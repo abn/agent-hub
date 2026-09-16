@@ -52,9 +52,8 @@ const glyph = (kind) => `<span class="glyph" data-kind="${esc(kind)}" aria-hidde
 const when = (ts) => esc(String(ts).slice(0, 16).replace("T", " "));
 
 function eventRow(event) {
-  const lane = event.kind === "question" ? "question" : event.kind === "approval" ? "approval" : "signal";
   return `<div class="row ${event.needs_action ? "unread" : ""}">
-    ${glyph(lane)}
+    ${glyph(event.kind)}
     <div class="grow">
       <div class="title">${esc(event.summary)}</div>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
@@ -85,7 +84,8 @@ function projectToolbar(projects, selected) {
     )
     .join("");
   return `<div class="toolbar"><label class="sr-only" for="project">Project</label>
-    <select id="project" data-role="project">${options}</select></div>`;
+    <select id="project" data-role="project">${options}</select>
+    <a class="button" href="#/artifacts?project=${encodeURIComponent(selected)}">Artifacts</a></div>`;
 }
 
 async function home() {
@@ -96,6 +96,10 @@ async function home() {
       <div><div class="n">${data.waiting}</div><div class="l">waiting on you</div></div>
       <div><div class="n">${data.unread}</div><div class="l">unread</div></div>
     </div></div>
+    <nav class="toolbar" aria-label="More">
+      <a class="chip" href="#/sessions">Sessions</a>
+      <a class="chip" href="#/storage">Storage</a>
+    </nav>
     <h2>Recent</h2>
     <div class="card">${data.recent.map(eventRow).join("") || '<p class="empty">No events yet.</p>'}</div>`;
 }
@@ -149,6 +153,31 @@ async function searchScreen(term) {
       <button class="primary" type="submit">Search</button>
     </form>
     ${results}`;
+}
+
+async function artifactsScreen(selected) {
+  const { projects } = await api("/api/v1/projects");
+  if (!projects.length) {
+    main.innerHTML = `<h1>Artifacts</h1><p class="empty">No projects yet. Create one in Settings.</p>`;
+    return;
+  }
+  const current = selected || projects[0].id;
+  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(current)}/artifacts`);
+  const rows = artifacts
+    .map(
+      (a) => `<div class="row">
+        ${glyph("artifact")}
+        <div class="grow">
+          <div class="title"><a href="/artifacts/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.title)}</a></div>
+          <div class="meta mono">v${a.version} \u00b7 ${a.protected ? "protected" : "public"} \u00b7 ${a.size_bytes} bytes</div>
+        </div>
+      </div>`,
+    )
+    .join("");
+  main.innerHTML = `
+    <h1>Artifacts</h1>
+    ${projectToolbar(projects, current)}
+    <div class="card">${rows || '<p class="empty">No artifacts yet.</p>'}</div>`;
 }
 
 async function sessionsScreen(selected) {
@@ -223,7 +252,17 @@ async function settingsScreen() {
       <label for="display_name">Display name</label>
       <input id="display_name" name="display_name" required>
       <p><button class="primary" type="submit">Create</button></p>
-    </form>`;
+    </form>
+    <p class="meta">Agents and access arrive with the identity layer.</p>`;
+}
+
+function setCurrent(screen) {
+  document.querySelectorAll(".tabbar a, .topbar nav a").forEach((anchor) => {
+    const target = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
+    if (target === screen) anchor.setAttribute("aria-current", "page");
+    else anchor.removeAttribute("aria-current");
+  });
+  document.title = screen.charAt(0).toUpperCase() + screen.slice(1) + " \u00b7 Agent Hub";
 }
 
 async function render() {
@@ -232,10 +271,12 @@ async function render() {
   const [path, query = ""] = hash.split("?");
   const params = new URLSearchParams(query);
   const screen = path.split("/")[1] || "home";
+  setCurrent(screen);
   try {
     if (screen === "inbox") await inbox();
     else if (screen === "feed") await projectsScreen(params.get("project"));
     else if (screen === "search") await searchScreen(params.get("q"));
+    else if (screen === "artifacts") await artifactsScreen(params.get("project"));
     else if (screen === "sessions") await sessionsScreen(params.get("project"));
     else if (screen === "storage") await storageScreen();
     else if (screen === "settings") await settingsScreen();
@@ -273,13 +314,45 @@ async function endSession(id) {
   render();
 }
 
+function toast(message, undo) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.style.position = "fixed";
+  el.style.left = "var(--s-4)";
+  el.style.right = "var(--s-4)";
+  el.style.bottom = "72px";
+  el.style.zIndex = "20";
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.border = "0";
+  const text = document.createElement("span");
+  text.className = "grow";
+  text.textContent = message;
+  row.appendChild(text);
+  if (undo) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "primary";
+    button.textContent = "Undo";
+    button.addEventListener("click", () => {
+      undo().finally(() => el.remove());
+    });
+    row.appendChild(button);
+  }
+  el.appendChild(row);
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), undo ? 30000 : 5000);
+}
+
 async function pruneSession(id) {
   const token = await api(`/api/v1/storage/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  const undo = confirm("Session pruned. Undo now?");
-  if (undo) await api(`/api/v1/prune/undo/${encodeURIComponent(token.undo_token)}`, { method: "POST" });
   render();
+  toast("Session pruned.", async () => {
+    await api(`/api/v1/prune/undo/${encodeURIComponent(token.undo_token)}`, { method: "POST" });
+    render();
+  });
 }
 
 main.addEventListener("click", (event) => {
@@ -323,6 +396,14 @@ main.addEventListener("change", (event) => {
     location.hash = `${screen}?project=${encodeURIComponent(event.target.value)}`;
   }
 });
+
+const skipLink = document.querySelector(".skip-link");
+if (skipLink) {
+  skipLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    main.focus();
+  });
+}
 
 window.addEventListener("hashchange", render);
 

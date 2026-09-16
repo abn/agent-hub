@@ -123,3 +123,27 @@ async fn projects_create_list_and_storage() {
         .expect("request");
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn serves_every_shell_asset_with_a_policy() {
+    let state = state().await;
+    for (path, needle) in [
+        ("/app.js", "serviceWorker"),
+        ("/app.css", "var(--"),
+        ("/manifest.webmanifest", "Agent Hub"),
+        ("/sw.js", "caches"),
+        ("/icon.svg", "<svg"),
+    ] {
+        let app = router(state.clone());
+        let response = app.oneshot(get(path, None)).await.expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert!(text(response).await.contains(needle), "{path} content");
+    }
+
+    let app = router(state);
+    let response = app.oneshot(get("/", None)).await.expect("request");
+    assert!(
+        response.headers().contains_key("content-security-policy"),
+        "the shell carries a content security policy"
+    );
+}

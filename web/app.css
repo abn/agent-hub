@@ -17,13 +17,13 @@
 .tabbar a {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
   min-height: 44px; justify-content: center; text-decoration: none;
-  color: var(--ink-3); font-size: 11px; font-weight: 500;
+  color: var(--ink-3); font-size: 12px; font-weight: 500;
 }
 .tabbar a[aria-current="page"] { color: var(--ink); font-weight: 600; }
 .badge {
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--r-pill);
   background: var(--accent); color: var(--ink-inverse);
-  font-size: 10px; font-weight: 600; line-height: 16px; text-align: center;
+  font-size: 12px; font-weight: 600; line-height: 16px; text-align: center;
 }
 
 main { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: var(--s-4) var(--s-4) 80px; }
@@ -58,7 +58,7 @@ h2 { font-size: var(--t-17); font-weight: 600; margin: var(--s-5) 0 var(--s-2); 
 
 .pill {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
-  font-size: 11px; font-weight: 600; background: var(--action-bg); color: var(--action);
+  font-size: 12px; font-weight: 600; background: var(--action-bg); color: var(--action);
 }
 .chip {
   display: inline-block; padding: 6px 10px; border-radius: var(--r-pill);
@@ -72,11 +72,14 @@ button, .button {
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
   font: inherit; font-weight: 500; cursor: pointer;
 }
+a.button, a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 button.primary { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
 button.action { background: var(--action); color: var(--ink-inverse); border-color: var(--action); }
 button.danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
 button[disabled] { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
-.row button { min-height: 32px; padding: 0 var(--s-3); }
+.row button { min-height: 44px; padding: 0 var(--s-3); }
+.topbar nav a { display: inline-flex; align-items: center; min-height: 44px; }
+.topbar > a { display: inline-flex; align-items: center; min-height: 44px; }
 
 input, select, textarea {
   width: 100%; min-height: 44px; padding: var(--s-2) var(--s-3);

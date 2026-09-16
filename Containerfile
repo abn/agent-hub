@@ -11,6 +11,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY vendor ./vendor
 COPY src ./src
+COPY web ./web
 
 RUN cargo build --release --locked
 

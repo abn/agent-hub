@@ -39,12 +39,31 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
             "a project display name is required".to_string(),
         ));
     }
-    if get(db, id).await?.is_some() {
-        return Err(Error::Conflict(format!("project {id} already exists")));
+    if display_name.chars().count() > 200 {
+        return Err(Error::InvalidArgument(
+            "the project display name is too long".to_string(),
+        ));
     }
     let created_at = crate::store::now_rfc3339();
-    let conn = db.connect().map_err(engine)?;
-    conn.execute(
+
+    // Inside the immediate transaction so a concurrent create is a conflict
+    // rather than a raw engine error.
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let mut rows = tx
+        .query(
+            "SELECT 1 FROM projects WHERE id = ?1",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if rows.next().await.map_err(engine)?.is_some() {
+        return Err(Error::Conflict(format!("project {id} already exists")));
+    }
+    tx.execute(
         "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings)
          VALUES (?1, ?2, NULL, ?3, NULL, NULL)",
         vec![
@@ -55,6 +74,8 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
     )
     .await
     .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+
     Ok(Project {
         id: id.to_string(),
         display_name: display_name.to_string(),
