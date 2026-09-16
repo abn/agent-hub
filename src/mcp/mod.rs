@@ -21,6 +21,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::app::AppState;
 use crate::config::Config;
@@ -28,19 +29,27 @@ use crate::error::{Error, ErrorCode};
 use crate::principal::Principal;
 use crate::store::events::{self, FeedQuery, NewEvent};
 
+mod brain;
+
 /// The hub's MCP server.
 #[derive(Clone)]
 pub struct HubServer {
     tool_router: ToolRouter<Self>,
     state: AppState,
+    /// The session the brain tools act on, as `(project_id, session_id)`.
+    ///
+    /// Set by `session_start` and read by the brain tools. One server instance
+    /// serves one client, so a single slot matches stdio and per-session HTTP.
+    active: Arc<AsyncMutex<Option<(String, String)>>>,
 }
 
 impl HubServer {
     /// Build the server over the shared application state.
     pub fn new(state: AppState) -> Self {
         Self {
-            tool_router: Self::tool_router(),
+            tool_router: Self::tool_router() + Self::brain_router(),
             state,
+            active: Arc::new(AsyncMutex::new(None)),
         }
     }
 
