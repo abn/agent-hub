@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, search
+
+* **Creation**: Added the MCP `search` tool and the REST `GET /api/v1/search`
+  route over the corpus already written by the feed, artifact, and brain
+  paths. Results are ranked by text relevance and grouped by corpus family,
+  with project and type filters and a short snippet.
+* **Update**: The ranked query uses the shape the engine's full-text index
+  method recognises, so relevance ordering is live; project and type filters
+  are applied after the ranked fetch.
+
 ## 2026-09-16, artifacts and prune
 
 * **Creation**: The MCP server adds `artifact_publish`, `artifact_update`,

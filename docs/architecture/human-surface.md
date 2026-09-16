@@ -10,8 +10,8 @@ status: draft
 
 The human reaches the hub through a REST API and an installable,
 mobile-first PWA served as static assets from the same binary. The feed,
-session, inbox, home, artifact, and prune routes ship; the PWA and the rest of
-the API are intended design.
+session, inbox, home, artifact, prune, and search routes ship; the PWA and the
+rest of the API are intended design.
 
 ## REST API
 
