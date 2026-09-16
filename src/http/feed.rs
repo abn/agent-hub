@@ -2,11 +2,12 @@
 
 use axum::Json;
 use axum::extract::{Path, RawQuery, State};
-use axum::http::{HeaderMap, header};
+use axum::http::HeaderMap;
 use serde::Serialize;
 
 use crate::app::AppState;
 use crate::error::Error;
+use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::limits::FEED_LIMIT_DEFAULT;
 use crate::store::events::{self, Event, FeedQuery, read_feed};
@@ -50,16 +51,6 @@ pub async fn read(
         next_since: page.next_since,
         next_before: page.next_before,
     }))
-}
-
-fn bearer_token(headers: &HeaderMap) -> Option<String> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let (scheme, token) = value.split_once(' ')?;
-    if scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty() {
-        Some(token.to_string())
-    } else {
-        None
-    }
 }
 
 // Query parsing is manual because the axum query extractor cannot map a
