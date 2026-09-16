@@ -1,14 +1,55 @@
 //! The MCP server agents call.
 //!
-//! The tool surface is built by the mcp lane. This root declares the entry
-//! point the binary dispatches to; the lane replaces the body.
+//! This root wires the stdio transport and the tool router. The streamable
+//! HTTP transport and the feed, brain, and artifact tool groups land in later
+//! changes; they add routes beside `version` and reuse the same handler.
+
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::{ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 
 use crate::config::Config;
-use crate::error::{Error, Result};
+use crate::error::Error;
+
+/// The hub's MCP server.
+#[derive(Clone)]
+pub struct HubServer {
+    tool_router: ToolRouter<Self>,
+    // Held for the store-backed tool groups that read the data directory.
+    _config: Config,
+}
+
+impl HubServer {
+    /// Build the server for one process lifetime.
+    pub fn new(config: Config) -> Self {
+        Self {
+            tool_router: Self::tool_router(),
+            _config: config,
+        }
+    }
+}
+
+#[tool_router]
+impl HubServer {
+    #[tool(description = "Report the Agent Hub server version.")]
+    fn version(&self) -> String {
+        format!("agent-hub {}", env!("CARGO_PKG_VERSION"))
+    }
+}
+
+#[tool_handler(router = self.tool_router, name = "agent-hub")]
+impl ServerHandler for HubServer {}
 
 /// Serve the MCP tool surface over stdio.
-pub async fn serve_stdio(_config: Config) -> Result<()> {
-    Err(Error::Config(
-        "the MCP stdio server is not wired up yet".to_string(),
-    ))
+pub async fn serve_stdio(config: Config) -> crate::Result<()> {
+    let running = HubServer::new(config)
+        .serve(rmcp::transport::stdio())
+        .await
+        .map_err(|err| Error::Config(format!("mcp stdio server failed to initialise: {err}")))?;
+
+    running
+        .waiting()
+        .await
+        .map_err(|err| Error::Config(format!("mcp stdio server task stopped: {err}")))?;
+
+    Ok(())
 }
