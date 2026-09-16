@@ -11,6 +11,7 @@ const TOKENS_CSS: &str = include_str!("../../web/tokens.css");
 const MANIFEST: &str = include_str!("../../web/manifest.webmanifest");
 const SERVICE_WORKER: &str = include_str!("../../web/sw.js");
 const ICON: &str = include_str!("../../web/icon.svg");
+const CRYPTO_JS: &str = include_str!("../../web/crypto.mjs");
 
 /// `GET /`
 pub async fn index() -> Response {
@@ -45,6 +46,13 @@ pub async fn service_worker() -> Response {
 /// `GET /icon.svg`
 pub async fn icon() -> Response {
     asset(ICON, "image/svg+xml")
+}
+
+/// `GET /crypto.mjs`
+///
+/// The artifact encryption module, shared by the PWA and the offline check.
+pub async fn crypto_js() -> Response {
+    asset(CRYPTO_JS, "text/javascript; charset=utf-8")
 }
 
 fn asset(body: &'static str, content_type: &'static str) -> Response {

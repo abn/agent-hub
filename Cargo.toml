@@ -20,6 +20,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rmcp = { version = "3.4", features = ["transport-io", "transport-streamable-http-server"] }
 ulid = "3"
 time = { version = "0.3", features = ["formatting", "parsing"] }
+rand = "0.9"
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

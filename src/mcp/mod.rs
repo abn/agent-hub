@@ -12,14 +12,11 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ErrorCode as McpErrorCode, ErrorData};
-use rmcp::schemars::{self, JsonSchema};
+use rmcp::model::{ErrorCode as McpErrorCode, ErrorData};
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
-use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -27,10 +24,11 @@ use crate::app::AppState;
 use crate::config::Config;
 use crate::error::{Error, ErrorCode};
 use crate::principal::Principal;
-use crate::store::events::{self, FeedQuery, NewEvent};
 
 mod artifacts;
 mod brain;
+mod feed;
+mod identity;
 mod inbox;
 mod search;
 
@@ -51,10 +49,12 @@ impl HubServer {
     pub fn new(state: AppState) -> Self {
         Self {
             tool_router: Self::tool_router()
+                + Self::feed_router()
                 + Self::brain_router()
                 + Self::inbox_router()
                 + Self::artifacts_router()
-                + Self::search_router(),
+                + Self::search_router()
+                + Self::identity_router(),
             state,
             active: Arc::new(AsyncMutex::new(None)),
         }
@@ -80,93 +80,10 @@ impl HubServer {
     fn version(&self) -> String {
         format!("agent-hub {}", env!("CARGO_PKG_VERSION"))
     }
-
-    #[tool(description = "Append an event to a project feed and return its id.")]
-    async fn signal_append(
-        &self,
-        context: RequestContext<RoleServer>,
-        Parameters(params): Parameters<SignalAppendParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
-        let event_id = events::append(
-            &self.state.db,
-            &actor,
-            params.idempotency_key.as_deref(),
-            NewEvent {
-                project_id: params.project_id,
-                kind: params.kind,
-                summary: params.summary,
-                payload: params.payload,
-                needs_action: params.needs_action.unwrap_or(false),
-                thread_id: params.thread_id,
-            },
-        )
-        .await
-        .map_err(to_error_data)?;
-
-        Ok(CallToolResult::structured(json!({ "event_id": event_id })))
-    }
-
-    #[tool(description = "Read a page of a project feed.")]
-    async fn feed_read(
-        &self,
-        _context: RequestContext<RoleServer>,
-        Parameters(params): Parameters<FeedReadParams>,
-    ) -> std::result::Result<CallToolResult, ErrorData> {
-        let mut query = FeedQuery {
-            since: params.since,
-            before: params.before,
-            kinds: params.kinds,
-            ..FeedQuery::default()
-        };
-        if let Some(limit) = params.limit {
-            query.limit = limit;
-        }
-
-        let page = events::read_feed(&self.state.db, &params.project_id, &query)
-            .await
-            .map_err(to_error_data)?;
-
-        Ok(CallToolResult::structured(json!({
-            "events": page.events,
-            "next_since": page.next_since,
-            "next_before": page.next_before,
-        })))
-    }
 }
 
 #[tool_handler(router = self.tool_router, name = "agent-hub")]
 impl ServerHandler for HubServer {}
-
-/// Arguments for `signal_append`.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct SignalAppendParams {
-    project_id: String,
-    kind: String,
-    summary: String,
-    #[serde(default)]
-    payload: Option<serde_json::Value>,
-    #[serde(default)]
-    needs_action: Option<bool>,
-    #[serde(default)]
-    thread_id: Option<String>,
-    #[serde(default)]
-    idempotency_key: Option<String>,
-}
-
-/// Arguments for `feed_read`.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct FeedReadParams {
-    project_id: String,
-    #[serde(default)]
-    since: Option<String>,
-    #[serde(default)]
-    before: Option<String>,
-    #[serde(default)]
-    limit: Option<i64>,
-    #[serde(default)]
-    kinds: Option<Vec<String>>,
-}
 
 /// Translate a hub error into an MCP tool error carrying the hub code.
 fn to_error_data(err: Error) -> ErrorData {
@@ -246,7 +163,7 @@ async fn require_bearer(
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::to_owned);
 
-    match state.auth.resolve_bearer(token.as_deref()) {
+    match state.auth.resolve_agent(&state.db, token.as_deref()).await {
         Ok(principal) => {
             request.extensions_mut().insert(principal);
             next.run(request).await

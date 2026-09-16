@@ -29,7 +29,7 @@ pub async fn prune(
 ) -> std::result::Result<Json<PruneToken>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let token = prune::prune_session(&state.db, &session_id)
@@ -49,7 +49,7 @@ pub async fn undo(
 ) -> std::result::Result<Json<UndoResult>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     prune::undo(&state.db, &token)
@@ -69,7 +69,7 @@ pub async fn usage(
 ) -> std::result::Result<Json<StorageUsage>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let usage = storage::usage(&state.db, &state.data_dir)

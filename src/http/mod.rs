@@ -1,13 +1,14 @@
 //! HTTP API and static PWA surface.
 
 use axum::extract::State;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
 
+pub mod agents;
 pub mod artifacts;
 pub mod auth;
 pub mod feed;
@@ -33,6 +34,23 @@ pub fn router(state: AppState) -> Router {
         .route("/manifest.webmanifest", get(web::manifest))
         .route("/sw.js", get(web::service_worker))
         .route("/icon.svg", get(web::icon))
+        .route("/crypto.mjs", get(web::crypto_js))
+        .route("/api/v1/agents", get(agents::list).post(agents::create))
+        .route("/api/v1/agents/{id}", patch(agents::update))
+        .route(
+            "/api/v1/agents/{id}/tokens",
+            get(agents::tokens).post(agents::issue),
+        )
+        .route("/api/v1/agents/{id}/tokens/{hash}", delete(agents::revoke))
+        .route(
+            "/api/v1/agents/{id}/grants",
+            get(agents::grants).post(agents::grant),
+        )
+        .route(
+            "/api/v1/agents/{id}/grants/{project_id}",
+            delete(agents::ungrant),
+        )
+        .route("/api/v1/artifacts/{id}", get(artifacts::content))
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/questions/{id}/answer", post(inbox::answer))

@@ -37,7 +37,7 @@ pub async fn read(
     let token = bearer_token(&headers);
     state
         .auth
-        .resolve_bearer(token.as_deref())
+        .require_admin(token.as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;

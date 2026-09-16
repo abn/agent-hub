@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -51,6 +51,11 @@ docs/check: ## Validate the docs bundle against OKF v0.2
 
 web/check: ## Static checks for the PWA assets
 	./.agents/scripts/check-web.py
+
+# Not part of `check`: the module is only reachable through the PWA, and the
+# Node runtime is not otherwise a build dependency.
+web/crypto: ## Run the artifact encryption round-trip self-test
+	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
 check: lint lint/engine clippy fmt/check docs/check web/check test ## Full quality gate
 	@printf 'check: ok\n'

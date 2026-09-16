@@ -29,7 +29,7 @@ pub async fn search(
 ) -> std::result::Result<Json<SearchResults>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let params = parse(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;

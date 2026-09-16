@@ -59,7 +59,7 @@ pub async fn home(
 ) -> std::result::Result<Json<Home>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let summary = home_store::home(&state.db, HOME_RECENT_LIMIT)
@@ -80,7 +80,7 @@ pub async fn list(
 ) -> std::result::Result<Json<InboxList>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let status = params.status.as_deref().filter(|status| !status.is_empty());
@@ -113,7 +113,7 @@ pub async fn answer(
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
     let principal = state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let Json(payload) = body.map_err(|rejection| {

@@ -33,7 +33,7 @@ pub async fn list(
 ) -> std::result::Result<Json<ProjectList>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let projects = projects::list(&state.db)
@@ -50,7 +50,7 @@ pub async fn create(
 ) -> std::result::Result<Json<Project>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let Json(payload) = body.map_err(|rejection| {

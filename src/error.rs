@@ -61,6 +61,9 @@ pub enum Error {
     /// The request body or payload exceeds a limit.
     #[error("{0}")]
     PayloadTooLarge(String),
+    /// The hub cannot serve the request yet, though the request is well formed.
+    #[error("{0}")]
+    Unavailable(String),
 }
 
 impl Error {
@@ -73,7 +76,7 @@ impl Error {
             Self::NotFound(_) => ErrorCode::NotFound,
             Self::Conflict(_) => ErrorCode::Conflict,
             Self::PayloadTooLarge(_) => ErrorCode::PayloadTooLarge,
-            Self::Engine(_) => ErrorCode::Unavailable,
+            Self::Unavailable(_) | Self::Engine(_) => ErrorCode::Unavailable,
             Self::Config(_) | Self::Io(_) => ErrorCode::Internal,
         }
     }

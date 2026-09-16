@@ -8,6 +8,7 @@ pub mod error;
 pub mod http;
 pub mod limits;
 pub mod mcp;
+pub mod policy;
 pub mod principal;
 pub mod store;
 

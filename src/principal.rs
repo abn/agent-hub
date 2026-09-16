@@ -1,12 +1,17 @@
 //! Who is calling: a resolved identity and its trust level.
 //!
 //! The `actor` on every event comes from here, never from the request body.
-//! The stdio transport is local trust; the HTTP transport must present a
-//! bearer token. Until full identity management lands, only the configured
-//! admin token is accepted.
+//! The stdio transport is local trust; the HTTP transports must present a
+//! bearer token.
+//!
+//! Two audiences resolve differently and must not share a resolver. The MCP
+//! transport accepts the admin token or a per-agent token; the REST control
+//! surface is the human's, so it accepts only the admin token. Widening one to
+//! serve the other would hand agents the control surface.
 
 use crate::config::{Config, TrustDefault};
 use crate::error::{Error, Result};
+use crate::store::identity;
 
 /// Trust level of a principal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +27,10 @@ pub struct Principal {
     pub actor: String,
     /// Whether the caller is trusted.
     pub trust: Trust,
+    /// The agent id, when the caller is an agent rather than the human admin.
+    pub agent_id: Option<String>,
+    /// Whether the caller is the human admin.
+    pub is_admin: bool,
 }
 
 /// Resolves a bearer token to a principal.
@@ -50,23 +59,63 @@ impl Auth {
         Principal {
             actor: self.local_actor.clone(),
             trust: trust_level(self.trust_default),
+            agent_id: None,
+            is_admin: false,
         }
     }
 
-    /// Resolve an HTTP bearer token, if one is configured and matches.
-    pub fn resolve_bearer(&self, token: Option<&str>) -> Result<Principal> {
+    /// The human admin for a matching admin token, if one is presented.
+    fn admin(&self, token: Option<&str>) -> Option<Principal> {
         match (&self.admin_token, token) {
             (Some(expected), Some(presented)) if constant_time_eq(expected, presented) => {
-                Ok(Principal {
+                Some(Principal {
                     actor: "human".to_string(),
                     trust: Trust::Trusted,
+                    agent_id: None,
+                    is_admin: true,
                 })
             }
-            (Some(_), _) => Err(Error::Unauthenticated(
-                "a valid bearer token is required".to_string(),
+            _ => None,
+        }
+    }
+
+    /// Resolve a token for the MCP transport: the admin token, or a per-agent
+    /// token looked up in the identity store.
+    pub async fn resolve_agent(
+        &self,
+        db: &turso::Database,
+        token: Option<&str>,
+    ) -> Result<Principal> {
+        if let Some(principal) = self.admin(token) {
+            return Ok(principal);
+        }
+        let presented = token
+            .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
+        let hash = identity::hash_token(presented);
+        match identity::resolve_token(db, &hash).await? {
+            Some((agent_id, trust)) => Ok(Principal {
+                actor: agent_id.clone(),
+                trust,
+                agent_id: Some(agent_id),
+                is_admin: false,
+            }),
+            None => Err(Error::Unauthenticated(
+                "the bearer token is not recognised".to_string(),
             )),
-            (None, _) => Err(Error::Unauthenticated(
-                "no admin token is configured, so the HTTP transport is disabled".to_string(),
+        }
+    }
+
+    /// Resolve a token for the REST control surface: the admin token only.
+    pub fn require_admin(&self, token: Option<&str>) -> Result<Principal> {
+        if let Some(principal) = self.admin(token) {
+            return Ok(principal);
+        }
+        match self.admin_token {
+            Some(_) => Err(Error::Unauthenticated(
+                "a valid admin bearer token is required".to_string(),
+            )),
+            None => Err(Error::Unauthenticated(
+                "no admin token is configured, so the control surface is disabled".to_string(),
             )),
         }
     }

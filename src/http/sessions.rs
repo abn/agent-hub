@@ -43,7 +43,7 @@ pub async fn list(
 ) -> std::result::Result<Json<SessionList>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let project = params
@@ -72,7 +72,7 @@ pub async fn end(
 ) -> std::result::Result<Json<EndResult>, Problem> {
     let principal = state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     session_store::end(&state.db, &session_id, &principal.actor)

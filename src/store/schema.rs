@@ -13,10 +13,16 @@ pub struct Migration {
 }
 
 /// The ordered migration list.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    ddl: V1,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        ddl: V1,
+    },
+    Migration {
+        version: 2,
+        ddl: V2,
+    },
+];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
 /// `search_docs` that native search depends on.
@@ -123,4 +129,12 @@ CREATE TABLE IF NOT EXISTS search_docs(
 );
 
 CREATE INDEX IF NOT EXISTS search_fts ON search_docs USING fts (title, body);
+"#;
+
+/// Version 2: each agent's personal space, generated when the agent is created
+/// so the id is unique and not derivable from the agent id (which may contain
+/// characters a project slug cannot).
+const V2: &str = r#"
+ALTER TABLE agents ADD COLUMN personal_project_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS agents_personal_project ON agents(personal_project_id);
 "#;

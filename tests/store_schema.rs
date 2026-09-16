@@ -33,10 +33,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 1, "migrations are forward only and apply once");
+    assert_eq!(again, 2, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -53,6 +53,53 @@ async fn migrate_creates_schema_and_search_index() {
             "missing table {table}"
         );
     }
+
+    // Migration 2 adds each agent's personal space id, unique but nullable so
+    // agents that predate it do not collide.
+    let mut agents = conn
+        .query("SELECT personal_project_id FROM agents LIMIT 1", ())
+        .await
+        .expect("agents.personal_project_id exists");
+    assert!(agents.next().await.expect("row").is_none());
+    drop(agents);
+
+    let mut indexes = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'agents_personal_project'",
+            (),
+        )
+        .await
+        .expect("index query");
+    assert!(
+        indexes.next().await.expect("row").is_some(),
+        "missing agents_personal_project index"
+    );
+    drop(indexes);
+
+    for id in ["a", "b"] {
+        conn.execute(
+            "INSERT INTO agents(id, display_name, trust, created_at) VALUES (?1, ?1, 'trusted', '2026-09-16T00:00:00Z')",
+            [id],
+        )
+        .await
+        .expect("insert agent");
+    }
+    conn.execute(
+        "UPDATE agents SET personal_project_id = 'space-1' WHERE id = 'a'",
+        (),
+    )
+    .await
+    .expect("set personal space");
+    let duplicate = conn
+        .execute(
+            "UPDATE agents SET personal_project_id = 'space-1' WHERE id = 'b'",
+            (),
+        )
+        .await;
+    assert!(
+        duplicate.is_err(),
+        "a duplicate personal space id must be rejected"
+    );
 
     conn.execute(
         "INSERT INTO search_docs(doc_id, project_id, type, ref_id, session_id, title, body, updated_at) \

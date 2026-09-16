@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod events;
 pub mod home;
 pub mod idempotency;
+pub mod identity;
 pub mod inbox;
 pub mod projects;
 pub mod prune;

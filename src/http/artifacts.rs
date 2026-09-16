@@ -14,6 +14,7 @@ use axum::response::Response;
 use serde::Serialize;
 
 use crate::app::AppState;
+use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::store::artifacts::{self as artifact_store, Artifact};
@@ -35,7 +36,7 @@ pub async fn list(
 ) -> std::result::Result<Json<ArtifactList>, Problem> {
     state
         .auth
-        .resolve_bearer(bearer_token(&headers).as_deref())
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
     let artifacts = artifact_store::list(&state.db, &project_id)
@@ -43,6 +44,54 @@ pub async fn list(
         .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(ArtifactList { artifacts }))
+}
+
+/// The content and encryption envelope of one artifact, for the browser
+/// decryptor. The server holds no plaintext for a protected artifact.
+#[derive(Debug, Serialize)]
+pub struct ArtifactContent {
+    /// Artifact title.
+    pub title: String,
+    /// `html` or `markdown`.
+    pub kind: String,
+    /// Whether the content is encrypted.
+    pub protected: bool,
+    /// The encryption envelope, when protected.
+    pub envelope: Option<serde_json::Value>,
+    /// The content, as the stored UTF-8 text; a ciphertext arrives base64.
+    pub content: String,
+}
+
+/// `GET /api/v1/artifacts/{id}`
+///
+/// Admin-only. Returns the content for the in-app viewer and decryptor.
+pub async fn content(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<ArtifactContent>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let (artifact, bytes) = artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let content = String::from_utf8(bytes).map_err(|_| {
+        Problem::from_error(&Error::InvalidArgument(format!(
+            "artifact {artifact_id} content is not UTF-8 text"
+        )))
+    })?;
+
+    Ok(Json(ArtifactContent {
+        title: artifact.title,
+        kind: artifact.kind,
+        protected: artifact.protected,
+        envelope: artifact.envelope,
+        content,
+    }))
 }
 
 /// `GET /artifacts/{id}`
