@@ -29,6 +29,7 @@ use crate::error::{Error, ErrorCode};
 use crate::principal::Principal;
 use crate::store::events::{self, FeedQuery, NewEvent};
 
+mod artifacts;
 mod brain;
 mod inbox;
 
@@ -48,7 +49,10 @@ impl HubServer {
     /// Build the server over the shared application state.
     pub fn new(state: AppState) -> Self {
         Self {
-            tool_router: Self::tool_router() + Self::brain_router() + Self::inbox_router(),
+            tool_router: Self::tool_router()
+                + Self::brain_router()
+                + Self::inbox_router()
+                + Self::artifacts_router(),
             state,
             active: Arc::new(AsyncMutex::new(None)),
         }
