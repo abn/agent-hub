@@ -1,0 +1,15 @@
+# Rust build output
+target/
+
+# Version control and local worktrees
+.git/
+.worktrees/
+
+# Agent scratch area and tool shims
+.agents/
+
+# Local hub data volume
+data/
+
+# Node tooling
+node_modules/

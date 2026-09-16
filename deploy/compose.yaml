@@ -1,0 +1,16 @@
+services:
+  hub:
+    build:
+      context: ..
+      dockerfile: Containerfile
+    environment:
+      HUB_DATA_DIR: /data
+      HUB_BIND: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - hub-data:/data
+    restart: unless-stopped
+
+volumes:
+  hub-data:
