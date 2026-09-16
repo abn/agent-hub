@@ -7,3 +7,9 @@ description = "A local-first operations layer for AI agents and their humans."
 publish = false
 
 [dependencies]
+# One engine everywhere, pinned exactly. See vendor/agentfs-sdk/PATCHES.md.
+turso = "=0.8.0-pre.11"
+agentfs-sdk = { path = "vendor/agentfs-sdk" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

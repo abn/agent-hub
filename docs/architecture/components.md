@@ -42,7 +42,8 @@ every change it makes.
   [decision 0010](../adr/0010-one-pinned-engine.md)).
 - **Search lives in the hub store.** One full-text index over a search
   documents table, written through by the wrapper, so no cross-file search is
-  needed.
+  needed. The index method is enabled explicitly on the engine connection
+  because it is behind an experimental flag.
 - **Schema migrations run in single-writer mode.** Data definition statements
   are not allowed inside a concurrent write transaction, so migrations take
   the single-writer path.

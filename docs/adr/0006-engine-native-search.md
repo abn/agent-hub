@@ -43,3 +43,7 @@ files by refreshing one index per file would not scale. The index is therefore
 centralised in `hub.db` over a `search_docs` table, populated write-through by
 the wrapper, which is the single writer and sees every change. Prune removes
 the affected rows.
+
+The index method is gated behind an experimental flag on the engine
+connection, so the hub enables it explicitly and re-tests it on every engine
+bump.

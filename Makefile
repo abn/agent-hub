@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint fmt fmt/check docs/check check clean hooks/require hooks/update
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check check clean hooks/require hooks/update
 
 ##@ Bootstrap
 
@@ -23,6 +23,18 @@ clippy: ## Run the Rust linter, warnings are errors
 lint: hooks/require ## Run every declarative hook against all files
 	pre-commit run --all-files
 
+# The one-engine invariant, enforced by tooling rather than review. Every
+# `turso*` crate in the tree must resolve to the same version.
+lint/engine: ## Verify exactly one engine version is linked
+	@versions=$$(cargo tree --prefix none 2>/dev/null | grep -oE '^turso[a-z_]* v[^ ]+' | awk '{print $$2}' | sort -u); \
+	count=$$(printf '%s\n' "$$versions" | grep -c .); \
+	if [ "$$count" -ne 1 ]; then \
+	  printf 'ERROR: expected one engine version, found %s:\n' "$$count" >&2; \
+	  printf '%s\n' "$$versions" >&2; \
+	  exit 1; \
+	fi; \
+	printf 'engine: %s\n' "$$versions"
+
 # The hygiene hooks rewrite files in place and exit non-zero when they do, so
 # a fix is not a failure here.
 FMT_HOOKS := trailing-whitespace end-of-file-fixer mixed-line-ending
@@ -37,7 +49,7 @@ fmt/check: ## Fail if formatting differs from rustfmt output
 docs/check: ## Validate the docs bundle against OKF v0.2
 	./.agents/scripts/check-okf.py
 
-check: lint clippy fmt/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Utilities
