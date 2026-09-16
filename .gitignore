@@ -1,0 +1,27 @@
+# Agent scratch area: working notes, drafts, inbox, task breakdowns.
+# Never committed.
+/.agents/brain/
+
+# Local assistant state, plus the tool shims .agents/bootstrap.sh generates
+/.claude/
+/.opencode/
+/CLAUDE.md
+/GEMINI.md
+
+# Worktrees
+/.worktrees/
+
+# Rust build output
+/target/
+
+# Local hub data volume
+/data/
+
+# Local environment
+.env
+.env.local
+
+# Editor and OS
+*.swp
+*~
+.DS_Store

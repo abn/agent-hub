@@ -1,0 +1,9 @@
+[package]
+name = "agent-hub"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "A local-first operations layer for AI agents and their humans."
+publish = false
+
+[dependencies]

@@ -1,0 +1,88 @@
+# Declarative hook configuration. Installed by .agents/bootstrap.sh.
+# `make check` runs the same hooks CI runs.
+default_install_hook_types: [pre-commit, commit-msg]
+# Without this, every file hook would also run against the commit message.
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-yaml
+      - id: check-json
+      - id: check-case-conflict
+      - id: check-symlinks
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      # The scratch area holds unreviewed material and is gitignored, but
+      # `git add -f` would still stage it. This makes that fail.
+      - id: no-scratch-area
+        name: reject anything staged under the scratch area
+        entry: the scratch area under .agents/brain/ is never committed
+        language: fail
+        files: '^\.agents/brain/'
+
+      # Editorial and privacy invariants from AGENTS.md. Pattern hooks rather
+      # than review discipline, because review discipline does not scale.
+      # Each runs twice: once over files, once over the commit message.
+      - id: no-em-dash
+        name: reject em-dashes
+        entry: '\xe2\x80\x94'
+        language: pygrep
+        types: [text]
+      - id: no-em-dash-msg
+        name: reject em-dashes in the commit message
+        entry: '\xe2\x80\x94'
+        language: pygrep
+        stages: [commit-msg]
+
+      - id: no-home-paths
+        name: reject host-specific home paths
+        entry: '(/home/|/Users/|/root/)[A-Za-z][A-Za-z0-9_.-]*'
+        language: pygrep
+        types: [text]
+      - id: no-home-paths-msg
+        name: reject host-specific home paths in the commit message
+        entry: '(/home/|/Users/|/root/)[A-Za-z][A-Za-z0-9_.-]*'
+        language: pygrep
+        stages: [commit-msg]
+
+      # Conventional Commits covers the subject only. This is the body rule:
+      # no trailers. Git trailer keys are hyphenated (Signed-off-by,
+      # Co-authored-by, Reviewed-by), so matching the hyphenated shape plus a
+      # few common flat keys catches them without touching a subject line like
+      # "chore: x" or the BREAKING CHANGE the commit convention requires.
+      - id: no-trailers
+        name: reject commit message trailers
+        entry: '^([A-Za-z]+(-[A-Za-z]+)+|Refs|Fixes|Closes|Cc|Link|Change-Id): '
+        language: pygrep
+        args: [-i]
+        stages: [commit-msg]
+
+      - id: no-process-leaks-msg
+        name: reject process leaks in the commit message
+        entry: '(?i)\b(wave[- ]?[0-9]+|lane|remediation|F[0-9]+)\b'
+        language: pygrep
+        stages: [commit-msg]
+
+      - id: okf-bundle
+        name: validate the OKF v0.2 docs bundle
+        entry: ./.agents/scripts/check-okf.py
+        language: script
+        pass_filenames: false
+        files: '^(docs/|\.agents/scripts/check-okf\.py$)'
