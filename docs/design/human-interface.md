@@ -10,8 +10,9 @@ status: draft
 
 The human surface is a calm mailroom for the operator's agents: quiet by
 default, one step louder when something waits, never alarming. This page
-records the design system behind it. It is intended design; the interface does
-not ship yet.
+records the design system behind it. The installable PWA shell and its core
+screens ship; the Agents and access surface and the session detail view are
+still intended design.
 
 ## Tokens
 

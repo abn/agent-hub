@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, installable PWA
+
+* **Creation**: Ship the interface as static assets from the binary: the design
+  tokens, a vanilla app shell, a manifest, and a service worker. The screens
+  are Home, Inbox, Project feed, Artifacts, Sessions, Storage, Search, and
+  Settings, with a four-tab mobile bar and a desktop top bar.
+* **Creation**: Added the REST routes the app reads: `GET` and `POST
+  /api/v1/projects` and `GET /api/v1/storage`.
+* **Update**: The interface is framed by a content security policy, artifacts
+  render only in a sandboxed frame, and the static web check runs as part of
+  the gate.
+* **Note**: The Agents and access surface, the session detail view, and project
+  deletion are still intended design; they land with the identity wave.
+
 ## 2026-09-16, search
 
 * **Creation**: Added the MCP `search` tool and the REST `GET /api/v1/search`
