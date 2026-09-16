@@ -24,6 +24,7 @@ pub fn write(
     kind: &str,
     bytes: &[u8],
 ) -> Result<String> {
+    crate::limits::check_artifact(bytes.len())?;
     let rel = blob_path(project_id, artifact_id, version, kind)?;
     let path = resolve(data_dir, &rel)?;
     if let Some(parent) = path.parent() {

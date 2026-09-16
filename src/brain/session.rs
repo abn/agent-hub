@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use agentfs_sdk::{AgentFS, AgentFSOptions};
 use serde::{Deserialize, Serialize};
@@ -44,23 +44,38 @@ enum Namespace<'a> {
     Fs(&'a str),
 }
 
+/// The process-wide table of per-session-file write locks.
+///
+/// The single-writer invariant is per file, across every store instance, so
+/// two handles to one session file serialise even when they come from
+/// different stores. Keying by the file path as constructed from the store
+/// root keeps distinct stores over distinct roots independent.
+fn locks() -> &'static Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Factory for session brains.
 ///
-/// Cheap to clone. Every clone shares one lock table, so two handles opened
-/// from the same store for the same session serialise their writes.
+/// Cheap to clone. Every clone, and every store, shares one lock table, so two
+/// writers to one session file serialise.
 #[derive(Clone)]
 pub struct BrainStore {
     root: PathBuf,
-    locks: Arc<Mutex<HashMap<String, Weak<AsyncMutex<()>>>>>,
 }
 
 impl BrainStore {
     /// Create a store rooted at the directory that holds the session files.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self {
-            root: root.into(),
-            locks: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { root: root.into() }
+    }
+
+    /// A store for the sessions directory under a data directory.
+    ///
+    /// The prune sweep uses this so its file removal takes the same session
+    /// lock as the store the rest of the hub writes through.
+    pub fn for_data_dir(data_dir: &Path) -> Self {
+        Self::new(data_dir.join("sessions"))
     }
 
     /// The directory holding one brain file per session, under its project.
@@ -82,6 +97,7 @@ impl BrainStore {
     pub async fn open(&self, project_id: &str, session_id: &str) -> Result<Brain> {
         let path = self.brain_path(project_id, session_id)?;
         std::fs::create_dir_all(self.root.join(project_id))?;
+        let lock = lock_for(&path);
 
         let path = path
             .to_str()
@@ -97,26 +113,41 @@ impl BrainStore {
 
         Ok(Brain {
             agent,
-            lock: self.lock_for(project_id, session_id),
+            lock,
             session_id: session_id.to_string(),
         })
     }
 
-    /// The write lock for a session, creating it on first use.
+    /// Remove a session's brain file while holding its write lock.
     ///
-    /// Dead locks are dropped on lookup so a store does not accumulate one
-    /// entry per session ever seen.
-    fn lock_for(&self, project_id: &str, session_id: &str) -> Arc<AsyncMutex<()>> {
-        let key = format!("{project_id}/{session_id}");
-        let mut locks = self.locks.lock().expect("brain lock table poisoned");
-        locks.retain(|_, weak| weak.strong_count() > 0);
-        if let Some(existing) = locks.get(&key).and_then(|weak| weak.upgrade()) {
-            return existing;
+    /// Taking the lock is the point: a prune must not race an in-flight write
+    /// to the same session file. Returns whether a file was actually removed,
+    /// so a caller can tell a clean removal from a missing file.
+    pub async fn remove(&self, project_id: &str, session_id: &str) -> Result<bool> {
+        let path = self.brain_path(project_id, session_id)?;
+        let lock = lock_for(&path);
+        let _guard = lock.lock().await;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err.into()),
         }
-        let lock = Arc::new(AsyncMutex::new(()));
-        locks.insert(key, Arc::downgrade(&lock));
-        lock
     }
+}
+
+/// The write lock for a session file, creating it on first use.
+///
+/// Dead locks are dropped on lookup so the table does not accumulate one entry
+/// per session ever seen.
+fn lock_for(path: &Path) -> Arc<AsyncMutex<()>> {
+    let mut locks = locks().lock().expect("brain lock table poisoned");
+    locks.retain(|_, weak| weak.strong_count() > 0);
+    if let Some(existing) = locks.get(path).and_then(|weak| weak.upgrade()) {
+        return existing;
+    }
+    let lock = Arc::new(AsyncMutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
 }
 
 /// A handle to one session's AgentFS brain.

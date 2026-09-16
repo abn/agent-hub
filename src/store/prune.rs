@@ -93,7 +93,7 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
     let conn = db.connect().map_err(engine)?;
     let mut rows = conn
         .query(
-            "SELECT id, brain_path, deleted_at FROM sessions WHERE deleted_at IS NOT NULL",
+            "SELECT id, project_id, deleted_at FROM sessions WHERE deleted_at IS NOT NULL",
             (),
         )
         .await
@@ -105,7 +105,7 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
             Value::Text(value) => value,
             _ => continue,
         };
-        let brain_path = match row.get_value(1).map_err(engine)? {
+        let project_id = match row.get_value(1).map_err(engine)? {
             Value::Text(value) => value,
             _ => continue,
         };
@@ -113,12 +113,12 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
             Value::Text(value) => value,
             _ => continue,
         };
-        pending.push((id, brain_path, deleted_at));
+        pending.push((id, project_id, deleted_at));
     }
 
     let now = time::OffsetDateTime::now_utc();
     let mut committed = 0;
-    for (id, brain_path, deleted_at) in pending {
+    for (id, project_id, deleted_at) in pending {
         let pruned_at = time::OffsetDateTime::parse(
             &deleted_at,
             &time::format_description::well_known::Rfc3339,
@@ -127,15 +127,21 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
         if (now - pruned_at).whole_seconds() < UNDO_WINDOW_SECS {
             continue;
         }
-        commit(db, data_dir, &id, &brain_path).await?;
+        commit(db, data_dir, &id, &project_id).await?;
         committed += 1;
     }
     Ok(committed)
 }
 
-async fn commit(db: &Database, data_dir: &Path, session_id: &str, brain_path: &str) -> Result<()> {
-    // Removing the file is the point of the prune; a failure must abort it.
-    crate::blob::remove(data_dir, brain_path)?;
+async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &str) -> Result<()> {
+    // Removing the file is the point of the prune, through the wrapper so it
+    // takes the session lock; a failure must abort the commit.
+    let removed = crate::brain::BrainStore::for_data_dir(data_dir)
+        .remove(project_id, session_id)
+        .await?;
+    if !removed {
+        tracing::warn!(session_id, "prune found no brain file to remove");
+    }
 
     let mut conn = db.connect().map_err(engine)?;
     let tx = conn
