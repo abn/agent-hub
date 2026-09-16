@@ -99,6 +99,12 @@ async fn answer_closes_the_thread_and_resolves_the_item() {
 
     let items = inbox::list(&db, None, None, 50).await.expect("inbox");
     assert_eq!(
+        items.len(),
+        1,
+        "the answer does not itself become an inbox item"
+    );
+    assert_eq!(items[0].kind, "question");
+    assert_eq!(
         items[0].status, "resolved",
         "the question is resolved by the answer"
     );
@@ -174,4 +180,88 @@ async fn feed_still_reads_the_thread() {
         .expect("feed")
         .events;
     assert_eq!(events.len(), 2);
+}
+
+#[tokio::test]
+async fn question_and_answer_honour_idempotency_keys() {
+    let db = open().await;
+
+    let mut first = question("repeatable?");
+    first.idempotency_key = Some("q1");
+    let q1 = questions::post(&db, first).await.expect("post");
+    let mut again = question("repeatable?");
+    again.idempotency_key = Some("q1");
+    let q2 = questions::post(&db, again).await.expect("post again");
+    assert_eq!(q1, q2, "a repeated question key returns the same event");
+
+    let a1 = questions::answer(&db, "human", &q1, "yes", Some("a1"))
+        .await
+        .expect("answer");
+    let a2 = questions::answer(&db, "human", &q1, "yes", Some("a1"))
+        .await
+        .expect("answer again");
+    assert_eq!(a1, a2, "a repeated answer key returns the same event");
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    assert_eq!(events.len(), 2, "one question and one answer were stored");
+}
+
+#[tokio::test]
+async fn signal_append_question_still_lands_in_the_inbox() {
+    let db = open().await;
+    let id = append(
+        &db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "question".to_string(),
+            summary: "written through the generic writer".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await
+    .expect("append question");
+
+    let event = agent_hub::store::events::get(&db, &id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(event.thread_id.as_deref(), Some(id.as_str()));
+    assert!(event.needs_action);
+
+    let items = inbox::list(&db, Some("action"), None, 50)
+        .await
+        .expect("inbox");
+    assert_eq!(
+        items.len(),
+        1,
+        "a question written directly still needs action"
+    );
+}
+
+#[tokio::test]
+async fn an_orphan_answer_is_rejected() {
+    let db = open().await;
+    let err = append(
+        &db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "answer".to_string(),
+            summary: "no question".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await
+    .expect_err("reject orphan answer");
+    assert_eq!(err.code(), agent_hub::error::ErrorCode::InvalidArgument);
 }

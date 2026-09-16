@@ -73,15 +73,7 @@ pub async fn post(db: &Database, question: NewQuestion<'_>) -> Result<String> {
     )
     .await?;
 
-    // Root the thread at the question itself.
-    let conn = db.connect().map_err(engine)?;
-    conn.execute(
-        "UPDATE events SET thread_id = ?1 WHERE id = ?1",
-        vec![turso::Value::Text(id.clone())],
-    )
-    .await
-    .map_err(engine)?;
-
+    // The event writer roots a question's thread at its own id.
     Ok(id)
 }
 
@@ -120,8 +112,4 @@ pub async fn answer(
 
     inbox::set_status(db, question_id, "resolved").await?;
     Ok(id)
-}
-
-fn engine(err: turso::Error) -> Error {
-    Error::Engine(err.to_string())
 }

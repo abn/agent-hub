@@ -1,11 +1,13 @@
 //! The home summary, the inbox listing, and answering a question.
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
+use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::store::home::{self as home_store, Home};
@@ -36,6 +38,9 @@ pub struct InboxList {
 pub struct AnswerBody {
     /// The answer text.
     pub body: String,
+    /// Optional idempotency key, so a retried answer does not duplicate.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 /// The acknowledgement returned when a question is answered.
@@ -104,19 +109,25 @@ pub async fn answer(
     State(state): State<AppState>,
     Path(question_id): Path<String>,
     headers: HeaderMap,
-    Json(payload): Json<AnswerBody>,
+    body: std::result::Result<Json<AnswerBody>, JsonRejection>,
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
     let principal = state
         .auth
         .resolve_bearer(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
+    let Json(payload) = body.map_err(|rejection| {
+        Problem::from_error(&Error::InvalidArgument(format!(
+            "the answer body must be JSON with a body field: {rejection}"
+        )))
+    })?;
+
     let event_id = question_store::answer(
         &state.db,
         &principal.actor,
         &question_id,
         &payload.body,
-        None,
+        payload.idempotency_key.as_deref(),
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;

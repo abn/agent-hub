@@ -82,6 +82,21 @@ pub async fn append(
     let mut conn = db.connect().map_err(engine)?;
     let id = ulid::Ulid::generate().to_string();
     let created_at = crate::store::now_rfc3339();
+
+    // A question always needs the human and roots its own thread, whichever
+    // tool wrote it. An answer must name the question it replies to.
+    if event.kind == "answer" && event.thread_id.is_none() {
+        return Err(Error::InvalidArgument(
+            "an answer must name the question it replies to".to_string(),
+        ));
+    }
+    let needs_action = event.needs_action || event.kind == "question";
+    let thread_id = if event.kind == "question" {
+        Some(id.clone())
+    } else {
+        event.thread_id.clone()
+    };
+
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -106,8 +121,8 @@ pub async fn append(
             Value::Text(actor.to_string()),
             Value::Text(event.summary.clone()),
             optional_text(payload_text.as_deref()),
-            optional_text(event.thread_id.as_deref()),
-            Value::Integer(i64::from(event.needs_action)),
+            optional_text(thread_id.as_deref()),
+            Value::Integer(i64::from(needs_action)),
             Value::Text(created_at.clone()),
         ],
     )
@@ -134,8 +149,8 @@ pub async fn append(
     }
 
     // Finished work and anything that needs the human land in the inbox.
-    if event.needs_action || event.kind == "finished" {
-        crate::store::inbox::project(&tx, &id, event.needs_action, &created_at).await?;
+    if needs_action || event.kind == "finished" {
+        crate::store::inbox::project(&tx, &id, needs_action, &created_at).await?;
     }
 
     tx.commit().await.map_err(engine)?;
