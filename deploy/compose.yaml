@@ -10,6 +10,9 @@ services:
       - "8080:8080"
     volumes:
       - hub-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
     restart: unless-stopped
 
 volumes:

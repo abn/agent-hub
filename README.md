@@ -39,7 +39,8 @@ that hooks and CI both reuse.
 ## Documentation
 
 The wiki lives in [`docs/`](docs/index.md): the
-[overview](docs/overview.md), the [design](docs/design/index.md), the
+[overview](docs/overview.md), the [usage](docs/usage/index.md), the
+[design](docs/design/index.md), the
 [architecture](docs/architecture/index.md), and the [decision
 records](docs/adr/index.md).
 

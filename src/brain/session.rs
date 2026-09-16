@@ -63,26 +63,26 @@ impl BrainStore {
         }
     }
 
-    /// The directory holding one `<session_id>.db` file per session.
+    /// The directory holding one brain file per session, under its project.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Path of the brain file for a session.
+    /// Path of the brain file for a session, under its project.
     ///
-    /// The path is stable for a given session id, which is what lets a resume
-    /// find the same state.
-    pub fn brain_path(&self, session_id: &str) -> Result<PathBuf> {
+    /// The path is stable for a given project and session, which is what lets
+    /// a resume find the same state.
+    pub fn brain_path(&self, project_id: &str, session_id: &str) -> Result<PathBuf> {
+        validate_project_id(project_id)?;
         validate_session_id(session_id)?;
-        Ok(self.root.join(format!("{session_id}.db")))
+        Ok(self.root.join(project_id).join(format!("{session_id}.db")))
     }
 
     /// Open the brain for a session, locating or creating its file.
-    pub async fn open(&self, session_id: &str) -> Result<Brain> {
-        self.brain_path(session_id)?;
-        std::fs::create_dir_all(&self.root)?;
+    pub async fn open(&self, project_id: &str, session_id: &str) -> Result<Brain> {
+        let path = self.brain_path(project_id, session_id)?;
+        std::fs::create_dir_all(self.root.join(project_id))?;
 
-        let path = self.brain_path(session_id)?;
         let path = path
             .to_str()
             .ok_or_else(|| Error::Config("session brain path is not valid UTF-8".to_string()))?
@@ -97,7 +97,7 @@ impl BrainStore {
 
         Ok(Brain {
             agent,
-            lock: self.lock_for(session_id),
+            lock: self.lock_for(project_id, session_id),
             session_id: session_id.to_string(),
         })
     }
@@ -106,14 +106,15 @@ impl BrainStore {
     ///
     /// Dead locks are dropped on lookup so a store does not accumulate one
     /// entry per session ever seen.
-    fn lock_for(&self, session_id: &str) -> Arc<AsyncMutex<()>> {
+    fn lock_for(&self, project_id: &str, session_id: &str) -> Arc<AsyncMutex<()>> {
+        let key = format!("{project_id}/{session_id}");
         let mut locks = self.locks.lock().expect("brain lock table poisoned");
         locks.retain(|_, weak| weak.strong_count() > 0);
-        if let Some(existing) = locks.get(session_id).and_then(|weak| weak.upgrade()) {
+        if let Some(existing) = locks.get(&key).and_then(|weak| weak.upgrade()) {
             return existing;
         }
         let lock = Arc::new(AsyncMutex::new(()));
-        locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+        locks.insert(key, Arc::downgrade(&lock));
         lock
     }
 }
@@ -296,6 +297,21 @@ impl Brain {
             }
         }
         Ok(())
+    }
+}
+
+/// Validate a project id before it becomes part of a directory name.
+fn validate_project_id(project_id: &str) -> Result<()> {
+    let valid = !project_id.is_empty()
+        && project_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::Config(format!(
+            "project id '{project_id}' must be non-empty and contain only ASCII alphanumerics, hyphens, and underscores"
+        )))
     }
 }
 

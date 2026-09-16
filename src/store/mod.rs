@@ -59,15 +59,14 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
 }
 
 async fn read_version(conn: &turso::Connection) -> Result<i64> {
-    let mut version = 0;
     let mut rows = conn
-        .query("SELECT version FROM schema_version LIMIT 1", ())
+        .query("SELECT COALESCE(MAX(version), 0) FROM schema_version", ())
         .await
         .map_err(engine)?;
-    while let Some(row) = rows.next().await.map_err(engine)? {
-        version = row.get::<i64>(0).map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => row.get::<i64>(0).map_err(engine),
+        None => Ok(0),
     }
-    Ok(version)
 }
 
 fn engine(err: turso::Error) -> Error {

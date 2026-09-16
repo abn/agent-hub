@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check check clean hooks/require hooks/update
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -51,6 +51,16 @@ docs/check: ## Validate the docs bundle against OKF v0.2
 
 check: lint lint/engine clippy fmt/check test ## Full quality gate
 	@printf 'check: ok\n'
+
+##@ Container
+
+# Not part of `check`: building the image compiles the whole engine and is a
+# deliberate, manual gate.
+container/config: ## Validate the container compose file
+	docker compose -f deploy/compose.yaml config
+
+container/build: ## Build the container image
+	docker build -f Containerfile -t agent-hub .
 
 ##@ Utilities
 

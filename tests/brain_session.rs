@@ -22,7 +22,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 #[tokio::test]
 async fn kv_and_file_round_trip() {
     let store = BrainStore::new(temp_dir("round-trip"));
-    let brain = store.open("session").await.expect("open brain");
+    let brain = store.open("proj", "session").await.expect("open brain");
 
     brain
         .put("/kv/recovery", b"handoff text")
@@ -70,7 +70,7 @@ async fn state_survives_reopen() {
 
     {
         let store = BrainStore::new(&root);
-        let brain = store.open("named").await.expect("open brain");
+        let brain = store.open("proj", "named").await.expect("open brain");
         brain.put("/kv/counter", b"1").await.expect("put key");
         brain
             .put("/fs/RECOVERY.md", b"resume here")
@@ -79,7 +79,7 @@ async fn state_survives_reopen() {
     }
 
     let store = BrainStore::new(&root);
-    let resumed = store.open("named").await.expect("reopen brain");
+    let resumed = store.open("proj", "named").await.expect("reopen brain");
     assert_eq!(
         resumed.get("/kv/counter").await.expect("get key"),
         Some(b"1".to_vec())
@@ -93,8 +93,8 @@ async fn state_survives_reopen() {
 #[tokio::test]
 async fn distinct_sessions_write_concurrently() {
     let store = BrainStore::new(temp_dir("concurrent"));
-    let first = store.open("first").await.expect("open first");
-    let second = store.open("second").await.expect("open second");
+    let first = store.open("proj", "first").await.expect("open first");
+    let second = store.open("proj", "second").await.expect("open second");
 
     let (first_result, second_result) = tokio::join!(
         first.put("/kv/name", b"first"),
@@ -110,5 +110,26 @@ async fn distinct_sessions_write_concurrently() {
     assert_eq!(
         second.get("/kv/name").await.expect("second read"),
         Some(b"second".to_vec())
+    );
+}
+
+#[tokio::test]
+async fn same_session_writes_serialise_and_persist() {
+    let store = BrainStore::new(temp_dir("same-session"));
+    let first = store.open("proj", "shared").await.expect("open first");
+    let second = store.open("proj", "shared").await.expect("open second");
+
+    let (a, b) = tokio::join!(first.put("/kv/a", b"one"), second.put("/kv/b", b"two"),);
+    a.expect("first write");
+    b.expect("second write");
+
+    let reopened = store.open("proj", "shared").await.expect("reopen");
+    assert_eq!(
+        reopened.get("/kv/a").await.expect("get a"),
+        Some(b"one".to_vec())
+    );
+    assert_eq!(
+        reopened.get("/kv/b").await.expect("get b"),
+        Some(b"two".to_vec())
     );
 }

@@ -24,9 +24,13 @@ struct McpServer {
 
 impl McpServer {
     fn spawn() -> Self {
+        Self::spawn_with_log("error")
+    }
+
+    fn spawn_with_log(rust_log: &str) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
             .arg("mcp")
-            .env("RUST_LOG", "error")
+            .env("RUST_LOG", rust_log)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -91,10 +95,11 @@ impl McpServer {
                 .lines
                 .recv_timeout(READ_TIMEOUT)
                 .unwrap_or_else(|_| panic!("timed out waiting for a response to request {id}"));
-            let value: Value = match serde_json::from_str(&line) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
+            let value: Value = serde_json::from_str(&line).unwrap_or_else(|err| {
+                panic!(
+                    "stdout carried a non-JSON line, which corrupts the protocol: {err}: {line:?}"
+                )
+            });
             if value.get("id").and_then(Value::as_u64) == Some(id) {
                 return value;
             }
@@ -147,5 +152,31 @@ fn initialize_list_and_call_over_stdio() {
     assert!(
         text.starts_with("agent-hub "),
         "the version tool reports the hub version, got {text:?}"
+    );
+}
+
+#[test]
+fn stdout_stays_pure_json_with_logging_enabled() {
+    // With logging on, any record written to stdout would break the protocol;
+    // the reader fails the test on any non-JSON line, so this guards the log
+    // destination.
+    let mut server = McpServer::spawn_with_log("info");
+
+    let init = server.call(
+        "initialize",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "mcp-stdio-purity", "version": "0.0.0"},
+        }),
+    );
+    assert!(init.get("result").is_some(), "initialize returns a result");
+
+    server.notify("notifications/initialized");
+
+    let listed = server.call("tools/list", json!({}));
+    assert!(
+        listed["result"]["tools"].is_array(),
+        "tools/list returns an array"
     );
 }

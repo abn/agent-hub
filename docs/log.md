@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, implementation and packaging
+
+* **Creation**: Opened the [usage](usage/index.md) section with the
+  [quickstart](usage/quickstart.md), covering the binary build, environment
+  configuration, the health probes, and running with the container and compose
+  file. The hub is an early work in progress and the page says so.
+* **Update**: Recorded the container packaging: a multi-stage `Containerfile`,
+  a `deploy/compose.yaml`, and a `.dockerignore`.
+* **Update**: Corrected the root [index](index.md) and this log, which still
+  said the bundle had no usage section and that a runnable binary did not
+  exist.
+
 ## 2026-09-16, grounding and design handoff
 
 * **Update**: Amended [0003](adr/0003-wrap-agentfs-per-session.md) to record
@@ -37,9 +49,10 @@ software release notes and the repository changelog.
   [human surface](architecture/human-surface.md)), nine [decision
   records](adr/index.md), and the contribution section
   ([guide](contribution/guide.md), [maintainer guide](contribution/maintainers.md)).
-* **Note**: The bundle deliberately has no usage or reference section yet.
-  The hub does not run, so a page describing how to run it would be fiction.
-  Both sections open when the first runnable binary does.
+* **Note**: At the baseline the bundle had no usage or reference section,
+  because the hub did not run and a page describing how to run it would have
+  been fiction. The usage section opened once the first runnable binary
+  existed.
 * **Note**: Every architecture page describes an intended design, not shipped
   behaviour, and says so. Pages are rewritten against the code as the code
   lands.

@@ -14,13 +14,18 @@ covering the project's public design, architecture, decisions, and
 contribution guidance. It is maintained to reflect status quo as the project
 evolves. The working specification is held outside this bundle.
 
-The hub itself is not implemented yet. The pages here describe the intended
-design and say so where that is the case.
+The hub is an early work in progress: the binary skeleton and its packaging
+exist, and most features are still intended design. Each page says which it is.
 
 ## Getting started
 
 * [Overview](overview.md) - what Agent Hub is and why it exists
 * [Contributor guide](contribution/guide.md) - how to contribute
+
+## Usage
+
+* [Usage overview](usage/index.md) - running the hub
+* [Quickstart](usage/quickstart.md) - build, run, and configure a local instance
 
 ## Design
 

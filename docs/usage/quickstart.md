@@ -16,8 +16,8 @@ exercise the packaging and the storage engine, not to depend on it.
 
 ## Build the binary
 
-The project builds with the pinned Rust toolchain. `make build` produces a
-debug binary:
+The project builds with a recent stable Rust toolchain (1.97 or newer).
+`make build` produces a debug binary:
 
 ```sh
 make build

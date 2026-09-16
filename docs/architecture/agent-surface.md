@@ -33,6 +33,7 @@ ships yet.
 | `brain_list` | List the session brain tree. |
 | `brain_delete` | Remove a path from the session brain. |
 | `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
+| `version` | Report the server version, for a connectivity check. |
 
 `brain_get` and `brain_put` operate on the current session's brain only. Brain
 paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
