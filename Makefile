@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -49,7 +49,10 @@ fmt/check: ## Fail if formatting differs from rustfmt output
 docs/check: ## Validate the docs bundle against OKF v0.2
 	./.agents/scripts/check-okf.py
 
-check: lint lint/engine clippy fmt/check docs/check test ## Full quality gate
+web/check: ## Static checks for the PWA assets
+	./.agents/scripts/check-web.py
+
+check: lint lint/engine clippy fmt/check docs/check web/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container

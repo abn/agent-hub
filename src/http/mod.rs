@@ -13,9 +13,11 @@ pub mod auth;
 pub mod feed;
 pub mod inbox;
 pub mod problem;
+pub mod projects;
 pub mod search;
 pub mod sessions;
 pub mod storage;
+pub mod web;
 
 use problem::Problem;
 
@@ -24,13 +26,25 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/", get(web::index))
+        .route("/app.js", get(web::app_js))
+        .route("/app.css", get(web::app_css))
+        .route("/tokens.css", get(web::tokens_css))
+        .route("/manifest.webmanifest", get(web::manifest))
+        .route("/sw.js", get(web::service_worker))
+        .route("/icon.svg", get(web::icon))
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/questions/{id}/answer", post(inbox::answer))
+        .route(
+            "/api/v1/projects",
+            get(projects::list).post(projects::create),
+        )
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
+        .route("/api/v1/storage", get(storage::usage))
         .route("/api/v1/storage/sessions/{id}", delete(storage::prune))
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
         .route("/api/v1/search", get(search::search))

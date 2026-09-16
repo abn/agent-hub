@@ -9,11 +9,13 @@ pub mod events;
 pub mod home;
 pub mod idempotency;
 pub mod inbox;
+pub mod projects;
 pub mod prune;
 pub mod questions;
 mod schema;
 pub mod search;
 pub mod sessions;
+pub mod storage;
 
 /// Open the engine with the full-text index method enabled.
 ///

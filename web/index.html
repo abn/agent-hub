@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#F5F3EE">
+  <title>Agent Hub</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/tokens.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="app">
+    <header class="topbar">
+      <span class="wordmark">Agent Hub</span>
+      <nav aria-label="Primary">
+        <a href="#/home">Home</a>
+        <a href="#/inbox">Inbox</a>
+        <a href="#/feed">Projects</a>
+        <a href="#/search">Search</a>
+      </nav>
+      <span class="grow"></span>
+      <a href="#/settings">Settings</a>
+    </header>
+    <main id="main" tabindex="-1"></main>
+    <nav class="tabbar" aria-label="Primary">
+      <a href="#/home">Home</a>
+      <a href="#/inbox">Inbox <span class="badge" id="tab-badge" hidden></span></a>
+      <a href="#/feed">Projects</a>
+      <a href="#/search">Search</a>
+    </nav>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

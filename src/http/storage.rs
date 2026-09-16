@@ -9,6 +9,7 @@ use crate::app::AppState;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::store::prune::{self, PruneToken};
+use crate::store::storage::{self, StorageUsage};
 
 /// The acknowledgement returned when a prune is undone.
 #[derive(Debug, Serialize)]
@@ -56,4 +57,23 @@ pub async fn undo(
         .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(UndoResult { ok: true }))
+}
+
+/// `GET /api/v1/storage`
+///
+/// A valid bearer token is required. Reports bytes on the data volume, broken
+/// down by project.
+pub async fn usage(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<StorageUsage>, Problem> {
+    state
+        .auth
+        .resolve_bearer(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let usage = storage::usage(&state.db, &state.data_dir)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    Ok(Json(usage))
 }
