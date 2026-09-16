@@ -13,6 +13,7 @@ async fn main() -> Result<()> {
 
     match std::env::args().nth(1).as_deref() {
         Some("mcp") => agent_hub::mcp::serve_stdio(config).await,
+        Some("mcp-http") => agent_hub::mcp::serve_http(config).await,
         _ => agent_hub::app::run(config).await,
     }
 }

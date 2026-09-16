@@ -5,7 +5,9 @@ pub mod brain;
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod limits;
 pub mod mcp;
+pub mod principal;
 pub mod store;
 
 pub use error::{Error, Result};

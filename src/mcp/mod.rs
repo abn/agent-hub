@@ -53,3 +53,12 @@ pub async fn serve_stdio(config: Config) -> crate::Result<()> {
 
     Ok(())
 }
+
+/// Serve the MCP tool surface over streamable HTTP.
+///
+/// Implemented by the mcp lane of the feed wave; it requires a bearer token.
+pub async fn serve_http(_config: Config) -> crate::Result<()> {
+    Err(Error::Config(
+        "the MCP streamable HTTP transport is not wired up yet".to_string(),
+    ))
+}

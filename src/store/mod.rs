@@ -1,10 +1,13 @@
-//! The hub store: engine access, schema, and migrations.
+//! The hub store: engine access, schema, migrations, and domain modules.
 
 use std::path::Path;
 
 use crate::error::{Error, Result};
 
+pub mod events;
+pub mod idempotency;
 mod schema;
+pub mod search;
 
 /// Open the engine with the full-text index method enabled.
 ///
@@ -69,6 +72,6 @@ async fn read_version(conn: &turso::Connection) -> Result<i64> {
     }
 }
 
-fn engine(err: turso::Error) -> Error {
+pub(crate) fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
