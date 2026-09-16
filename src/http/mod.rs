@@ -10,6 +10,7 @@ use crate::error::Error;
 
 pub mod auth;
 pub mod feed;
+pub mod inbox;
 pub mod problem;
 pub mod sessions;
 
@@ -20,6 +21,9 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/api/v1/home", get(inbox::home))
+        .route("/api/v1/inbox", get(inbox::list))
+        .route("/api/v1/questions/{id}/answer", post(inbox::answer))
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
