@@ -47,9 +47,11 @@ pub async fn list(
 
 /// `GET /artifacts/{id}`
 ///
-/// Public: a recipient opens the link without a token. A public artifact is
-/// served as HTML. A protected artifact returns an unlock shell carrying the
-/// envelope and ciphertext; the server holds no plaintext to leak.
+/// Public: a recipient opens the link without a token. The artifact is always
+/// wrapped in a document the hub controls and framed without same-origin
+/// access, so agent-authored content never runs in the hub origin. A protected
+/// artifact returns an unlock shell carrying the envelope and ciphertext; the
+/// server holds no plaintext to leak.
 pub async fn render(
     State(state): State<AppState>,
     Path(artifact_id): Path<String>,
@@ -58,23 +60,50 @@ pub async fn render(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    if artifact.protected {
-        return Ok(html_response(unlock_shell(&artifact, &bytes)));
-    }
-
-    match artifact.kind.as_str() {
-        "html" => Ok(html_response(bytes)),
-        _ => Ok(html_response(markdown_document(&artifact.title, &bytes))),
-    }
+    let document = if artifact.protected {
+        unlock_shell(&artifact, &bytes)
+    } else if artifact.kind == "html" {
+        framed_document(&artifact.title, &bytes)
+    } else {
+        markdown_document(&artifact.title, &bytes)
+    };
+    Ok(html_response(document))
 }
 
 fn html_response(body: impl Into<Body>) -> Response {
     let mut response = Response::new(body.into());
-    response.headers_mut().insert(
+    let headers = response.headers_mut();
+    headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // No scripts, no external loads, no navigation, and no same-origin access.
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
+        ),
+    );
     response
+}
+
+/// Frame untrusted HTML in a sandboxed document. The frame has no
+/// same-origin access and the content policy disables scripts and external
+/// loads, so a published page cannot touch the hub origin.
+fn framed_document(title: &str, content: &[u8]) -> String {
+    let title = escape_html(title);
+    let srcdoc = escape_html(&String::from_utf8_lossy(content));
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n\
+<body style=\"margin:0\">\n<iframe title=\"{title}\" sandbox srcdoc=\"{srcdoc}\" \
+style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>\n</body>\n</html>\n"
+    )
 }
 
 /// Wrap raw markdown in a readable document. The source stays text, so the

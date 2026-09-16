@@ -55,6 +55,18 @@ pub async fn run(config: Config) -> Result<()> {
     let state = AppState::open(config).await?;
     let bind = state.config.bind;
 
+    // Commit any prune whose undo window has passed, then keep sweeping.
+    let sweeper = state.clone();
+    tokio::spawn(async move {
+        let interval = std::time::Duration::from_secs(store::prune::UNDO_WINDOW_SECS as u64);
+        loop {
+            if let Err(err) = store::prune::sweep(&sweeper.db, &sweeper.data_dir).await {
+                tracing::warn!(error = %err, "prune sweep failed");
+            }
+            tokio::time::sleep(interval).await;
+        }
+    });
+
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(bind = %bind, schema_version = state.schema_version, "hub listening");
 

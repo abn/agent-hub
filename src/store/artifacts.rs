@@ -127,6 +127,9 @@ pub async fn publish(
 }
 
 /// Publish a new version of an existing artifact.
+///
+/// The version bump is read inside the immediate transaction, so concurrent
+/// updates serialise and each writes a distinct version file.
 pub async fn update(
     db: &Database,
     data_dir: &Path,
@@ -135,10 +138,16 @@ pub async fn update(
     content: &[u8],
     envelope: Option<serde_json::Value>,
 ) -> Result<Artifact> {
-    let existing = row(db, artifact_id)
+    limits::check_artifact(content.len())?;
+
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let existing = row_on(&tx, artifact_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
-    limits::check_artifact(content.len())?;
 
     let version = existing.version + 1;
     let rel = blob::write(
@@ -155,11 +164,6 @@ pub async fn update(
     let updated_at = crate::store::now_rfc3339();
 
     let write = async {
-        let mut conn = db.connect().map_err(engine)?;
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
         tx.execute(
             "UPDATE artifacts SET current_ver = ?1, envelope = ?2, path = ?3, size_bytes = ?4, updated_at = ?5 WHERE id = ?6",
             vec![
@@ -243,6 +247,10 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
 
 async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
     let conn = db.connect().map_err(engine)?;
+    row_on(&conn, artifact_id).await
+}
+
+async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
             "SELECT id, project_id, title, kind, current_ver, envelope, size_bytes, created_at, updated_at, path

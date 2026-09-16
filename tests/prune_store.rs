@@ -36,6 +36,9 @@ async fn prune_hides_a_session_and_undo_restores_it() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
 
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
     assert_eq!(token.undo_token, session.id);
@@ -68,6 +71,9 @@ async fn sweep_commits_an_expired_prune() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
 
     // Age the tombstone past the window, then sweep.
@@ -115,6 +121,9 @@ async fn a_fresh_prune_is_not_committed() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
 
     let committed = prune::sweep(&db, &dir).await.expect("sweep");
@@ -125,4 +134,50 @@ async fn a_fresh_prune_is_not_committed() {
             .expect("get")
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn pruning_an_active_session_is_rejected() {
+    let dir = temp_dir("prune-active");
+    let db = open(&dir).await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let err = prune::prune_session(&db, &session.id)
+        .await
+        .expect_err("an active session cannot be pruned");
+    assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn undo_after_the_window_is_rejected() {
+    let dir = temp_dir("prune-late-undo");
+    let db = open(&dir).await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
+    let token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+        vec![
+            turso::Value::Text(
+                old.format(&time::format_description::well_known::Rfc3339)
+                    .expect("format"),
+            ),
+            turso::Value::Text(session.id.clone()),
+        ],
+    )
+    .await
+    .expect("age");
+
+    let err = prune::undo(&db, &token.undo_token)
+        .await
+        .expect_err("the window has passed");
+    assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
 }

@@ -22,15 +22,29 @@ pub struct PruneToken {
 }
 
 /// Soft-delete a session and return the token that can undo it.
+///
+/// The session must be ended first: pruning removes the brain file, and the
+/// wrapper must not be writing to an open session.
 pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken> {
     let session = crate::store::sessions::get(db, session_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
 
+    if session.deleted_at.is_some() {
+        return Err(Error::Conflict(format!(
+            "session {session_id} is already pruned"
+        )));
+    }
+    if session.status != "ended" {
+        return Err(Error::Conflict(
+            "end the session before pruning it".to_string(),
+        ));
+    }
+
     let now = time::OffsetDateTime::now_utc();
     let conn = db.connect().map_err(engine)?;
     conn.execute(
-        "UPDATE sessions SET deleted_at = ?1, status = 'ended' WHERE id = ?2",
+        "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
         vec![
             Value::Text(format_time(now)),
             Value::Text(session.id.clone()),
@@ -47,6 +61,23 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
 
 /// Restore a session pruned within the window.
 pub async fn undo(db: &Database, token: &str) -> Result<()> {
+    let session = crate::store::sessions::get(db, token)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("session {token} not found")))?;
+    let deleted_at = session
+        .deleted_at
+        .ok_or_else(|| Error::NotFound(format!("session {token} is not pruned")))?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let pruned_at =
+        time::OffsetDateTime::parse(&deleted_at, &time::format_description::well_known::Rfc3339)
+            .unwrap_or(now);
+    if (now - pruned_at).whole_seconds() >= UNDO_WINDOW_SECS {
+        return Err(Error::Conflict(
+            "the undo window for this prune has passed".to_string(),
+        ));
+    }
+
     let conn = db.connect().map_err(engine)?;
     conn.execute(
         "UPDATE sessions SET deleted_at = NULL WHERE id = ?1",
@@ -103,22 +134,31 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
 }
 
 async fn commit(db: &Database, data_dir: &Path, session_id: &str, brain_path: &str) -> Result<()> {
-    let _ = crate::blob::remove(data_dir, brain_path);
+    // Removing the file is the point of the prune; a failure must abort it.
+    crate::blob::remove(data_dir, brain_path)?;
 
     let mut conn = db.connect().map_err(engine)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+    // The session's lifecycle events are indexed; drop their rows first.
     tx.execute(
-        "DELETE FROM search_docs WHERE session_id = ?1",
-        vec![Value::Text(session_id.to_string())],
+        "DELETE FROM search_docs WHERE doc_id IN
+         (SELECT 'event:' || id FROM events WHERE kind = 'session' AND payload LIKE ?1)",
+        vec![Value::Text(format!("%\"session_id\":\"{session_id}\"%"))],
     )
     .await
     .map_err(engine)?;
     tx.execute(
         "DELETE FROM events WHERE kind = 'session' AND payload LIKE ?1",
         vec![Value::Text(format!("%\"session_id\":\"{session_id}\"%"))],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM search_docs WHERE session_id = ?1",
+        vec![Value::Text(session_id.to_string())],
     )
     .await
     .map_err(engine)?;
