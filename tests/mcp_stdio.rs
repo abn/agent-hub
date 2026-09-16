@@ -28,9 +28,16 @@ impl McpServer {
     }
 
     fn spawn_with_log(rust_log: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let data_dir =
+            std::env::temp_dir().join(format!("agent-hub-mcp-{}-{nanos}", std::process::id()));
         let mut child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
             .arg("mcp")
             .env("RUST_LOG", rust_log)
+            .env("HUB_DATA_DIR", &data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

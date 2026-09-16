@@ -6,7 +6,6 @@
 //! from tool arguments.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -174,34 +173,9 @@ fn to_error_data(err: Error) -> ErrorData {
     ErrorData::new(wire, err.to_string(), Some(data))
 }
 
-/// How long to wait for the hub store when another process holds its lock.
-const STORE_LOCK_WAIT: Duration = Duration::from_secs(15);
-const STORE_LOCK_RETRY: Duration = Duration::from_millis(100);
-
-/// Open the shared state, waiting out a store lock held elsewhere.
-///
-/// The engine is single-writer per data directory, so a hub starting while a
-/// previous process is still shutting down would otherwise crash on the lock.
-async fn open_state(config: Config) -> crate::Result<AppState> {
-    let deadline = tokio::time::Instant::now() + STORE_LOCK_WAIT;
-    loop {
-        match AppState::open(config.clone()).await {
-            Ok(state) => return Ok(state),
-            Err(err) if is_store_lock(&err) && tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(STORE_LOCK_RETRY).await;
-            }
-            Err(err) => return Err(err),
-        }
-    }
-}
-
-fn is_store_lock(err: &Error) -> bool {
-    matches!(err, Error::Engine(message) if message.contains("locked"))
-}
-
 /// Serve the MCP tool surface over stdio.
 pub async fn serve_stdio(config: Config) -> crate::Result<()> {
-    let state = open_state(config).await?;
+    let state = AppState::open(config).await?;
     let running = HubServer::new(state)
         .serve(rmcp::transport::stdio())
         .await
@@ -222,7 +196,7 @@ pub async fn serve_stdio(config: Config) -> crate::Result<()> {
 /// bearer gate so agents on the LAN or tailnet can reach the hub by its own
 /// address.
 pub async fn serve_http(config: Config) -> crate::Result<()> {
-    let state = open_state(config).await?;
+    let state = AppState::open(config).await?;
     let bind = state.config.bind;
 
     let factory_state = state.clone();

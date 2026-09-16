@@ -1,5 +1,6 @@
 //! HTTP feed route: auth, ordering, and problem responses.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::app::AppState;
@@ -11,12 +12,18 @@ use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
 use tower::ServiceExt;
 
+static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
 async fn state() -> AppState {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-http-{}-{nanos}", std::process::id()));
+    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "agent-hub-http-{}-{nanos}-{unique}",
+        std::process::id()
+    ));
     AppState::open(Config {
         data_dir: dir,
         bind: "127.0.0.1:0".parse().expect("socket address"),
