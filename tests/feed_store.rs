@@ -1,17 +1,24 @@
 //! Feed store tests: append, read, idempotency, paging, limits, indexing.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
 use agent_hub::store::events::{FeedQuery, NewEvent, append, read_feed};
 use agent_hub::store::{migrate, open_engine};
 
+static NEXT_DB: AtomicU64 = AtomicU64::new(0);
+
 fn temp_db(tag: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
+    let unique = NEXT_DB.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "agent-hub-{tag}-{}-{nanos}-{unique}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     dir.join("hub.db")
 }
@@ -46,7 +53,8 @@ async fn append_and_read_newest_first() {
 
     let events = read_feed(&db, "proj", &FeedQuery::default())
         .await
-        .expect("read feed");
+        .expect("read feed")
+        .events;
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].summary, "second needle");
     assert_eq!(events[0].actor, "agent-one");
@@ -66,7 +74,8 @@ async fn idempotency_key_returns_the_same_event_once() {
 
     let events = read_feed(&db, "proj", &FeedQuery::default())
         .await
-        .expect("read feed");
+        .expect("read feed")
+        .events;
     assert_eq!(events.len(), 1);
 }
 
@@ -81,7 +90,7 @@ async fn since_cursor_reads_oldest_first() {
         since: Some(first),
         ..Default::default()
     };
-    let events = read_feed(&db, "proj", &query).await.expect("read");
+    let events = read_feed(&db, "proj", &query).await.expect("read").events;
     assert_eq!(
         events
             .iter()
@@ -132,5 +141,53 @@ async fn appended_event_is_searchable_through_the_corpus() {
     assert!(
         doc_id.starts_with("event:"),
         "doc id is namespaced: {doc_id}"
+    );
+}
+
+#[tokio::test]
+async fn before_cursor_pages_backwards_with_both_cursors() {
+    let db = open().await;
+    append(&db, "a", None, event("one")).await.expect("one");
+    append(&db, "a", None, event("two")).await.expect("two");
+    let third = append(&db, "a", None, event("three")).await.expect("three");
+
+    let first_page = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            limit: 2,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("page one");
+    assert_eq!(first_page.events.len(), 2);
+    assert_eq!(first_page.events[0].summary, "three");
+    assert_eq!(first_page.events[1].summary, "two");
+    assert_eq!(third, first_page.events[0].id);
+    assert_eq!(
+        first_page.next_since.as_deref(),
+        Some(first_page.events[0].id.as_str())
+    );
+    assert_eq!(
+        first_page.next_before.as_deref(),
+        Some(first_page.events[1].id.as_str())
+    );
+
+    let second_page = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            before: first_page.next_before.clone(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("page two");
+    assert_eq!(second_page.events.len(), 1);
+    assert_eq!(second_page.events[0].summary, "one");
+    assert_eq!(
+        second_page.next_before.as_deref(),
+        Some(second_page.events[0].id.as_str())
     );
 }

@@ -107,17 +107,15 @@ impl HubServer {
             query.limit = limit;
         }
 
-        let events = events::read_feed(&self.state.db, &params.project_id, &query)
+        let page = events::read_feed(&self.state.db, &params.project_id, &query)
             .await
             .map_err(to_error_data)?;
-        let next_since = events
-            .last()
-            .map(|event| event.id.clone())
-            .or_else(|| query.since.clone());
 
-        Ok(CallToolResult::structured(
-            json!({ "events": events, "next_since": next_since }),
-        ))
+        Ok(CallToolResult::structured(json!({
+            "events": page.events,
+            "next_since": page.next_since,
+            "next_before": page.next_before,
+        })))
     }
 }
 

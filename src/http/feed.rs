@@ -8,16 +8,18 @@ use serde::Serialize;
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::problem::Problem;
-use crate::limits::{FEED_LIMIT_DEFAULT, FEED_LIMIT_MAX};
+use crate::limits::FEED_LIMIT_DEFAULT;
 use crate::store::events::{self, Event, FeedQuery, read_feed};
 
-/// A page of the feed plus the cursor to continue from.
+/// A page of the feed plus the cursors to continue in either direction.
 #[derive(Debug, Serialize)]
 pub struct FeedPage {
     /// The events in this page.
     pub events: Vec<Event>,
-    /// The cursor to pass as `since` for the next page.
+    /// Newest id on the page: pass as `since` to poll for newer events.
     pub next_since: Option<String>,
+    /// Oldest id on the page: pass as `before` to page further back.
+    pub next_before: Option<String>,
 }
 
 /// `GET /api/v1/projects/{id}/feed`
@@ -38,21 +40,16 @@ pub async fn read(
         .map_err(|err| Problem::from_error(&err))?;
 
     let query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
-    let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
-    let events = read_feed(&state.db, &project_id, &query)
+    let page = read_feed(&state.db, &project_id, &query)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    // A full page points at its last event; a short page has no further page,
-    // so it echoes the caller's cursor back.
-    let next_since = if events.len() as i64 >= limit {
-        events.last().map(|event| event.id.clone())
-    } else {
-        query.since.clone()
-    };
-
-    Ok(Json(FeedPage { events, next_since }))
+    Ok(Json(FeedPage {
+        events: page.events,
+        next_since: page.next_since,
+        next_before: page.next_before,
+    }))
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {

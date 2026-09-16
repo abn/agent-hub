@@ -107,7 +107,8 @@ async fn bearer_token_reads_events_newest_first() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[0]["summary"], "second");
     assert_eq!(events[1]["summary"], "first");
-    assert_eq!(page["next_since"], Value::Null);
+    assert_eq!(page["next_since"], events[0]["id"]);
+    assert_eq!(page["next_before"], events[1]["id"]);
 }
 
 #[tokio::test]

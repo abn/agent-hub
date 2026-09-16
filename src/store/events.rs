@@ -80,20 +80,21 @@ pub async fn append(
     )?;
 
     let mut conn = db.connect().map_err(engine)?;
-
-    if let Some(key) = idempotency_key
-        && let Some(existing) =
-            crate::store::idempotency::lookup(&conn, &event.project_id, key).await?
-    {
-        return Ok(existing);
-    }
-
     let id = ulid::Ulid::generate().to_string();
     let created_at = now();
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+
+    // Inside the immediate transaction, so a concurrent retry with the same
+    // key serialises and sees the recorded row rather than racing it.
+    if let Some(key) = idempotency_key
+        && let Some(existing) =
+            crate::store::idempotency::lookup(&tx, &event.project_id, key).await?
+    {
+        return Ok(existing);
+    }
 
     tx.execute(
         "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at)
@@ -136,8 +137,19 @@ pub async fn append(
     Ok(id)
 }
 
+/// A page of the feed with the cursors to continue in either direction.
+#[derive(Debug, Clone)]
+pub struct FeedPage {
+    /// The events on this page, in read order.
+    pub events: Vec<Event>,
+    /// Newest id on the page: pass as `since` to poll for newer events.
+    pub next_since: Option<String>,
+    /// Oldest id on the page: pass as `before` to page further back.
+    pub next_before: Option<String>,
+}
+
 /// Read a page of the feed.
-pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Result<Vec<Event>> {
+pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Result<FeedPage> {
     let conn = db.connect().map_err(engine)?;
     let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
@@ -165,7 +177,8 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
     }
 
     // Forward from a cursor reads oldest first; otherwise newest first.
-    if query.since.is_some() && query.before.is_none() {
+    let ascending = query.since.is_some() && query.before.is_none();
+    if ascending {
         sql.push_str(" ORDER BY id ASC");
     } else {
         sql.push_str(" ORDER BY id DESC");
@@ -179,7 +192,23 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
     while let Some(row) = rows.next().await.map_err(engine)? {
         events.push(event_from_row(&row)?);
     }
-    Ok(events)
+
+    let (next_since, next_before) = match (events.first(), events.last()) {
+        (Some(first), Some(last)) => {
+            let (newest, oldest) = if ascending {
+                (last, first)
+            } else {
+                (first, last)
+            };
+            (Some(newest.id.clone()), Some(oldest.id.clone()))
+        }
+        _ => (None, None),
+    };
+    Ok(FeedPage {
+        events,
+        next_since,
+        next_before,
+    })
 }
 
 fn validate_kind(kind: &str) -> Result<()> {
