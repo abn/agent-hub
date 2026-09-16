@@ -62,13 +62,13 @@ fn optional_text(value: Option<&str>) -> Value {
 }
 
 /// A search request over the corpus.
-pub struct SearchQuery<'a> {
+pub struct SearchQuery {
     /// The text to match against titles and bodies.
-    pub text: &'a str,
+    pub text: String,
     /// Restrict to one project.
-    pub project_id: Option<&'a str>,
+    pub project_id: Option<String>,
     /// Restrict to one corpus family: `feed`, `artifact`, or `brain`.
-    pub kind: Option<&'a str>,
+    pub kind: Option<String>,
     /// Maximum hits to return.
     pub limit: i64,
 }
@@ -87,13 +87,13 @@ pub struct SearchHit {
 }
 
 /// Query the corpus, ranked by text relevance with a recency tiebreak.
-pub async fn query(db: &Database, search: &SearchQuery<'_>) -> Result<Vec<SearchHit>> {
+pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>> {
     if search.text.trim().is_empty() {
         return Err(Error::InvalidArgument(
             "a search query is required".to_string(),
         ));
     }
-    if let Some(kind) = search.kind {
+    if let Some(kind) = search.kind.as_deref() {
         validate_kind(kind)?;
     }
     let limit = search.limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
@@ -103,16 +103,16 @@ pub async fn query(db: &Database, search: &SearchQuery<'_>) -> Result<Vec<Search
          FROM search_docs
          WHERE (fts_match(title, ?1) OR fts_match(body, ?1))",
     );
-    let mut params: Vec<Value> = vec![Value::Text(search.text.to_string())];
-    if let Some(project_id) = search.project_id {
-        params.push(Value::Text(project_id.to_string()));
+    let mut params: Vec<Value> = vec![Value::Text(search.text.clone())];
+    if let Some(project_id) = &search.project_id {
+        params.push(Value::Text(project_id.clone()));
         sql.push_str(&format!(" AND project_id = ?{}", params.len()));
     }
-    if let Some(kind) = search.kind {
-        params.push(Value::Text(kind.to_string()));
+    if let Some(kind) = &search.kind {
+        params.push(Value::Text(kind.clone()));
         sql.push_str(&format!(" AND type = ?{}", params.len()));
     }
-    params.push(Value::Text(search.text.to_string()));
+    params.push(Value::Text(search.text.clone()));
     let score = params.len();
     params.push(Value::Integer(limit));
     let lim = params.len();

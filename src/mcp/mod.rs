@@ -32,6 +32,7 @@ use crate::store::events::{self, FeedQuery, NewEvent};
 mod artifacts;
 mod brain;
 mod inbox;
+mod search;
 
 /// The hub's MCP server.
 #[derive(Clone)]
@@ -52,7 +53,8 @@ impl HubServer {
             tool_router: Self::tool_router()
                 + Self::brain_router()
                 + Self::inbox_router()
-                + Self::artifacts_router(),
+                + Self::artifacts_router()
+                + Self::search_router(),
             state,
             active: Arc::new(AsyncMutex::new(None)),
         }

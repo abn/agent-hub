@@ -13,6 +13,7 @@ pub mod auth;
 pub mod feed;
 pub mod inbox;
 pub mod problem;
+pub mod search;
 pub mod sessions;
 pub mod storage;
 
@@ -32,6 +33,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
         .route("/api/v1/storage/sessions/{id}", delete(storage::prune))
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
+        .route("/api/v1/search", get(search::search))
         .route("/artifacts/{id}", get(artifacts::render))
         .fallback(not_found)
         .with_state(state)

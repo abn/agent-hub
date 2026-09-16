@@ -59,9 +59,9 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
     .expect("publish");
 }
 
-fn q<'a>(text: &'a str) -> SearchQuery<'a> {
+fn q(text: &str) -> SearchQuery {
     SearchQuery {
-        text,
+        text: text.to_string(),
         project_id: None,
         kind: None,
         limit: 50,
@@ -93,9 +93,9 @@ async fn filters_by_type_and_project() {
     let artifacts = search::query(
         &db,
         &SearchQuery {
-            text: "engine",
-            project_id: Some("proj"),
-            kind: Some("artifact"),
+            text: "engine".to_string(),
+            project_id: Some("proj".to_string()),
+            kind: Some("artifact".to_string()),
             limit: 50,
         },
     )
@@ -107,8 +107,8 @@ async fn filters_by_type_and_project() {
     let other_project = search::query(
         &db,
         &SearchQuery {
-            text: "engine",
-            project_id: Some("elsewhere"),
+            text: "engine".to_string(),
+            project_id: Some("elsewhere".to_string()),
             kind: None,
             limit: 50,
         },
@@ -133,9 +133,9 @@ async fn unknown_type_is_rejected() {
     let err = search::query(
         &db,
         &SearchQuery {
-            text: "engine",
+            text: "engine".to_string(),
             project_id: None,
-            kind: Some("nonsense"),
+            kind: Some("nonsense".to_string()),
             limit: 50,
         },
     )
