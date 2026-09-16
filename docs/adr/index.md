@@ -14,3 +14,10 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0008](0008-lean-single-binary.md) - Lean by construction
 * [0009](0009-browser-side-artifact-encryption.md) - Browser-side artifact
   encryption
+* [0010](0010-one-pinned-engine.md) - One pinned engine version
+* [0011](0011-mcp-primary-a2a-deferred.md) - MCP is primary, A2A is deferred
+* [0012](0012-agent-identity-and-trust.md) - Agent identity and trust
+* [0013](0013-per-session-serialization.md) - Per-session serialization
+* [0014](0014-optional-embedded-tailnet.md) - Optional embedded tailnet
+* [0015](0015-human-interface-foundation.md) - The human interface follows the
+  design foundation

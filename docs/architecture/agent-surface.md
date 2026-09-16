@@ -17,12 +17,14 @@ ships yet.
 
 | Tool | Purpose |
 |---|---|
-| `feed_read` | Read a project feed, newest first, optionally since a point and filtered by kind. |
+| `session_start` | Register or resume a session by project, agent, and session name. Idempotent on the name, so a resume reuses the same brain. |
+| `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
+| `feed_read` | Read a project feed, newest first, optionally since a cursor and filtered by kind. |
 | `signal_append` | Append an event to a project feed. |
-| `inbox_read` | Read the human's global inbox, optionally by status. |
 | `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed. |
-| `answer_post` | Reply to a question. The answer lands in the feed and marks the question acted on. |
-| `artifact_publish` | Publish an HTML or markdown artifact, optionally password protected. |
+| `answer_post` | Reply to a question. The answer lands in the feed and closes the thread. |
+| `inbox_read` | Read the human's global inbox, optionally by status or project. |
+| `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
 | `artifact_get` | Read an artifact's content and metadata. |
 | `artifact_list` | List a project's artifacts. |
@@ -30,13 +32,35 @@ ships yet.
 | `brain_put` | Write a file or key-value entry into the session brain. |
 | `brain_list` | List the session brain tree. |
 | `brain_delete` | Remove a path from the session brain. |
-| `session_start` | Register a session. Idempotent, so a resume reuses the same brain. |
-| `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
 | `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
 
-`brain_get` and `brain_put` operate on the current session's brain only. A
-session cannot reach another session's brain, and no tool exposes a raw file
-handle.
+`brain_get` and `brain_put` operate on the current session's brain only. Brain
+paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
+entries. A session cannot reach another session's brain, and no tool exposes a
+raw file handle.
+
+## Trust
+
+Every call carries a bearer token bound to a stable agent identity, and the
+server sets the `actor`. A trusted agent reads every resource and writes its
+own and shared resources; an untrusted agent reaches only its own spaces and
+explicit grants. See [agent identity and
+trust](../adr/0012-agent-identity-and-trust.md).
+
+## Pagination, errors, and idempotency
+
+Feed cursors are exclusive event ids; `since` walks forward and `before` walks
+back, with a default page of 50 and a cap of 500. Tool errors are structured
+(`code`, `message`, `retryable`, `details`) rather than prose. Every write
+accepts an optional idempotency key, so a retry after a dropped connection
+returns the original result instead of a duplicate.
+
+## Kind families
+
+Event kinds are a closed set of six design families (`signal`, `finished`,
+`question`, `answer`, `approval`, `artifact`, `session`) plus `system`.
+Sub-actions ride in the payload, so an artifact has an action of `published`
+or `updated` and a session has `started` or `ended`.
 
 ## Bootstrap convention
 

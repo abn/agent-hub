@@ -30,3 +30,16 @@ MCP search tool and the PWA search box. There is no separate search service.
 - Whether the engine's embedded full-text support covers every need is an
   open question to confirm at scaffold time. If it falls short, the fallback
   is a search-text column on the event store, still inside the same engine.
+
+## Amendment (2026-09-16)
+
+Confirmed: the engine has a native full-text index, built on Tantivy, created
+with `CREATE INDEX ... USING fts` and queried with `fts_match` and `fts_score`.
+It is MVCC-aware and enabled by default in the Rust binding. The fallback is
+not needed.
+
+One correction to the shape: indexes are per database, so searching session
+files by refreshing one index per file would not scale. The index is therefore
+centralised in `hub.db` over a `search_docs` table, populated write-through by
+the wrapper, which is the single writer and sees every change. Prune removes
+the affected rows.

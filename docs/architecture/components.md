@@ -24,9 +24,10 @@ One Rust process serves three client-facing endpoints over a shared core:
 
 The AgentFS wrapper sits between the core and the session files. It holds one
 write handle per active session, so writes to a given session file are
-serialized by construction and cross-session conflicts are structurally
-impossible. The hub event store uses the engine's concurrent journal mode
-where available.
+serialised by construction and cross-session conflicts are structurally
+impossible. The hub event store runs under the engine's concurrent journal
+mode. The wrapper is also the single place that writes the search index, on
+every change it makes.
 
 ## Boundaries
 
@@ -34,7 +35,14 @@ where available.
   the single writer for a session file. There is no path by which an agent
   opens a brain file directly.
 - **The wrapper is the only AgentFS caller.** No other component embeds or
-  reimplements AgentFS; the hub wraps it.
+  reimplements AgentFS; the hub wraps it. The SDK is vendored so its engine
+  matches the hub's single pinned engine.
+- **One engine version links.** The build fails if the dependency tree contains
+  two engine versions, which is what vendoring the SDK prevents (see
+  [decision 0010](../adr/0010-one-pinned-engine.md)).
+- **Search lives in the hub store.** One full-text index over a search
+  documents table, written through by the wrapper, so no cross-file search is
+  needed.
 - **Schema migrations run in single-writer mode.** Data definition statements
   are not allowed inside a concurrent write transaction, so migrations take
   the single-writer path.
@@ -49,9 +57,13 @@ scratch or distroless container as a non-root user with a read-only root
 filesystem. Persistence is a single mounted data volume; backups are node or
 NAS snapshots.
 
-A tailnet-SDK build flag lets the same binary join a tailnet itself, so no
-inbound ports need opening and no reverse proxy is required. The plain
-container behind a reverse proxy remains the fallback.
+The default path is the plain container behind a reverse proxy, which owns
+TLS. An optional build embeds a tailnet endpoint through `tailscale-rs`, so the
+same binary can join a tailnet in userspace and listen there with no open
+ports. That build is experimental: the library has no tailnet name resolution
+or certificate issuance yet and its NAT traversal is in progress, so it is
+addressed by tailnet IP and TLS is terminated by the hub (see
+[decision 0014](../adr/0014-optional-embedded-tailnet.md)).
 
 ## See also
 
@@ -59,3 +71,6 @@ container behind a reverse proxy remains the fallback.
 - [Decision 0002](../adr/0002-single-turso-engine.md) - why one engine
 - [Decision 0003](../adr/0003-wrap-agentfs-per-session.md) - why the wrapper
   is the single writer
+- [Decision 0010](../adr/0010-one-pinned-engine.md) - why the SDK is vendored
+- [Decision 0014](../adr/0014-optional-embedded-tailnet.md) - the tailnet
+  option

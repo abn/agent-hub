@@ -48,6 +48,11 @@ is not implemented yet; the public pages say so and describe intended design.
   elevation.
 - **No AI slop.** No em-dashes, no marketing fluff, no filler prose, no
   comments that restate the code. Code and docs read like a human wrote them.
+- **No emoji.** Anywhere: interface, copy, mocks, or docs. Icons are inline
+  SVG line glyphs or typographic marks.
+- **Accessibility is a build gate.** WCAG AA in both themes, a 12px UI text
+  floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
+  meaning carried by colour alone. Reduced motion is honoured.
 - **No internal process leaks.** Committed files never reference process,
   tracking, task or ticket identifiers, wave or lane names, or scratch paths.
   Internal tracking belongs in the scratch area only.

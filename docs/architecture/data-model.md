@@ -19,25 +19,42 @@ inbox, which is global.
 
 | Table | Holds |
 |---|---|
-| `projects` | Slug id, display name, creation time, reserved retention hints, and a JSON settings column such as artifact password policy. |
-| `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, and a link to a related event for question and answer threads. |
-| `artifacts` | Artifact metadata. Title, kind (HTML or markdown), current version, timestamps, an optional password salt, and the path to the blob. |
+| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, reserved retention hints, and a JSON settings column such as the artifact password policy. |
+| `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, and a thread link for question and answer. |
+| `artifacts` | Artifact metadata. Title, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, and the blob path. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
-| `sessions` | Session metadata only, because state lives in the brain file: project, agent, status, the brain file path, and creation and last-activity times. |
+| `sessions` | Session metadata: project, the agent-supplied session name, agent, status, the brain file path, timestamps, and a soft-delete marker. State itself lives in the brain file. |
+| `agents` | Agent identity, display name, and trust level (`trusted` or `untrusted`). |
+| `agent_tokens` | Token hashes bound to an agent, with last use and revocation. |
+| `grants` | An agent, a project, and read or write access, for opening a project to an untrusted agent. |
+| `search_docs` | The search corpus: one row per indexed document (feed, artifact, or brain path) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable
 lookups cheap. Indexes support paging a project feed newest first and
 ordering the inbox by action and time. The `events` table carries a JSON
-payload, so structured detail rides along without a second schema.
+payload, so structured detail rides along without a second schema. The event
+kind is a closed set of the six design families (`signal`, `finished`,
+`question`, `answer`, `approval`, `artifact`, `session`) plus `system`;
+sub-actions such as an artifact publish or update ride in the payload.
+
+Identity is a first-class table rather than a field on a token, so the server
+sets the `actor` on every event and a request cannot forge another agent. The
+trust model and grants are described in [agent identity and
+trust](../adr/0012-agent-identity-and-trust.md).
 
 Retention is deliberately a per-layer concept. The schema carries
 `created_at`, `last_activity`, a `retention` column, and room for an
 `archived_at` column so the later layers slot in without a painful migration.
-The [decision record](../adr/0004-manual-pruning-in-v1.md) explains why no
-layer ships in v1.
+Pruning is reversible for a short window: a session carries `deleted_at` while
+its removal can still be undone, and the file is removed only when the window
+closes. The [decision record](../adr/0004-manual-pruning-in-v1.md) explains why
+no automatic layer ships in v1.
 
 Artifact blobs live in a filesystem store under a per-project directory. That
-store is the blob layer; no external object store is needed.
+store is the blob layer; no external object store is needed. A protected
+artifact stores an envelope (algorithm, key derivation, iterations, salt, and
+initialisation vector) beside the ciphertext, and the browser holds the only
+key.
 
 ## Session brain file
 
@@ -59,9 +76,11 @@ brain, not a separate subsystem.
 ## Multi-writer sessions
 
 When several agents share one named session, they still write through the
-wrapper. The wrapper uses versioned upserts with optimistic locking, so a
-write lands only against the version it read. Last-writer-wins is acceptable
-because the wake cycle reads before it writes.
+wrapper. The hub process is the single writer per session file, so it
+serialises writers with a per-session lock; writers to distinct sessions never
+block each other. Optimistic locking is not used in v1 because it needs a
+version column the store does not carry and a multi-process model the hub does
+not have; a version column is reserved for later.
 
 ## See also
 

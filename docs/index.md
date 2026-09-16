@@ -27,6 +27,7 @@ design and say so where that is the case.
 * [Design overview](design/index.md) - the approach in one place
 * [Goals and non-goals](design/goals.md) - what v1 does and does not cover
 * [Terminology](design/terminology.md) - the canonical vocabulary
+* [Human interface](design/human-interface.md) - the design system and rules
 
 ## Architecture
 

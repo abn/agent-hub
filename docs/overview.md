@@ -48,10 +48,10 @@ it through an installable, mobile-first PWA.
 
 Two choices shape everything else. First, a single storage engine: the Turso
 Database Rust engine backs the hub event store, the per-session AgentFS files,
-and artifact storage, so there is no two-engine split. Second, real AgentFS:
-the hub wraps AgentFS rather than reimplementing it, giving each session one
-file that holds key-value state, an append-only audit log, and a POSIX-like
-filesystem.
+the search index, and artifact metadata, so there is no two-engine split;
+artifact blobs live on the data volume. Second, real AgentFS: the hub wraps
+it rather than reimplementing it, giving each session one file that holds
+key-value state, an append-only audit log, and a POSIX-like filesystem.
 
 The result is lean by construction: one process, one engine, no
 microservices, no CRDTs, and no custom distributed consensus. See the

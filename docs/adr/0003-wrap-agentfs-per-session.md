@@ -33,3 +33,12 @@ speak MCP to the wrapper, which is the single writer for each session file.
 - An open question at scaffold time is whether AgentFS is embedded as a Rust
   crate or driven as a subprocess. Both keep a single binary; the choice is
   settled empirically before code depends on it.
+
+## Amendment (2026-09-16)
+
+The embedding question is settled: AgentFS ships an embeddable Rust crate,
+`agentfs-sdk`, so the hub embeds it rather than shelling out. The crate pins
+its own engine version, which conflicts with the hub store, so it is vendored
+and its engine patched to the single pinned version (see
+[decision 0010](0010-one-pinned-engine.md)). The SDK exposes the KV store, the
+filesystem, the audit log, and the raw connection the wrapper needs.

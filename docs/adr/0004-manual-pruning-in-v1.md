@@ -30,3 +30,12 @@ session brains, and artifacts.
   afterthought.
 - Session brains survive until the human acts, which is safe but requires the
   prune surface to be usable early.
+
+## Amendment (2026-09-16)
+
+The design foundation adds one property: prune is reversible. A prune is
+confirmed in a dialog, then a 30 second undo window, then committed. The
+session row carries `deleted_at` during the window and the file is removed only
+on commit. Storage acts on sessions only; whole-project deletion is a separate
+destructive action in project settings, and it is the only path that removes
+artifacts.
