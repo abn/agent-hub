@@ -1,0 +1,373 @@
+//! The authorization policy: admin, trusted, untrusted, and grants.
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use agent_hub::error::ErrorCode;
+use agent_hub::policy::{Access, Visibility, authorize, visibility};
+use agent_hub::principal::{Principal, Trust};
+use agent_hub::store::events::{self, NewEvent};
+use agent_hub::store::search::{self, SearchQuery};
+use agent_hub::store::{identity, inbox, migrate, open_engine, projects};
+
+fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
+    NewEvent {
+        project_id: project_id.to_string(),
+        kind: kind.to_string(),
+        summary: summary.to_string(),
+        payload: None,
+        needs_action: false,
+        thread_id: None,
+    }
+}
+
+static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock before epoch")
+        .as_nanos();
+    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "agent-hub-{tag}-{}-{nanos}-{unique}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
+async fn db(tag: &str) -> turso::Database {
+    let dir = temp_dir(tag);
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    migrate(&db).await.expect("migrate");
+    db
+}
+
+fn principal(actor: &str, agent_id: &str, trust: Trust) -> Principal {
+    Principal {
+        actor: actor.to_string(),
+        trust,
+        agent_id: Some(agent_id.to_string()),
+        is_admin: false,
+    }
+}
+
+fn admin() -> Principal {
+    Principal {
+        actor: "human".to_string(),
+        trust: Trust::Trusted,
+        agent_id: None,
+        is_admin: true,
+    }
+}
+
+async fn forbidden(
+    db: &turso::Database,
+    who: &Principal,
+    project_id: &str,
+    access: Access,
+) -> bool {
+    authorize(db, who, project_id, access)
+        .await
+        .expect_err("denied")
+        .code()
+        == ErrorCode::Forbidden
+}
+
+#[tokio::test]
+async fn the_admin_reaches_everything() {
+    let db = db("policy-admin").await;
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared");
+
+    let admin = admin();
+    for (project, access) in [
+        ("shared", Access::Read),
+        ("shared", Access::Write),
+        (&strict.personal_project_id, Access::Read),
+        (&strict.personal_project_id, Access::Write),
+    ] {
+        authorize(&db, &admin, project, access)
+            .await
+            .unwrap_or_else(|err| panic!("admin {access:?} {project}: {err}"));
+    }
+}
+
+#[tokio::test]
+async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
+    let db = db("policy-trusted").await;
+    let trust = identity::create_agent(&db, "trust", "Trust", Trust::Trusted)
+        .await
+        .expect("create trust");
+    let other = identity::create_agent(&db, "other", "Other", Trust::Trusted)
+        .await
+        .expect("create other");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared");
+    let who = principal("trust", "trust", Trust::Trusted);
+
+    authorize(&db, &who, "shared", Access::Read)
+        .await
+        .expect("read shared");
+    authorize(&db, &who, "shared", Access::Write)
+        .await
+        .expect("write shared");
+    authorize(&db, &who, &trust.personal_project_id, Access::Write)
+        .await
+        .expect("write own space");
+    authorize(&db, &who, &other.personal_project_id, Access::Read)
+        .await
+        .expect("read another space");
+    assert!(
+        forbidden(&db, &who, &other.personal_project_id, Access::Write).await,
+        "a trusted agent must not write another agent's space"
+    );
+
+    let missing = authorize(&db, &who, "ghost", Access::Read)
+        .await
+        .expect_err("missing project");
+    assert_eq!(missing.code(), ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn an_untrusted_agent_is_confined_to_its_space_and_grants() {
+    let db = db("policy-untrusted").await;
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    let other = identity::create_agent(&db, "other", "Other", Trust::Trusted)
+        .await
+        .expect("create other");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared");
+    projects::create(&db, "granted", "Granted")
+        .await
+        .expect("granted");
+    let who = principal("strict", "strict", Trust::Untrusted);
+
+    authorize(&db, &who, &strict.personal_project_id, Access::Write)
+        .await
+        .expect("its own space");
+    assert!(forbidden(&db, &who, "shared", Access::Read).await);
+    assert!(forbidden(&db, &who, "shared", Access::Write).await);
+    assert!(forbidden(&db, &who, &other.personal_project_id, Access::Read).await);
+
+    identity::add_grant(&db, "strict", "granted", "read")
+        .await
+        .expect("read grant");
+    authorize(&db, &who, "granted", Access::Read)
+        .await
+        .expect("granted read");
+    assert!(
+        forbidden(&db, &who, "granted", Access::Write).await,
+        "a read grant does not permit writes"
+    );
+
+    identity::add_grant(&db, "strict", "granted", "write")
+        .await
+        .expect("write grant");
+    authorize(&db, &who, "granted", Access::Write)
+        .await
+        .expect("granted write");
+}
+
+#[tokio::test]
+async fn search_and_inbox_respect_the_confined_set() {
+    let db = db("policy-scoping").await;
+    projects::create(&db, "p1", "One").await.expect("p1");
+    projects::create(&db, "p2", "Two").await.expect("p2");
+    events::append(&db, "agent", None, event("p1", "signal", "alpha one"))
+        .await
+        .expect("append p1");
+    events::append(&db, "agent", None, event("p2", "signal", "alpha two"))
+        .await
+        .expect("append p2");
+    events::append(&db, "agent", None, event("p1", "finished", "done p1"))
+        .await
+        .expect("finished p1");
+    events::append(&db, "agent", None, event("p2", "finished", "done p2"))
+        .await
+        .expect("finished p2");
+
+    let query = SearchQuery {
+        text: "alpha".to_string(),
+        project_id: None,
+        kind: None,
+        limit: 10,
+    };
+    let confined = vec!["p1".to_string()];
+    let scoped = search::query_visible(&db, &query, Some(&confined))
+        .await
+        .expect("scoped search");
+    assert!(!scoped.is_empty());
+    assert!(
+        scoped.iter().all(|hit| hit.project_id == "p1"),
+        "a confined search returns only its projects"
+    );
+    let all = search::query(&db, &query).await.expect("unscoped search");
+    assert!(
+        all.iter().any(|hit| hit.project_id == "p2"),
+        "the unscoped search sees every project"
+    );
+
+    let items = inbox::list_visible(&db, None, None, 50, Some(&confined))
+        .await
+        .expect("scoped inbox");
+    assert!(!items.is_empty());
+    assert!(
+        items.iter().all(|item| item.project_id == "p1"),
+        "a confined inbox returns only its projects"
+    );
+    let empty = inbox::list_visible(&db, None, None, 50, Some(&[]))
+        .await
+        .expect("empty confinement");
+    assert!(empty.is_empty(), "an empty confinement yields nothing");
+}
+
+#[tokio::test]
+async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
+    let db = db("policy-starvation").await;
+    projects::create(&db, "mine", "Mine").await.expect("mine");
+    projects::create(&db, "other", "Other")
+        .await
+        .expect("other");
+    for index in 0..25 {
+        events::append(
+            &db,
+            "agent",
+            None,
+            event(
+                "other",
+                "signal",
+                &format!("needle needle needle needle {index}"),
+            ),
+        )
+        .await
+        .expect("high-rank event");
+    }
+    events::append(
+        &db,
+        "agent",
+        None,
+        event("mine", "signal", "needle in my project"),
+    )
+    .await
+    .expect("visible event");
+
+    let query = SearchQuery {
+        text: "needle".to_string(),
+        project_id: None,
+        kind: None,
+        limit: 1,
+    };
+    let visible = vec!["mine".to_string()];
+    let hits = search::query_visible(&db, &query, Some(&visible))
+        .await
+        .expect("confined search");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].project_id, "mine",
+        "a visible hit is found even when higher-ranked projects fill the cap"
+    );
+}
+
+#[tokio::test]
+async fn a_confined_search_keeps_relevance_order() {
+    let db = db("policy-relevance").await;
+    projects::create(&db, "mine", "Mine").await.expect("mine");
+    events::append(
+        &db,
+        "agent",
+        None,
+        event("mine", "signal", "needle needle needle needle"),
+    )
+    .await
+    .expect("relevant event");
+    events::append(&db, "agent", None, event("mine", "signal", "needle"))
+        .await
+        .expect("newer but less relevant event");
+
+    let query = SearchQuery {
+        text: "needle".to_string(),
+        project_id: None,
+        kind: None,
+        limit: 2,
+    };
+    let visible = vec!["mine".to_string()];
+    let hits = search::query_visible(&db, &query, Some(&visible))
+        .await
+        .expect("confined search");
+    assert_eq!(hits.len(), 2);
+    assert!(
+        hits.iter().all(|hit| hit.project_id == "mine"),
+        "only the confined project is returned"
+    );
+    assert_eq!(
+        hits[0].title.as_deref(),
+        Some("needle needle needle needle"),
+        "text relevance still outranks recency under confinement"
+    );
+}
+
+#[tokio::test]
+async fn visibility_lists_the_reachable_projects() {
+    assert!(Visibility::All.as_filter().is_none());
+    match Visibility::Only(vec!["a".to_string()]).as_filter() {
+        Some(ids) => assert_eq!(ids, ["a".to_string()]),
+        None => panic!("a confined set must yield a filter"),
+    }
+
+    let db = db("policy-visibility").await;
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared");
+    projects::create(&db, "granted", "Granted")
+        .await
+        .expect("granted");
+
+    assert_eq!(
+        visibility(&db, &admin()).await.expect("admin"),
+        Visibility::All
+    );
+    assert_eq!(
+        visibility(&db, &principal("trust", "trust", Trust::Trusted))
+            .await
+            .expect("trusted"),
+        Visibility::All
+    );
+
+    let only = visibility(&db, &principal("strict", "strict", Trust::Untrusted))
+        .await
+        .expect("untrusted");
+    assert_eq!(
+        only,
+        Visibility::Only(vec![strict.personal_project_id.clone()])
+    );
+
+    identity::add_grant(&db, "strict", "granted", "read")
+        .await
+        .expect("grant");
+    let only = visibility(&db, &principal("strict", "strict", Trust::Untrusted))
+        .await
+        .expect("untrusted");
+    match only {
+        Visibility::Only(mut ids) => {
+            ids.sort();
+            let mut expected = vec![strict.personal_project_id.clone(), "granted".to_string()];
+            expected.sort();
+            assert_eq!(ids, expected);
+        }
+        Visibility::All => panic!("an untrusted agent must not see everything"),
+    }
+}

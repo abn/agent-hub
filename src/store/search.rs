@@ -94,6 +94,21 @@ pub struct SearchHit {
 /// final limit are applied afterwards. More candidates are fetched than
 /// returned so a filter does not starve the page.
 pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>> {
+    query_visible(db, search, None).await
+}
+
+/// Query the corpus with an optional project confinement.
+///
+/// `None` means every project (the admin surface), fetched with a cap. `Some`
+/// confines the result, and the ranked query is left uncapped so a confined
+/// caller is not starved by higher-ranked projects it cannot see. The engine's
+/// full-text score only survives the query's exact shape, so the confinement
+/// is applied while reading the ranked rows rather than as a SQL predicate.
+pub async fn query_visible(
+    db: &Database,
+    search: &SearchQuery,
+    visible: Option<&[String]>,
+) -> Result<Vec<SearchHit>> {
     if search.text.trim().is_empty() {
         return Err(Error::InvalidArgument(
             "a search query is required".to_string(),
@@ -102,18 +117,27 @@ pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>
     if let Some(kind) = search.kind.as_deref() {
         validate_kind(kind)?;
     }
+    if let Some(visible) = visible
+        && visible.is_empty()
+    {
+        return Ok(Vec::new());
+    }
     let limit = search.limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
-    let fetch = (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX);
+
+    let mut sql = String::from(
+        "SELECT * FROM search_docs WHERE fts_match(title, body, ?1)
+         ORDER BY fts_score(title, body, ?1) DESC",
+    );
+    let mut params = vec![Value::Text(search.text.clone())];
+    if visible.is_none() {
+        let fetch = (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX);
+        params.push(Value::Integer(fetch));
+        sql.push_str(&format!(" LIMIT ?{}", params.len()));
+    }
 
     let conn = db.connect().map_err(crate::store::engine)?;
     let mut rows = conn
-        .query(
-            "SELECT * FROM search_docs
-             WHERE fts_match(title, body, ?1)
-             ORDER BY fts_score(title, body, ?1) DESC
-             LIMIT ?2",
-            vec![Value::Text(search.text.clone()), Value::Integer(fetch)],
-        )
+        .query(&sql, params)
         .await
         .map_err(crate::store::engine)?;
     let mut hits = Vec::new();
@@ -126,6 +150,11 @@ pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>
         }
         if let Some(kind) = &search.kind
             && &hit.kind != kind
+        {
+            continue;
+        }
+        if let Some(visible) = visible
+            && !visible.iter().any(|id| id == &hit.project_id)
         {
             continue;
         }

@@ -63,10 +63,29 @@ pub async fn list(
     project_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<InboxItem>> {
+    list_visible(db, status, project_id, limit, None).await
+}
+
+/// List inbox entries with an optional project confinement.
+///
+/// `None` means every project (the admin surface). `Some(set)` keeps only
+/// entries from those projects; an empty set yields nothing.
+pub async fn list_visible(
+    db: &Database,
+    status: Option<&str>,
+    project_id: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<Vec<InboxItem>> {
     if let Some(status) = status {
         validate_status(status)?;
     }
     let limit = limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
+    if let Some(visible) = visible
+        && visible.is_empty()
+    {
+        return Ok(Vec::new());
+    }
 
     let mut sql = String::from(
         "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
@@ -81,6 +100,17 @@ pub async fn list(
     if let Some(project_id) = project_id {
         params.push(Value::Text(project_id.to_string()));
         sql.push_str(&format!(" AND e.project_id = ?{}", params.len()));
+    }
+    if let Some(visible) = visible {
+        let mut placeholders = Vec::with_capacity(visible.len());
+        for id in visible {
+            params.push(Value::Text(id.clone()));
+            placeholders.push(format!("?{}", params.len()));
+        }
+        sql.push_str(&format!(
+            " AND e.project_id IN ({})",
+            placeholders.join(", ")
+        ));
     }
     params.push(Value::Integer(limit));
     sql.push_str(&format!(
