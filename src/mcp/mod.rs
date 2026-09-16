@@ -30,6 +30,7 @@ use crate::principal::Principal;
 use crate::store::events::{self, FeedQuery, NewEvent};
 
 mod brain;
+mod inbox;
 
 /// The hub's MCP server.
 #[derive(Clone)]
@@ -47,7 +48,7 @@ impl HubServer {
     /// Build the server over the shared application state.
     pub fn new(state: AppState) -> Self {
         Self {
-            tool_router: Self::tool_router() + Self::brain_router(),
+            tool_router: Self::tool_router() + Self::brain_router() + Self::inbox_router(),
             state,
             active: Arc::new(AsyncMutex::new(None)),
         }
