@@ -1,6 +1,7 @@
 //! Agent Hub: a local-first operations layer for AI agents and their humans.
 
 pub mod app;
+pub mod blob;
 pub mod brain;
 pub mod config;
 pub mod error;
