@@ -53,9 +53,11 @@ is not implemented yet; the public pages say so and describe intended design.
 - **Accessibility is a build gate.** WCAG AA in both themes, a 12px UI text
   floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
   meaning carried by colour alone. Reduced motion is honoured.
-- **No internal process leaks.** Committed files never reference process,
-  tracking, task or ticket identifiers, wave or lane names, or scratch paths.
-  Internal tracking belongs in the scratch area only.
+- **No internal process leaks.** Committed files and assets never reference
+  internal process or tracking identifiers, task or ticket numbers, agent-work
+  references, milestone identifiers, or scratch paths. Internal and agent-work
+  tracking belongs in the scratch area only. A hook rejects the obvious
+  identifier patterns; review covers the rest.
 - **Always-public-ready docs.** `docs/` is an OKF v0.2 bundle. No internal
   names, codenames, hostnames, absolute paths, tokens, or task identifiers.
 - **Tightly scoped changes.** Every change is the smallest clean change that

@@ -65,6 +65,16 @@ repos:
         language: pygrep
         stages: [commit-msg]
 
+      # Agent-work tracking (numbered waves, lettered lanes, milestone codes)
+      # stays in the scratch area. The concept words alone are fine in prose;
+      # what is rejected is an identifier. Cargo.lock is generated and exempt.
+      - id: no-process-leaks
+        name: reject agent-work and milestone identifiers
+        entry: '\b([Ww]ave\s*-?\s*[0-9]+|[Ll]ane\s+[A-Z0-9]|[Mm]ilestone\s+[0-9]+|M[0-9]{1,2})\b'
+        language: pygrep
+        types: [text]
+        exclude: '^Cargo\.lock$'
+
       # Conventional Commits covers the subject only. This is the body rule:
       # no trailers. Git trailer keys are hyphenated (Signed-off-by,
       # Co-authored-by, Reviewed-by), so matching the hyphenated shape plus a
