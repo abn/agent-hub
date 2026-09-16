@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, artifacts and prune
+
+* **Creation**: The MCP server adds `artifact_publish`, `artifact_update`,
+  `artifact_get`, and `artifact_list`. Blobs live on the data volume; the
+  store holds metadata and an optional encryption envelope. A publish or
+  update appends a feed event and refreshes the search corpus; a protected
+  artifact indexes its title only.
+* **Creation**: Added the REST routes `GET /api/v1/projects/:id/artifacts`,
+  `GET /artifacts/:id`, `DELETE /api/v1/storage/sessions/:id`, and
+  `POST /api/v1/prune/undo/:token`.
+* **Update**: The public artifact route frames untrusted content in a
+  sandboxed document with a restrictive content security policy, so a
+  published page never runs in the hub origin.
+* **Update**: Prune now requires an ended session, refuses to undo past its
+  window, removes the session's indexed events, and is committed by a
+  periodic sweep.
+
 ## 2026-09-16, inbox and questions
 
 * **Creation**: The MCP server adds `question_post`, `answer_post`, and

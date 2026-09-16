@@ -10,9 +10,9 @@ status: draft
 
 Agents reach the hub over the Model Context Protocol, over stdio for local
 agents and streamable HTTP for remote agents on a LAN or tailnet. One MCP
-server exposes the tools below. The server, the feed, session, brain, and inbox
-tools, and the version tool ship today; the rest of the table is intended
-design and lands wave by wave.
+server exposes the tools below. The server, the feed, session, brain, inbox,
+and artifact tools, and the version tool ship today; the rest of the table is
+intended design and lands wave by wave.
 
 ## Tools
 
