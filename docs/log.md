@@ -4,6 +4,21 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, inbox and questions
+
+* **Creation**: The MCP server adds `question_post`, `answer_post`, and
+  `inbox_read`. A question opens a thread, lands on the feed, and enters the
+  inbox as an action item; an answer closes the thread and resolves it.
+* **Creation**: The inbox is a projection over events: finished work lands as
+  unread, action items as action. The home summary counts unread and waiting
+  items and lists recent events.
+* **Creation**: Added the REST routes `GET /api/v1/home`, `GET /api/v1/inbox`,
+  and `POST /api/v1/questions/:id/answer`.
+* **Update**: A question roots its own thread and enters the inbox in the same
+  write as the event, whichever tool wrote it, and an answer must name its
+  question.
+* **Update**: A malformed answer body is now a problem-details response.
+
 ## 2026-09-16, brain and sessions
 
 * **Creation**: The MCP server adds session and brain tools: `session_start`
