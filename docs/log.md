@@ -4,6 +4,22 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, brain and sessions
+
+* **Creation**: The MCP server adds session and brain tools: `session_start`
+  and `session_end`, the `brain_get`, `brain_put`, `brain_list`, and
+  `brain_delete` group over the `/kv/` and `/fs/` namespaces, and an active
+  session per connection. A brain write is mirrored into the search corpus.
+* **Creation**: The session store records the mapping from an agent session
+  name to a brain file, idempotent start and resume, and a retry-safe end,
+  with lifecycle events on the feed.
+* **Creation**: Added the REST routes `GET /api/v1/sessions` and
+  `POST /api/v1/sessions/:id/end`.
+* **Update**: A session's agent identity now comes from the authenticated
+  principal, never a request field.
+* **Update**: `make check` now runs the docs bundle check, so documentation
+  cannot fall behind silently.
+
 ## 2026-09-16, feed surface
 
 * **Creation**: The MCP server exposes the feed: `signal_append` writes an

@@ -10,15 +10,15 @@ status: draft
 
 Agents reach the hub over the Model Context Protocol, over stdio for local
 agents and streamable HTTP for remote agents on a LAN or tailnet. One MCP
-server exposes the tools below. The server, the feed tools, and the version
-tool ship today; the rest of the table is intended design and lands wave by
-wave.
+server exposes the tools below. The server, the feed tools, the session and
+brain tools, and the version tool ship today; the rest of the table is
+intended design and lands wave by wave.
 
 ## Tools
 
 | Tool | Purpose |
 |---|---|
-| `session_start` | Register or resume a session by project, agent, and session name. Idempotent on the name, so a resume reuses the same brain. |
+| `session_start` | Register or resume a session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. |
 | `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
 | `feed_read` | Read a project feed, newest first, optionally since a cursor and filtered by kind. |
 | `signal_append` | Append an event to a project feed. |

@@ -49,7 +49,7 @@ fmt/check: ## Fail if formatting differs from rustfmt output
 docs/check: ## Validate the docs bundle against OKF v0.2
 	./.agents/scripts/check-okf.py
 
-check: lint lint/engine clippy fmt/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
