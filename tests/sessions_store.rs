@@ -67,7 +67,9 @@ async fn end_marks_the_session_and_emits_an_event() {
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id).await.expect("end");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
 
     let ended = sessions::get(&db, &session.id)
         .await
@@ -94,7 +96,9 @@ async fn list_returns_active_and_ended_sessions() {
     let two = sessions::start(&db, "proj", "two", "agent-one")
         .await
         .expect("two");
-    sessions::end(&db, &two.id).await.expect("end two");
+    sessions::end(&db, &two.id, "agent-one")
+        .await
+        .expect("end two");
 
     let listed = sessions::list(&db, "proj").await.expect("list");
     assert_eq!(listed.len(), 2);
@@ -106,7 +110,7 @@ async fn list_returns_active_and_ended_sessions() {
 #[tokio::test]
 async fn end_unknown_session_is_not_found() {
     let db = open().await;
-    let err = sessions::end(&db, "01900000-0000-0000-0000-000000000000")
+    let err = sessions::end(&db, "01900000-0000-0000-0000-000000000000", "agent-one")
         .await
         .expect_err("not found");
     assert_eq!(err.code(), ErrorCode::NotFound);

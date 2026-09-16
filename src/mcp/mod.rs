@@ -165,9 +165,12 @@ struct FeedReadParams {
 fn to_error_data(err: Error) -> ErrorData {
     let code = err.code();
     let wire = match code {
-        ErrorCode::InvalidArgument => McpErrorCode::INVALID_PARAMS,
+        ErrorCode::InvalidArgument | ErrorCode::Conflict | ErrorCode::PayloadTooLarge => {
+            McpErrorCode::INVALID_PARAMS
+        }
+        ErrorCode::Unauthenticated | ErrorCode::Forbidden => McpErrorCode::INVALID_REQUEST,
         ErrorCode::NotFound => McpErrorCode::RESOURCE_NOT_FOUND,
-        _ => McpErrorCode::INTERNAL_ERROR,
+        ErrorCode::Unavailable | ErrorCode::Internal => McpErrorCode::INTERNAL_ERROR,
     };
     let data = json!({
         "error": {

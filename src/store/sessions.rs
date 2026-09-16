@@ -118,10 +118,17 @@ pub async fn start(
 }
 
 /// Mark a session ended. The brain is retained until the human prunes it.
-pub async fn end(db: &Database, session_id: &str) -> Result<()> {
+///
+/// Retry-safe: ending an already-ended session is a no-op, so a retried call
+/// does not append a second lifecycle event.
+pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
     let session = get(db, session_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
+
+    if session.status == "ended" {
+        return Ok(());
+    }
 
     let conn = db.connect().map_err(engine)?;
     let now = crate::store::now_rfc3339();
@@ -134,7 +141,7 @@ pub async fn end(db: &Database, session_id: &str) -> Result<()> {
 
     events::append(
         db,
-        &session.agent,
+        actor,
         None,
         NewEvent {
             project_id: session.project_id,

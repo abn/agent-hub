@@ -28,13 +28,13 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SessionStartParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        // The agent is the authenticated identity, never client input.
         let actor = self.principal(&context).actor;
-        let agent = params.agent.unwrap_or(actor);
         let session = sessions::start(
             &self.state.db,
             &params.project_id,
             &params.session_name,
-            &agent,
+            &actor,
         )
         .await
         .map_err(to_error_data)?;
@@ -50,9 +50,11 @@ impl HubServer {
     #[tool(description = "Mark a session ended. Its brain is retained until pruned.")]
     async fn session_end(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SessionEndParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        sessions::end(&self.state.db, &params.session_id)
+        let actor = self.principal(&context).actor;
+        sessions::end(&self.state.db, &params.session_id, &actor)
             .await
             .map_err(to_error_data)?;
 
@@ -212,9 +214,6 @@ fn brain_doc_id(session_id: &str, path: &str) -> String {
 struct SessionStartParams {
     project_id: String,
     session_name: String,
-    /// Identity to record on the session; defaults to the resolved principal.
-    #[serde(default)]
-    agent: Option<String>,
 }
 
 /// Arguments for `session_end`.

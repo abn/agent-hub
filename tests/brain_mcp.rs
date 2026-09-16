@@ -336,3 +336,71 @@ fn brain_tools_require_an_active_session() {
         "brain_get without a started session is a conflict"
     );
 }
+
+#[test]
+fn session_survives_a_process_restart() {
+    let data_dir = TempDir::new("restart");
+
+    let (session_id, brain_root) = {
+        let mut server = McpServer::spawn(&data_dir.0);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "named"}),
+        );
+        let result = structured(&started);
+        let id = result["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let root = result["brain_root"]
+            .as_str()
+            .expect("brain root")
+            .to_string();
+        let put = server.call_tool("brain_put", json!({"path": "/kv/counter", "content": "1"}));
+        assert_eq!(structured(&put)["ok"], true, "brain_put before the restart");
+        (id, root)
+    };
+
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    let resumed = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+    let result = structured(&resumed);
+    assert_eq!(
+        result["session_id"].as_str().expect("session id"),
+        session_id,
+        "the same name resumes the same session after a restart"
+    );
+    assert_eq!(
+        result["brain_root"].as_str().expect("brain root"),
+        brain_root
+    );
+
+    let got = server.call_tool("brain_get", json!({"path": "/kv/counter"}));
+    assert_eq!(
+        structured(&got)["content"].as_str().expect("content"),
+        "1",
+        "brain state survives the restart"
+    );
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let events = structured(&feed)["events"]
+        .as_array()
+        .expect("events")
+        .clone();
+    let starts = events
+        .iter()
+        .filter(|event| {
+            event["summary"]
+                .as_str()
+                .is_some_and(|summary| summary.contains("started"))
+        })
+        .count();
+    assert_eq!(
+        starts, 1,
+        "a resume after a restart does not duplicate the start event"
+    );
+}

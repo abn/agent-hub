@@ -133,3 +133,24 @@ async fn same_session_writes_serialise_and_persist() {
         Some(b"two".to_vec())
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn same_session_writes_serialise_on_a_worker_pool() {
+    let store = BrainStore::new(temp_dir("mt-same-session"));
+    let first = store.open("proj", "shared").await.expect("open first");
+    let second = store.open("proj", "shared").await.expect("open second");
+
+    let (a, b) = tokio::join!(first.put("/kv/a", b"one"), second.put("/kv/b", b"two"),);
+    a.expect("first write");
+    b.expect("second write");
+
+    let reopened = store.open("proj", "shared").await.expect("reopen");
+    assert_eq!(
+        reopened.get("/kv/a").await.expect("a"),
+        Some(b"one".to_vec())
+    );
+    assert_eq!(
+        reopened.get("/kv/b").await.expect("b"),
+        Some(b"two".to_vec())
+    );
+}

@@ -70,12 +70,12 @@ pub async fn end(
     Path(session_id): Path<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<EndResult>, Problem> {
-    state
+    let principal = state
         .auth
         .resolve_bearer(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    session_store::end(&state.db, &session_id)
+    session_store::end(&state.db, &session_id, &principal.actor)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 

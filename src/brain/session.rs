@@ -255,7 +255,9 @@ impl Brain {
         self.ensure_parent(path).await?;
         if let Some(stats) = self.agent.fs.stat(path).await.map_err(engine_error)? {
             if stats.is_directory() {
-                return Err(Error::Config(format!("brain path '{path}' is a directory")));
+                return Err(Error::InvalidArgument(format!(
+                    "brain path '{path}' is a directory"
+                )));
             }
             self.agent
                 .fs
@@ -283,7 +285,7 @@ impl Brain {
             match self.agent.fs.stat(&current).await.map_err(engine_error)? {
                 Some(stats) if stats.is_directory() => {}
                 Some(_) => {
-                    return Err(Error::Config(format!(
+                    return Err(Error::InvalidArgument(format!(
                         "brain path '{current}' is not a directory"
                     )));
                 }
@@ -309,7 +311,7 @@ fn validate_project_id(project_id: &str) -> Result<()> {
     if valid {
         Ok(())
     } else {
-        Err(Error::Config(format!(
+        Err(Error::InvalidArgument(format!(
             "project id '{project_id}' must be non-empty and contain only ASCII alphanumerics, hyphens, and underscores"
         )))
     }
@@ -320,7 +322,7 @@ fn validate_session_id(session_id: &str) -> Result<()> {
     if AgentFSOptions::validate_agent_id(session_id) {
         Ok(())
     } else {
-        Err(Error::Config(format!(
+        Err(Error::InvalidArgument(format!(
             "session id '{session_id}' must be non-empty and contain only alphanumeric characters, hyphens, and underscores"
         )))
     }
@@ -337,7 +339,7 @@ fn parse_path(path: &str) -> Result<Namespace<'_>> {
     } else if path == "/fs" {
         Ok(Namespace::Fs(""))
     } else {
-        Err(Error::Config(format!(
+        Err(Error::InvalidArgument(format!(
             "brain path '{path}' must start with /kv/ or /fs/"
         )))
     }
@@ -346,7 +348,7 @@ fn parse_path(path: &str) -> Result<Namespace<'_>> {
 /// A key-value operation needs a key, unlike a listing which may take all keys.
 fn require_key(key: &str) -> Result<&str> {
     if key.is_empty() {
-        Err(Error::Config(
+        Err(Error::InvalidArgument(
             "brain key path must name a key after /kv/".to_string(),
         ))
     } else {
