@@ -5,7 +5,10 @@ use std::path::Path;
 use crate::error::{Error, Result};
 
 pub mod events;
+pub mod home;
 pub mod idempotency;
+pub mod inbox;
+pub mod questions;
 mod schema;
 pub mod search;
 pub mod sessions;

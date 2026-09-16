@@ -133,8 +133,49 @@ pub async fn append(
         crate::store::idempotency::record(&tx, &event.project_id, key, &id, &created_at).await?;
     }
 
+    // Finished work and anything that needs the human land in the inbox.
+    if event.needs_action || event.kind == "finished" {
+        crate::store::inbox::project(&tx, &id, event.needs_action, &created_at).await?;
+    }
+
     tx.commit().await.map_err(engine)?;
     Ok(id)
+}
+
+/// Fetch one event by id.
+pub async fn get(db: &Database, event_id: &str) -> Result<Option<Event>> {
+    let conn = db.connect().map_err(engine)?;
+    let mut rows = conn
+        .query(
+            "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
+             FROM events WHERE id = ?1",
+            vec![Value::Text(event_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(event_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Read the most recent events across every project, newest first.
+pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
+    let conn = db.connect().map_err(engine)?;
+    let limit = limit.clamp(1, FEED_LIMIT_MAX);
+    let mut rows = conn
+        .query(
+            "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
+             FROM events ORDER BY id DESC LIMIT ?1",
+            vec![Value::Integer(limit)],
+        )
+        .await
+        .map_err(engine)?;
+    let mut events = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        events.push(event_from_row(&row)?);
+    }
+    Ok(events)
 }
 
 /// A page of the feed with the cursors to continue in either direction.
