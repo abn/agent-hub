@@ -1,18 +1,20 @@
 //! HTTP API and static PWA surface.
 
 use axum::extract::State;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
 
+pub mod artifacts;
 pub mod auth;
 pub mod feed;
 pub mod inbox;
 pub mod problem;
 pub mod sessions;
+pub mod storage;
 
 use problem::Problem;
 
@@ -25,8 +27,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/questions/{id}/answer", post(inbox::answer))
         .route("/api/v1/projects/{id}/feed", get(feed::read))
+        .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
+        .route("/api/v1/storage/sessions/{id}", delete(storage::prune))
+        .route("/api/v1/prune/undo/{token}", post(storage::undo))
+        .route("/artifacts/{id}", get(artifacts::render))
         .fallback(not_found)
         .with_state(state)
 }
