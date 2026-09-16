@@ -43,20 +43,21 @@ fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
 #[tokio::test]
 async fn the_agents_surface_rejects_a_missing_token() {
     let app = router(state().await);
-    for uri in [
-        "/api/v1/agents",
-        "/api/v1/agents/one/tokens",
-        "/api/v1/agents/one/grants",
+    for (method, uri) in [
+        ("GET", "/api/v1/agents"),
+        ("POST", "/api/v1/agents/one/token"),
+        ("DELETE", "/api/v1/agents/one/token"),
+        ("GET", "/api/v1/agents/one/grants"),
     ] {
         let response = app
             .clone()
-            .oneshot(request("GET", uri, None))
+            .oneshot(request(method, uri, None))
             .await
             .expect("request");
         assert_eq!(
             response.status(),
             StatusCode::UNAUTHORIZED,
-            "{uri} must require a token"
+            "{method} {uri} must require a token"
         );
     }
 }

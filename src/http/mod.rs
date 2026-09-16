@@ -38,10 +38,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/agents", get(agents::list).post(agents::create))
         .route("/api/v1/agents/{id}", patch(agents::update))
         .route(
-            "/api/v1/agents/{id}/tokens",
-            get(agents::tokens).post(agents::issue),
+            "/api/v1/agents/{id}/token",
+            post(agents::issue).delete(agents::revoke),
         )
-        .route("/api/v1/agents/{id}/tokens/{hash}", delete(agents::revoke))
         .route(
             "/api/v1/agents/{id}/grants",
             get(agents::grants).post(agents::grant),

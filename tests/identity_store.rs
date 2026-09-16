@@ -32,6 +32,23 @@ async fn db(tag: &str) -> turso::Database {
     db
 }
 
+async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM agent_tokens WHERE agent_id = ?1 AND revoked_at IS NULL",
+            [agent_id],
+        )
+        .await
+        .expect("count");
+    rows.next()
+        .await
+        .expect("row")
+        .expect("a count row")
+        .get::<i64>(0)
+        .expect("count")
+}
+
 #[tokio::test]
 async fn create_agent_creates_its_personal_space() {
     let db = db("identity-create").await;
@@ -68,42 +85,73 @@ async fn create_agent_keeps_the_given_trust_and_rejects_a_duplicate() {
 }
 
 #[tokio::test]
-async fn tokens_resolve_until_revoked() {
+async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
     let db = db("identity-tokens").await;
     let agent = identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
         .await
         .expect("create");
 
-    let (plaintext, record) = identity::issue_token(&db, &agent.id).await.expect("issue");
-    assert_eq!(plaintext.len(), 64);
-    assert_eq!(record.token_hash, identity::hash_token(&plaintext));
-    assert!(record.revoked_at.is_none());
+    let first = identity::issue_token(&db, &agent.id).await.expect("issue");
+    assert_eq!(first.token.len(), 64);
+    assert_eq!(live_tokens(&db, "worker").await, 1);
+    let first_hash = identity::hash_token(&first.token);
 
-    let resolved = identity::resolve_token(&db, &record.token_hash)
+    let resolved = identity::resolve_token(&db, &first_hash)
         .await
         .expect("resolve")
         .expect("a live token resolves");
     assert_eq!(resolved.0, "worker");
     assert_eq!(resolved.1, Trust::Untrusted);
 
-    let tokens = identity::list_tokens(&db, &agent.id).await.expect("list");
-    assert_eq!(tokens.len(), 1);
+    let second = identity::issue_token(&db, &agent.id)
+        .await
+        .expect("reissue");
+    assert_ne!(second.token, first.token);
+    assert_eq!(
+        live_tokens(&db, "worker").await,
+        1,
+        "a reissue leaves exactly one live token"
+    );
+    assert!(
+        identity::resolve_token(&db, &first_hash)
+            .await
+            .expect("resolve")
+            .is_none(),
+        "a reissue revokes the previous token"
+    );
+    let second_hash = identity::hash_token(&second.token);
+    assert!(
+        identity::resolve_token(&db, &second_hash)
+            .await
+            .expect("resolve")
+            .is_some(),
+        "the new token resolves"
+    );
 
-    identity::revoke_token(&db, &record.token_hash)
+    identity::revoke_token(&db, &agent.id)
         .await
         .expect("revoke");
+    assert_eq!(live_tokens(&db, "worker").await, 0);
     assert!(
-        identity::resolve_token(&db, &record.token_hash)
+        identity::resolve_token(&db, &second_hash)
             .await
             .expect("resolve")
             .is_none(),
         "a revoked token never resolves"
     );
-
-    let unknown = identity::revoke_token(&db, "not-a-hash")
+    identity::revoke_token(&db, &agent.id)
         .await
-        .expect_err("unknown token");
+        .expect("revoke is idempotent");
+
+    let unknown = identity::revoke_token(&db, "ghost")
+        .await
+        .expect_err("unknown agent");
     assert_eq!(unknown.code(), ErrorCode::NotFound);
+
+    let unissued = identity::issue_token(&db, "ghost")
+        .await
+        .expect_err("unknown agent");
+    assert_eq!(unissued.code(), ErrorCode::NotFound);
 }
 
 #[tokio::test]

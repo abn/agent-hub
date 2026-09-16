@@ -138,9 +138,10 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     let agent = identity::create_agent(&db, "probe", "Probe", Trust::Untrusted)
         .await
         .expect("create agent");
-    let (agent_token, _) = identity::issue_token(&db, &agent.id)
+    let agent_token = identity::issue_token(&db, &agent.id)
         .await
-        .expect("issue token");
+        .expect("issue token")
+        .token;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start session");

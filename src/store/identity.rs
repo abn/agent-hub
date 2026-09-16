@@ -1,8 +1,8 @@
 //! Agent identities, tokens, and grants.
 //!
 //! An agent is a stable id with a trust level and a personal space, a project
-//! it owns. A token is issued once in plaintext and stored only as a hash, so
-//! a leaked database does not yield usable tokens. A grant opens one project
+//! it owns. A token's plaintext is returned once and only its hash is stored,
+//! so a leaked database does not yield usable tokens. A grant opens one project
 //! to one agent with read or write access.
 
 use serde::Serialize;
@@ -34,18 +34,13 @@ pub struct Agent {
     pub last_seen_at: Option<String>,
 }
 
-/// A token's metadata. The plaintext is returned once, at issue time, and
-/// never stored.
+/// A freshly issued token. The plaintext is returned once and never stored.
 #[derive(Debug, Clone, Serialize)]
-pub struct TokenRecord {
-    /// Hash of the token, which is also its id for revocation.
-    pub token_hash: String,
+pub struct IssuedToken {
+    /// The plaintext token, shown once.
+    pub token: String,
     /// When the token was issued.
     pub created_at: String,
-    /// When the token was last used, if ever.
-    pub last_used_at: Option<String>,
-    /// When the token was revoked, if it has been.
-    pub revoked_at: Option<String>,
 }
 
 /// A grant of one project to one agent.
@@ -284,83 +279,78 @@ pub async fn set_trust(db: &Database, id: &str, trust: Trust) -> Result<Agent> {
         .ok_or_else(|| Error::NotFound(format!("agent {id} not found")))
 }
 
-/// Issue a token for an agent. The plaintext is returned once and never stored.
-pub async fn issue_token(db: &Database, agent_id: &str) -> Result<(String, TokenRecord)> {
-    if get_agent(db, agent_id).await?.is_none() {
-        return Err(Error::NotFound(format!("agent {agent_id} not found")));
-    }
+/// Issue the agent's token, replacing any it already has.
+///
+/// One token per agent: the previous live token is revoked and the new one
+/// inserted in the same transaction, so a reissue never leaves two usable
+/// tokens. The plaintext is returned once and never stored.
+pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     let plaintext = generate_token();
     let token_hash = hash_token(&plaintext);
     let created_at = crate::store::now_rfc3339();
-    let conn = db.connect().map_err(engine)?;
-    conn.execute(
+
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let mut rows = tx
+        .query(
+            "SELECT 1 FROM agents WHERE id = ?1",
+            vec![Value::Text(agent_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if rows.next().await.map_err(engine)?.is_none() {
+        drop(rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::NotFound(format!("agent {agent_id} not found")));
+    }
+    drop(rows);
+    tx.execute(
+        "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
+        vec![
+            Value::Text(created_at.clone()),
+            Value::Text(agent_id.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
         "INSERT INTO agent_tokens(token_hash, agent_id, created_at, last_used_at, revoked_at)
          VALUES (?1, ?2, ?3, NULL, NULL)",
         vec![
-            Value::Text(token_hash.clone()),
+            Value::Text(token_hash),
             Value::Text(agent_id.to_string()),
             Value::Text(created_at.clone()),
         ],
     )
     .await
     .map_err(engine)?;
-    Ok((
-        plaintext,
-        TokenRecord {
-            token_hash,
-            created_at,
-            last_used_at: None,
-            revoked_at: None,
-        },
-    ))
+    tx.commit().await.map_err(engine)?;
+
+    Ok(IssuedToken {
+        token: plaintext,
+        created_at,
+    })
 }
 
-/// List an agent's tokens, newest first.
-pub async fn list_tokens(db: &Database, agent_id: &str) -> Result<Vec<TokenRecord>> {
-    let conn = db.connect().map_err(engine)?;
-    let mut rows = conn
-        .query(
-            "SELECT token_hash, created_at, last_used_at, revoked_at
-             FROM agent_tokens WHERE agent_id = ?1 ORDER BY created_at DESC",
-            [agent_id],
-        )
-        .await
-        .map_err(engine)?;
-    let mut tokens = Vec::new();
-    while let Some(row) = rows.next().await.map_err(engine)? {
-        tokens.push(TokenRecord {
-            token_hash: text(&row, 0)?,
-            created_at: text(&row, 1)?,
-            last_used_at: optional_text(&row, 2)?,
-            revoked_at: optional_text(&row, 3)?,
-        });
+/// Revoke the agent's live token, if it has one.
+///
+/// Agent-keyed and idempotent: revoking an agent that already has no live
+/// token is not an error. An unknown agent is not found.
+pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
+    if get_agent(db, agent_id).await?.is_none() {
+        return Err(Error::NotFound(format!("agent {agent_id} not found")));
     }
-    Ok(tokens)
-}
-
-/// Revoke a token. Revoking an already-revoked token is not an error.
-pub async fn revoke_token(db: &Database, token_hash: &str) -> Result<()> {
     let now = crate::store::now_rfc3339();
     let conn = db.connect().map_err(engine)?;
-    let affected = conn
-        .execute(
-            "UPDATE agent_tokens SET revoked_at = ?1 WHERE token_hash = ?2 AND revoked_at IS NULL",
-            vec![Value::Text(now), Value::Text(token_hash.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    if affected == 0 {
-        let mut exists = conn
-            .query(
-                "SELECT 1 FROM agent_tokens WHERE token_hash = ?1",
-                [token_hash],
-            )
-            .await
-            .map_err(engine)?;
-        if exists.next().await.map_err(engine)?.is_none() {
-            return Err(Error::NotFound("no such token".to_string()));
-        }
-    }
+    conn.execute(
+        "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
+        vec![Value::Text(now), Value::Text(agent_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
     Ok(())
 }
 

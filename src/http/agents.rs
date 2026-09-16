@@ -49,15 +49,7 @@ pub async fn update(State(state): State<AppState>, headers: HeaderMap) -> Proble
     unwired()
 }
 
-/// `GET /api/v1/agents/{id}/tokens`
-pub async fn tokens(State(state): State<AppState>, headers: HeaderMap) -> Problem {
-    if let Some(problem) = gate(&state, &headers) {
-        return problem;
-    }
-    unwired()
-}
-
-/// `POST /api/v1/agents/{id}/tokens`
+/// `POST /api/v1/agents/{id}/token`: reissue, invalidating the previous token.
 pub async fn issue(State(state): State<AppState>, headers: HeaderMap) -> Problem {
     if let Some(problem) = gate(&state, &headers) {
         return problem;
@@ -65,7 +57,7 @@ pub async fn issue(State(state): State<AppState>, headers: HeaderMap) -> Problem
     unwired()
 }
 
-/// `DELETE /api/v1/agents/{id}/tokens/{hash}`
+/// `DELETE /api/v1/agents/{id}/token`: revoke the agent's live token.
 pub async fn revoke(State(state): State<AppState>, headers: HeaderMap) -> Problem {
     if let Some(problem) = gate(&state, &headers) {
         return problem;
