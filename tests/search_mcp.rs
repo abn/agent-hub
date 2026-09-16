@@ -132,13 +132,17 @@ fn search_finds_appended_content() {
     assert!(structured(&appended).get("event_id").is_some());
 
     let found = server.call_tool("search", json!({"query": "engine"}));
-    let results = structured(&found)["results"]
+    let groups = structured(&found)["groups"]
         .as_array()
-        .expect("results array")
+        .expect("groups array")
         .clone();
+    let feed = groups
+        .iter()
+        .find(|group| group["kind"] == "feed")
+        .expect("a feed group");
     assert!(
-        results.iter().any(|hit| hit["kind"] == "feed"),
-        "the appended signal is found"
+        feed["hits"].as_array().is_some_and(|hits| !hits.is_empty()),
+        "the appended signal is found under the feed group"
     );
 
     let empty = server.call_tool("search", json!({"query": "   "}));

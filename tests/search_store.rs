@@ -32,7 +32,7 @@ async fn open(dir: &std::path::Path) -> turso::Database {
 }
 
 async fn seed(db: &turso::Database, dir: &std::path::Path) {
-    let mut event = NewEvent {
+    let event = NewEvent {
         project_id: "proj".to_string(),
         kind: "signal".to_string(),
         summary: "engine groundwork".to_string(),
@@ -40,7 +40,6 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
         needs_action: false,
         thread_id: None,
     };
-    event.summary = "engine groundwork".to_string();
     append(db, "agent-one", None, event).await.expect("append");
 
     artifacts::publish(
@@ -142,4 +141,52 @@ async fn unknown_type_is_rejected() {
     .await
     .expect_err("reject");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
+}
+
+#[tokio::test]
+async fn ranking_prefers_the_higher_term_frequency() {
+    let dir = temp_dir("search-rank");
+    let db = open(&dir).await;
+
+    // Older, but mentions the term three times.
+    append(
+        &db,
+        "a",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "older".to_string(),
+            payload: Some(serde_json::json!({"body": "engine engine engine alpha"})),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await
+    .expect("older append");
+
+    // Newer, but mentions the term once.
+    append(
+        &db,
+        "a",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "newer".to_string(),
+            payload: Some(serde_json::json!({"body": "engine beta"})),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await
+    .expect("newer append");
+
+    let hits = search::query(&db, &q("engine")).await.expect("search");
+    assert_eq!(hits.len(), 2);
+    assert!(
+        hits[0].snippet.contains("alpha"),
+        "the higher-scoring document ranks first, got {:?}",
+        hits[0].snippet
+    );
 }

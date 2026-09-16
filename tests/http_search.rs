@@ -79,9 +79,9 @@ async fn search_returns_hits_with_a_token() {
         .expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
-    let results = body["results"].as_array().expect("results");
+    let groups = body["groups"].as_array().expect("groups");
     assert!(
-        results.iter().any(|hit| hit["kind"] == "feed"),
+        groups.iter().any(|group| group["kind"] == "feed"),
         "the seeded signal is found"
     );
 }

@@ -9,13 +9,13 @@ use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
-use crate::store::search::{self, SearchHit, SearchQuery};
+use crate::store::search::{self, SearchGroup, SearchQuery};
 
-/// The results of a search.
+/// The results of a search, grouped by corpus family.
 #[derive(Debug, Serialize)]
 pub struct SearchResults {
-    /// The hits, best first.
-    pub results: Vec<SearchHit>,
+    /// The groups, best first.
+    pub groups: Vec<SearchGroup>,
 }
 
 /// `GET /api/v1/search?q=&scope=&project=&type=&limit=`
@@ -37,8 +37,9 @@ pub async fn search(
     let results = search::query(&state.db, &params)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    let groups = search::group(results);
 
-    Ok(Json(SearchResults { results }))
+    Ok(Json(SearchResults { groups }))
 }
 
 fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
@@ -73,10 +74,16 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
         ));
     }
 
-    // `scope=global` clears the project filter; otherwise `project` scopes it.
+    // `scope=global` clears the project filter; `scope=project` requires one.
     let project_id = match scope.as_deref() {
         Some("global") => None,
-        _ => project,
+        Some("project") => Some(project.ok_or_else(|| {
+            Error::InvalidArgument("scope=project requires a project".to_string())
+        })?),
+        Some(other) => {
+            return Err(Error::InvalidArgument(format!("unknown scope '{other}'")));
+        }
+        None => project,
     };
 
     Ok(SearchQuery {

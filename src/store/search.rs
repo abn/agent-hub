@@ -1,9 +1,10 @@
-//! The search corpus write path.
+//! The search corpus: the write-through seam every writer calls, and the query
+//! path over it.
 //!
-//! One row per indexable document, in the hub store, written through by the
-//! wrapper on every change. Querying and ranking live in the search module of
-//! a later change; this is the seam every writer calls so nothing is written
-//! without being indexed.
+//! Ranking uses the engine's full-text index, which only produces a real score
+//! for a query shaped the way its index method recognises: a single
+//! `fts_match` over the indexed columns with `fts_score` ordering. Project and
+//! type filters are applied after the ranked fetch, so the ranking stays live.
 
 use turso::{Connection, Database, Row, Value};
 
@@ -86,7 +87,12 @@ pub struct SearchHit {
     pub updated_at: String,
 }
 
-/// Query the corpus, ranked by text relevance with a recency tiebreak.
+/// Query the corpus, ranked by text relevance, then filtered by project and
+/// corpus family.
+///
+/// The ranked fetch uses the index method's recognised shape; filters and the
+/// final limit are applied afterwards. More candidates are fetched than
+/// returned so a filter does not starve the page.
 pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>> {
     if search.text.trim().is_empty() {
         return Err(Error::InvalidArgument(
@@ -97,36 +103,61 @@ pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>
         validate_kind(kind)?;
     }
     let limit = search.limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
+    let fetch = (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX);
 
-    let mut sql = String::from(
-        "SELECT doc_id, project_id, type, ref_id, session_id, title, body, updated_at
-         FROM search_docs
-         WHERE (fts_match(title, ?1) OR fts_match(body, ?1))",
-    );
-    let mut params: Vec<Value> = vec![Value::Text(search.text.clone())];
-    if let Some(project_id) = &search.project_id {
-        params.push(Value::Text(project_id.clone()));
-        sql.push_str(&format!(" AND project_id = ?{}", params.len()));
-    }
-    if let Some(kind) = &search.kind {
-        params.push(Value::Text(kind.clone()));
-        sql.push_str(&format!(" AND type = ?{}", params.len()));
-    }
-    params.push(Value::Text(search.text.clone()));
-    let score = params.len();
-    params.push(Value::Integer(limit));
-    let lim = params.len();
-    sql.push_str(&format!(
-        " ORDER BY (COALESCE(fts_score(title, ?{score}), 0) + COALESCE(fts_score(body, ?{score}), 0)) DESC, updated_at DESC LIMIT ?{lim}"
-    ));
-
-    let conn = db.connect().map_err(engine)?;
-    let mut rows = conn.query(&sql, params).await.map_err(engine)?;
+    let conn = db.connect().map_err(crate::store::engine)?;
+    let mut rows = conn
+        .query(
+            "SELECT * FROM search_docs
+             WHERE fts_match(title, body, ?1)
+             ORDER BY fts_score(title, body, ?1) DESC
+             LIMIT ?2",
+            vec![Value::Text(search.text.clone()), Value::Integer(fetch)],
+        )
+        .await
+        .map_err(crate::store::engine)?;
     let mut hits = Vec::new();
-    while let Some(row) = rows.next().await.map_err(engine)? {
-        hits.push(hit_from_row(&row)?);
+    while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
+        let hit = hit_from_row(&row)?;
+        if let Some(project_id) = &search.project_id
+            && &hit.project_id != project_id
+        {
+            continue;
+        }
+        if let Some(kind) = &search.kind
+            && &hit.kind != kind
+        {
+            continue;
+        }
+        hits.push(hit);
+        if hits.len() as i64 == limit {
+            break;
+        }
     }
     Ok(hits)
+}
+
+/// A group of hits sharing one corpus family.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SearchGroup {
+    pub kind: String,
+    pub hits: Vec<SearchHit>,
+}
+
+/// Group hits by corpus family, preserving the ranked order inside each group
+/// and ordering the groups by their best hit.
+pub fn group(hits: Vec<SearchHit>) -> Vec<SearchGroup> {
+    let mut groups: Vec<SearchGroup> = Vec::new();
+    for hit in hits {
+        match groups.iter_mut().find(|group| group.kind == hit.kind) {
+            Some(group) => group.hits.push(hit),
+            None => groups.push(SearchGroup {
+                kind: hit.kind.clone(),
+                hits: vec![hit],
+            }),
+        }
+    }
+    groups
 }
 
 fn hit_from_row(row: &Row) -> Result<SearchHit> {
@@ -169,16 +200,12 @@ fn validate_kind(kind: &str) -> Result<()> {
     }
 }
 
-fn engine(err: turso::Error) -> Error {
-    Error::Engine(err.to_string())
-}
-
 fn required(row: &Row, index: usize) -> Result<String> {
     text_at(row, index)?.ok_or_else(|| Error::Engine("search row is missing a column".to_string()))
 }
 
 fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
-    match row.get_value(index).map_err(engine)? {
+    match row.get_value(index).map_err(crate::store::engine)? {
         Value::Text(text) => Ok(Some(text)),
         Value::Null => Ok(None),
         other => Err(Error::Engine(format!(

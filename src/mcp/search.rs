@@ -27,7 +27,7 @@ struct SearchParams {
 
 #[tool_router(router = search_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Search feed events, artifacts, and session content.")]
+    #[tool(description = "Search feed events, artifacts, and session brain content.")]
     async fn search(
         &self,
         Parameters(params): Parameters<SearchParams>,
@@ -47,6 +47,8 @@ impl HubServer {
         let results = search::query(&self.state.db, &query)
             .await
             .map_err(to_error_data)?;
-        Ok(CallToolResult::structured(json!({ "results": results })))
+        Ok(CallToolResult::structured(
+            json!({ "groups": search::group(results) }),
+        ))
     }
 }
