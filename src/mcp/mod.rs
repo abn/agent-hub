@@ -123,16 +123,15 @@ pub async fn serve_stdio(config: Config) -> crate::Result<()> {
     Ok(())
 }
 
-/// Serve the MCP tool surface over streamable HTTP.
+/// The MCP streamable HTTP endpoint, ready to mount on the server router at
+/// `/mcp`.
 ///
 /// Every request must carry a valid bearer token; the token resolves to the
 /// principal recorded as the actor on writes. Host allowlisting is left to the
 /// bearer gate so agents on the LAN or tailnet can reach the hub by its own
-/// address.
-pub async fn serve_http(config: Config) -> crate::Result<()> {
-    let state = AppState::open(config).await?;
-    let bind = state.config.bind;
-
+/// address. The router sets no fallback: it is merged into the server router,
+/// and a fallback on both sides panics at startup.
+pub fn http_router(state: AppState) -> axum::Router {
     let factory_state = state.clone();
     let service = StreamableHttpService::new(
         move || Ok(HubServer::new(factory_state.clone())),
@@ -140,14 +139,9 @@ pub async fn serve_http(config: Config) -> crate::Result<()> {
         StreamableHttpServerConfig::default().disable_allowed_hosts(),
     );
 
-    let router = axum::Router::new().nest_service("/mcp", service).layer(
-        axum::middleware::from_fn_with_state(state.clone(), require_bearer),
-    );
-
-    let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(bind = %bind, "mcp streamable http listening");
-    axum::serve(listener, router).await?;
-    Ok(())
+    axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn_with_state(state, require_bearer))
 }
 
 /// Reject requests without a valid bearer token and pass the principal along.

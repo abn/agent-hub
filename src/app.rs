@@ -7,7 +7,7 @@ use crate::brain::BrainStore;
 use crate::config::Config;
 use crate::error::Result;
 use crate::principal::Auth;
-use crate::{http, store};
+use crate::{http, mcp, store};
 
 /// Shared state handed to every HTTP handler and the MCP server.
 #[derive(Clone)]
@@ -50,15 +50,22 @@ impl AppState {
     }
 }
 
-/// Run the hub HTTP surface until the process is stopped.
+/// Run the hub until the process is stopped.
+///
+/// One process serves the REST API, the PWA, and the MCP streamable HTTP
+/// endpoint on one listener, and runs the prune sweeper. The per-session write
+/// lock only spans this process, so a second server over one data directory is
+/// not a supported topology; the engine's exclusive file lock rejects it at
+/// startup rather than letting the two corrupt data.
 pub async fn run(config: Config) -> Result<()> {
     let state = AppState::open(config).await?;
     let bind = state.config.bind;
+    let schema_version = state.schema_version;
 
     // Commit any prune whose undo window has passed, then keep sweeping.
     let sweeper = state.clone();
     tokio::spawn(async move {
-        let interval = std::time::Duration::from_secs(store::prune::UNDO_WINDOW_SECS as u64);
+        let interval = sweep_interval();
         loop {
             if let Err(err) = store::prune::sweep(&sweeper.db, &sweeper.data_dir).await {
                 tracing::warn!(error = %err, "prune sweep failed");
@@ -67,9 +74,21 @@ pub async fn run(config: Config) -> Result<()> {
         }
     });
 
+    let router = http::router(state.clone()).merge(mcp::http_router(state));
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(bind = %bind, schema_version = state.schema_version, "hub listening");
+    tracing::info!(bind = %bind, schema_version, "hub listening");
 
-    axum::serve(listener, http::router(state)).await?;
+    axum::serve(listener, router).await?;
     Ok(())
+}
+
+/// How often the prune sweeper runs. Overridable so a test can watch it commit
+/// without waiting the full undo window.
+fn sweep_interval() -> std::time::Duration {
+    let secs = std::env::var("HUB_SWEEP_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(store::prune::UNDO_WINDOW_SECS as u64);
+    std::time::Duration::from_secs(secs)
 }

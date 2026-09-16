@@ -1,8 +1,9 @@
 //! End-to-end tests for the MCP feed tools and the streamable HTTP transport.
 //!
 //! The stdio tests spawn the built binary as `agent-hub mcp` and speak
-//! line-delimited JSON-RPC. The HTTP test spawns `agent-hub mcp-http` and
-//! speaks HTTP/1.1 over a raw socket so no new client dependency is needed.
+//! line-delimited JSON-RPC. The HTTP test spawns the hub, which serves MCP at
+//! `/mcp`, and speaks HTTP/1.1 over a raw socket so no new client dependency is
+//! needed.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -265,7 +266,6 @@ fn free_port() -> u16 {
 
 fn spawn_http(data_dir: &Path, port: u16) -> ChildGuard {
     let child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .arg("mcp-http")
         .env("RUST_LOG", "error")
         .env("HUB_DATA_DIR", data_dir)
         .env("HUB_BIND", format!("127.0.0.1:{port}"))
@@ -274,7 +274,7 @@ fn spawn_http(data_dir: &Path, port: u16) -> ChildGuard {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("failed to spawn agent-hub mcp-http");
+        .expect("failed to spawn the hub");
     ChildGuard(child)
 }
 
@@ -286,13 +286,12 @@ fn wait_for_port(port: u16) {
         }
         thread::sleep(Duration::from_millis(50));
     }
-    panic!("agent-hub mcp-http did not start on port {port}");
+    panic!("the hub did not start on port {port}");
 }
 
 /// One raw HTTP/1.1 POST, read until the server closes or the read stalls.
 fn http_post(port: u16, body: &str, token: Option<&str>, session: Option<&str>) -> HttpResponse {
-    let mut stream =
-        TcpStream::connect(("127.0.0.1", port)).expect("connect to the mcp-http listener");
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub listener");
     stream
         .set_read_timeout(Some(Duration::from_millis(1500)))
         .expect("set read timeout");
