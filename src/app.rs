@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::brain::BrainStore;
 use crate::config::Config;
 use crate::error::Result;
 use crate::principal::Auth;
@@ -19,6 +20,8 @@ pub struct AppState {
     pub schema_version: i64,
     /// The hub store handle.
     pub db: turso::Database,
+    /// Per-session brain files.
+    pub brain: BrainStore,
     /// Token resolver.
     pub auth: Arc<Auth>,
 }
@@ -34,12 +37,14 @@ impl AppState {
         let schema_version = store::migrate(&db).await?;
 
         let data_dir = config.data_dir.clone();
+        let brain = BrainStore::new(config.sessions_dir());
         let auth = Arc::new(Auth::from_config(&config));
         Ok(Self {
             config: Arc::new(config),
             data_dir,
             schema_version,
             db,
+            brain,
             auth,
         })
     }

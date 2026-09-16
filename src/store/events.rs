@@ -81,7 +81,7 @@ pub async fn append(
 
     let mut conn = db.connect().map_err(engine)?;
     let id = ulid::Ulid::generate().to_string();
-    let created_at = now();
+    let created_at = crate::store::now_rfc3339();
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -265,12 +265,6 @@ fn optional_text(value: Option<&str>) -> Value {
         Some(text) => Value::Text(text.to_string()),
         None => Value::Null,
     }
-}
-
-fn now() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
 }
 
 fn engine(err: turso::Error) -> Error {

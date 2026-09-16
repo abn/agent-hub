@@ -8,6 +8,7 @@ pub mod events;
 pub mod idempotency;
 mod schema;
 pub mod search;
+pub mod sessions;
 
 /// Open the engine with the full-text index method enabled.
 ///
@@ -74,4 +75,11 @@ async fn read_version(conn: &turso::Connection) -> Result<i64> {
 
 pub(crate) fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+/// RFC 3339 UTC timestamp for now.
+pub(crate) fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
 }
