@@ -34,16 +34,7 @@ pub async fn list(db: &Database) -> Result<Vec<Project>> {
 /// Create a project. The id is a slug, immutable after creation.
 pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Project> {
     validate_id(id)?;
-    if display_name.trim().is_empty() {
-        return Err(Error::InvalidArgument(
-            "a project display name is required".to_string(),
-        ));
-    }
-    if display_name.chars().count() > 200 {
-        return Err(Error::InvalidArgument(
-            "the project display name is too long".to_string(),
-        ));
-    }
+    validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
 
     // Inside the immediate transaction so a concurrent create is a conflict
@@ -63,17 +54,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
     if rows.next().await.map_err(engine)?.is_some() {
         return Err(Error::Conflict(format!("project {id} already exists")));
     }
-    tx.execute(
-        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings)
-         VALUES (?1, ?2, NULL, ?3, NULL, NULL)",
-        vec![
-            Value::Text(id.to_string()),
-            Value::Text(display_name.to_string()),
-            Value::Text(created_at.clone()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
+    insert_owned(&tx, id, display_name, None, &created_at).await?;
     tx.commit().await.map_err(engine)?;
 
     Ok(Project {
@@ -82,6 +63,32 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
         owner_agent: None,
         created_at,
     })
+}
+
+/// Insert a project inside a caller's transaction.
+///
+/// `owner_agent` is set when the project is an agent's personal space, so the
+/// agent row and its space can be written as one unit.
+pub(crate) async fn insert_owned(
+    tx: &turso::transaction::Transaction<'_>,
+    id: &str,
+    display_name: &str,
+    owner_agent: Option<&str>,
+    created_at: &str,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL)",
+        vec![
+            Value::Text(id.to_string()),
+            Value::Text(display_name.to_string()),
+            owner_agent.map_or(Value::Null, |agent| Value::Text(agent.to_string())),
+            Value::Text(created_at.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
 }
 
 /// Fetch one project.
@@ -119,6 +126,20 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         owner_agent,
         created_at: text(3)?,
     })
+}
+
+fn validate_display_name(display_name: &str) -> Result<()> {
+    if display_name.trim().is_empty() {
+        return Err(Error::InvalidArgument(
+            "a project display name is required".to_string(),
+        ));
+    }
+    if display_name.chars().count() > 200 {
+        return Err(Error::InvalidArgument(
+            "the project display name is too long".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_id(id: &str) -> Result<()> {
