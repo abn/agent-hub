@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-16, feed surface
+
+* **Creation**: The MCP server exposes the feed: `signal_append` writes an
+  event, and `feed_read` pages a project feed with `next_since` and
+  `next_before` cursors. The streamable HTTP transport requires a bearer token.
+* **Creation**: Added the REST feed route `GET /api/v1/projects/:id/feed`,
+  with RFC 9457 problem details.
+* **Update**: Recorded the event store design: append-only events with ULID
+  ids, cursor paging, idempotency keys, payload limits, and write-through
+  indexing into the search corpus.
+* **Update**: Corrected the stale "not implemented yet" notes on the overview,
+  the architecture index, the agent surface, and the human surface.
+
 ## 2026-09-16, implementation and packaging
 
 * **Creation**: Opened the [usage](usage/index.md) section with the

@@ -59,6 +59,6 @@ microservices, no CRDTs, and no custom distributed consensus. See the
 
 ## Status
 
-The repository holds the operational baseline and a minimal binary skeleton.
-The hub is not implemented yet. The public pages describe intended design,
-and every page that does says so.
+The store, the per-session brain wrapper, the MCP server with the feed tools,
+and the container packaging exist. The rest of the hub is not implemented yet.
+The public pages describe intended design, and every page that does says so.

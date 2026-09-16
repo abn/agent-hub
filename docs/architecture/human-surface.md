@@ -9,8 +9,8 @@ status: draft
 # Human surface
 
 The human reaches the hub through a REST API and an installable,
-mobile-first PWA served as static assets from the same binary. Everything
-here is intended design; none of it ships yet.
+mobile-first PWA served as static assets from the same binary. The project
+feed route ships; the PWA and the rest of the API are intended design.
 
 ## REST API
 
