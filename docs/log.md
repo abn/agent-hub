@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, feed design
+
+* **Update**: The Project feed groups events by day (Today, Yesterday, or the
+  date) and filters by kind with per-project chips; the Home recent list is
+  grouped the same way.
+* **Update**: The Inbox keeps its "Waiting on you" and "Unread" groups and
+  carries the row action inline, so a waiting question or approval is answered
+  or decided without opening it. A handled item leaves the queue; the feed
+  keeps its history.
+* **Creation**: Added `POST /api/v1/approvals/:id/decision`, an admin-gated
+  route that records an approval decision as an answer on the approval's
+  thread and resolves the waiting item. An approval is decided once; a second
+  decision is a conflict.
+* **Update**: An approval forces `needs_action` at the event writer, like a
+  question, and a feed event carries its inbox status so a resolved item stops
+  offering its action.
+
 ## 2026-09-17, polish and reach
 
 * **Creation**: A session opens into a detail view with its brain keys and
@@ -26,9 +43,6 @@ software release notes and the repository changelog.
 * **Note**: True background push, delivered with the app closed, is
   outstanding; notifications today are opt-in and raised while the app runs.
 * **Note**: The headless accessibility audit remains outstanding.
-* **Note**: The Project feed is a flat list; day grouping and kind-filter
-  chips, and inline approve actions on action items, are designed but not
-  built.
 
 ## 2026-09-17, identity and access
 

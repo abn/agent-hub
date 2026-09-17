@@ -31,6 +31,7 @@ GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=
 POST   /api/v1/questions/:id/answer
+POST   /api/v1/approvals/:id/decision
 POST   /api/v1/sessions/:id/end
 GET    /api/v1/sessions?project=
 GET    /api/v1/sessions/:id/brain?path=
