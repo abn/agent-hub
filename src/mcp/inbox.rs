@@ -72,10 +72,10 @@ impl HubServer {
             .await
             .map_err(to_error_data)?
             .ok_or_else(|| {
-                to_error_data(Error::NotFound(format!(
-                    "question {} not found",
-                    params.question_id
-                )))
+                to_error_data(policy::conceal(
+                    &principal,
+                    Error::NotFound(format!("question {} not found", params.question_id)),
+                ))
             })?;
         policy::authorize(
             &self.state.db,

@@ -8,7 +8,7 @@
 
 use turso::{Database, Value};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorCode, Result};
 use crate::principal::{Principal, Trust};
 use crate::store::{engine, projects};
 
@@ -50,9 +50,13 @@ pub async fn authorize(
     if principal.is_admin {
         return Ok(());
     }
-    let project = projects::get(db, project_id)
-        .await?
-        .ok_or_else(|| Error::NotFound(format!("project {project_id} not found")))?;
+    // A non-admin never learns whether a project exists: a missing one and a
+    // denied one both return the same value, so neither the code nor the
+    // message is an existence oracle. The detail goes to the log.
+    let project = projects::get(db, project_id).await?.ok_or_else(|| {
+        tracing::debug!(actor = %principal.actor, project = %project_id, "project not found");
+        denied()
+    })?;
 
     let allowed = match principal.trust {
         Trust::Trusted => match access {
@@ -87,15 +91,30 @@ pub async fn authorize(
     if allowed {
         Ok(())
     } else {
-        Err(Error::Forbidden(format!(
-            "{} may not {} project {project_id}",
-            principal.actor,
-            match access {
-                Access::Read => "read",
-                Access::Write => "write",
-            }
-        )))
+        tracing::debug!(
+            actor = %principal.actor,
+            project = %project_id,
+            ?access,
+            "forbidden"
+        );
+        Err(denied())
     }
+}
+
+/// The one denial a non-admin caller sees, shared by every non-admin refusal
+/// so that a missing resource and a denied one are indistinguishable.
+fn denied() -> Error {
+    Error::Forbidden("not found or not permitted".to_string())
+}
+
+/// Collapse a missing resource to `Forbidden` for a non-admin caller, so an
+/// agent cannot tell "does not exist" from "not allowed". The admin, who can
+/// reach everything, keeps the precise error.
+pub fn conceal(principal: &Principal, error: Error) -> Error {
+    if principal.is_admin || error.code() != ErrorCode::NotFound {
+        return error;
+    }
+    denied()
 }
 
 /// The projects a principal may reach. The admin and trusted agents see every

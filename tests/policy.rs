@@ -133,7 +133,11 @@ async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
     let missing = authorize(&db, &who, "ghost", Access::Read)
         .await
         .expect_err("missing project");
-    assert_eq!(missing.code(), ErrorCode::NotFound);
+    assert_eq!(
+        missing.code(),
+        ErrorCode::Forbidden,
+        "a non-admin cannot tell a missing project from a denied one"
+    );
 }
 
 #[tokio::test]

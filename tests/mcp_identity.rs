@@ -293,6 +293,59 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         read.raw
     );
 
+    let missing = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "feed_read",
+        json!({"project_id": "ghost"}),
+    );
+    assert!(
+        missing.raw.contains("forbidden"),
+        "a missing project is forbidden, not a not-found oracle: {}",
+        missing.raw
+    );
+    assert!(
+        !missing.raw.contains("not_found"),
+        "the error code does not reveal whether a project exists: {}",
+        missing.raw
+    );
+    assert!(
+        missing.raw.contains("not found or not permitted"),
+        "a missing project carries the shared denial message: {}",
+        missing.raw
+    );
+
+    // The denied existing project and the missing one must be indistinguishable.
+    assert!(
+        read.raw.contains("not found or not permitted"),
+        "a denied project carries the same message as a missing one: {}",
+        read.raw
+    );
+    assert!(
+        !read.raw.contains("may not"),
+        "the denial does not name the project or the access: {}",
+        read.raw
+    );
+
+    let missing_artifact = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "artifact_get",
+        json!({"artifact_id": "ghost-artifact"}),
+    );
+    assert!(
+        missing_artifact.raw.contains("forbidden"),
+        "a missing artifact is forbidden for an agent: {}",
+        missing_artifact.raw
+    );
+    assert!(
+        missing_artifact.raw.contains("not found or not permitted"),
+        "a missing artifact carries the shared denial message: {}",
+        missing_artifact.raw
+    );
+
     let me = call(port, &strict_token, &strict_session, "whoami", json!({}));
     assert!(
         me.raw.contains(&strict.personal_project_id),

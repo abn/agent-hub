@@ -115,6 +115,12 @@ for the tokens and rules.
   stdio transport is the local admin and needs no token.
 - Shared artifacts use a password and browser-side encryption, so the
   recipient needs nothing else.
+- The PWA keeps the admin token in local storage, so a script running in the
+  hub origin could read it. The shell is served with a strict content security
+  policy, every agent-controlled field is escaped, and agent-authored HTML
+  renders only in a sandboxed frame, so there is no hub-origin script
+  injection path today. This is accepted for a single-operator node; a browser
+  cookie is not a clean fit for a static PWA that also reaches the API.
 
 ## See also
 

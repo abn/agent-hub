@@ -59,7 +59,9 @@ Feed cursors are exclusive event ids; `since` walks forward and `before` walks
 back, with a default page of 50 and a cap of 500. A page returns `next_since`
 (the newest id, for polling forward) and `next_before` (the oldest id, for
 paging back). Tool errors are structured (`code`, `message`, `retryable`,
-`details`) rather than prose. A write that creates a durable record elsewhere
+`details`) rather than prose. A resource a caller may not reach returns the
+same error whether it is missing or denied, so an agent cannot use an error as
+an existence check. A write that creates a durable record elsewhere
 (a feed event, a question, an answer, an artifact, or a decision) accepts an
 optional idempotency key, so a retry after a dropped connection returns the
 original result instead of a duplicate.

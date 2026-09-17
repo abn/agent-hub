@@ -66,7 +66,7 @@ impl HubServer {
         let principal = self.principal(&context);
         let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
             .await
-            .map_err(to_error_data)?;
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
         policy::authorize(
             &self.state.db,
             &principal,
@@ -101,7 +101,7 @@ impl HubServer {
         let principal = self.principal(&context);
         let artifact = artifacts::metadata(&self.state.db, &params.artifact_id)
             .await
-            .map_err(to_error_data)?;
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
         policy::authorize(
             &self.state.db,
             &principal,

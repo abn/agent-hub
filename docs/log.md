@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, agent-surface hardening
+
+* **Update**: A non-admin caller no longer learns whether a project, artifact,
+  or session exists. A missing resource and a denied one return the same
+  authorization failure, so neither the error code nor its message can be used
+  as an existence oracle.
+* **Note**: Blocking artifact IO from async handlers and the admin token held
+  in browser local storage are accepted for a single-operator node, with the
+  reasoning recorded in the blob module and the human surface page.
+
 ## 2026-09-17, retry safety
 
 * **Update**: `artifact_publish` and `artifact_update` accept an optional

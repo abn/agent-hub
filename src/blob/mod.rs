@@ -2,6 +2,12 @@
 //!
 //! Blobs live at `artifacts/<project>/<artifact>/v<version>.<ext>`, relative
 //! to the data directory. The path column stores that relative path.
+//!
+//! The IO here is blocking and is called from async handlers. At the artifact
+//! cap and the single-operator scale this is accepted: the worst case is one
+//! Tokio worker stalled for the duration of a large transfer. Revisit with
+//! `spawn_blocking` or `tokio::fs` if the node ever serves concurrent large
+//! transfers.
 
 use std::path::{Path, PathBuf};
 
