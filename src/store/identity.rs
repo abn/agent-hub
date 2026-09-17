@@ -10,6 +10,7 @@ use turso::{Database, Row, Value};
 
 use crate::error::{Error, Result};
 use crate::principal::Trust;
+use crate::store::events::{self, NewEvent};
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
@@ -246,6 +247,17 @@ pub async fn create_agent(
         &created_at,
     )
     .await?;
+    audit(
+        &tx,
+        &personal_project_id,
+        format!("agent {id} created"),
+        serde_json::json!({
+            "action": "agent_created",
+            "agent_id": id,
+            "trust": trust_str(trust),
+        }),
+    )
+    .await?;
     tx.commit().await.map_err(engine)?;
 
     Ok(Agent {
@@ -260,20 +272,48 @@ pub async fn create_agent(
 
 /// Change an agent's trust level.
 pub async fn set_trust(db: &Database, id: &str, trust: Trust) -> Result<Agent> {
-    let conn = db.connect().map_err(engine)?;
-    let affected = conn
-        .execute(
-            "UPDATE agents SET trust = ?1 WHERE id = ?2",
-            vec![
-                Value::Text(trust_str(trust).to_string()),
-                Value::Text(id.to_string()),
-            ],
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let mut rows = tx
+        .query(
+            "SELECT trust, personal_project_id FROM agents WHERE id = ?1",
+            vec![Value::Text(id.to_string())],
         )
         .await
         .map_err(engine)?;
-    if affected == 0 {
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        drop(rows);
+        tx.rollback().await.map_err(engine)?;
         return Err(Error::NotFound(format!("agent {id} not found")));
-    }
+    };
+    let from = text(&row, 0)?;
+    let personal_project_id = text(&row, 1)?;
+    drop(rows);
+    tx.execute(
+        "UPDATE agents SET trust = ?1 WHERE id = ?2",
+        vec![
+            Value::Text(trust_str(trust).to_string()),
+            Value::Text(id.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    audit(
+        &tx,
+        &personal_project_id,
+        format!("agent {id} trust set to {}", trust_str(trust)),
+        serde_json::json!({
+            "action": "trust_changed",
+            "agent_id": id,
+            "from": from,
+            "to": trust_str(trust),
+        }),
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
     get_agent(db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("agent {id} not found")))
@@ -296,16 +336,17 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
         .map_err(engine)?;
     let mut rows = tx
         .query(
-            "SELECT 1 FROM agents WHERE id = ?1",
+            "SELECT personal_project_id FROM agents WHERE id = ?1",
             vec![Value::Text(agent_id.to_string())],
         )
         .await
         .map_err(engine)?;
-    if rows.next().await.map_err(engine)?.is_none() {
+    let Some(row) = rows.next().await.map_err(engine)? else {
         drop(rows);
         tx.rollback().await.map_err(engine)?;
         return Err(Error::NotFound(format!("agent {agent_id} not found")));
-    }
+    };
+    let personal_project_id = text(&row, 0)?;
     drop(rows);
     tx.execute(
         "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
@@ -327,6 +368,13 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     )
     .await
     .map_err(engine)?;
+    audit(
+        &tx,
+        &personal_project_id,
+        format!("token issued for {agent_id}"),
+        serde_json::json!({ "action": "token_issued", "agent_id": agent_id }),
+    )
+    .await?;
     tx.commit().await.map_err(engine)?;
 
     Ok(IssuedToken {
@@ -340,17 +388,43 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
 /// Agent-keyed and idempotent: revoking an agent that already has no live
 /// token is not an error. An unknown agent is not found.
 pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
-    if get_agent(db, agent_id).await?.is_none() {
-        return Err(Error::NotFound(format!("agent {agent_id} not found")));
-    }
     let now = crate::store::now_rfc3339();
-    let conn = db.connect().map_err(engine)?;
-    conn.execute(
-        "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
-        vec![Value::Text(now), Value::Text(agent_id.to_string())],
-    )
-    .await
-    .map_err(engine)?;
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let mut rows = tx
+        .query(
+            "SELECT personal_project_id FROM agents WHERE id = ?1",
+            vec![Value::Text(agent_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        drop(rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::NotFound(format!("agent {agent_id} not found")));
+    };
+    let personal_project_id = text(&row, 0)?;
+    drop(rows);
+    let affected = tx
+        .execute(
+            "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
+            vec![Value::Text(now), Value::Text(agent_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if affected > 0 {
+        audit(
+            &tx,
+            &personal_project_id,
+            format!("token revoked for {agent_id}"),
+            serde_json::json!({ "action": "token_revoked", "agent_id": agent_id }),
+        )
+        .await?;
+    }
+    tx.commit().await.map_err(engine)?;
     Ok(())
 }
 
@@ -387,8 +461,12 @@ pub async fn add_grant(
         return Err(Error::NotFound(format!("project {project_id} not found")));
     }
     let created_at = crate::store::now_rfc3339();
-    let conn = db.connect().map_err(engine)?;
-    conn.execute(
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    tx.execute(
         "INSERT INTO grants(agent_id, project_id, access, created_at)
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(agent_id, project_id) DO UPDATE SET
@@ -403,6 +481,19 @@ pub async fn add_grant(
     )
     .await
     .map_err(engine)?;
+    audit(
+        &tx,
+        project_id,
+        format!("grant for {agent_id} on {project_id} set to {access}"),
+        serde_json::json!({
+            "action": "grant_set",
+            "agent_id": agent_id,
+            "project_id": project_id,
+            "access": access,
+        }),
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
     Ok(Grant {
         agent_id: agent_id.to_string(),
         project_id: project_id.to_string(),
@@ -413,8 +504,12 @@ pub async fn add_grant(
 
 /// Remove a grant.
 pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<()> {
-    let conn = db.connect().map_err(engine)?;
-    let affected = conn
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let affected = tx
         .execute(
             "DELETE FROM grants WHERE agent_id = ?1 AND project_id = ?2",
             vec![
@@ -427,6 +522,18 @@ pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Re
     if affected == 0 {
         return Err(Error::NotFound("no such grant".to_string()));
     }
+    audit(
+        &tx,
+        project_id,
+        format!("grant for {agent_id} on {project_id} removed"),
+        serde_json::json!({
+            "action": "grant_removed",
+            "agent_id": agent_id,
+            "project_id": project_id,
+        }),
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
     Ok(())
 }
 
@@ -446,11 +553,45 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
+/// Record an identity change as a system event, inside the caller's
+/// transaction so the change and its audit cannot diverge.
+///
+/// Identity mutation is reachable only through the admin control surface, so
+/// the actor is the human. A future agent-callable path must pass its own
+/// principal instead of reusing this.
+async fn audit(
+    tx: &turso::transaction::Transaction<'_>,
+    project_id: &str,
+    summary: String,
+    payload: serde_json::Value,
+) -> Result<()> {
+    events::append_in_tx(
+        tx,
+        "human",
+        None,
+        NewEvent {
+            project_id: project_id.to_string(),
+            kind: "system".to_string(),
+            summary,
+            payload: Some(payload),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
 fn validate_agent_id(id: &str) -> Result<()> {
     if id.trim().is_empty() || id.chars().count() > 200 {
         return Err(Error::InvalidArgument(
             "an agent id must be non-empty and at most 200 characters".to_string(),
         ));
+    }
+    if matches!(id, "human" | "local") {
+        return Err(Error::InvalidArgument(format!(
+            "agent id '{id}' is reserved for the hub's own identities"
+        )));
     }
     if id.chars().any(char::is_control) {
         return Err(Error::InvalidArgument(

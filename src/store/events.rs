@@ -72,6 +72,26 @@ pub async fn append(
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let id = append_in_tx(&tx, actor, idempotency_key, event).await?;
+    tx.commit().await.map_err(engine)?;
+    Ok(id)
+}
+
+/// Append an event inside a caller's transaction.
+///
+/// Lets a related write, an identity change for instance, and its audit event
+/// commit together, so neither can survive without the other.
+pub(crate) async fn append_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    actor: &str,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
     validate_kind(&event.kind)?;
     let payload_text = event.payload.as_ref().map(|value| value.to_string());
     limits::check_event(
@@ -79,7 +99,6 @@ pub async fn append(
         payload_text.as_deref().map(str::len).unwrap_or(0),
     )?;
 
-    let mut conn = db.connect().map_err(engine)?;
     let id = ulid::Ulid::generate().to_string();
     let created_at = crate::store::now_rfc3339();
 
@@ -97,16 +116,11 @@ pub async fn append(
         event.thread_id.clone()
     };
 
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
-
     // Inside the immediate transaction, so a concurrent retry with the same
     // key serialises and sees the recorded row rather than racing it.
     if let Some(key) = idempotency_key
         && let Some(existing) =
-            crate::store::idempotency::lookup(&tx, &event.project_id, key).await?
+            crate::store::idempotency::lookup(tx, &event.project_id, key).await?
     {
         return Ok(existing);
     }
@@ -130,7 +144,7 @@ pub async fn append(
     .map_err(engine)?;
 
     index_doc(
-        &tx,
+        tx,
         SearchDoc {
             doc_id: &format!("event:{id}"),
             project_id: &event.project_id,
@@ -145,15 +159,14 @@ pub async fn append(
     .await?;
 
     if let Some(key) = idempotency_key {
-        crate::store::idempotency::record(&tx, &event.project_id, key, &id, &created_at).await?;
+        crate::store::idempotency::record(tx, &event.project_id, key, &id, &created_at).await?;
     }
 
     // Finished work and anything that needs the human land in the inbox.
     if needs_action || event.kind == "finished" {
-        crate::store::inbox::project(&tx, &id, needs_action, &created_at).await?;
+        crate::store::inbox::project(tx, &id, needs_action, &created_at).await?;
     }
 
-    tx.commit().await.map_err(engine)?;
     Ok(id)
 }
 
