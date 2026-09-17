@@ -290,6 +290,44 @@ async fn rendering_a_markdown_artifact_renders_and_escapes_it() {
         body.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
         "the escaped script source is shown as text"
     );
+    assert_eq!(
+        body.matches("<h1>").count(),
+        1,
+        "the artifact title is not repeated above its own heading"
+    );
+}
+
+#[tokio::test]
+async fn rendering_a_markdown_artifact_without_a_heading_shows_the_title() {
+    let state = state().await;
+    let id = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "Bare note",
+            kind: "markdown",
+            content: b"Just a paragraph.",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish markdown")
+    .id;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+        .await
+        .expect("request");
+    let body = text_body(response).await;
+    assert!(
+        body.contains("<h1>Bare note</h1>"),
+        "a markdown artifact with no heading still shows its title"
+    );
+    assert!(body.contains("<p>Just a paragraph.</p>"));
 }
 
 #[tokio::test]

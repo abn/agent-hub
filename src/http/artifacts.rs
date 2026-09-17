@@ -177,11 +177,18 @@ style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>\n</bo
 /// artifact page, so the document cannot script or load anything external.
 fn rendered_document(title: &str, body: &str) -> String {
     let title = escape_html(title);
+    // The artifact title names the document; show it as a heading only when
+    // the markdown does not carry its own, so it never appears twice.
+    let heading = if body.contains("<h") {
+        String::new()
+    } else {
+        format!("<h1>{title}</h1>\n")
+    };
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
 <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n<body>\n\
-<main>\n<h1>{title}</h1>\n{body}</main>\n</body>\n</html>\n"
+<main>\n{heading}{body}</main>\n</body>\n</html>\n"
     )
 }
 
