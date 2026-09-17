@@ -4,16 +4,25 @@
 //! full-text search and concurrent writes, and that an AgentFS brain file
 //! works on the same engine.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agentfs_sdk::{AgentFS, AgentFSOptions};
+
+static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before epoch")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
+    // A process-wide counter, not just the clock: parallel tests in one binary
+    // can otherwise land on the same path and collide on the engine lock.
+    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "agent-hub-{tag}-{}-{nanos}-{unique}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     dir
 }
