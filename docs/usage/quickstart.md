@@ -39,6 +39,8 @@ The binary reads its configuration from the environment.
 | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
 | `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
+| `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
+| `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
 | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |

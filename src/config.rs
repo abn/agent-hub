@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use crate::error::{Error, Result};
+use crate::limits::InboxCaps;
 
 /// The default trust posture a new agent is created with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,8 @@ pub struct Config {
     pub admin_token: Option<String>,
     /// Posture applied to a newly created agent.
     pub trust_default: TrustDefault,
+    /// Ceilings on the open action items an agent may leave on the human.
+    pub inbox_caps: InboxCaps,
 }
 
 /// The embedded tailnet endpoint configuration.
@@ -88,11 +91,19 @@ impl Config {
             }
         };
 
+        let inbox_caps = InboxCaps::parse(
+            std::env::var("HUB_INBOX_ACTION_PER_AGENT").ok().as_deref(),
+            std::env::var("HUB_INBOX_ACTION_PER_PROJECT")
+                .ok()
+                .as_deref(),
+        )?;
+
         Ok(Self {
             data_dir,
             bind,
             admin_token,
             trust_default,
+            inbox_caps,
         })
     }
 

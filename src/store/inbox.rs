@@ -56,6 +56,64 @@ pub async fn project(
     Ok(())
 }
 
+/// Count the items that still wait on the human in one project.
+///
+/// `actor` confines the count to one actor; `None` counts every actor. Only an
+/// open item counts, since a resolved item frees its slot and an unread or
+/// read item never waited on the human.
+pub(crate) async fn open_count(
+    conn: &Connection,
+    project_id: &str,
+    actor: Option<&str>,
+) -> Result<i64> {
+    let mut sql = String::from(
+        "SELECT COUNT(*) FROM inbox i JOIN events e ON e.id = i.event_id
+         WHERE i.status IN ('action', 'waiting') AND e.project_id = ?1",
+    );
+    let mut params = vec![Value::Text(project_id.to_string())];
+    if let Some(actor) = actor {
+        params.push(Value::Text(actor.to_string()));
+        sql.push_str(&format!(" AND e.actor = ?{}", params.len()));
+    }
+    let mut rows = conn.query(&sql, params).await.map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => row.get::<i64>(0).map_err(engine),
+        None => Ok(0),
+    }
+}
+
+/// Refuse a new open item when it would push a count past its cap.
+///
+/// Runs inside the writer's immediate transaction, so the count and the insert
+/// it guards commit together and a concurrent writer cannot slip past. The
+/// per-actor cap runs first, so the message names the narrowest limit.
+pub(crate) async fn enforce_open_cap(
+    conn: &Connection,
+    project_id: &str,
+    actor: &str,
+    caps: &crate::limits::InboxCaps,
+) -> Result<()> {
+    if caps.per_actor > 0 {
+        let open = open_count(conn, project_id, Some(actor)).await?;
+        if open >= caps.per_actor {
+            return Err(Error::RateLimited(format!(
+                "{actor} already has {open} open items in {project_id}; the per-agent cap is {}",
+                caps.per_actor
+            )));
+        }
+    }
+    if caps.per_project > 0 {
+        let open = open_count(conn, project_id, None).await?;
+        if open >= caps.per_project {
+            return Err(Error::RateLimited(format!(
+                "{project_id} already has {open} open items; the per-project cap is {}",
+                caps.per_project
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// List inbox entries, newest first, optionally filtered.
 pub async fn list(
     db: &Database,

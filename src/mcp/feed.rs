@@ -51,22 +51,35 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
         // The client cannot set the action flag. Only an approval waits on the
-        // human, so an agent cannot flood the inbox with ordinary signals.
+        // human, so an agent cannot flood the inbox with ordinary signals. An
+        // approval is an open item and is subject to the inbox cap.
         let needs_action = params.kind == "approval";
-        let event_id = events::append(
-            &self.state.db,
-            &principal.actor,
-            params.idempotency_key.as_deref(),
-            NewEvent {
-                project_id: params.project_id,
-                kind: params.kind,
-                summary: params.summary,
-                payload: params.payload,
-                needs_action,
-                thread_id: params.thread_id,
-            },
-        )
-        .await
+        let event = NewEvent {
+            project_id: params.project_id,
+            kind: params.kind,
+            summary: params.summary,
+            payload: params.payload,
+            needs_action,
+            thread_id: params.thread_id,
+        };
+        let event_id = if needs_action {
+            events::append_action(
+                &self.state.db,
+                &self.state.config.inbox_caps,
+                &principal.actor,
+                params.idempotency_key.as_deref(),
+                event,
+            )
+            .await
+        } else {
+            events::append(
+                &self.state.db,
+                &principal.actor,
+                params.idempotency_key.as_deref(),
+                event,
+            )
+            .await
+        }
         .map_err(to_error_data)?;
 
         self.state.notify();

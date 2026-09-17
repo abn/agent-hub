@@ -76,12 +76,40 @@ pub async fn append(
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
+    append_with_caps(db, None, actor, idempotency_key, event).await
+}
+
+/// Append an open item with the inbox cap applied.
+///
+/// An open item is a question or an approval, the two kinds that wait on the
+/// human. The cap check, the event insert, and the inbox projection commit in
+/// one immediate transaction, so two concurrent writers cannot both slip past.
+/// The cap is not applied to a replayed write: the idempotency lookup returns
+/// the original id before the check, so a retry of an accepted write never
+/// turns into a refusal.
+pub async fn append_action(
+    db: &Database,
+    caps: &crate::limits::InboxCaps,
+    actor: &str,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
+    append_with_caps(db, Some(caps), actor, idempotency_key, event).await
+}
+
+async fn append_with_caps(
+    db: &Database,
+    caps: Option<&crate::limits::InboxCaps>,
+    actor: &str,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
     let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
-    let id = append_in_tx(&tx, actor, idempotency_key, event).await?;
+    let id = append_in_tx_capped(&tx, caps, actor, idempotency_key, event).await?;
     tx.commit().await.map_err(engine)?;
     Ok(id)
 }
@@ -89,9 +117,20 @@ pub async fn append(
 /// Append an event inside a caller's transaction.
 ///
 /// Lets a related write, an identity change for instance, and its audit event
-/// commit together, so neither can survive without the other.
+/// commit together, so neither can survive without the other. The inbox cap is
+/// not applied here; an actionable write goes through [`append_action`].
 pub(crate) async fn append_in_tx(
     tx: &turso::transaction::Transaction<'_>,
+    actor: &str,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
+    append_in_tx_capped(tx, None, actor, idempotency_key, event).await
+}
+
+async fn append_in_tx_capped(
+    tx: &turso::transaction::Transaction<'_>,
+    caps: Option<&crate::limits::InboxCaps>,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
@@ -103,9 +142,6 @@ pub(crate) async fn append_in_tx(
         payload_text.as_deref().map(str::len).unwrap_or(0),
     )?;
 
-    let id = ulid::Ulid::generate().to_string();
-    let created_at = crate::store::now_rfc3339();
-
     // A question always needs the human and roots its own thread, whichever
     // tool wrote it. An answer must name the question it replies to.
     if event.kind == "answer" && event.thread_id.is_none() {
@@ -116,20 +152,30 @@ pub(crate) async fn append_in_tx(
     // A question and an approval both wait on the human, whichever surface
     // wrote them, so the rule lives here rather than at each write path.
     let needs_action = event.needs_action || event.kind == "question" || event.kind == "approval";
-    let thread_id = if event.kind == "question" {
-        Some(id.clone())
-    } else {
-        event.thread_id.clone()
-    };
 
     // Inside the immediate transaction, so a concurrent retry with the same
-    // key serialises and sees the recorded row rather than racing it.
+    // key serialises and sees the recorded row rather than racing it. This runs
+    // before the cap so a replay of an accepted write is returned as it was.
     if let Some(key) = idempotency_key
         && let Some(existing) =
             crate::store::idempotency::lookup(tx, &event.project_id, key).await?
     {
         return Ok(existing);
     }
+
+    // Checked before any row is written, so a refused write leaves nothing
+    // behind and the count and the insert share one transaction.
+    if needs_action && let Some(caps) = caps {
+        crate::store::inbox::enforce_open_cap(tx, &event.project_id, actor, caps).await?;
+    }
+
+    let id = ulid::Ulid::generate().to_string();
+    let created_at = crate::store::now_rfc3339();
+    let thread_id = if event.kind == "question" {
+        Some(id.clone())
+    } else {
+        event.thread_id.clone()
+    };
 
     tx.execute(
         "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at)

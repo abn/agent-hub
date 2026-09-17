@@ -57,6 +57,7 @@ fn config() -> Config {
         bind: "127.0.0.1:0".parse::<SocketAddr>().expect("address"),
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
+        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
     }
 }
 

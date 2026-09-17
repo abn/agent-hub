@@ -32,6 +32,7 @@ async fn state() -> AppState {
         bind: "127.0.0.1:0".parse().expect("socket address"),
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
+        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
     })
     .await
     .expect("open state")
@@ -72,6 +73,7 @@ async fn problem_body(response: axum::response::Response) -> Value {
 async fn seed_question(state: &AppState, subject: &str) -> String {
     questions::post(
         &state.db,
+        &agent_hub::limits::InboxCaps::disabled(),
         NewQuestion {
             actor: "agent-one",
             project_id: "proj",
@@ -523,4 +525,44 @@ async fn missing_token_is_a_problem() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
     assert_eq!(problem["status"], 401);
+}
+
+#[tokio::test]
+async fn the_inbox_listing_honours_the_limit() {
+    let state = state().await;
+    for index in 0..3 {
+        events::append(
+            &state.db,
+            "agent-one",
+            None,
+            NewEvent {
+                project_id: "proj".to_string(),
+                kind: "finished".to_string(),
+                summary: format!("done {index}"),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+            },
+        )
+        .await
+        .expect("append finished work");
+    }
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=unread&limit=2",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(
+        body["items"].as_array().expect("items").len(),
+        2,
+        "the limit caps the page"
+    );
 }

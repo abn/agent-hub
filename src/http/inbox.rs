@@ -24,6 +24,8 @@ pub struct InboxParams {
     pub status: Option<String>,
     /// Restrict to one project.
     pub project: Option<String>,
+    /// Maximum entries to return, clamped by the store to the feed page cap.
+    pub limit: Option<i64>,
 }
 
 /// The inbox entries matching the filters.
@@ -90,14 +92,10 @@ pub async fn list(
         .as_deref()
         .filter(|project| !project.is_empty());
 
-    let items = inbox_store::list(
-        &state.db,
-        status,
-        project,
-        crate::limits::FEED_LIMIT_DEFAULT,
-    )
-    .await
-    .map_err(|err| Problem::from_error(&err))?;
+    let limit = params.limit.unwrap_or(crate::limits::FEED_LIMIT_DEFAULT);
+    let items = inbox_store::list(&state.db, status, project, limit)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(InboxList { items }))
 }

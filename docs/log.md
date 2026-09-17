@@ -4,6 +4,22 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, inbox action-item cap
+
+* **Creation**: Added [the inbox action-item cap](adr/0017-inbox-action-item-cap.md):
+  a question or an approval is an open item on the human, and the writer caps
+  how many one actor may leave open in a project and how many may accumulate in
+  the project at all. A refused write returns `rate_limited` (HTTP 429) and
+  changes nothing. The defaults are generous, and
+  `HUB_INBOX_ACTION_PER_AGENT` and `HUB_INBOX_ACTION_PER_PROJECT` set them, with
+  zero disabling a check.
+* **Update**: The [agent surface](architecture/agent-surface.md) documents the
+  refusal as a structured tool error alongside the other write errors, and the
+  [human surface](architecture/human-surface.md) and
+  [human interface](design/human-interface.md) describe the waiting queue
+  grouped by actor so an agent that leaves many items is one block with its own
+  count.
+
 ## 2026-09-17, markdown rendering
 
 * **Update**: The public artifact route and the in-app viewer render a

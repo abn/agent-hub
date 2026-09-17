@@ -53,15 +53,20 @@ struct McpServer {
 }
 
 impl McpServer {
-    fn spawn(data_dir: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+    fn spawn(data_dir: &Path, envs: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
+        command
             .arg("mcp")
             .env("RUST_LOG", "error")
             .env("HUB_DATA_DIR", data_dir)
             .env("HUB_AGENT_ID", AGENT_ID)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let mut child = command
             .spawn()
             .expect("failed to spawn the agent-hub binary");
 
@@ -191,7 +196,7 @@ fn item_with_id<'a>(items: &'a [Value], event_id: &str) -> &'a Value {
 fn inbox_and_question_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
     common::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::spawn(&data_dir.0, &[]);
     server.initialize();
 
     let finished = server.call_tool(
@@ -310,5 +315,63 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
         error_code(&invalid),
         "invalid_argument",
         "an unknown status is rejected"
+    );
+}
+
+#[test]
+fn question_post_is_refused_at_the_inbox_cap() {
+    let data_dir = TempDir::new("cap");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0, &[("HUB_INBOX_ACTION_PER_AGENT", "2")]);
+    server.initialize();
+
+    for subject in ["one", "two"] {
+        let asked = server.call_tool(
+            "question_post",
+            json!({"project_id": "proj", "subject": subject}),
+        );
+        structured(&asked)["question_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("under the cap the question is admitted: {asked}"));
+    }
+
+    let refused = server.call_tool(
+        "question_post",
+        json!({"project_id": "proj", "subject": "three"}),
+    );
+    assert_eq!(
+        error_code(&refused),
+        "rate_limited",
+        "the cap refuses the third open item"
+    );
+    assert_eq!(
+        refused["error"]["data"]["error"]["retryable"], false,
+        "a capped write is not retried blindly; the human frees the slot"
+    );
+}
+
+#[test]
+fn approval_signal_is_refused_at_the_inbox_cap() {
+    let data_dir = TempDir::new("approval-cap");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0, &[("HUB_INBOX_ACTION_PER_AGENT", "1")]);
+    server.initialize();
+
+    let first = server.call_tool(
+        "signal_append",
+        json!({"project_id": "proj", "kind": "approval", "summary": "deploy?"}),
+    );
+    structured(&first)["event_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("under the cap the approval is admitted: {first}"));
+
+    let refused = server.call_tool(
+        "signal_append",
+        json!({"project_id": "proj", "kind": "approval", "summary": "again"}),
+    );
+    assert_eq!(
+        error_code(&refused),
+        "rate_limited",
+        "the cap refuses a second open approval"
     );
 }

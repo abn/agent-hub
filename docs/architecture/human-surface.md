@@ -29,7 +29,7 @@ POST   /api/v1/projects
 DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
-GET    /api/v1/inbox?status=
+GET    /api/v1/inbox?status=&limit=
 GET    /api/v1/stream
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
@@ -75,7 +75,7 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 | Screen | Purpose |
 |---|---|
 | Home | Today at a glance: what waits on you, the latest feed across projects, and storage. |
-| Inbox | The global queue: a "Waiting on you" group above unread finished work. |
+| Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer, with an unlock screen for protected artifacts. |
 | Sessions | Sessions per project, drilling into the brain tree and audit log, with end and prune actions. |
@@ -106,6 +106,12 @@ The freshness stream carries no event data. It signals that a write changed
 the inbox or the feed, and the client refetches its waiting badge, so it is a
 mailbox nudge rather than a chat channel and the asynchronous interaction
 model is unchanged.
+
+The waiting queue groups its open items by actor, so an agent that leaves many
+items is one block with its own count rather than a run of rows buried in the
+list. The number of open items an actor may leave is capped, by
+[decision](../adr/0017-inbox-action-item-cap.md); the defaults are generous and
+two environment variables set them, with zero disabling the guard.
 
 The interaction model is read, answer, approve, and prune, with no chat
 interface, by [decision](../adr/0007-async-mailbox-semantics.md). Alerts have

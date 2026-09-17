@@ -11,6 +11,7 @@ pub enum ErrorCode {
     NotFound,
     Conflict,
     PayloadTooLarge,
+    RateLimited,
     Unavailable,
     Internal,
 }
@@ -25,6 +26,7 @@ impl ErrorCode {
             Self::NotFound => "not_found",
             Self::Conflict => "conflict",
             Self::PayloadTooLarge => "payload_too_large",
+            Self::RateLimited => "rate_limited",
             Self::Unavailable => "unavailable",
             Self::Internal => "internal",
         }
@@ -61,6 +63,9 @@ pub enum Error {
     /// The request body or payload exceeds a limit.
     #[error("{0}")]
     PayloadTooLarge(String),
+    /// A write was refused because it would push a count past its cap.
+    #[error("{0}")]
+    RateLimited(String),
     /// The hub cannot serve the request yet, though the request is well formed.
     #[error("{0}")]
     Unavailable(String),
@@ -76,6 +81,7 @@ impl Error {
             Self::NotFound(_) => ErrorCode::NotFound,
             Self::Conflict(_) => ErrorCode::Conflict,
             Self::PayloadTooLarge(_) => ErrorCode::PayloadTooLarge,
+            Self::RateLimited(_) => ErrorCode::RateLimited,
             Self::Unavailable(_) | Self::Engine(_) => ErrorCode::Unavailable,
             Self::Config(_) | Self::Io(_) => ErrorCode::Internal,
         }
@@ -83,6 +89,8 @@ impl Error {
 
     /// Whether a caller may sensibly retry the same request.
     pub fn retryable(&self) -> bool {
+        // A cap refusal clears only when the human resolves or prunes an item,
+        // which the server cannot time, so a blind retry is not sensible.
         matches!(self.code(), ErrorCode::Unavailable)
     }
 }

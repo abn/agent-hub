@@ -27,7 +27,14 @@ pub struct NewQuestion<'a> {
 
 /// Post a question. It opens a thread, lands on the feed, and enters the inbox
 /// as an action item. Returns the question's event id.
-pub async fn post(db: &Database, question: NewQuestion<'_>) -> Result<String> {
+///
+/// A question is an open item, so it is subject to the inbox cap and may be
+/// refused when the asker already holds the cap in the project.
+pub async fn post(
+    db: &Database,
+    caps: &crate::limits::InboxCaps,
+    question: NewQuestion<'_>,
+) -> Result<String> {
     let NewQuestion {
         actor,
         project_id,
@@ -55,8 +62,9 @@ pub async fn post(db: &Database, question: NewQuestion<'_>) -> Result<String> {
         payload.insert("to".to_string(), serde_json::Value::String(to.to_string()));
     }
 
-    let id = events::append(
+    let id = events::append_action(
         db,
+        caps,
         actor,
         idempotency_key,
         NewEvent {

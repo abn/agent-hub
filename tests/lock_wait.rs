@@ -113,6 +113,7 @@ async fn concurrent_same_key_questions_serialize() {
         handles.push(tokio::spawn(async move {
             questions::post(
                 &db,
+                &agent_hub::limits::InboxCaps::disabled(),
                 NewQuestion {
                     actor: "agent-one",
                     project_id: "proj",
@@ -155,6 +156,7 @@ async fn concurrent_same_key_answers_serialize() {
     let db = Arc::new(open(&dir).await);
     let question_id = questions::post(
         &db,
+        &agent_hub::limits::InboxCaps::disabled(),
         NewQuestion {
             actor: "agent-one",
             project_id: "proj",

@@ -102,7 +102,9 @@ fn to_error_data(err: Error) -> ErrorData {
         ErrorCode::InvalidArgument | ErrorCode::Conflict | ErrorCode::PayloadTooLarge => {
             McpErrorCode::INVALID_PARAMS
         }
-        ErrorCode::Unauthenticated | ErrorCode::Forbidden => McpErrorCode::INVALID_REQUEST,
+        ErrorCode::Unauthenticated | ErrorCode::Forbidden | ErrorCode::RateLimited => {
+            McpErrorCode::INVALID_REQUEST
+        }
         ErrorCode::NotFound => McpErrorCode::RESOURCE_NOT_FOUND,
         ErrorCode::Unavailable | ErrorCode::Internal => McpErrorCode::INTERNAL_ERROR,
     };

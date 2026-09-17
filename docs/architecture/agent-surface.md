@@ -70,7 +70,11 @@ resource a caller may not reach returns the same error whether it is missing
 or denied, so an agent cannot use an error as an existence check. A write that
 creates a durable record elsewhere (a feed event, a question, an answer, an
 artifact, or a decision) accepts an optional idempotency key, so a retry after
-a dropped connection returns the original result instead of a duplicate.
+a dropped connection returns the original result instead of a duplicate. A
+question or an approval is an open item on the human, and the hub caps how many
+one actor may leave open in a project; a write past the cap is refused with
+`rate_limited` and changes nothing, and resolving an item frees its slot. See
+[the inbox cap](../adr/0017-inbox-action-item-cap.md).
 
 ## Kind families
 

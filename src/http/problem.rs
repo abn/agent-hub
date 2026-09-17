@@ -63,6 +63,7 @@ pub fn status_for(code: ErrorCode) -> StatusCode {
         ErrorCode::NotFound => StatusCode::NOT_FOUND,
         ErrorCode::Conflict => StatusCode::CONFLICT,
         ErrorCode::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+        ErrorCode::RateLimited => StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
     }

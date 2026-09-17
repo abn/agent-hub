@@ -40,6 +40,7 @@ impl HubServer {
         .map_err(to_error_data)?;
         let event_id = questions::post(
             &self.state.db,
+            &self.state.config.inbox_caps,
             NewQuestion {
                 actor: &principal.actor,
                 project_id: &params.project_id,

@@ -1,10 +1,12 @@
 //! Inbox and question tests: projection, threads, resolution, and counts.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
-use agent_hub::store::events::{self, FeedQuery, NewEvent, append, read_feed};
+use agent_hub::limits::InboxCaps;
+use agent_hub::store::events::{self, FeedQuery, NewEvent, append, append_action, read_feed};
 use agent_hub::store::questions::NewQuestion;
 use agent_hub::store::{home, inbox, migrate, open_engine, questions};
 
@@ -39,6 +41,25 @@ fn question(subject: &str) -> NewQuestion<'_> {
         context: None,
         to: None,
         idempotency_key: None,
+    }
+}
+
+fn question_by<'a>(actor: &'a str, subject: &'a str) -> NewQuestion<'a> {
+    NewQuestion {
+        actor,
+        project_id: "proj",
+        subject,
+        body: None,
+        context: None,
+        to: None,
+        idempotency_key: None,
+    }
+}
+
+fn caps(per_actor: i64, per_project: i64) -> InboxCaps {
+    InboxCaps {
+        per_actor,
+        per_project,
     }
 }
 
@@ -247,7 +268,9 @@ async fn question_opens_a_thread_and_lands_in_the_inbox() {
     let mut ask = question("Deploy tonight?");
     ask.body = Some("The release is ready.");
     ask.to = Some("human");
-    let question_id = questions::post(&db, ask).await.expect("post question");
+    let question_id = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), ask)
+        .await
+        .expect("post question");
 
     let event = agent_hub::store::events::get(&db, &question_id)
         .await
@@ -271,9 +294,13 @@ async fn question_opens_a_thread_and_lands_in_the_inbox() {
 #[tokio::test]
 async fn answer_closes_the_thread_and_resolves_the_item() {
     let db = open().await;
-    let question_id = questions::post(&db, question("Ship it?"))
-        .await
-        .expect("post");
+    let question_id = questions::post(
+        &db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        question("Ship it?"),
+    )
+    .await
+    .expect("post");
 
     let answer_id = questions::answer(&db, "human", &question_id, "Yes, ship it", None)
         .await
@@ -357,9 +384,13 @@ async fn answering_a_non_question_is_rejected() {
 #[tokio::test]
 async fn feed_still_reads_the_thread() {
     let db = open().await;
-    let question_id = questions::post(&db, question("Anyone there?"))
-        .await
-        .expect("post");
+    let question_id = questions::post(
+        &db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        question("Anyone there?"),
+    )
+    .await
+    .expect("post");
     questions::answer(&db, "human", &question_id, "here", None)
         .await
         .expect("answer");
@@ -377,10 +408,14 @@ async fn question_and_answer_honour_idempotency_keys() {
 
     let mut first = question("repeatable?");
     first.idempotency_key = Some("q1");
-    let q1 = questions::post(&db, first).await.expect("post");
+    let q1 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), first)
+        .await
+        .expect("post");
     let mut again = question("repeatable?");
     again.idempotency_key = Some("q1");
-    let q2 = questions::post(&db, again).await.expect("post again");
+    let q2 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), again)
+        .await
+        .expect("post again");
     assert_eq!(q1, q2, "a repeated question key returns the same event");
 
     let a1 = questions::answer(&db, "human", &q1, "yes", Some("a1"))
@@ -453,4 +488,130 @@ async fn an_orphan_answer_is_rejected() {
     .await
     .expect_err("reject orphan answer");
     assert_eq!(err.code(), agent_hub::error::ErrorCode::InvalidArgument);
+}
+
+#[tokio::test]
+async fn the_per_actor_cap_refuses_the_next_open_item_and_resolving_frees_a_slot() {
+    let db = open().await;
+    let cap = caps(2, 0);
+    questions::post(&db, &cap, question("first"))
+        .await
+        .expect("first open item");
+    questions::post(&db, &cap, question("second"))
+        .await
+        .expect("second open item");
+
+    let err = questions::post(&db, &cap, question("third"))
+        .await
+        .expect_err("the third open item is refused");
+    assert_eq!(err.code(), ErrorCode::RateLimited);
+
+    let items = inbox::list(&db, Some("action"), None, 50)
+        .await
+        .expect("inbox");
+    assert_eq!(items.len(), 2, "a refused write leaves no item behind");
+
+    let oldest = items.last().expect("an open item").event_id.clone();
+    questions::answer(&db, "human", &oldest, "done", None)
+        .await
+        .expect("answer frees a slot");
+    questions::post(&db, &cap, question("fourth"))
+        .await
+        .expect("the freed slot admits a new item");
+}
+
+#[tokio::test]
+async fn the_per_project_cap_holds_across_actors() {
+    let db = open().await;
+    let cap = caps(0, 2);
+    questions::post(&db, &cap, question_by("agent-one", "one"))
+        .await
+        .expect("agent one");
+    questions::post(&db, &cap, question_by("agent-two", "two"))
+        .await
+        .expect("agent two");
+
+    let err = questions::post(&db, &cap, question_by("agent-three", "three"))
+        .await
+        .expect_err("the project ceiling refuses a third actor");
+    assert_eq!(err.code(), ErrorCode::RateLimited);
+}
+
+#[tokio::test]
+async fn unread_work_does_not_count_toward_the_cap() {
+    let db = open().await;
+    let cap = caps(1, 0);
+    append(&db, "agent-one", None, finished("nightly done"))
+        .await
+        .expect("append finished work");
+
+    questions::post(&db, &cap, question("the only open item"))
+        .await
+        .expect("unread work does not fill a slot");
+    let err = questions::post(&db, &cap, question("over the cap"))
+        .await
+        .expect_err("the second open item is refused");
+    assert_eq!(err.code(), ErrorCode::RateLimited);
+}
+
+#[tokio::test]
+async fn approvals_and_questions_share_the_cap() {
+    let db = open().await;
+    let cap = caps(1, 0);
+    append_action(&db, &cap, "agent-one", None, approval("deploy?"))
+        .await
+        .expect("an approval is an open item");
+
+    let err = questions::post(&db, &cap, question("also open"))
+        .await
+        .expect_err("a question is refused behind the approval");
+    assert_eq!(err.code(), ErrorCode::RateLimited);
+}
+
+#[tokio::test]
+async fn a_replayed_open_item_is_returned_at_the_cap() {
+    let db = open().await;
+    let cap = caps(1, 0);
+    let mut first = question("repeatable");
+    first.idempotency_key = Some("q-key");
+    let q1 = questions::post(&db, &cap, first)
+        .await
+        .expect("first write");
+
+    let mut replay = question("repeatable");
+    replay.idempotency_key = Some("q-key");
+    let q2 = questions::post(&db, &cap, replay)
+        .await
+        .expect("a replay is not refused at the cap");
+    assert_eq!(q1, q2, "a replay returns the original id");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn two_writers_one_under_the_actor_cap_admit_exactly_one() {
+    let db = Arc::new(open().await);
+    let cap = caps(1, 0);
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let mut handles = Vec::new();
+    for subject in ["a", "b"] {
+        let db = db.clone();
+        let barrier = barrier.clone();
+        handles.push(tokio::spawn(async move {
+            barrier.wait().await;
+            questions::post(&db, &cap, question_by("agent-one", subject))
+                .await
+                .map_err(|err| err.code())
+        }));
+    }
+
+    let mut admitted = 0;
+    let mut refused = 0;
+    for handle in handles {
+        match handle.await.expect("join") {
+            Ok(_) => admitted += 1,
+            Err(ErrorCode::RateLimited) => refused += 1,
+            Err(other) => panic!("unexpected error code {other:?}"),
+        }
+    }
+    assert_eq!(admitted, 1, "exactly one write is admitted");
+    assert_eq!(refused, 1, "the other write is refused");
 }

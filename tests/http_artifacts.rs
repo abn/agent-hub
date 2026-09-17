@@ -36,6 +36,7 @@ async fn state() -> AppState {
         bind: "127.0.0.1:0".parse().expect("socket address"),
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
+        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
     })
     .await
     .expect("open state")
