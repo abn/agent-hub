@@ -454,18 +454,20 @@ pub async fn add_grant(
     access: &str,
 ) -> Result<Grant> {
     validate_access(access)?;
-    if get_agent(db, agent_id).await?.is_none() {
-        return Err(Error::NotFound(format!("agent {agent_id} not found")));
-    }
-    if crate::store::projects::get(db, project_id).await?.is_none() {
-        return Err(Error::NotFound(format!("project {project_id} not found")));
-    }
     let created_at = crate::store::now_rfc3339();
     let mut conn = db.connect().map_err(engine)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+    // Checked inside the transaction, so the check and the insert cannot be
+    // separated by a concurrent project delete.
+    if !row_exists(&tx, Table::Agents, agent_id).await? {
+        return Err(Error::NotFound(format!("agent {agent_id} not found")));
+    }
+    if !row_exists(&tx, Table::Projects, project_id).await? {
+        return Err(Error::NotFound(format!("project {project_id} not found")));
+    }
     tx.execute(
         "INSERT INTO grants(agent_id, project_id, access, created_at)
          VALUES (?1, ?2, ?3, ?4)
@@ -637,6 +639,35 @@ fn grant_from_row(row: &Row) -> Result<Grant> {
         access: text(row, 2)?,
         created_at: text(row, 3)?,
     })
+}
+
+/// The tables an id can be resolved against. Closed so no caller-supplied
+/// string can reach the query.
+#[derive(Clone, Copy)]
+enum Table {
+    Agents,
+    Projects,
+}
+
+impl Table {
+    fn name(self) -> &'static str {
+        match self {
+            Table::Agents => "agents",
+            Table::Projects => "projects",
+        }
+    }
+}
+
+/// Whether a row with this id exists, read through a caller's connection.
+async fn row_exists(conn: &turso::Connection, table: Table, id: &str) -> Result<bool> {
+    let mut rows = conn
+        .query(
+            &format!("SELECT 1 FROM {} WHERE id = ?1", table.name()),
+            [id],
+        )
+        .await
+        .map_err(engine)?;
+    Ok(rows.next().await.map_err(engine)?.is_some())
 }
 
 fn text(row: &Row, index: usize) -> Result<String> {

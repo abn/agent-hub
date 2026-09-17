@@ -91,11 +91,11 @@ pub async fn start(
         }
     };
 
-    tx.commit().await.map_err(engine)?;
-
+    // A new session and its lifecycle event commit together, so a failure
+    // cannot leave a live session with no `started` record.
     if created {
-        events::append(
-            db,
+        events::append_in_tx(
+            &tx,
             agent,
             None,
             NewEvent {
@@ -114,6 +114,7 @@ pub async fn start(
         .await?;
     }
 
+    tx.commit().await.map_err(engine)?;
     Ok(session)
 }
 
@@ -122,7 +123,15 @@ pub async fn start(
 /// Retry-safe: ending an already-ended session is a no-op, so a retried call
 /// does not append a second lifecycle event.
 pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
-    let session = get(db, session_id)
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    // The status re-check and the lifecycle event share the transaction, so a
+    // retried end and a concurrent end cannot both append.
+    let session = get_on(&tx, session_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
 
@@ -130,17 +139,16 @@ pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
         return Ok(());
     }
 
-    let conn = db.connect().map_err(engine)?;
     let now = crate::store::now_rfc3339();
-    conn.execute(
+    tx.execute(
         "UPDATE sessions SET status = 'ended', last_activity = ?1 WHERE id = ?2",
         vec![Value::Text(now), Value::Text(session_id.to_string())],
     )
     .await
     .map_err(engine)?;
 
-    events::append(
-        db,
+    events::append_in_tx(
+        &tx,
         actor,
         None,
         NewEvent {
@@ -157,12 +165,17 @@ pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
         },
     )
     .await?;
+    tx.commit().await.map_err(engine)?;
     Ok(())
 }
 
 /// Fetch one session by id.
 pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
     let conn = db.connect().map_err(engine)?;
+    get_on(&conn, session_id).await
+}
+
+async fn get_on(conn: &turso::Connection, session_id: &str) -> Result<Option<Session>> {
     let mut rows = conn
         .query(
             "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at

@@ -88,6 +88,58 @@ async fn end_marks_the_session_and_emits_an_event() {
 }
 
 #[tokio::test]
+async fn ending_twice_does_not_emit_a_second_event() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end again");
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let ends = events
+        .iter()
+        .filter(|event| event.kind == "session" && event.summary.contains("ended"))
+        .count();
+    assert_eq!(ends, 1, "a retried end does not append a second event");
+}
+
+#[tokio::test]
+async fn concurrent_ends_emit_one_event() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let (a, b) = tokio::join!(
+        sessions::end(&db, &session.id, "agent-one"),
+        sessions::end(&db, &session.id, "agent-one"),
+    );
+    assert!(
+        a.is_ok() || b.is_ok(),
+        "at least one end succeeds: {a:?} {b:?}"
+    );
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let ends = events
+        .iter()
+        .filter(|event| event.kind == "session" && event.summary.contains("ended"))
+        .count();
+    assert_eq!(ends, 1, "concurrent ends append one event");
+}
+
+#[tokio::test]
 async fn list_returns_active_and_ended_sessions() {
     let db = open().await;
     sessions::start(&db, "proj", "one", "agent-one")

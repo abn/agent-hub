@@ -101,6 +101,18 @@ pub async fn publish(
             },
         )
         .await?;
+        append_event(
+            &tx,
+            artifact.actor,
+            artifact.project_id,
+            "published",
+            &id,
+            artifact.title,
+            artifact.kind,
+            1,
+            protected,
+        )
+        .await?;
         tx.commit().await.map_err(engine)
     }
     .await;
@@ -109,19 +121,6 @@ pub async fn publish(
         let _ = blob::remove(data_dir, &rel);
         return Err(err);
     }
-
-    append_event(
-        db,
-        artifact.actor,
-        artifact.project_id,
-        "published",
-        &id,
-        artifact.title,
-        artifact.kind,
-        1,
-        protected,
-    )
-    .await?;
 
     get(db, data_dir, &id).await.map(|(artifact, _)| artifact)
 }
@@ -191,6 +190,18 @@ pub async fn update(
             },
         )
         .await?;
+        append_event(
+            &tx,
+            actor,
+            &existing.project_id,
+            "updated",
+            artifact_id,
+            &existing.title,
+            &existing.kind,
+            version,
+            protected,
+        )
+        .await?;
         tx.commit().await.map_err(engine)
     }
     .await;
@@ -199,19 +210,6 @@ pub async fn update(
         let _ = blob::remove(data_dir, &rel);
         return Err(err);
     }
-
-    append_event(
-        db,
-        actor,
-        &existing.project_id,
-        "updated",
-        artifact_id,
-        &existing.title,
-        &existing.kind,
-        version,
-        protected,
-    )
-    .await?;
 
     get(db, data_dir, artifact_id)
         .await
@@ -280,7 +278,7 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
 
 #[allow(clippy::too_many_arguments)]
 async fn append_event(
-    db: &Database,
+    tx: &turso::transaction::Transaction<'_>,
     actor: &str,
     project_id: &str,
     action: &str,
@@ -290,8 +288,8 @@ async fn append_event(
     version: i64,
     protected: bool,
 ) -> Result<()> {
-    events::append(
-        db,
+    events::append_in_tx(
+        tx,
         actor,
         None,
         NewEvent {

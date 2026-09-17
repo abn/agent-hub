@@ -79,6 +79,10 @@ pub async fn post(db: &Database, question: NewQuestion<'_>) -> Result<String> {
 }
 
 /// Answer a question. The answer lands on the thread and resolves the item.
+///
+/// The read, the answer, and the resolve commit in one immediate transaction,
+/// so a concurrent answer serialises and a failure cannot leave an answer
+/// without the question resolved.
 pub async fn answer(
     db: &Database,
     actor: &str,
@@ -86,7 +90,13 @@ pub async fn answer(
     body: &str,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    let question = events::get(db, question_id)
+    let mut conn = db.connect().map_err(crate::store::engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(crate::store::engine)?;
+
+    let question = events::get_in_tx(&tx, question_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("question {question_id} not found")))?;
     if question.kind != "question" {
@@ -96,8 +106,8 @@ pub async fn answer(
         )));
     }
 
-    let id = events::append(
-        db,
+    let id = events::append_in_tx(
+        &tx,
         actor,
         idempotency_key,
         NewEvent {
@@ -111,7 +121,8 @@ pub async fn answer(
     )
     .await?;
 
-    inbox::set_status(db, question_id, "resolved").await?;
+    inbox::set_status_in_tx(&tx, question_id, "resolved").await?;
+    tx.commit().await.map_err(crate::store::engine)?;
     Ok(id)
 }
 

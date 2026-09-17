@@ -63,12 +63,49 @@ async fn publish_reads_back_and_lands_on_the_feed() {
         .await
         .expect("feed")
         .events;
-    assert!(
-        events
-            .iter()
-            .any(|event| event.kind == "artifact" && event.summary.contains("published")),
-        "a publish event lands on the feed"
+    let published = events
+        .iter()
+        .find(|event| event.kind == "artifact" && event.summary.contains("published"))
+        .expect("a publish event lands on the feed");
+    let payload = published.payload.as_ref().expect("publish payload");
+    assert_eq!(payload["artifact_id"], artifact.id);
+    assert_eq!(payload["version"], 1);
+    assert_eq!(payload["protected"], false);
+}
+
+#[tokio::test]
+async fn concurrent_updates_get_distinct_versions() {
+    let dir = temp_dir("artifact-concurrent");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"))
+        .await
+        .expect("publish");
+
+    let (a, b) = tokio::join!(
+        artifacts::update(&db, &dir, "agent-one", &artifact.id, b"second draft", None),
+        artifacts::update(&db, &dir, "agent-one", &artifact.id, b"third draft", None),
     );
+
+    let mut versions: Vec<i64> = [a, b]
+        .iter()
+        .filter_map(|result| result.as_ref().ok().map(|artifact| artifact.version))
+        .collect();
+    versions.sort_unstable();
+    assert_eq!(
+        versions,
+        vec![2, 3],
+        "both updates serialise onto distinct versions"
+    );
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let updated = events
+        .iter()
+        .filter(|event| event.kind == "artifact" && event.summary.contains("updated"))
+        .count();
+    assert_eq!(updated, 2, "each granted version has one event");
 }
 
 #[tokio::test]
@@ -89,6 +126,21 @@ async fn update_adds_a_version_and_refreshes_search() {
     assert_eq!(read.version, 2);
 
     assert!(search_hits(&db, "draft").await >= 1);
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    assert!(
+        events.iter().any(|event| event.kind == "artifact"
+            && event.summary.contains("updated")
+            && event
+                .payload
+                .as_ref()
+                .and_then(|payload| payload["version"].as_i64())
+                == Some(2)),
+        "an update event with the granted version lands on the feed"
+    );
 }
 
 #[tokio::test]
