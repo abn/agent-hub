@@ -152,6 +152,28 @@ function groupedEvents(events, row) {
     .join("");
 }
 
+// Group open items by actor, preserving the incoming order, so one agent's
+// queue reads as one block. The count makes a runaway agent visible without
+// opening every row.
+function byActor(items) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.actor)) groups.set(item.actor, []);
+    groups.get(item.actor).push(item);
+  }
+  return groups;
+}
+
+function actorGroups(items) {
+  return [...byActor(items)]
+    .map(
+      ([actor, rows]) =>
+        `<h3 class="group">${esc(actor)} <span class="group-n">${rows.length}</span></h3>
+         <div class="card">${rows.map(inboxRow).join("")}</div>`,
+    )
+    .join("");
+}
+
 function kindChips(active) {
   const chips = KINDS.map((kind) => {
     const pressed = active.has(kind) ? "true" : "false";
@@ -188,15 +210,27 @@ async function home() {
 }
 
 async function inbox() {
-  const { items } = await api("/api/v1/inbox");
-  // The queue is what waits on the human and what they have not read. A
-  // resolved or read item has left it; the feed keeps its history.
-  const waiting = items.filter((item) => item.status === "action" || item.status === "waiting");
-  const unread = items.filter((item) => item.status === "unread");
-  const section = (title, rows) =>
-    rows.length ? `<h2>${title}</h2><div class="card">${rows.map(inboxRow).join("")}</div>` : "";
+  // Read the queue the human acts on apart from unread finished work. Unread
+  // items accumulate without expiry, so a single shared page could crowd the
+  // waiting items off the end; the three sets are fetched independently. Each
+  // actor in the waiting group gets its own block, so one agent's queue reads
+  // as a block rather than a run of rows scattered through the list.
+  const [action, waitingItems, unread] = await Promise.all([
+    api("/api/v1/inbox?status=action&limit=500"),
+    api("/api/v1/inbox?status=waiting&limit=500"),
+    api("/api/v1/inbox?status=unread&limit=500"),
+  ]);
+  const waiting = [...action.items, ...waitingItems.items].sort(
+    (a, b) => new Date(b.updated_at) - new Date(a.updated_at),
+  );
+  const waitingSection = waiting.length
+    ? `<h2>Waiting on you</h2>${actorGroups(waiting)}`
+    : "";
+  const unreadSection = unread.items.length
+    ? `<h2>Unread</h2><div class="card">${unread.items.map(inboxRow).join("")}</div>`
+    : "";
   main.innerHTML = `<h1>Inbox</h1>${
-    section("Waiting on you", waiting) + section("Unread", unread) ||
+    waitingSection + unreadSection ||
     '<p class="empty">Inbox is clear. Finished work, questions, and approvals will land here.</p>'
   }`;
 }

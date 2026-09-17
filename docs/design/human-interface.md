@@ -48,7 +48,8 @@ desktop adds a top bar and a list plus detail layout.
 ## Interaction rules
 
 - Every verb is reachable in two taps from Home: read, answer, approve, prune.
-- Action items are inline in the Inbox as the first group, above unread.
+- Action items are inline in the Inbox as the first group, above unread, and
+  grouped by actor within that group.
 - Read is explicit, by opening an item or a swipe; never scroll-past.
 - Feeds are grouped by day, with kind filters as chips.
 - Prune is confirmed in a dialog, then reversible for a short window, then
