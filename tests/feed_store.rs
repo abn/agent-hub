@@ -145,6 +145,31 @@ async fn appended_event_is_searchable_through_the_corpus() {
 }
 
 #[tokio::test]
+async fn empty_forward_poll_keeps_the_since_cursor() {
+    let db = open().await;
+    append(&db, "a", None, event("one")).await.expect("one");
+
+    let first_page = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("page one");
+    let cursor = first_page.next_since.clone().expect("a since cursor");
+
+    let poll = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            since: Some(cursor.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("empty poll");
+    assert!(poll.events.is_empty(), "no newer events to return");
+    assert_eq!(poll.next_since.as_deref(), Some(cursor.as_str()));
+    assert_eq!(poll.next_before, None);
+}
+
+#[tokio::test]
 async fn before_cursor_pages_backwards_with_both_cursors() {
     let db = open().await;
     append(&db, "a", None, event("one")).await.expect("one");

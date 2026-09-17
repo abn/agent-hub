@@ -290,6 +290,11 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
         events.push(event_from_row(&row)?);
     }
 
+    // A forward poll that sees no new events must not drop the caller's
+    // cursor, so it reports the `since` it was given and the client keeps
+    // polling from the same position. An empty backward page has no older
+    // event to point at, and a mixed query is not a polling shape, so both
+    // stay cursorless.
     let (next_since, next_before) = match (events.first(), events.last()) {
         (Some(first), Some(last)) => {
             let (newest, oldest) = if ascending {
@@ -299,6 +304,7 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
             };
             (Some(newest.id.clone()), Some(oldest.id.clone()))
         }
+        _ if ascending => (query.since.clone(), None),
         _ => (None, None),
     };
     Ok(FeedPage {

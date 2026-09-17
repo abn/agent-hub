@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, feed cursor
+
+* **Update**: An empty forward feed poll returns the `since` cursor it was
+  given rather than none, so a polling client keeps its place instead of
+  losing it. A non-empty page, a backward (`before`) page, and a mixed query
+  keep their existing cursors.
+
 ## 2026-09-17, tailnet coverage
 
 * **Update**: The embedded tailnet opt-in is now automatic. Setting
