@@ -53,6 +53,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        self.state.notify();
         // The question roots its own thread, so the thread id is its event id.
         let thread_id = event_id.clone();
         Ok(CallToolResult::structured(json!({
@@ -95,6 +96,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        self.state.notify();
         Ok(CallToolResult::structured(json!({ "event_id": event_id })))
     }
 

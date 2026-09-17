@@ -51,6 +51,7 @@ impl HubServer {
 
         *self.active.lock().await = Some((session.project_id.clone(), session.id.clone()));
 
+        self.state.notify();
         Ok(CallToolResult::structured(json!({
             "session_id": session.id,
             "brain_root": session.brain_path,
@@ -93,6 +94,7 @@ impl HubServer {
             *active = None;
         }
 
+        self.state.notify();
         Ok(CallToolResult::structured(json!({ "ok": true })))
     }
 

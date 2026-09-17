@@ -24,6 +24,9 @@ pub struct AppState {
     pub brain: BrainStore,
     /// Token resolver.
     pub auth: Arc<Auth>,
+    /// Freshness ticks for the human stream. A write that changes the inbox or
+    /// feed sends one; the stream carries no data, only the nudge to refetch.
+    pub ticker: tokio::sync::broadcast::Sender<()>,
 }
 
 impl AppState {
@@ -39,6 +42,7 @@ impl AppState {
         let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
         let auth = Arc::new(Auth::from_config(&config));
+        let (ticker, _) = tokio::sync::broadcast::channel(16);
         Ok(Self {
             config: Arc::new(config),
             data_dir,
@@ -46,7 +50,14 @@ impl AppState {
             db,
             brain,
             auth,
+            ticker,
         })
+    }
+
+    /// Nudge every stream subscriber to refetch. A send with no subscribers is
+    /// not an error; the next subscriber gets the state on its next write.
+    pub fn notify(&self) {
+        let _ = self.ticker.send(());
     }
 }
 
@@ -67,8 +78,10 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(async move {
         let interval = sweep_interval();
         loop {
-            if let Err(err) = store::prune::sweep(&sweeper.db, &sweeper.data_dir).await {
-                tracing::warn!(error = %err, "prune sweep failed");
+            match store::prune::sweep(&sweeper.db, &sweeper.data_dir).await {
+                Ok(committed) if committed > 0 => sweeper.notify(),
+                Ok(_) => {}
+                Err(err) => tracing::warn!(error = %err, "prune sweep failed"),
             }
             tokio::time::sleep(interval).await;
         }

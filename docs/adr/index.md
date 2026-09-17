@@ -21,3 +21,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0014](0014-optional-embedded-tailnet.md) - Optional embedded tailnet
 * [0015](0015-human-interface-foundation.md) - The human interface follows the
   design foundation
+* [0016](0016-push-notifications-deferred.md) - Push notifications are deferred
+  beyond v1

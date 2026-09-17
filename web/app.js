@@ -712,6 +712,39 @@ function showWaitingNotification(count) {
     .catch(() => {});
 }
 
+// Read the server's freshness stream. It carries no event data; each tick just
+// refetches the badge. A dropped stream reconnects, and the slow poll covers
+// any gap. The loop also waits for a token, so entering one in Settings starts
+// the stream without a reload.
+let streamRunning = false;
+async function startStream() {
+  if (streamRunning) return;
+  if (!prefs.token) {
+    setTimeout(startStream, 15000);
+    return;
+  }
+  streamRunning = true;
+  try {
+    const response = await fetch("/api/v1/stream", {
+      headers: { Authorization: "Bearer " + prefs.token, Accept: "text/event-stream" },
+    });
+    if (!response.ok || !response.body) throw new Error("stream unavailable");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop();
+      if (frames.some((frame) => frame.includes("event: tick"))) refreshBadge();
+    }
+  } catch {}
+  streamRunning = false;
+  setTimeout(startStream, 15000);
+}
+
 async function answer(id) {
   const body = prompt("Your answer");
   if (!body) return;
@@ -879,7 +912,11 @@ window.addEventListener("hashchange", render);
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
-  setInterval(refreshBadge, 30000);
 }
+
+// The freshness stream nudges a refetch when a write lands; the slow poll is
+// the fallback if the stream drops or the browser cannot stream a fetch.
+setInterval(refreshBadge, 60000);
+startStream();
 
 render();

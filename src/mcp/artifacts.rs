@@ -51,6 +51,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        self.state.notify();
         Ok(CallToolResult::structured(json!({
             "artifact_id": artifact.id,
             "version": artifact.version,
@@ -87,6 +88,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        self.state.notify();
         Ok(CallToolResult::structured(
             json!({ "version": artifact.version }),
         ))

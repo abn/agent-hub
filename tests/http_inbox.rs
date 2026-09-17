@@ -1,7 +1,9 @@
 //! HTTP home, inbox, and answer routes: counts, listing, auth, and problems.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use tokio_stream::StreamExt;
 
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
@@ -456,6 +458,58 @@ async fn deciding_without_a_token_is_a_problem() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
     assert_eq!(problem["status"], 401);
+}
+
+#[tokio::test]
+async fn the_stream_requires_a_token_and_pushes_a_tick() {
+    let state = state().await;
+    let question_id = seed_question(&state, "Ship it?").await;
+
+    let app = router(state.clone());
+    let denied = app
+        .oneshot(request("GET", "/api/v1/stream", None, None))
+        .await
+        .expect("request");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request("GET", "/api/v1/stream", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream"),
+    );
+
+    // A write on the REST surface reaches the subscriber as a tick.
+    let mut body = response.into_body().into_data_stream();
+    let app = router(state);
+    let answered = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/questions/{question_id}/answer"),
+            Some("Bearer token"),
+            Some(json!({ "body": "yes" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(answered.status(), StatusCode::OK);
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), body.next())
+        .await
+        .expect("a frame arrives")
+        .expect("a chunk")
+        .expect("read ok");
+    let text = String::from_utf8_lossy(&frame);
+    assert!(
+        text.contains("event: tick"),
+        "the write ticks the stream: {text}"
+    );
 }
 
 #[tokio::test]

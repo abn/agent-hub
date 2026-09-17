@@ -83,5 +83,6 @@ pub async fn delete(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(StatusCode::NO_CONTENT)
 }

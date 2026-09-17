@@ -133,6 +133,7 @@ pub async fn answer(
     .await
     .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(Json(AnswerResult { event_id }))
 }
 
@@ -191,5 +192,6 @@ pub async fn decide(
     .await
     .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(Json(AnswerResult { event_id }))
 }

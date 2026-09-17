@@ -93,6 +93,7 @@ pub async fn end(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(Json(EndResult { ok: true }))
 }
 

@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, notifications descoped
+
+* **Update**: Background push is deferred beyond v1. Real delivery with the
+  app closed needs a browser push service, a third party in the transport path
+  that the local-first design avoids, and a secure context. The shipped
+  surface stays an opt-in in-app notification, raised while the app runs.
+* **Creation**: Added `GET /api/v1/stream`, an admin-gated server-sent
+  freshness stream. It carries no event data, only a tick when a write changes
+  the inbox or feed, so an open app refreshes its waiting badge without
+  polling.
+* **Note**: A later revision can add opt-in Web Push with a contentless,
+  end-to-end encrypted payload if a vendor transport is accepted.
+
 ## 2026-09-17, agent-surface hardening
 
 * **Update**: A non-admin caller no longer learns whether a project, artifact,

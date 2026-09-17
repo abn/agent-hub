@@ -36,6 +36,7 @@ pub async fn prune(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(Json(token))
 }
 
@@ -56,6 +57,7 @@ pub async fn undo(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    state.notify();
     Ok(Json(UndoResult { ok: true }))
 }
 

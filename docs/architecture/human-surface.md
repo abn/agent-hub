@@ -30,6 +30,7 @@ DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=
+GET    /api/v1/stream
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
 POST   /api/v1/sessions/:id/end
@@ -92,7 +93,15 @@ offers End and Prune. Project deletion is a destructive action under Settings
 behind a confirmation; an agent's personal space cannot be deleted. Inbox
 notifications are opt-in from Settings, request permission only on that
 action, and carry only waiting-on-you items; without permission or support
-they degrade silently.
+they degrade silently. True background push is deferred, by
+[decision](../adr/0016-push-notifications-deferred.md); an open app reads the
+freshness stream and refreshes its waiting badge on a tick, with a slow poll
+as the fallback.
+
+The freshness stream carries no event data. It signals that a write changed
+the inbox or the feed, and the client refetches its waiting badge, so it is a
+mailbox nudge rather than a chat channel and the asynchronous interaction
+model is unchanged.
 
 The interaction model is read, answer, approve, and prune, with no chat
 interface, by [decision](../adr/0007-async-mailbox-semantics.md). Alerts have

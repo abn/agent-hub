@@ -69,6 +69,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        self.state.notify();
         Ok(CallToolResult::structured(json!({ "event_id": event_id })))
     }
 
