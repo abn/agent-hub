@@ -23,7 +23,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::app::AppState;
 use crate::config::Config;
 use crate::error::{Error, ErrorCode};
-use crate::principal::Principal;
+use crate::principal::{Principal, Trust};
 
 mod artifacts;
 mod brain;
@@ -63,14 +63,24 @@ impl HubServer {
     /// The caller identity for this request.
     ///
     /// The streamable HTTP transport resolves and rejects tokens in middleware
-    /// and stashes the principal on the request; stdio is local trust and has
-    /// no principal extension, so it falls back to the local actor.
+    /// and stashes the principal on the request. stdio has no principal
+    /// extension and is the local admin. An HTTP request that arrives with a
+    /// `Parts` but no resolved principal is a wiring fault, so it fails closed
+    /// rather than inheriting local trust.
     fn principal(&self, context: &RequestContext<RoleServer>) -> Principal {
-        context
+        let Some(parts) = context.extensions.get::<axum::http::request::Parts>() else {
+            return self.state.auth.local();
+        };
+        parts
             .extensions
-            .get::<axum::http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<Principal>().cloned())
-            .unwrap_or_else(|| self.state.auth.local())
+            .get::<Principal>()
+            .cloned()
+            .unwrap_or_else(|| Principal {
+                actor: "unknown".to_string(),
+                trust: Trust::Untrusted,
+                agent_id: None,
+                is_admin: false,
+            })
     }
 }
 

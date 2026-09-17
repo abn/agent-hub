@@ -32,7 +32,7 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("./data"));
 
-        let bind = std::env::var("HUB_BIND")
+        let bind: SocketAddr = std::env::var("HUB_BIND")
             .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
             .parse()
             .map_err(|err| Error::Config(format!("HUB_BIND is not a socket address: {err}")))?;
@@ -40,6 +40,19 @@ impl Config {
         let admin_token = std::env::var("HUB_ADMIN_TOKEN")
             .ok()
             .filter(|token| !token.is_empty());
+
+        // The control surface fails closed without a token, so an exposed bind
+        // would be dead. Require the token off loopback; only warn locally.
+        if admin_token.is_none() {
+            if !bind.ip().is_loopback() {
+                return Err(Error::Config(
+                    "HUB_ADMIN_TOKEN is required when HUB_BIND is not loopback".to_string(),
+                ));
+            }
+            tracing::warn!(
+                "HUB_ADMIN_TOKEN is unset; the control surface will reject every request"
+            );
+        }
 
         let trust_default = match std::env::var("HUB_TRUST_DEFAULT").as_deref() {
             Ok("untrusted") => TrustDefault::Untrusted,

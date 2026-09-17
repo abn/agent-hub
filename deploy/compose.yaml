@@ -6,6 +6,7 @@ services:
     environment:
       HUB_DATA_DIR: /data
       HUB_BIND: 0.0.0.0:8080
+      HUB_ADMIN_TOKEN: ${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in the environment or a .env file}
     ports:
       - "8080:8080"
     volumes:
