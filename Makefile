@@ -72,8 +72,9 @@ web/a11y: build ## Run the headless accessibility audit
 	if [ -z "$$found" ]; then printf 'web/a11y: playwright is not installed, skipped\n'; exit 0; fi; \
 	"$$found" .agents/scripts/a11y.py
 
-net/check: ## Compile the optional embedded tailnet build
+net/check: ## Compile and test the optional embedded tailnet build
 	cargo check --features tailnet
+	cargo test --features tailnet --test tailnet_config
 
 check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y net/check test ## Full quality gate
 	@printf 'check: ok\n'

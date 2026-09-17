@@ -13,6 +13,24 @@ mod embedded;
 #[cfg(feature = "tailnet")]
 pub use embedded::serve;
 
+/// Acknowledge that the embedded tailnet uses early-days software, so the
+/// library's experimental guard passes. A build without the feature has no
+/// guard and does nothing.
+///
+/// # Safety
+///
+/// Mutates the process environment, so the caller must be single-threaded and
+/// call it before any other thread starts. Call it once from the sync start of
+/// `main`, before the async runtime is built.
+pub unsafe fn acknowledge_unstable() {
+    #[cfg(feature = "tailnet")]
+    {
+        unsafe {
+            std::env::set_var("TS_RS_EXPERIMENT", "this_is_unstable_software");
+        }
+    }
+}
+
 /// Reject a tailnet request on a build without the feature.
 #[cfg(not(feature = "tailnet"))]
 pub async fn serve(

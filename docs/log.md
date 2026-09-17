@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, tailnet coverage
+
+* **Update**: The embedded tailnet opt-in is now automatic. Setting
+  `HUB_TAILNET` acknowledges the library's experimental guard, so the endpoint
+  starts as documented instead of failing its own startup check.
+* **Creation**: Added `HUB_TAILNET_CONTROL_URL`, so the endpoint can point at a
+  self-hosted control server; the public control plane remains the default.
+* **Update**: The gate compiles and tests the feature build. The tailnet
+  configuration tests cover the missing-key, bad-port, control-URL, and
+  feature-refusal paths. The live join and serve path stays a documented,
+  manual test, because it needs a real tailnet.
+
 ## 2026-09-17, accessibility gate
 
 * **Update**: The accessibility gate now runs in two layers. A hermetic

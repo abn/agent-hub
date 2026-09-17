@@ -25,9 +25,14 @@ pub async fn serve(config: &Tailnet, router: axum::Router) -> Result<()> {
         std::fs::set_permissions(&config.state_dir, std::fs::Permissions::from_mode(0o700))?;
     }
     let state_path = config.state_dir.join("keys.json");
-    let device_config = tailscale::Config::default_with_key_file(&state_path)
+    let mut device_config = tailscale::Config::default_with_key_file(&state_path)
         .await
         .map_err(|err| Error::Config(format!("tailnet key state failed: {err}")))?;
+    // A self-hosted control plane is pointed at explicitly; the public one is
+    // the library default.
+    if let Some(control_url) = &config.control_url {
+        device_config.control_server_url = control_url.clone();
+    }
     let device = tailscale::Device::new(&device_config, Some(auth_key))
         .await
         .map_err(|err| Error::Config(format!("tailnet device failed: {err}")))?;

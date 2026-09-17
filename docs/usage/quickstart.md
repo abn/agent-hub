@@ -41,12 +41,15 @@ The binary reads its configuration from the environment.
 | `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
 | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
+| `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
 
 The embedded tailnet endpoint is experimental and needs a binary built with
-the `tailnet` feature (`cargo build --features tailnet`). It is addressed by
-tailnet IP and carries plain HTTP inside the tunnel, so it needs
-`HUB_ADMIN_TOKEN` as well. Leave `HUB_TAILNET` unset for the default
-deployment: the plain container behind a reverse proxy.
+the `tailnet` feature (`cargo build --features tailnet`). Setting `HUB_TAILNET`
+is the acknowledgement that it uses early-days software; the hub records that
+on startup, so no extra variable is needed. It is addressed by tailnet IP and
+carries plain HTTP inside the tunnel, so it needs `HUB_ADMIN_TOKEN` as well.
+Leave `HUB_TAILNET` unset for the default deployment: the plain container
+behind a reverse proxy.
 
 ## Run the binary
 

@@ -37,6 +37,9 @@ pub struct Tailnet {
     pub port: u16,
     /// Directory holding the device key state, under the data directory.
     pub state_dir: PathBuf,
+    /// Optional control server URL, for a self-hosted control plane. The
+    /// library's public control plane is used when this is unset.
+    pub control_url: Option<url::Url>,
 }
 
 impl Tailnet {
@@ -93,6 +96,12 @@ impl Config {
         })
     }
 
+    /// Whether a tailnet auth key is configured, so the process should opt into
+    /// the embedded tailnet's experimental guard before starting.
+    pub fn tailnet_requested(&self) -> bool {
+        std::env::var("HUB_TAILNET").is_ok_and(|key| !key.is_empty())
+    }
+
     /// Read the optional embedded tailnet endpoint configuration.
     ///
     /// Kept out of [`Config`] so the common configuration stays small and a
@@ -104,12 +113,21 @@ impl Config {
                 .map_err(|_| Error::Config(format!("HUB_TAILNET_PORT is not a port: {value}")))?,
             Err(_) => 8080,
         };
+        // Validated here, not in the spawned endpoint task, so a typo fails
+        // startup instead of leaving a dead endpoint behind a healthy hub.
+        let control_url = match std::env::var("HUB_TAILNET_CONTROL_URL") {
+            Ok(value) if !value.is_empty() => Some(value.parse().map_err(|err| {
+                Error::Config(format!("HUB_TAILNET_CONTROL_URL is not a URL: {err}"))
+            })?),
+            _ => None,
+        };
         let tailnet = Tailnet {
             auth_key: std::env::var("HUB_TAILNET")
                 .ok()
                 .filter(|key| !key.is_empty()),
             port,
             state_dir: self.data_dir.join("tailnet"),
+            control_url,
         };
         if tailnet.enabled() && !cfg!(feature = "tailnet") {
             return Err(Error::Config(
