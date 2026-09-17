@@ -280,6 +280,126 @@ fn artifact_tools_round_trip_over_stdio() {
     );
 }
 
+fn tool_error_code(response: &Value) -> String {
+    response
+        .get("error")
+        .and_then(|error| error.get("data"))
+        .and_then(|data| data.get("error"))
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("tool error carries the hub code: {response}"))
+        .to_string()
+}
+
+#[test]
+fn artifact_versioning_round_trip_over_stdio() {
+    let data_dir = TempDir::new("versioned");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let published = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Versioned report",
+            "kind": "html",
+            "content": "<h1>v1</h1>",
+            "description": "A longer summary",
+            "favicon": "R",
+            "label": "v1-label",
+        }),
+    );
+    let result = structured(&published);
+    let artifact_id = result["artifact_id"]
+        .as_str()
+        .expect("artifact_publish returns an id")
+        .to_string();
+    assert_eq!(result["version"], 1);
+
+    let response = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let got = structured(&response);
+    assert_eq!(got["description"], "A longer summary");
+    assert_eq!(got["favicon"], "R");
+    assert_eq!(got["label"], "v1-label");
+    assert_eq!(got["content"], "<h1>v1</h1>");
+    assert_eq!(got["version"], 1);
+
+    let updated = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "<h1>v2</h1>",
+            "base_version": 1,
+            "label": "v2-label",
+        }),
+    );
+    assert_eq!(
+        structured(&updated)["version"],
+        2,
+        "an update from the current base increments the version"
+    );
+
+    let response = server.call_tool(
+        "artifact_get",
+        json!({"artifact_id": artifact_id, "version": 1}),
+    );
+    let first = structured(&response);
+    assert_eq!(first["content"], "<h1>v1</h1>");
+    assert_eq!(first["version"], 1);
+    assert_eq!(first["label"], "v1-label");
+    assert_eq!(first["description"], "A longer summary");
+
+    let response = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let current = structured(&response);
+    assert_eq!(current["content"], "<h1>v2</h1>");
+    assert_eq!(current["version"], 2);
+    assert_eq!(current["label"], "v2-label");
+
+    let stale = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "<h1>stale</h1>",
+            "base_version": 1,
+        }),
+    );
+    assert_eq!(
+        tool_error_code(&stale),
+        "conflict",
+        "a stale base without force conflicts: {stale}"
+    );
+
+    let response = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let still = structured(&response);
+    assert_eq!(still["version"], 2, "a conflicted update keeps the version");
+    assert_eq!(still["content"], "<h1>v2</h1>");
+
+    let response = server.call_tool("artifact_versions", json!({"artifact_id": artifact_id}));
+    let listed = structured(&response);
+    let versions = listed["versions"]
+        .as_array()
+        .expect("artifact_versions returns versions");
+    assert_eq!(versions.len(), 2, "both versions are listed");
+    assert_eq!(versions[0]["version"], 1);
+    assert_eq!(versions[1]["version"], 2);
+    assert!(
+        versions[0]["version"].as_i64() < versions[1]["version"].as_i64(),
+        "versions ascend, got {versions:?}"
+    );
+
+    let response = server.call_tool("artifact_delete", json!({"artifact_id": artifact_id}));
+    let deleted = structured(&response);
+    assert_eq!(deleted["artifact_id"], artifact_id);
+
+    let after = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert!(
+        after.get("error").is_some(),
+        "reading a deleted artifact errors: {after}"
+    );
+    assert_eq!(tool_error_code(&after), "not_found");
+}
+
 #[test]
 fn artifact_get_of_an_absent_id_is_not_found() {
     let data_dir = TempDir::new("absent");

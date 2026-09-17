@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_hub::principal::Trust;
+use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, migrate, open_engine, projects};
 use serde_json::json;
@@ -425,6 +426,148 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         after.raw.contains("\"trust\""),
         "the recorded actor is the token identity: {}",
         after.raw
+    );
+
+    drop(_child);
+    drop(data_dir);
+}
+
+#[tokio::test]
+async fn artifact_history_and_delete_are_concealed_from_strangers() {
+    let data_dir = TempDir::new("artifact-conceal");
+
+    let db = open_engine(&data_dir.0.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared project");
+    let strict_token = identity::issue_token(&db, "strict")
+        .await
+        .expect("strict token")
+        .token;
+    let foreign = artifacts::publish(
+        &db,
+        &data_dir.0,
+        NewArtifact {
+            actor: "human",
+            project_id: "shared",
+            title: "Shared notes",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"# notes",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("shared artifact");
+    let own = artifacts::publish(
+        &db,
+        &data_dir.0,
+        NewArtifact {
+            actor: "strict",
+            project_id: &strict.personal_project_id,
+            title: "Own notes",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"# mine",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("own artifact");
+    drop(db);
+
+    let port = free_port();
+    let _child = spawn(&data_dir.0, port);
+    wait_for_port(port);
+
+    let strict_session = initialize(port, &strict_token);
+
+    for tool in ["artifact_versions", "artifact_delete"] {
+        let denied = call(
+            port,
+            &strict_token,
+            &strict_session,
+            tool,
+            json!({"artifact_id": foreign.id}),
+        );
+        assert!(
+            denied.raw.contains("forbidden"),
+            "{tool} on a foreign artifact is forbidden: {}",
+            denied.raw
+        );
+        assert!(
+            !denied.raw.contains("not_found"),
+            "{tool} carries no existence oracle: {}",
+            denied.raw
+        );
+        let missing = call(
+            port,
+            &strict_token,
+            &strict_session,
+            tool,
+            json!({"artifact_id": "ghost-artifact"}),
+        );
+        assert!(
+            missing.raw.contains("forbidden"),
+            "{tool} on a missing artifact is forbidden too: {}",
+            missing.raw
+        );
+    }
+
+    let versions = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "artifact_versions",
+        json!({"artifact_id": own.id}),
+    );
+    assert!(
+        versions.raw.contains("\"version\":1"),
+        "an agent reads its own artifact history: {}",
+        versions.raw
+    );
+
+    let deleted = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "artifact_delete",
+        json!({"artifact_id": own.id}),
+    );
+    assert!(
+        deleted.raw.contains(&own.id),
+        "an agent deletes its own artifact: {}",
+        deleted.raw
+    );
+
+    let gone = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "artifact_get",
+        json!({"artifact_id": own.id}),
+    );
+    assert!(
+        gone.raw.contains("forbidden"),
+        "a deleted artifact reads as forbidden, not found: {}",
+        gone.raw
+    );
+    assert!(
+        !gone.raw.contains("not_found"),
+        "no existence oracle on deleted artifacts: {}",
+        gone.raw
     );
 
     drop(_child);

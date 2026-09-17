@@ -42,9 +42,9 @@ impl HubServer {
                 actor: &principal.actor,
                 project_id: &params.project_id,
                 title: &params.title,
-                description: "",
-                favicon: "",
-                label: None,
+                description: &params.description,
+                favicon: &params.favicon,
+                label: params.label.as_deref(),
                 kind: &params.kind,
                 content: params.content.as_bytes(),
                 envelope: params.envelope,
@@ -87,9 +87,9 @@ impl HubServer {
             params.content.as_bytes(),
             params.envelope,
             UpdateOptions {
-                base_version: None,
-                force: false,
-                label: None,
+                base_version: params.base_version,
+                force: params.force,
+                label: params.label.as_deref(),
             },
             params.idempotency_key.as_deref(),
         )
@@ -102,11 +102,66 @@ impl HubServer {
         ))
     }
 
-    #[tool(description = "Read an artifact's metadata and its current content.")]
+    #[tool(description = "Read an artifact's metadata and its content, optionally at a version.")]
     async fn artifact_get(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ArtifactIdParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &existing.project_id,
+            Access::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let (artifact, bytes) = match params.version {
+            Some(version) => artifacts::get_at_version(
+                &self.state.db,
+                &self.state.data_dir,
+                &params.artifact_id,
+                version,
+            )
+            .await
+            .map_err(to_error_data)?,
+            None => {
+                let bytes = artifacts::read_blob(&self.state.data_dir, &existing)
+                    .await
+                    .map_err(to_error_data)?;
+                (existing, bytes)
+            }
+        };
+        // A protected artifact returns its ciphertext here; decryption is the
+        // client's job and never the server's.
+        let content = String::from_utf8(bytes).map_err(|_| {
+            to_error_data(Error::InvalidArgument(format!(
+                "artifact {} content is not UTF-8 text",
+                params.artifact_id
+            )))
+        })?;
+
+        Ok(CallToolResult::structured(json!({
+            "title": artifact.title,
+            "description": artifact.description,
+            "favicon": artifact.favicon,
+            "label": artifact.label,
+            "kind": artifact.kind,
+            "version": artifact.version,
+            "protected": artifact.protected,
+            "content": content,
+        })))
+    }
+
+    #[tool(description = "List an artifact's versions, oldest first.")]
+    async fn artifact_versions(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<ArtifactVersionsParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
         let artifact = artifacts::metadata(&self.state.db, &params.artifact_id)
@@ -120,25 +175,44 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let bytes = artifacts::read_blob(&self.state.data_dir, &artifact)
+        let versions = artifacts::list_versions(&self.state.db, &params.artifact_id)
             .await
             .map_err(to_error_data)?;
-        // A protected artifact returns its ciphertext here; decryption is the
-        // client's job and never the server's.
-        let content = String::from_utf8(bytes).map_err(|_| {
-            to_error_data(Error::InvalidArgument(format!(
-                "artifact {} content is not UTF-8 text",
-                params.artifact_id
-            )))
-        })?;
 
-        Ok(CallToolResult::structured(json!({
-            "title": artifact.title,
-            "kind": artifact.kind,
-            "version": artifact.version,
-            "protected": artifact.protected,
-            "content": content,
-        })))
+        Ok(CallToolResult::structured(json!({ "versions": versions })))
+    }
+
+    #[tool(description = "Delete an artifact and its history.")]
+    async fn artifact_delete(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<ArtifactDeleteParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &existing.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let deleted = artifacts::delete(
+            &self.state.db,
+            &self.state.data_dir,
+            &principal.actor,
+            &params.artifact_id,
+        )
+        .await
+        .map_err(to_error_data)?;
+
+        self.state.notify();
+        Ok(CallToolResult::structured(
+            json!({ "artifact_id": deleted.id }),
+        ))
     }
 
     #[tool(description = "List a project's artifacts, most recently updated first.")]
@@ -167,6 +241,12 @@ struct ArtifactPublishParams {
     kind: String,
     content: String,
     #[serde(default)]
+    description: String,
+    #[serde(default)]
+    favicon: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
     envelope: Option<serde_json::Value>,
     /// Optional idempotency key, so a retried publish returns the original.
     #[serde(default)]
@@ -180,6 +260,12 @@ struct ArtifactUpdateParams {
     content: String,
     #[serde(default)]
     envelope: Option<serde_json::Value>,
+    #[serde(default)]
+    base_version: Option<i64>,
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    label: Option<String>,
     /// Optional idempotency key, so a retried update returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
@@ -188,6 +274,20 @@ struct ArtifactUpdateParams {
 /// Arguments for `artifact_get`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactIdParams {
+    artifact_id: String,
+    #[serde(default)]
+    version: Option<i64>,
+}
+
+/// Arguments for `artifact_versions`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ArtifactVersionsParams {
+    artifact_id: String,
+}
+
+/// Arguments for `artifact_delete`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ArtifactDeleteParams {
     artifact_id: String,
 }
 
