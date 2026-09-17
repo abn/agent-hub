@@ -17,6 +17,7 @@ pub mod problem;
 pub mod projects;
 pub mod search;
 pub mod sessions;
+pub mod skill;
 pub mod storage;
 pub mod stream;
 pub mod web;
@@ -36,6 +37,7 @@ pub fn router(state: AppState) -> Router {
         .route("/sw.js", get(web::service_worker))
         .route("/icon.svg", get(web::icon))
         .route("/crypto.mjs", get(web::crypto_js))
+        .route("/SKILL.md", get(skill::skill))
         .route("/api/v1/agents", get(agents::list).post(agents::create))
         .route("/api/v1/agents/{id}", patch(agents::update))
         .route(

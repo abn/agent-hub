@@ -165,6 +165,138 @@ async fn service_worker_handles_notifications() {
 }
 
 #[tokio::test]
+async fn serves_the_skill_with_the_request_host() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "hub.example:8080")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    assert_eq!(response.status(), StatusCode::OK, "the skill is public");
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/markdown; charset=utf-8")
+    );
+    let body = text(response).await;
+    assert!(
+        body.contains("http://hub.example:8080"),
+        "the base url is the request host"
+    );
+    assert!(
+        !body.contains("{{base_url}}"),
+        "every placeholder is rendered"
+    );
+}
+
+#[tokio::test]
+async fn the_skill_prefers_forwarded_headers() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "internal:8080")
+        .header("x-forwarded-proto", "https")
+        .header("x-forwarded-host", "hub.example")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    let body = text(response).await;
+    assert!(
+        body.contains("https://hub.example"),
+        "forwarded origin wins"
+    );
+    assert!(
+        !body.contains("https://internal") && !body.contains("http://internal"),
+        "the internal host is not exposed"
+    );
+}
+
+#[tokio::test]
+async fn the_skill_falls_back_to_the_configured_bind() {
+    let app = router(state().await);
+    let response = app.oneshot(get("/SKILL.md", None)).await.expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        text(response).await.contains("http://127.0.0.1:0"),
+        "the configured bind is the fallback"
+    );
+}
+
+#[tokio::test]
+async fn an_unsafe_forwarded_host_falls_through_to_the_request_host() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "hub.example:8080")
+        .header("x-forwarded-host", "http://evil.example/path")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    let body = text(response).await;
+    assert!(
+        body.contains("http://hub.example:8080"),
+        "a bad forwarded host falls through to the request host"
+    );
+    assert!(!body.contains("evil.example"), "the bad host is dropped");
+}
+
+#[tokio::test]
+async fn a_forwarded_scheme_applies_to_the_request_host() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "hub.example")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    assert!(
+        text(response).await.contains("https://hub.example"),
+        "the forwarded scheme combines with the request host"
+    );
+}
+
+#[tokio::test]
+async fn an_invalid_forwarded_scheme_is_not_echoed() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "hub.example")
+        .header("x-forwarded-proto", "ftp")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    assert!(
+        text(response).await.contains("http://hub.example"),
+        "an unknown scheme falls back to http"
+    );
+}
+
+#[tokio::test]
+async fn an_unsafe_host_falls_back_to_the_bind() {
+    let app = router(state().await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "http://evil.example/path")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    assert!(
+        text(response).await.contains("http://127.0.0.1:0"),
+        "a host that is not a host is not echoed"
+    );
+}
+
+#[tokio::test]
 async fn serves_artifact_content_for_the_viewer() {
     let state = state().await;
     let published = artifacts::publish(

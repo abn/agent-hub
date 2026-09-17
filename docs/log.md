@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, usage guide and served skill
+
+* **Creation**: Added [artifacts](usage/artifacts.md), a usage guide for
+  publishing, versioning, protecting, and reading artifacts, and a project and
+  agent setup walkthrough in the [quickstart](usage/quickstart.md).
+* **Update**: Corrected the quickstart's opening, which still described the
+  agent and human surfaces as unbuilt, and added `HUB_AGENT_ID` to the
+  environment table.
+* **Creation**: Added a public `GET /SKILL.md` route that serves a bootstrap
+  guide with the caller's own origin rendered in from the forwarded or request
+  host, so an agent that can already reach the hub learns how to connect and
+  what the tools are. The
+  [human surface](architecture/human-surface.md) lists the route.
+
 ## 2026-09-17, inbox action-item cap
 
 * **Creation**: Added [the inbox action-item cap](adr/0017-inbox-action-item-cap.md):

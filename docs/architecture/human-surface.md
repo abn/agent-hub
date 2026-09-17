@@ -52,11 +52,18 @@ GET    /api/v1/search?q=&scope=&type=
 GET    /healthz
 GET    /readyz
 GET    /artifacts/:id
+GET    /SKILL.md
 ```
 
 The whole REST surface is the human control surface and is admin-only: it
 accepts the configured admin token and nothing else, so an agent token is
 rejected there. Agents reach the hub over MCP.
+
+`GET /SKILL.md` is a public bootstrap guide. The hub renders the caller's own
+origin into it from the forwarded or request host, so an agent that can already
+reach the hub can fetch the connection details and the tool list before it has
+a token, and behind a reverse proxy it receives the public address rather than
+the internal bind.
 
 Errors are RFC 9457 problem details. The public artifact route renders the
 artifact shell; for a protected artifact the shell carries ciphertext, and
