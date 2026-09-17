@@ -53,6 +53,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/questions/{id}/answer", post(inbox::answer))
+        .route("/api/v1/approvals/{id}/decision", post(inbox::decide))
         .route(
             "/api/v1/projects",
             get(projects::list).post(projects::create),

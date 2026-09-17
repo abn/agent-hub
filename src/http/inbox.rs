@@ -43,7 +43,8 @@ pub struct AnswerBody {
     pub idempotency_key: Option<String>,
 }
 
-/// The acknowledgement returned when a question is answered.
+/// The acknowledgement returned when a question is answered or an approval is
+/// decided.
 #[derive(Debug, Serialize)]
 pub struct AnswerResult {
     /// The id of the answer event that was appended.
@@ -128,6 +129,60 @@ pub async fn answer(
         &question_id,
         &payload.body,
         payload.idempotency_key.as_deref(),
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(AnswerResult { event_id }))
+}
+
+/// The body for a decision on an approval.
+#[derive(Debug, Deserialize)]
+pub struct DecisionBody {
+    /// The decision: `approve` or `decline`.
+    pub decision: String,
+    /// Optional note recorded with the decision.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `POST /api/v1/approvals/{id}/decision`
+///
+/// A valid bearer token is required. The decision is recorded on the feed and
+/// resolves the waiting item. An unknown id is a 404, a non-approval id a 400.
+pub async fn decide(
+    State(state): State<AppState>,
+    Path(approval_id): Path<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<DecisionBody>, JsonRejection>,
+) -> std::result::Result<Json<AnswerResult>, Problem> {
+    let principal = state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let Json(payload) = body.map_err(|rejection| {
+        Problem::from_error(&Error::InvalidArgument(format!(
+            "the decision body must be JSON with a decision field: {rejection}"
+        )))
+    })?;
+
+    let approved = match payload.decision.as_str() {
+        "approve" => true,
+        "decline" => false,
+        other => {
+            return Err(Problem::from_error(&Error::InvalidArgument(format!(
+                "decision must be approve or decline, got '{other}'"
+            ))));
+        }
+    };
+
+    let event_id = question_store::decide(
+        &state.db,
+        &principal.actor,
+        &approval_id,
+        approved,
+        payload.note.as_deref(),
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;

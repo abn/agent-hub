@@ -102,6 +102,24 @@ async fn seed_finished(state: &AppState, summary: &str) -> String {
     .expect("append finished")
 }
 
+async fn seed_approval(state: &AppState, summary: &str) -> String {
+    events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "approval".to_string(),
+            summary: summary.to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await
+    .expect("append approval")
+}
+
 #[tokio::test]
 async fn home_returns_the_counts_and_recent_events() {
     let state = state().await;
@@ -254,6 +272,154 @@ async fn answering_an_unknown_id_is_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "not_found");
+}
+
+#[tokio::test]
+async fn deciding_an_approval_returns_an_event_and_resolves_the_item() {
+    let state = state().await;
+    let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{approval_id}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "approve", "note": "ship it" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let event_id = body["event_id"].as_str().expect("event id");
+    assert!(!event_id.is_empty());
+    assert_ne!(event_id, approval_id);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=resolved",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["event_id"], approval_id);
+
+    let app = router(state);
+    let response = app
+        .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    assert_eq!(body["waiting"], 0);
+}
+
+#[tokio::test]
+async fn a_repeated_decision_is_a_conflict() {
+    let state = state().await;
+    let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
+
+    let decide = |id: String| {
+        let app = router(state.clone());
+        async move {
+            app.oneshot(request(
+                "POST",
+                &format!("/api/v1/approvals/{id}/decision"),
+                Some("Bearer token"),
+                Some(json!({ "decision": "approve" })),
+            ))
+            .await
+            .expect("request")
+        }
+    };
+
+    let first = decide(approval_id.clone()).await;
+    assert_eq!(first.status(), StatusCode::OK);
+
+    let second = decide(approval_id).await;
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    let problem = problem_body(second).await;
+    assert_eq!(problem["code"], "conflict");
+}
+
+#[tokio::test]
+async fn deciding_a_non_approval_is_a_problem() {
+    let state = state().await;
+    let finished_id = seed_finished(&state, "not an approval").await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{finished_id}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "approve" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "invalid_argument");
+}
+
+#[tokio::test]
+async fn deciding_an_unknown_id_is_not_found() {
+    let app = router(state().await);
+    let response = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/approvals/unknown-approval/decision",
+            Some("Bearer token"),
+            Some(json!({ "decision": "approve" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "not_found");
+}
+
+#[tokio::test]
+async fn a_malformed_decision_is_a_problem() {
+    let state = state().await;
+    let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{approval_id}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "maybe" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "invalid_argument");
+}
+
+#[tokio::test]
+async fn deciding_without_a_token_is_a_problem() {
+    let app = router(state().await);
+    let response = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/approvals/any-approval/decision",
+            None,
+            Some(json!({ "decision": "approve" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "unauthenticated");
+    assert_eq!(problem["status"], 401);
 }
 
 #[tokio::test]
