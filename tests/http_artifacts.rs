@@ -5,8 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
+use agent_hub::error::Error;
+use agent_hub::http::problem::Problem;
 use agent_hub::http::router;
-use agent_hub::store::artifacts::{self, NewArtifact};
+use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
 use agent_hub::store::sessions;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -448,4 +450,362 @@ async fn pruning_requires_a_token() {
 
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
+}
+
+async fn publish_versioned(state: &AppState) -> String {
+    let id = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "Report",
+            kind: "html",
+            content: b"<p>v1</p>",
+            envelope: None,
+            description: "A report",
+            favicon: "star",
+            label: Some("v1"),
+        },
+        None,
+    )
+    .await
+    .expect("publish v1")
+    .id;
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>v2</p>",
+        None,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some("v2"),
+        },
+        None,
+    )
+    .await
+    .expect("publish v2");
+    id
+}
+
+#[tokio::test]
+async fn content_serves_a_version_and_defaults_to_latest() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}?version=1"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["content"], "<p>v1</p>");
+    assert_eq!(body["version"], 1);
+    assert_eq!(body["description"], "A report");
+    assert_eq!(body["favicon"], "star");
+    assert_eq!(body["label"], "v1");
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["content"], "<p>v2</p>");
+    assert_eq!(body["version"], 2);
+    assert_eq!(body["label"], "v2");
+}
+
+#[tokio::test]
+async fn raw_serves_a_version() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/raw?version=1"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        content_type(&response).as_deref(),
+        Some("text/plain; charset=utf-8"),
+    );
+    assert_eq!(text_body(response).await, "<p>v1</p>");
+}
+
+#[tokio::test]
+async fn content_rejects_unknown_versions() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}?version=0"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "invalid_argument");
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}?version=99"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "not_found");
+}
+
+#[tokio::test]
+async fn versions_lists_history_oldest_first() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/versions"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let versions = body["versions"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0]["version"], 1);
+    assert_eq!(versions[1]["version"], 2);
+    assert_eq!(versions[0]["label"], "v1");
+    assert_eq!(versions[1]["label"], "v2");
+    assert!(versions[0]["created_at"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn raw_serves_text_for_a_public_artifact() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>raw-body</p>").await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/raw"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = content_type(&response).unwrap_or_default();
+    assert!(
+        content_type.starts_with("text/plain"),
+        "public raw is text, got {content_type}"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::X_CONTENT_TYPE_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff"),
+    );
+    assert!(csp(&response).is_empty(), "raw carries no policy");
+    let body = text_body(response).await;
+    assert_eq!(body, "<p>raw-body</p>");
+}
+
+#[tokio::test]
+async fn raw_serves_envelope_and_ciphertext_for_a_protected_artifact() {
+    let state = state().await;
+    let id = publish_protected(&state, "proj", "Sealed report", CIPHERTEXT.as_bytes()).await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/raw"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(content_type(&response).as_deref(), Some("application/json"),);
+    let body = json_body(response).await;
+    assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
+    assert_eq!(body["ciphertext"], "Y2lwaGVyLW1hcmstN2YzYTlj");
+    assert!(
+        !body.to_string().contains(PLAINTEXT),
+        "raw never carries plaintext"
+    );
+}
+
+#[tokio::test]
+async fn raw_rejects_bad_versions() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/raw?version=0"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(response).await["code"], "invalid_argument");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}/raw?version=99"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem_body(response).await["code"], "not_found");
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/artifacts/missing/raw",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_removes_the_artifact_and_its_history() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "DELETE",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["ok"], true);
+
+    for uri in [
+        format!("/api/v1/artifacts/{id}"),
+        format!("/api/v1/artifacts/{id}/versions"),
+        format!("/api/v1/artifacts/{id}/raw"),
+        format!("/artifacts/{id}"),
+    ] {
+        let app = router(state.clone());
+        let response = app
+            .oneshot(request("GET", &uri, Some("Bearer token"), None))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {uri}");
+    }
+}
+
+#[tokio::test]
+async fn new_admin_routes_require_a_token() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>one</p>").await;
+
+    for (method, uri) in [
+        ("GET", format!("/api/v1/artifacts/{id}")),
+        ("GET", format!("/api/v1/artifacts/{id}/versions")),
+        ("GET", format!("/api/v1/artifacts/{id}/raw")),
+        ("DELETE", format!("/api/v1/artifacts/{id}")),
+    ] {
+        let app = router(state.clone());
+        let response = app
+            .oneshot(request(method, &uri, None, None))
+            .await
+            .expect("request");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {uri}"
+        );
+        let problem = problem_body(response).await;
+        assert_eq!(problem["code"], "unauthenticated");
+    }
+}
+
+#[tokio::test]
+async fn render_serves_a_version() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/artifacts/{id}?version=1"),
+            None,
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        csp(&response).contains("sandbox"),
+        "a versioned page is still sandboxed"
+    );
+    let body = text_body(response).await;
+    assert!(body.contains("&lt;p&gt;v1&lt;/p&gt;"));
+    assert!(!body.contains("v2"));
+}
+
+#[test]
+fn stale_base_conflict_maps_to_409() {
+    let problem = Problem::from_error(&Error::Conflict(
+        "artifact abc is at version 2, not base version 1".to_string(),
+    ));
+    assert_eq!(problem.status, 409);
+    assert_eq!(problem.code, "conflict");
 }

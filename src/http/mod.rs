@@ -52,7 +52,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/agents/{id}/grants/{project_id}",
             delete(agents::ungrant),
         )
-        .route("/api/v1/artifacts/{id}", get(artifacts::content))
+        .route(
+            "/api/v1/artifacts/{id}",
+            get(artifacts::content).delete(artifacts::destroy),
+        )
+        .route("/api/v1/artifacts/{id}/versions", get(artifacts::versions))
+        .route("/api/v1/artifacts/{id}/raw", get(artifacts::raw))
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/stream", get(stream::stream))

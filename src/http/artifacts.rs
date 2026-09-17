@@ -10,17 +10,17 @@
 
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::markdown::escape_html;
-use crate::store::artifacts::{self as artifact_store, Artifact};
+use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
 
 /// The artifacts of one project.
 #[derive(Debug, Serialize)]
@@ -67,14 +67,45 @@ pub struct ArtifactContent {
     /// it in a sandboxed frame. Null for every other kind and for a protected
     /// artifact, whose plaintext never reaches the server.
     pub rendered: Option<String>,
+    /// The version the content was read at.
+    pub version: i64,
+    /// Artifact description.
+    pub description: String,
+    /// Artifact favicon.
+    pub favicon: String,
+    /// The label of the version read, when set.
+    pub label: Option<String>,
+}
+
+/// The `?version=N` selector shared by the versioned artifact routes.
+#[derive(Debug, Default, Deserialize)]
+pub struct VersionQuery {
+    /// The version to read. Omitted, the current version is read.
+    pub version: Option<i64>,
+}
+
+/// The version history of one artifact, oldest first.
+#[derive(Debug, Serialize)]
+pub struct VersionList {
+    /// The versions, oldest first.
+    pub versions: Vec<ArtifactVersion>,
+}
+
+/// The acknowledgement returned when an artifact is deleted.
+#[derive(Debug, Serialize)]
+pub struct DestroyResult {
+    /// Always true on success.
+    pub ok: bool,
 }
 
 /// `GET /api/v1/artifacts/{id}`
 ///
 /// Admin-only. Returns the content for the in-app viewer and decryptor.
+/// With `?version=N`, returns that version instead of the current one.
 pub async fn content(
     State(state): State<AppState>,
     Path(artifact_id): Path<String>,
+    Query(query): Query<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ArtifactContent>, Problem> {
     state
@@ -82,9 +113,16 @@ pub async fn content(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let (artifact, bytes) = artifact_store::get(&state.db, &state.data_dir, &artifact_id)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let (artifact, bytes) = match query.version {
+        Some(version) => {
+            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
+                .await
+                .map_err(|err| Problem::from_error(&err))?
+        }
+        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?,
+    };
 
     let content = String::from_utf8(bytes).map_err(|_| {
         Problem::from_error(&Error::InvalidArgument(format!(
@@ -102,7 +140,91 @@ pub async fn content(
         envelope: artifact.envelope,
         content,
         rendered,
+        version: artifact.version,
+        description: artifact.description,
+        favicon: artifact.favicon,
+        label: artifact.label,
     }))
+}
+
+/// `GET /api/v1/artifacts/{id}/versions`
+///
+/// Admin-only. Returns the version history, oldest first.
+pub async fn versions(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<VersionList>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let versions = artifact_store::list_versions(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(VersionList { versions }))
+}
+
+/// `DELETE /api/v1/artifacts/{id}`
+///
+/// Admin-only. Deletes the artifact and its history.
+pub async fn destroy(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<DestroyResult>, Problem> {
+    let principal = state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    artifact_store::delete(&state.db, &state.data_dir, &principal.actor, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(DestroyResult { ok: true }))
+}
+
+/// `GET /api/v1/artifacts/{id}/raw`
+///
+/// Admin-only. Returns the raw bytes of the current version, or of
+/// `?version=N` when given. A public artifact arrives as text; a protected
+/// one arrives as a JSON envelope plus base64 ciphertext for the browser to
+/// decrypt.
+pub async fn raw(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    Query(query): Query<VersionQuery>,
+    headers: HeaderMap,
+) -> std::result::Result<Response, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let (artifact, bytes) = match query.version {
+        Some(version) => {
+            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
+                .await
+                .map_err(|err| Problem::from_error(&err))?
+        }
+        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?,
+    };
+
+    if artifact.protected {
+        let body = serde_json::json!({
+            "envelope": artifact.envelope,
+            "ciphertext": base64_encode(&bytes),
+        });
+        Ok(raw_json_response(body.to_string()))
+    } else {
+        Ok(raw_text_response(bytes))
+    }
 }
 
 /// `GET /artifacts/{id}`
@@ -111,14 +233,23 @@ pub async fn content(
 /// wrapped in a document the hub controls and framed without same-origin
 /// access, so agent-authored content never runs in the hub origin. A protected
 /// artifact returns an unlock shell carrying the envelope and ciphertext; the
-/// server holds no plaintext to leak.
+/// server holds no plaintext to leak. With `?version=N`, serves that version
+/// instead of the current one.
 pub async fn render(
     State(state): State<AppState>,
     Path(artifact_id): Path<String>,
+    Query(query): Query<VersionQuery>,
 ) -> std::result::Result<Response, Problem> {
-    let (artifact, bytes) = artifact_store::get(&state.db, &state.data_dir, &artifact_id)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let (artifact, bytes) = match query.version {
+        Some(version) => {
+            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
+                .await
+                .map_err(|err| Problem::from_error(&err))?
+        }
+        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?,
+    };
 
     let document = if artifact.protected {
         unlock_shell(&artifact, &bytes)
@@ -152,6 +283,60 @@ fn html_response(body: impl Into<Body>) -> Response {
         ),
     );
     response
+}
+
+/// Serve raw public bytes as text. Only the content type and nosniff travel
+/// with the body.
+fn raw_text_response(body: Vec<u8>) -> Response {
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// Serve a protected version as JSON for the browser decryptor. Only the
+/// content type and nosniff travel with the body.
+fn raw_json_response(body: String) -> Response {
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// Encode bytes with the standard base64 alphabet for the raw protected body.
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let mut block: u32 = 0;
+        for &byte in chunk {
+            block = (block << 8) | u32::from(byte);
+        }
+        block <<= (3 - chunk.len()) * 8;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                let index = ((block >> (18 - 6 * i)) & 0x3f) as usize;
+                out.push(ALPHABET[index] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 /// Frame untrusted HTML in a sandboxed document. The frame has no
@@ -265,4 +450,21 @@ fn json_byte_string(bytes: &[u8]) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64_encode;
+
+    #[test]
+    fn base64_matches_the_standard_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(&[0xff, 0xfe, 0x00, 0x01]), "//4AAQ==");
+    }
 }
