@@ -63,10 +63,9 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactUpdateParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let (existing, _) =
-            artifacts::get(&self.state.db, &self.state.data_dir, &params.artifact_id)
-                .await
-                .map_err(to_error_data)?;
+        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(to_error_data)?;
         policy::authorize(
             &self.state.db,
             &principal,
@@ -98,10 +97,9 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactIdParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let (artifact, bytes) =
-            artifacts::get(&self.state.db, &self.state.data_dir, &params.artifact_id)
-                .await
-                .map_err(to_error_data)?;
+        let artifact = artifacts::metadata(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(to_error_data)?;
         policy::authorize(
             &self.state.db,
             &principal,
@@ -110,6 +108,9 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let bytes = artifacts::read_blob(&self.state.data_dir, &artifact)
+            .await
+            .map_err(to_error_data)?;
         // A protected artifact returns its ciphertext here; decryption is the
         // client's job and never the server's.
         let content = String::from_utf8(bytes).map_err(|_| {

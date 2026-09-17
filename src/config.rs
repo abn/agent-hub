@@ -25,6 +25,25 @@ pub struct Config {
     pub trust_default: TrustDefault,
 }
 
+/// The embedded tailnet endpoint configuration.
+///
+/// The endpoint is addressed by tailnet IP, since the library has no tailnet
+/// name resolution, and is off unless `HUB_TAILNET` is set.
+#[derive(Debug, Clone, Default)]
+pub struct Tailnet {
+    /// A Tailscale auth key. Present when the endpoint is enabled.
+    pub auth_key: Option<String>,
+    /// Port to serve on the tailnet IP.
+    pub port: u16,
+}
+
+impl Tailnet {
+    /// Whether the embedded endpoint is configured.
+    pub fn enabled(&self) -> bool {
+        self.auth_key.is_some()
+    }
+}
+
 impl Config {
     /// Read configuration from the environment, falling back to safe defaults.
     pub fn from_env() -> Result<Self> {
@@ -70,6 +89,29 @@ impl Config {
             admin_token,
             trust_default,
         })
+    }
+
+    /// Read the optional embedded tailnet endpoint configuration.
+    ///
+    /// Kept out of [`Config`] so the common configuration stays small and a
+    /// build without the feature does not carry it.
+    pub fn tailnet_from_env() -> Result<Tailnet> {
+        let tailnet = Tailnet {
+            auth_key: std::env::var("HUB_TAILNET")
+                .ok()
+                .filter(|key| !key.is_empty()),
+            port: std::env::var("HUB_TAILNET_PORT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(8080),
+        };
+        if tailnet.enabled() && !cfg!(feature = "tailnet") {
+            return Err(Error::Config(
+                "HUB_TAILNET is set but the binary was built without the tailnet feature"
+                    .to_string(),
+            ));
+        }
+        Ok(tailnet)
     }
 
     /// Path to the hub store.

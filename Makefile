@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto net/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -59,7 +59,10 @@ web/crypto: ## Run the artifact encryption round-trip self-test
 	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto test ## Full quality gate
+net/check: ## Compile the optional embedded tailnet build
+	cargo check --features tailnet
+
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto net/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container

@@ -22,6 +22,15 @@ ulid = "3"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 rand = "0.9"
 sha2 = "0.10"
+# The embedded tailnet endpoint is optional and off by default, so the standard
+# binary and the one-engine gate are untouched. It is experimental: the library
+# has no tailnet name resolution or certificate issuance and its NAT traversal
+# is in progress.
+tailscale = { version = "0.5", features = ["axum"], optional = true }
+
+[features]
+default = []
+tailnet = ["dep:tailscale"]
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

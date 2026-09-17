@@ -218,13 +218,26 @@ pub async fn update(
         .map(|(artifact, _)| artifact)
 }
 
+/// Read an artifact's metadata without its blob.
+///
+/// Reads that must authorize before touching up to the artifact cap use this,
+/// then read the blob once access is granted.
+pub async fn metadata(db: &Database, artifact_id: &str) -> Result<Artifact> {
+    row(db, artifact_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))
+}
+
 /// Read an artifact's metadata and its current blob.
 pub async fn get(db: &Database, data_dir: &Path, artifact_id: &str) -> Result<(Artifact, Vec<u8>)> {
-    let artifact = row(db, artifact_id)
-        .await?
-        .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+    let artifact = metadata(db, artifact_id).await?;
     let bytes = blob::read(data_dir, &artifact.path)?;
     Ok((artifact, bytes))
+}
+
+/// Read an artifact's blob, once its metadata has been authorized.
+pub async fn read_blob(data_dir: &Path, artifact: &Artifact) -> Result<Vec<u8>> {
+    blob::read(data_dir, &artifact.path)
 }
 
 /// List a project's artifacts, most recently updated first.

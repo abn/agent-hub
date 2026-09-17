@@ -174,6 +174,10 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     )
     .await
     .map_err(engine)?;
+    // Idempotency rows are keyed by project and key, not by session, so a
+    // pruned session's keys cannot be targeted without a schema link. They
+    // are left in place; a retry resolves to the recorded id, which is now
+    // absent, and the caller sees a normal write rather than a duplicate.
     tx.commit().await.map_err(engine)
 }
 

@@ -164,8 +164,10 @@ async fn require_bearer(
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::to_owned);
+        .and_then(|value| {
+            let (scheme, token) = value.split_once(' ')?;
+            (scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty()).then(|| token.to_owned())
+        });
 
     match state.auth.resolve_agent(&state.db, token.as_deref()).await {
         Ok(principal) => {

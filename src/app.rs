@@ -7,7 +7,7 @@ use crate::brain::BrainStore;
 use crate::config::Config;
 use crate::error::Result;
 use crate::principal::Auth;
-use crate::{http, mcp, store};
+use crate::{http, mcp, net, store};
 
 /// Shared state handed to every HTTP handler and the MCP server.
 #[derive(Clone)]
@@ -74,7 +74,20 @@ pub async fn run(config: Config) -> Result<()> {
         }
     });
 
-    let router = http::router(state.clone()).merge(mcp::http_router(state));
+    let router = http::router(state.clone()).merge(mcp::http_router(state.clone()));
+
+    // An optional tailnet endpoint serves the same router on the device's
+    // tailnet address, beside the plain listener.
+    let tailnet = crate::config::Config::tailnet_from_env()?;
+    if tailnet.enabled() {
+        let tailnet_router = router.clone();
+        tokio::spawn(async move {
+            if let Err(err) = net::serve(&tailnet, tailnet_router).await {
+                tracing::error!(error = %err, "tailnet endpoint stopped");
+            }
+        });
+    }
+
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(bind = %bind, schema_version, "hub listening");
 
