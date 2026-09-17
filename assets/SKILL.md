@@ -100,6 +100,30 @@ resolves.
 | `search` | Full-text search over feed events, artifacts, and session brains. |
 | `whoami`, `version` | Identity and connectivity checks. |
 
+The argument shapes, with a trailing `?` for optional:
+
+```
+session_start(project_id, session_name)
+session_end(session_id)
+brain_get(path) / brain_delete(path)
+brain_put(path, content)
+brain_list(path?)
+feed_read(project_id, since?, before?, limit?, kinds?)
+signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
+question_post(project_id, subject, body?, context?, to?, idempotency_key?)
+answer_post(question_id, body, idempotency_key?)
+inbox_read(status?, project_id?, limit?)
+search(query, scope?, project_id?, type?, limit?)
+artifact_publish(project_id, title, kind, content, envelope?, idempotency_key?)
+artifact_update(artifact_id, content, envelope?, idempotency_key?)
+artifact_get(artifact_id)
+artifact_list(project_id)
+```
+
+`search` with `scope: "global"` covers every visible project; otherwise pass
+`project_id`, and `type` filters by kind. Results are confined to the projects
+the caller can see.
+
 ## Sessions and the brain
 
 `session_start` takes a `project_id` and a `session_name` and returns a
@@ -116,11 +140,18 @@ A `signal` is a plain note. `finished` work lands in the inbox as unread. An
 `approval` and a `question` wait on the human and land in the inbox as action
 items. `question_post` roots its own thread and returns `event_id`,
 `question_id`, and `thread_id`, all the same value; `answer_post` takes that
-value as `question_id`. A question or an approval is an open item, and the hub
-caps how many one agent may leave open in a project (100 by default); a write
-past the cap is refused with `rate_limited` and changes nothing. Writes that
-create a record accept an optional `idempotency_key`, so a retry after a
-dropped connection returns the original result instead of a duplicate.
+value as `question_id`. `signal_append` accepts only `signal`, `finished`, and
+`approval`; the needs-action flag follows the kind and cannot be set by a
+client.
+
+An inbox item is `unread` for finished work, `action` while it waits on the
+human, and `resolved` once answered or decided. The `waiting` and `read`
+statuses are reserved. `inbox_read` returns `event_id`, `project_id`, `kind`,
+`actor`, `summary`, `payload`, `status`, `created_at`, and `updated_at`.
+
+A question or an approval is an open item, and the hub caps how many one agent
+may leave open in a project (100 by default); a write past the cap is refused
+with `rate_limited` and changes nothing.
 
 ## Artifacts
 
@@ -139,9 +170,24 @@ artifact_list(project_id)
 A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
 and rendered in the PWA. Markdown artifacts are rendered by the hub with raw
 HTML in the source escaped; the viewer frames every artifact without
-same-origin access. For protected content, encrypt in the client and send the
-ciphertext with its `envelope`: the server stores the envelope and never sees
-the plaintext.
+same-origin access.
+
+For protected content, encrypt in the client and send the ciphertext as
+`content` with its `envelope`:
+
+```
+{ "alg": "AES-256-GCM", "kdf": "PBKDF2-HMAC-SHA256",
+  "iterations": 600000, "salt": "...", "iv": "..." }
+```
+
+The server stores the envelope and ciphertext and never sees the plaintext. A
+protected artifact has no server-side rendering; the viewer decrypts it in the
+browser.
+
+Authored HTML has a strict content security policy, so it cannot make external
+requests: inline all CSS and JS, embed images and fonts as `data:` URIs, keep
+no storage-backed state, support light and dark themes, avoid horizontal body
+scroll, and use no emoji or em-dashes.
 
 There is no live editing. Artifacts are versioned snapshots, and a change is a
 new version.
@@ -149,9 +195,20 @@ new version.
 ## Pagination and errors
 
 Feed cursors are exclusive event ids: `since` walks forward and `before` walks
-back, with a page default of 50 and a cap of 500. Tool errors
-are structured with `code`, `message`, `retryable`, and `details`. A resource
-you may not reach returns the same error whether it is missing or denied.
+back, with a page default of 50 and a cap of 500. A page returns `next_since`
+and `next_before` for continuing in either direction, and an empty forward poll
+returns the `since` it was given so a polling client keeps its place.
+
+Tool errors are structured with `code`, `message`, `retryable`, and `details`.
+The codes are `invalid_argument`, `unauthenticated`, `forbidden`, `not_found`,
+`conflict`, `payload_too_large`, `rate_limited`, `unavailable`, and `internal`.
+A resource you may not reach returns the same error whether it is missing or
+denied.
+
+A write that creates a durable record (a feed event, a question, an answer, an
+artifact, or a decision) accepts an optional `idempotency_key`, scoped per
+project and per operation, so a retry after a dropped connection returns the
+original result instead of a duplicate.
 
 ## Read more
 

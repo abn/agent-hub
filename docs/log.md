@@ -17,6 +17,11 @@ software release notes and the repository changelog.
   host, so an agent that can already reach the hub learns how to connect and
   what the tools are. The
   [human surface](architecture/human-surface.md) lists the route.
+* **Update**: The served document is the single tool contract: it carries the
+  argument shapes, feed and inbox statuses, pagination, error codes, and the
+  artifact authoring rules. The installable agent skill keeps the workflow and
+  the offline bootstrap and defers to the served document for the contract, so
+  the two cannot drift.
 
 ## 2026-09-17, inbox action-item cap
 
