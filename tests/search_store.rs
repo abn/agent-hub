@@ -52,6 +52,9 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
             kind: "markdown",
             content: b"# engine notes\nstate and search",
             envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )

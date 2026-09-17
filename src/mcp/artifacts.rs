@@ -14,7 +14,7 @@ use serde_json::json;
 
 use crate::error::Error;
 use crate::policy::{self, Access};
-use crate::store::artifacts::{self, NewArtifact};
+use crate::store::artifacts::{self, NewArtifact, UpdateOptions};
 
 use super::{HubServer, to_error_data};
 
@@ -42,6 +42,9 @@ impl HubServer {
                 actor: &principal.actor,
                 project_id: &params.project_id,
                 title: &params.title,
+                description: "",
+                favicon: "",
+                label: None,
                 kind: &params.kind,
                 content: params.content.as_bytes(),
                 envelope: params.envelope,
@@ -83,6 +86,11 @@ impl HubServer {
             &params.artifact_id,
             params.content.as_bytes(),
             params.envelope,
+            UpdateOptions {
+                base_version: None,
+                force: false,
+                label: None,
+            },
             params.idempotency_key.as_deref(),
         )
         .await

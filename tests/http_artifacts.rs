@@ -109,6 +109,9 @@ async fn publish_public(state: &AppState, project_id: &str, title: &str, content
             kind: "html",
             content,
             envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )
@@ -139,6 +142,9 @@ async fn publish_protected(
                 "salt": "c2FsdA",
                 "iv": "aXY",
             })),
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )
@@ -251,6 +257,9 @@ async fn rendering_a_markdown_artifact_renders_and_escapes_it() {
             kind: "markdown",
             content: b"# Runbook\n\nSteps to deploy safely.\n\n<script>alert(1)</script>",
             envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )
@@ -311,6 +320,9 @@ async fn rendering_a_markdown_artifact_without_a_heading_shows_the_title() {
             kind: "markdown",
             content: b"Just a paragraph.",
             envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )

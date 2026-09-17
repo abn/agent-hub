@@ -70,6 +70,9 @@ async fn concurrent_same_key_publishes_serialize() {
                     kind: "html",
                     content: b"body",
                     envelope: None,
+                    description: "",
+                    favicon: "",
+                    label: None,
                 },
                 Some("pub-key"),
             )

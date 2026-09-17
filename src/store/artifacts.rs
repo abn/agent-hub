@@ -3,6 +3,11 @@
 //! A protected artifact carries an encryption envelope and ciphertext; the
 //! server never sees its plaintext. Publishing or updating appends a feed
 //! event and refreshes the search corpus.
+//!
+//! Every publish and update records one `artifact_versions` row, so any
+//! version stays addressable after the current pointer moves on. The row
+//! carries the per-version envelope, which is key-derivation parameters,
+//! not plaintext, so history never weakens the encryption posture.
 
 use std::path::Path;
 
@@ -16,12 +21,26 @@ use crate::store::events::{self, NewEvent};
 use crate::store::idempotency;
 use crate::store::search::{SearchDoc, index_doc};
 
+/// Maximum characters of an artifact title.
+pub const TITLE_CHARS_MAX: usize = 500;
+/// Maximum characters of an artifact description.
+pub const DESCRIPTION_CHARS_MAX: usize = 2000;
+/// Maximum characters of an artifact favicon. Lenient on purpose: a single
+/// emoji is one code point, a compound one is several, and the render
+/// escapes it either way.
+pub const FAVICON_CHARS_MAX: usize = 8;
+/// Maximum UTF-8 bytes of a version label.
+pub const LABEL_BYTES_MAX: usize = 60;
+
 /// Artifact metadata. The blob path stays internal.
 #[derive(Debug, Clone, Serialize)]
 pub struct Artifact {
     pub id: String,
     pub project_id: String,
     pub title: String,
+    pub description: String,
+    pub favicon: String,
+    pub label: Option<String>,
     pub kind: String,
     pub version: i64,
     pub protected: bool,
@@ -33,19 +52,50 @@ pub struct Artifact {
     pub path: String,
 }
 
+/// One immutable version of an artifact.
+#[derive(Debug, Clone, Serialize)]
+pub struct ArtifactVersion {
+    pub version: i64,
+    pub title: String,
+    pub description: String,
+    pub favicon: String,
+    pub kind: String,
+    pub label: Option<String>,
+    pub protected: bool,
+    pub envelope: Option<serde_json::Value>,
+    pub size_bytes: i64,
+    pub created_at: String,
+}
+
 /// A new artifact to publish.
 pub struct NewArtifact<'a> {
     pub actor: &'a str,
     pub project_id: &'a str,
     pub title: &'a str,
+    pub description: &'a str,
+    pub favicon: &'a str,
+    pub label: Option<&'a str>,
     pub kind: &'a str,
     pub content: &'a [u8],
     /// The encryption envelope when the artifact is protected.
     pub envelope: Option<serde_json::Value>,
 }
 
-/// Publish an artifact: write the blob, record the metadata, append a feed
-/// event, and index it.
+/// Options for publishing a new version of an artifact.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateOptions<'a> {
+    /// When set, the update applies only if the artifact is still at this
+    /// version, unless `force` is set. A mismatch is a conflict naming the
+    /// current version.
+    pub base_version: Option<i64>,
+    /// Overwrite a version mismatch instead of conflicting.
+    pub force: bool,
+    /// When set, replaces the current label; otherwise the label is kept.
+    pub label: Option<&'a str>,
+}
+
+/// Publish an artifact: write the blob, record the metadata and its first
+/// version row, append a feed event, and index it.
 pub async fn publish(
     db: &Database,
     data_dir: &Path,
@@ -53,6 +103,10 @@ pub async fn publish(
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(artifact.content.len())?;
+    let title = resolve_title(artifact.title, artifact.kind, artifact.content)?;
+    let description = check_description(artifact.description)?;
+    let favicon = check_favicon(artifact.favicon)?;
+    let label = check_label(artifact.label)?;
 
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -85,12 +139,15 @@ pub async fn publish(
 
     let write = async {
         tx.execute(
-            "INSERT INTO artifacts(id, project_id, title, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?8)",
+            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(artifact.project_id.to_string()),
-                Value::Text(artifact.title.to_string()),
+                Value::Text(title.clone()),
+                Value::Text(description.clone()),
+                Value::Text(favicon.clone()),
+                optional_text(label.as_deref()),
                 Value::Text(artifact.kind.to_string()),
                 optional_text(envelope_json.as_deref()),
                 Value::Text(rel.clone()),
@@ -100,6 +157,22 @@ pub async fn publish(
         )
         .await
         .map_err(engine)?;
+        insert_version(
+            &tx,
+            &id,
+            1,
+            &title,
+            &description,
+            &favicon,
+            artifact.kind,
+            label.as_deref(),
+            protected,
+            envelope_json.as_deref(),
+            artifact.content.len() as i64,
+            &rel,
+            &created_at,
+        )
+        .await?;
         index_doc(
             &tx,
             SearchDoc {
@@ -108,7 +181,7 @@ pub async fn publish(
                 kind: "artifact",
                 ref_id: &id,
                 session_id: None,
-                title: Some(artifact.title),
+                title: Some(&title),
                 body: searchable_body(artifact.content, protected),
                 updated_at: &created_at,
             },
@@ -120,10 +193,11 @@ pub async fn publish(
             artifact.project_id,
             "published",
             &id,
-            artifact.title,
+            &title,
             artifact.kind,
             1,
             protected,
+            label.as_deref(),
         )
         .await?;
         if let Some(key) = idempotency_key {
@@ -145,7 +219,9 @@ pub async fn publish(
 /// Publish a new version of an existing artifact.
 ///
 /// The version bump is read inside the immediate transaction, so concurrent
-/// updates serialise and each writes a distinct version file.
+/// updates serialise and each writes a distinct version file. A stale
+/// `base_version` without `force` is a conflict, not an overwrite.
+#[allow(clippy::too_many_arguments)]
 pub async fn update(
     db: &Database,
     data_dir: &Path,
@@ -153,9 +229,11 @@ pub async fn update(
     artifact_id: &str,
     content: &[u8],
     envelope: Option<serde_json::Value>,
+    opts: UpdateOptions<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(content.len())?;
+    let label = check_label(opts.label)?;
 
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -174,6 +252,16 @@ pub async fn update(
         return replay(&tx, &entry, Some(artifact_id)).await;
     }
 
+    if let Some(base) = opts.base_version
+        && base != existing.version
+        && !opts.force
+    {
+        return Err(Error::Conflict(format!(
+            "artifact {artifact_id} is at version {}, not base version {base}",
+            existing.version
+        )));
+    }
+
     let version = existing.version + 1;
     let rel = blob::write(
         data_dir,
@@ -186,13 +274,15 @@ pub async fn update(
     let envelope = envelope.or(existing.envelope.clone());
     let envelope_json = envelope.as_ref().map(|value| value.to_string());
     let protected = envelope_json.is_some();
+    let label = label.or(existing.label.clone());
     let updated_at = crate::store::now_rfc3339();
 
     let write = async {
         tx.execute(
-            "UPDATE artifacts SET current_ver = ?1, envelope = ?2, path = ?3, size_bytes = ?4, updated_at = ?5 WHERE id = ?6",
+            "UPDATE artifacts SET current_ver = ?1, label = ?2, envelope = ?3, path = ?4, size_bytes = ?5, updated_at = ?6 WHERE id = ?7",
             vec![
                 Value::Integer(version),
+                optional_text(label.as_deref()),
                 optional_text(envelope_json.as_deref()),
                 Value::Text(rel.clone()),
                 Value::Integer(content.len() as i64),
@@ -202,6 +292,22 @@ pub async fn update(
         )
         .await
         .map_err(engine)?;
+        insert_version(
+            &tx,
+            artifact_id,
+            version,
+            &existing.title,
+            &existing.description,
+            &existing.favicon,
+            &existing.kind,
+            label.as_deref(),
+            protected,
+            envelope_json.as_deref(),
+            content.len() as i64,
+            &rel,
+            &updated_at,
+        )
+        .await?;
         index_doc(
             &tx,
             SearchDoc {
@@ -226,6 +332,7 @@ pub async fn update(
             &existing.kind,
             version,
             protected,
+            label.as_deref(),
         )
         .await?;
         if let Some(key) = idempotency_key {
@@ -254,6 +361,73 @@ pub async fn update(
         .map(|(artifact, _)| artifact)
 }
 
+/// Delete an artifact and its history.
+///
+/// The version rows, search row, and idempotency rows go in the same
+/// transaction as a `deleted` feed event, so a replay after the delete
+/// records fresh instead of resolving to a missing row. The blob tree is
+/// removed best effort after the commit; a missing tree is not an error.
+pub async fn delete(
+    db: &Database,
+    data_dir: &Path,
+    actor: &str,
+    artifact_id: &str,
+) -> Result<Artifact> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let existing = row_on(&tx, artifact_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+    tx.execute(
+        "DELETE FROM artifact_versions WHERE artifact_id = ?1",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM search_docs WHERE doc_id = ?1",
+        vec![Value::Text(artifact_doc_id(artifact_id))],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM idempotency WHERE artifact_id = ?1",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM artifacts WHERE id = ?1",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    append_event(
+        &tx,
+        actor,
+        &existing.project_id,
+        "deleted",
+        artifact_id,
+        &existing.title,
+        &existing.kind,
+        existing.version,
+        existing.protected,
+        existing.label.as_deref(),
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
+
+    let tree = format!("artifacts/{}/{}", existing.project_id, artifact_id);
+    if let Err(err) = blob::remove_tree(data_dir, &tree) {
+        tracing::warn!(artifact = artifact_id, error = %err, "artifact tree removal failed");
+    }
+    Ok(existing)
+}
+
 /// Read an artifact's metadata without its blob.
 ///
 /// Reads that must authorize before touching up to the artifact cap use this,
@@ -271,6 +445,113 @@ pub async fn get(db: &Database, data_dir: &Path, artifact_id: &str) -> Result<(A
     Ok((artifact, bytes))
 }
 
+/// Read one version of an artifact.
+///
+/// The returned metadata reflects the requested version row, not the current
+/// pointer. A version below 1 is rejected; an unknown version is not found.
+pub async fn get_at_version(
+    db: &Database,
+    data_dir: &Path,
+    artifact_id: &str,
+    version: i64,
+) -> Result<(Artifact, Vec<u8>)> {
+    if version < 1 {
+        return Err(Error::InvalidArgument(format!(
+            "artifact version must be 1 or more, got {version}"
+        )));
+    }
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT a.project_id,
+                    v.title, v.description, v.favicon, v.kind, v.label,
+                    v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path
+             FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
+             WHERE v.artifact_id = ?1 AND v.version = ?2",
+            vec![
+                Value::Text(artifact_id.to_string()),
+                Value::Integer(version),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        // A missing parent and a missing version read the same: the surface
+        // conceals the difference for callers without access.
+        return Err(Error::NotFound(format!(
+            "artifact {artifact_id} has no version {version}"
+        )));
+    };
+    let project_id = required_text(&row, 0)?;
+    let title = required_text(&row, 1)?;
+    let description = text_at(&row, 2)?.unwrap_or_default();
+    let favicon = text_at(&row, 3)?.unwrap_or_default();
+    let kind = required_text(&row, 4)?;
+    let label = text_at(&row, 5)?;
+    let protected = int_at(&row, 6)? != 0;
+    let envelope = match text_at(&row, 7)? {
+        Some(json) => Some(
+            serde_json::from_str(&json)
+                .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
+        ),
+        None => None,
+    };
+    let size_bytes = int_at(&row, 8)?;
+    let created_at = required_text(&row, 9)?;
+    let path = required_text(&row, 10)?;
+    let bytes = blob::read(data_dir, &path)?;
+    Ok((
+        Artifact {
+            id: artifact_id.to_string(),
+            project_id,
+            title,
+            description,
+            favicon,
+            label,
+            kind,
+            version,
+            protected,
+            envelope,
+            size_bytes,
+            created_at: created_at.clone(),
+            updated_at: created_at,
+            path,
+        },
+        bytes,
+    ))
+}
+
+/// List an artifact's versions, oldest first.
+pub async fn list_versions(db: &Database, artifact_id: &str) -> Result<Vec<ArtifactVersion>> {
+    let conn = super::connect(db)?;
+    let has_parent = {
+        let mut rows = conn
+            .query(
+                "SELECT id FROM artifacts WHERE id = ?1",
+                vec![Value::Text(artifact_id.to_string())],
+            )
+            .await
+            .map_err(engine)?;
+        rows.next().await.map_err(engine)?.is_some()
+    };
+    if !has_parent {
+        return Err(Error::NotFound(format!("artifact {artifact_id} not found")));
+    }
+    let mut rows = conn
+        .query(
+            "SELECT version, title, description, favicon, kind, label, encrypted, envelope, size_bytes, created_at
+             FROM artifact_versions WHERE artifact_id = ?1 ORDER BY version ASC",
+            vec![Value::Text(artifact_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let mut versions = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        versions.push(version_from_row(&row)?);
+    }
+    Ok(versions)
+}
+
 /// Read an artifact's blob, once its metadata has been authorized.
 pub async fn read_blob(data_dir: &Path, artifact: &Artifact) -> Result<Vec<u8>> {
     blob::read(data_dir, &artifact.path)
@@ -281,7 +562,7 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
              FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
             vec![Value::Text(project_id.to_string())],
         )
@@ -302,7 +583,7 @@ async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
 async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
              FROM artifacts WHERE id = ?1",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -312,6 +593,45 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
         Some(row) => Ok(Some(artifact_from_row(&row)?)),
         None => Ok(None),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_version(
+    tx: &turso::transaction::Transaction<'_>,
+    artifact_id: &str,
+    version: i64,
+    title: &str,
+    description: &str,
+    favicon: &str,
+    kind: &str,
+    label: Option<&str>,
+    protected: bool,
+    envelope_json: Option<&str>,
+    size_bytes: i64,
+    path: &str,
+    created_at: &str,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO artifact_versions(artifact_id, version, title, description, favicon, kind, label, encrypted, envelope, size_bytes, path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        vec![
+            Value::Text(artifact_id.to_string()),
+            Value::Integer(version),
+            Value::Text(title.to_string()),
+            Value::Text(description.to_string()),
+            Value::Text(favicon.to_string()),
+            Value::Text(kind.to_string()),
+            optional_text(label),
+            Value::Integer(i64::from(protected)),
+            optional_text(envelope_json),
+            Value::Integer(size_bytes),
+            Value::Text(path.to_string()),
+            Value::Text(created_at.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -325,6 +645,7 @@ async fn append_event(
     kind: &str,
     version: i64,
     protected: bool,
+    label: Option<&str>,
 ) -> Result<String> {
     events::append_in_tx(
         tx,
@@ -341,6 +662,7 @@ async fn append_event(
                 "kind": kind,
                 "version": version,
                 "protected": protected,
+                "label": label,
             })),
             needs_action: false,
             thread_id: None,
@@ -380,8 +702,86 @@ async fn replay(
     Ok(artifact)
 }
 
+/// Resolve and check display metadata: title with its markdown fallback,
+/// description, favicon, and label.
+fn resolve_title(title: &str, kind: &str, content: &[u8]) -> Result<String> {
+    let trimmed = title.trim();
+    if !trimmed.is_empty() {
+        return check_title(trimmed);
+    }
+    if kind == "markdown"
+        && let Some(heading) = first_heading(content)
+    {
+        return check_title(&heading);
+    }
+    Err(Error::InvalidArgument(
+        "artifact title is required (or include a markdown heading in the content)".to_string(),
+    ))
+}
+
+fn check_title(title: &str) -> Result<String> {
+    if title.chars().count() > TITLE_CHARS_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "artifact title exceeds {TITLE_CHARS_MAX} characters"
+        )));
+    }
+    Ok(title.to_string())
+}
+
+fn check_description(description: &str) -> Result<String> {
+    if description.chars().count() > DESCRIPTION_CHARS_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "artifact description exceeds {DESCRIPTION_CHARS_MAX} characters"
+        )));
+    }
+    Ok(description.to_string())
+}
+
+fn check_favicon(favicon: &str) -> Result<String> {
+    if favicon.chars().count() > FAVICON_CHARS_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "artifact favicon exceeds {FAVICON_CHARS_MAX} characters"
+        )));
+    }
+    Ok(favicon.to_string())
+}
+
+fn check_label(label: Option<&str>) -> Result<Option<String>> {
+    let Some(label) = label else {
+        return Ok(None);
+    };
+    if label.is_empty() {
+        return Ok(None);
+    }
+    if label.len() > LABEL_BYTES_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "artifact label exceeds {LABEL_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(Some(label.to_string()))
+}
+
+/// The first ATX heading of a markdown source, for the title fallback.
+fn first_heading(content: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(content).ok()?;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+        if hashes == 0 || hashes > 6 {
+            continue;
+        }
+        if let Some(rest) = trimmed[hashes..].strip_prefix(|ch| ch == ' ' || ch == '\t') {
+            let heading = rest.trim();
+            if !heading.is_empty() {
+                return Some(heading.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn artifact_from_row(row: &Row) -> Result<Artifact> {
-    let envelope = match text_at(row, 5)? {
+    let envelope = match text_at(row, 8)? {
         Some(json) => Some(
             serde_json::from_str(&json)
                 .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
@@ -392,14 +792,39 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         id: required_text(row, 0)?,
         project_id: required_text(row, 1)?,
         title: required_text(row, 2)?,
-        kind: required_text(row, 3)?,
-        version: int_at(row, 4)?,
+        description: text_at(row, 3)?.unwrap_or_default(),
+        favicon: text_at(row, 4)?.unwrap_or_default(),
+        label: text_at(row, 5)?,
+        kind: required_text(row, 6)?,
+        version: int_at(row, 7)?,
         protected: envelope.is_some(),
         envelope,
-        size_bytes: int_at(row, 6)?,
-        created_at: required_text(row, 7)?,
-        updated_at: required_text(row, 8)?,
-        path: required_text(row, 9)?,
+        size_bytes: int_at(row, 9)?,
+        created_at: required_text(row, 10)?,
+        updated_at: required_text(row, 11)?,
+        path: required_text(row, 12)?,
+    })
+}
+
+fn version_from_row(row: &Row) -> Result<ArtifactVersion> {
+    let envelope = match text_at(row, 7)? {
+        Some(json) => Some(
+            serde_json::from_str(&json)
+                .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
+        ),
+        None => None,
+    };
+    Ok(ArtifactVersion {
+        version: int_at(row, 0)?,
+        title: required_text(row, 1)?,
+        description: text_at(row, 2)?.unwrap_or_default(),
+        favicon: text_at(row, 3)?.unwrap_or_default(),
+        kind: required_text(row, 4)?,
+        label: text_at(row, 5)?,
+        protected: int_at(row, 6)? != 0,
+        envelope,
+        size_bytes: int_at(row, 8)?,
+        created_at: required_text(row, 9)?,
     })
 }
 

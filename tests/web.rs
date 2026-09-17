@@ -309,6 +309,9 @@ async fn serves_artifact_content_for_the_viewer() {
             kind: "markdown",
             content: b"hello",
             envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )
@@ -351,6 +354,9 @@ async fn serves_artifact_content_for_the_viewer() {
             kind: "markdown",
             content: b"Y2lwaGVy",
             envelope: Some(serde_json::json!({"alg": "AES-256-GCM"})),
+            description: "",
+            favicon: "",
+            label: None,
         },
         None,
     )

@@ -26,6 +26,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 3,
         ddl: V3,
     },
+    Migration {
+        version: 4,
+        ddl: V4,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -162,4 +166,39 @@ INSERT INTO idempotency_v3(project_id, operation, idempotency_key, event_id, cre
   SELECT project_id, 'event', idempotency_key, event_id, created_at FROM idempotency;
 DROP TABLE idempotency;
 ALTER TABLE idempotency_v3 RENAME TO idempotency;
+"#;
+
+/// Version 4: artifact version history and display metadata.
+///
+/// Every publish and update records one `artifact_versions` row, so any
+/// version stays addressable after the current pointer moves on. Rows
+/// that predate this migration are backfilled from the current pointer,
+/// which is the only metadata they still carry; older blobs on disk stay
+/// orphaned and invisible.
+const V4: &str = r#"
+ALTER TABLE artifacts ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE artifacts ADD COLUMN favicon TEXT NOT NULL DEFAULT '';
+ALTER TABLE artifacts ADD COLUMN label TEXT;
+CREATE TABLE IF NOT EXISTS artifact_versions(
+  artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  favicon TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL,
+  label TEXT,
+  encrypted INTEGER NOT NULL DEFAULT 0,
+  envelope TEXT,
+  size_bytes INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(artifact_id, version)
+);
+CREATE INDEX IF NOT EXISTS artifact_versions_lookup
+  ON artifact_versions(artifact_id, version);
+INSERT INTO artifact_versions(artifact_id, version, title, description,
+  favicon, kind, label, encrypted, envelope, size_bytes, path, created_at)
+  SELECT id, current_ver, title, '', '', kind, NULL,
+    CASE WHEN envelope IS NULL THEN 0 ELSE 1 END,
+    envelope, size_bytes, path, updated_at FROM artifacts;
 "#;

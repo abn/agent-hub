@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_hub::store::schema::MIGRATIONS;
 use agent_hub::store::{migrate, open_engine};
 
 const TABLES: &[&str] = &[
@@ -10,6 +11,7 @@ const TABLES: &[&str] = &[
     "events",
     "inbox",
     "artifacts",
+    "artifact_versions",
     "sessions",
     "agents",
     "agent_tokens",
@@ -33,10 +35,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 3, "migrations are forward only and apply once");
+    assert_eq!(again, 4, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -87,6 +89,18 @@ async fn migrate_creates_schema_and_search_index() {
     assert!(idempotency.next().await.expect("row").is_none());
     drop(idempotency);
 
+    // Migration 4 adds display metadata to artifacts and the version
+    // history table.
+    let mut meta = conn
+        .query(
+            "SELECT description, favicon, label FROM artifacts LIMIT 1",
+            (),
+        )
+        .await
+        .expect("artifacts.description, favicon and label exist");
+    assert!(meta.next().await.expect("row").is_none());
+    drop(meta);
+
     for id in ["a", "b"] {
         conn.execute(
             "INSERT INTO agents(id, display_name, trust, created_at) VALUES (?1, ?1, 'trusted', '2026-09-16T00:00:00Z')",
@@ -134,6 +148,96 @@ async fn migrate_creates_schema_and_search_index() {
     assert_eq!(hits, vec!["event:01".to_string()]);
 
     drop(rows);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn migration_four_backfills_version_history() {
+    let dir = temp_dir("store-schema-v4");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // Build a version-3 database by hand: the schema_version table first,
+    // then each migration below 4 with its version recorded, so `migrate`
+    // applies only the new one.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 4) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    conn.execute(
+        "INSERT INTO artifacts(id, project_id, title, kind, current_ver, envelope, path, size_bytes, created_at, updated_at) \
+         VALUES ('art', 'proj', 'Old', 'html', 2, '{\"alg\":\"AES-256-GCM\"}', 'artifacts/proj/art/v2.html', 4, '2026-09-16T00:00:00Z', '2026-09-17T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert artifact");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 4);
+
+    let mut rows = conn
+        .query(
+            "SELECT version, title, kind, label, encrypted, envelope, path FROM artifact_versions WHERE artifact_id = 'art'",
+            (),
+        )
+        .await
+        .expect("query versions");
+    let row = rows.next().await.expect("row").expect("one backfilled row");
+    assert_eq!(row.get::<i64>(0).expect("version"), 2);
+    assert_eq!(row.get::<String>(1).expect("title"), "Old");
+    assert_eq!(row.get::<String>(2).expect("kind"), "html");
+    assert!(
+        matches!(row.get_value(3).expect("label"), turso::Value::Null),
+        "the backfilled label is null"
+    );
+    assert_eq!(row.get::<i64>(4).expect("encrypted"), 1);
+    assert_eq!(
+        row.get::<String>(5).expect("envelope"),
+        "{\"alg\":\"AES-256-GCM\"}"
+    );
+    assert_eq!(
+        row.get::<String>(6).expect("path"),
+        "artifacts/proj/art/v2.html"
+    );
+    assert!(
+        rows.next().await.expect("row").is_none(),
+        "exactly one version row is backfilled"
+    );
+    drop(rows);
+
+    let mut meta = conn
+        .query(
+            "SELECT description, favicon FROM artifacts WHERE id = 'art'",
+            (),
+        )
+        .await
+        .expect("query metadata");
+    let row = meta.next().await.expect("row").expect("artifact row");
+    assert_eq!(row.get::<String>(0).expect("description"), "");
+    assert_eq!(row.get::<String>(1).expect("favicon"), "");
+
+    drop(meta);
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&dir).expect("clean temp dir");
