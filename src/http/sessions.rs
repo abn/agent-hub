@@ -1,4 +1,4 @@
-//! Session REST routes: list a project's sessions and end one.
+//! Session REST routes: list a project's sessions, end one, and read a brain.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -31,6 +31,20 @@ pub struct SessionList {
 pub struct EndResult {
     /// Always true on success.
     pub ok: bool,
+}
+
+/// The prefix whose brain entries are listed.
+#[derive(Debug, Deserialize)]
+pub struct BrainParams {
+    /// A `/kv` or `/fs` prefix, defaulting to every namespace.
+    pub path: Option<String>,
+}
+
+/// A session's brain entries under a prefix.
+#[derive(Debug, Serialize)]
+pub struct BrainList {
+    /// The entry paths, sorted.
+    pub entries: Vec<String>,
 }
 
 /// `GET /api/v1/sessions?project=<id>`
@@ -80,4 +94,64 @@ pub async fn end(
         .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(EndResult { ok: true }))
+}
+
+/// `GET /api/v1/sessions/{id}/brain?path=`
+///
+/// A valid bearer token is required. An unknown session is a 404. The optional
+/// `path` is a `/kv` or `/fs` prefix; omitted, both namespaces are listed.
+pub async fn brain(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<BrainParams>,
+) -> std::result::Result<Json<BrainList>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let session = session_store::get(&state.db, &session_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .filter(|session| session.deleted_at.is_none())
+        .ok_or_else(|| {
+            Problem::from_error(&Error::NotFound(format!("session {session_id} not found")))
+        })?;
+
+    // A read does not create a brain: a session whose file is absent simply
+    // has no entries yet.
+    let brain = match state
+        .brain
+        .open_existing(&session.project_id, &session.id)
+        .await
+    {
+        Ok(Some(brain)) => brain,
+        Ok(None) => {
+            return Ok(Json(BrainList {
+                entries: Vec::new(),
+            }));
+        }
+        Err(err) => return Err(Problem::from_error(&err)),
+    };
+
+    let entries = list_entries(&brain, params.path.as_deref())
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(BrainList { entries }))
+}
+
+async fn list_entries(
+    brain: &crate::brain::Brain,
+    path: Option<&str>,
+) -> crate::error::Result<Vec<String>> {
+    match path {
+        Some(path) => brain.list(path).await,
+        None => {
+            let mut entries = brain.list("/kv").await?;
+            entries.extend(brain.list("/fs").await?);
+            Ok(entries)
+        }
+    }
 }

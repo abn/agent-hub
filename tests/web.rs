@@ -151,6 +151,19 @@ async fn serves_every_shell_asset_with_a_policy() {
 }
 
 #[tokio::test]
+async fn service_worker_handles_notifications() {
+    let app = router(state().await);
+    let response = app.oneshot(get("/sw.js", None)).await.expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = text(response).await;
+    assert!(
+        body.contains("notificationclick"),
+        "notification clicks are handled"
+    );
+    assert!(body.contains("#/inbox"), "a click opens the inbox");
+}
+
+#[tokio::test]
 async fn serves_artifact_content_for_the_viewer() {
     let state = state().await;
     let published = artifacts::publish(

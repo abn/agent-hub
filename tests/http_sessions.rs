@@ -173,3 +173,81 @@ async fn end_without_token_is_a_problem() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
 }
+
+#[tokio::test]
+async fn brain_lists_entries() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let brain = state
+        .brain
+        .open("proj", &session.id)
+        .await
+        .expect("open brain");
+    brain.put("/kv/note", b"value").await.expect("put key");
+    brain
+        .put("/fs/notes/todo.txt", b"value")
+        .await
+        .expect("put file");
+
+    let app = router(state.clone());
+    let keys = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Fkv", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(keys.status(), StatusCode::OK);
+    let body = json_body(keys).await;
+    assert_eq!(body["entries"], serde_json::json!(["/kv/note"]));
+
+    let app = router(state);
+    let files = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Ffs", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(files.status(), StatusCode::OK);
+    let body = json_body(files).await;
+    assert_eq!(body["entries"], serde_json::json!(["/fs/notes"]));
+}
+
+#[tokio::test]
+async fn brain_unknown_session_is_not_found() {
+    let app = router(state().await);
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/unknown-session/brain?path=%2Fkv",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "not_found");
+}
+
+#[tokio::test]
+async fn brain_without_token_is_a_problem() {
+    let app = router(state().await);
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/unknown-session/brain?path=%2Fkv",
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "unauthenticated");
+}

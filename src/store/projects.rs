@@ -1,8 +1,12 @@
 //! Projects: the top-level grouping for a feed, sessions, and artifacts.
 
+use std::path::Path;
+
 use serde::Serialize;
 use turso::{Database, Value};
 
+use crate::blob;
+use crate::brain::BrainStore;
 use crate::error::{Error, Result};
 
 /// A project.
@@ -105,6 +109,115 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
         Some(row) => Ok(Some(project_from_row(&row)?)),
         None => Ok(None),
     }
+}
+
+/// Delete a project and every row and file scoped to it.
+///
+/// Refuses an agent's personal space: that project belongs to the agent and is
+/// removed only with it. The rows are deleted in one transaction first, so
+/// nothing is visible but partially gone; the files are then removed best
+/// effort, since an orphaned file is invisible while an orphaned row is not.
+pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
+    let project = get(db, id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("project {id} not found")))?;
+    if project.owner_agent.is_some() {
+        return Err(Error::Conflict(format!(
+            "project {id} is an agent's personal space"
+        )));
+    }
+
+    let session_ids = session_ids(db, id).await?;
+
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    // Inbox and search rows hang off events, so they go first.
+    tx.execute(
+        "DELETE FROM inbox WHERE event_id IN (SELECT id FROM events WHERE project_id = ?1)",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM events WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM artifacts WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM sessions WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM grants WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM idempotency WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM search_docs WHERE project_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM projects WHERE id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+
+    // Every artifact version lives under one directory, so remove the tree
+    // rather than only the current version's file. A file failure here leaves
+    // an orphan, not a dangling row.
+    if let Err(err) = blob::remove_tree(data_dir, &format!("artifacts/{id}")) {
+        tracing::warn!(project = id, error = %err, "artifact tree removal failed");
+    }
+    let brains = BrainStore::for_data_dir(data_dir);
+    for session_id in session_ids {
+        if let Err(err) = brains.remove(id, &session_id).await {
+            tracing::warn!(session_id, error = %err, "brain removal failed");
+        }
+    }
+    Ok(())
+}
+
+/// Every session id for a project, including a pruned session whose brain file
+/// has not been swept yet.
+async fn session_ids(db: &Database, project_id: &str) -> Result<Vec<String>> {
+    let conn = db.connect().map_err(engine)?;
+    let mut rows = conn
+        .query(
+            "SELECT id FROM sessions WHERE project_id = ?1",
+            vec![Value::Text(project_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let mut ids = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let Value::Text(id) = row.get_value(0).map_err(engine)? {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 fn project_from_row(row: &turso::Row) -> Result<Project> {

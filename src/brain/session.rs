@@ -118,6 +118,18 @@ impl BrainStore {
         })
     }
 
+    /// Open the brain for a session only when its file already exists.
+    ///
+    /// A read path uses this so it never creates a brain for a session whose
+    /// file is absent; `None` means there is nothing stored yet.
+    pub async fn open_existing(&self, project_id: &str, session_id: &str) -> Result<Option<Brain>> {
+        let path = self.brain_path(project_id, session_id)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(self.open(project_id, session_id).await?))
+    }
+
     /// Remove a session's brain file while holding its write lock.
     ///
     /// Taking the lock is the point: a prune must not race an in-flight write

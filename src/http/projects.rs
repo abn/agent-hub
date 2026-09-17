@@ -1,8 +1,8 @@
-//! Project REST routes: list and create.
+//! Project REST routes: list, create, and delete.
 
 use axum::Json;
-use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
@@ -63,4 +63,25 @@ pub async fn create(
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(project))
+}
+
+/// `DELETE /api/v1/projects/{id}`
+///
+/// A valid bearer token is required. An unknown project is a 404, and an
+/// agent's personal space is a 409.
+pub async fn delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> std::result::Result<StatusCode, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    projects::delete(&state.db, &state.data_dir, &id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(StatusCode::NO_CONTENT)
 }

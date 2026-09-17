@@ -50,6 +50,19 @@ pub fn remove(data_dir: &Path, rel: &str) -> Result<()> {
     }
 }
 
+/// Remove a directory tree under the data directory.
+///
+/// Used for a whole project's artifacts, where every version's blob lives
+/// under one directory. A tree that is already absent is not an error.
+pub fn remove_tree(data_dir: &Path, rel: &str) -> Result<()> {
+    let path = resolve(data_dir, rel)?;
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
 fn extension(kind: &str) -> Result<&'static str> {
     match kind {
         "html" => Ok("html"),
