@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, question id discoverability
+
+* **Update**: `question_post` now returns `question_id` alongside `event_id`
+  and `thread_id`, all the same value, so a client has the id `answer_post`
+  needs without inferring it. The `answer_post` description names that source.
+* **Update**: The agent surface page documents the id relationship for the
+  question and answer tools.
+
 ## 2026-09-17, feed cursor
 
 * **Update**: An empty forward feed poll returns the `since` cursor it was

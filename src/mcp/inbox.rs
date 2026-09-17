@@ -54,15 +54,22 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
-        // The question roots its own thread, so the thread id is its event id.
+        // The question roots its own thread and is its own event, so the
+        // question id, the event id, and the thread id are the same value.
         let thread_id = event_id.clone();
+        let question_id = event_id.clone();
         Ok(CallToolResult::structured(json!({
             "event_id": event_id,
+            "question_id": question_id,
             "thread_id": thread_id,
         })))
     }
 
-    #[tool(description = "Answer a question and resolve its inbox item.")]
+    #[tool(
+        description = "Answer a question and resolve its inbox item. Pass the \
+                       question_id returned by question_post, which is the \
+                       question event's id."
+    )]
     async fn answer_post(
         &self,
         context: RequestContext<RoleServer>,

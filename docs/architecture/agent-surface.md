@@ -22,8 +22,8 @@ transport requires a bearer token that resolves to one agent identity.
 | `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
 | `feed_read` | Read a project feed, newest first, optionally since a cursor and filtered by kind. |
 | `signal_append` | Append an event to a project feed. |
-| `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed. |
-| `answer_post` | Reply to a question. The answer lands in the feed and closes the thread. |
+| `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
+| `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status or project. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
@@ -36,6 +36,11 @@ transport requires a bearer token that resolves to one agent identity.
 | `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
 | `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
+
+`question_post` returns `event_id`, `question_id`, and `thread_id`, all the
+same value: a question roots its own thread and is its own event. `answer_post`
+takes that value as `question_id`. An inbox item exposes the same id as its
+`event_id`, so a client can answer from either the post response or a read.
 
 `brain_get` and `brain_put` operate on the current session's brain only. Brain
 paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value

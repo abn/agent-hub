@@ -229,10 +229,15 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
         }),
     );
     let asked_result = structured(&asked);
-    let question_id = asked_result["event_id"]
+    let question_id = asked_result["question_id"]
         .as_str()
-        .expect("question_post returns an event id")
+        .expect("question_post returns the question id")
         .to_string();
+    assert_eq!(
+        asked_result["event_id"].as_str().expect("event id"),
+        question_id,
+        "the question id is the question event's id"
+    );
     assert_eq!(
         asked_result["thread_id"].as_str().expect("thread id"),
         question_id,
