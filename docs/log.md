@@ -4,6 +4,22 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, markdown rendering
+
+* **Update**: The public artifact route and the in-app viewer render a
+  `markdown` artifact to HTML instead of showing its source. Raw HTML embedded
+  in the markdown is escaped, and the rendered page keeps the sandboxed
+  document and restrictive content security policy of every artifact page, so
+  a published note cannot script or load anything external.
+* **Update**: `GET /api/v1/artifacts/:id` returns a `rendered` HTML field for a
+  public markdown artifact, which the viewer frames without same-origin access.
+  A protected artifact carries no `rendered` value, because its plaintext never
+  reaches the server; the viewer keeps showing the decrypted source as text.
+* **Note**: The renderer is hand-rolled for a fixed subset (headings,
+  paragraphs, emphasis, inline and fenced code, lists, and links). It adds no
+  dependency to the binary and guarantees that every source character is
+  escaped, which is why it is preferred over a full parser.
+
 ## 2026-09-17, engine lock wait
 
 * **Update**: Every store connection now sets a bounded engine busy timeout, so

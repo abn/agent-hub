@@ -1,8 +1,10 @@
 //! Artifact REST routes: the project listing and the public render shell.
 //!
 //! Agent-authored content is untrusted. A public artifact's HTML is served as
-//! authored (the design's public link), but every page the hub builds around
-//! it escapes the title and content first. A protected artifact has no
+//! authored but always framed without same-origin access; a markdown artifact
+//! is rendered to HTML by [`crate::markdown`] first, so raw HTML embedded in
+//! the source is escaped rather than passed through. Every page the hub builds
+//! around an artifact escapes the title first. A protected artifact has no
 //! plaintext on the server, so its route can only carry the envelope and the
 //! ciphertext for the browser to decrypt.
 
@@ -17,6 +19,7 @@ use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
+use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact};
 
 /// The artifacts of one project.
@@ -60,6 +63,10 @@ pub struct ArtifactContent {
     pub envelope: Option<serde_json::Value>,
     /// The content, as the stored UTF-8 text; a ciphertext arrives base64.
     pub content: String,
+    /// The rendered HTML for a public markdown artifact, so the viewer can show
+    /// it in a sandboxed frame. Null for every other kind and for a protected
+    /// artifact, whose plaintext never reaches the server.
+    pub rendered: Option<String>,
 }
 
 /// `GET /api/v1/artifacts/{id}`
@@ -85,12 +92,16 @@ pub async fn content(
         )))
     })?;
 
+    let rendered = (!artifact.protected && artifact.kind == "markdown")
+        .then(|| crate::markdown::to_html(&content));
+
     Ok(Json(ArtifactContent {
         title: artifact.title,
         kind: artifact.kind,
         protected: artifact.protected,
         envelope: artifact.envelope,
         content,
+        rendered,
     }))
 }
 
@@ -111,10 +122,13 @@ pub async fn render(
 
     let document = if artifact.protected {
         unlock_shell(&artifact, &bytes)
-    } else if artifact.kind == "html" {
-        framed_document(&artifact.title, &bytes)
     } else {
-        markdown_document(&artifact.title, &bytes)
+        let content = String::from_utf8_lossy(&bytes);
+        match artifact.kind.as_str() {
+            "html" => framed_document(&artifact.title, &content),
+            "markdown" => rendered_document(&artifact.title, &crate::markdown::to_html(&content)),
+            _ => plain_document(&artifact.title, &content),
+        }
     };
     Ok(html_response(document))
 }
@@ -143,9 +157,9 @@ fn html_response(body: impl Into<Body>) -> Response {
 /// Frame untrusted HTML in a sandboxed document. The frame has no
 /// same-origin access and the content policy disables scripts and external
 /// loads, so a published page cannot touch the hub origin.
-fn framed_document(title: &str, content: &[u8]) -> String {
+fn framed_document(title: &str, content: &str) -> String {
     let title = escape_html(title);
-    let srcdoc = escape_html(&String::from_utf8_lossy(content));
+    let srcdoc = escape_html(content);
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
@@ -155,11 +169,27 @@ style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>\n</bo
     )
 }
 
-/// Wrap raw markdown in a readable document. The source stays text, so the
-/// `<pre>` body is escaped rather than interpreted.
-fn markdown_document(title: &str, content: &[u8]) -> String {
+/// Wrap rendered markdown in a readable document.
+///
+/// The body is hub-generated HTML: [`crate::markdown`] escapes every source
+/// character, so raw HTML in the markdown is text, not markup. The response
+/// still carries the restrictive policy and `sandbox` directive of every
+/// artifact page, so the document cannot script or load anything external.
+fn rendered_document(title: &str, body: &str) -> String {
     let title = escape_html(title);
-    let body = escape_html(&String::from_utf8_lossy(content));
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n<body>\n\
+<main>\n<h1>{title}</h1>\n{body}</main>\n</body>\n</html>\n"
+    )
+}
+
+/// Wrap content of an unknown kind in a readable document. The source stays
+/// text, so the `<pre>` body is escaped rather than interpreted.
+fn plain_document(title: &str, content: &str) -> String {
+    let title = escape_html(title);
+    let body = escape_html(content);
     format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
@@ -227,20 +257,5 @@ fn json_byte_string(bytes: &[u8]) -> String {
         }
     }
     out.push('"');
-    out
-}
-
-fn escape_html(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            other => out.push(other),
-        }
-    }
     out
 }

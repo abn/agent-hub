@@ -202,6 +202,10 @@ async fn serves_artifact_content_for_the_viewer() {
     assert_eq!(body["title"], "Note");
     assert_eq!(body["protected"], false);
     assert_eq!(body["content"], "hello");
+    assert_eq!(
+        body["rendered"], "<p>hello</p>\n",
+        "the viewer gets hub-rendered markdown for a public artifact"
+    );
     assert!(body["envelope"].is_null());
 
     let protected = artifacts::publish(
@@ -231,5 +235,9 @@ async fn serves_artifact_content_for_the_viewer() {
     let body = json(response).await;
     assert_eq!(body["protected"], true);
     assert_eq!(body["content"], "Y2lwaGVy");
+    assert!(
+        body["rendered"].is_null(),
+        "the server holds no plaintext to render for a protected artifact"
+    );
     assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
 }

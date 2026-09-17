@@ -77,6 +77,15 @@ fn content_type(response: &axum::response::Response) -> Option<String> {
         .map(|value| value.to_string())
 }
 
+fn csp(response: &axum::response::Response) -> String {
+    response
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string()
+}
+
 async fn problem_body(response: axum::response::Response) -> Value {
     assert_eq!(
         response
@@ -201,7 +210,7 @@ async fn listing_artifacts_returns_the_project_artifacts() {
 }
 
 #[tokio::test]
-async fn rendering_a_public_artifact_serves_its_html() {
+async fn rendering_a_public_artifact_serves_its_html_sandboxed() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>public-artifact-body</p>").await;
 
@@ -215,13 +224,21 @@ async fn rendering_a_public_artifact_serves_its_html() {
         content_type(&response).as_deref(),
         Some("text/html; charset=utf-8")
     );
+    assert!(
+        csp(&response).contains("sandbox"),
+        "the artifact page is sandboxed"
+    );
 
     let body = text_body(response).await;
     assert!(body.contains("public-artifact-body"));
+    assert!(
+        body.contains("sandbox srcdoc"),
+        "agent-authored HTML renders in a sandboxed frame"
+    );
 }
 
 #[tokio::test]
-async fn rendering_a_markdown_artifact_wraps_and_escapes_it() {
+async fn rendering_a_markdown_artifact_renders_and_escapes_it() {
     let state = state().await;
     let id = artifacts::publish(
         &state.db,
@@ -231,7 +248,7 @@ async fn rendering_a_markdown_artifact_wraps_and_escapes_it() {
             project_id: "proj",
             title: "Notes",
             kind: "markdown",
-            content: b"# Heading\n<script>alert(1)</script>",
+            content: b"# Runbook\n\nSteps to deploy safely.\n\n<script>alert(1)</script>",
             envelope: None,
         },
         None,
@@ -250,14 +267,28 @@ async fn rendering_a_markdown_artifact_wraps_and_escapes_it() {
         content_type(&response).as_deref(),
         Some("text/html; charset=utf-8")
     );
+    assert!(
+        csp(&response).contains("sandbox"),
+        "the artifact page is sandboxed"
+    );
 
     let body = text_body(response).await;
-    assert!(body.contains("<pre>"));
-    assert!(body.contains("# Heading"));
-    assert!(body.contains("&lt;script&gt;"));
+    assert!(
+        body.contains("<h1>Runbook</h1>"),
+        "the heading is rendered as a heading element"
+    );
+    assert!(
+        !body.contains("# Runbook"),
+        "the literal heading marker is not shown"
+    );
+    assert!(body.contains("<p>Steps to deploy safely.</p>"));
     assert!(
         !body.contains("<script>alert(1)</script>"),
-        "agent markdown must be escaped, not interpreted"
+        "raw HTML in the markdown must be escaped, not interpreted"
+    );
+    assert!(
+        body.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "the escaped script source is shown as text"
     );
 }
 

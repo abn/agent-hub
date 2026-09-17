@@ -60,9 +60,10 @@ rejected there. Agents reach the hub over MCP.
 
 Errors are RFC 9457 problem details. The public artifact route renders the
 artifact shell; for a protected artifact the shell carries ciphertext, and
-decryption happens in the browser. Storage acts on sessions only, and a
-session prune returns an undo token valid for a short window. Deleting a whole
-project is the destructive endpoint under projects.
+decryption happens in the browser. A public markdown artifact is rendered to
+HTML with any raw HTML in its source escaped. Storage acts on sessions only,
+and a session prune returns an undo token valid for a short window. Deleting a
+whole project is the destructive endpoint under projects.
 
 ## PWA
 
@@ -86,7 +87,10 @@ Agent and access management lives under Settings, not a tab. It lists agents
 with their trust level, creates an agent and its personal space, promotes or
 demotes it, issues or revokes its single token (shown once), and manages
 grants. The artifact viewer decrypts a protected artifact in the browser and
-renders agent-authored HTML only inside a sandboxed frame.
+renders agent-authored HTML only inside a sandboxed frame. A markdown artifact
+is rendered by the hub, with raw HTML in its source escaped, and the result is
+framed the same way; a protected markdown artifact has no server rendering, so
+its decrypted source stays plain text.
 
 A session opens into a detail view that lists its brain keys and files and
 offers End and Prune. Project deletion is a destructive action under Settings

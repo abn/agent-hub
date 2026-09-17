@@ -624,14 +624,19 @@ function showArtifact(meta, content, decrypted) {
     : "Public artifact.";
   main.append(back, heading, note);
 
-  if (meta.kind === "html") {
+  // Agent-authored HTML is sandboxed; markdown is rendered by the hub and the
+  // result is sandboxed the same way. A protected markdown artifact has no
+  // server-rendered HTML, so its decrypted source stays plain text.
+  const framed =
+    meta.kind === "html" ? content : meta.kind === "markdown" ? meta.rendered : null;
+  if (typeof framed === "string" && framed.length) {
     const frame = document.createElement("iframe");
     frame.setAttribute("sandbox", "");
     frame.setAttribute("title", meta.title);
     frame.style.width = "100%";
     frame.style.height = "60vh";
     frame.style.border = "1px solid var(--line)";
-    frame.srcdoc = content;
+    frame.srcdoc = framed;
     main.appendChild(frame);
   } else {
     const pre = document.createElement("pre");

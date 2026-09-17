@@ -7,6 +7,7 @@ pub mod config;
 pub mod error;
 pub mod http;
 pub mod limits;
+pub mod markdown;
 pub mod mcp;
 pub mod net;
 pub mod policy;
