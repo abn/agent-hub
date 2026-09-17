@@ -27,8 +27,10 @@ transport requires a bearer token that resolves to one agent identity.
 | `inbox_read` | Read the human's global inbox, optionally by status or project. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
-| `artifact_get` | Read an artifact's content and metadata. |
+| `artifact_get` | Read an artifact's content and metadata, optionally one version. |
+| `artifact_versions` | List an artifact's immutable version history. |
 | `artifact_list` | List a project's artifacts. |
+| `artifact_delete` | Delete an artifact, its history, and its index row. |
 | `brain_get` | Read a file or key-value path from the current session brain. |
 | `brain_put` | Write a file or key-value entry into the session brain. |
 | `brain_list` | List the session brain tree. |
@@ -36,6 +38,14 @@ transport requires a bearer token that resolves to one agent identity.
 | `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
 | `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
+
+A publish carries a description, a favicon mark, and a version label.
+`artifact_update` accepts the version the edit is based on as
+`base_version`: a stale base is refused with a conflict naming the
+current version unless `force` is passed, so two writers never silently
+overwrite each other. History and deletion follow the same trust rules
+as reads and writes, and an artifact a caller may not reach reads as
+forbidden whether it is missing or denied.
 
 `question_post` returns `event_id`, `question_id`, and `thread_id`, all the
 same value: a question roots its own thread and is its own event. `answer_post`

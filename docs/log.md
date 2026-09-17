@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, artifact versions, conflicts, and deletion
+
+* **Update**: Artifacts carry display metadata (description, favicon mark,
+  version label) and an immutable, addressable version history. Documented
+  in the [artifacts guide](usage/artifacts.md), the
+  [agent surface](architecture/agent-surface.md), the
+  [human surface](architecture/human-surface.md), the
+  [data model](architecture/data-model.md), and the served skill contract.
+* **Update**: Concurrent updates use optimistic concurrency: `artifact_update`
+  accepts the base version and refuses a stale write with a conflict naming
+  the current version unless forced. History reads (`artifact_versions`,
+  versioned get and raw, `?version=N` on the public page) and
+  `artifact_delete` are documented in the same pages.
+
 ## 2026-09-18, usage guide and served skill
 
 * **Creation**: Added [artifacts](usage/artifacts.md), a usage guide for

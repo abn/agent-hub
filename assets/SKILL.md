@@ -114,10 +114,12 @@ question_post(project_id, subject, body?, context?, to?, idempotency_key?)
 answer_post(question_id, body, idempotency_key?)
 inbox_read(status?, project_id?, limit?)
 search(query, scope?, project_id?, type?, limit?)
-artifact_publish(project_id, title, kind, content, envelope?, idempotency_key?)
-artifact_update(artifact_id, content, envelope?, idempotency_key?)
-artifact_get(artifact_id)
+artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
+artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
+artifact_get(artifact_id, version?)
+artifact_versions(artifact_id)
 artifact_list(project_id)
+artifact_delete(artifact_id)
 ```
 
 `search` with `scope: "global"` covers every visible project; otherwise pass
@@ -161,14 +163,22 @@ artifact id stays the same and the version increments. Kinds are `html` and
 `markdown`, and the blob is capped at 50 MiB.
 
 ```
-artifact_publish(project_id, title, kind, content, envelope?, idempotency_key?)
-artifact_update(artifact_id, content, envelope?, idempotency_key?)
-artifact_get(artifact_id)
+artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
+artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
+artifact_get(artifact_id, version?)
+artifact_versions(artifact_id)
 artifact_list(project_id)
+artifact_delete(artifact_id)
 ```
 
+A publish carries a description, a favicon mark, and a version label. Pass
+the version the edit is based on as `base_version`: a stale base is refused
+with a conflict naming the current version unless `force` is set. Read one
+snapshot with `artifact_get` plus `version`, list history with
+`artifact_versions`, and remove an artifact with `artifact_delete`.
+
 A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
-and rendered in the PWA. Markdown artifacts are rendered by the hub with raw
+with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown artifacts are rendered by the hub with raw
 HTML in the source escaped; the viewer frames every artifact without
 same-origin access.
 

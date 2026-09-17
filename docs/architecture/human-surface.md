@@ -45,6 +45,9 @@ GET    /api/v1/agents/:id/grants
 POST   /api/v1/agents/:id/grants
 DELETE /api/v1/agents/:id/grants/:projectId
 GET    /api/v1/artifacts/:id
+GET    /api/v1/artifacts/:id/versions
+GET    /api/v1/artifacts/:id/raw
+DELETE /api/v1/artifacts/:id
 GET    /api/v1/storage
 DELETE /api/v1/storage/sessions/:id
 POST   /api/v1/prune/undo/:token
@@ -54,6 +57,13 @@ GET    /readyz
 GET    /artifacts/:id
 GET    /SKILL.md
 ```
+
+The artifact content route accepts `?version=N` to read one snapshot; the
+versions route lists the immutable history oldest first; the raw route
+returns the stored bytes as text, or a JSON envelope with base64 ciphertext
+for a protected artifact. Deletion removes the artifact, its history, and
+its search entry, and records a `deleted` event. The public page serves
+`?version=N` the same way.
 
 The whole REST surface is the human control surface and is admin-only: it
 accepts the configured admin token and nothing else, so an agent token is
