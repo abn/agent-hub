@@ -10,6 +10,13 @@ const prefs = {
   density: localStorage.getItem("hub.density") || "comfortable",
 };
 
+// The kind filters are per project, so switching projects does not carry a
+// filter across. They are view state, not a saved preference.
+const projectFilters = new Map();
+
+// The chip a render should return focus to, set when a filter is toggled.
+let pendingFocus = null;
+
 function applyPrefs() {
   const resolved =
     prefs.theme === "system"
@@ -53,29 +60,104 @@ const glyph = (kind) => `<span class="glyph" data-kind="${esc(kind)}" aria-hidde
 
 const when = (ts) => esc(String(ts).slice(0, 16).replace("T", " "));
 
+const KINDS = ["signal", "finished", "question", "answer", "approval", "artifact", "session"];
+const KIND_LABELS = {
+  signal: "Updates",
+  finished: "Finished",
+  question: "Questions",
+  answer: "Answers",
+  approval: "Approvals",
+  artifact: "Artifacts",
+  session: "Sessions",
+};
+
+// The action a caller can take on an event. A question is answered; an
+// approval is a decision. Both are the human's to act on, so the row carries
+// the verb rather than only a label.
+function actionFor(event) {
+  const id = esc(event.event_id || event.id);
+  if (event.kind === "question") {
+    return `<button type="button" class="action" data-action="answer" data-id="${id}">Reply</button>`;
+  }
+  if (event.kind === "approval") {
+    return `<button type="button" class="action" data-action="approve" data-id="${id}" data-summary="${esc(event.summary)}">Approve</button>`;
+  }
+  return "";
+}
+
+// Whether an event still expects the human. A feed event carries the inbox
+// status, so a decided item stops offering its action even though the event
+// itself is append-only.
+function isOpen(event) {
+  return event.inbox_status === "action" || event.inbox_status === "waiting";
+}
+
 function eventRow(event) {
-  return `<div class="row ${event.needs_action ? "unread" : ""}">
+  const open = isOpen(event);
+  return `<div class="row ${open ? "unread" : ""}">
     ${glyph(event.kind)}
     <div class="grow">
       <div class="title">${esc(event.summary)}</div>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
     </div>
+    ${open ? actionFor(event) : ""}
   </div>`;
 }
 
 function inboxRow(item) {
-  const reply =
-    item.kind === "question"
-      ? `<button type="button" class="action" data-action="answer" data-id="${esc(item.event_id)}">Reply</button>`
-      : "";
+  const action =
+    item.status === "action" || item.status === "waiting" ? actionFor(item) : "";
   return `<div class="row">
     ${glyph(item.kind)}
     <div class="grow">
       <div class="title">${esc(item.summary)}</div>
       <div class="meta">${esc(item.project_id)} · ${esc(item.actor)} · ${esc(item.status)}</div>
     </div>
-    ${reply}
+    ${action}
   </div>`;
+}
+
+// A day bucket for grouping: Today, Yesterday, or the date.
+function dayOf(ts, now) {
+  const date = new Date(ts);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diff = Math.round((start - day) / 86400000);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// Group events into day buckets, newest day first, preserving order inside a
+// day. The feed and Home both use this, so their shape stays identical.
+function byDay(events) {
+  const now = new Date();
+  const groups = [];
+  for (const event of events) {
+    const label = dayOf(event.created_at, now);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.events.push(event);
+    else groups.push({ label, events: [event] });
+  }
+  return groups;
+}
+
+function groupedEvents(events, row) {
+  return byDay(events)
+    .map(
+      (group) =>
+        `<h2 class="day">${esc(group.label)}</h2>
+         <div class="card">${group.events.map(row).join("")}</div>`,
+    )
+    .join("");
+}
+
+function kindChips(active) {
+  const chips = KINDS.map((kind) => {
+    const pressed = active.has(kind) ? "true" : "false";
+    return `<button type="button" class="chip" data-action="kind" data-kind="${kind}" aria-pressed="${pressed}">${KIND_LABELS[kind]}</button>`;
+  }).join("");
+  return `<div class="toolbar" role="group" aria-label="Filter by kind">${chips}</div>`;
 }
 
 function projectToolbar(projects, selected) {
@@ -102,15 +184,20 @@ async function home() {
       <a class="chip" href="#/storage">Storage</a>
     </nav>
     <h2>Recent</h2>
-    <div class="card">${data.recent.map(eventRow).join("") || '<p class="empty">Nothing has happened yet.</p>'}</div>`;
+    ${groupedEvents(data.recent, eventRow) || '<p class="empty">Nothing has happened yet.</p>'}`;
 }
 
 async function inbox() {
   const { items } = await api("/api/v1/inbox");
+  // The queue is what waits on the human and what they have not read. A
+  // resolved or read item has left it; the feed keeps its history.
+  const waiting = items.filter((item) => item.status === "action" || item.status === "waiting");
+  const unread = items.filter((item) => item.status === "unread");
+  const section = (title, rows) =>
+    rows.length ? `<h2>${title}</h2><div class="card">${rows.map(inboxRow).join("")}</div>` : "";
   main.innerHTML = `<h1>Inbox</h1>${
-    items.length
-      ? `<div class="card">${items.map(inboxRow).join("")}</div>`
-      : '<p class="empty">Inbox is clear.</p>'
+    section("Waiting on you", waiting) + section("Unread", unread) ||
+    '<p class="empty">Inbox is clear. Finished work, questions, and approvals will land here.</p>'
   }`;
 }
 
@@ -121,11 +208,17 @@ async function projectsScreen(selected) {
     return;
   }
   const current = selected || projects[0].id;
-  const page = await api(`/api/v1/projects/${encodeURIComponent(current)}/feed?limit=50`);
+  const active = new Set(projectFilters.get(current) || []);
+  // The kind filter runs in the query, before the limit, so a chip finds the
+  // newest events of its kind rather than only those inside a fetched window.
+  const kinds = [...active].map((kind) => `&kinds=${encodeURIComponent(kind)}`).join("");
+  const page = await api(`/api/v1/projects/${encodeURIComponent(current)}/feed?limit=100${kinds}`);
+  const empty = active.size ? "No events match this filter." : "No events yet.";
   main.innerHTML = `
     <h1>Project feed</h1>
     ${projectToolbar(projects, current)}
-    <div class="card">${page.events.map(eventRow).join("") || '<p class="empty">No events yet.</p>'}</div>`;
+    ${kindChips(active)}
+    ${groupedEvents(page.events, eventRow) || `<p class="empty">${empty}</p>`}`;
 }
 
 async function searchScreen(term) {
@@ -578,7 +671,11 @@ async function render() {
   } catch (error) {
     main.innerHTML = `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`;
   }
-  main.focus({ preventScroll: true });
+  const focus = pendingFocus;
+  pendingFocus = null;
+  const chip = focus && main.querySelector(`[data-action="kind"][data-kind="${CSS.escape(focus)}"]`);
+  if (chip) chip.focus({ preventScroll: true });
+  else main.focus({ preventScroll: true });
 }
 
 async function refreshBadge() {
@@ -622,6 +719,32 @@ async function answer(id) {
     method: "POST",
     body: JSON.stringify({ body }),
   });
+  render();
+}
+
+// An approval is a decision. It is recorded on the feed and leaves the waiting
+// queue, so the confirm names what is approved and the toast states the result.
+async function approve(id, summary) {
+  const named = summary ? `"${summary}"` : "this action";
+  const message = `Approve ${named}? Your decision is recorded on the feed and resolves the waiting item.`;
+  if (!confirm(message)) return;
+  await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
+    method: "POST",
+    body: JSON.stringify({ decision: "approve" }),
+  });
+  toast("Approved, recorded on the feed.");
+  render();
+}
+
+// The kind chips are per project. The toggle keeps focus on the chip it
+// pressed rather than dropping a keyboard user back at the top of the page.
+function toggleKind(kind, projectId) {
+  if (!projectId) return;
+  const active = new Set(projectFilters.get(projectId) || []);
+  if (active.has(kind)) active.delete(kind);
+  else active.add(kind);
+  projectFilters.set(projectId, [...active]);
+  pendingFocus = kind;
   render();
 }
 
@@ -676,6 +799,13 @@ main.addEventListener("click", (event) => {
   if (!button || button.tagName !== "BUTTON") return;
   const { action, id } = button.dataset;
   if (action === "answer") answer(id).catch((error) => alert(error.message));
+  if (action === "approve")
+    approve(id, button.dataset.summary).catch((error) => {
+      alert(error.message);
+      render();
+    });
+  if (action === "kind")
+    toggleKind(button.dataset.kind, main.querySelector('[data-role="project"]')?.value);
   if (action === "end") endSession(id).catch((error) => alert(error.message));
   if (action === "prune") pruneSession(id).catch((error) => alert(error.message));
   if (action === "agent-trust")
