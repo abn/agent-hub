@@ -398,6 +398,17 @@ fn artifact_versioning_round_trip_over_stdio() {
         "reading a deleted artifact errors: {after}"
     );
     assert_eq!(tool_error_code(&after), "not_found");
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let events = structured(&feed)["events"]
+        .as_array()
+        .expect("feed_read returns events");
+    assert!(
+        events.iter().any(|event| event["kind"] == "artifact"
+            && event["payload"]["action"] == "deleted"
+            && event["payload"]["artifact_id"] == artifact_id),
+        "the delete lands a deleted event on the feed: {feed}"
+    );
 }
 
 #[test]

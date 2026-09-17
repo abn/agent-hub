@@ -748,6 +748,19 @@ async fn delete_removes_the_artifact_and_its_history() {
             .expect("request");
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {uri}");
     }
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/artifacts/missing",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem_body(response).await["code"], "not_found");
 }
 
 #[tokio::test]
@@ -799,6 +812,30 @@ async fn render_serves_a_version() {
     let body = text_body(response).await;
     assert!(body.contains("&lt;p&gt;v1&lt;/p&gt;"));
     assert!(!body.contains("v2"));
+}
+
+#[tokio::test]
+async fn render_rejects_bad_versions() {
+    let state = state().await;
+    let id = publish_versioned(&state).await;
+
+    for (version, status) in [
+        ("0", StatusCode::BAD_REQUEST),
+        ("99", StatusCode::NOT_FOUND),
+        ("abc", StatusCode::BAD_REQUEST),
+    ] {
+        let app = router(state.clone());
+        let response = app
+            .oneshot(request(
+                "GET",
+                &format!("/artifacts/{id}?version={version}"),
+                None,
+                None,
+            ))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), status, "version {version}");
+    }
 }
 
 #[test]
