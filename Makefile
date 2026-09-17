@@ -52,12 +52,14 @@ docs/check: ## Validate the docs bundle against OKF v0.2
 web/check: ## Static checks for the PWA assets
 	./.agents/scripts/check-web.py
 
-# Not part of `check`: the module is only reachable through the PWA, and the
-# Node runtime is not otherwise a build dependency.
+# The artifact encryption round-trip. The module is reachable only through the
+# PWA, but a regression in it would break every protected artifact, so the gate
+# runs it when a Node runtime is present and says so when it is not.
 web/crypto: ## Run the artifact encryption round-trip self-test
+	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
-check: lint lint/engine clippy fmt/check docs/check web/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container

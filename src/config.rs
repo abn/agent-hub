@@ -56,7 +56,12 @@ impl Config {
 
         let trust_default = match std::env::var("HUB_TRUST_DEFAULT").as_deref() {
             Ok("untrusted") => TrustDefault::Untrusted,
-            _ => TrustDefault::Trusted,
+            Ok("trusted") | Err(_) => TrustDefault::Trusted,
+            Ok(other) => {
+                return Err(Error::Config(format!(
+                    "HUB_TRUST_DEFAULT must be 'trusted' or 'untrusted', got '{other}'"
+                )));
+            }
         };
 
         Ok(Self {

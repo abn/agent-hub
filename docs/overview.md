@@ -59,7 +59,9 @@ microservices, no CRDTs, and no custom distributed consensus. See the
 
 ## Status
 
-The store, the per-session brain wrapper, the MCP server with the feed and
-session tools, the REST feed and session routes, and the container packaging
-exist. The rest of the hub is not implemented yet. The public pages describe
-intended design, and every page that does says so.
+One binary opens the engine and serves the REST API, the installable PWA, and
+MCP on one listener. The feed, session brains, the inbox and questions,
+artifacts with reversible prune, engine-native search, per-agent identity with
+a trust model, and the container packaging exist. The session detail view,
+push notifications, project deletion, and an embedded tailnet are intended
+design, and the pages describing them say so.

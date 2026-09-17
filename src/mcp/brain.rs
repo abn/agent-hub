@@ -205,15 +205,32 @@ impl HubServer {
     }
 
     /// Authorize and open the active session's brain.
+    ///
+    /// The session row must still exist: a prune removes it, and opening the
+    /// brain afterwards would recreate the file and an orphaned search row. A
+    /// pruned session is a conflict, so the tool fails rather than resurrecting
+    /// it.
     async fn brain_for(
         &self,
         principal: &Principal,
         access: Access,
     ) -> Result<(String, String, Brain)> {
-        let (project_id, session_id) = self.active_session().await?;
-        policy::authorize(&self.state.db, principal, &project_id, access).await?;
-        let brain = self.state.brain.open(&project_id, &session_id).await?;
-        Ok((project_id, session_id, brain))
+        let (_, session_id) = self.active_session().await?;
+        let session = sessions::get(&self.state.db, &session_id)
+            .await?
+            .filter(|session| session.deleted_at.is_none())
+            .ok_or_else(|| {
+                Error::Conflict(format!(
+                    "session {session_id} is no longer available; start a session"
+                ))
+            })?;
+        policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
+        let brain = self
+            .state
+            .brain
+            .open(&session.project_id, &session.id)
+            .await?;
+        Ok((session.project_id, session.id, brain))
     }
 
     /// Index a brain value: path as title, content as body.

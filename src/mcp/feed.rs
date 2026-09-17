@@ -2,6 +2,10 @@
 //!
 //! The actor on every write comes from the resolved principal, never from the
 //! tool arguments, and the action flag is derived rather than client-set.
+//!
+//! An agent writes plain signals through this tool. The kinds owned by other
+//! surfaces, and `system`, which records hub-only audit events, are refused so
+//! a feed cannot impersonate a session, artifact, question, or audit record.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -11,10 +15,17 @@ use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::events::{self, FeedQuery, NewEvent};
 
 use super::{HubServer, to_error_data};
+
+/// The kinds an agent may write through `signal_append`. The rest are owned by
+/// a dedicated tool or the hub: `question` and `answer` by the question tools,
+/// `session` and `artifact` by the hub's own lifecycle, and `system` by the
+/// identity audit.
+const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval"];
 
 #[tool_router(router = feed_router, vis = "pub")]
 impl HubServer {
@@ -24,6 +35,12 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SignalAppendParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        if !SIGNAL_KINDS.contains(&params.kind.as_str()) {
+            return Err(to_error_data(Error::InvalidArgument(format!(
+                "kind '{}' is not writable through signal_append",
+                params.kind
+            ))));
+        }
         let principal = self.principal(&context);
         policy::authorize(
             &self.state.db,

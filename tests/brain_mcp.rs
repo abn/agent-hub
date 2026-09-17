@@ -327,6 +327,89 @@ fn session_and_brain_tools_round_trip_over_stdio() {
 }
 
 #[test]
+fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
+    let data_dir = TempDir::new("pruned");
+    common::seed_project(&data_dir.0, "proj");
+
+    let session_id = {
+        let mut server = McpServer::spawn(&data_dir.0);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "named"}),
+        );
+        let id = structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let put = server.call_tool("brain_put", json!({"path": "/kv/note", "content": "one"}));
+        assert_eq!(structured(&put)["ok"], true, "the first write lands");
+        id
+    };
+
+    // End and prune the session while no MCP server holds it, age the
+    // tombstone past the undo window, and sweep, so the file is truly gone.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let brain_path = runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open engine");
+        let session = agent_hub::store::sessions::get(&db, &session_id)
+            .await
+            .expect("get")
+            .expect("the session exists");
+        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent")
+            .await
+            .expect("end");
+        agent_hub::store::prune::prune_session(&db, &session_id)
+            .await
+            .expect("prune");
+        let old = (time::OffsetDateTime::now_utc() - time::Duration::seconds(120))
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("format");
+        db.connect()
+            .expect("connect")
+            .execute(
+                "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+                vec![
+                    turso::Value::Text(old),
+                    turso::Value::Text(session_id.clone()),
+                ],
+            )
+            .await
+            .expect("age the tombstone");
+        agent_hub::store::prune::sweep(&db, &data_dir.0)
+            .await
+            .expect("sweep");
+        session.brain_path
+    });
+
+    // A fresh server starts the session by name, then writes to it. The pruned
+    // row is gone, so this is a new session, not the pruned one; the removed
+    // file belongs to the pruned session and must stay gone.
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "renamed"}),
+    );
+    let resumed_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    assert_ne!(resumed_id, session_id, "the pruned session is not resumed");
+    let response = server.call_tool("brain_put", json!({"path": "/kv/note", "content": "two"}));
+    assert_eq!(structured(&response)["ok"], true, "{response}");
+    assert!(
+        !data_dir.0.join(&brain_path).exists(),
+        "a pruned brain file is not recreated"
+    );
+}
+
+#[test]
 fn brain_tools_require_an_active_session() {
     let data_dir = TempDir::new("no-session");
     let mut server = McpServer::spawn(&data_dir.0);

@@ -26,7 +26,6 @@ A versioned JSON API backs the PWA and any other client:
 GET    /api/v1/home
 GET    /api/v1/projects
 POST   /api/v1/projects
-DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=

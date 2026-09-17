@@ -124,16 +124,22 @@ pub async fn query_visible(
     }
     let limit = search.limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
 
+    // A confined caller reads the ranked rows with a generous cap rather than
+    // a fixed page, since the confinement is applied while reading. The cap
+    // bounds the scan while still reaching deeper than a page.
+    let fetch = if visible.is_none() {
+        (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX)
+    } else {
+        (limit.saturating_mul(200)).clamp(limit, crate::limits::SEARCH_FETCH_MAX)
+    };
+
     let mut sql = String::from(
         "SELECT * FROM search_docs WHERE fts_match(title, body, ?1)
          ORDER BY fts_score(title, body, ?1) DESC",
     );
     let mut params = vec![Value::Text(search.text.clone())];
-    if visible.is_none() {
-        let fetch = (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX);
-        params.push(Value::Integer(fetch));
-        sql.push_str(&format!(" LIMIT ?{}", params.len()));
-    }
+    params.push(Value::Integer(fetch));
+    sql.push_str(&format!(" LIMIT ?{}", params.len()));
 
     let conn = db.connect().map_err(crate::store::engine)?;
     let mut rows = conn

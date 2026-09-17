@@ -203,6 +203,36 @@ fn signal_append_round_trips_over_stdio() {
 }
 
 #[test]
+fn signal_append_refuses_hub_owned_kinds() {
+    let data_dir = TempDir::new("hub-kinds");
+    common::seed_project(&data_dir.0, "p1");
+    let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
+    server.initialize();
+
+    for kind in ["system", "session", "artifact", "question", "answer"] {
+        let response = server.call_tool(
+            "signal_append",
+            json!({"project_id": "p1", "kind": kind, "summary": "forged"}),
+        );
+        assert_eq!(
+            response["error"]["data"]["error"]["code"], "invalid_argument",
+            "kind {kind} must not be writable through signal_append: {response}"
+        );
+    }
+
+    // The refused writes left no events behind.
+    let read = server.call_tool("feed_read", json!({"project_id": "p1"}));
+    assert_eq!(
+        structured(&read)["events"]
+            .as_array()
+            .expect("events")
+            .len(),
+        0,
+        "a refused kind is not recorded"
+    );
+}
+
+#[test]
 fn idempotency_key_yields_one_event() {
     let data_dir = TempDir::new("idempotency");
     common::seed_project(&data_dir.0, "p1");

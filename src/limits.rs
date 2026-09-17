@@ -17,6 +17,10 @@ pub const ARTIFACT_BYTES_MAX: usize = 50 * 1024 * 1024;
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
+/// Maximum rows a confined search reads before it stops, bounding the scan
+/// while still reaching deeper than a page of visible hits.
+pub const SEARCH_FETCH_MAX: i64 = 5000;
+
 /// Default feed page size.
 pub const FEED_LIMIT_DEFAULT: i64 = 50;
 

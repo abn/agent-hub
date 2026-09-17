@@ -20,9 +20,12 @@ Agents reach the hub over MCP. Humans reach it over the PWA.
 
 ## Status
 
-The repository holds the operational baseline and a minimal binary skeleton.
-The hub itself is not implemented yet. The public design lives in the wiki
-under [`docs/`](docs/index.md); the working specification is held outside the
+The hub is early but working: one binary opens the engine, serves the REST
+API, the installable PWA, and MCP on one listener, and ships the feed, the
+session brains, the inbox, artifacts, search, and per-agent identity with a
+trust model. The session detail view, push notifications, and an embedded
+tailnet remain intended design. The public design lives in the wiki under
+[`docs/`](docs/index.md); the working specification is held outside the
 committed tree.
 
 ## Building
