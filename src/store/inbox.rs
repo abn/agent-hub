@@ -127,10 +127,42 @@ pub async fn list_visible(
     Ok(items)
 }
 
+/// The status of an inbox entry, if it is tracked there.
+///
+/// Reads inside a caller's transaction so a status check and the write it
+/// guards cannot race a concurrent writer.
+pub(crate) async fn status_in_tx(conn: &Connection, event_id: &str) -> Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT status FROM inbox WHERE event_id = ?1",
+            vec![Value::Text(event_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => match row.get_value(0).map_err(engine)? {
+            Value::Text(status) => Ok(Some(status)),
+            other => Err(Error::Engine(format!(
+                "expected text in an inbox column, found {other:?}"
+            ))),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Set an inbox entry's status.
 pub async fn set_status(db: &Database, event_id: &str, status: &str) -> Result<()> {
-    validate_status(status)?;
     let conn = db.connect().map_err(engine)?;
+    set_status_in_tx(&conn, event_id, status).await
+}
+
+/// Set an inbox entry's status inside a caller's transaction.
+pub(crate) async fn set_status_in_tx(
+    conn: &Connection,
+    event_id: &str,
+    status: &str,
+) -> Result<()> {
+    validate_status(status)?;
     conn.execute(
         "UPDATE inbox SET status = ?1, updated_at = ?2 WHERE event_id = ?3",
         vec![

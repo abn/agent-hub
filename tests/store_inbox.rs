@@ -3,7 +3,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_hub::store::events::{FeedQuery, NewEvent, append, read_feed};
+use agent_hub::error::ErrorCode;
+use agent_hub::store::events::{self, FeedQuery, NewEvent, append, read_feed};
 use agent_hub::store::questions::NewQuestion;
 use agent_hub::store::{home, inbox, migrate, open_engine, questions};
 
@@ -50,6 +51,142 @@ fn finished(summary: &str) -> NewEvent {
         needs_action: false,
         thread_id: None,
     }
+}
+
+fn approval(summary: &str) -> NewEvent {
+    NewEvent {
+        project_id: "proj".to_string(),
+        kind: "approval".to_string(),
+        summary: summary.to_string(),
+        payload: None,
+        needs_action: false,
+        thread_id: None,
+    }
+}
+
+#[tokio::test]
+async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    // An approval needs the human, so it enters the inbox as an action.
+    let event = events::get(&db, &approval_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert!(event.needs_action, "an approval waits on the human");
+    assert_eq!(
+        event.inbox_status.as_deref(),
+        Some("action"),
+        "the approval is open in the inbox"
+    );
+    let waiting = inbox::list(&db, Some("action"), None, 50)
+        .await
+        .expect("list");
+    assert_eq!(waiting.len(), 1, "the approval is an action item");
+
+    let decision = questions::decide(&db, "human", &approval_id, true, Some("ship it"))
+        .await
+        .expect("decide");
+    let decision_event = events::get(&db, &decision)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        decision_event.kind, "answer",
+        "the decision is a feed reply"
+    );
+    assert_eq!(
+        decision_event.thread_id.as_deref(),
+        Some(approval_id.as_str()),
+        "the decision is on the approval's thread"
+    );
+    let payload = decision_event.payload.expect("decision payload");
+    assert_eq!(payload["body"], "Approved: ship it");
+    assert_eq!(payload["decision"], "approved");
+
+    let resolved = events::get(&db, &approval_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        resolved.inbox_status.as_deref(),
+        Some("resolved"),
+        "the feed carries the resolved status"
+    );
+    let counts = inbox::counts(&db).await.expect("counts");
+    assert_eq!(counts.waiting, 0, "the decision clears the waiting item");
+
+    let bad = questions::decide(&db, "human", "missing", true, None)
+        .await
+        .expect_err("unknown approval");
+    assert_eq!(bad.code(), ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn an_approval_is_decided_once() {
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    questions::decide(&db, "human", &approval_id, true, None)
+        .await
+        .expect("first decision");
+
+    let again = questions::decide(&db, "human", &approval_id, false, None)
+        .await
+        .expect_err("a second decision conflicts");
+    assert_eq!(again.code(), ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
+    let db = open().await;
+
+    let padded = events::append(&db, "agent-one", None, approval("Ship it"))
+        .await
+        .expect("append approval");
+    let decision = questions::decide(&db, "human", &padded, true, Some("  go ahead  "))
+        .await
+        .expect("decide");
+    let payload = events::get(&db, &decision)
+        .await
+        .expect("get")
+        .expect("exists")
+        .payload
+        .expect("payload");
+    assert_eq!(payload["body"], "Approved: go ahead", "the note is trimmed");
+
+    let blank = events::append(&db, "agent-one", None, approval("Roll it back"))
+        .await
+        .expect("append approval");
+    let decision = questions::decide(&db, "human", &blank, false, Some("   "))
+        .await
+        .expect("decide");
+    let payload = events::get(&db, &decision)
+        .await
+        .expect("get")
+        .expect("exists")
+        .payload
+        .expect("payload");
+    assert_eq!(payload["body"], "Declined", "a blank note adds nothing");
+    assert_eq!(payload["decision"], "declined");
+}
+
+#[tokio::test]
+async fn a_non_approval_cannot_be_decided() {
+    let db = open().await;
+    let signal = events::append(&db, "agent-one", None, finished("done"))
+        .await
+        .expect("append");
+
+    let err = questions::decide(&db, "human", &signal, true, None)
+        .await
+        .expect_err("not an approval");
+    assert_eq!(err.code(), ErrorCode::InvalidArgument);
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 //! The project feed: append-only, time-ordered, addressable events.
 
 use serde::{Deserialize, Serialize};
-use turso::{Database, Row, Value};
+use turso::{Connection, Database, Row, Value};
 
 use crate::error::{Error, Result};
 use crate::limits::{self, FEED_LIMIT_DEFAULT, FEED_LIMIT_MAX};
@@ -24,6 +24,10 @@ pub struct Event {
     pub thread_id: Option<String>,
     pub needs_action: bool,
     pub created_at: String,
+    /// The inbox status when the event is tracked there. `None` when it never
+    /// entered the inbox. An action is open while this is `action` or
+    /// `waiting`, and closed once it is `resolved`.
+    pub inbox_status: Option<String>,
 }
 
 /// A new event to append.
@@ -109,7 +113,9 @@ pub(crate) async fn append_in_tx(
             "an answer must name the question it replies to".to_string(),
         ));
     }
-    let needs_action = event.needs_action || event.kind == "question";
+    // A question and an approval both wait on the human, whichever surface
+    // wrote them, so the rule lives here rather than at each write path.
+    let needs_action = event.needs_action || event.kind == "question" || event.kind == "approval";
     let thread_id = if event.kind == "question" {
         Some(id.clone())
     } else {
@@ -173,10 +179,20 @@ pub(crate) async fn append_in_tx(
 /// Fetch one event by id.
 pub async fn get(db: &Database, event_id: &str) -> Result<Option<Event>> {
     let conn = db.connect().map_err(engine)?;
+    get_on(&conn, event_id).await
+}
+
+/// Fetch one event inside a caller's transaction, so a read and the write it
+/// guards serialise against a concurrent writer.
+pub(crate) async fn get_in_tx(conn: &Connection, event_id: &str) -> Result<Option<Event>> {
+    get_on(conn, event_id).await
+}
+
+async fn get_on(conn: &Connection, event_id: &str) -> Result<Option<Event>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
-             FROM events WHERE id = ?1",
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+             FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.id = ?1",
             vec![Value::Text(event_id.to_string())],
         )
         .await
@@ -205,8 +221,8 @@ pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
     let limit = limit.clamp(1, FEED_LIMIT_MAX);
     let mut rows = conn
         .query(
-            "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
-             FROM events WHERE kind <> 'system' ORDER BY id DESC LIMIT ?1",
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+             FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.kind <> 'system' ORDER BY e.id DESC LIMIT ?1",
             vec![Value::Integer(limit)],
         )
         .await
@@ -235,8 +251,8 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
     let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
     let mut sql = String::from(
-        "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
-         FROM events WHERE project_id = ?1",
+        "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+         FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.project_id = ?1",
     );
     let mut params: Vec<Value> = vec![Value::Text(project_id.to_string())];
 
@@ -246,23 +262,23 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
             params.push(Value::Text(kind.clone()));
             placeholders.push(format!("?{}", params.len()));
         }
-        sql.push_str(&format!(" AND kind IN ({})", placeholders.join(", ")));
+        sql.push_str(&format!(" AND e.kind IN ({})", placeholders.join(", ")));
     }
     if let Some(since) = &query.since {
         params.push(Value::Text(since.clone()));
-        sql.push_str(&format!(" AND id > ?{}", params.len()));
+        sql.push_str(&format!(" AND e.id > ?{}", params.len()));
     }
     if let Some(before) = &query.before {
         params.push(Value::Text(before.clone()));
-        sql.push_str(&format!(" AND id < ?{}", params.len()));
+        sql.push_str(&format!(" AND e.id < ?{}", params.len()));
     }
 
     // Forward from a cursor reads oldest first; otherwise newest first.
     let ascending = query.since.is_some() && query.before.is_none();
     if ascending {
-        sql.push_str(" ORDER BY id ASC");
+        sql.push_str(" ORDER BY e.id ASC");
     } else {
-        sql.push_str(" ORDER BY id DESC");
+        sql.push_str(" ORDER BY e.id DESC");
     }
 
     params.push(Value::Integer(limit));
@@ -324,6 +340,7 @@ fn event_from_row(row: &Row) -> Result<Event> {
         thread_id: text_at(row, 6)?,
         needs_action,
         created_at: required_text(row, 8)?,
+        inbox_status: text_at(row, 9)?,
     })
 }
 

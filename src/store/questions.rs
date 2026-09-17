@@ -1,4 +1,5 @@
-//! Questions and answers: an agent asks, the human or another agent replies.
+//! Questions, answers, and approval decisions: an agent asks, the human or
+//! another agent replies.
 
 use turso::Database;
 
@@ -111,5 +112,80 @@ pub async fn answer(
     .await?;
 
     inbox::set_status(db, question_id, "resolved").await?;
+    Ok(id)
+}
+
+/// Approve or decline an approval.
+///
+/// The decision lands on the feed as an `answer` on the approval's thread, so
+/// it is a durable, human-visibility record, and it resolves the waiting item
+/// so the queue and the record agree. The status check, the answer, and the
+/// resolve commit in one immediate transaction, so two concurrent decisions
+/// serialise: the second sees `resolved` and conflicts rather than appending a
+/// contradictory answer.
+pub async fn decide(
+    db: &Database,
+    actor: &str,
+    approval_id: &str,
+    approved: bool,
+    note: Option<&str>,
+) -> Result<String> {
+    let mut conn = db.connect().map_err(crate::store::engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(crate::store::engine)?;
+
+    let approval = events::get_in_tx(&tx, approval_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("approval {approval_id} not found")))?;
+    if approval.kind != "approval" {
+        return Err(Error::InvalidArgument(format!(
+            "event {approval_id} is a {} and is not an approval",
+            approval.kind
+        )));
+    }
+    // An approval is decided once. An approval always enters the inbox when it
+    // is written, so an untracked one is a data fault, not a decidable event.
+    match inbox::status_in_tx(&tx, approval_id).await?.as_deref() {
+        Some("resolved") => {
+            return Err(Error::Conflict(format!(
+                "approval {approval_id} was already decided"
+            )));
+        }
+        Some(_) => {}
+        None => {
+            return Err(Error::NotFound(format!(
+                "approval {approval_id} is not tracked in the inbox"
+            )));
+        }
+    }
+
+    let decision = if approved { "Approved" } else { "Declined" };
+    let note = note.map(str::trim).filter(|note| !note.is_empty());
+    let body = match note {
+        Some(note) => format!("{decision}: {note}"),
+        None => decision.to_string(),
+    };
+    let id = events::append_in_tx(
+        &tx,
+        actor,
+        None,
+        NewEvent {
+            project_id: approval.project_id.clone(),
+            kind: "answer".to_string(),
+            summary: format!("re: {}", approval.summary),
+            payload: Some(serde_json::json!({
+                "body": body,
+                "decision": decision.to_lowercase(),
+            })),
+            needs_action: false,
+            thread_id: Some(approval_id.to_string()),
+        },
+    )
+    .await?;
+
+    inbox::set_status_in_tx(&tx, approval_id, "resolved").await?;
+    tx.commit().await.map_err(crate::store::engine)?;
     Ok(id)
 }
