@@ -24,8 +24,8 @@ inbox, which is global.
 | `artifacts` | Artifact metadata. Title, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, and the blob path. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
 | `sessions` | Session metadata: project, the agent-supplied session name, agent, status, the brain file path, timestamps, and a soft-delete marker. State itself lives in the brain file. |
-| `agents` | Agent identity, display name, and trust level (`trusted` or `untrusted`). |
-| `agent_tokens` | Token hashes bound to an agent, with last use and revocation. |
+| `agents` | Agent identity, display name, trust level (`trusted` or `untrusted`), and the id of the agent's personal space. |
+| `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
 | `grants` | An agent, a project, and read or write access, for opening a project to an untrusted agent. |
 | `search_docs` | The search corpus: one row per indexed document (feed, artifact, or brain path) with a full-text index over title and body. |
 
@@ -41,6 +41,12 @@ Identity is a first-class table rather than a field on a token, so the server
 sets the `actor` on every event and a request cannot forge another agent. The
 trust model and grants are described in [agent identity and
 trust](../adr/0012-agent-identity-and-trust.md).
+
+Identity changes are audited. Creating an agent, changing its trust, issuing or
+revoking its token, and adding or removing a grant each append a `system` event
+to the affected project's feed, in the same transaction as the change, so a
+change and its record cannot diverge. Agent-scoped changes land in the agent's
+personal space; a grant lands in the project it opens.
 
 Retention is deliberately a per-layer concept. The schema carries
 `created_at`, `last_activity`, a `retention` column, and room for an

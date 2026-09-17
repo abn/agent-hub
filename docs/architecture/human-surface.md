@@ -10,10 +10,13 @@ status: draft
 
 The human reaches the hub through a REST API and an installable,
 mobile-first PWA served as static assets from the same binary. The feed,
-session, inbox, home, artifact, prune, and search routes ship, along with the
-installable PWA shell, Home, Inbox, Project feed, Artifacts, Sessions, Storage,
-Search, and Settings; the Agents and access surface, the session detail view,
-and project deletion are still intended design.
+session, inbox, home, artifact, prune, search, and identity routes ship, along
+with the installable PWA shell and its screens: Home, Inbox, Project feed,
+Artifacts and viewer, Sessions, Storage, Search, and Settings with the Agents
+and access section. The session detail view and project deletion are still
+intended design. The binary serves the REST API, the PWA, and the MCP endpoint
+on one listener in one process, so the per-session write lock covers every
+writer and the prune sweeper always runs.
 
 ## REST API
 
@@ -33,9 +36,12 @@ GET    /api/v1/sessions?project=
 GET    /api/v1/agents
 POST   /api/v1/agents
 PATCH  /api/v1/agents/:id
+POST   /api/v1/agents/:id/token
+DELETE /api/v1/agents/:id/token
 GET    /api/v1/agents/:id/grants
 POST   /api/v1/agents/:id/grants
 DELETE /api/v1/agents/:id/grants/:projectId
+GET    /api/v1/artifacts/:id
 GET    /api/v1/storage
 DELETE /api/v1/storage/sessions/:id
 POST   /api/v1/prune/undo/:token
@@ -44,6 +50,10 @@ GET    /healthz
 GET    /readyz
 GET    /artifacts/:id
 ```
+
+The whole REST surface is the human control surface and is admin-only: it
+accepts the configured admin token and nothing else, so an agent token is
+rejected there. Agents reach the hub over MCP.
 
 Errors are RFC 9457 problem details. The public artifact route renders the
 artifact shell; for a protected artifact the shell carries ciphertext, and
@@ -69,9 +79,11 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 | Storage | Usage by project and kind, with the reversible prune actions for sessions. |
 | Project settings | Project fields, artifact password policy, reserved retention hints, and deletion. |
 
-Agent and access management is a sub-screen of Project settings on mobile and
-a Settings section on desktop, not a tab. It lists agents with their trust
-level, issues tokens, and manages grants.
+Agent and access management lives under Settings, not a tab. It lists agents
+with their trust level, creates an agent and its personal space, promotes or
+demotes it, issues or revokes its single token (shown once), and manages
+grants. The artifact viewer decrypts a protected artifact in the browser and
+renders agent-authored HTML only inside a sandboxed frame.
 
 The interaction model is read, answer, approve, and prune, with no chat
 interface, by [decision](../adr/0007-async-mailbox-semantics.md). Alerts have
@@ -87,10 +99,11 @@ for the tokens and rules.
 
 ## Auth
 
-- The control surface uses the tailnet identity when running on a tailnet,
-  reverse-proxy auth on a LAN, or a config-set admin token.
-- The MCP endpoints use per-agent bearer tokens bound to an identity and a
-  trust level, by [decision](../adr/0012-agent-identity-and-trust.md).
+- The control surface uses a config-set admin token. It is required when the
+  bind is not loopback, since the surface rejects every request without one.
+- The MCP endpoint uses a per-agent bearer token bound to an identity and a
+  trust level, by [decision](../adr/0012-agent-identity-and-trust.md). The
+  stdio transport is the local admin and needs no token.
 - Shared artifacts use a password and browser-side encryption, so the
   recipient needs nothing else.
 

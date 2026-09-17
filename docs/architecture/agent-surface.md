@@ -8,11 +8,11 @@ status: draft
 
 # Agent surface
 
-Agents reach the hub over the Model Context Protocol, over stdio for local
-agents and streamable HTTP for remote agents on a LAN or tailnet. One MCP
-server exposes the tools below. The server, the feed, session, brain, inbox,
-artifact, and search tools, and the version tool ship today; the rest of the
-table is intended design and lands wave by wave.
+Agents reach the hub over the Model Context Protocol: streamable HTTP on the
+hub's own listener at `/mcp`, and stdio for a local process. One MCP server
+exposes the tools below, and every tool ships. The stdio transport is a process
+the operator launched on the node, so it acts as the human admin. The HTTP
+transport requires a bearer token that resolves to one agent identity.
 
 ## Tools
 
@@ -34,6 +34,7 @@ table is intended design and lands wave by wave.
 | `brain_list` | List the session brain tree. |
 | `brain_delete` | Remove a path from the session brain. |
 | `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
+| `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
 
 `brain_get` and `brain_put` operate on the current session's brain only. Brain
@@ -43,11 +44,14 @@ raw file handle.
 
 ## Trust
 
-Every call carries a bearer token bound to a stable agent identity, and the
-server sets the `actor`. A trusted agent reads every resource and writes its
-own and shared resources; an untrusted agent reaches only its own spaces and
-explicit grants. See [agent identity and
-trust](../adr/0012-agent-identity-and-trust.md).
+Every HTTP call carries a bearer token bound to a stable agent identity, and
+the server sets the `actor`; a request cannot forge it. The stdio transport
+carries no token and is the human admin. A trusted agent reads every resource
+and writes shared projects and its own personal space, but not another agent's;
+an untrusted agent reaches only its own space and the projects explicitly
+granted to it, at the granted level. Global reads are confined to the caller's
+visible projects, so a search or an inbox read never crosses a boundary. See
+[agent identity and trust](../adr/0012-agent-identity-and-trust.md).
 
 ## Pagination, errors, and idempotency
 

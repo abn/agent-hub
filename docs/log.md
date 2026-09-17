@@ -4,6 +4,30 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, identity and access
+
+* **Creation**: Agents have a stable identity, one token at a time, a trust
+  level, and a personal space. Issuing a token revokes the previous one in the
+  same transaction, and revocation is agent-keyed.
+* **Creation**: Every MCP tool and every REST read is authorized before it
+  touches state. A trusted agent reads broadly and writes shared projects and
+  its own; an untrusted agent reaches its own space and explicit grants.
+  Search and the inbox are confined to a caller's visible projects.
+* **Creation**: Added the `whoami` MCP tool, the admin-only REST identity
+  routes (`POST` and `DELETE /api/v1/agents/:id/token`, and the grants routes),
+  and `GET /api/v1/artifacts/:id` for the in-app viewer.
+* **Creation**: The PWA gains Agents and access under Settings, and an artifact
+  viewer that decrypts protected artifacts in the browser and renders
+  agent-authored HTML only in a sandboxed frame.
+* **Update**: The hub serves the REST API, the PWA, and MCP at `/mcp` on one
+  listener in one process, and runs the prune sweeper there.
+* **Update**: Identity changes are audited as `system` feed events, in the same
+  transaction as the change.
+* **Update**: The control-surface admin token is required when the bind is not
+  loopback. The stdio transport is the local admin; HTTP requires a token.
+* **Note**: The session detail view, project deletion, push notifications, and
+  a headless accessibility audit remain outstanding.
+
 ## 2026-09-16, installable PWA
 
 * **Creation**: Ship the interface as static assets from the binary: the design

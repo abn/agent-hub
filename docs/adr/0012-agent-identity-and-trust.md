@@ -18,8 +18,10 @@ that are not trusted yet.
 
 ## Decision
 
-Every agent has a stable identity and its own token. The server sets the
-`actor`; no request can forge it. An agent is `trusted` or `untrusted`:
+Every agent has a stable identity and one token at a time. Issuing a token for
+an agent revokes the previous one, so revocation is agent-keyed. The server
+sets the `actor`; no request can forge it. An agent is `trusted` or
+`untrusted`:
 
 - **Trusted** reads every resource and writes its own projects, sessions, and
   shared resources.
@@ -34,7 +36,15 @@ default where the human opts each agent in.
 ## Consequences
 
 - The `actor` on every event is trustworthy.
-- The human is the admin: it creates agents, sets trust, and manages grants.
+- The human is the admin: it creates agents, sets trust, manages tokens and
+  grants, through an admin-only REST surface and the PWA.
 - The strict mode is a deployment choice, not a code change.
 - A shared-token mode is not offered, because it erases the identity the model
   depends on.
+- One live token per agent means no rotation overlap window. That is acceptable
+  for one operator on one node, and it can be widened later without a schema
+  change since revoked rows are retained.
+- Every identity change is audited as a `system` feed event, in the same
+  transaction as the change.
+- The local stdio transport is the human admin, because it is a process the
+  operator launched on the node; only token transports carry an agent identity.
