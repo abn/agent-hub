@@ -10,8 +10,8 @@ or NAS node. The node is the cloud: agents report in over LAN or tailnet, and
 the human watches everything from an installable PWA.
 
 The working specification is held in the gitignored scratch area and is never
-committed. The public design lives in the wiki under `docs/`. The hub itself
-is not implemented yet; the public pages say so and describe intended design.
+committed. The public design lives in the wiki under `docs/` and describes the
+shipped behaviour.
 
 ## Invariants
 

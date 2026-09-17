@@ -8,11 +8,12 @@ status: draft
 
 # Quickstart
 
-This page covers building the hub and running it locally, either as a binary
-or through the container and compose file. The hub is not feature complete
-yet: the binary starts, opens its store, and answers health and readiness
-probes, while the agent and human surfaces are still being built. Run it to
-exercise the packaging and the storage engine, not to depend on it.
+This page covers building the hub, running it locally as a binary or through
+the container and compose file, and connecting the first agent. The REST API,
+the installable PWA, and the MCP surface all ship; the
+[agent surface](../architecture/agent-surface.md) and
+[human surface](../architecture/human-surface.md) pages describe their
+contracts, and [artifacts](artifacts.md) covers authoring.
 
 ## Build the binary
 
@@ -38,6 +39,7 @@ The binary reads its configuration from the environment.
 | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
 | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
+| `HUB_AGENT_ID` | `local` | Actor label recorded for the stdio admin process, effective only with `mcp` |
 | `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
 | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
 | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
@@ -73,6 +75,42 @@ curl http://127.0.0.1:8080/readyz
 On start the binary creates the data directory and its `sessions/` and
 `artifacts/` children, then opens `hub.db` at the top of the data directory.
 Back up the whole data directory as one unit.
+
+## Create a project and connect an agent
+
+Every REST call carries the admin token. Create a project, create an agent,
+and issue its token:
+
+```sh
+ADMIN="Authorization: Bearer change-me"
+curl -sS -X POST http://127.0.0.1:8080/api/v1/projects -H "$ADMIN" \
+  -H 'content-type: application/json' \
+  -d '{"id":"homelab","display_name":"Homelab"}'
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agents -H "$ADMIN" \
+  -H 'content-type: application/json' \
+  -d '{"id":"my-agent","display_name":"My Agent"}'
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agents/my-agent/token -H "$ADMIN"
+```
+
+The token is shown once; reissuing replaces it and revokes the previous one.
+An agent reaches the hub over MCP, either stdio for a local process or
+streamable HTTP with its bearer token:
+
+```sh
+HUB_DATA_DIR=./data HUB_AGENT_ID=my-agent ./target/debug/agent-hub mcp
+```
+
+```
+POST http://127.0.0.1:8080/mcp
+Authorization: Bearer <agent token>
+```
+
+Open `http://127.0.0.1:8080/` for the human surface and paste the admin token
+in Settings. The hub also serves `GET /SKILL.md`, a bootstrap guide with its
+own address filled in, so an agent that can already reach the hub can fetch
+the connection details and the tool list. Trust levels and grants are managed
+under Settings or through the agent routes; see the
+[agent surface](../architecture/agent-surface.md).
 
 ## Run with compose
 
