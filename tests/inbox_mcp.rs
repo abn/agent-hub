@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+mod common;
+
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const AGENT_ID: &str = "mcp-inbox";
@@ -188,6 +190,7 @@ fn item_with_id<'a>(items: &'a [Value], event_id: &str) -> &'a Value {
 #[test]
 fn inbox_and_question_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
+    common::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 

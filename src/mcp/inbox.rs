@@ -12,7 +12,10 @@ use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::error::Error;
 use crate::limits::FEED_LIMIT_DEFAULT;
+use crate::policy::{self, Access};
+use crate::store::events;
 use crate::store::inbox;
 use crate::store::questions::{self, NewQuestion};
 
@@ -26,11 +29,19 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<QuestionPostParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &params.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let event_id = questions::post(
             &self.state.db,
             NewQuestion {
-                actor: &actor,
+                actor: &principal.actor,
                 project_id: &params.project_id,
                 subject: &params.subject,
                 body: params.body.as_deref(),
@@ -56,10 +67,27 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<AnswerPostParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        let question = events::get(&self.state.db, &params.question_id)
+            .await
+            .map_err(to_error_data)?
+            .ok_or_else(|| {
+                to_error_data(Error::NotFound(format!(
+                    "question {} not found",
+                    params.question_id
+                )))
+            })?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &question.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let event_id = questions::answer(
             &self.state.db,
-            &actor,
+            &principal.actor,
             &params.question_id,
             &params.body,
             params.idempotency_key.as_deref(),
@@ -73,15 +101,20 @@ impl HubServer {
     #[tool(description = "Read the human's inbox, newest first.")]
     async fn inbox_read(
         &self,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<InboxReadParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let visible = policy::visibility(&self.state.db, &principal)
+            .await
+            .map_err(to_error_data)?;
         let limit = params.limit.unwrap_or(FEED_LIMIT_DEFAULT);
-        let items = inbox::list(
+        let items = inbox::list_visible(
             &self.state.db,
             params.status.as_deref(),
             params.project_id.as_deref(),
             limit,
+            visible.as_filter(),
         )
         .await
         .map_err(to_error_data)?;

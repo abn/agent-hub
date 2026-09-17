@@ -11,6 +11,7 @@ use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::policy::{self, Access};
 use crate::store::events::{self, FeedQuery, NewEvent};
 
 use super::{HubServer, to_error_data};
@@ -23,13 +24,21 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SignalAppendParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &params.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         // The client cannot set the action flag. Only an approval waits on the
         // human, so an agent cannot flood the inbox with ordinary signals.
         let needs_action = params.kind == "approval";
         let event_id = events::append(
             &self.state.db,
-            &actor,
+            &principal.actor,
             params.idempotency_key.as_deref(),
             NewEvent {
                 project_id: params.project_id,
@@ -49,9 +58,14 @@ impl HubServer {
     #[tool(description = "Read a page of a project feed.")]
     async fn feed_read(
         &self,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<FeedReadParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
+            .await
+            .map_err(to_error_data)?;
+
         let mut query = FeedQuery {
             since: params.since,
             before: params.before,

@@ -15,6 +15,8 @@ use turso::Value;
 
 use crate::brain::Brain;
 use crate::error::{Error, Result};
+use crate::policy::{self, Access};
+use crate::principal::Principal;
 use crate::store::search::{SearchDoc, index_doc};
 use crate::store::sessions;
 
@@ -29,12 +31,20 @@ impl HubServer {
         Parameters(params): Parameters<SessionStartParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         // The agent is the authenticated identity, never client input.
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &params.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let session = sessions::start(
             &self.state.db,
             &params.project_id,
             &params.session_name,
-            &actor,
+            &principal.actor,
         )
         .await
         .map_err(to_error_data)?;
@@ -53,8 +63,25 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SessionEndParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
-        sessions::end(&self.state.db, &params.session_id, &actor)
+        let principal = self.principal(&context);
+        let session = sessions::get(&self.state.db, &params.session_id)
+            .await
+            .map_err(to_error_data)?
+            .ok_or_else(|| {
+                to_error_data(Error::NotFound(format!(
+                    "session {} not found",
+                    params.session_id
+                )))
+            })?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &session.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
+        sessions::end(&self.state.db, &params.session_id, &principal.actor)
             .await
             .map_err(to_error_data)?;
 
@@ -72,9 +99,14 @@ impl HubServer {
     #[tool(description = "Read a value from the active session brain.")]
     async fn brain_get(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainPathParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let (_, _, brain) = self.active_brain().await.map_err(to_error_data)?;
+        let principal = self.principal(&context);
+        let (_, _, brain) = self
+            .brain_for(&principal, Access::Read)
+            .await
+            .map_err(to_error_data)?;
         let bytes = brain
             .get(&params.path)
             .await
@@ -101,9 +133,14 @@ impl HubServer {
     #[tool(description = "Write a value to the active session brain and index it.")]
     async fn brain_put(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainPutParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let (project_id, session_id, brain) = self.active_brain().await.map_err(to_error_data)?;
+        let principal = self.principal(&context);
+        let (project_id, session_id, brain) = self
+            .brain_for(&principal, Access::Write)
+            .await
+            .map_err(to_error_data)?;
         brain
             .put(&params.path, params.content.as_bytes())
             .await
@@ -118,9 +155,14 @@ impl HubServer {
     #[tool(description = "List brain entries under a path, or all entries when omitted.")]
     async fn brain_list(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainListParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let (_, _, brain) = self.active_brain().await.map_err(to_error_data)?;
+        let principal = self.principal(&context);
+        let (_, _, brain) = self
+            .brain_for(&principal, Access::Read)
+            .await
+            .map_err(to_error_data)?;
         let entries = match params.path.as_deref() {
             Some(path) => brain.list(path).await.map_err(to_error_data)?,
             None => {
@@ -136,9 +178,14 @@ impl HubServer {
     #[tool(description = "Delete a value from the active session brain and its index row.")]
     async fn brain_delete(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainPathParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let (_, session_id, brain) = self.active_brain().await.map_err(to_error_data)?;
+        let principal = self.principal(&context);
+        let (_, session_id, brain) = self
+            .brain_for(&principal, Access::Write)
+            .await
+            .map_err(to_error_data)?;
         brain.delete(&params.path).await.map_err(to_error_data)?;
         self.delete_brain_doc(&session_id, &params.path)
             .await
@@ -157,9 +204,14 @@ impl HubServer {
         })
     }
 
-    /// Open the active session's brain, with its project and session ids.
-    async fn active_brain(&self) -> Result<(String, String, Brain)> {
+    /// Authorize and open the active session's brain.
+    async fn brain_for(
+        &self,
+        principal: &Principal,
+        access: Access,
+    ) -> Result<(String, String, Brain)> {
         let (project_id, session_id) = self.active_session().await?;
+        policy::authorize(&self.state.db, principal, &project_id, access).await?;
         let brain = self.state.brain.open(&project_id, &session_id).await?;
         Ok((project_id, session_id, brain))
     }

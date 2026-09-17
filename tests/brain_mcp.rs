@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use agent_hub::store::open_engine;
 use serde_json::{Value, json};
 
+mod common;
+
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -174,6 +176,7 @@ fn error_code(response: &Value) -> &str {
 #[test]
 fn session_and_brain_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
+    common::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -340,6 +343,7 @@ fn brain_tools_require_an_active_session() {
 #[test]
 fn session_survives_a_process_restart() {
     let data_dir = TempDir::new("restart");
+    common::seed_project(&data_dir.0, "proj");
 
     let (session_id, brain_root) = {
         let mut server = McpServer::spawn(&data_dir.0);

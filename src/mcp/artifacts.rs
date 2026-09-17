@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::Error;
+use crate::policy::{self, Access};
 use crate::store::artifacts::{self, NewArtifact};
 
 use super::{HubServer, to_error_data};
@@ -25,12 +26,20 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ArtifactPublishParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &params.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let artifact = artifacts::publish(
             &self.state.db,
             &self.state.data_dir,
             NewArtifact {
-                actor: &actor,
+                actor: &principal.actor,
                 project_id: &params.project_id,
                 title: &params.title,
                 kind: &params.kind,
@@ -53,11 +62,23 @@ impl HubServer {
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ArtifactUpdateParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        let actor = self.principal(&context).actor;
+        let principal = self.principal(&context);
+        let (existing, _) =
+            artifacts::get(&self.state.db, &self.state.data_dir, &params.artifact_id)
+                .await
+                .map_err(to_error_data)?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &existing.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let artifact = artifacts::update(
             &self.state.db,
             &self.state.data_dir,
-            &actor,
+            &principal.actor,
             &params.artifact_id,
             params.content.as_bytes(),
             params.envelope,
@@ -73,12 +94,22 @@ impl HubServer {
     #[tool(description = "Read an artifact's metadata and its current content.")]
     async fn artifact_get(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ArtifactIdParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
         let (artifact, bytes) =
             artifacts::get(&self.state.db, &self.state.data_dir, &params.artifact_id)
                 .await
                 .map_err(to_error_data)?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &artifact.project_id,
+            Access::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
         // A protected artifact returns its ciphertext here; decryption is the
         // client's job and never the server's.
         let content = String::from_utf8(bytes).map_err(|_| {
@@ -100,8 +131,13 @@ impl HubServer {
     #[tool(description = "List a project's artifacts, most recently updated first.")]
     async fn artifact_list(
         &self,
+        context: RequestContext<RoleServer>,
         Parameters(params): Parameters<ArtifactListParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
+            .await
+            .map_err(to_error_data)?;
         let listed = artifacts::list(&self.state.db, &params.project_id)
             .await
             .map_err(to_error_data)?;

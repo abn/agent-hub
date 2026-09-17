@@ -15,6 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+mod common;
+
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -164,6 +166,7 @@ fn structured(response: &Value) -> &Value {
 #[test]
 fn artifact_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
+    common::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -280,6 +283,7 @@ fn artifact_tools_round_trip_over_stdio() {
 #[test]
 fn artifact_get_of_an_absent_id_is_not_found() {
     let data_dir = TempDir::new("absent");
+    common::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
