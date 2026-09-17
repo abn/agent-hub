@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, engine lock wait
+
+* **Update**: Every store connection now sets a bounded engine busy timeout, so
+  a writer that loses the immediate-transaction race waits for the lock and
+  then replays to the same result instead of returning `database is locked`.
+  The busy handler is per-connection and the engine builder has no timeout, so
+  all connection creation goes through one store helper.
+* **Update**: A concurrency test over same-key artifact publish, question post,
+  and answer proves that eight parallel writers serialise to one result and
+  none surfaces the lock.
+
 ## 2026-09-17, question id discoverability
 
 * **Update**: `question_post` now returns `question_id` alongside `event_id`

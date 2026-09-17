@@ -90,7 +90,7 @@ pub async fn answer(
     body: &str,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    let mut conn = db.connect().map_err(crate::store::engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -142,7 +142,7 @@ pub async fn decide(
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    let mut conn = db.connect().map_err(crate::store::engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await

@@ -42,7 +42,7 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
     }
 
     let now = time::OffsetDateTime::now_utc();
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     conn.execute(
         "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
         vec![
@@ -78,7 +78,7 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
         ));
     }
 
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     conn.execute(
         "UPDATE sessions SET deleted_at = NULL WHERE id = ?1",
         vec![Value::Text(token.to_string())],
@@ -90,7 +90,7 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
 
 /// Commit every prune whose window has passed. Returns how many were committed.
 pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, project_id, deleted_at FROM sessions WHERE deleted_at IS NOT NULL",
@@ -143,7 +143,7 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
         tracing::warn!(session_id, "prune found no brain file to remove");
     }
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await

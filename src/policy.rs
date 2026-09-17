@@ -126,7 +126,7 @@ pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibili
     let Some(agent_id) = principal.agent_id.as_deref() else {
         return Ok(Visibility::Only(Vec::new()));
     };
-    let conn = db.connect().map_err(engine)?;
+    let conn = crate::store::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id FROM projects WHERE owner_agent = ?1
@@ -148,7 +148,7 @@ pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibili
 
 /// The access level of an agent's grant on a project, if any.
 async fn grant_access(db: &Database, agent_id: &str, project_id: &str) -> Result<Option<String>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = crate::store::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT access FROM grants WHERE agent_id = ?1 AND project_id = ?2",

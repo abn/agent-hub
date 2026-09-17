@@ -37,7 +37,7 @@ pub async fn start(
     validate_id("project", project_id)?;
     validate_id("session name", session_name)?;
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -123,7 +123,7 @@ pub async fn start(
 /// Retry-safe: ending an already-ended session is a no-op, so a retried call
 /// does not append a second lifecycle event.
 pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -171,7 +171,7 @@ pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
 
 /// Fetch one session by id.
 pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     get_on(&conn, session_id).await
 }
 
@@ -192,7 +192,7 @@ async fn get_on(conn: &turso::Connection, session_id: &str) -> Result<Option<Ses
 
 /// List a project's sessions, most recently active first.
 pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at

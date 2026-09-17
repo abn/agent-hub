@@ -54,7 +54,7 @@ pub async fn publish(
 ) -> Result<Artifact> {
     limits::check_artifact(artifact.content.len())?;
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -157,7 +157,7 @@ pub async fn update(
 ) -> Result<Artifact> {
     limits::check_artifact(content.len())?;
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -278,7 +278,7 @@ pub async fn read_blob(data_dir: &Path, artifact: &Artifact) -> Result<Vec<u8>> 
 
 /// List a project's artifacts, most recently updated first.
 pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, project_id, title, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
@@ -295,7 +295,7 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
 }
 
 async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     row_on(&conn, artifact_id).await
 }
 

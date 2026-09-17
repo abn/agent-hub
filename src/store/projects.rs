@@ -20,7 +20,7 @@ pub struct Project {
 
 /// List projects, oldest first.
 pub async fn list(db: &Database) -> Result<Vec<Project>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, display_name, owner_agent, created_at FROM projects ORDER BY created_at ASC",
@@ -43,7 +43,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
 
     // Inside the immediate transaction so a concurrent create is a conflict
     // rather than a raw engine error.
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -97,7 +97,7 @@ pub(crate) async fn insert_owned(
 
 /// Fetch one project.
 pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, display_name, owner_agent, created_at FROM projects WHERE id = ?1",
@@ -129,7 +129,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
 
     let session_ids = session_ids(db, id).await?;
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -203,7 +203,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
 /// Every session id for a project, including a pruned session whose brain file
 /// has not been swept yet.
 async fn session_ids(db: &Database, project_id: &str) -> Result<Vec<String>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id FROM sessions WHERE project_id = ?1",

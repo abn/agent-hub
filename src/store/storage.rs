@@ -24,7 +24,7 @@ pub struct StorageUsage {
 
 /// Compute storage usage from artifact sizes and session brain file sizes.
 pub async fn usage(db: &Database, data_dir: &Path) -> Result<StorageUsage> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
 
     let mut by_project: Vec<ProjectUsage> = Vec::new();
     let ensure = |by_project: &mut Vec<ProjectUsage>, project_id: &str| {

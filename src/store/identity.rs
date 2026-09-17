@@ -104,7 +104,7 @@ impl Serialize for Trust {
 /// A revoked token never resolves. The token and agent last-seen timestamps
 /// are refreshed at most once per window.
 pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(String, Trust)>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT a.id, a.trust, a.last_seen_at, t.last_used_at
@@ -165,7 +165,7 @@ async fn touch(
 
 /// List agents, oldest first.
 pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, display_name, trust, personal_project_id, created_at, last_seen_at
@@ -183,7 +183,7 @@ pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
 
 /// Fetch one agent.
 pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT id, display_name, trust, personal_project_id, created_at, last_seen_at
@@ -211,7 +211,7 @@ pub async fn create_agent(
     let personal_project_id = format!("space-{}", ulid::Ulid::generate());
     let personal_display_name = format!("{display_name} (personal)");
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -272,7 +272,7 @@ pub async fn create_agent(
 
 /// Change an agent's trust level.
 pub async fn set_trust(db: &Database, id: &str, trust: Trust) -> Result<Agent> {
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -329,7 +329,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     let token_hash = hash_token(&plaintext);
     let created_at = crate::store::now_rfc3339();
 
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -389,7 +389,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
 /// token is not an error. An unknown agent is not found.
 pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
     let now = crate::store::now_rfc3339();
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -430,7 +430,7 @@ pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
 
 /// List an agent's grants.
 pub async fn list_grants(db: &Database, agent_id: &str) -> Result<Vec<Grant>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(
             "SELECT agent_id, project_id, access, created_at
@@ -455,7 +455,7 @@ pub async fn add_grant(
 ) -> Result<Grant> {
     validate_access(access)?;
     let created_at = crate::store::now_rfc3339();
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -506,7 +506,7 @@ pub async fn add_grant(
 
 /// Remove a grant.
 pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<()> {
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await

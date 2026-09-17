@@ -141,7 +141,7 @@ pub async fn query_visible(
     params.push(Value::Integer(fetch));
     sql.push_str(&format!(" LIMIT ?{}", params.len()));
 
-    let conn = db.connect().map_err(crate::store::engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query(&sql, params)
         .await

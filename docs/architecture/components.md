@@ -47,6 +47,12 @@ every change it makes.
 - **Schema migrations run in single-writer mode.** Data definition statements
   are not allowed inside a concurrent write transaction, so migrations take
   the single-writer path.
+- **Every store connection waits briefly for the write lock.** The engine's
+  busy handler is per-connection and there is no builder-level timeout, so the
+  store opens every connection through one helper that sets a bounded wait. A
+  writer that loses the immediate-transaction race waits, then reads the
+  committed key and replays to the same event or artifact, instead of
+  surfacing the lock as an error.
 - **The storage facade is hygiene, not a swap seam.** It exists to keep the
   storage layer testable and portable. It is not engine-swap machinery; the
   engine is fixed.

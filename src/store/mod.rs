@@ -18,10 +18,29 @@ pub mod search;
 pub mod sessions;
 pub mod storage;
 
+/// How long a connection waits for a competing writer to release the lock.
+///
+/// The engine's busy handler is per-connection and there is no builder-level
+/// timeout, so every connection the hub opens goes through [`connect`]. Five
+/// seconds is far longer than any hub transaction holds the lock for, and
+/// bounds the wait so a stuck writer still surfaces as an error.
+pub(crate) const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Open a connection to the hub store with the bounded lock wait applied.
+///
+/// Every connection the hub opens must come through here: the busy handler is
+/// per-connection, so a connection that skips it returns Busy the instant
+/// another writer holds the lock.
+pub(crate) fn connect(db: &turso::Database) -> Result<turso::Connection> {
+    let conn = db.connect().map_err(engine)?;
+    conn.busy_timeout(LOCK_WAIT).map_err(engine)?;
+    Ok(conn)
+}
+
 /// Open the engine with the full-text index method enabled.
 ///
-/// The index method is behind an experimental flag, so every connection the
-/// hub opens goes through here rather than calling the engine builder directly.
+/// The index method is behind an experimental flag, so the engine is built
+/// here rather than through the builder at each call site.
 pub async fn open_engine(path: &Path) -> Result<turso::Database> {
     let path = path
         .to_str()
@@ -39,7 +58,7 @@ pub async fn open_engine(path: &Path) -> Result<turso::Database> {
 /// transaction, and its version is recorded in the same transaction so a
 /// failed migration leaves no partial version behind.
 pub async fn migrate(db: &turso::Database) -> Result<i64> {
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = connect(db)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
         (),

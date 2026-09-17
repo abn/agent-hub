@@ -118,7 +118,7 @@ pub async fn list_visible(
         params.len()
     ));
 
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn.query(&sql, params).await.map_err(engine)?;
     let mut items = Vec::new();
     while let Some(row) = rows.next().await.map_err(engine)? {
@@ -152,7 +152,7 @@ pub(crate) async fn status_in_tx(conn: &Connection, event_id: &str) -> Result<Op
 
 /// Set an inbox entry's status.
 pub async fn set_status(db: &Database, event_id: &str, status: &str) -> Result<()> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     set_status_in_tx(&conn, event_id, status).await
 }
 
@@ -178,7 +178,7 @@ pub(crate) async fn set_status_in_tx(
 
 /// Count unread and waiting items.
 pub async fn counts(db: &Database) -> Result<Counts> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let mut rows = conn
         .query("SELECT status, COUNT(*) FROM inbox GROUP BY status", ())
         .await

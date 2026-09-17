@@ -243,7 +243,7 @@ impl HubServer {
         path: &str,
         body: &str,
     ) -> Result<()> {
-        let conn = self.state.db.connect().map_err(crate::store::engine)?;
+        let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
         let doc_id = brain_doc_id(session_id, path);
         index_doc(
@@ -264,7 +264,7 @@ impl HubServer {
 
     /// Remove a brain value's search row.
     async fn delete_brain_doc(&self, session_id: &str, path: &str) -> Result<()> {
-        let conn = self.state.db.connect().map_err(crate::store::engine)?;
+        let conn = crate::store::connect(&self.state.db)?;
         conn.execute(
             "DELETE FROM search_docs WHERE doc_id = ?1",
             vec![Value::Text(brain_doc_id(session_id, path))],

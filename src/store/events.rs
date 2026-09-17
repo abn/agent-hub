@@ -76,7 +76,7 @@ pub async fn append(
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    let mut conn = db.connect().map_err(engine)?;
+    let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
@@ -178,7 +178,7 @@ pub(crate) async fn append_in_tx(
 
 /// Fetch one event by id.
 pub async fn get(db: &Database, event_id: &str) -> Result<Option<Event>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     get_on(&conn, event_id).await
 }
 
@@ -217,7 +217,7 @@ pub fn human_kinds() -> Vec<String> {
 /// Read the most recent human-visible events across every project, newest
 /// first.
 pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let limit = limit.clamp(1, FEED_LIMIT_MAX);
     let mut rows = conn
         .query(
@@ -247,7 +247,7 @@ pub struct FeedPage {
 
 /// Read a page of the feed.
 pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Result<FeedPage> {
-    let conn = db.connect().map_err(engine)?;
+    let conn = super::connect(db)?;
     let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
     let mut sql = String::from(
