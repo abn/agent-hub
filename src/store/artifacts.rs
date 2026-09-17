@@ -13,6 +13,7 @@ use crate::blob;
 use crate::error::{Error, Result};
 use crate::limits;
 use crate::store::events::{self, NewEvent};
+use crate::store::idempotency;
 use crate::store::search::{SearchDoc, index_doc};
 
 /// Artifact metadata. The blob path stays internal.
@@ -49,8 +50,25 @@ pub async fn publish(
     db: &Database,
     data_dir: &Path,
     artifact: NewArtifact<'_>,
+    idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(artifact.content.len())?;
+
+    let mut conn = db.connect().map_err(engine)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    // A retry with the same key returns what the first call produced, so a
+    // dropped response does not leave a duplicate artifact.
+    if let Some(key) = idempotency_key
+        && let Some(entry) =
+            idempotency::lookup_entry(&tx, artifact.project_id, "artifact", key).await?
+    {
+        return replay(&tx, &entry, None).await;
+    }
+
     let id = ulid::Ulid::generate().to_string();
     let created_at = crate::store::now_rfc3339();
     let rel = blob::write(
@@ -66,11 +84,6 @@ pub async fn publish(
     let protected = envelope_json.is_some();
 
     let write = async {
-        let mut conn = db.connect().map_err(engine)?;
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
         tx.execute(
             "INSERT INTO artifacts(id, project_id, title, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?8)",
@@ -101,7 +114,7 @@ pub async fn publish(
             },
         )
         .await?;
-        append_event(
+        let event_id = append_event(
             &tx,
             artifact.actor,
             artifact.project_id,
@@ -113,6 +126,10 @@ pub async fn publish(
             protected,
         )
         .await?;
+        if let Some(key) = idempotency_key {
+            idempotency::record_artifact(&tx, artifact.project_id, key, &event_id, &id, 1, &created_at)
+                .await?;
+        }
         tx.commit().await.map_err(engine)
     }
     .await;
@@ -136,6 +153,7 @@ pub async fn update(
     artifact_id: &str,
     content: &[u8],
     envelope: Option<serde_json::Value>,
+    idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(content.len())?;
 
@@ -147,6 +165,14 @@ pub async fn update(
     let existing = row_on(&tx, artifact_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+    // A retry with the same key returns the version the first call granted.
+    if let Some(key) = idempotency_key
+        && let Some(entry) =
+            idempotency::lookup_entry(&tx, &existing.project_id, "artifact", key).await?
+    {
+        return replay(&tx, &entry, Some(artifact_id)).await;
+    }
 
     let version = existing.version + 1;
     let rel = blob::write(
@@ -190,7 +216,7 @@ pub async fn update(
             },
         )
         .await?;
-        append_event(
+        let event_id = append_event(
             &tx,
             actor,
             &existing.project_id,
@@ -202,6 +228,18 @@ pub async fn update(
             protected,
         )
         .await?;
+        if let Some(key) = idempotency_key {
+            idempotency::record_artifact(
+                &tx,
+                &existing.project_id,
+                key,
+                &event_id,
+                artifact_id,
+                version,
+                &updated_at,
+            )
+            .await?;
+        }
         tx.commit().await.map_err(engine)
     }
     .await;
@@ -287,7 +325,7 @@ async fn append_event(
     kind: &str,
     version: i64,
     protected: bool,
-) -> Result<()> {
+) -> Result<String> {
     events::append_in_tx(
         tx,
         actor,
@@ -308,8 +346,38 @@ async fn append_event(
             thread_id: None,
         },
     )
-    .await?;
-    Ok(())
+    .await
+}
+
+/// Resolve a recorded key to the artifact it produced, so a retry returns the
+/// original result. A key that named a different write is refused.
+///
+/// Only the id and version are authoritative on a replay; the other fields are
+/// the artifact's current metadata, which a later update may have moved on.
+async fn replay(
+    tx: &turso::transaction::Transaction<'_>,
+    entry: &idempotency::Entry,
+    expected: Option<&str>,
+) -> Result<Artifact> {
+    let artifact_id = entry.artifact_id.as_deref().ok_or_else(|| {
+        Error::InvalidArgument("idempotency key was used for a different write".to_string())
+    })?;
+    if let Some(expected) = expected
+        && expected != artifact_id
+    {
+        return Err(Error::InvalidArgument(
+            "idempotency key was used for a different artifact".to_string(),
+        ));
+    }
+    let mut artifact = row_on(tx, artifact_id).await?.ok_or_else(|| {
+        Error::Engine(format!(
+            "an idempotency record points at missing artifact {artifact_id}"
+        ))
+    })?;
+    if let Some(version) = entry.version {
+        artifact.version = version;
+    }
+    Ok(artifact)
 }
 
 fn artifact_from_row(row: &Row) -> Result<Artifact> {

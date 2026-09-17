@@ -87,7 +87,7 @@ async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
         .expect("list");
     assert_eq!(waiting.len(), 1, "the approval is an action item");
 
-    let decision = questions::decide(&db, "human", &approval_id, true, Some("ship it"))
+    let decision = questions::decide(&db, "human", &approval_id, true, Some("ship it"), None)
         .await
         .expect("decide");
     let decision_event = events::get(&db, &decision)
@@ -119,7 +119,7 @@ async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
     let counts = inbox::counts(&db).await.expect("counts");
     assert_eq!(counts.waiting, 0, "the decision clears the waiting item");
 
-    let bad = questions::decide(&db, "human", "missing", true, None)
+    let bad = questions::decide(&db, "human", "missing", true, None, None)
         .await
         .expect_err("unknown approval");
     assert_eq!(bad.code(), ErrorCode::NotFound);
@@ -132,14 +132,66 @@ async fn an_approval_is_decided_once() {
         .await
         .expect("append approval");
 
-    questions::decide(&db, "human", &approval_id, true, None)
+    questions::decide(&db, "human", &approval_id, true, None, None)
         .await
         .expect("first decision");
 
-    let again = questions::decide(&db, "human", &approval_id, false, None)
+    let again = questions::decide(&db, "human", &approval_id, false, None, None)
         .await
         .expect_err("a second decision conflicts");
     assert_eq!(again.code(), ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn a_decision_replays_on_its_idempotency_key() {
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    let first = questions::decide(&db, "human", &approval_id, true, None, Some("decision-key"))
+        .await
+        .expect("first decision");
+    let replay = questions::decide(&db, "human", &approval_id, true, None, Some("decision-key"))
+        .await
+        .expect("replay");
+    assert_eq!(
+        first, replay,
+        "a retried decision returns the original answer"
+    );
+
+    let conflict = questions::decide(&db, "human", &approval_id, false, None, Some("other-key"))
+        .await
+        .expect_err("a different key on a decided approval conflicts");
+    assert_eq!(conflict.code(), ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn an_event_key_does_not_resolve_a_decision() {
+    let db = open().await;
+    let signal = events::append(&db, "agent-one", Some("shared-key"), finished("done"))
+        .await
+        .expect("append keyed signal");
+    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    let decision = questions::decide(&db, "human", &approval_id, true, None, Some("shared-key"))
+        .await
+        .expect("decide");
+    assert_ne!(
+        decision, signal,
+        "a decision key is not the event key of another write"
+    );
+    let resolved = events::get(&db, &approval_id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        resolved.inbox_status.as_deref(),
+        Some("resolved"),
+        "the approval is actually decided"
+    );
 }
 
 #[tokio::test]
@@ -149,7 +201,7 @@ async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
     let padded = events::append(&db, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
-    let decision = questions::decide(&db, "human", &padded, true, Some("  go ahead  "))
+    let decision = questions::decide(&db, "human", &padded, true, Some("  go ahead  "), None)
         .await
         .expect("decide");
     let payload = events::get(&db, &decision)
@@ -163,7 +215,7 @@ async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
     let blank = events::append(&db, "agent-one", None, approval("Roll it back"))
         .await
         .expect("append approval");
-    let decision = questions::decide(&db, "human", &blank, false, Some("   "))
+    let decision = questions::decide(&db, "human", &blank, false, Some("   "), None)
         .await
         .expect("decide");
     let payload = events::get(&db, &decision)
@@ -183,7 +235,7 @@ async fn a_non_approval_cannot_be_decided() {
         .await
         .expect("append");
 
-    let err = questions::decide(&db, "human", &signal, true, None)
+    let err = questions::decide(&db, "human", &signal, true, None, None)
         .await
         .expect_err("not an approval");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);

@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, retry safety
+
+* **Update**: `artifact_publish` and `artifact_update` accept an optional
+  idempotency key, so a retry after a dropped response returns the original
+  artifact and version instead of a duplicate or a second version.
+* **Update**: The approval decision route accepts an optional idempotency key
+  and returns the original answer on a replay rather than a conflict.
+* **Update**: An idempotency key is scoped to the operation that used it and
+  can carry the artifact and version it produced, added by schema version 3.
+  Prune keeps a key whose event still exists, so a keyed write that survives a
+  prune still resolves.
+
 ## 2026-09-17, feed design
 
 * **Update**: The Project feed groups events by day (Today, Yesterday, or the

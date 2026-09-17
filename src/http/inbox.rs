@@ -144,6 +144,9 @@ pub struct DecisionBody {
     /// Optional note recorded with the decision.
     #[serde(default)]
     pub note: Option<String>,
+    /// Optional idempotency key, so a retried decision returns the original.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 /// `POST /api/v1/approvals/{id}/decision`
@@ -183,6 +186,7 @@ pub async fn decide(
         &approval_id,
         approved,
         payload.note.as_deref(),
+        payload.idempotency_key.as_deref(),
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;

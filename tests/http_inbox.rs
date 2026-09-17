@@ -348,6 +348,42 @@ async fn a_repeated_decision_is_a_conflict() {
 }
 
 #[tokio::test]
+async fn a_decision_replays_on_its_idempotency_key() {
+    let state = state().await;
+    let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
+
+    let decide = |body: Value| {
+        let app = router(state.clone());
+        let id = approval_id.clone();
+        async move {
+            app.oneshot(request(
+                "POST",
+                &format!("/api/v1/approvals/{id}/decision"),
+                Some("Bearer token"),
+                Some(body),
+            ))
+            .await
+            .expect("request")
+        }
+    };
+
+    let first = decide(json!({ "decision": "approve", "idempotency_key": "key-1" })).await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_id = json_body(first).await["event_id"]
+        .as_str()
+        .expect("event id")
+        .to_string();
+
+    let replay = decide(json!({ "decision": "approve", "idempotency_key": "key-1" })).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    let replay_id = json_body(replay).await["event_id"]
+        .as_str()
+        .expect("event id")
+        .to_string();
+    assert_eq!(first_id, replay_id, "a replay returns the original answer");
+}
+
+#[tokio::test]
 async fn deciding_a_non_approval_is_a_problem() {
     let state = state().await;
     let finished_id = seed_finished(&state, "not an approval").await;

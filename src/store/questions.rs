@@ -140,6 +140,7 @@ pub async fn decide(
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
+    idempotency_key: Option<&str>,
 ) -> Result<String> {
     let mut conn = db.connect().map_err(crate::store::engine)?;
     let tx = conn
@@ -155,6 +156,17 @@ pub async fn decide(
             "event {approval_id} is a {} and is not an approval",
             approval.kind
         )));
+    }
+    // A retried decision with the same key returns the answer it already
+    // appended, checked before the resolved guard so a replay is not a
+    // conflict.
+    if let Some(key) = idempotency_key
+        && let Some(entry) =
+            crate::store::idempotency::lookup_entry(&tx, &approval.project_id, "decision", key)
+                .await?
+        && let Some(event_id) = entry.event_id
+    {
+        return Ok(event_id);
     }
     // An approval is decided once. An approval always enters the inbox when it
     // is written, so an untracked one is a data fault, not a decidable event.
@@ -196,6 +208,19 @@ pub async fn decide(
     )
     .await?;
 
+    // The key is scoped to a decision, so it cannot be confused with an event
+    // or artifact key that happens to use the same string.
+    if let Some(key) = idempotency_key {
+        let created_at = crate::store::now_rfc3339();
+        crate::store::idempotency::record_decision(
+            &tx,
+            &approval.project_id,
+            key,
+            &id,
+            &created_at,
+        )
+        .await?;
+    }
     inbox::set_status_in_tx(&tx, approval_id, "resolved").await?;
     tx.commit().await.map_err(crate::store::engine)?;
     Ok(id)

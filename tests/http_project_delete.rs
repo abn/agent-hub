@@ -85,6 +85,7 @@ async fn delete_project_cascades_its_data() {
             content: b"hello cascade",
             envelope: None,
         },
+        None,
     )
     .await
     .expect("publish artifact");
@@ -108,6 +109,7 @@ async fn delete_project_cascades_its_data() {
         &artifact.id,
         b"hello cascade v2",
         None,
+        None,
     )
     .await
     .expect("update artifact");
@@ -124,8 +126,8 @@ async fn delete_project_cascades_its_data() {
 
     let conn = state.db.connect().expect("connect");
     conn.execute(
-        "INSERT INTO idempotency(project_id, idempotency_key, event_id, created_at)
-         VALUES ('homelab', 'retry-key', ?1, '2026-09-17T00:00:00Z')",
+        "INSERT INTO idempotency(project_id, operation, idempotency_key, event_id, created_at)
+         VALUES ('homelab', 'event', 'retry-key', ?1, '2026-09-17T00:00:00Z')",
         vec![turso::Value::Text(event.clone())],
     )
     .await

@@ -177,6 +177,7 @@ async fn serves_artifact_content_for_the_viewer() {
             content: b"hello",
             envelope: None,
         },
+        None,
     )
     .await
     .expect("publish");
@@ -214,6 +215,7 @@ async fn serves_artifact_content_for_the_viewer() {
             content: b"Y2lwaGVy",
             envelope: Some(serde_json::json!({"alg": "AES-256-GCM"})),
         },
+        None,
     )
     .await
     .expect("publish protected");

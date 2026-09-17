@@ -46,7 +46,7 @@ fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
 async fn publish_reads_back_and_lands_on_the_feed() {
     let dir = temp_dir("artifact");
     let db = open(&dir).await;
-    let artifact = artifacts::publish(&db, &dir, public("Report", b"<h1>hits</h1>"))
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"<h1>hits</h1>"), None)
         .await
         .expect("publish");
     assert_eq!(artifact.version, 1);
@@ -77,13 +77,29 @@ async fn publish_reads_back_and_lands_on_the_feed() {
 async fn concurrent_updates_get_distinct_versions() {
     let dir = temp_dir("artifact-concurrent");
     let db = open(&dir).await;
-    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"))
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
         .await
         .expect("publish");
 
     let (a, b) = tokio::join!(
-        artifacts::update(&db, &dir, "agent-one", &artifact.id, b"second draft", None),
-        artifacts::update(&db, &dir, "agent-one", &artifact.id, b"third draft", None),
+        artifacts::update(
+            &db,
+            &dir,
+            "agent-one",
+            &artifact.id,
+            b"second draft",
+            None,
+            None
+        ),
+        artifacts::update(
+            &db,
+            &dir,
+            "agent-one",
+            &artifact.id,
+            b"third draft",
+            None,
+            None
+        ),
     );
 
     let mut versions: Vec<i64> = [a, b]
@@ -112,13 +128,21 @@ async fn concurrent_updates_get_distinct_versions() {
 async fn update_adds_a_version_and_refreshes_search() {
     let dir = temp_dir("artifact-update");
     let db = open(&dir).await;
-    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"))
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
         .await
         .expect("publish");
 
-    let updated = artifacts::update(&db, &dir, "agent-one", &artifact.id, b"second draft", None)
-        .await
-        .expect("update");
+    let updated = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second draft",
+        None,
+        None,
+    )
+    .await
+    .expect("update");
     assert_eq!(updated.version, 2);
 
     let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
@@ -159,6 +183,7 @@ async fn a_protected_artifact_is_not_searchable_by_body() {
             content: b"ciphertextbytes",
             envelope: Some(envelope.clone()),
         },
+        None,
     )
     .await
     .expect("publish protected");
@@ -182,10 +207,90 @@ async fn an_over_cap_artifact_is_rejected() {
     let dir = temp_dir("artifact-cap");
     let db = open(&dir).await;
     let big = vec![0u8; ARTIFACT_BYTES_MAX + 1];
-    let err = artifacts::publish(&db, &dir, public("Big", &big))
+    let err = artifacts::publish(&db, &dir, public("Big", &big), None)
         .await
         .expect_err("too large");
     assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
+}
+
+#[tokio::test]
+async fn a_publish_replays_on_its_idempotency_key() {
+    let dir = temp_dir("artifact-idem");
+    let db = open(&dir).await;
+    let first = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
+        .await
+        .expect("publish");
+    let second = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
+        .await
+        .expect("replay");
+
+    assert_eq!(first.id, second.id, "a retry returns the original artifact");
+    assert_eq!(second.version, 1);
+
+    let listed = artifacts::list(&db, "proj").await.expect("list");
+    assert_eq!(listed.len(), 1, "a retry adds no artifact");
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let published = events
+        .iter()
+        .filter(|event| event.kind == "artifact" && event.summary.contains("published"))
+        .count();
+    assert_eq!(published, 1, "a retry appends no event");
+}
+
+#[tokio::test]
+async fn an_update_replays_on_its_idempotency_key() {
+    let dir = temp_dir("artifact-idem-update");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"draft"), None)
+        .await
+        .expect("publish");
+
+    let first = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second",
+        None,
+        Some("upd-key"),
+    )
+    .await
+    .expect("update");
+    let second = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"another",
+        None,
+        Some("upd-key"),
+    )
+    .await
+    .expect("replay");
+
+    assert_eq!(first.version, 2);
+    assert_eq!(second.version, 2, "a retry returns the granted version");
+
+    let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
+    assert_eq!(read.version, 2);
+    assert_eq!(
+        bytes, b"second",
+        "a replayed update does not overwrite the blob"
+    );
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let updated = events
+        .iter()
+        .filter(|event| event.kind == "artifact" && event.summary.contains("updated"))
+        .count();
+    assert_eq!(updated, 1, "a retry appends no event");
 }
 
 async fn search_hits(db: &turso::Database, term: &str) -> usize {

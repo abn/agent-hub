@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::brain::BrainStore;
-use agent_hub::store::events::{FeedQuery, read_feed};
+use agent_hub::store::events::{self, FeedQuery, NewEvent, read_feed};
 use agent_hub::store::{migrate, open_engine, prune, sessions};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -111,6 +111,65 @@ async fn sweep_commits_an_expired_prune() {
     assert!(
         events.iter().all(|event| event.kind != "session"),
         "the session's feed events are gone"
+    );
+}
+
+#[tokio::test]
+async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
+    let dir = temp_dir("prune-keys");
+    let db = open(&dir).await;
+
+    let event = || NewEvent {
+        project_id: "proj".to_string(),
+        kind: "signal".to_string(),
+        summary: "keep me".to_string(),
+        payload: None,
+        needs_action: false,
+        thread_id: None,
+    };
+    let kept = events::append(&db, "agent-one", Some("keep-key"), event())
+        .await
+        .expect("append keyed event");
+
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
+    prune::prune_session(&db, &session.id).await.expect("prune");
+
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+        vec![
+            turso::Value::Text(
+                old.format(&time::format_description::well_known::Rfc3339)
+                    .expect("format"),
+            ),
+            turso::Value::Text(session.id.clone()),
+        ],
+    )
+    .await
+    .expect("age");
+    prune::sweep(&db, &dir).await.expect("sweep");
+
+    let retry = events::append(&db, "agent-one", Some("keep-key"), event())
+        .await
+        .expect("retry");
+    assert_eq!(
+        kept, retry,
+        "a key whose event still exists is not garbage-collected"
+    );
+    assert!(
+        read_feed(&db, "proj", &FeedQuery::default())
+            .await
+            .expect("feed")
+            .events
+            .iter()
+            .any(|event| event.id == kept),
+        "the keyed event survives the prune"
     );
 }
 

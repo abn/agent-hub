@@ -22,6 +22,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 2,
         ddl: V2,
     },
+    Migration {
+        version: 3,
+        ddl: V3,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -137,4 +141,25 @@ CREATE INDEX IF NOT EXISTS search_fts ON search_docs USING fts (title, body);
 const V2: &str = r#"
 ALTER TABLE agents ADD COLUMN personal_project_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS agents_personal_project ON agents(personal_project_id);
+"#;
+
+/// Version 3: an idempotency key is scoped to the operation it was used for,
+/// so a key reused across operations never resolves to another operation's
+/// result. A record also carries the artifact and version an artifact write
+/// produced. Existing rows are event keys, so they migrate under `event`.
+const V3: &str = r#"
+CREATE TABLE idempotency_v3(
+  project_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  event_id TEXT,
+  artifact_id TEXT,
+  version INTEGER,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, operation, idempotency_key)
+);
+INSERT INTO idempotency_v3(project_id, operation, idempotency_key, event_id, created_at)
+  SELECT project_id, 'event', idempotency_key, event_id, created_at FROM idempotency;
+DROP TABLE idempotency;
+ALTER TABLE idempotency_v3 RENAME TO idempotency;
 "#;

@@ -46,6 +46,7 @@ impl HubServer {
                 content: params.content.as_bytes(),
                 envelope: params.envelope,
             },
+            params.idempotency_key.as_deref(),
         )
         .await
         .map_err(to_error_data)?;
@@ -81,6 +82,7 @@ impl HubServer {
             &params.artifact_id,
             params.content.as_bytes(),
             params.envelope,
+            params.idempotency_key.as_deref(),
         )
         .await
         .map_err(to_error_data)?;
@@ -156,6 +158,9 @@ struct ArtifactPublishParams {
     content: String,
     #[serde(default)]
     envelope: Option<serde_json::Value>,
+    /// Optional idempotency key, so a retried publish returns the original.
+    #[serde(default)]
+    idempotency_key: Option<String>,
 }
 
 /// Arguments for `artifact_update`.
@@ -165,6 +170,9 @@ struct ArtifactUpdateParams {
     content: String,
     #[serde(default)]
     envelope: Option<serde_json::Value>,
+    /// Optional idempotency key, so a retried update returns the original.
+    #[serde(default)]
+    idempotency_key: Option<String>,
 }
 
 /// Arguments for `artifact_get`.

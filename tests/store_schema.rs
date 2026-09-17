@@ -33,10 +33,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 2, "migrations are forward only and apply once");
+    assert_eq!(again, 3, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -75,6 +75,17 @@ async fn migrate_creates_schema_and_search_index() {
         "missing agents_personal_project index"
     );
     drop(indexes);
+
+    // Migration 3 adds the artifact columns an idempotency record can carry.
+    let mut idempotency = conn
+        .query(
+            "SELECT operation, artifact_id, version FROM idempotency LIMIT 1",
+            (),
+        )
+        .await
+        .expect("idempotency.operation, artifact_id and version exist");
+    assert!(idempotency.next().await.expect("row").is_none());
+    drop(idempotency);
 
     for id in ["a", "b"] {
         conn.execute(

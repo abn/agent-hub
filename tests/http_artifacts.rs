@@ -100,6 +100,7 @@ async fn publish_public(state: &AppState, project_id: &str, title: &str, content
             content,
             envelope: None,
         },
+        None,
     )
     .await
     .expect("publish public artifact")
@@ -129,6 +130,7 @@ async fn publish_protected(
                 "iv": "aXY",
             })),
         },
+        None,
     )
     .await
     .expect("publish protected artifact")
@@ -232,6 +234,7 @@ async fn rendering_a_markdown_artifact_wraps_and_escapes_it() {
             content: b"# Heading\n<script>alert(1)</script>",
             envelope: None,
         },
+        None,
     )
     .await
     .expect("publish markdown")
