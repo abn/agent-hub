@@ -174,10 +174,17 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     )
     .await
     .map_err(engine)?;
-    // Idempotency rows are keyed by project and key, not by session, so a
-    // pruned session's keys cannot be targeted without a schema link. They
-    // are left in place; a retry resolves to the recorded id, which is now
-    // absent, and the caller sees a normal write rather than a duplicate.
+    // Idempotency rows are keyed by project and key, not by session, so the
+    // session's keys cannot be targeted directly. The session lifecycle events
+    // that were just removed carry no keys, but a key recorded against any
+    // now-deleted event would resolve a retry to a dead id; drop those.
+    tx.execute(
+        "DELETE FROM idempotency WHERE project_id = ?1
+         AND event_id NOT IN (SELECT id FROM events WHERE project_id = ?1)",
+        vec![Value::Text(project_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
     tx.commit().await.map_err(engine)
 }
 

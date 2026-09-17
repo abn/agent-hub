@@ -35,12 +35,18 @@ The binary reads its configuration from the environment.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, and artifact blobs |
+| `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
 | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
-| `HUB_ADMIN_TOKEN` | unset | Optional admin token for the control surface |
+| `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
+| `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
+| `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
+| `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 
-`HUB_TRUST_DEFAULT` also sets the posture applied to a newly created agent.
-Leave it unset for the trusted default.
+The embedded tailnet endpoint is experimental and needs a binary built with
+the `tailnet` feature (`cargo build --features tailnet`). It is addressed by
+tailnet IP and carries plain HTTP inside the tunnel, so it needs
+`HUB_ADMIN_TOKEN` as well. Leave `HUB_TAILNET` unset for the default
+deployment: the plain container behind a reverse proxy.
 
 ## Run the binary
 

@@ -59,11 +59,12 @@ filesystem. Persistence is a single mounted data volume; backups are node or
 NAS snapshots.
 
 The default path is the plain container behind a reverse proxy, which owns
-TLS. An optional build embeds a tailnet endpoint through `tailscale-rs`, so the
-same binary can join a tailnet in userspace and listen there with no open
-ports. That build is experimental: the library has no tailnet name resolution
-or certificate issuance yet and its NAT traversal is in progress, so it is
-addressed by tailnet IP and TLS is terminated by the hub (see
+TLS. An optional build embeds a tailnet endpoint through `tailscale-rs`, behind
+a cargo feature that is off by default, so the same binary can join a tailnet
+in userspace and listen there with no open ports. That build is experimental:
+the library has no tailnet name resolution or certificate issuance yet and its
+NAT traversal is in progress, so it is addressed by tailnet IP, and the
+tailnet carries plain HTTP inside the WireGuard tunnel, with no hub TLS (see
 [decision 0014](../adr/0014-optional-embedded-tailnet.md)).
 
 ## See also

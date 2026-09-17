@@ -24,6 +24,7 @@ them. There is no real-time chat with agents in v1.
 
 - Questions from agents land in the inbox and the feed, and answers land back
   in the feed and mark the question acted on.
-- The PWA notification channel, not an open window, is the signal that
-  something needs the human.
+- An opt-in local notification, raised while the app is running, is the
+  signal that something needs the human; true background push, delivered with
+  the app closed, remains outstanding.
 - The human surface stays calm and bounded, which keeps it shippable.

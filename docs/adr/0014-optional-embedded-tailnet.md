@@ -23,9 +23,9 @@ by tailnet IP and traffic may relay through public relays.
 Two deployment modes. The default is the plain container behind a reverse
 proxy, which owns TLS. The optional embedded tailnet endpoint uses
 `tailscale-rs`: the process joins the tailnet in userspace and listens there,
-addressed by tailnet IP, with TLS terminated by the hub. Embedded mode is
-experimental until NAT traversal, MagicDNS, and certificates are available
-upstream.
+addressed by tailnet IP, carrying plain HTTP inside the tailnet's own tunnel.
+Embedded mode is experimental until NAT traversal, name resolution, and
+certificates are available upstream.
 
 ## Consequences
 

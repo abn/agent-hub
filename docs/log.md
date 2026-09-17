@@ -4,6 +4,27 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, polish and reach
+
+* **Creation**: A session opens into a detail view with its brain keys and
+  files and its End and Prune actions, backed by an admin-gated
+  `GET /api/v1/sessions/:id/brain` that does not create a brain on a read.
+* **Creation**: Added `DELETE /api/v1/projects/:id`, a destructive action under
+  Settings that removes every row and file scoped to the project. An agent's
+  personal space is refused.
+* **Creation**: Opt-in inbox notifications. Permission is requested only from
+  the Settings control, and only waiting-on-you items notify; without
+  permission or support the feature degrades silently.
+* **Creation**: An optional embedded tailnet endpoint behind a cargo feature
+  that is off by default, serving the same router on the node's tailnet
+  address. It stays experimental and IP-addressed.
+* **Update**: The MCP bearer scheme is case-insensitive, an artifact is
+  authorized before its blob is read, and prune drops the idempotency keys
+  whose events it removed.
+* **Note**: True background push, delivered with the app closed, is
+  outstanding; notifications today are opt-in and raised while the app runs.
+* **Note**: The headless accessibility audit remains outstanding.
+
 ## 2026-09-17, identity and access
 
 * **Creation**: Agents have a stable identity, one token at a time, a trust

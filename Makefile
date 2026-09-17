@@ -26,7 +26,7 @@ lint: hooks/require ## Run every declarative hook against all files
 # The one-engine invariant, enforced by tooling rather than review. Every
 # `turso*` crate in the tree must resolve to the same version.
 lint/engine: ## Verify exactly one engine version is linked
-	@versions=$$(cargo tree --prefix none 2>/dev/null | grep -oE '^turso[a-z_]* v[^ ]+' | awk '{print $$2}' | sort -u); \
+	@versions=$$(cargo tree --all-features --prefix none 2>/dev/null | grep -oE '^turso[a-z_]* v[^ ]+' | awk '{print $$2}' | sort -u); \
 	count=$$(printf '%s\n' "$$versions" | grep -c .); \
 	if [ "$$count" -ne 1 ]; then \
 	  printf 'ERROR: expected one engine version, found %s:\n' "$$count" >&2; \

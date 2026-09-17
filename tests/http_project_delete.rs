@@ -256,6 +256,58 @@ async fn delete_project_cascades_its_data() {
 }
 
 #[tokio::test]
+async fn delete_leaves_other_projects_untouched() {
+    let state = state().await;
+    for id in ["keep", "drop"] {
+        projects::create(&state.db, id, id)
+            .await
+            .expect("create project");
+        events::append(
+            &state.db,
+            "agent-one",
+            None,
+            NewEvent {
+                project_id: id.to_string(),
+                kind: "signal".to_string(),
+                summary: format!("{id} event"),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+            },
+        )
+        .await
+        .expect("append event");
+    }
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/projects/drop",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    assert!(
+        projects::get(&state.db, "keep")
+            .await
+            .expect("get")
+            .is_some(),
+        "the sibling project survives"
+    );
+    let feed = agent_hub::store::events::read_feed(
+        &state.db,
+        "keep",
+        &agent_hub::store::events::FeedQuery::default(),
+    )
+    .await
+    .expect("read feed");
+    assert_eq!(feed.events.len(), 1, "the sibling project's events survive");
+}
+
+#[tokio::test]
 async fn delete_refuses_a_personal_space() {
     let state = state().await;
     let agent = identity::create_agent(&state.db, "laptop", "Laptop", Trust::Trusted)

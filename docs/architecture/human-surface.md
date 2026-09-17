@@ -13,10 +13,10 @@ mobile-first PWA served as static assets from the same binary. The feed,
 session, inbox, home, artifact, prune, search, and identity routes ship, along
 with the installable PWA shell and its screens: Home, Inbox, Project feed,
 Artifacts and viewer, Sessions, Storage, Search, and Settings with the Agents
-and access section. The session detail view and project deletion are still
-intended design. The binary serves the REST API, the PWA, and the MCP endpoint
-on one listener in one process, so the per-session write lock covers every
-writer and the prune sweeper always runs.
+and access section, a session detail view with the brain tree, and project
+deletion under Settings. The binary serves the REST API, the PWA, and the MCP
+endpoint on one listener in one process, so the per-session write lock covers
+every writer and the prune sweeper always runs.
 
 ## REST API
 
@@ -26,12 +26,14 @@ A versioned JSON API backs the PWA and any other client:
 GET    /api/v1/home
 GET    /api/v1/projects
 POST   /api/v1/projects
+DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/sessions/:id/end
 GET    /api/v1/sessions?project=
+GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/agents
 POST   /api/v1/agents
 PATCH  /api/v1/agents/:id
@@ -83,6 +85,13 @@ with their trust level, creates an agent and its personal space, promotes or
 demotes it, issues or revokes its single token (shown once), and manages
 grants. The artifact viewer decrypts a protected artifact in the browser and
 renders agent-authored HTML only inside a sandboxed frame.
+
+A session opens into a detail view that lists its brain keys and files and
+offers End and Prune. Project deletion is a destructive action under Settings
+behind a confirmation; an agent's personal space cannot be deleted. Inbox
+notifications are opt-in from Settings, request permission only on that
+action, and carry only waiting-on-you items; without permission or support
+they degrade silently.
 
 The interaction model is read, answer, approve, and prune, with no chat
 interface, by [decision](../adr/0007-async-mailbox-semantics.md). Alerts have

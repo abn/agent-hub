@@ -15,7 +15,16 @@ pub async fn serve(config: &Tailnet, router: axum::Router) -> Result<()> {
         .clone()
         .ok_or_else(|| Error::Config("the tailnet endpoint needs an auth key".to_string()))?;
 
-    let state_path = std::env::temp_dir().join("agent-hub-tsrs-keys.json");
+    // The key state is the device's tailnet identity and private key, so it
+    // lives under the data directory, in a directory only the operator can
+    // read, and survives a restart.
+    std::fs::create_dir_all(&config.state_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&config.state_dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let state_path = config.state_dir.join("keys.json");
     let device_config = tailscale::Config::default_with_key_file(&state_path)
         .await
         .map_err(|err| Error::Config(format!("tailnet key state failed: {err}")))?;

@@ -26,4 +26,5 @@ The binary serves it as static assets.
 - No app store, no per-platform build.
 - The PWA is the window into the hub: inbox, project feeds, artifact gallery
   and viewer, session explorer, search, and storage and prune.
-- Push notifications are a later layer. In-app badges carry the signal in v1.
+- Notifications are an opt-in local notification raised while the app runs;
+  background push and in-app badges remain later layers.

@@ -219,6 +219,58 @@ async fn brain_lists_entries() {
 }
 
 #[tokio::test]
+async fn brain_read_does_not_create_a_file() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "fresh", "agent-one")
+        .await
+        .expect("start");
+    let path = state.brain.brain_path("proj", &session.id).expect("path");
+    assert!(!path.exists(), "no brain file before the first write");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Fkv", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["entries"], serde_json::json!([]));
+    assert!(!path.exists(), "a brain read does not create the file");
+}
+
+#[tokio::test]
+async fn brain_hides_a_pruned_session() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&state.db, &session.id, "agent-one")
+        .await
+        .expect("end");
+    agent_hub::store::prune::prune_session(&state.db, &session.id)
+        .await
+        .expect("prune");
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Fkv", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "a pruned session is not readable"
+    );
+}
+
+#[tokio::test]
 async fn brain_unknown_session_is_not_found() {
     let app = router(state().await);
     let response = app

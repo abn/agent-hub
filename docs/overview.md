@@ -62,6 +62,5 @@ microservices, no CRDTs, and no custom distributed consensus. See the
 One binary opens the engine and serves the REST API, the installable PWA, and
 MCP on one listener. The feed, session brains, the inbox and questions,
 artifacts with reversible prune, engine-native search, per-agent identity with
-a trust model, and the container packaging exist. The session detail view,
-push notifications, project deletion, and an embedded tailnet are intended
-design, and the pages describing them say so.
+a trust model, the container packaging, and an optional embedded tailnet exist.
+The pages describe shipped behaviour and mark anything still intended design.

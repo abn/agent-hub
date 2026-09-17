@@ -78,7 +78,14 @@ pub async fn run(config: Config) -> Result<()> {
 
     // An optional tailnet endpoint serves the same router on the device's
     // tailnet address, beside the plain listener.
-    let tailnet = crate::config::Config::tailnet_from_env()?;
+    let tailnet = state.config.tailnet_from_env()?;
+    if tailnet.enabled() && state.config.admin_token.is_none() {
+        // The tailnet endpoint is reachable by any peer on the tailnet, so it
+        // needs the same admin token the loopback bind is allowed to omit.
+        return Err(crate::error::Error::Config(
+            "HUB_ADMIN_TOKEN is required when the tailnet endpoint is enabled".to_string(),
+        ));
+    }
     if tailnet.enabled() {
         let tailnet_router = router.clone();
         tokio::spawn(async move {

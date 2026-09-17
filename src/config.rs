@@ -35,6 +35,8 @@ pub struct Tailnet {
     pub auth_key: Option<String>,
     /// Port to serve on the tailnet IP.
     pub port: u16,
+    /// Directory holding the device key state, under the data directory.
+    pub state_dir: PathBuf,
 }
 
 impl Tailnet {
@@ -95,15 +97,19 @@ impl Config {
     ///
     /// Kept out of [`Config`] so the common configuration stays small and a
     /// build without the feature does not carry it.
-    pub fn tailnet_from_env() -> Result<Tailnet> {
+    pub fn tailnet_from_env(&self) -> Result<Tailnet> {
+        let port = match std::env::var("HUB_TAILNET_PORT") {
+            Ok(value) => value
+                .parse()
+                .map_err(|_| Error::Config(format!("HUB_TAILNET_PORT is not a port: {value}")))?,
+            Err(_) => 8080,
+        };
         let tailnet = Tailnet {
             auth_key: std::env::var("HUB_TAILNET")
                 .ok()
                 .filter(|key| !key.is_empty()),
-            port: std::env::var("HUB_TAILNET_PORT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(8080),
+            port,
+            state_dir: self.data_dir.join("tailnet"),
         };
         if tailnet.enabled() && !cfg!(feature = "tailnet") {
             return Err(Error::Config(
