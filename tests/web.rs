@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
+use agent_hub::store::artifacts::{self, NewArtifact};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
@@ -128,8 +129,9 @@ async fn projects_create_list_and_storage() {
 async fn serves_every_shell_asset_with_a_policy() {
     let state = state().await;
     for (path, needle) in [
-        ("/app.js", "serviceWorker"),
+        ("/app.js", "crypto.mjs"),
         ("/app.css", "var(--"),
+        ("/crypto.mjs", "export"),
         ("/manifest.webmanifest", "Agent Hub"),
         ("/sw.js", "caches"),
         ("/icon.svg", "<svg"),
@@ -146,4 +148,73 @@ async fn serves_every_shell_asset_with_a_policy() {
         response.headers().contains_key("content-security-policy"),
         "the shell carries a content security policy"
     );
+}
+
+#[tokio::test]
+async fn serves_artifact_content_for_the_viewer() {
+    let state = state().await;
+    let published = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "human",
+            project_id: "proj",
+            title: "Note",
+            kind: "markdown",
+            content: b"hello",
+            envelope: None,
+        },
+    )
+    .await
+    .expect("publish");
+
+    let app = router(state.clone());
+    let denied = app
+        .oneshot(get(&format!("/api/v1/artifacts/{}", published.id), None))
+        .await
+        .expect("request");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let app = router(state.clone());
+    let public = app
+        .oneshot(get(
+            &format!("/api/v1/artifacts/{}", published.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(public.status(), StatusCode::OK);
+    let body = json(public).await;
+    assert_eq!(body["title"], "Note");
+    assert_eq!(body["protected"], false);
+    assert_eq!(body["content"], "hello");
+    assert!(body["envelope"].is_null());
+
+    let protected = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "human",
+            project_id: "proj",
+            title: "Secret",
+            kind: "markdown",
+            content: b"Y2lwaGVy",
+            envelope: Some(serde_json::json!({"alg": "AES-256-GCM"})),
+        },
+    )
+    .await
+    .expect("publish protected");
+
+    let app = router(state);
+    let response = app
+        .oneshot(get(
+            &format!("/api/v1/artifacts/{}", protected.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let body = json(response).await;
+    assert_eq!(body["protected"], true);
+    assert_eq!(body["content"], "Y2lwaGVy");
+    assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
 }

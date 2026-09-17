@@ -18,6 +18,7 @@ REQUIRED = [
     "app.js",
     "app.css",
     "tokens.css",
+    "crypto.mjs",
     "manifest.webmanifest",
     "sw.js",
     "icon.svg",

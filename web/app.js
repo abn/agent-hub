@@ -1,4 +1,6 @@
 // Agent Hub PWA. A small vanilla single-page app over the REST API.
+import { decrypt } from "./crypto.mjs";
+
 const main = document.getElementById("main");
 const badge = document.getElementById("tab-badge");
 
@@ -168,9 +170,10 @@ async function artifactsScreen(selected) {
       (a) => `<div class="row">
         ${glyph("artifact")}
         <div class="grow">
-          <div class="title"><a href="/artifacts/${encodeURIComponent(a.id)}" target="_blank" rel="noopener">${esc(a.title)}</a></div>
+          <div class="title">${esc(a.title)}</div>
           <div class="meta mono">v${a.version} \u00b7 ${a.protected ? "protected" : "public"} \u00b7 ${a.size_bytes} bytes</div>
         </div>
+        <button type="button" data-action="artifact-open" data-id="${esc(a.id)}" aria-label="Open ${esc(a.title)}">Open</button>
       </div>`,
     )
     .join("");
@@ -227,6 +230,7 @@ async function storageScreen() {
 }
 
 async function settingsScreen() {
+  const agents = await agentsSection();
   main.innerHTML = `
     <h1>Settings</h1>
     <form class="card" data-action="prefs">
@@ -253,7 +257,185 @@ async function settingsScreen() {
       <input id="display_name" name="display_name" required>
       <p><button class="primary" type="submit">Create</button></p>
     </form>
-    <p class="meta">Agents and access arrive with the identity layer.</p>`;
+    ${agents}`;
+}
+
+async function agentsSection() {
+  let agents;
+  try {
+    agents = (await api("/api/v1/agents")).agents;
+  } catch (error) {
+    return `<div class="card"><h2>Agents and access</h2><p class="meta">${esc(error.message)}</p></div>`;
+  }
+
+  const grantsByAgent = {};
+  await Promise.all(
+    agents.map(async (agent) => {
+      try {
+        grantsByAgent[agent.id] = (
+          await api(`/api/v1/agents/${encodeURIComponent(agent.id)}/grants`)
+        ).grants;
+      } catch {
+        grantsByAgent[agent.id] = [];
+      }
+    }),
+  );
+
+  const rows = agents
+    .map((agent) => {
+      const grants = grantsByAgent[agent.id] || [];
+      const grantRows = grants
+        .map(
+          (grant) =>
+            `<div class="meta mono">${esc(grant.project_id)} \u00b7 ${esc(grant.access)} ` +
+            `<button type="button" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" aria-label="Remove grant on ${esc(grant.project_id)}">Remove</button></div>`,
+        )
+        .join("");
+      const promote = agent.trust === "trusted" ? "untrusted" : "trusted";
+      return `<div class="row">
+        <div class="grow">
+          <div class="title">${esc(agent.display_name)} <span class="pill">${esc(agent.trust)}</span></div>
+          <div class="meta mono">${esc(agent.id)} \u00b7 ${esc(agent.personal_project_id)}</div>
+          <div class="toolbar">
+            <button type="button" data-action="agent-trust" data-id="${esc(agent.id)}" data-trust="${promote}" aria-label="${agent.trust === "trusted" ? "Demote" : "Promote"} ${esc(agent.display_name)}">${agent.trust === "trusted" ? "Demote" : "Promote"}</button>
+            <button type="button" data-action="agent-token" data-id="${esc(agent.id)}" aria-label="Reissue token for ${esc(agent.display_name)}">Reissue token</button>
+            <button type="button" class="danger" data-action="agent-revoke" data-id="${esc(agent.id)}" aria-label="Revoke token for ${esc(agent.display_name)}">Revoke token</button>
+          </div>
+          <div class="meta">Grants</div>
+          ${grantRows || '<div class="meta">None.</div>'}
+          <form data-action="agent-grant">
+            <input type="hidden" name="agent" value="${esc(agent.id)}">
+            <label class="sr-only" for="grant-project-${esc(agent.id)}">Project</label>
+            <input id="grant-project-${esc(agent.id)}" name="project" required placeholder="project id">
+            <label class="sr-only" for="grant-access-${esc(agent.id)}">Access</label>
+            <select id="grant-access-${esc(agent.id)}" name="access">
+              <option value="read">read</option>
+              <option value="write">write</option>
+            </select>
+            <p><button class="primary" type="submit">Add grant</button></p>
+          </form>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  return `<div class="card">
+    <h2>Agents and access</h2>
+    <form data-action="agent-create">
+      <label for="agent-id">Agent id</label>
+      <input id="agent-id" name="id" required autocomplete="off" placeholder="laptop/claude">
+      <label for="agent-name">Display name</label>
+      <input id="agent-name" name="display_name" required>
+      <label for="agent-trust">Trust</label>
+      <select id="agent-trust" name="trust">
+        <option value="">deployment default</option>
+        <option value="trusted">trusted</option>
+        <option value="untrusted">untrusted</option>
+      </select>
+      <p><button class="primary" type="submit">Create agent</button></p>
+    </form>
+    ${rows || '<p class="empty">No agents yet.</p>'}
+  </div>`;
+}
+
+function showToken(token) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.setAttribute("role", "status");
+  card.setAttribute("aria-live", "polite");
+  const label = document.createElement("p");
+  label.className = "title";
+  label.textContent = "New token, shown once";
+  const code = document.createElement("p");
+  code.className = "token";
+  code.textContent = token;
+  const note = document.createElement("p");
+  note.className = "meta";
+  note.textContent = "Copy it now. Reissuing replaces it and revokes the previous token.";
+  card.append(label, code, note);
+  main.prepend(card);
+  card.scrollIntoView();
+}
+
+async function setAgentTrust(id, trust) {
+  await api(`/api/v1/agents/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ trust }),
+  });
+  await render();
+}
+
+async function reissueToken(id) {
+  const issued = await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, {
+    method: "POST",
+  });
+  await render();
+  showToken(issued.token);
+}
+
+async function revokeToken(id) {
+  if (!confirm(`Revoke the token for ${id}? The agent loses access immediately.`)) return;
+  await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
+  await render();
+}
+
+async function ungrant(id, project) {
+  await api(`/api/v1/agents/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
+    method: "DELETE",
+  });
+  await render();
+}
+
+async function openArtifact(id) {
+  const meta = await api(`/api/v1/artifacts/${encodeURIComponent(id)}`);
+  let content = meta.content;
+  let decrypted = false;
+  if (meta.protected) {
+    const password = prompt("Password for this artifact");
+    if (!password) return;
+    try {
+      content = await decrypt(password, meta.envelope, meta.content);
+    } catch {
+      throw new Error("could not decrypt: check the password");
+    }
+    decrypted = true;
+  }
+  showArtifact(meta, content, decrypted);
+}
+
+function showArtifact(meta, content, decrypted) {
+  main.innerHTML = "";
+  const back = document.createElement("p");
+  const link = document.createElement("a");
+  link.href = "#/artifacts";
+  link.textContent = "Back to artifacts";
+  back.appendChild(link);
+  const heading = document.createElement("h1");
+  heading.textContent = meta.title;
+  const note = document.createElement("p");
+  note.className = "meta";
+  note.textContent = meta.protected
+    ? decrypted
+      ? "Decrypted in your browser. The server never held the plaintext."
+      : "Protected."
+    : "Public artifact.";
+  main.append(back, heading, note);
+
+  if (meta.kind === "html") {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "");
+    frame.setAttribute("title", meta.title);
+    frame.style.width = "100%";
+    frame.style.height = "60vh";
+    frame.style.border = "1px solid var(--line)";
+    frame.srcdoc = content;
+    main.appendChild(frame);
+  } else {
+    const pre = document.createElement("pre");
+    pre.className = "card";
+    pre.textContent = content;
+    main.appendChild(pre);
+  }
 }
 
 function setCurrent(screen) {
@@ -362,6 +544,13 @@ main.addEventListener("click", (event) => {
   if (action === "answer") answer(id).catch((error) => alert(error.message));
   if (action === "end") endSession(id).catch((error) => alert(error.message));
   if (action === "prune") pruneSession(id).catch((error) => alert(error.message));
+  if (action === "agent-trust")
+    setAgentTrust(id, button.dataset.trust).catch((error) => alert(error.message));
+  if (action === "agent-token") reissueToken(id).catch((error) => alert(error.message));
+  if (action === "agent-revoke") revokeToken(id).catch((error) => alert(error.message));
+  if (action === "agent-ungrant")
+    ungrant(id, button.dataset.project).catch((error) => alert(error.message));
+  if (action === "artifact-open") openArtifact(id).catch((error) => alert(error.message));
 });
 
 main.addEventListener("submit", (event) => {
@@ -386,6 +575,20 @@ main.addEventListener("submit", (event) => {
       body: JSON.stringify({ id: data.get("id"), display_name: data.get("display_name") }),
     })
       .then(() => (location.hash = "#/feed"))
+      .catch((error) => alert(error.message));
+  } else if (action === "agent-create") {
+    const payload = { id: data.get("id"), display_name: data.get("display_name") };
+    const trust = String(data.get("trust") || "");
+    if (trust) payload.trust = trust;
+    api("/api/v1/agents", { method: "POST", body: JSON.stringify(payload) })
+      .then(() => render())
+      .catch((error) => alert(error.message));
+  } else if (action === "agent-grant") {
+    api(`/api/v1/agents/${encodeURIComponent(data.get("agent"))}/grants`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: data.get("project"), access: data.get("access") }),
+    })
+      .then(() => render())
       .catch((error) => alert(error.message));
   }
 });

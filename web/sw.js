@@ -1,6 +1,14 @@
 // Agent Hub service worker: offline shell for static assets, live for the API.
-const SHELL = "agent-hub-shell-v1";
-const ASSETS = ["/", "/app.js", "/app.css", "/tokens.css", "/manifest.webmanifest", "/icon.svg"];
+const SHELL = "agent-hub-shell-v2";
+const ASSETS = [
+  "/",
+  "/app.js",
+  "/app.css",
+  "/tokens.css",
+  "/crypto.mjs",
+  "/manifest.webmanifest",
+  "/icon.svg",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(ASSETS)));

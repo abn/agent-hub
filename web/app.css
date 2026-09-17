@@ -88,6 +88,9 @@ input, select, textarea {
 }
 label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var(--s-2) 0 var(--s-1); }
 
+.token {
+  font-family: var(--font-mono); overflow-wrap: anywhere; word-break: break-all;
+}
 .empty { color: var(--ink-3); text-align: center; padding: var(--s-6) var(--s-4); }
 .error { color: var(--danger); font-size: var(--t-13); }
 .stat { display: flex; gap: var(--s-4); }
