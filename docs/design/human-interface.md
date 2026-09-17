@@ -68,6 +68,14 @@ This is a build gate, not a guideline: WCAG AA in both themes, a 12px UI text
 floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
 meaning carried by colour alone. Reduced motion is honoured.
 
+The gate runs in two layers. A hermetic contract check computes WCAG contrast
+for the token pairs, enforces the 12px floor, and asserts the focus ring, the
+reduced-motion block, and the 44px interactive minimum, so it runs on every
+machine. An optional headless axe audit renders the eight screens in both
+themes and reports DOM, ARIA, label, heading, and computed-contrast problems
+when Playwright, a browser, and axe are present; it skips cleanly when they are
+not.
+
 ## Copy
 
 Agent voice, past tense, no exclamation marks. Approvals name the action and

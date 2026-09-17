@@ -21,6 +21,9 @@
 .env
 .env.local
 
+# Python bytecode from the check scripts
+__pycache__/
+
 # Editor and OS
 *.swp
 *~

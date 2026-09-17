@@ -4,6 +4,21 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-17, accessibility gate
+
+* **Update**: The accessibility gate now runs in two layers. A hermetic
+  contract check computes WCAG contrast for the theme token pairs, enforces the
+  12px type floor, and asserts the focus ring, the reduced-motion block, and
+  the 44px interactive minimum. An optional headless axe audit renders the
+  eight screens in both themes when Playwright, a browser, and axe are present,
+  and skips cleanly when they are not.
+* **Update**: The light action token was darkened so the action pill text
+  clears the AA contrast minimum, which the new contract check surfaced.
+* **Note**: Axe covers the rendered DOM, ARIA, labels, heading order, and
+  computed contrast; the contract check covers the type floor and the presence
+  of the focus and reduced-motion rules. Neither replaces a manual keyboard
+  pass.
+
 ## 2026-09-17, notifications descoped
 
 * **Update**: Background push is deferred beyond v1. Real delivery with the

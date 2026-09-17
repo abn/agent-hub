@@ -67,7 +67,7 @@ h2.day {
   font-size: 12px; font-weight: 600; background: var(--action-bg); color: var(--action);
 }
 .chip {
-  display: inline-block; padding: 6px 10px; border-radius: var(--r-pill);
+  display: inline-block; min-height: 44px; padding: 6px 10px; border-radius: var(--r-pill);
   border: 1px solid var(--line-strong); color: var(--ink-2);
   background: transparent; font-size: var(--t-12); font-weight: 500; cursor: pointer;
 }

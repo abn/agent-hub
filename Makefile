@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto net/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y net/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -59,10 +59,23 @@ web/crypto: ## Run the artifact encryption round-trip self-test
 	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
+# The headless accessibility audit over the rendered screens. It needs
+# Playwright, a browser, and an axe build, so it runs when a Python with
+# playwright is found and skips cleanly otherwise; the static checks in
+# web/check always run.
+web/a11y: build ## Run the headless accessibility audit
+	@found=""; \
+	for python in python3 "$$(head -1 "$$(command -v playwright 2>/dev/null)" 2>/dev/null | sed -e 's|^#!||' -e 's| .*$$||')"; do \
+	  [ -n "$$python" ] || continue; \
+	  if "$$python" -c 'import playwright' >/dev/null 2>&1; then found="$$python"; break; fi; \
+	done; \
+	if [ -z "$$found" ]; then printf 'web/a11y: playwright is not installed, skipped\n'; exit 0; fi; \
+	"$$found" .agents/scripts/a11y.py
+
 net/check: ## Compile the optional embedded tailnet build
 	cargo check --features tailnet
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto net/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y net/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
