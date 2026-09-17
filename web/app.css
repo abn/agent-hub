@@ -93,10 +93,17 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 }
 .empty { color: var(--ink-3); text-align: center; padding: var(--s-6) var(--s-4); }
 .error { color: var(--danger); font-size: var(--t-13); }
-.stat { display: flex; gap: var(--s-4); }
-.stat div { flex: 1; }
-.stat .n { font-size: var(--t-28); font-weight: 600; }
-.stat .l { color: var(--ink-3); font-size: var(--t-12); }
+/* A summary pair. Each count is its own door into the inbox, so the numbers
+   carry their own affordance and the row reads as one unit, not two floats. */
+.counts { display: flex; gap: var(--s-4); }
+.count {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-1);
+  color: inherit; text-decoration: none;
+}
+.count:hover { background: var(--surface-2); }
+.count .n { font-size: var(--t-28); font-weight: 600; line-height: 1.1; }
+.count .l { color: var(--ink-3); font-size: var(--t-12); }
 .toolbar { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-bottom: var(--s-3); }
 
 @media (min-width: 720px) {

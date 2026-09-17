@@ -40,7 +40,12 @@ pub async fn read(
         .require_admin(token.as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
+    let mut query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
+    // The human feed hides the hub's own audit events unless they are asked
+    // for by kind.
+    if query.kinds.is_none() {
+        query.kinds = Some(events::human_kinds());
+    }
 
     let page = read_feed(&state.db, &project_id, &query)
         .await

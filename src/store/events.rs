@@ -187,14 +187,26 @@ pub async fn get(db: &Database, event_id: &str) -> Result<Option<Event>> {
     }
 }
 
-/// Read the most recent events across every project, newest first.
+/// Events the human's feed surfaces show. Hub bookkeeping, `system`, is
+/// excluded: the audit trail stays available to agents and the store, but a
+/// calm human feed does not carry it.
+pub fn human_kinds() -> Vec<String> {
+    KINDS
+        .iter()
+        .filter(|kind| **kind != "system")
+        .map(|kind| kind.to_string())
+        .collect()
+}
+
+/// Read the most recent human-visible events across every project, newest
+/// first.
 pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
     let conn = db.connect().map_err(engine)?;
     let limit = limit.clamp(1, FEED_LIMIT_MAX);
     let mut rows = conn
         .query(
             "SELECT id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at
-             FROM events ORDER BY id DESC LIMIT ?1",
+             FROM events WHERE kind <> 'system' ORDER BY id DESC LIMIT ?1",
             vec![Value::Integer(limit)],
         )
         .await

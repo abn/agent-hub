@@ -68,6 +68,62 @@ async fn problem_body(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
+async fn the_human_feed_hides_system_events() {
+    let state = state().await;
+    append(&state.db, "agent", None, event("a signal"))
+        .await
+        .expect("append signal");
+    let mut audit = event("agent created");
+    audit.kind = "system".to_string();
+    append(&state.db, "human", None, audit)
+        .await
+        .expect("append system");
+
+    let kinds = |page: &Value| -> Vec<String> {
+        page["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|event| event["kind"].as_str().expect("kind").to_string())
+            .collect()
+    };
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(get("/api/v1/projects/proj/feed", Some("Bearer token")))
+        .await
+        .expect("request");
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let page: Value = serde_json::from_slice(&bytes).expect("page is JSON");
+    assert_eq!(
+        kinds(&page),
+        vec!["signal".to_string()],
+        "the human feed hides system events"
+    );
+
+    // An explicit kind filter still reaches the audit trail.
+    let app = router(state);
+    let response = app
+        .oneshot(get(
+            "/api/v1/projects/proj/feed?kinds=system",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    let page: Value = serde_json::from_slice(&bytes).expect("page is JSON");
+    assert_eq!(
+        kinds(&page),
+        vec!["system".to_string()],
+        "an explicit kind filter is honoured"
+    );
+}
+
+#[tokio::test]
 async fn missing_token_is_a_problem() {
     let app = router(state().await);
     let response = app

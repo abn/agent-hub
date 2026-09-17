@@ -21,9 +21,14 @@ software release notes and the repository changelog.
 * **Update**: The MCP bearer scheme is case-insensitive, an artifact is
   authorized before its blob is read, and prune drops the idempotency keys
   whose events it removed.
+* **Update**: The human feed surfaces hide the hub's own `system` audit
+  events; an explicit kind filter still reaches them.
 * **Note**: True background push, delivered with the app closed, is
   outstanding; notifications today are opt-in and raised while the app runs.
 * **Note**: The headless accessibility audit remains outstanding.
+* **Note**: The Project feed is a flat list; day grouping and kind-filter
+  chips, and inline approve actions on action items, are designed but not
+  built.
 
 ## 2026-09-17, identity and access
 

@@ -86,24 +86,23 @@ function projectToolbar(projects, selected) {
     )
     .join("");
   return `<div class="toolbar"><label class="sr-only" for="project">Project</label>
-    <select id="project" data-role="project">${options}</select>
-    <a class="button" href="#/artifacts?project=${encodeURIComponent(selected)}">Artifacts</a></div>`;
+    <select id="project" data-role="project">${options}</select></div>`;
 }
 
 async function home() {
   const data = await api("/api/v1/home");
   main.innerHTML = `
     <h1>Home</h1>
-    <div class="card"><div class="stat">
-      <div><div class="n">${data.waiting}</div><div class="l">waiting on you</div></div>
-      <div><div class="n">${data.unread}</div><div class="l">unread</div></div>
+    <div class="card"><div class="counts">
+      <a class="count" href="#/inbox"><span class="n">${data.waiting}</span><span class="l">waiting on you</span></a>
+      <a class="count" href="#/inbox"><span class="n">${data.unread}</span><span class="l">unread</span></a>
     </div></div>
     <nav class="toolbar" aria-label="More">
       <a class="chip" href="#/sessions">Sessions</a>
       <a class="chip" href="#/storage">Storage</a>
     </nav>
     <h2>Recent</h2>
-    <div class="card">${data.recent.map(eventRow).join("") || '<p class="empty">No events yet.</p>'}</div>`;
+    <div class="card">${data.recent.map(eventRow).join("") || '<p class="empty">Nothing has happened yet.</p>'}</div>`;
 }
 
 async function inbox() {
@@ -180,7 +179,7 @@ async function artifactsScreen(selected) {
   main.innerHTML = `
     <h1>Artifacts</h1>
     ${projectToolbar(projects, current)}
-    <div class="card">${rows || '<p class="empty">No artifacts yet.</p>'}</div>`;
+    <div class="card">${rows || '<p class="empty">This project has no artifacts yet. An agent publishing one will show it here.</p>'}</div>`;
 }
 
 async function sessionsScreen(selected) {
@@ -270,8 +269,12 @@ async function storageScreen() {
     .join("");
   main.innerHTML = `
     <h1>Storage</h1>
-    <div class="card"><div class="stat"><div><div class="n">${mb(usage.total_bytes)}</div><div class="l">used</div></div></div></div>
-    <div class="card">${rows || '<p class="empty">Nothing stored yet.</p>'}</div>
+    ${
+      rows
+        ? `<div class="card"><div class="counts"><div class="count"><span class="n">${mb(usage.total_bytes)}</span><span class="l">used</span></div></div></div>
+           <div class="card">${rows}</div>`
+        : '<p class="empty">Nothing is stored yet. Session brains and artifact blobs appear here as agents work.</p>'
+    }
     <p class="meta">Session pruning lives in the Sessions screen. You are the garbage collector: no automatic expiry ships.</p>`;
 }
 
