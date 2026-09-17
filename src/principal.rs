@@ -9,7 +9,7 @@
 //! surface is the human's, so it accepts only the admin token. Widening one to
 //! serve the other would hand agents the control surface.
 
-use crate::config::{Config, TrustDefault};
+use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::store::identity;
 
@@ -36,7 +36,6 @@ pub struct Principal {
 /// Resolves a bearer token to a principal.
 pub struct Auth {
     admin_token: Option<String>,
-    trust_default: TrustDefault,
     local_actor: String,
 }
 
@@ -49,18 +48,22 @@ impl Auth {
             .unwrap_or_else(|| "local".to_string());
         Self {
             admin_token: config.admin_token.clone(),
-            trust_default: config.trust_default,
             local_actor,
         }
     }
 
     /// The principal for the local stdio transport, which needs no token.
+    ///
+    /// stdio is a process the operator launched on the node, so it is the
+    /// human admin: it reaches everything and is attributed to the configured
+    /// local actor. Only stdio is treated this way; a token transport is
+    /// resolved through [`Auth::resolve_agent`] or [`Auth::require_admin`].
     pub fn local(&self) -> Principal {
         Principal {
             actor: self.local_actor.clone(),
-            trust: trust_level(self.trust_default),
+            trust: Trust::Trusted,
             agent_id: None,
-            is_admin: false,
+            is_admin: true,
         }
     }
 
@@ -118,13 +121,6 @@ impl Auth {
                 "no admin token is configured, so the control surface is disabled".to_string(),
             )),
         }
-    }
-}
-
-fn trust_level(default: TrustDefault) -> Trust {
-    match default {
-        TrustDefault::Trusted => Trust::Trusted,
-        TrustDefault::Untrusted => Trust::Untrusted,
     }
 }
 

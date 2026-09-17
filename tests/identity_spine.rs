@@ -52,14 +52,14 @@ fn require_admin_accepts_only_the_admin_token() {
 }
 
 #[test]
-fn local_principal_follows_the_trust_default_and_is_not_admin() {
-    let trusted = Auth::from_config(&config(TrustDefault::Trusted)).local();
-    assert_eq!(trusted.trust, Trust::Trusted);
-    assert!(!trusted.is_admin);
-
-    let untrusted = Auth::from_config(&config(TrustDefault::Untrusted)).local();
-    assert_eq!(untrusted.trust, Trust::Untrusted);
-    assert!(!untrusted.is_admin);
+fn local_stdio_is_the_human_admin() {
+    // The local transport is a process the operator launched, so it is the
+    // admin regardless of the trust posture; only token transports resolve
+    // through the identity store.
+    let local = Auth::from_config(&config(TrustDefault::Untrusted)).local();
+    assert_eq!(local.trust, Trust::Trusted);
+    assert!(local.is_admin, "stdio is the operator's local bridge");
+    assert!(local.agent_id.is_none());
 }
 
 #[tokio::test]
