@@ -6,8 +6,8 @@
 //! An update only learns its version number under the store's write lock, so
 //! its content lands beside the versions under a `pending-<token>` name and is
 //! renamed into place once the number is allocated. A pending file that never
-//! made it that far is inert: no row points at it, and it goes with the tree
-//! when the artifact or the project is deleted.
+//! made it that far is inert: no row points at it, and it is swept at the next
+//! startup.
 //!
 //! The IO here is blocking and is called from async handlers. At the artifact
 //! cap and the single-operator scale this is accepted: the worst case is one
@@ -18,6 +18,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+
+/// Name prefix of content whose version number is not yet allocated.
+const PENDING_PREFIX: &str = "pending-";
 
 /// The relative path of a blob, without writing it.
 pub fn blob_path(project_id: &str, artifact_id: &str, version: i64, kind: &str) -> Result<String> {
@@ -57,7 +60,7 @@ pub fn write_pending(
     crate::limits::check_artifact(bytes.len())?;
     let ext = extension(kind)?;
     let token = ulid::Ulid::generate();
-    let rel = format!("artifacts/{project_id}/{artifact_id}/pending-{token}.{ext}");
+    let rel = format!("artifacts/{project_id}/{artifact_id}/{PENDING_PREFIX}{token}.{ext}");
     write_at(data_dir, &rel, bytes)?;
     Ok(rel)
 }
@@ -109,6 +112,53 @@ pub fn remove_tree(data_dir: &Path, rel: &str) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+/// Remove every pending blob under the data directory, returning the count.
+///
+/// A pending name lives only between an update's write and its rename, both in
+/// one process. Content whose rename never ran is referenced by nothing, is
+/// counted by no storage figure, and only a delete of the whole artifact or
+/// project would ever clear it. Called at startup, where no update is in
+/// flight here and the engine's exclusive lock rules out a second hub over the
+/// same directory, so every pending file on disk is dead and no age threshold
+/// is needed.
+pub fn reap_pending(data_dir: &Path) -> Result<usize> {
+    let mut removed = 0;
+    for project in child_dirs(&data_dir.join("artifacts"))? {
+        for artifact in child_dirs(&project)? {
+            for entry in std::fs::read_dir(&artifact)? {
+                let entry = entry?;
+                let pending = entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(PENDING_PREFIX));
+                if pending && entry.file_type()?.is_file() {
+                    std::fs::remove_file(entry.path())?;
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// The directories directly under `path`. A symlink is not one of them, and a
+/// missing directory yields none.
+fn child_dirs(path: &Path) -> Result<Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.into()),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            dirs.push(entry.path());
+        }
+    }
+    Ok(dirs)
 }
 
 fn write_at(data_dir: &Path, rel: &str, bytes: &[u8]) -> Result<()> {

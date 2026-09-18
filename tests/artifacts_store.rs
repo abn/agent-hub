@@ -3,6 +3,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_hub::app::AppState;
+use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::ARTIFACT_BYTES_MAX;
 use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
@@ -1040,4 +1042,84 @@ async fn project_delete_drops_version_rows() {
         rows.next().await.expect("row").is_none(),
         "no version rows survive the project"
     );
+}
+
+#[tokio::test]
+async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
+    let dir = temp_dir("artifact-pending");
+    let db = open(&dir).await;
+    let report = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
+        .await
+        .expect("publish");
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &report.id,
+        b"second draft",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+    let notes = artifacts::publish(&db, &dir, public("Notes", b"notes"), None)
+        .await
+        .expect("publish notes");
+
+    // Content an update wrote and never renamed onto a version path, in two
+    // artifacts, plus two names the sweep must not touch.
+    let root = dir.join("artifacts").join("proj");
+    let stale = root.join(&report.id).join("pending-01J0STALE.html");
+    let other_stale = root.join(&notes.id).join("pending-01J0OTHER.html");
+    let named_pending = root.join(&report.id).join("v1-pending-review.html");
+    let outside = dir.join("artifacts").join("pending-01J0LOOSE.html");
+    for path in [&stale, &other_stale, &named_pending, &outside] {
+        std::fs::write(path, b"interrupted").expect("write file");
+    }
+    drop(db);
+
+    let state = AppState::open(Config {
+        data_dir: dir.clone(),
+        bind: "127.0.0.1:0".parse().expect("socket address"),
+        public_url: None,
+        admin_token: Some("token".to_string()),
+        trust_default: TrustDefault::Trusted,
+        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
+    })
+    .await
+    .expect("open state");
+
+    assert!(!stale.exists(), "content with no version left on disk");
+    assert!(
+        !other_stale.exists(),
+        "content with no version left in a second artifact"
+    );
+    assert!(
+        named_pending.exists(),
+        "a file that only carries the word in its name was removed"
+    );
+    assert!(
+        outside.exists(),
+        "a file outside an artifact directory was removed"
+    );
+
+    let versions = root.join(&report.id);
+    assert_eq!(
+        std::fs::read(versions.join("v1.html")).expect("read v1"),
+        b"first draft"
+    );
+    assert_eq!(
+        std::fs::read(versions.join("v2.html")).expect("read v2"),
+        b"second draft"
+    );
+    let (current, bytes) = artifacts::get(&state.db, &state.data_dir, &report.id)
+        .await
+        .expect("get");
+    assert_eq!(current.version, 2);
+    assert_eq!(bytes, b"second draft");
+    let (_, bytes) = artifacts::get(&state.db, &state.data_dir, &notes.id)
+        .await
+        .expect("get notes");
+    assert_eq!(bytes, b"notes");
 }

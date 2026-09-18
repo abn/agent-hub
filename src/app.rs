@@ -7,7 +7,7 @@ use crate::brain::BrainStore;
 use crate::config::Config;
 use crate::error::Result;
 use crate::principal::Auth;
-use crate::{http, mcp, net, store};
+use crate::{blob, http, mcp, net, store};
 
 /// Shared state handed to every HTTP handler and the MCP server.
 #[derive(Clone)]
@@ -38,6 +38,23 @@ impl AppState {
 
         let db = store::open_engine(&config.hub_db_path()).await?;
         let schema_version = store::migrate(&db).await?;
+
+        // The engine lock is held from here, so no other hub is mid-update over
+        // this directory and none is in flight in this one: any content still
+        // waiting for a version number was left by an interrupted update. This
+        // is housekeeping, so a file it cannot remove is a warning and never a
+        // reason the hub does not start.
+        match blob::reap_pending(&config.data_dir) {
+            Ok(0) => {}
+            Ok(reaped) => tracing::info!(
+                reaped,
+                "removed artifact content left by an interrupted update"
+            ),
+            Err(err) => tracing::warn!(
+                error = %err,
+                "could not clear artifact content left by an interrupted update"
+            ),
+        }
 
         let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
