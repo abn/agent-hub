@@ -37,9 +37,13 @@ pub async fn usage(db: &Database, data_dir: &Path) -> Result<StorageUsage> {
         }
     };
 
+    // Every version keeps its blob on disk (only delete removes the tree), so
+    // the report sums the version rows rather than just the current pointer.
     let mut artifacts = conn
         .query(
-            "SELECT project_id, COALESCE(SUM(size_bytes), 0) FROM artifacts GROUP BY project_id",
+            "SELECT a.project_id, COALESCE(SUM(v.size_bytes), 0)
+             FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
+             GROUP BY a.project_id",
             (),
         )
         .await

@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
-use agent_hub::store::artifacts::{self, NewArtifact};
+use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
@@ -131,6 +131,68 @@ async fn projects_create_list_and_storage() {
         .await
         .expect("request");
     assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn storage_usage_sums_every_stored_version() {
+    let state = state().await;
+
+    let published = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "homelab",
+            title: "Report",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "html",
+            content: b"12345",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &published.id,
+        b"1234567890",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("first update");
+
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &published.id,
+        b"123",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("second update");
+
+    // The three versions on disk are 5, 10, and 3 bytes: a report that only
+    // counted the current pointer would show 3, not the 18 actually stored.
+    let app = router(state);
+    let usage = app
+        .oneshot(get("/api/v1/storage", Some("Bearer token")))
+        .await
+        .expect("request");
+    assert_eq!(usage.status(), StatusCode::OK);
+    let body = json(usage).await;
+    assert_eq!(body["total_bytes"], 18);
+    assert_eq!(body["projects"][0]["artifact_bytes"], 18);
 }
 
 #[tokio::test]
