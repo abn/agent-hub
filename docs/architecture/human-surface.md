@@ -29,6 +29,8 @@ capped at 4 MiB:
 GET    /api/v1/home
 GET    /api/v1/projects
 POST   /api/v1/projects
+GET    /api/v1/projects/:id
+PATCH  /api/v1/projects/:id
 DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
@@ -126,7 +128,7 @@ than zero.
 | Route | Carries |
 |---|---|
 | `GET /api/v1/home` | `unread`, `waiting`, `agents_active`, `last_event_at`, `recent`, `unseen` (per project, the feed events above its cursor), `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Home makes one request |
-| `GET /api/v1/projects` | each project with its `id`, `display_name`, `owner_agent`, `created_at` and `unseen_events` |
+| `GET /api/v1/projects` and `GET /api/v1/projects/:id` | each project with its `id`, `display_name`, `owner_agent`, `created_at`, `artifact_password_policy` and `unseen_events` |
 | `GET /api/v1/projects/:id/feed` | `events`, `next_since`, `next_before`, and `last_seen`, the newest event the human has seen, so a client draws the unread dot on an event whose id is above it |
 | `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `prunable`, and a row per project with its artifact, session, knowledge and prunable bytes |
@@ -172,6 +174,16 @@ and it counts only projects the listing returns. Upgrading an existing hub
 seeds every cursor at that project's newest event, so nothing is lit by the
 upgrade itself. The route ships; the PWA does not call it yet.
 
+A project is settable after it is created. `PATCH` changes its display name
+and its artifact password policy (`off`, `optional` or `required`, and
+`optional` for every project that has not said otherwise); a field the body
+does not name is left alone, and an unknown field is ignored as it is on the
+create route. The id is the slug every MCP call and every other table names,
+so it is read-only after creation and a body that carries one is refused. An
+agent's personal space is settable like any other project; only deleting it is
+refused, because that is the agent's lifecycle rather than a setting. The
+routes ship; the Project settings screen does not.
+
 A batch prune takes every ended session of one project, or of every project,
 with the same soft delete, undo window and sweep as pruning one. It never
 touches an active session, a feed event, an artifact or a project knowledge
@@ -196,7 +208,7 @@ shipped.
 | Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind against the volume's own capacity, with the reversible prune actions for one session, one project, or every project. |
-| Project settings | Deletion ships, under the global Settings screen. A dedicated Project settings screen with project fields, artifact password policy, and reserved retention hints is intended design, not yet shipped. |
+| Project settings | Deletion ships, under the global Settings screen, and the routes behind the screen ship: renaming a project and setting its artifact password policy. The dedicated Project settings screen, with the read-only slug and the reserved retention hint, is intended design, not yet shipped. |
 
 Agent and access management lives under Settings, not a tab. It lists agents
 with their trust level, creates an agent and its personal space, promotes or

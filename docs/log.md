@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a project can be renamed and set up
+
+* **Update**: A project is read on its own route and changed on a new one: its
+  display name, and what it asks of a protected artifact (`off`, `optional` or
+  `required`, and `optional` for every project that has not said otherwise).
+  A field the body does not name is left alone. Both routes are in the
+  [human surface](architecture/human-surface.md); the Project settings screen
+  is not built yet.
+* **Note**: The slug is read-only after creation, because it is the name every
+  MCP call, every other table and every blob path uses; a body that tries to
+  change it is refused. An agent's personal space can be renamed and set up
+  like any other project, though deleting it is still refused.
+
 ## 2026-09-18, a project feed remembers how far it was read
 
 * **Update**: Each project carries one cursor, the newest event the human has

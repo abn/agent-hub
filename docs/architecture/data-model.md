@@ -20,7 +20,7 @@ inbox, which is global.
 
 | Table | Holds |
 |---|---|
-| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, reserved retention hints, and a JSON settings column such as the artifact password policy. |
+| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
 | `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
 | `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, and the blob path. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
@@ -64,6 +64,13 @@ had before, and `read` is not a status an agent can filter on. An agent
 therefore cannot poll the inbox to learn which of its reports the human has
 opened, or when. The listing is ordered by event id, which is minted in commit
 order, so reading an item never moves it or shifts the page a limit cuts.
+
+The display name is the only name a project keeps in one place: every other
+table, every MCP call and every blob path names the slug, so renaming a project
+changes one column and nothing goes stale behind it. The slug itself is
+read-only after creation for the same reason. The artifact password policy is
+its own column rather than a key in the reserved settings JSON, because every
+publish reads it.
 
 A feed is not read the same way, and the two must not be confused. Nothing in
 a feed is marked by hand: a project carries one cursor, and every event above
