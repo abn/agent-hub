@@ -142,13 +142,14 @@ the caller can see.
 ## Sessions and the brain
 
 `session_start` takes a `project_id` and a `session_name` and returns a
-`session_id` and a `brain_root`. The brain is the session's server-side working
-state, one AgentFS file per session. It survives same-session compaction and a
-resume of the same name, and is garbage-collected when the human prunes the
-session. Durable knowledge leaves the brain only when you promote it: a feed
-event, an artifact, or a search-indexed write. Keys live under `/kv/`, files
-under `/fs/`. One brain value is capped at 4 MiB; a larger write is refused
-with `payload_too_large` and stores nothing.
+`session_id`. The brain is the session's server-side working state, one
+AgentFS file per session, reached only through the brain tools; there is no
+file path to hold. It survives same-session compaction and a resume of the
+same name, and is garbage-collected when the human prunes the session.
+Durable knowledge leaves the brain only when you promote it: a feed event, an
+artifact, or a search-indexed write. Keys live under `/kv/`, files under
+`/fs/`. One brain value is capped at 4 MiB; a larger write is refused with
+`payload_too_large` and stores nothing.
 
 ## Feed, inbox, and questions
 

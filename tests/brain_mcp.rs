@@ -189,12 +189,9 @@ fn session_and_brain_tools_round_trip_over_stdio() {
         .as_str()
         .expect("session_start returns a session id")
         .to_string();
-    let brain_root = result["brain_root"]
-        .as_str()
-        .expect("session_start returns a brain root");
     assert!(
-        brain_root.ends_with(".db"),
-        "the brain root names the session file, got {brain_root:?}"
+        result.get("brain_root").is_none(),
+        "session_start hands back no server file path, got {result}"
     );
 
     let put_kv = server.call_tool(
@@ -562,25 +559,20 @@ fn session_survives_a_process_restart() {
     let data_dir = TempDir::new("restart");
     common::seed_project(&data_dir.0, "proj");
 
-    let (session_id, brain_root) = {
+    let session_id = {
         let mut server = McpServer::spawn(&data_dir.0);
         server.initialize();
         let started = server.call_tool(
             "session_start",
             json!({"project_id": "proj", "session_name": "named"}),
         );
-        let result = structured(&started);
-        let id = result["session_id"]
+        let id = structured(&started)["session_id"]
             .as_str()
             .expect("session id")
             .to_string();
-        let root = result["brain_root"]
-            .as_str()
-            .expect("brain root")
-            .to_string();
         let put = server.call_tool("brain_put", json!({"path": "/kv/counter", "content": "1"}));
         assert_eq!(structured(&put)["ok"], true, "brain_put before the restart");
-        (id, root)
+        id
     };
 
     let mut server = McpServer::spawn(&data_dir.0);
@@ -594,10 +586,6 @@ fn session_survives_a_process_restart() {
         result["session_id"].as_str().expect("session id"),
         session_id,
         "the same name resumes the same session after a restart"
-    );
-    assert_eq!(
-        result["brain_root"].as_str().expect("brain root"),
-        brain_root
     );
 
     let got = server.call_tool("brain_get", json!({"path": "/kv/counter"}));

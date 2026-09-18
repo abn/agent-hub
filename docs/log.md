@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, session start stops returning a server path
+
+* **Update**: `session_start` returns the session id alone. The brain file
+  path it used to hand back named nothing any brain tool accepts and
+  disclosed the server's on-disk layout; the file path stays on the
+  human-facing session surface. Documented in the
+  [agent surface](architecture/agent-surface.md) and the served skill
+  contract.
+
 ## 2026-09-18, brain values carry a size ceiling
 
 * **Update**: A single session brain value is capped at 4 MiB, matching the

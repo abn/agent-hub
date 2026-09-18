@@ -62,8 +62,9 @@ takes that value as `question_id`. An inbox item exposes the same id as its
 `brain_get` and `brain_put` operate on the current session's brain only. Brain
 paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A session cannot reach another session's brain, and no tool exposes a
-raw file handle. One value is capped at 4 MiB, and a larger write is refused
-with `payload_too_large` before anything is stored.
+raw file handle or the server path of the file: `session_start` returns the
+session id and nothing else. One value is capped at 4 MiB, and a larger write
+is refused with `payload_too_large` before anything is stored.
 
 ## Trust
 

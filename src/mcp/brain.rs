@@ -52,10 +52,11 @@ impl HubServer {
         *self.active.lock().await = Some((session.project_id.clone(), session.id.clone()));
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({
-            "session_id": session.id,
-            "brain_root": session.brain_path,
-        })))
+        // The brain is reached only through the namespaced tool paths, so the
+        // server's file layout is not the agent's business.
+        Ok(CallToolResult::structured(
+            json!({ "session_id": session.id }),
+        ))
     }
 
     #[tool(description = "Mark a session ended. Its brain is retained until pruned.")]
