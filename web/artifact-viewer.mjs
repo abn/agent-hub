@@ -103,7 +103,8 @@ function frameLoader() {
 // Mirror of web/tokens.css values for the srcdoc frame: an opaque origin
 // cannot load the file, so the frame carries the values inline. Body copy
 // follows the foundation prose scale: 15px/1.6 ink-2, headings ink, 640px
-// measure. Keep in sync with tokens.css when it changes.
+// measure. The static check fails on any colour here that tokens.css does not
+// declare, so the mirror cannot drift into a second palette.
 function frameStyle() {
   return (
     `<style>` +
@@ -126,9 +127,9 @@ function frameStyle() {
     `html[data-theme="dark"] th,html[data-theme="dark"] td{border-color:#2F2C26}` +
     `blockquote{margin:0;padding-left:1rem;border-left:3px solid #E4E0D8;color:#6F6A61}` +
     `html[data-theme="dark"] blockquote{border-color:#2F2C26;color:#948E83}` +
-    `.hub-callout{background:#EDEAE3;border-left:.25rem solid #888;border-radius:6px;` +
+    `.hub-callout{background:#EDEAE3;border-left:.25rem solid #CFC9BE;border-radius:6px;` +
     `padding:.75rem 1rem;margin:1rem 0}` +
-    `html[data-theme="dark"] .hub-callout{background:#26241F}` +
+    `html[data-theme="dark"] .hub-callout{background:#26241F;border-color:#44403A}` +
     `.hub-callout.note{border-color:#2F5FA8}` +
     `html[data-theme="dark"] .hub-callout.note{border-color:#8AAAE8}` +
     `.hub-callout.tip{border-color:#2E7D4F}` +

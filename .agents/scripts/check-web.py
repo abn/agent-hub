@@ -47,22 +47,131 @@ EMOJI = re.compile("[\U0001f000-\U0001faff\U00002600-\U000026ff]")
 INLINE_HANDLER = re.compile(r"\son[a-z]+\s*=", re.I)
 
 
-# Text pairs must meet WCAG AA for normal text; glyph pairs are typographic
-# marks, which are held to the non-text contrast minimum.
+KINDS = ("signal", "finished", "question", "approval", "artifact", "session")
+
+# The whole token list the design foundation names. Light declares all of it;
+# dark restates every token whose value depends on the theme. A token that goes
+# missing resolves to nothing and the rule that wanted it silently does not
+# paint, so presence is checked rather than assumed.
+LIGHT_TOKENS = (
+    "--font-sans",
+    "--font-mono",
+    "--bg",
+    "--surface",
+    "--surface-2",
+    "--line",
+    "--line-strong",
+    "--ink",
+    "--ink-2",
+    "--ink-3",
+    "--ink-inverse",
+    "--accent",
+    "--accent-bg",
+    "--action",
+    "--action-bg",
+    "--ok",
+    "--ok-bg",
+    "--danger",
+    "--danger-bg",
+    *(f"--k-{kind}" for kind in KINDS),
+    *(f"--k-{kind}-bg" for kind in KINDS),
+    "--focus",
+    "--shadow-1",
+    "--shadow-2",
+    "--r-1",
+    "--r-2",
+    "--r-pill",
+    "--s-1",
+    "--s-2",
+    "--s-3",
+    "--s-4",
+    "--s-5",
+    "--s-6",
+    "--row-y",
+    "--t-12",
+    "--t-13",
+    "--t-15",
+    "--t-17",
+    "--t-22",
+    "--t-28",
+)
+DARK_TOKENS = tuple(
+    name
+    for name in LIGHT_TOKENS
+    if name
+    not in {
+        "--font-sans",
+        "--font-mono",
+        "--focus",
+        "--r-1",
+        "--r-2",
+        "--r-pill",
+        "--s-1",
+        "--s-2",
+        "--s-3",
+        "--s-4",
+        "--s-5",
+        "--s-6",
+        "--row-y",
+        "--t-12",
+        "--t-13",
+        "--t-15",
+        "--t-17",
+        "--t-22",
+        "--t-28",
+    }
+)
+
+# Every pair the interface paints text with, on every surface it paints it on,
+# in both themes. Held to WCAG AA for normal text.
 TEXT_PAIRS = [
     ("--ink", "--bg"),
     ("--ink", "--surface"),
+    ("--ink", "--surface-2"),
     ("--ink-2", "--bg"),
-    ("--ink-3", "--surface"),
+    ("--ink-2", "--surface"),
+    ("--ink-2", "--surface-2"),
     ("--ink-3", "--bg"),
+    ("--ink-3", "--surface"),
     ("--ink-inverse", "--ink"),
-    ("--accent", "--bg"),
-    ("--action", "--action-bg"),
+    ("--ink-inverse", "--accent"),
     ("--ink-inverse", "--action"),
+    ("--ink-inverse", "--danger"),
+    ("--accent", "--bg"),
+    ("--accent", "--surface"),
+    ("--accent", "--surface-2"),
+    ("--accent", "--accent-bg"),
+    ("--action", "--bg"),
+    ("--action", "--surface"),
+    ("--action", "--surface-2"),
+    ("--action", "--action-bg"),
+    ("--ok", "--surface"),
+    ("--danger", "--bg"),
     ("--danger", "--surface"),
+    ("--danger", "--surface-2"),
+    ("--danger", "--danger-bg"),
 ]
-KINDS = ("signal", "finished", "question", "approval", "artifact", "session")
-GLYPH_PAIRS = [(f"--k-{kind}", f"--k-{kind}-bg") for kind in KINDS]
+# A disabled control is exempt from the text contrast rule, but its label still
+# has to say what the control would do, so it is held to the non-text floor.
+DISABLED_PAIRS = [("--ink-3", "--surface-2")]
+# The rule that draws every text field, and the surfaces a field sits on. A
+# bare field has no label inside it, so its border is the only thing that says
+# a control is there: WCAG 1.4.11 asks 3:1 of it. The token is read out of the
+# rule rather than named here, so swapping the border back to a fainter one is
+# what fails, not only editing a list.
+FIELD_RULE = r"input,\s*select,\s*textarea"
+FIELD_SURFACES = ("--surface", "--bg")
+# Two kind badges carry a typographic mark rather than a drawn path. A mark is
+# text, so those two meet the text minimum while the drawn glyphs meet the
+# non-text one.
+TEXT_MARK_KINDS = ("question", "approval")
+
+# A hex colour written anywhere but tokens.css is a hand copy of a token: the
+# manifest's theme colour, the shell's meta colour, the icon, and the artifact
+# frame, which is an opaque origin and cannot load the stylesheet. A copy that
+# drifts is a second palette the contrast gate never sees, so every literal has
+# to be a value tokens.css declares.
+HEX = re.compile(r"#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b")
 
 
 def token_blocks(css: str) -> dict[str, dict[str, str]]:
@@ -131,17 +240,42 @@ def ratio_check(
         )
 
 
+def field_border_token(errors: list[str], app_css: str) -> str | None:
+    """The token web/app.css draws every text field's border in."""
+    rule = re.search(FIELD_RULE + r"\s*\{([^}]*)\}", app_css)
+    if rule is None:
+        errors.append(f"web/app.css: no rule found for {FIELD_RULE}")
+        return None
+    border = re.search(r"border:[^;]*var\((--[\w-]+)\)", rule.group(1))
+    if border is None:
+        errors.append("web/app.css: a text field's border is not drawn in a token")
+        return None
+    return border.group(1)
+
+
 def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> None:
     blocks = token_blocks(tokens_css)
-    for theme in ("light", "dark"):
+    field_border = field_border_token(errors, app_css)
+    for theme, required in (("light", LIGHT_TOKENS), ("dark", DARK_TOKENS)):
         tokens = blocks.get(theme)
         if not tokens:
             errors.append(f"web/tokens.css: the {theme} token block is missing")
             continue
+        for name in required:
+            if name not in tokens:
+                errors.append(f"web/tokens.css: the {theme} block does not declare {name}")
+        # Dark inherits anything it does not restate, so a pair is read against
+        # the values a browser would resolve rather than the block alone.
+        resolved = {**blocks.get("light", {}), **tokens}
         for foreground, background in TEXT_PAIRS:
-            ratio_check(errors, theme, tokens, foreground, background, 4.5)
-        for foreground, background in GLYPH_PAIRS:
-            ratio_check(errors, theme, tokens, foreground, background, 3.0)
+            ratio_check(errors, theme, resolved, foreground, background, 4.5)
+        for foreground, background in DISABLED_PAIRS:
+            ratio_check(errors, theme, resolved, foreground, background, 3.0)
+        for surface in FIELD_SURFACES if field_border else ():
+            ratio_check(errors, theme, resolved, field_border, surface, 3.0)
+        for kind in KINDS:
+            minimum = 4.5 if kind in TEXT_MARK_KINDS else 3.0
+            ratio_check(errors, theme, resolved, f"--k-{kind}", f"--k-{kind}-bg", minimum)
 
     for name, value in blocks.get("light", {}).items():
         if re.fullmatch(r"--t-\d+", name):
@@ -164,6 +298,29 @@ def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> N
         size = re.search(r"font-size:\s*(\d+(?:\.\d+)?)px", line)
         if size and float(size.group(1)) < 12:
             errors.append(f"web/app.css:{number}: font-size is below the 12px floor")
+
+
+def check_palette_copies(errors: list[str], tokens_css: str) -> None:
+    """No second palette. Every hand-copied colour is a token value."""
+    declared = {
+        value.upper()
+        for block in token_blocks(tokens_css).values()
+        for value in block.values()
+        if hex_rgb(value)
+    }
+    for path in sorted(WEB.rglob("*")):
+        if not path.is_file() or VENDOR in path.parents or path.name == "tokens.css":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            for found in HEX.findall(line):
+                digits = found[1:]
+                if len(digits) == 3:
+                    digits = "".join(digit * 2 for digit in digits)
+                if f"#{digits.upper()}" not in declared:
+                    errors.append(
+                        f"{path}:{number}: {found} is not a colour web/tokens.css declares"
+                    )
 
 
 def main() -> int:
@@ -227,6 +384,7 @@ def main() -> int:
             errors.append(f"web/sw.js: the server stamps {placeholder}; keep it in the source")
 
     check_design_contract(errors, css, app_css)
+    check_palette_copies(errors, css)
     check_first_party_syntax(errors)
     check_every_script_is_served(errors)
 

@@ -16,6 +16,8 @@
 
   --accent: #2F5FA8;
   --accent-bg: #E6ECF7;
+  /* The foundation's #9A5E0C reads 4.39:1 on --surface-2 and 4.47:1 on
+     --action-bg, so the light action tone is one step darker here. */
   --action: #95590B;
   --action-bg: #F7EBD5;
   --ok: #2E7D4F;
@@ -26,7 +28,9 @@
   --k-signal: #6F6A61;    --k-signal-bg: #EDEAE3;
   --k-finished: #2E7D4F;  --k-finished-bg: #E2F1E7;
   --k-question: #2F5FA8;  --k-question-bg: #E6ECF7;
-  --k-approval: #9A5E0C;  --k-approval-bg: #F7EBD5;
+  /* The approval kind is the action tone: the Approve fill and the badge that
+     asks for it are one colour. */
+  --k-approval: #95590B;  --k-approval-bg: #F7EBD5;
   --k-artifact: #6E4B92;  --k-artifact-bg: #EEE6F5;
   --k-session: #23706E;   --k-session-bg: #DFF0EF;
 

@@ -98,10 +98,15 @@ button[disabled] { background: var(--surface-2); color: var(--ink-3); border-col
 .topbar nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .topbar > a { display: inline-flex; align-items: center; min-height: 44px; }
 
+/* An empty field has nothing in it that says a control is there, so its border
+   is the whole of what identifies it and has to be seen: the design's
+   --line-strong reads 1.65:1 on --surface, under the 3:1 non-text minimum, so
+   every field is drawn one step darker. An outline button keeps --line-strong,
+   because its own label is what identifies it. */
 input, select, textarea {
   width: 100%; min-height: 44px; padding: var(--s-2) var(--s-3);
   font: inherit; color: var(--ink); background: var(--surface);
-  border: 1px solid var(--line-strong); border-radius: var(--r-1);
+  border: 1px solid var(--ink-3); border-radius: var(--r-1);
 }
 label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var(--s-2) 0 var(--s-1); }
 
