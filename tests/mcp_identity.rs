@@ -681,3 +681,99 @@ async fn comment_mutations_are_concealed_from_strangers() {
     drop(_child);
     drop(data_dir);
 }
+
+#[tokio::test]
+async fn an_agent_does_not_reach_the_hub_audit_trail() {
+    let data_dir = TempDir::new("audit");
+
+    let db = open_engine(&data_dir.0.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    let watched = identity::create_agent(&db, "watched", "Watched", Trust::Untrusted)
+        .await
+        .expect("create watched");
+    identity::create_agent(&db, "watcher", "Watcher", Trust::Trusted)
+        .await
+        .expect("create watcher");
+    let watcher_token = identity::issue_token(&db, "watcher")
+        .await
+        .expect("watcher token")
+        .token;
+    // Ordinary work in the same project, so the assertions below separate
+    // "the audit trail is hidden" from "the tool returned nothing".
+    events::append(
+        &db,
+        "human",
+        None,
+        signal(&watched.personal_project_id, "ordinary watched work"),
+    )
+    .await
+    .expect("ordinary event");
+    drop(db);
+
+    let port = free_port();
+    let _child = spawn(&data_dir.0, port);
+    wait_for_port(port);
+    let session = initialize(port, &watcher_token);
+
+    let page = call(
+        port,
+        &watcher_token,
+        &session,
+        "feed_read",
+        json!({"project_id": watched.personal_project_id}),
+    );
+    assert!(
+        page.raw.contains("ordinary watched work"),
+        "a trusted agent still reads ordinary events: {}",
+        page.raw
+    );
+    assert!(
+        !page.raw.contains("agent_created"),
+        "the hub's own audit trail is not in an agent's feed: {}",
+        page.raw
+    );
+
+    let asked = call(
+        port,
+        &watcher_token,
+        &session,
+        "feed_read",
+        json!({"project_id": watched.personal_project_id, "kinds": ["system"]}),
+    );
+    assert!(
+        !asked.raw.contains("agent_created"),
+        "asking for the audit kind by name does not reach it: {}",
+        asked.raw
+    );
+
+    let ordinary = call(
+        port,
+        &watcher_token,
+        &session,
+        "search",
+        json!({"query": "ordinary", "scope": "global"}),
+    );
+    assert!(
+        ordinary.raw.contains("ordinary watched work"),
+        "a trusted agent still searches ordinary events: {}",
+        ordinary.raw
+    );
+
+    let audit = call(
+        port,
+        &watcher_token,
+        &session,
+        "search",
+        json!({"query": "watched", "scope": "global"}),
+    );
+    assert!(
+        !audit.raw.contains("agent_created"),
+        "the hub's own audit trail is not in an agent's search: {}",
+        audit.raw
+    );
+
+    drop(_child);
+    drop(data_dir);
+}

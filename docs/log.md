@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the identity trail is the human's to read
+
+* **Update**: Identity audit events stay out of the search corpus, and an
+  agent's feed read never returns one. The admin still reads the trail
+  through the project feed route by kind. Documented in the
+  [data model](architecture/data-model.md).
+
 ## 2026-09-18, session start stops returning a server path
 
 * **Update**: `session_start` returns the session id alone. The brain file

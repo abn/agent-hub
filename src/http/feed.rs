@@ -102,6 +102,8 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         before,
         limit: limit.unwrap_or(FEED_LIMIT_DEFAULT),
         kinds: if kinds.is_empty() { None } else { Some(kinds) },
+        // The route is admin-only, and the audit screen reads the trail here.
+        exclude_audit: false,
     })
 }
 

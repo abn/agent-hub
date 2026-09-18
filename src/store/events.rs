@@ -12,6 +12,12 @@ pub const KINDS: &[&str] = &[
     "signal", "finished", "question", "answer", "approval", "artifact", "session", "system",
 ];
 
+/// The kind carrying the hub's record of itself: who was created, whose trust
+/// changed, which tokens were issued and revoked. The identity store is its
+/// only writer and the human its only reader, so it is neither in the search
+/// corpus nor in a feed read by an agent.
+pub const AUDIT_KIND: &str = "system";
+
 /// A stored event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -52,6 +58,9 @@ pub struct FeedQuery {
     pub limit: i64,
     /// Restrict to these kinds.
     pub kinds: Option<Vec<String>>,
+    /// Drop the hub's own audit events whatever the caller asked for. This is
+    /// a confinement rather than a filter, so a caller cannot lift it.
+    pub exclude_audit: bool,
 }
 
 impl Default for FeedQuery {
@@ -61,6 +70,7 @@ impl Default for FeedQuery {
             before: None,
             limit: FEED_LIMIT_DEFAULT,
             kinds: None,
+            exclude_audit: false,
         }
     }
 }
@@ -195,20 +205,25 @@ async fn append_in_tx_capped(
     .await
     .map_err(engine)?;
 
-    index_doc(
-        tx,
-        SearchDoc {
-            doc_id: &format!("event:{id}"),
-            project_id: &event.project_id,
-            kind: "feed",
-            ref_id: &id,
-            session_id: None,
-            title: Some(&event.summary),
-            body: payload_text.as_deref().unwrap_or(""),
-            updated_at: &created_at,
-        },
-    )
-    .await?;
+    // The corpus carries no event kind, so an audit event that reaches it can
+    // no longer be held back from a search. It is kept out instead; the human
+    // reads the trail through the feed, by kind.
+    if event.kind != AUDIT_KIND {
+        index_doc(
+            tx,
+            SearchDoc {
+                doc_id: &format!("event:{id}"),
+                project_id: &event.project_id,
+                kind: "feed",
+                ref_id: &id,
+                session_id: None,
+                title: Some(&event.summary),
+                body: payload_text.as_deref().unwrap_or(""),
+                updated_at: &created_at,
+            },
+        )
+        .await?;
+    }
 
     if let Some(key) = idempotency_key {
         crate::store::idempotency::record(tx, &event.project_id, key, &id, &created_at).await?;
@@ -255,7 +270,7 @@ async fn get_on(conn: &Connection, event_id: &str) -> Result<Option<Event>> {
 pub fn human_kinds() -> Vec<String> {
     KINDS
         .iter()
-        .filter(|kind| **kind != "system")
+        .filter(|kind| **kind != AUDIT_KIND)
         .map(|kind| kind.to_string())
         .collect()
 }
@@ -309,6 +324,10 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
             placeholders.push(format!("?{}", params.len()));
         }
         sql.push_str(&format!(" AND e.kind IN ({})", placeholders.join(", ")));
+    }
+    if query.exclude_audit {
+        params.push(Value::Text(AUDIT_KIND.to_string()));
+        sql.push_str(&format!(" AND e.kind <> ?{}", params.len()));
     }
     if let Some(since) = &query.since {
         params.push(Value::Text(since.clone()));

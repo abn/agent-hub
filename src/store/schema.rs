@@ -34,6 +34,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 5,
         ddl: V5,
     },
+    Migration {
+        version: 6,
+        ddl: V6,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -229,4 +233,14 @@ CREATE TABLE IF NOT EXISTS comments(
 CREATE INDEX IF NOT EXISTS comments_artifact
   ON comments(artifact_id, created_at, id);
 ALTER TABLE idempotency ADD COLUMN comment_id TEXT;
+"#;
+
+/// Version 6: the hub's own audit events leave the search corpus.
+///
+/// They are no longer indexed on the way in, so this clears the ones an
+/// existing database already holds. The events themselves stay; only their
+/// search documents go.
+const V6: &str = r#"
+DELETE FROM search_docs
+WHERE doc_id IN (SELECT 'event:' || id FROM events WHERE kind = 'system');
 "#;

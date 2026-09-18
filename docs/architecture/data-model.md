@@ -48,7 +48,10 @@ Identity changes are audited. Creating an agent, changing its trust, issuing or
 revoking its token, and adding or removing a grant each append a `system` event
 to the affected project's feed, in the same transaction as the change, so a
 change and its record cannot diverge. Agent-scoped changes land in the agent's
-personal space; a grant lands in the project it opens.
+personal space; a grant lands in the project it opens. The trail is the human's
+to read: a `system` event is left out of the search corpus, and an agent's feed
+read never returns one, whatever kinds it asks for. The admin reads it through
+the project feed route, by kind.
 
 Retention is deliberately a per-layer concept. The schema carries
 `created_at`, `last_activity`, a `retention` column, and room for an

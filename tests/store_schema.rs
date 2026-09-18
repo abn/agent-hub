@@ -36,10 +36,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 5, "migrations are forward only and apply once");
+    assert_eq!(again, 6, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -226,7 +226,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let mut rows = conn
         .query(
@@ -270,6 +270,79 @@ async fn migration_four_backfills_version_history() {
     assert_eq!(row.get::<String>(1).expect("favicon"), "");
 
     drop(meta);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn migration_six_clears_indexed_audit_events() {
+    let dir = temp_dir("store-schema-v6");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-5 database that still indexes the hub's own audit events.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 6) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    for (id, kind, summary) in [
+        ("audit", "system", "agent one created"),
+        ("work", "signal", "ordinary work"),
+    ] {
+        conn.execute(
+            "INSERT INTO events(id, project_id, kind, actor, summary, created_at) \
+             VALUES (?1, 'proj', ?2, 'human', ?3, '2026-09-16T00:00:00Z')",
+            [id, kind, summary],
+        )
+        .await
+        .expect("insert event");
+        conn.execute(
+            "INSERT INTO search_docs(doc_id, project_id, type, ref_id, title, body, updated_at) \
+             VALUES (?1, 'proj', 'feed', ?2, ?3, '', '2026-09-16T00:00:00Z')",
+            [format!("event:{id}"), id.to_string(), summary.to_string()],
+        )
+        .await
+        .expect("index event");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 6);
+
+    let mut rows = conn
+        .query("SELECT doc_id FROM search_docs ORDER BY doc_id", ())
+        .await
+        .expect("query corpus");
+    let mut docs = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        docs.push(row.get::<String>(0).expect("doc_id"));
+    }
+    assert_eq!(
+        docs,
+        vec!["event:work".to_string()],
+        "the audit document leaves the corpus and ordinary work stays"
+    );
+
+    drop(rows);
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&dir).expect("clean temp dir");
