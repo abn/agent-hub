@@ -17,6 +17,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 const APP_JS: &str = include_str!("../web/app.js");
 const APP_CSS: &str = include_str!("../web/app.css");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
+const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 
@@ -477,15 +478,28 @@ fn viewer_module_renders_unlocks_and_themes() {
         "mermaid fences become placeholders"
     );
     assert!(
-        VIEWER_JS.contains("mermaid.initialize")
-            && VIEWER_JS.contains("mermaid.run")
-            && VIEWER_JS.contains("startOnLoad")
-            && VIEWER_JS.contains("querySelector"),
-        "the frame loader matches the frozen loader contract"
+        VIEWER_JS.contains("/frame-loader.js"),
+        "the viewer references the shared loader instead of inlining one"
     );
     assert!(
-        VIEWER_JS.contains("src/http/artifacts.rs"),
-        "the loader names its mirrored copy"
+        VIEWER_JS.contains("hubFrameHeight")
+            && VIEWER_JS.contains("contentWindow")
+            && VIEWER_JS.contains("12000"),
+        "the host sizes the frame from its posted height, clamped"
+    );
+    assert!(
+        FRAME_LOADER_JS.contains("postMessage") && FRAME_LOADER_JS.contains("ResizeObserver"),
+        "the shared loader reports its height"
+    );
+    assert!(
+        FRAME_LOADER_JS.contains("window.mermaid")
+            && FRAME_LOADER_JS.contains(".default")
+            && FRAME_LOADER_JS.contains(".initialize(")
+            && FRAME_LOADER_JS.contains(".run(")
+            && FRAME_LOADER_JS.contains("startOnLoad")
+            && FRAME_LOADER_JS.contains("querySelector")
+            && FRAME_LOADER_JS.contains("data-theme"),
+        "the shared loader matches the frozen loader contract"
     );
     assert!(
         VIEWER_JS.contains("?version="),

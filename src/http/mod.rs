@@ -39,6 +39,7 @@ pub fn router(state: AppState) -> Router {
         .route("/crypto.mjs", get(web::crypto_js))
         .route("/vendor/marked.js", get(web::marked_js))
         .route("/vendor/mermaid.runtime.js", get(web::mermaid_js))
+        .route("/frame-loader.js", get(web::frame_loader_js))
         .route("/artifact-viewer.mjs", get(web::viewer_js))
         .route("/SKILL.md", get(skill::skill))
         .route("/api/v1/agents", get(agents::list).post(agents::create))

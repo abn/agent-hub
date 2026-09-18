@@ -94,19 +94,10 @@ function renderMermaidPlaceholders(html) {
   );
 }
 
-// Frame loader, mirrored in the frame route renderer in
-// src/http/artifacts.rs. Keep the two copies identical: this one serves the
-// host-assembled srcdoc path, the other serves stored HTML artifacts.
-function frameLoader(theme) {
-  return (
-    `<script>` +
-    `document.addEventListener("DOMContentLoaded",function(){` +
-    `if(window.mermaid&&document.querySelector(".mermaid")){` +
-    `mermaid.initialize({startOnLoad:false,theme:"${theme}"});` +
-    `mermaid.run({querySelector:".mermaid"});` +
-    `}});` +
-    `</script>`
-  );
+// Frame loader tag. The shared file also sizes the frame to its body,
+// which the host cannot measure across the opaque origin.
+function frameLoader() {
+  return `<script src="/frame-loader.js"></script>`;
 }
 
 function frameStyle() {
@@ -126,18 +117,21 @@ function frameStyle() {
   );
 }
 
-// The srcdoc frame is sandboxed by the host iframe attribute, so the meta
-// policy carries every frame directive except sandbox itself.
+// The srcdoc frame is sandboxed by the host iframe attribute. The meta
+// policy restates the frame directives so the document is self-describing;
+// the inherited host policy applies on top, and their intersection governs.
+// `frame-ancestors` is deliberately absent: it is ignored in a meta element
+// and the sandbox plus host headers own framing instead.
 function buildSrcdoc({ title, body, theme, withMermaid }) {
   const origin = window.location.origin;
   const csp =
     "default-src 'none'; script-src " +
-    `${origin} 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; ` +
+    `${origin}; style-src 'unsafe-inline'; img-src data: blob:; ` +
     "font-src data:; media-src data: blob:; connect-src 'none'; " +
-    "form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
-  const loader = withMermaid
-    ? `<script src="/vendor/mermaid.runtime.js"></script>${frameLoader(theme)}`
-    : "";
+    "form-action 'none'; base-uri 'none'";
+  const loader =
+    (withMermaid ? `<script src="/vendor/mermaid.runtime.js"></script>` : "") +
+    frameLoader();
   return (
     `<!doctype html><html lang="en" data-theme="${theme}"><head>` +
     `<meta charset="utf-8">` +
@@ -218,6 +212,18 @@ function init() {
     });
   }
 
+  // Size the frame to its body. The frame is opaque, so the host cannot
+  // measure it; the shared frame loader posts its height instead. Only
+  // the frame element's own messages are honored, and the height is
+  // clamped to a sane band.
+  window.addEventListener("message", (event) => {
+    if (!state.frame || event.source !== state.frame.contentWindow) return;
+    const height = event.data && event.data.hubFrameHeight;
+    if (typeof height !== "number" || !isFinite(height)) return;
+    const clamped = Math.min(Math.max(Math.round(height), 120), 12000);
+    state.frame.style.height = `${clamped}px`;
+  });
+
   const pickerWrap = document.getElementById("hub-picker-wrap");
   const picker = document.getElementById("hub-version-select");
   if (pickerWrap && picker) {
@@ -236,14 +242,17 @@ function init() {
   if (form && password && errorLine) {
     password.addEventListener("input", () => {
       errorLine.textContent = "";
+      errorLine.hidden = true;
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       errorLine.textContent = "";
+      errorLine.hidden = true;
       const envelope = readJson("hub-envelope");
       const ciphertext = readJson("hub-ciphertext");
       if (!envelope || typeof ciphertext !== "string") {
         errorLine.textContent = "This artifact has no unlock data.";
+        errorLine.hidden = false;
         return;
       }
       try {
@@ -255,6 +264,7 @@ function init() {
         renderForTheme(state, state.theme);
       } catch {
         errorLine.textContent = "Could not decrypt: check the password.";
+        errorLine.hidden = false;
       }
     });
   }

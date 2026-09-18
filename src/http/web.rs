@@ -15,6 +15,7 @@ const CRYPTO_JS: &str = include_str!("../../web/crypto.mjs");
 const MARKED_JS: &str = include_str!("../../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../../web/vendor/mermaid.runtime.js");
 const VIEWER_MJS: &str = include_str!("../../web/artifact-viewer.mjs");
+const FRAME_LOADER_JS: &str = include_str!("../../web/frame-loader.js");
 
 /// `GET /`
 pub async fn index() -> Response {
@@ -77,6 +78,15 @@ pub async fn mermaid_js() -> Response {
 /// The first-party viewer module bound to the host shell element ids.
 pub async fn viewer_js() -> Response {
     asset(VIEWER_MJS, "application/javascript; charset=utf-8")
+}
+
+/// `GET /frame-loader.js`
+///
+/// The shared mermaid loader both frame paths reference instead of
+/// inlining one: an external same-origin script runs under the inherited
+/// and frame policies alike, where an inline loader would be blocked.
+pub async fn frame_loader_js() -> Response {
+    asset(FRAME_LOADER_JS, "application/javascript; charset=utf-8")
 }
 
 fn asset(body: &'static str, content_type: &'static str) -> Response {

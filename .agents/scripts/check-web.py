@@ -23,6 +23,7 @@ REQUIRED = [
     "tokens.css",
     "crypto.mjs",
     "artifact-viewer.mjs",
+    "frame-loader.js",
     "vendor/marked.js",
     "vendor/mermaid.runtime.js",
     "manifest.webmanifest",

@@ -597,7 +597,7 @@ fn reader_shell(
          <script type=\"application/json\" id=\"hub-versions\">{version_blob}</script>\n\
          <script type=\"application/json\" id=\"hub-markdown-body\">{markdown_blob}</script>\n\
          </body>\n</html>\n",
-        head = shell_head(artifact, shown, pinned, origin, bytes, false),
+        head = shell_head(artifact, shown, pinned, origin),
     )
 }
 
@@ -633,6 +633,7 @@ fn locked_shell(
          Decryption happens in your browser with the password the sender shared.</p>\n\
          <form id=\"hub-unlock-form\">\n\
          <label for=\"hub-password\">Password</label>\n\
+         <input type=\"text\" name=\"username\" value=\"artifact\" autocomplete=\"username\" hidden>\n\
          <input id=\"hub-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\">\n\
          <p id=\"hub-unlock-error\" hidden></p>\n\
          <button type=\"submit\">Unlock</button>\n</form>\n\
@@ -643,30 +644,18 @@ fn locked_shell(
          <script type=\"application/json\" id=\"hub-envelope\">{envelope}</script>\n\
          <script type=\"application/json\" id=\"hub-ciphertext\">{encoded}</script>\n\
          </body>\n</html>\n",
-        head = shell_head(artifact, shown, pinned, origin, &[], true),
+        head = shell_head(artifact, shown, pinned, origin),
     )
 }
 
 /// The head shared by both shell variants: preview meta tags plus the vendor
 /// and viewer scripts. No inline scripts, no stylesheets.
-fn shell_head(
-    artifact: &Artifact,
-    shown: i64,
-    pinned: bool,
-    origin: &str,
-    bytes: &[u8],
-    locked: bool,
-) -> String {
+fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> String {
     let title = escape_html(&artifact.title);
     let description = escape_html(&artifact.description);
     let pinned = match pinned {
         true => format!("?version={shown}"),
         false => String::new(),
-    };
-    let mermaid = if !locked && bytes_contains_mermaid(bytes) {
-        "<script src=\"/vendor/mermaid.runtime.js\"></script>\n".to_string()
-    } else {
-        String::new()
     };
     format!(
         "<meta charset=\"utf-8\">\n\
@@ -677,7 +666,20 @@ fn shell_head(
          <meta property=\"og:image\" content=\"{origin}/artifacts/{id}/og.svg{pinned}\">\n\
          <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
-         <script src=\"/vendor/marked.js\"></script>\n{mermaid}\
+         <style>\n\
+         :root{{color-scheme:light dark}}\n\
+         html,body{{margin:0;padding:0}}\n\
+         body{{font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif;line-height:1.5;background:#ffffff;color:#111111}}\n\
+         html[data-theme=\"dark\"] body{{background:#141311;color:#ece8e0}}\n\
+         body>header{{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem .75rem;border-bottom:1px solid #888888}}\n\
+         body>header h1{{font-size:1rem;font-weight:600;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
+         body>header button,body>header select,body>header input{{font:inherit;font-size:.85rem;padding:.4rem .6rem;min-height:44px}}\n\
+         button:focus-visible,select:focus-visible,input:focus-visible{{outline:2px solid #4d7cfe;outline-offset:2px}}\n\
+         main{{padding:0}}\n\
+         main>p,main>form{{margin:1rem;max-width:44rem}}\n\
+         iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
+         </style>\n\
+         <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
         id = artifact.id,
     )
@@ -716,27 +718,13 @@ fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
 
 /// The sandboxed body of a plain HTML artifact. Author bytes travel verbatim;
 /// the policy around them names the request origin and never grants
-/// same-origin access. When the bytes mention mermaid, the runtime and the
-/// loader ride along so fenced diagrams render in the frame theme.
+/// same-origin access. When the bytes mention mermaid, the runtime rides
+/// along; the shared frame loader always does, so the host can size the
+/// frame to its body and diagrams render in the frame theme.
 fn frame_document(title: &str, content: &str, theme: &str) -> String {
     let title = escape_html(title);
     let mermaid = if bytes_contains_mermaid(content.as_bytes()) {
-        let mermaid_theme = match theme {
-            "dark" => "dark",
-            _ => "default",
-        };
-        format!(
-            "<script src=\"/vendor/mermaid.runtime.js\"></script>\n\
-             <script>\n\
-             // Mirrors the mermaid loader in web/artifact-viewer.mjs (host srcdoc path); keep the two copies in sync.\n\
-             document.addEventListener('DOMContentLoaded', function () {{\n\
-             if (window.mermaid && document.querySelector('.mermaid')) {{\n\
-             mermaid.initialize({{ startOnLoad: false, theme: '{mermaid_theme}' }});\n\
-             mermaid.run({{ querySelector: '.mermaid' }});\n\
-             }}\n\
-             }});\n\
-             </script>\n"
-        )
+        "<script src=\"/vendor/mermaid.runtime.js\"></script>\n".to_string()
     } else {
         String::new()
     };
@@ -747,7 +735,7 @@ fn frame_document(title: &str, content: &str, theme: &str) -> String {
          <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n\
          <style>html[data-theme=\"light\"]{{color-scheme:light;background:#ffffff;color:#111111}}\
          html[data-theme=\"dark\"]{{color-scheme:dark;background:#111111;color:#eeeeee}}</style>\n\
-         {mermaid}</head>\n<body>\n{content}</body>\n</html>\n"
+         {mermaid}<script src=\"/frame-loader.js\"></script>\n</head>\n<body>\n{content}</body>\n</html>\n"
     )
 }
 

@@ -363,7 +363,7 @@ async fn host_inlines_markdown_source_without_rendering_it() {
 }
 
 #[tokio::test]
-async fn host_loads_the_mermaid_runtime_when_the_source_names_it() {
+async fn host_leaves_the_mermaid_runtime_to_the_frame() {
     let state = state().await;
     let id = artifacts::publish(
         &state.db,
@@ -391,7 +391,10 @@ async fn host_loads_the_mermaid_runtime_when_the_source_names_it() {
         .await
         .expect("request");
     let body = text_body(response).await;
-    assert!(body.contains("<script src=\"/vendor/mermaid.runtime.js\">"));
+    assert!(
+        !body.contains("/vendor/mermaid.runtime.js"),
+        "the host never loads the runtime; the frame and srcdoc carry their own"
+    );
 }
 
 #[tokio::test]
@@ -430,6 +433,35 @@ async fn host_shows_the_title_for_markdown_without_a_heading() {
     assert!(
         body.contains("Just a paragraph."),
         "the source travels in the markdown blob"
+    );
+}
+
+#[tokio::test]
+async fn host_shell_is_styled_and_sizes_its_frame() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+        .await
+        .expect("request");
+    let body = text_body(response).await;
+    assert!(
+        body.contains("font-family:system-ui") && body.contains("data-theme=\"light\""),
+        "the host chrome carries its own styles"
+    );
+    assert!(
+        body.contains("min-height:44px"),
+        "host controls meet the touch target floor"
+    );
+    assert!(
+        body.contains("iframe#hub-frame") && body.contains("min-height:60vh"),
+        "the frame has a styled no-JS minimum"
+    );
+    assert!(
+        body.contains(":focus-visible"),
+        "host controls show a focus ring"
     );
 }
 
@@ -1272,10 +1304,14 @@ async fn frame_loads_mermaid_only_when_the_bytes_name_it() {
         ))
         .await
         .expect("request");
+    let plain_body = text_body(response).await;
     assert!(
-        !text_body(response)
-            .await
-            .contains("/vendor/mermaid.runtime.js")
+        !plain_body.contains("/vendor/mermaid.runtime.js"),
+        "the runtime ships only when the bytes name it"
+    );
+    assert!(
+        plain_body.contains("<script src=\"/frame-loader.js\">"),
+        "the sizing loader rides along unconditionally"
     );
 
     let app = router(state);
@@ -1291,11 +1327,10 @@ async fn frame_loads_mermaid_only_when_the_bytes_name_it() {
     let body = text_body(response).await;
     assert!(body.contains("<script src=\"/vendor/mermaid.runtime.js\">"));
     assert!(
-        body.contains("web/artifact-viewer.mjs"),
-        "the loader names its viewer-side mirror"
+        body.contains("<script src=\"/frame-loader.js\">"),
+        "the shared loader rides along instead of an inline copy"
     );
-    assert!(body.contains("mermaid.initialize"));
-    assert!(body.contains("theme: 'dark'"));
+    assert!(body.contains("data-theme=\"dark\""));
 }
 
 #[tokio::test]
