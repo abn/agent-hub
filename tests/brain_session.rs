@@ -209,6 +209,37 @@ async fn a_write_through_a_handle_whose_brain_was_pruned_is_refused() {
 }
 
 #[tokio::test]
+async fn removing_a_brain_leaves_nothing_of_the_session_on_disk() {
+    let root = temp_dir("removal-leftovers");
+    let store = BrainStore::new(&root);
+
+    let brain = store.open("proj", "leftover").await.expect("open");
+    brain.put("/kv/seed", b"1").await.expect("write");
+    brain
+        .put("/fs/notes/plan.md", b"# plan\n")
+        .await
+        .expect("write file");
+    drop(brain);
+
+    assert!(store.remove("proj", "leftover").await.expect("remove"));
+
+    // The engine keeps a write-ahead log beside the database, and it outlives
+    // the handle. Prune is how the human reclaims the disk, so anything the
+    // engine wrote for the session has to go with it.
+    let left: Vec<String> = std::fs::read_dir(root.join("proj"))
+        .expect("read project directory")
+        .map(|entry| {
+            entry
+                .expect("directory entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(left.is_empty(), "the session left files behind: {left:?}");
+}
+
+#[tokio::test]
 async fn a_read_racing_a_prune_does_not_bring_the_brain_back() {
     let root = temp_dir("read-vs-prune");
     let store = std::sync::Arc::new(BrainStore::new(&root));

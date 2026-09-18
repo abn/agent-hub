@@ -175,17 +175,44 @@ impl BrainStore {
     /// Remove a session's brain file while holding its write lock.
     ///
     /// Taking the lock is the point: a prune must not race an in-flight write
-    /// to the same session file. Returns whether a file was actually removed,
-    /// so a caller can tell a clean removal from a missing file.
+    /// to the same session file. Returns whether the brain file itself was
+    /// actually removed, so a caller can tell a clean removal from a missing
+    /// file.
     pub async fn remove(&self, project_id: &str, session_id: &str) -> Result<bool> {
         let path = self.brain_path(project_id, session_id)?;
         let lock = lock_for(&path);
         let _guard = lock.lock().await;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(err) => Err(err.into()),
+        let removed = remove_if_present(&path)?;
+        // The engine's write-ahead log sits beside the brain file and outlives
+        // the handle that wrote it. Prune is how the human reclaims the disk,
+        // so the sidecar goes with the file it belongs to.
+        for suffix in SIDECAR_SUFFIXES {
+            let mut sidecar = path.clone().into_os_string();
+            sidecar.push(suffix);
+            // The brain file is already gone, so a sidecar that will not go
+            // must not fail the removal: the prune would keep its tombstone
+            // and be retried on every sweep for a file that no longer matters.
+            if let Err(err) = remove_if_present(Path::new(&sidecar)) {
+                tracing::warn!(
+                    sidecar = %Path::new(&sidecar).display(),
+                    error = %err,
+                    "could not remove a brain sidecar"
+                );
+            }
         }
+        Ok(removed)
+    }
+}
+
+/// What the engine can write beside a brain file, as a suffix on its path.
+const SIDECAR_SUFFIXES: [&str; 1] = ["-wal"];
+
+/// Remove a file, treating an already absent one as nothing to do.
+fn remove_if_present(path: &Path) -> Result<bool> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
     }
 }
 
