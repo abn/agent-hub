@@ -516,3 +516,40 @@ async fn a_listing_reports_each_entry_type_and_size() {
         "a file reports its own size and a directory the sum of its children"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reader_handle_sees_a_live_writer_handle_on_one_file() {
+    let store = BrainStore::new(temp_dir("reader-beside-writer"));
+    let writer = store.open("proj", "shared").await.expect("open writer");
+    writer.put("/kv/plan", b"first").await.expect("first write");
+
+    // A second handle on a file another handle already holds open is what a
+    // cross-session read does, so opening one must not need the writer to go
+    // away first.
+    let reader = store
+        .open_existing("proj", "shared")
+        .await
+        .expect("open a reader beside the writer")
+        .expect("the file exists");
+    assert_eq!(
+        reader.get("/kv/plan").await.expect("read"),
+        Some(b"first".to_vec()),
+        "a reader handle reads what the writer handle stored"
+    );
+
+    // Reads do not take the write lock, so this is the real overlap: a read in
+    // flight while a write on the same file is in flight.
+    let (written, read) = tokio::join!(writer.put("/kv/plan", b"second"), reader.get("/kv/plan"));
+    written.expect("concurrent write");
+    let read = read.expect("concurrent read");
+    assert!(
+        read == Some(b"first".to_vec()) || read == Some(b"second".to_vec()),
+        "a concurrent read yields one of the two committed values, got {read:?}"
+    );
+
+    assert_eq!(
+        reader.get("/kv/plan").await.expect("read after the write"),
+        Some(b"second".to_vec()),
+        "a reader handle sees a later write through the other handle"
+    );
+}
