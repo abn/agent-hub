@@ -12,9 +12,11 @@ The human surface is a calm mailroom for the operator's agents: quiet by
 default, one step louder when something waits, never alarming. This page
 records the design system behind it. The installable PWA shell, its screens,
 the Agents and access section under Settings, session detail, project
-deletion, and opt-in inbox notifications ship. Project settings as its own
-screen, an explicit read state, swipe gestures, and a desktop list plus detail
-layout are intended design, not yet shipped.
+deletion, opt-in inbox notifications, the confirmation dialog in front of a
+destructive action, the undo toast, and the reply composer ship. Project
+settings as its own screen, an explicit read state, the rest of the swipe
+gestures, and a desktop list plus detail layout are intended design, not yet
+shipped.
 
 ## Tokens
 
@@ -81,10 +83,19 @@ single-column screens with a top bar.
   intended design, not yet shipped: nothing marks an item read today.
 - Feeds are grouped by day, with kind filters as chips.
 - Prune is confirmed in a dialog, then reversible for a short window, then
-  committed.
+  committed. The dialog holds focus inside itself, opens with the safe action
+  focused, treats Esc as keeping, and hands focus back to the control that
+  opened it.
+- A question is answered in a composer under the item it belongs to, not in a
+  browser prompt. A refused send keeps what was typed and says why in place.
+- What an action did is reported in a toast, which is a live region so it is
+  announced. A toast that carries an undo takes focus, because the undo is the
+  only way back and the control that started the action has gone. One toast is
+  on screen at a time and a new one replaces it.
 - Swipes are first-class on mobile, never destructive, and always have a tap
-  equivalent. This is intended design, not yet shipped: no swipe gestures
-  exist today.
+  equivalent. Only the toast's swipe-down dismiss ships, with a dismiss control
+  and Esc beside it; the row and screen gestures are intended design, not yet
+  shipped.
 
 ## Alert hierarchy
 

@@ -205,7 +205,7 @@ shipped.
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. Explicit read state ships on the routes; the "Mark all read" and "Unread only" controls are intended design, not yet shipped. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
-| Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |
+| Sessions | Sessions per project, with End and a Prune that is confirmed in a dialog and undoable for 30 seconds. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind against the volume's own capacity, with the reversible prune actions for one session, one project, or every project. |
 | Project settings | Deletion ships, under the global Settings screen, and the routes behind the screen ship: renaming a project and setting its artifact password policy. The dedicated Project settings screen, with the read-only slug and the reserved retention hint, is intended design, not yet shipped. |
@@ -239,9 +239,9 @@ The app ships as ES modules with no bundler and no build step. `app.js` is
 the entry: it names the screens the router can paint and routes the delegated
 click, submit, and change events to the handler that owns each action.
 Beside it sit a shared core (the API client, the router, the DOM and escaping
-helpers, time formatting, preferences, the toast, the freshness stream and
-badge, and the project picker) and one module per screen, with the comments
-drawer in its own. The binary embeds every one of them in the same table it
+helpers, time formatting, preferences, the confirmation dialog, the toast, the
+reply composer, the freshness stream and badge, and the project picker) and one
+module per screen, with the comments drawer in its own. The binary embeds every one of them in the same table it
 serves, precaches, and digests for the service worker's cache name, so a
 module the hub does not serve cannot ship. Each render carries a number, and
 a screen whose fetches resolve after the reader has moved on does not paint
@@ -268,13 +268,19 @@ The interaction model is read, answer, approve, and prune, with no chat
 interface, by [decision](../adr/0007-async-mailbox-semantics.md). Alerts have
 three levels: quiet, unread, and waiting on you. They are never red, never
 animated, and never a modal. Prune is confirmed, then reversible for a short
-window, then committed.
+window, then committed. The app asks and reports in its own components: a
+modal confirmation dialog in front of anything destructive, an announced toast
+carrying the undo, and a composer for a reply, with no browser prompt, confirm
+or alert anywhere. A write that fails says so in the toast or inside the
+composer that tried it, and focus follows the control that was pressed rather
+than falling to the top of the page.
 
 The design carries hard invariants: no emoji, WCAG AA in both themes, a 12px
 UI text floor, 44px tap targets, a visible focus ring, a full keyboard path,
-and no colour-only meaning. Swipe gestures that are always non-destructive and
-always have a tap equivalent are intended design, not yet shipped; no swipe or
-touch gesture exists today. See the
+and no colour-only meaning. Swipe gestures are always non-destructive and
+always have a tap equivalent; swipe-down to dismiss a toast ships, with a
+dismiss control and Esc beside it, and the row and screen gestures are intended
+design, not yet shipped. See the
 [human interface](../design/human-interface.md) for the tokens and rules.
 
 ## Auth

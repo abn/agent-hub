@@ -4,6 +4,31 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the app asks and reports in its own components
+
+* **Update**: Pruning a session now asks first. A confirmation dialog names the
+  session, keeps on Esc or on its safe action, holds focus inside itself and
+  hands it back to the control that opened it; the prune request goes out only
+  once the dialog is answered. Before this, the first click pruned. Described in
+  the [human interface](design/human-interface.md).
+* **Update**: What an action did is reported in a toast that a screen reader
+  announces, carrying a counting undo for the 30 seconds a prune stays
+  reversible. It sits above the tab bar, dismisses on a swipe down, on Esc or on
+  its dismiss control, and one is on screen at a time.
+* **Update**: A question is answered in a composer under the item rather than in
+  a browser prompt. It is multi-line, sends on Enter where there is a keyboard
+  and on its send button everywhere, and a refused send keeps what was typed and
+  says why in place.
+* **Update**: No screen opens a browser prompt, confirm or alert any more.
+  Approving, revoking a token, deleting a comment and deleting a project all ask
+  through the same dialog, a failed write reports in the toast or in the
+  composer that tried it, and focus follows the control that was pressed instead
+  of falling to the top of the page. Described in the
+  [human surface](architecture/human-surface.md).
+* **Note**: The prune dialog names the session and its agent but no size: the
+  session listing route reports no byte count, and no number is shown that the
+  hub has not given.
+
 ## 2026-09-18, a kind is a shape, and the type scale stands up
 
 * **Update**: Each event kind now draws its own mark inside the badge, and the
