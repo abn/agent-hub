@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments::{self, AnchorInput};
 use agent_hub::store::projects;
 use agent_hub::store::{migrate, open_engine};
@@ -354,7 +354,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
         "agent-one",
         &artifact_id,
         b"ciphertext",
-        Some(serde_json::json!({"alg": "AES-GCM"})),
+        EnvelopeUpdate::Set(serde_json::json!({"alg": "AES-GCM"})),
         UpdateOptions::default(),
         None,
     )

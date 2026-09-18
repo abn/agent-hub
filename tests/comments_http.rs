@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments::{self, AnchorInput};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -555,7 +555,7 @@ async fn host_filters_comments_by_shown_version() {
         "agent-one",
         &id,
         b"<p>v2</p>",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: None,
             force: false,

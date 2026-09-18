@@ -7,7 +7,7 @@ use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::ARTIFACT_BYTES_MAX;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::events::{FeedQuery, read_feed};
 use agent_hub::store::projects;
 use agent_hub::store::{migrate, open_engine};
@@ -94,7 +94,7 @@ async fn concurrent_updates_get_distinct_versions() {
             "agent-one",
             &artifact.id,
             b"second draft",
-            None,
+            EnvelopeUpdate::Keep,
             UpdateOptions::default(),
             None
         ),
@@ -104,7 +104,7 @@ async fn concurrent_updates_get_distinct_versions() {
             "agent-one",
             &artifact.id,
             b"third draft",
-            None,
+            EnvelopeUpdate::Keep,
             UpdateOptions::default(),
             None
         ),
@@ -159,7 +159,7 @@ async fn update_adds_a_version_and_refreshes_search() {
         "agent-one",
         &artifact.id,
         b"second draft",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -280,7 +280,7 @@ async fn an_update_replays_on_its_idempotency_key() {
         "agent-one",
         &artifact.id,
         b"second",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         Some("upd-key"),
     )
@@ -292,7 +292,7 @@ async fn an_update_replays_on_its_idempotency_key() {
         "agent-one",
         &artifact.id,
         b"another",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         Some("upd-key"),
     )
@@ -384,7 +384,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
         "agent-one",
         &artifact.id,
         b"v2-stale",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: Some(999),
             force: false,
@@ -406,7 +406,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
         "agent-one",
         &artifact.id,
         b"v2-forced",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: Some(999),
             force: true,
@@ -425,7 +425,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
         "agent-one",
         &artifact.id,
         b"v3",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: Some(2),
             force: false,
@@ -456,7 +456,7 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
         "agent-one",
         &artifact.id,
         b"second",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: None,
             force: false,
@@ -519,7 +519,7 @@ async fn versions_carry_their_own_envelopes() {
         "agent-one",
         &artifact.id,
         b"ciphertext-two",
-        Some(rotated_envelope.clone()),
+        EnvelopeUpdate::Set(rotated_envelope.clone()),
         UpdateOptions::default(),
         None,
     )
@@ -548,7 +548,7 @@ async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
         "agent-one",
         &artifact.id,
         b"second",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -734,7 +734,7 @@ async fn a_conflicting_update_leaves_no_blob_behind() {
         "agent-one",
         &artifact.id,
         b"v2-stale",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: Some(999),
             force: false,
@@ -775,7 +775,7 @@ async fn a_replayed_write_leaves_no_extra_blob() {
         "agent-one",
         &artifact.id,
         b"second",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         Some("upd-key"),
     )
@@ -787,7 +787,7 @@ async fn a_replayed_write_leaves_no_extra_blob() {
         "agent-one",
         &artifact.id,
         b"another",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         Some("upd-key"),
     )
@@ -816,7 +816,7 @@ async fn sequential_updates_keep_every_version_blob() {
         "agent-one",
         &artifact.id,
         b"second",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -828,7 +828,7 @@ async fn sequential_updates_keep_every_version_blob() {
         "agent-one",
         &artifact.id,
         b"third",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -892,7 +892,7 @@ async fn publish_and_update_return_the_metadata_they_committed() {
         "agent-one",
         &published.id,
         b"<h1>more hits</h1>",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -936,7 +936,7 @@ async fn an_update_writes_its_blob_before_taking_the_write_lock() {
                 "agent-one",
                 &id,
                 b"second",
-                None,
+                EnvelopeUpdate::Keep,
                 UpdateOptions::default(),
                 None,
             )
@@ -1021,7 +1021,7 @@ async fn project_delete_drops_version_rows() {
         "agent-one",
         &artifact.id,
         b"v2",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -1057,7 +1057,7 @@ async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
         "agent-one",
         &report.id,
         b"second draft",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -1124,4 +1124,333 @@ async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
         .await
         .expect("get notes");
     assert_eq!(bytes, b"notes");
+}
+
+fn envelope() -> serde_json::Value {
+    serde_json::json!({
+        "alg": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "iterations": 600000,
+        "salt": "c2FsdA==",
+        "iv": "aXY=",
+    })
+}
+
+fn protected<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
+    NewArtifact {
+        envelope: Some(envelope()),
+        ..public(title, content)
+    }
+}
+
+/// A project at one artifact password policy.
+async fn project_at(db: &turso::Database, policy: &str) {
+    projects::create(db, "proj", "Proj")
+        .await
+        .expect("create project");
+    set_policy(db, policy).await;
+}
+
+async fn set_policy(db: &turso::Database, policy: &str) {
+    projects::update(
+        db,
+        "proj",
+        projects::ProjectChanges {
+            artifact_password_policy: Some(policy),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("set the policy");
+}
+
+#[tokio::test]
+async fn a_project_that_requires_protection_refuses_plain_content() {
+    let dir = temp_dir("artifact-required");
+    let db = open(&dir).await;
+    project_at(&db, "required").await;
+
+    let refused = artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
+        .await
+        .expect_err("a plain publish is refused");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+    assert!(
+        refused.to_string().contains("envelope"),
+        "the refusal says what to send instead: {refused}"
+    );
+    assert!(
+        artifacts::list(&db, "proj").await.expect("list").is_empty(),
+        "a refused publish writes nothing"
+    );
+
+    artifacts::publish(&db, &dir, protected("Report", b"ciphertext"), None)
+        .await
+        .expect("a protected publish is accepted");
+}
+
+#[tokio::test]
+async fn a_project_with_protection_off_refuses_an_envelope() {
+    let dir = temp_dir("artifact-off");
+    let db = open(&dir).await;
+    project_at(&db, "off").await;
+
+    let refused = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect_err("a protected publish is refused");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+    assert!(
+        refused.to_string().contains("envelope"),
+        "the refusal names the envelope: {refused}"
+    );
+
+    artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
+        .await
+        .expect("a plain publish is accepted");
+}
+
+#[tokio::test]
+async fn an_optional_policy_takes_either_kind() {
+    let dir = temp_dir("artifact-optional");
+    let db = open(&dir).await;
+    project_at(&db, "optional").await;
+
+    artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
+        .await
+        .expect("a plain publish is accepted");
+    artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect("a protected publish is accepted");
+}
+
+#[tokio::test]
+async fn a_policy_change_applies_to_the_next_version_only() {
+    let dir = temp_dir("artifact-policy-change");
+    let db = open(&dir).await;
+    project_at(&db, "optional").await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
+        .await
+        .expect("publish");
+
+    set_policy(&db, "required").await;
+
+    // What was published stays published and stays readable.
+    let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
+    assert_eq!(bytes, b"first draft");
+    assert!(!read.protected);
+
+    let refused = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second draft",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect_err("a plain new version is refused");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+
+    let updated = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"ciphertext",
+        EnvelopeUpdate::Set(envelope()),
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("a protected new version is accepted");
+    assert_eq!(updated.version, 2);
+    assert!(updated.protected);
+
+    // The first version is still what it was, in the clear.
+    let (first, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, 1)
+        .await
+        .expect("read version one");
+    assert!(!first.protected);
+    assert_eq!(bytes, b"first draft");
+}
+
+#[tokio::test]
+async fn turning_protection_off_holds_for_a_new_version_of_a_protected_artifact() {
+    let dir = temp_dir("artifact-policy-off-change");
+    let db = open(&dir).await;
+    project_at(&db, "optional").await;
+    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect("publish");
+
+    set_policy(&db, "off").await;
+
+    // An update carries the envelope forward unless it is given a new one, so
+    // the version it would write is still protected, and the project no longer
+    // takes one.
+    let refused = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"more ciphertext",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect_err("a protected new version is refused");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+
+    // The artifact itself is untouched: what was published stays published.
+    let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
+    assert!(read.protected);
+    assert_eq!(bytes, b"ciphertext");
+}
+
+#[tokio::test]
+async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
+    let dir = temp_dir("artifact-clear");
+    let db = open(&dir).await;
+    project_at(&db, "optional").await;
+    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect("publish");
+
+    let inherited = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"more ciphertext",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("an update carries the envelope forward");
+    assert!(inherited.protected, "saying nothing keeps the protection");
+
+    let cleared = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"in the clear",
+        EnvelopeUpdate::Clear,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("an update can say the new version is not protected");
+    assert_eq!(cleared.version, 3);
+    assert!(!cleared.protected);
+    assert!(cleared.envelope.is_none());
+
+    // The history stays coherent: each version is what it was published as.
+    let (first, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, 1)
+        .await
+        .expect("version one");
+    assert!(first.protected, "the first version is still ciphertext");
+    assert_eq!(bytes, b"ciphertext");
+    let (third, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, 3)
+        .await
+        .expect("version three");
+    assert!(!third.protected);
+    assert_eq!(bytes, b"in the clear");
+
+    let versions = artifacts::list_versions(&db, &artifact.id)
+        .await
+        .expect("versions");
+    assert_eq!(
+        versions
+            .iter()
+            .map(|version| version.protected)
+            .collect::<Vec<_>>(),
+        vec![true, true, false]
+    );
+}
+
+#[tokio::test]
+async fn protection_off_names_the_way_to_publish_in_the_clear() {
+    let dir = temp_dir("artifact-off-remedy");
+    let db = open(&dir).await;
+    project_at(&db, "optional").await;
+    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect("publish");
+    set_policy(&db, "off").await;
+
+    let refused = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"more ciphertext",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect_err("the version it would write is still protected");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+    assert!(
+        refused.to_string().contains("envelope: null"),
+        "the refusal names a request the agent can actually make: {refused}"
+    );
+
+    let cleared = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"in the clear",
+        EnvelopeUpdate::Clear,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("and that request is accepted");
+    assert!(!cleared.protected);
+    assert_eq!(cleared.version, 2);
+}
+
+#[tokio::test]
+async fn required_protection_refuses_an_update_that_clears_it() {
+    let dir = temp_dir("artifact-required-clear");
+    let db = open(&dir).await;
+    project_at(&db, "required").await;
+    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+        .await
+        .expect("publish");
+
+    let refused = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"in the clear",
+        EnvelopeUpdate::Clear,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect_err("the project requires protection");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+    assert!(refused.to_string().contains("envelope"));
+
+    let kept = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"more ciphertext",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("carrying the envelope forward is accepted");
+    assert!(kept.protected);
 }

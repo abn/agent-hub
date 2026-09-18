@@ -7,7 +7,7 @@ use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::principal::Trust;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, projects, sessions};
 use axum::body::{Body, to_bytes};
@@ -144,7 +144,7 @@ async fn delete_project_cascades_its_data() {
         "agent-one",
         &artifact.id,
         b"hello cascade v2",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )

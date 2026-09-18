@@ -85,7 +85,11 @@ impl HubServer {
             &principal.actor,
             &params.artifact_id,
             params.content.as_bytes(),
-            params.envelope,
+            match params.envelope {
+                None => artifacts::EnvelopeUpdate::Keep,
+                Some(None) => artifacts::EnvelopeUpdate::Clear,
+                Some(Some(envelope)) => artifacts::EnvelopeUpdate::Set(envelope),
+            },
             UpdateOptions {
                 base_version: params.base_version,
                 force: params.force,
@@ -258,8 +262,13 @@ struct ArtifactPublishParams {
 struct ArtifactUpdateParams {
     artifact_id: String,
     content: String,
-    #[serde(default)]
-    envelope: Option<serde_json::Value>,
+    /// Absent keeps the artifact's current envelope, an envelope replaces it,
+    /// and an explicit null publishes this version in the clear. The three are
+    /// distinct, so an agent that says nothing never has its ciphertext stored
+    /// as if it were plaintext.
+    #[serde(default, deserialize_with = "present_or_absent")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    envelope: Option<Option<serde_json::Value>>,
     #[serde(default)]
     base_version: Option<i64>,
     #[serde(default)]
@@ -269,6 +278,17 @@ struct ArtifactUpdateParams {
     /// Optional idempotency key, so a retried update returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
+}
+
+/// Read a field that may be absent or explicitly null into a nested option, so
+/// the two can be told apart. Serde's own default handles the absent case.
+fn present_or_absent<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<serde_json::Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer).map(Some)
 }
 
 /// Arguments for `artifact_get`.

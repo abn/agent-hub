@@ -8,7 +8,7 @@ use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::Error;
 use agent_hub::http::problem::Problem;
 use agent_hub::http::router;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::sessions;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -882,7 +882,7 @@ async fn publish_versioned(state: &AppState) -> String {
         "agent-one",
         &id,
         b"<p>v2</p>",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions {
             base_version: None,
             force: false,
@@ -1647,4 +1647,47 @@ fn stale_base_conflict_maps_to_409() {
     ));
     assert_eq!(problem.status, 409);
     assert_eq!(problem.code, "conflict");
+}
+
+#[tokio::test]
+async fn the_page_follows_each_version_of_a_mixed_history() {
+    let state = state().await;
+    let id = publish_protected(&state, "proj", "Sealed report", CIPHERTEXT.as_bytes()).await;
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>in the clear</p>",
+        EnvelopeUpdate::Clear,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("publish a version in the clear");
+
+    let page = |query: &str| {
+        let app = router(state.clone());
+        let uri = format!("/artifacts/{id}{query}");
+        async move {
+            let response = app
+                .oneshot(request("GET", &uri, None, None))
+                .await
+                .expect("request");
+            assert_eq!(response.status(), StatusCode::OK);
+            text_body(response).await
+        }
+    };
+
+    let current = page("").await;
+    assert!(
+        !current.contains("Encrypted artifact"),
+        "the current version is in the clear, so the page reads it"
+    );
+
+    let sealed = page("?version=1").await;
+    assert!(
+        sealed.contains("Encrypted artifact"),
+        "the version that was published protected still asks for its password"
+    );
 }

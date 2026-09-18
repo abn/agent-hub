@@ -4,6 +4,26 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a project decides what it asks of a protected artifact
+
+* **Update**: The artifact password policy is enforced where artifacts are
+  written, so every writer meets it: a project set to require protection
+  refuses content with no envelope, one that keeps its artifacts in plain text
+  refuses content with one, and `optional`, the default, leaves the choice to
+  the agent. A refusal names the project and what to send instead, and writes
+  nothing. See [artifacts](usage/artifacts.md).
+* **Update**: An update now says what happens to the protection: leaving
+  `envelope` out carries the current one forward, passing one protects the new
+  version under it, and passing `null` publishes the new version in the clear.
+  A protected artifact in a project that has turned protection off moves into
+  the clear that way, keeping its id, its history, its comments and the links
+  already shared, and the refusal names that request. Each version keeps what
+  it was published as, so one artifact can hold a protected version and a plain
+  one. See [artifacts](usage/artifacts.md).
+* **Note**: The rule applies to the version being written, never backwards. An
+  artifact published under another policy stays as it is and stays readable;
+  only its next version has to comply.
+
 ## 2026-09-18, a project can be renamed and set up
 
 * **Update**: A project is read on its own route and changed on a new one: its

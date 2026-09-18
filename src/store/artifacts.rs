@@ -81,6 +81,40 @@ pub struct NewArtifact<'a> {
     pub envelope: Option<serde_json::Value>,
 }
 
+/// What a new version does with the artifact's protection.
+///
+/// An update that says nothing keeps what the artifact carries, whatever the
+/// project's policy is: an agent relying on that sends ciphertext, and storing
+/// it as plaintext because a policy changed would corrupt the artifact. Moving
+/// a version into the clear is therefore something the caller says out loud.
+#[derive(Debug, Clone, Default)]
+pub enum EnvelopeUpdate {
+    /// Carry the current envelope forward, if there is one.
+    #[default]
+    Keep,
+    /// Publish this version protected under this envelope.
+    Set(serde_json::Value),
+    /// Publish this version in the clear: the content sent is plaintext.
+    Clear,
+}
+
+impl EnvelopeUpdate {
+    /// The envelope the new version carries, given the current one.
+    fn resolve(&self, current: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+        match self {
+            Self::Keep => current.cloned(),
+            Self::Set(envelope) => Some(envelope.clone()),
+            Self::Clear => None,
+        }
+    }
+
+    /// Whether the protection would come from the artifact rather than the
+    /// call, which is what a refusal has to explain.
+    fn inherits(&self) -> bool {
+        matches!(self, Self::Keep)
+    }
+}
+
 /// Options for publishing a new version of an artifact.
 #[derive(Debug, Clone, Default)]
 pub struct UpdateOptions<'a> {
@@ -116,6 +150,15 @@ pub async fn publish(
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(artifact.content.len())?;
+    check_password_policy(
+        db,
+        artifact.project_id,
+        Protection {
+            protected: artifact.envelope.is_some(),
+            inherited: false,
+        },
+    )
+    .await?;
     let title = resolve_title(artifact.title, artifact.kind, artifact.content)?;
     let description = check_description(artifact.description)?;
     let favicon = check_favicon(artifact.favicon)?;
@@ -276,7 +319,7 @@ pub async fn update(
     actor: &str,
     artifact_id: &str,
     content: &[u8],
-    envelope: Option<serde_json::Value>,
+    envelope: EnvelopeUpdate,
     opts: UpdateOptions<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
@@ -290,6 +333,18 @@ pub async fn update(
     let current = row_on(&conn, artifact_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+    // The policy is asked about the version this would write, which is what
+    // the update carries forward when it says nothing.
+    check_password_policy(
+        db,
+        &current.project_id,
+        Protection {
+            protected: envelope.resolve(current.envelope.as_ref()).is_some(),
+            inherited: envelope.inherits() && current.envelope.is_some(),
+        },
+    )
+    .await?;
 
     // A retry with the same key returns the version the first call granted.
     // As in publish, the lookup runs before the blob write and again inside
@@ -349,7 +404,7 @@ pub async fn update(
             &existing.kind,
         )?;
         promoted = Some(rel.clone());
-        let envelope = envelope.or(existing.envelope.clone());
+        let envelope = envelope.resolve(existing.envelope.as_ref());
         let envelope_json = envelope.as_ref().map(|value| value.to_string());
         let protected = envelope_json.is_some();
         let label = label.or(existing.label.clone());
@@ -819,6 +874,43 @@ async fn replay(
         artifact.version = version;
     }
     Ok(artifact)
+}
+
+/// How the version about to be written is protected, and where that came from.
+struct Protection {
+    /// Whether the new version carries an envelope.
+    protected: bool,
+    /// Whether that envelope comes from the artifact rather than the call, so a
+    /// refusal can name the request that changes it.
+    inherited: bool,
+}
+
+/// Hold a write to what its project asks of a protected artifact.
+///
+/// The check lives here, at the store boundary, so every writer meets it and
+/// nothing is written before it is met: a refused call transfers no blob and
+/// leaves no row. It asks about the version that would be written, so an
+/// artifact published before the project changed its mind stays exactly as it
+/// was and only its next version has to comply. Every refusal names a request
+/// the caller can actually make.
+async fn check_password_policy(
+    db: &Database,
+    project_id: &str,
+    protection: Protection,
+) -> Result<()> {
+    let policy = crate::store::projects::artifact_password_policy(db, project_id).await?;
+    match (policy.as_str(), protection.protected, protection.inherited) {
+        ("required", false, _) => Err(Error::InvalidArgument(format!(
+            "project {project_id} requires artifact protection: encrypt the content in the client and send the ciphertext with its envelope"
+        ))),
+        ("off", true, true) => Err(Error::InvalidArgument(format!(
+            "project {project_id} stores artifacts in plain text and this artifact is protected: send envelope: null with the plaintext content to publish this version in the clear"
+        ))),
+        ("off", true, false) => Err(Error::InvalidArgument(format!(
+            "project {project_id} stores artifacts in plain text: send the content without an envelope, or envelope: null on an update"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Resolve and check display metadata: title with its markdown fallback,

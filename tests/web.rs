@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
-use agent_hub::store::artifacts::{self, NewArtifact, UpdateOptions};
+use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
@@ -175,7 +175,7 @@ async fn storage_usage_sums_every_stored_version() {
         "agent-one",
         &published.id,
         b"1234567890",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )
@@ -188,7 +188,7 @@ async fn storage_usage_sums_every_stored_version() {
         "agent-one",
         &published.id,
         b"123",
-        None,
+        EnvelopeUpdate::Keep,
         UpdateOptions::default(),
         None,
     )

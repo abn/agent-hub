@@ -448,6 +448,21 @@ browser. It accepts `iterations` from 100000 to 10000000 and refuses anything
 outside that range before the password is tried, so such an artifact never
 opens.
 
+An update treats `envelope` three ways: leave it out and the artifact's current
+envelope carries forward, pass one and this version is protected under it, or
+pass `null` and this version is published in the clear, with `content` as
+plaintext. Older versions keep what they were published as, so an artifact can
+hold a protected version and a plain one.
+
+A project can decide this for you. Most projects leave it to you, but one set
+to require protection refuses a publish or an update with no `envelope`, and
+one that keeps its artifacts in plain text refuses a publish or an update that
+would carry one. Either refusal is `invalid_argument` and names what to send
+instead; nothing is written. If the artifact is already protected and the
+project has since turned protection off, the refusal says to send
+`envelope: null` with the plaintext content, which moves it into the clear
+without losing the id, the history or the comments.
+
 Authored HTML has a strict content security policy, so it cannot make external
 requests: inline all CSS and JS, embed images and fonts as `data:` URIs, keep
 no storage-backed state, support light and dark themes, avoid horizontal body

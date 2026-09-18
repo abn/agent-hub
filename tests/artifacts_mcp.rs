@@ -428,3 +428,241 @@ fn artifact_get_of_an_absent_id_is_not_found() {
         .unwrap_or_else(|| panic!("tool error carries the hub code: {response}"));
     assert_eq!(code, "not_found");
 }
+
+/// Set a project's artifact password policy before the hub is spawned over it.
+fn set_policy(data_dir: &Path, project_id: &str, policy: &str) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build runtime");
+    runtime.block_on(async {
+        let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
+            .await
+            .expect("open engine");
+        agent_hub::store::migrate(&db).await.expect("migrate");
+        agent_hub::store::projects::update(
+            &db,
+            project_id,
+            agent_hub::store::projects::ProjectChanges {
+                artifact_password_policy: Some(policy),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("set the policy");
+    });
+}
+
+#[test]
+fn a_project_that_requires_protection_refuses_a_plain_publish() {
+    let data_dir = TempDir::new("policy-required");
+    common::seed_project(&data_dir.0, "proj");
+    set_policy(&data_dir.0, "proj", "required");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let refused = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Report",
+            "kind": "markdown",
+            "content": "in the clear",
+        }),
+    );
+    assert_eq!(tool_error_code(&refused), "invalid_argument");
+    let message = refused.to_string();
+    assert!(
+        message.contains("envelope"),
+        "the agent is told what to send instead: {message}"
+    );
+
+    let accepted = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Report",
+            "kind": "markdown",
+            "content": "ciphertextbase64",
+            "envelope": {
+                "alg": "AES-GCM",
+                "kdf": "PBKDF2-SHA256",
+                "iterations": 600000,
+                "salt": "c2FsdA==",
+                "iv": "aXY=",
+            },
+        }),
+    );
+    assert_eq!(structured(&accepted)["version"], 1);
+}
+
+#[test]
+fn a_project_with_protection_off_refuses_an_envelope() {
+    let data_dir = TempDir::new("policy-off");
+    common::seed_project(&data_dir.0, "proj");
+    set_policy(&data_dir.0, "proj", "off");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let refused = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Secret",
+            "kind": "markdown",
+            "content": "ciphertextbase64",
+            "envelope": {
+                "alg": "AES-GCM",
+                "kdf": "PBKDF2-SHA256",
+                "iterations": 600000,
+                "salt": "c2FsdA==",
+                "iv": "aXY=",
+            },
+        }),
+    );
+    assert_eq!(tool_error_code(&refused), "invalid_argument");
+
+    let accepted = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Report",
+            "kind": "markdown",
+            "content": "in the clear",
+        }),
+    );
+    assert_eq!(structured(&accepted)["version"], 1);
+}
+
+#[test]
+fn an_agent_publishes_a_version_in_the_clear_by_saying_so() {
+    let data_dir = TempDir::new("envelope-null");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let envelope = json!({
+        "alg": "AES-GCM",
+        "kdf": "PBKDF2-SHA256",
+        "iterations": 600000,
+        "salt": "c2FsdA==",
+        "iv": "aXY=",
+    });
+    let published = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Secret report",
+            "kind": "markdown",
+            "content": "ciphertextbase64",
+            "envelope": envelope,
+        }),
+    );
+    let artifact_id = structured(&published)["artifact_id"]
+        .as_str()
+        .expect("an id")
+        .to_string();
+
+    // Saying nothing carries the protection forward.
+    let inherited = server.call_tool(
+        "artifact_update",
+        json!({"artifact_id": artifact_id, "content": "more ciphertext"}),
+    );
+    assert_eq!(structured(&inherited)["version"], 2);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["protected"], true);
+
+    // An explicit null says this version is plaintext.
+    let cleared = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# in the clear",
+            "envelope": Value::Null,
+        }),
+    );
+    assert_eq!(structured(&cleared)["version"], 3);
+
+    let current = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let current = structured(&current);
+    assert_eq!(current["protected"], false);
+    assert_eq!(current["content"], "# in the clear");
+
+    let first = server.call_tool(
+        "artifact_get",
+        json!({"artifact_id": artifact_id, "version": 1}),
+    );
+    let first = structured(&first);
+    assert_eq!(
+        first["protected"], true,
+        "the version published protected stays protected"
+    );
+    assert_eq!(first["content"], "ciphertextbase64");
+
+    let versions = server.call_tool("artifact_versions", json!({"artifact_id": artifact_id}));
+    let protection: Vec<bool> = structured(&versions)["versions"]
+        .as_array()
+        .expect("versions")
+        .iter()
+        .map(|version| version["protected"].as_bool().expect("protected"))
+        .collect();
+    assert_eq!(protection, vec![true, true, false]);
+}
+
+#[test]
+fn protection_off_tells_an_agent_how_to_publish_in_the_clear() {
+    let data_dir = TempDir::new("policy-off-remedy");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let published = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Secret report",
+            "kind": "markdown",
+            "content": "ciphertextbase64",
+            "envelope": {
+                "alg": "AES-GCM",
+                "kdf": "PBKDF2-SHA256",
+                "iterations": 600000,
+                "salt": "c2FsdA==",
+                "iv": "aXY=",
+            },
+        }),
+    );
+    let artifact_id = structured(&published)["artifact_id"]
+        .as_str()
+        .expect("an id")
+        .to_string();
+
+    // The hub has to be stopped before the policy is set: one process holds
+    // the engine.
+    drop(server);
+    set_policy(&data_dir.0, "proj", "off");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let refused = server.call_tool(
+        "artifact_update",
+        json!({"artifact_id": artifact_id, "content": "more ciphertext"}),
+    );
+    assert_eq!(tool_error_code(&refused), "invalid_argument");
+    assert!(
+        refused.to_string().contains("envelope: null"),
+        "the refusal names a request the agent can make: {refused}"
+    );
+
+    let accepted = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# in the clear",
+            "envelope": Value::Null,
+        }),
+    );
+    assert_eq!(structured(&accepted)["version"], 2);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["protected"], false);
+}
