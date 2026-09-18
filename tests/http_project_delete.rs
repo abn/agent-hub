@@ -105,6 +105,34 @@ async fn delete_project_cascades_its_data() {
         .expect("open brain");
     brain.put("/kv/note", b"value").await.expect("put brain");
 
+    let knowledge = state
+        .knowledge
+        .open("homelab", agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open the knowledge base");
+    knowledge
+        .put("/fs/runbook.md", b"durable knowledge")
+        .await
+        .expect("put a page");
+    let conn = state.db.connect().expect("connect");
+    agent_hub::store::search::index_doc(
+        &conn,
+        agent_hub::store::search::SearchDoc {
+            doc_id: "kb:homelab:/fs/runbook.md",
+            project_id: "homelab",
+            kind: "kb",
+            ref_id: "/fs/runbook.md",
+            session_id: None,
+            title: Some("/fs/runbook.md"),
+            body: "durable knowledge",
+            updated_at: "2026-09-18T00:00:00Z",
+        },
+    )
+    .await
+    .expect("index the page");
+    drop(conn);
+    drop(knowledge);
+
     // A second version, so the first version's blob is exercised too.
     let first_blob = state.data_dir.join(&artifact.path);
     artifacts::update(
@@ -142,8 +170,18 @@ async fn delete_project_cascades_its_data() {
 
     let blob_file = state.data_dir.join(&artifact.path);
     let brain_file = state.data_dir.join(&session.brain_path);
+    let knowledge_file = state
+        .knowledge
+        .brain_path("homelab", agent_hub::brain::KNOWLEDGE_FILE)
+        .expect("the knowledge base path");
+    let knowledge_sidecar = knowledge_file.with_file_name("kb.db-wal");
     assert!(blob_file.exists(), "the blob is staged");
     assert!(brain_file.exists(), "the brain file is staged");
+    assert!(knowledge_file.exists(), "the knowledge base is staged");
+    assert!(
+        knowledge_sidecar.exists(),
+        "the knowledge base write-ahead log is staged"
+    );
 
     let app = router(state.clone());
     let response = app
@@ -183,6 +221,10 @@ async fn delete_project_cascades_its_data() {
         "the session row is gone"
     );
     assert!(!brain_file.exists(), "the brain file is gone");
+    assert!(
+        !knowledge_file.exists() && !knowledge_sidecar.exists(),
+        "the knowledge base and its write-ahead log are gone"
+    );
     assert!(
         identity::list_grants(&state.db, &agent.id)
             .await

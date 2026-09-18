@@ -209,6 +209,14 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
             tracing::warn!(session_id, error = %err, "brain removal failed");
         }
     }
+    // A knowledge base has no prune path of its own: deleting the project it
+    // belongs to is the only way it goes, and it goes with everything else.
+    if let Err(err) = BrainStore::for_knowledge(data_dir)
+        .remove(id, crate::brain::KNOWLEDGE_FILE)
+        .await
+    {
+        tracing::warn!(project = id, error = %err, "knowledge base removal failed");
+    }
     Ok(())
 }
 
