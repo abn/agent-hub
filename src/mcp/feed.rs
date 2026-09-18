@@ -104,7 +104,7 @@ impl HubServer {
             // The hub's record of itself belongs to the human. A trusted agent
             // reads every project, which would otherwise hand it the fleet's
             // identity history.
-            exclude_audit: !principal.is_admin,
+            include_audit: principal.is_admin,
             ..FeedQuery::default()
         };
         if let Some(limit) = params.limit {

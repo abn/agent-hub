@@ -58,9 +58,10 @@ pub struct FeedQuery {
     pub limit: i64,
     /// Restrict to these kinds.
     pub kinds: Option<Vec<String>>,
-    /// Drop the hub's own audit events whatever the caller asked for. This is
-    /// a confinement rather than a filter, so a caller cannot lift it.
-    pub exclude_audit: bool,
+    /// Opt in to the hub's own audit events. This is a confinement rather
+    /// than a filter: it defaults to false, so a query that leaves it unset
+    /// never sees the audit trail, whatever kinds it names.
+    pub include_audit: bool,
 }
 
 impl Default for FeedQuery {
@@ -70,7 +71,7 @@ impl Default for FeedQuery {
             before: None,
             limit: FEED_LIMIT_DEFAULT,
             kinds: None,
-            exclude_audit: false,
+            include_audit: false,
         }
     }
 }
@@ -325,7 +326,7 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
         }
         sql.push_str(&format!(" AND e.kind IN ({})", placeholders.join(", ")));
     }
-    if query.exclude_audit {
+    if !query.include_audit {
         params.push(Value::Text(AUDIT_KIND.to_string()));
         sql.push_str(&format!(" AND e.kind <> ?{}", params.len()));
     }

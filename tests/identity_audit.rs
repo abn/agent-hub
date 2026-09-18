@@ -35,6 +35,7 @@ async fn db(tag: &str) -> turso::Database {
 async fn system_events(db: &turso::Database, project_id: &str) -> Vec<Event> {
     let query = FeedQuery {
         kinds: Some(vec!["system".to_string()]),
+        include_audit: true,
         ..FeedQuery::default()
     };
     events::read_feed(db, project_id, &query)

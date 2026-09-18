@@ -103,6 +103,25 @@ async fn since_cursor_reads_oldest_first() {
 }
 
 #[tokio::test]
+async fn a_default_feed_read_hides_the_audit_trail() {
+    let db = open().await;
+    let mut audit = event("agent created");
+    audit.kind = "system".to_string();
+    append(&db, "human", None, audit)
+        .await
+        .expect("append audit event");
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("read feed")
+        .events;
+    assert!(
+        events.is_empty(),
+        "a feed read built only with a project id must not return an audit event: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn payload_over_the_cap_is_rejected() {
     let db = open().await;
     let mut big = event("big");
