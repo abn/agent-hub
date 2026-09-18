@@ -1,7 +1,7 @@
 ---
 type: Decision Record
 title: The local hub is the cloud
-description: There is no vendor cloud and no remote brain; the node is the central solution.
+description: There is no vendor cloud and no brain off the node; the node is the central solution.
 tags: [adr, deployment, local-first]
 status: stable
 ---
@@ -18,8 +18,9 @@ centre of the system. It also tends to make the useful parts a paid tier.
 ## Decision
 
 The homelab or NAS node is the central solution. There is no vendor cloud and
-no remote brain. The hub is one binary or container the operator runs, and
-agents on any machine report in over a LAN or tailnet.
+no brain off the node: the node holds every brain. The hub is one binary or
+container the operator runs, and agents on any machine report in over a LAN or
+tailnet.
 
 ## Consequences
 

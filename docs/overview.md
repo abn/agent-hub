@@ -26,8 +26,8 @@ machine.
 Agent Hub is the self-hosted answer. It is one lean binary or container that
 runs on a homelab or NAS node and acts as the central, cross-node hub for a
 fleet of agents and their human. The node is the cloud: agents on any machine
-report in over a LAN or tailnet, and there is no remote brain and no vendor
-service.
+report in over a LAN or tailnet, and there is no brain off the node and no
+vendor service.
 
 It offers four surfaces over one data model:
 

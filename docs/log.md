@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the node holds every brain
+
+* **Update**: The first invariant now reads "no vendor cloud, and no brain off
+  the node" in place of "no remote brain", in the
+  [overview](overview.md), the [goals](design/goals.md), and the
+  [local hub decision](adr/0001-local-hub-is-the-cloud.md). The rule is
+  unchanged: nothing is hosted by anyone else. The old wording could be read
+  as forbidding agents on other machines from reaching their brain on the
+  node, which is what the hub is for.
+
 ## 2026-09-18, what the published container port carries
 
 * **Note**: The [quickstart](usage/quickstart.md) compose section now states

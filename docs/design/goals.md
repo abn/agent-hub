@@ -20,11 +20,11 @@ status: draft
 - **Stay lean.** One binary, one engine, and the smallest set of moving parts
   that delivers the above.
 - **Stay local.** All data on the operator's node; no vendor cloud and no
-  remote brain.
+  brain off the node.
 
 ## Non-goals for v1
 
-- No vendor or remote cloud, and no remote brain synchronisation.
+- No vendor or remote cloud, and no synchronising a brain off the node.
 - No multi-tenant organisations. The v1 shape is a single human with a fleet
   of agents.
 - No real-time chat with agents. Interaction is asynchronous, under mailbox

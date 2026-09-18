@@ -15,9 +15,9 @@ shipped behaviour.
 
 ## Invariants
 
-- **The local hub is the cloud.** There is no vendor cloud and no remote
-  brain. The homelab or NAS node is the central solution and nodes report in
-  over LAN or tailnet.
+- **The local hub is the cloud.** No vendor cloud, and no brain off the node:
+  the node holds every brain and agents reach it over LAN or tailnet. The
+  homelab or NAS node is the central solution.
 - **One engine everywhere.** The hub event store, per-session AgentFS files,
   and artifact storage all run on the Turso Database Rust engine. No libSQL,
   no SQLite C bindings, no two-engine split.

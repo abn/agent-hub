@@ -4,7 +4,8 @@ Agent Hub is a local-first operations layer for a fleet of AI agents and the
 human who runs them. One binary on a homelab or NAS node holds the project
 feeds, per-session brains, artifacts, and the human's inbox. The node is the
 cloud: agents report in over the LAN or a tailnet, and the human watches from
-an installable PWA. There is no vendor cloud and no remote brain.
+an installable PWA. There is no vendor cloud and no brain off the node: the
+node holds every brain.
 
 This document is served by the hub you are talking to. Its base URL is
 `{{base_url}}`. Fetch it any time to recover the address and the connection
