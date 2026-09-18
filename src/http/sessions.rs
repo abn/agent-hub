@@ -89,15 +89,20 @@ pub struct EndResult {
 /// The prefix whose brain entries are listed.
 #[derive(Debug, Deserialize)]
 pub struct BrainParams {
-    /// A `/kv` or `/fs` prefix, defaulting to every namespace.
+    /// A `/kv` or `/fs` prefix, defaulting to every namespace. One level of a
+    /// directory comes back at a time, so a tree loads as it opens.
     pub path: Option<String>,
 }
 
 /// A session's brain entries under a prefix.
 #[derive(Debug, Serialize)]
 pub struct BrainList {
-    /// The entry paths, sorted.
-    pub entries: Vec<String>,
+    /// The entries, sorted, each with what it is and what it holds.
+    pub entries: Vec<crate::brain::Entry>,
+    /// The prefix these entries are under.
+    pub path: String,
+    /// Whether the level held more than one response carries.
+    pub truncated: bool,
 }
 
 /// `GET /api/v1/sessions?project=<id>`
@@ -292,6 +297,7 @@ pub async fn brain(
         .map_err(|err| Problem::from_error(&err))?;
 
     let session = live(&state, &session_id).await?;
+    let prefix = params.path.as_deref().unwrap_or(BOTH_NAMESPACES);
 
     // A read does not create a brain: a session whose file is absent simply
     // has no entries yet.
@@ -304,31 +310,39 @@ pub async fn brain(
         Ok(None) => {
             return Ok(Json(BrainList {
                 entries: Vec::new(),
+                path: prefix.to_string(),
+                truncated: false,
             }));
         }
         Err(err) => return Err(Problem::from_error(&err)),
     };
 
-    let entries = list_entries(&brain, params.path.as_deref())
+    let mut entries = list_entries(&brain, params.path.as_deref())
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    let truncated = entries.len() > crate::limits::BRAIN_LIST_ENTRIES_MAX;
+    entries.truncate(crate::limits::BRAIN_LIST_ENTRIES_MAX);
 
-    Ok(Json(BrainList { entries }))
+    Ok(Json(BrainList {
+        entries,
+        path: prefix.to_string(),
+        truncated,
+    }))
 }
+
+/// Every namespace, when a caller names no prefix.
+const BOTH_NAMESPACES: &str = "/";
 
 async fn list_entries(
     brain: &crate::brain::Brain,
     path: Option<&str>,
-) -> crate::error::Result<Vec<String>> {
-    let entries = match path {
+) -> crate::error::Result<Vec<crate::brain::Entry>> {
+    Ok(match path {
         Some(path) => brain.list(path).await?,
         None => {
             let mut entries = brain.list("/kv").await?;
             entries.extend(brain.list("/fs").await?);
             entries
         }
-    };
-    // The session detail view lists paths; the per-entry type and size belong
-    // to the brain tree it does not draw yet.
-    Ok(entries.into_iter().map(|entry| entry.path).collect())
+    })
 }

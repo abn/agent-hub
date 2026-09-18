@@ -48,6 +48,13 @@ pub const SESSION_LIST_LIMIT_MAX: i64 = 200;
 /// Default session listing page size.
 pub const SESSION_LIST_LIMIT_DEFAULT: i64 = 50;
 
+/// Entries one brain listing returns.
+///
+/// The tree loads a directory at a time, so the cap bounds one level rather
+/// than a whole brain. A level with more says so instead of truncating in
+/// silence.
+pub const BRAIN_LIST_ENTRIES_MAX: usize = 500;
+
 /// Characters of a handoff note carried in a session listing.
 pub const HANDOFF_SUMMARY_CHARS: usize = 200;
 

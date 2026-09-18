@@ -81,7 +81,7 @@ export async function sessionDetail(project, id, gen) {
 function brainTree(label, entries) {
   const rows = entries
     .map(
-      (entry) => `<div class="row"><div class="grow"><div class="title mono">${esc(entry)}</div></div></div>`,
+      (entry) => `<div class="row"><div class="grow"><div class="title mono">${esc(entry.path)}</div></div></div>`,
     )
     .join("");
   return `<h2>${label}</h2><div class="card">${rows || '<p class="empty">Empty.</p>'}</div>`;

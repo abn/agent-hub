@@ -206,9 +206,15 @@ async fn brain_lists_entries() {
         .expect("request");
     assert_eq!(keys.status(), StatusCode::OK);
     let body = json_body(keys).await;
-    assert_eq!(body["entries"], serde_json::json!(["/kv/note"]));
+    assert_eq!(
+        body["entries"],
+        serde_json::json!([{"path": "/kv/note", "type": "key", "size_bytes": 5}]),
+        "a key carries the bytes a read would hand back"
+    );
+    assert_eq!(body["path"], "/kv");
+    assert_eq!(body["truncated"], false);
 
-    let app = router(state);
+    let app = router(state.clone());
     let files = app
         .oneshot(request(
             "GET",
@@ -219,7 +225,68 @@ async fn brain_lists_entries() {
         .expect("request");
     assert_eq!(files.status(), StatusCode::OK);
     let body = json_body(files).await;
-    assert_eq!(body["entries"], serde_json::json!(["/fs/notes"]));
+    assert_eq!(
+        body["entries"],
+        serde_json::json!([{"path": "/fs/notes", "type": "dir", "size_bytes": 5}]),
+        "a directory is a directory, with the bytes it holds directly"
+    );
+
+    // The tree opens one level at a time, so a directory lists its own
+    // children rather than the whole brain.
+    let app = router(state);
+    let level = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Ffs%2Fnotes", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let body = json_body(level).await;
+    assert_eq!(
+        body["entries"],
+        serde_json::json!([{"path": "/fs/notes/todo.txt", "type": "file", "size_bytes": 5}])
+    );
+    assert_eq!(body["path"], "/fs/notes");
+}
+
+#[tokio::test]
+async fn a_brain_listing_reports_a_level_it_could_not_carry_whole() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "wide", "agent-one")
+        .await
+        .expect("start");
+    let brain = state
+        .brain
+        .open("proj", &session.id)
+        .await
+        .expect("open brain");
+    for index in 0..=agent_hub::limits::BRAIN_LIST_ENTRIES_MAX {
+        brain
+            .put(&format!("/kv/key-{index:04}"), b"v")
+            .await
+            .expect("put key");
+    }
+
+    let app = router(state);
+    let body = json_body(
+        app.oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/brain?path=%2Fkv", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request"),
+    )
+    .await;
+    assert_eq!(
+        body["entries"].as_array().expect("entries").len(),
+        agent_hub::limits::BRAIN_LIST_ENTRIES_MAX
+    );
+    assert_eq!(
+        body["truncated"], true,
+        "a level with more says so rather than looking complete"
+    );
 }
 
 #[tokio::test]
