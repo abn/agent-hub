@@ -216,7 +216,9 @@ For protected content, encrypt in the client and send the ciphertext as
 
 The server stores the envelope and ciphertext and never sees the plaintext. A
 protected artifact has no server-side rendering; the viewer decrypts it in the
-browser.
+browser. It accepts `iterations` from 100000 to 10000000 and refuses anything
+outside that range before the password is tried, so such an artifact never
+opens.
 
 Authored HTML has a strict content security policy, so it cannot make external
 requests: inline all CSS and JS, embed images and fonts as `data:` URIs, keep

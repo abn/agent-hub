@@ -825,7 +825,7 @@ fn locked_shell(
          <input type=\"text\" name=\"username\" value=\"artifact\" autocomplete=\"username\" hidden>\n\
          <input id=\"hub-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Artifact password\">\n\
          <label class=\"hub-remember\"><input id=\"hub-remember\" type=\"checkbox\" name=\"remember\"> Remember on this device</label>\n\
-         <p id=\"hub-unlock-error\" hidden></p>\n\
+         <p id=\"hub-unlock-error\" role=\"alert\" hidden></p>\n\
          <button type=\"submit\">Unlock</button>\n</form>\n\
          <p id=\"hub-fingerprint\" class=\"mono\">{fingerprint}</p>\n\
          </div>\n\

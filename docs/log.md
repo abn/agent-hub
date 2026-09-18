@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the iteration range the artifact viewer accepts
+
+* **Update**: The protected-artifact envelope is accepted only with an
+  `iterations` count between 100000 and 10000000; the client writes 600000.
+  Documented in [artifacts](usage/artifacts.md) and the served skill contract.
+* **Note**: An envelope outside that range, or one naming another algorithm,
+  now tells the human the viewer does not accept its settings. It used to
+  report a wrong password, which sent the human back to a field that could
+  never open it.
+
 ## 2026-09-18, the node holds every brain
 
 * **Update**: The first invariant now reads "no vendor cloud, and no brain off

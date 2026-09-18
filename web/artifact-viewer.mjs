@@ -3,7 +3,7 @@
 // in a frame; every behavior below binds one of the frozen shell ids the
 // server renders, and nothing else. No inline scripts: the shell loads this
 // module plus the classic vendor scripts.
-import { decrypt } from "./crypto.mjs";
+import { decrypt, UNSUPPORTED_ENVELOPE } from "./crypto.mjs";
 
 const THEME_KEY = "hub-artifact-theme";
 
@@ -323,6 +323,8 @@ function init() {
   const errorLine = document.getElementById("hub-unlock-error");
   const remember = document.getElementById("hub-remember");
   const passwords = passwordStore();
+  // Returns "ok", "retry" when another attempt could work, or "unsupported"
+  // when no password can open this envelope.
   const unlock = async (secret) => {
     const envelope = readJson("hub-envelope");
     const ciphertext = readJson("hub-ciphertext");
@@ -330,7 +332,7 @@ function init() {
         errorLine.textContent = "This artifact has no unlock data.";
         errorLine.hidden = false;
         password.focus();
-        return false;
+        return "retry";
       }
     try {
       // Nothing is fetched; the ciphertext already on the page decrypts
@@ -340,12 +342,20 @@ function init() {
       const copy = form.closest(".hub-gate")?.querySelector(".hub-gate-copy");
       if (copy) copy.hidden = true;
       renderForTheme(state, state.theme);
-      return true;
-    } catch {
+      return "ok";
+    } catch (error) {
+      if (error?.code === UNSUPPORTED_ENVELOPE) {
+        // Leave the field as it is: focusing it would read as an invitation
+        // to try a password again, and no password opens this envelope.
+        errorLine.textContent =
+          "This artifact was encrypted with settings this viewer does not accept. Retyping the password will not open it.";
+        errorLine.hidden = false;
+        return "unsupported";
+      }
       errorLine.textContent = "Wrong password. Nothing was sent anywhere.";
       errorLine.hidden = false;
       password.focus();
-      return false;
+      return "retry";
     }
   };
   if (form && password && errorLine) {
@@ -358,22 +368,24 @@ function init() {
       errorLine.textContent = "";
       errorLine.hidden = true;
       const secret = password.value;
-      const ok = await unlock(secret);
+      const result = await unlock(secret);
       if (remember && meta.project_id) {
-        if (ok && remember.checked) passwords.write(meta.project_id, secret);
+        if (result === "ok" && remember.checked) passwords.write(meta.project_id, secret);
         else if (!remember.checked) passwords.remove(meta.project_id);
       }
-      password.value = "";
-      if (ok) password.blur();
+      if (result !== "unsupported") password.value = "";
+      if (result === "ok") password.blur();
     });
     // A remembered password unlocks without asking again. A stale one
-    // fails silently back to the form.
+    // fails silently back to the form and is forgotten; an envelope this
+    // viewer will not open says so and keeps the password, which is not
+    // what failed.
     if (meta.project_id) {
       const saved = passwords.read(meta.project_id);
       if (saved) {
         if (remember) remember.checked = true;
-        unlock(saved).then((ok) => {
-          if (!ok) {
+        unlock(saved).then((result) => {
+          if (result === "retry") {
             passwords.remove(meta.project_id);
             password.value = "";
             password.focus();

@@ -14,6 +14,12 @@ const MAX_ITERATIONS = 10000000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 
+// Set as `code` on the refusals a password cannot fix: the envelope names an
+// algorithm or an iteration count this module will not accept. A wrong
+// password and tampered data stay unmarked, and stay indistinguishable from
+// each other, because the cipher reports both the same way.
+export const UNSUPPORTED_ENVELOPE = "unsupported-envelope";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -46,10 +52,16 @@ function envelopeAad(envelope) {
   ].join(";");
 }
 
+function unsupported(message) {
+  const error = new Error(message);
+  error.code = UNSUPPORTED_ENVELOPE;
+  return error;
+}
+
 function iterationsOf(envelope) {
   const count = Number(envelope.iterations);
   if (!Number.isInteger(count) || count < MIN_ITERATIONS || count > MAX_ITERATIONS) {
-    throw new Error("unsupported iteration count");
+    throw unsupported("unsupported iteration count");
   }
   return count;
 }
@@ -101,11 +113,11 @@ async function seal(password, plaintext, iterations) {
 
 // Decrypt a base64 ciphertext with the envelope and password. Throws when the
 // password is wrong, the envelope was altered, or it is not one this module
-// produced.
+// produced; only the last carries `code === UNSUPPORTED_ENVELOPE`.
 export async function decrypt(password, envelope, ciphertext) {
   if (!password) throw new Error("a password is required");
   if (!envelope || envelope.alg !== "AES-256-GCM") {
-    throw new Error("unsupported encryption envelope");
+    throw unsupported("unsupported encryption envelope");
   }
   const iterations = iterationsOf(envelope);
   const salt = base64ToBytes(envelope.salt);
@@ -147,21 +159,40 @@ export async function selfTest() {
   }
   if (!tamperRejected) throw new Error("an altered envelope was accepted");
   let wrongRejected = false;
+  let wrongCode;
   try {
     await decrypt("wrong horse", first.envelope, first.ciphertext);
-  } catch {
+  } catch (error) {
     wrongRejected = true;
+    wrongCode = error.code;
   }
   if (!wrongRejected) throw new Error("a wrong password decrypted the ciphertext");
+  if (wrongCode === UNSUPPORTED_ENVELOPE) {
+    throw new Error("a wrong password was marked as an unsupported envelope");
+  }
   // Sealed for real below the floor, so only the floor check can refuse it.
   const weak = await seal("correct horse", plaintext, MIN_ITERATIONS - 1);
   let weakRejected = false;
+  let weakCode;
   try {
     await decrypt("correct horse", weak.envelope, weak.ciphertext);
-  } catch {
+  } catch (error) {
     weakRejected = true;
+    weakCode = error.code;
   }
   if (!weakRejected) throw new Error("an envelope below the iteration floor was accepted");
+  if (weakCode !== UNSUPPORTED_ENVELOPE) {
+    throw new Error("a refused envelope did not carry the unsupported marker");
+  }
+  let foreignCode;
+  try {
+    await decrypt("correct horse", { ...first.envelope, alg: "AES-128-CBC" }, first.ciphertext);
+  } catch (error) {
+    foreignCode = error.code;
+  }
+  if (foreignCode !== UNSUPPORTED_ENVELOPE) {
+    throw new Error("a foreign algorithm did not carry the unsupported marker");
+  }
   const flipped = base64ToBytes(first.ciphertext);
   flipped[0] ^= 0xff;
   let ciphertextRejected = false;

@@ -714,6 +714,12 @@ fn viewer_module_renders_unlocks_and_themes() {
         "a wrong password renders the error line"
     );
     assert!(
+        VIEWER_JS.contains("UNSUPPORTED_ENVELOPE")
+            && VIEWER_JS
+                .contains("This artifact was encrypted with settings this viewer does not accept."),
+        "an envelope the viewer will not accept says so instead of blaming the password"
+    );
+    assert!(
         VIEWER_JS.contains("hub-artifact-passwords")
             && VIEWER_JS.contains("hub-back")
             && VIEWER_JS.contains("history.back()"),

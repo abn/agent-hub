@@ -739,7 +739,9 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     assert!(body.contains("id=\"hub-unlock-form\""));
     assert!(body.contains("id=\"hub-password\""));
     assert!(body.contains("id=\"hub-remember\""));
-    assert!(body.contains("id=\"hub-unlock-error\""));
+    // One refusal deliberately leaves focus where it is, so the line has to
+    // announce itself rather than rely on a focus move to be heard.
+    assert!(body.contains("<p id=\"hub-unlock-error\" role=\"alert\" hidden>"));
     assert!(
         body.contains("hub-lock-tile"),
         "the gate shows its lock tile"

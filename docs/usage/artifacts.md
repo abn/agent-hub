@@ -96,13 +96,17 @@ state.
 
 A protected artifact is encrypted in the client before upload. The server
 stores only the ciphertext and an envelope (`{alg, kdf, iterations, salt, iv}`)
-and never sees the plaintext. Opening the page shows a password gate with the
-ciphertext fingerprint; the browser decrypts with the password and renders
-the result in the same sandboxed frame. A remembered password unlocks again
-without asking and stays on the device. Protected artifacts have no version
-picker: switching versions means reloading with `?version=N` and entering
-the password again. Share the URL and the password through
-different channels.
+and never sees the plaintext. The viewer accepts an `iterations` count from
+100000 to 10000000, and the client writes 600000. An envelope outside that
+range, or one naming another algorithm, is refused before any password is
+tried: the page says the artifact was encrypted with settings the viewer does
+not accept, rather than reporting a wrong password, because no password would
+open it. Opening the page shows a password gate with the ciphertext
+fingerprint; the browser decrypts with the password and renders the result in
+the same sandboxed frame. A remembered password unlocks again without asking
+and stays on the device. Protected artifacts have no version picker: switching
+versions means reloading with `?version=N` and entering the password again.
+Share the URL and the password through different channels.
 
 ## Comments
 
