@@ -31,8 +31,25 @@ pub const AGENT_BODY_BYTES_MAX: usize =
 /// its own budget for any sane number of entries.
 pub const BRAIN_VALUE_BYTES_MAX: usize = REQUEST_BODY_BYTES_MAX;
 
+/// Maximum characters of the note a session leaves when it ends.
+///
+/// A handoff is a pointer to the work, not the work: the state itself is in the
+/// brain the next agent picks up.
+pub const HANDOFF_CHARS_MAX: usize = 4096;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
+
+/// Maximum session listing page size, and its default.
+///
+/// Its own pair rather than the feed's, so two unrelated page sizes are not
+/// tied together.
+pub const SESSION_LIST_LIMIT_MAX: i64 = 200;
+/// Default session listing page size.
+pub const SESSION_LIST_LIMIT_DEFAULT: i64 = 50;
+
+/// Characters of a handoff note carried in a session listing.
+pub const HANDOFF_SUMMARY_CHARS: usize = 200;
 
 /// Maximum search page size.
 pub const SEARCH_LIMIT_MAX: i64 = 100;
@@ -132,6 +149,16 @@ pub fn check_brain_value(bytes: usize) -> Result<()> {
     if bytes > BRAIN_VALUE_BYTES_MAX {
         return Err(Error::PayloadTooLarge(format!(
             "brain value exceeds {BRAIN_VALUE_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a handoff note over the cap.
+pub fn check_handoff(handoff: &str) -> Result<()> {
+    if handoff.chars().count() > HANDOFF_CHARS_MAX {
+        return Err(Error::PayloadTooLarge(format!(
+            "handoff note exceeds {HANDOFF_CHARS_MAX} characters limit={HANDOFF_CHARS_MAX}"
         )));
     }
     Ok(())

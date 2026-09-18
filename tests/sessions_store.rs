@@ -91,7 +91,7 @@ async fn resuming_a_pruned_name_is_a_conflict() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one")
+    sessions::end(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -125,7 +125,7 @@ async fn end_marks_the_session_and_emits_an_event() {
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one")
+    sessions::end(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -152,10 +152,10 @@ async fn ending_twice_does_not_emit_a_second_event() {
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one")
+    sessions::end(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
-    sessions::end(&db, &session.id, "agent-one")
+    sessions::end(&db, &session.id, "agent-one", None)
         .await
         .expect("end again");
 
@@ -178,8 +178,8 @@ async fn concurrent_ends_emit_one_event() {
         .expect("start");
 
     let (a, b) = tokio::join!(
-        sessions::end(&db, &session.id, "agent-one"),
-        sessions::end(&db, &session.id, "agent-one"),
+        sessions::end(&db, &session.id, "agent-one", None),
+        sessions::end(&db, &session.id, "agent-one", None),
     );
     assert!(
         a.is_ok() || b.is_ok(),
@@ -206,7 +206,7 @@ async fn list_returns_active_and_ended_sessions() {
     let two = sessions::start(&db, "proj", "two", "agent-one")
         .await
         .expect("two");
-    sessions::end(&db, &two.id, "agent-one")
+    sessions::end(&db, &two.id, "agent-one", None)
         .await
         .expect("end two");
 
@@ -220,9 +220,14 @@ async fn list_returns_active_and_ended_sessions() {
 #[tokio::test]
 async fn end_unknown_session_is_not_found() {
     let db = open().await;
-    let err = sessions::end(&db, "01900000-0000-0000-0000-000000000000", "agent-one")
-        .await
-        .expect_err("not found");
+    let err = sessions::end(
+        &db,
+        "01900000-0000-0000-0000-000000000000",
+        "agent-one",
+        None,
+    )
+    .await
+    .expect_err("not found");
     assert_eq!(err.code(), ErrorCode::NotFound);
 }
 
@@ -233,4 +238,265 @@ async fn bad_session_name_is_rejected() {
         .await
         .expect_err("bad name");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn racing_pickups_adopt_a_session_once() {
+    // Ten rounds, because one pass of a race proves nothing: the losing path
+    // is the one that must never report an adoption it did not make.
+    for round in 0..10 {
+        let db = open().await;
+        let session = sessions::start(&db, "proj", "handover", "agent-one")
+            .await
+            .expect("start");
+        sessions::end(&db, &session.id, "agent-one", None)
+            .await
+            .expect("end");
+
+        // Both callers wait on the same barrier, so neither can have finished
+        // resolving the source before the other starts.
+        let db = std::sync::Arc::new(db);
+        let gate = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let mut racers = Vec::new();
+        for agent in ["agent-two", "agent-three"] {
+            let db = db.clone();
+            let gate = gate.clone();
+            let source_id = session.id.clone();
+            racers.push(tokio::spawn(async move {
+                gate.wait().await;
+                sessions::start_from(&db, "proj", "handover", agent, &source_id).await
+            }));
+        }
+        let second = racers.pop().expect("second racer").await.expect("join");
+        let first = racers.pop().expect("first racer").await.expect("join");
+
+        let adopted: Vec<&sessions::Session> = [&first, &second]
+            .into_iter()
+            .filter_map(|outcome| match outcome {
+                Ok(sessions::Pickup::Adopted { session, .. }) => Some(session),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            adopted.len(),
+            1,
+            "round {round}: one adoption: {first:?} {second:?}"
+        );
+        assert_eq!(adopted[0].id, session.id);
+
+        let owner = sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .expect("exists");
+        assert_eq!(
+            owner.agent, adopted[0].agent,
+            "round {round}: the row has the winner's owner"
+        );
+
+        let events = read_feed(&db, "proj", &FeedQuery::default())
+            .await
+            .expect("feed")
+            .events;
+        let adoptions = events
+            .iter()
+            .filter(|event| event.summary.contains("picked up"))
+            .count();
+        assert_eq!(adoptions, 1, "round {round}: one adoption, one event");
+    }
+}
+
+#[tokio::test]
+async fn a_handoff_note_rides_the_session_and_its_event() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&db, &session.id, "agent-one", Some("half applied"))
+        .await
+        .expect("end");
+
+    let ended = sessions::get(&db, &session.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(ended.handoff.as_deref(), Some("half applied"));
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    let payload = events
+        .iter()
+        .find(|event| event.summary.contains("ended"))
+        .and_then(|event| event.payload.clone())
+        .expect("the end event carries a payload");
+    assert_eq!(payload["handoff"], "half applied");
+
+    // A retried end does not clear the note.
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end again");
+    let again = sessions::get(&db, &session.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(again.handoff.as_deref(), Some("half applied"));
+}
+
+#[tokio::test]
+async fn a_handoff_over_the_cap_is_refused() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let note = "n".repeat(agent_hub::limits::HANDOFF_CHARS_MAX + 1);
+
+    let err = sessions::end(&db, &session.id, "agent-one", Some(&note))
+        .await
+        .expect_err("over the cap");
+    assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
+    assert!(err.to_string().contains("limit="), "{err}");
+
+    let untouched = sessions::get(&db, &session.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(untouched.status, "active", "a refused end changes nothing");
+}
+
+#[tokio::test]
+async fn a_listing_narrows_by_project_status_and_agent() {
+    let db = open().await;
+    sessions::start(&db, "proj", "one", "agent-one")
+        .await
+        .expect("one");
+    let two = sessions::start(&db, "proj", "two", "agent-two")
+        .await
+        .expect("two");
+    sessions::end(&db, &two.id, "agent-two", Some("over to you"))
+        .await
+        .expect("end two");
+
+    let all = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("list all");
+    assert_eq!(all.len(), 2);
+
+    let ended = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            status: Some("ended"),
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("list ended");
+    assert_eq!(ended.len(), 1);
+    assert_eq!(ended[0].handoff.as_deref(), Some("over to you"));
+
+    let owned = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            agent: Some("agent-one"),
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("list by owner");
+    assert_eq!(owned.len(), 1);
+    assert_eq!(owned[0].session_name, "one");
+
+    // A caller that may reach no project sees nothing, whatever exists.
+    let confined = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            visible: Some(&[]),
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("list confined");
+    assert!(confined.is_empty());
+
+    let bad = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            status: Some("retired"),
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect_err("unknown status");
+    assert_eq!(bad.code(), ErrorCode::InvalidArgument);
+}
+
+#[tokio::test]
+async fn a_pruned_session_is_omitted_from_a_listing() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "old", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    prune::prune_session(&db, &session.id).await.expect("prune");
+
+    let listed = sessions::query(
+        &db,
+        &sessions::SessionQuery {
+            limit: 50,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("list");
+    assert!(listed.is_empty(), "a pruned session is gone from a listing");
+}
+
+#[tokio::test]
+async fn the_human_reassigns_an_active_session() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "stuck", "agent-one")
+        .await
+        .expect("start");
+    agent_hub::store::identity::create_agent(
+        &db,
+        "agent-two",
+        "Agent two",
+        agent_hub::principal::Trust::Trusted,
+    )
+    .await
+    .expect("create the agent the session moves to");
+
+    let moved = sessions::reassign(&db, &session.id, "agent-two", "human")
+        .await
+        .expect("reassign");
+    assert_eq!(moved.agent, "agent-two");
+    assert_eq!(moved.id, session.id, "the brain does not move");
+
+    let resumed = sessions::start(&db, "proj", "stuck", "agent-two")
+        .await
+        .expect("the new owner resumes it by name");
+    assert_eq!(resumed.id, session.id);
+
+    let events = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed")
+        .events;
+    assert!(
+        events
+            .iter()
+            .any(|event| event.summary.contains("reassigned to agent-two")),
+        "the human feed shows the reassignment"
+    );
 }

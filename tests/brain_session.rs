@@ -631,3 +631,60 @@ async fn a_copy_through_the_engine_carries_state_and_its_audit_log() {
         "a later write to the source does not reach the copy"
     );
 }
+
+#[tokio::test]
+async fn a_copy_refused_under_the_lock_leaves_no_file() {
+    let store = BrainStore::new(temp_dir("engine-copy-refused"));
+    let source = store.open("proj", "source").await.expect("open source");
+    source.put("/kv/plan", b"first").await.expect("write key");
+
+    // A prune commits between the decision to fork and the copy: the check
+    // under the lock is the one that counts, and a refused copy leaves nothing
+    // half written behind.
+    let destination = store.brain_path("proj", "copy").expect("destination path");
+    let err = source
+        .vacuum_into(&destination, async || {
+            Err(Error::Conflict("the source is gone".to_string()))
+        })
+        .await
+        .expect_err("the copy is refused");
+    assert!(matches!(err, Error::Conflict(_)), "{err}");
+    assert!(
+        !destination.exists(),
+        "a refused copy writes no destination file"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_copy_taken_mid_write_opens_cleanly() {
+    let store = BrainStore::new(temp_dir("engine-copy-mid-write"));
+    let source = store.open("proj", "source").await.expect("open source");
+    source
+        .put("/kv/plan", b"before")
+        .await
+        .expect("first write");
+
+    let destination = store.brain_path("proj", "copy").expect("destination path");
+    let reader = store
+        .open_existing("proj", "source")
+        .await
+        .expect("open a second handle")
+        .expect("the source exists");
+    let (written, copied) = tokio::join!(
+        source.put("/kv/plan", b"after"),
+        reader.vacuum_into(&destination, async || Ok(())),
+    );
+    written.expect("the write completes");
+    copied.expect("the copy completes");
+
+    let copy = store
+        .open_existing("proj", "copy")
+        .await
+        .expect("open the copy")
+        .expect("the copy exists");
+    let value = copy.get("/kv/plan").await.expect("read the copy");
+    assert!(
+        value == Some(b"before".to_vec()) || value == Some(b"after".to_vec()),
+        "the copy holds one committed value, got {value:?}"
+    );
+}

@@ -249,7 +249,7 @@ async fn brain_hides_a_pruned_session() {
     let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "agent-one")
+    sessions::end(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     agent_hub::store::prune::prune_session(&state.db, &session.id)

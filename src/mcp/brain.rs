@@ -18,6 +18,7 @@ use turso::Value;
 
 use crate::brain::{self, Brain};
 use crate::error::{Error, Result};
+use crate::limits::{HANDOFF_SUMMARY_CHARS, SESSION_LIST_LIMIT_MAX};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
 use crate::store::search::{SearchDoc, index_doc};
@@ -27,7 +28,9 @@ use super::{HubServer, to_error_data};
 
 #[tool_router(router = brain_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Start or resume a session and make it the active brain.")]
+    #[tool(
+        description = "Start or resume a session and make it the active brain. A session belongs to the agent that starts it, so a name under another agent is another session. Pass from to pick up another agent's work, by session_id or by agent and name: the hub adopts it when that session has ended and forks it when it is still running."
+    )]
     async fn session_start(
         &self,
         context: RequestContext<RoleServer>,
@@ -43,26 +46,52 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let session = sessions::start(
-            &self.state.db,
-            &params.project_id,
-            &params.session_name,
-            &principal.actor,
-        )
-        .await
-        .map_err(to_error_data)?;
+
+        let (session, resumed, pickup) = match params.from.as_ref() {
+            Some(reference) => self
+                .pick_up(
+                    &principal,
+                    &params.project_id,
+                    &params.session_name,
+                    reference,
+                )
+                .await
+                .map_err(to_error_data)?,
+            None => {
+                let (session, resumed) = sessions::start_resumed(
+                    &self.state.db,
+                    &params.project_id,
+                    &params.session_name,
+                    &principal.actor,
+                )
+                .await
+                .map_err(to_error_data)?;
+                (session, resumed, None)
+            }
+        };
 
         *self.active.lock().await = Some((session.project_id.clone(), session.id.clone()));
 
         self.state.notify();
         // The brain is reached only through the namespaced tool paths, so the
         // server's file layout is not the agent's business.
-        Ok(CallToolResult::structured(
-            json!({ "session_id": session.id }),
-        ))
+        Ok(CallToolResult::structured(json!({
+            "session_id": session.id,
+            "project_id": session.project_id,
+            "agent": session.agent,
+            "session_name": session.session_name,
+            "status": session.status,
+            "resumed": resumed,
+            "pickup": pickup,
+            "namespaces": { "kv": "/kv", "fs": "/fs" },
+            "recovery_path": RECOVERY_PATH,
+            "brain_bytes": self.brain_bytes(&session),
+        })))
     }
 
-    #[tool(description = "Mark a session ended. Its brain is retained until pruned.")]
+    #[tool(
+        description = "Mark a session ended, optionally leaving a handoff note for whoever picks it up. Only the session's owner may end it. Its brain is retained until pruned."
+    )]
     async fn session_end(
         &self,
         context: RequestContext<RoleServer>,
@@ -86,9 +115,23 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        sessions::end(&self.state.db, &params.session_id, &principal.actor)
-            .await
-            .map_err(to_error_data)?;
+        // A session brain has one writer, so only its owner closes it and
+        // leaves the note. The local stdio caller is the human admin and
+        // passes here, which is what keeps an operator's own use working.
+        if !principal.is_admin && session.agent != principal.actor {
+            return Err(to_error_data(Error::Forbidden(format!(
+                "session {} belongs to another agent owner={}",
+                session.id, session.agent
+            ))));
+        }
+        sessions::end(
+            &self.state.db,
+            &params.session_id,
+            &principal.actor,
+            params.handoff.as_deref(),
+        )
+        .await
+        .map_err(to_error_data)?;
 
         let mut active = self.active.lock().await;
         if active
@@ -100,6 +143,75 @@ impl HubServer {
 
         self.state.notify();
         Ok(CallToolResult::structured(json!({ "ok": true })))
+    }
+
+    #[tool(
+        description = "List sessions and who owns them, most recently active first. Narrow with project_id, status (\"active\" or \"ended\") and agent. Each entry carries its owner, the handoff note its last owner left, and where it was picked up from."
+    )]
+    async fn session_list(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<SessionListParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        // A named project is authorized outright; without one the caller's own
+        // visibility filters the rows, so an untrusted agent lists only what it
+        // may read.
+        let visible = match params.project_id.as_deref() {
+            Some(project_id) => {
+                policy::authorize(&self.state.db, &principal, project_id, Access::Read)
+                    .await
+                    .map_err(to_error_data)?;
+                None
+            }
+            None => policy::visibility(&self.state.db, &principal)
+                .await
+                .map_err(to_error_data)?
+                .as_filter()
+                .map(<[String]>::to_vec),
+        };
+        let limit = params
+            .limit
+            .unwrap_or(crate::limits::SESSION_LIST_LIMIT_DEFAULT);
+        let sessions = sessions::query(
+            &self.state.db,
+            &sessions::SessionQuery {
+                project_id: params.project_id.as_deref(),
+                status: params.status.as_deref(),
+                agent: params.agent.as_deref(),
+                visible: visible.as_deref(),
+                limit,
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+
+        let truncated = sessions.len() as i64 == limit.clamp(1, SESSION_LIST_LIMIT_MAX);
+        let entries: Vec<_> = sessions
+            .iter()
+            .map(|session| {
+                let (handoff, handoff_truncated) = summarise(session.handoff.as_deref());
+                json!({
+                    "session_id": session.id,
+                    "project_id": session.project_id,
+                    "session_name": session.session_name,
+                    "agent": session.agent,
+                    "status": session.status,
+                    "created_at": session.created_at,
+                    "last_activity": session.last_activity,
+                    "handoff": handoff,
+                    "handoff_truncated": handoff_truncated,
+                    "forked_from": session.forked_from,
+                    "adopted_from": session.adopted_from,
+                    "brain_bytes": self.brain_bytes(session),
+                })
+            })
+            .collect();
+
+        Ok(CallToolResult::structured(json!({
+            "sessions": entries,
+            "truncated": truncated,
+        })))
     }
 
     #[tool(
@@ -412,7 +524,182 @@ impl Target {
     }
 }
 
+/// Remove a file that should not outlive a failed fork.
+///
+/// A copy that was not finished, or whose session row was not written, is not
+/// a brain anybody can reach, so a removal that fails is logged rather than
+/// reported over a failure that already has a cause.
+fn discard(path: &std::path::Path) {
+    let mut sidecar = path.to_path_buf().into_os_string();
+    sidecar.push("-wal");
+    for path in [path.to_path_buf(), std::path::PathBuf::from(sidecar)] {
+        if let Err(err) = std::fs::remove_file(&path)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %path.display(), error = %err, "could not discard a brain copy");
+        }
+    }
+}
+
+/// Where an agent is expected to leave the note that orients its successor.
+///
+/// Returned by `session_start` so the bootstrap convention describes itself
+/// rather than living only in a skill file.
+const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
+
+/// The handoff note as a listing carries it, with whether it was cut short.
+fn summarise(handoff: Option<&str>) -> (Option<String>, bool) {
+    match handoff {
+        None => (None, false),
+        Some(note) => {
+            let summary: String = note.chars().take(HANDOFF_SUMMARY_CHARS).collect();
+            let truncated = summary.chars().count() < note.chars().count();
+            (Some(summary), truncated)
+        }
+    }
+}
+
 impl HubServer {
+    /// Take over or branch from another agent's session.
+    ///
+    /// The hub reads the source's state and decides: an ended session is
+    /// adopted, ownership and all, and a live one is forked into a copy. The
+    /// agent cannot tell which is right, and a wrong guess either forks a dead
+    /// session or adopts a live one.
+    async fn pick_up(
+        &self,
+        principal: &Principal,
+        project_id: &str,
+        session_name: &str,
+        reference: &SessionRef,
+    ) -> Result<(sessions::Session, bool, Option<serde_json::Value>)> {
+        let source = self
+            .resolve_session(principal, reference, Some(project_id))
+            .await?;
+        match sessions::start_from(
+            &self.state.db,
+            project_id,
+            session_name,
+            &principal.actor,
+            &source.id,
+        )
+        .await?
+        {
+            sessions::Pickup::Resumed(session) => Ok((session, true, None)),
+            sessions::Pickup::Adopted {
+                session,
+                from_agent,
+            } => {
+                let pickup = json!({
+                    "mode": "adopt",
+                    "source_active": false,
+                    "from_session_id": session.id,
+                    "from_agent": from_agent,
+                    "handoff": session.handoff,
+                });
+                Ok((session, false, Some(pickup)))
+            }
+            sessions::Pickup::Fork(source) => {
+                let handoff = source.handoff.clone();
+                let from_agent = source.agent.clone();
+                let from_session_id = source.id.clone();
+                let session = self.fork(&source, session_name, &principal.actor).await?;
+                // A fork reads like an adoption unless it says otherwise. A
+                // caller that asked for finished work and lost the pickup to
+                // another agent lands here, holding the same handoff note, so
+                // the result says the original is still being worked and by
+                // whom.
+                let note = format!(
+                    "this is a copy: {from_agent} holds the original and is still working it, \
+                     so coordinate through the feed or pick other work"
+                );
+                let pickup = json!({
+                    "mode": "fork",
+                    "from_session_id": from_session_id,
+                    "from_agent": from_agent,
+                    "handoff": handoff,
+                    "source_active": true,
+                    "note": note,
+                });
+                Ok((session, false, Some(pickup)))
+            }
+        }
+    }
+
+    /// Copy a live session's brain into a new session owned by the caller.
+    ///
+    /// The copy runs before the row exists, so a failure leaves neither: the
+    /// partial file goes, and so does the copy if the row cannot be written.
+    async fn fork(
+        &self,
+        source: &sessions::Session,
+        session_name: &str,
+        caller: &str,
+    ) -> Result<sessions::Session> {
+        let new_id = crate::store::next_id();
+        let destination = self.state.brain.brain_path(&source.project_id, &new_id)?;
+        let mut temporary = destination.clone().into_os_string();
+        temporary.push(".tmp");
+        let temporary = std::path::PathBuf::from(temporary);
+
+        // A source that never wrote has no file to copy, and the fork starts
+        // with an empty brain rather than an invented one.
+        if let Some(brain) = self
+            .state
+            .brain
+            .open_existing(&source.project_id, &source.id)
+            .await?
+        {
+            let db = self.state.db.clone();
+            let source_id = source.id.clone();
+            let copied = brain
+                .vacuum_into(&temporary, async move || {
+                    // Under the source's write lock, which a prune also takes
+                    // to remove the file: a prune that lands between the branch
+                    // and the copy must not be copied out from under.
+                    match sessions::get(&db, &source_id).await? {
+                        Some(session) if session.deleted_at.is_none() => Ok(()),
+                        _ => Err(Error::Conflict(format!(
+                            "session {source_id} was pruned while forking it session_id={source_id}"
+                        ))),
+                    }
+                })
+                .await;
+            if let Err(err) = copied {
+                discard(&temporary);
+                return Err(err);
+            }
+            std::fs::rename(&temporary, &destination)?;
+            discard(&temporary);
+        }
+
+        match sessions::insert_fork(&self.state.db, source, session_name, caller, &new_id).await {
+            Ok(session) => Ok(session),
+            Err(err) => {
+                discard(&destination);
+                Err(err)
+            }
+        }
+    }
+
+    /// Bytes a session's brain occupies on disk, its write-ahead log included.
+    fn brain_bytes(&self, session: &sessions::Session) -> i64 {
+        let Ok(path) = self
+            .state
+            .brain
+            .brain_path(&session.project_id, &session.id)
+        else {
+            return 0;
+        };
+        let mut sidecar = path.clone().into_os_string();
+        sidecar.push("-wal");
+        [path, std::path::PathBuf::from(sidecar)]
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok())
+            .map(|meta| meta.len() as i64)
+            .sum()
+    }
+
     /// The recorded active session, or a conflict when none was started.
     async fn active_session(&self) -> Result<(String, String)> {
         let active = self.active.lock().await;
@@ -447,6 +734,18 @@ impl HubServer {
         let (_, session_id) = self.active_session().await?;
         let session = self.live_session(&session_id).await?;
         policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
+        // The slot remembers a session this connection started, but the session
+        // may have moved since: the human ended it and another agent picked it
+        // up, or the human reassigned it. One brain has one writer, so a
+        // connection that lost its session stops writing to it, the admin
+        // included, and is told who holds it and how to carry on.
+        if matches!(access, Access::Write) && session.agent != principal.actor {
+            *self.active.lock().await = None;
+            return Err(Error::Conflict(format!(
+                "session {} now belongs to {}; call session_start to begin or resume a session of your own",
+                session.id, session.agent
+            )));
+        }
         Ok(session)
     }
 
@@ -460,6 +759,30 @@ impl HubServer {
         &self,
         principal: &Principal,
         reference: &SessionRef,
+    ) -> Result<sessions::Session> {
+        let session = self.resolve_session(principal, reference, None).await?;
+        // A pruned session is gone from a reader's point of view, undo window
+        // or not: whether the bytes survive another moment is the human's
+        // business, and the file is never opened to find out. A pickup says
+        // more, because the human can still undo what it names.
+        if session.deleted_at.is_some() {
+            return Err(Error::NotFound(format!(
+                "session {} has been pruned",
+                session.id
+            )));
+        }
+        Ok(session)
+    }
+
+    /// Resolve a session reference, pruned rows included.
+    ///
+    /// `default_project` is the project of the enclosing call, which a pickup
+    /// has and a plain read takes from the active session instead.
+    async fn resolve_session(
+        &self,
+        principal: &Principal,
+        reference: &SessionRef,
+        default_project: Option<&str>,
     ) -> Result<sessions::Session> {
         let session = match (
             reference.session_id.as_deref(),
@@ -488,7 +811,7 @@ impl HubServer {
                 session
             }
             (None, Some(agent), Some(name)) => {
-                let project_id = match reference.project_id.as_deref() {
+                let project_id = match reference.project_id.as_deref().or(default_project) {
                     Some(project_id) => project_id.to_string(),
                     None => self.active_session().await.map_err(|_| {
                         Error::InvalidArgument(
@@ -508,15 +831,6 @@ impl HubServer {
             }
             _ => return Err(Error::InvalidArgument(SESSION_REF.to_string())),
         };
-        // A pruned session is gone from a reader's point of view, undo window
-        // or not: whether the bytes survive another moment is the human's
-        // business, and the file is never opened to find out.
-        if session.deleted_at.is_some() {
-            return Err(Error::NotFound(format!(
-                "session {} has been pruned",
-                session.id
-            )));
-        }
         Ok(session)
     }
 
@@ -726,12 +1040,35 @@ impl HubServer {
 struct SessionStartParams {
     project_id: String,
     session_name: String,
+    /// The session to pick up, by session_id or by agent and name. The hub
+    /// adopts an ended session and forks a running one.
+    #[serde(default)]
+    from: Option<SessionRef>,
 }
 
 /// Arguments for `session_end`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SessionEndParams {
     session_id: String,
+    /// What the next agent needs to know, kept on the session and shown to the
+    /// human. It never enters the brain.
+    #[serde(default)]
+    handoff: Option<String>,
+}
+
+/// Arguments for `session_list`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionListParams {
+    #[serde(default)]
+    project_id: Option<String>,
+    /// `active` or `ended`.
+    #[serde(default)]
+    status: Option<String>,
+    /// The owning agent.
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
 }
 
 /// How a call names the session it reads.

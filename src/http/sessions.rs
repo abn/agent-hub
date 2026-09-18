@@ -89,7 +89,9 @@ pub async fn end(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    session_store::end(&state.db, &session_id, &principal.actor)
+    // The human ends a session from the control surface; the note is the
+    // agent's to leave, so this route takes none.
+    session_store::end(&state.db, &session_id, &principal.actor, None)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 

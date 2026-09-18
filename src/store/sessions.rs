@@ -44,6 +44,19 @@ pub async fn start(
     session_name: &str,
     agent: &str,
 ) -> Result<Session> {
+    Ok(start_resumed(db, project_id, session_name, agent).await?.0)
+}
+
+/// Start a session, reporting whether it resumed one that already existed.
+///
+/// The surfaces tell the agent which of the two happened; the stores that only
+/// need the row call [`start`].
+pub async fn start_resumed(
+    db: &Database,
+    project_id: &str,
+    session_name: &str,
+    agent: &str,
+) -> Result<(Session, bool)> {
     validate_id("project", project_id)?;
     validate_id("session name", session_name)?;
 
@@ -82,7 +95,7 @@ pub async fn start(
         }
         None => {
             let id = crate::store::next_id();
-            let brain_path = format!("sessions/{project_id}/{id}.db");
+            let brain_path = brain_path(project_id, &id);
             tx.execute(
                 "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity)
                  VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7)",
@@ -139,14 +152,382 @@ pub async fn start(
     }
 
     tx.commit().await.map_err(engine)?;
-    Ok(session)
+    Ok((session, !created))
 }
 
-/// Mark a session ended. The brain is retained until the human prunes it.
+/// What picking up a session turned out to be.
+///
+/// The hub decides from the source's state, never the caller: an agent cannot
+/// tell whether the source is still running, and a wrong guess either forks a
+/// dead session or adopts a live one.
+#[derive(Debug)]
+pub enum Pickup {
+    /// The caller named its own session under its own name: an ordinary resume.
+    Resumed(Session),
+    /// The source had ended, so ownership moved and the brain stayed put.
+    Adopted {
+        session: Session,
+        /// The owner the session came from.
+        from_agent: String,
+    },
+    /// The source is still running, so the caller gets a copy of it. The row is
+    /// written by [`insert_fork`] once the brain has been copied.
+    Fork(Session),
+}
+
+/// Take over or branch from another session, inside one transaction.
+///
+/// The resolution, every check and the write share one immediate transaction,
+/// so two agents picking up one ended session cannot both be told they got it:
+/// the guarded update names the row it checked, and a zero-row update is the
+/// loser's conflict.
+pub async fn start_from(
+    db: &Database,
+    project_id: &str,
+    session_name: &str,
+    caller: &str,
+    source_id: &str,
+) -> Result<Pickup> {
+    validate_id("project", project_id)?;
+    validate_id("session name", session_name)?;
+
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let source = get_on(&tx, source_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("session {source_id} not found")))?;
+    if source.project_id != project_id {
+        return Err(Error::InvalidArgument(format!(
+            "session {source_id} belongs to another project, and a brain is project-scoped from_project_id={}",
+            source.project_id
+        )));
+    }
+    if source.deleted_at.is_some() {
+        // The human pruned it deliberately and holds the undo; the hub does not
+        // resurrect a file the sweep is about to remove.
+        return Err(Error::Conflict(format!(
+            "session {source_id} is pruned; restore it with undo before picking it up session_id={source_id}"
+        )));
+    }
+    if source.agent == caller && source.session_name == session_name {
+        let now = crate::store::now_rfc3339();
+        tx.execute(
+            "UPDATE sessions SET status = 'active', last_activity = ?1 WHERE id = ?2",
+            vec![Value::Text(now.clone()), Value::Text(source.id.clone())],
+        )
+        .await
+        .map_err(engine)?;
+        tx.commit().await.map_err(engine)?;
+        let mut session = source;
+        session.status = "active".to_string();
+        session.last_activity = now;
+        return Ok(Pickup::Resumed(session));
+    }
+    if source.status != "ended" {
+        // A live session is copied, not taken: its owner is still writing. The
+        // name is checked here as well as when the fork's row is written, so a
+        // name the caller already holds is refused before a brain of any size
+        // is copied for nothing.
+        collision_free(&tx, project_id, caller, session_name, None).await?;
+        tx.commit().await.map_err(engine)?;
+        return Ok(Pickup::Fork(source));
+    }
+
+    collision_free(&tx, project_id, caller, session_name, Some(&source.id)).await?;
+
+    let now = crate::store::now_rfc3339();
+    let previous_owner = source.agent.clone();
+    let adopted_from = (previous_owner != caller).then(|| source.id.clone());
+    // The guard carries every condition the branch was chosen on, so a source
+    // that was resumed or pruned in between matches no row.
+    let moved = tx
+        .execute(
+            "UPDATE sessions
+                SET agent = ?1, session_name = ?2, status = 'active',
+                    last_activity = ?3, adopted_from = ?4
+              WHERE id = ?5 AND deleted_at IS NULL AND status = 'ended'",
+            vec![
+                Value::Text(caller.to_string()),
+                Value::Text(session_name.to_string()),
+                Value::Text(now.clone()),
+                adopted_from.clone().map_or(Value::Null, Value::Text),
+                Value::Text(source.id.clone()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    if moved == 0 {
+        // Another adopter, or the owner itself, moved the row first. Only the
+        // row as it stands now says who holds it.
+        let current = get_on(&tx, source_id).await?;
+        return Err(Error::Conflict(match current {
+            Some(current) => format!(
+                "session {source_id} was picked up or resumed while adopting it owner={}",
+                current.agent
+            ),
+            None => format!("session {source_id} is gone owner=none"),
+        }));
+    }
+
+    events::append_in_tx(
+        &tx,
+        caller,
+        None,
+        NewEvent {
+            project_id: project_id.to_string(),
+            kind: "session".to_string(),
+            summary: format!("session {session_name} picked up from {previous_owner}"),
+            payload: Some(serde_json::json!({
+                "action": "adopted",
+                "session_id": source.id,
+                "session_name": session_name,
+                "from_session_id": source.id,
+                "from_agent": previous_owner,
+                "handoff": source.handoff,
+            })),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
+
+    let session = Session {
+        agent: caller.to_string(),
+        session_name: session_name.to_string(),
+        status: "active".to_string(),
+        last_activity: now,
+        adopted_from,
+        ..source
+    };
+    Ok(Pickup::Adopted {
+        session,
+        from_agent: previous_owner,
+    })
+}
+
+/// Record a fork once its brain file is in place.
+///
+/// The row, the copied search rows and the lifecycle event commit together, so
+/// a forked session is never listed without the entries it was forked with.
+pub async fn insert_fork(
+    db: &Database,
+    source: &Session,
+    session_name: &str,
+    caller: &str,
+    new_id: &str,
+) -> Result<Session> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    collision_free(&tx, &source.project_id, caller, session_name, None).await?;
+
+    let now = crate::store::now_rfc3339();
+    let brain_path = brain_path(&source.project_id, new_id);
+    tx.execute(
+        "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path,
+                              created_at, last_activity, forked_from)
+         VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?6, ?7)",
+        vec![
+            Value::Text(new_id.to_string()),
+            Value::Text(source.project_id.clone()),
+            Value::Text(session_name.to_string()),
+            Value::Text(caller.to_string()),
+            Value::Text(brain_path.clone()),
+            Value::Text(now.clone()),
+            Value::Text(source.id.clone()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    // The copy holds the source's entries, so it holds the source's search
+    // rows too; `ref_id` is already the brain path, so only the keys change.
+    tx.execute(
+        "INSERT INTO search_docs(doc_id, project_id, type, ref_id, session_id, title, body, updated_at)
+         SELECT 'brain:' || ?1 || ':' || ref_id, project_id, 'brain', ref_id, ?1, title, body, updated_at
+           FROM search_docs WHERE type = 'brain' AND session_id = ?2",
+        vec![
+            Value::Text(new_id.to_string()),
+            Value::Text(source.id.clone()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    events::append_in_tx(
+        &tx,
+        caller,
+        None,
+        NewEvent {
+            project_id: source.project_id.clone(),
+            kind: "session".to_string(),
+            summary: format!("session {session_name} forked from {}", source.agent),
+            payload: Some(serde_json::json!({
+                "action": "forked",
+                "session_id": new_id,
+                "session_name": session_name,
+                "from_session_id": source.id,
+                "from_agent": source.agent,
+            })),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
+
+    Ok(Session {
+        id: new_id.to_string(),
+        project_id: source.project_id.clone(),
+        session_name: session_name.to_string(),
+        agent: caller.to_string(),
+        status: "active".to_string(),
+        brain_path,
+        created_at: now.clone(),
+        last_activity: now,
+        deleted_at: None,
+        forked_from: Some(source.id.clone()),
+        adopted_from: None,
+        handoff: None,
+    })
+}
+
+/// Move an active session to another agent, which only the human does.
+pub async fn reassign(
+    db: &Database,
+    session_id: &str,
+    to_agent: &str,
+    actor: &str,
+) -> Result<Session> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let session = get_on(&tx, session_id)
+        .await?
+        .filter(|session| session.deleted_at.is_none())
+        .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
+    if session.agent == to_agent {
+        return Err(Error::Conflict(format!(
+            "session {session_id} already belongs to {to_agent} owner={to_agent}"
+        )));
+    }
+    // An owner no token resolves to could never resume, end or write the
+    // session again, and only another reassign would recover it.
+    let mut known = tx
+        .query(
+            "SELECT 1 FROM agents WHERE id = ?1",
+            vec![Value::Text(to_agent.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if known.next().await.map_err(engine)?.is_none() {
+        return Err(Error::NotFound(format!("agent {to_agent} not found")));
+    }
+    drop(known);
+    collision_free(
+        &tx,
+        &session.project_id,
+        to_agent,
+        &session.session_name,
+        Some(session_id),
+    )
+    .await?;
+
+    let now = crate::store::now_rfc3339();
+    let moved = tx
+        .execute(
+            "UPDATE sessions SET agent = ?1, last_activity = ?2
+              WHERE id = ?3 AND deleted_at IS NULL AND agent = ?4",
+            vec![
+                Value::Text(to_agent.to_string()),
+                Value::Text(now.clone()),
+                Value::Text(session_id.to_string()),
+                Value::Text(session.agent.clone()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    if moved == 0 {
+        return Err(Error::Conflict(format!(
+            "session {session_id} changed while reassigning it owner={}",
+            session.agent
+        )));
+    }
+
+    events::append_in_tx(
+        &tx,
+        actor,
+        None,
+        NewEvent {
+            project_id: session.project_id.clone(),
+            kind: "session".to_string(),
+            summary: format!("session {} reassigned to {to_agent}", session.session_name),
+            payload: Some(serde_json::json!({
+                "action": "reassigned",
+                "session_id": session.id,
+                "session_name": session.session_name,
+                "from_agent": session.agent,
+                "to_agent": to_agent,
+            })),
+            needs_action: false,
+            thread_id: None,
+        },
+    )
+    .await?;
+    tx.commit().await.map_err(engine)?;
+
+    Ok(Session {
+        agent: to_agent.to_string(),
+        last_activity: now,
+        ..session
+    })
+}
+
+/// Refuse a name the caller already holds live, naming what holds it.
+async fn collision_free(
+    conn: &turso::Connection,
+    project_id: &str,
+    agent: &str,
+    session_name: &str,
+    except: Option<&str>,
+) -> Result<()> {
+    if let Some(existing) = find_owned_on(conn, project_id, agent, session_name).await?
+        && Some(existing.id.as_str()) != except
+    {
+        return Err(Error::Conflict(format!(
+            "session name '{session_name}' is already in use existing_session_id={}",
+            existing.id
+        )));
+    }
+    Ok(())
+}
+
+/// Mark a session ended, with the note its owner leaves behind.
 ///
 /// Retry-safe: ending an already-ended session is a no-op, so a retried call
-/// does not append a second lifecycle event.
-pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
+/// does not append a second lifecycle event and does not clear an earlier note.
+/// The note lives on the row and in the event, never in the brain: a session
+/// that never wrote must not get a brain file just because it ended.
+pub async fn end(
+    db: &Database,
+    session_id: &str,
+    actor: &str,
+    handoff: Option<&str>,
+) -> Result<()> {
+    if let Some(handoff) = handoff {
+        crate::limits::check_handoff(handoff)?;
+    }
     let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
@@ -165,8 +546,14 @@ pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
 
     let now = crate::store::now_rfc3339();
     tx.execute(
-        "UPDATE sessions SET status = 'ended', last_activity = ?1 WHERE id = ?2",
-        vec![Value::Text(now), Value::Text(session_id.to_string())],
+        "UPDATE sessions SET status = 'ended', last_activity = ?1,
+                             handoff = COALESCE(?2, handoff)
+         WHERE id = ?3",
+        vec![
+            Value::Text(now),
+            handoff.map_or(Value::Null, |note| Value::Text(note.to_string())),
+            Value::Text(session_id.to_string()),
+        ],
     )
     .await
     .map_err(engine)?;
@@ -183,6 +570,7 @@ pub async fn end(db: &Database, session_id: &str, actor: &str) -> Result<()> {
                 "action": "ended",
                 "session_id": session.id,
                 "session_name": session.session_name,
+                "handoff": handoff,
             })),
             needs_action: false,
             thread_id: None,
@@ -222,6 +610,84 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
         )
         .await
         .map_err(engine)?;
+    let mut sessions = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        sessions.push(session_from_row(&row)?);
+    }
+    Ok(sessions)
+}
+
+/// Where a session's brain file sits under the data directory.
+fn brain_path(project_id: &str, session_id: &str) -> String {
+    format!("sessions/{project_id}/{session_id}.db")
+}
+
+/// What an agent's session listing asks for.
+#[derive(Debug, Default)]
+pub struct SessionQuery<'a> {
+    /// One project, or every project the caller may read.
+    pub project_id: Option<&'a str>,
+    /// `active` or `ended`.
+    pub status: Option<&'a str>,
+    /// The owner.
+    pub agent: Option<&'a str>,
+    /// The projects the caller may reach at all, or `None` for every project.
+    pub visible: Option<&'a [String]>,
+    /// Rows to return, clamped to the listing cap.
+    pub limit: i64,
+}
+
+/// List sessions a caller may see, most recently active first.
+///
+/// Soft-deleted sessions are omitted: a pruned session is gone from a reader's
+/// point of view, undo window or not.
+pub async fn query(db: &Database, query: &SessionQuery<'_>) -> Result<Vec<Session>> {
+    if let Some(status) = query.status
+        && status != "active"
+        && status != "ended"
+    {
+        return Err(Error::InvalidArgument(format!(
+            "status '{status}' must be 'active' or 'ended'"
+        )));
+    }
+    if let Some(visible) = query.visible
+        && visible.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+
+    let mut sql = format!("SELECT {COLUMNS} FROM sessions WHERE deleted_at IS NULL");
+    let mut params: Vec<Value> = Vec::new();
+    if let Some(project_id) = query.project_id {
+        params.push(Value::Text(project_id.to_string()));
+        sql.push_str(&format!(" AND project_id = ?{}", params.len()));
+    }
+    if let Some(status) = query.status {
+        params.push(Value::Text(status.to_string()));
+        sql.push_str(&format!(" AND status = ?{}", params.len()));
+    }
+    if let Some(agent) = query.agent {
+        params.push(Value::Text(agent.to_string()));
+        sql.push_str(&format!(" AND agent = ?{}", params.len()));
+    }
+    if let Some(visible) = query.visible {
+        let mut placeholders = Vec::with_capacity(visible.len());
+        for id in visible {
+            params.push(Value::Text(id.clone()));
+            placeholders.push(format!("?{}", params.len()));
+        }
+        sql.push_str(&format!(" AND project_id IN ({})", placeholders.join(", ")));
+    }
+    params.push(Value::Integer(
+        query.limit.clamp(1, crate::limits::SESSION_LIST_LIMIT_MAX),
+    ));
+    sql.push_str(&format!(
+        " ORDER BY last_activity DESC, id DESC LIMIT ?{}",
+        params.len()
+    ));
+
+    let conn = super::connect(db)?;
+    let mut rows = conn.query(&sql, params).await.map_err(engine)?;
     let mut sessions = Vec::new();
     while let Some(row) = rows.next().await.map_err(engine)? {
         sessions.push(session_from_row(&row)?);

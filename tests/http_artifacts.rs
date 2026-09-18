@@ -783,7 +783,7 @@ async fn pruning_a_session_returns_a_token_and_undo_restores_it() {
     let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "human")
+    sessions::end(&state.db, &session.id, "human", None)
         .await
         .expect("end");
     assert_eq!(list_sessions(&state).await.len(), 1);

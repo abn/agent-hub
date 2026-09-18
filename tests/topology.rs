@@ -157,7 +157,7 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     brain.put("/kv/note", b"to be pruned").await.expect("put");
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
-    sessions::end(&db, &session.id, "agent-one")
+    sessions::end(&db, &session.id, "agent-one", None)
         .await
         .expect("end session");
     prune::prune_session(&db, &session.id)
