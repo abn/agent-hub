@@ -20,6 +20,9 @@ const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
+/// The worker before it is stamped. The served copy has its version and cache
+/// lists filled in, so the digest can only be recomputed from the source.
+const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 
 async fn state() -> AppState {
     state_with_public_url(None).await
@@ -313,6 +316,8 @@ async fn service_worker_cache_name_follows_the_assets() {
 
     let state = state().await;
     let mut hasher = Sha256::new();
+    hasher.update(SERVICE_WORKER.as_bytes());
+    hasher.update([0]);
     for path in SHELL_PATHS {
         let app = router(state.clone());
         let response = app.oneshot(get(path, None)).await.expect("request");

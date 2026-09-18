@@ -116,11 +116,15 @@ static STAMPED_WORKER: LazyLock<String> = LazyLock::new(|| {
 /// A digest of what the shell is made of.
 ///
 /// Both the path and the body of every asset go in, so a rename counts as a
-/// change too. Half a SHA-256 is plenty to tell two builds apart; this names
-/// a cache, it guards nothing.
+/// change too, and so does the worker's own source: the cache name is what
+/// makes the new worker drop the old cache, so a release that only changes
+/// the worker still has to turn the name over. Half a SHA-256 is plenty to
+/// tell two builds apart; this names a cache, it guards nothing.
 fn shell_version() -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
+    hasher.update(SERVICE_WORKER.as_bytes());
+    hasher.update([0]);
     for asset in SHELL_ASSETS {
         hasher.update(asset.path.as_bytes());
         hasher.update([0]);
