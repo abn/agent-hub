@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::json;
 use turso::Value;
 
-use crate::brain::Brain;
+use crate::brain::{self, Brain};
 use crate::error::{Error, Result};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
@@ -141,15 +141,18 @@ impl HubServer {
         Parameters(params): Parameters<BrainPutParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        // The store and the corpus have to agree on the entry, so both take the
+        // canonical path and an alias never becomes a second search row.
+        let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
         let (project_id, session_id, brain) = self
             .brain_for(&principal, Access::Write)
             .await
             .map_err(to_error_data)?;
         brain
-            .put(&params.path, params.content.as_bytes())
+            .put(&path, params.content.as_bytes())
             .await
             .map_err(to_error_data)?;
-        self.index_brain_put(&project_id, &session_id, &params.path, &params.content)
+        self.index_brain_put(&project_id, &session_id, &path, &params.content)
             .await
             .map_err(to_error_data)?;
 
@@ -189,12 +192,13 @@ impl HubServer {
         Parameters(params): Parameters<BrainPathParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
         let (_, session_id, brain) = self
             .brain_for(&principal, Access::Write)
             .await
             .map_err(to_error_data)?;
-        brain.delete(&params.path).await.map_err(to_error_data)?;
-        self.delete_brain_doc(&session_id, &params.path)
+        brain.delete(&path).await.map_err(to_error_data)?;
+        self.delete_brain_doc(&session_id, &path)
             .await
             .map_err(to_error_data)?;
 

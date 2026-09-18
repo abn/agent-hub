@@ -410,6 +410,66 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
 }
 
 #[test]
+fn a_non_canonical_path_indexes_and_deletes_one_row() {
+    let data_dir = TempDir::new("aliased");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    // The brain stores this at /fs/secret.md, so the canonical path is the
+    // only entry there is to index and the only one to delete.
+    let put = server.call_tool(
+        "brain_put",
+        json!({"path": "/fs/notes/../secret.md", "content": "aliased recovery body"}),
+    );
+    assert_eq!(structured(&put)["ok"], true, "the aliased write lands");
+
+    let deleted = server.call_tool("brain_delete", json!({"path": "/fs/secret.md"}));
+    assert_eq!(
+        structured(&deleted)["ok"],
+        true,
+        "the canonical path deletes"
+    );
+
+    let gone = server.call_tool("brain_get", json!({"path": "/fs/secret.md"}));
+    assert_eq!(error_code(&gone), "not_found", "the entry is gone");
+
+    drop(server);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build a runtime");
+    let hits = runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open the hub store");
+        let conn = db.connect().expect("connect");
+        let mut rows = conn
+            .query(
+                "SELECT doc_id FROM search_docs WHERE fts_match(body, 'aliased')",
+                (),
+            )
+            .await
+            .expect("fts query");
+        let mut hits = Vec::new();
+        while let Some(row) = rows.next().await.expect("row") {
+            hits.push(row.get::<String>(0).expect("doc id"));
+        }
+        hits
+    });
+    assert!(
+        hits.is_empty(),
+        "a deleted brain entry leaves no searchable row, got {hits:?}"
+    );
+}
+
+#[test]
 fn a_brain_read_does_not_create_the_session_file() {
     let data_dir = TempDir::new("read-only");
     common::seed_project(&data_dir.0, "proj");

@@ -300,7 +300,7 @@ impl Brain {
                 Ok(keys.into_iter().map(|key| format!("/kv/{key}")).collect())
             }
             Namespace::Fs(path) => {
-                let dir = fs_list_path(path);
+                let dir = fs_path(path);
                 let Some(stats) = self.agent.fs.stat(&dir).await.map_err(engine_error)? else {
                     return Ok(Vec::new());
                 };
@@ -463,22 +463,43 @@ fn require_key(key: &str) -> Result<&str> {
     }
 }
 
-/// Map a filesystem path fragment to an absolute AgentFS path.
-fn fs_path(rest: &str) -> String {
-    if rest.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{rest}")
-    }
+/// The canonical brain path for an entry, as the store addresses it.
+///
+/// The filesystem resolves `.`, `..`, empty components and a trailing slash
+/// before it reaches an inode, so several client paths name one entry. Anything
+/// that keys on a path, the search corpus above all, canonicalises first so one
+/// entry never becomes two keys.
+pub fn canonical_path(path: &str) -> Result<String> {
+    Ok(match parse_path(path)? {
+        // A key-value key is opaque: the store uses it verbatim.
+        Namespace::Kv(key) => format!("/kv/{}", require_key(key)?),
+        Namespace::Fs(rest) => match fs_path(rest).as_str() {
+            "/" => "/fs".to_string(),
+            resolved => format!("/fs{resolved}"),
+        },
+    })
 }
 
-/// Map a directory prefix to an absolute AgentFS path, ignoring a trailing slash.
-fn fs_list_path(rest: &str) -> String {
-    let trimmed = rest.trim_end_matches('/');
-    if trimmed.is_empty() {
+/// Resolve a filesystem path fragment to the absolute AgentFS path it names.
+///
+/// This mirrors what the filesystem does internally: `.` and empty components
+/// drop out, `..` pops a component but never climbs above the root, and a
+/// trailing slash is ignored.
+fn fs_path(rest: &str) -> String {
+    let mut components: Vec<&str> = Vec::new();
+    for component in rest.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            name => components.push(name),
+        }
+    }
+    if components.is_empty() {
         "/".to_string()
     } else {
-        format!("/{trimmed}")
+        format!("/{}", components.join("/"))
     }
 }
 

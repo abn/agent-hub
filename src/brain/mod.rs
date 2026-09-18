@@ -16,4 +16,4 @@
 
 mod session;
 
-pub use session::{Brain, BrainStore};
+pub use session::{Brain, BrainStore, canonical_path};
