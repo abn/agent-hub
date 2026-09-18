@@ -86,14 +86,22 @@ single-column screens with a top bar.
 - Feeds are grouped by day, with kind filters as chips.
 - Time is short on a row and whole on request. A row carries a compact relative
   form in the reader's own locale, counting itself up while the app is open;
-  the full local timestamp is the element's accessible name, its hover title,
-  and what one press shows, so a reader who cannot hover still gets it.
+  the full local timestamp is the element's accessible name and its hover
+  title, and a press or a tap swaps it in for a reader who cannot hover. It is
+  not a stop of its own: a screen holds one per row, and a list of them would
+  be the whole tab ring. The row is the stop, and the full stamp is read with
+  it.
 - Keyboard: `/` focuses search, `j` and `k` move a selection through the rows
   of the current screen, Enter opens the selected row, `a` approves and `r`
-  replies on it, and Esc closes what is on top. `?` lists them. The selection
-  is a real focus move, so the ring shows it and a reader following focus goes
-  with it. Nothing fires while the reader is typing, while a modifier is held,
-  or while a dialog holds the keyboard.
+  replies on it, and Esc closes what is on top. `?` lists them and says where
+  to switch them off. The selection is a real focus move, so the ring shows it
+  and a reader following focus goes with it; a painted list parks the selection
+  on its first row, so a reader who has never pressed `j` still reaches the
+  list by Tab. Nothing fires while the reader is typing, while a modifier is
+  held, or while a dialog holds the keyboard. Because a key that needs no
+  modifier fires on whatever reaches the keyboard, Settings carries a
+  single-key shortcuts switch; turned off, no character key fires, and Esc and
+  Tab are unaffected.
 - Prune is confirmed in a dialog, then reversible for a short window, then
   committed. The dialog holds focus inside itself, opens with the safe action
   focused, treats Esc as keeping, and hands focus back to the control that
@@ -120,6 +128,13 @@ grouped at the top. Alerts are never red, never animated, and never a modal.
 This is a build gate, not a guideline: WCAG AA in both themes, a 12px UI text
 floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
 meaning carried by colour alone. Reduced motion is honoured.
+
+The focus ring is the designed shadow over a transparent outline, because a
+browser in forced colours drops shadows and recolours outlines, and a ring that
+is only a shadow is no ring at all there. A text field is drawn one step darker
+than the design's hairline: an empty field has nothing inside it that says a
+control is there, so its border alone has to meet the 3:1 non-text minimum. An
+outline button keeps the hairline, because its own label identifies it.
 
 The gate runs in three layers. A hermetic contract check computes WCAG contrast
 for every token pair on every surface it is painted on, enforces the 12px

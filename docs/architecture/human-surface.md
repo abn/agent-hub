@@ -244,8 +244,10 @@ empty-state component, the confirmation dialog, the toast, the reply composer,
 the freshness stream and badge, and the project picker) and one module per
 screen, with the comments drawer in its own. The keyboard map is one module the
 screens with rows register with, so the shortcuts and the roving selection are
-defined once rather than per screen, and a dialog can take the map out of the
-way while it holds the keyboard. The binary embeds every one of them in the same table it
+defined once rather than per screen. An open dialog holds the map, asked of the
+document rather than announced to it, so every dialog holds it and none has to
+remember to. The reader can switch the single-key shortcuts off in Settings.
+The binary embeds every one of them in the same table it
 serves, precaches, and digests for the service worker's cache name, so a
 module the hub does not serve cannot ship. Each render carries a number, and
 a screen whose fetches resolve after the reader has moved on does not paint
@@ -275,9 +277,12 @@ animated, and never a modal. Prune is confirmed, then reversible for a short
 window, then committed. The app asks and reports in its own components: a
 modal confirmation dialog in front of anything destructive, an announced toast
 carrying the undo, and a composer for a reply, with no browser prompt, confirm
-or alert anywhere. A write that fails says so in the toast or inside the
-composer that tried it, and focus follows the control that was pressed rather
-than falling to the top of the page.
+or alert anywhere, which a static check holds for every path rather than only
+the ones a browser run walks. A write that fails says so in the toast or inside
+the composer that tried it, and focus follows the control that was pressed
+rather than falling to the top of the page. A toast carrying an undo takes
+focus so the way back is under the reader's hands, except while they are
+writing, when the live region announces it and the caret stays where it was.
 
 The design carries hard invariants: no emoji, WCAG AA in both themes, a 12px
 UI text floor, 44px tap targets, a visible focus ring, a full keyboard path,

@@ -4,6 +4,31 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, reaching the app without a mouse
+
+* **Update**: A timestamp is no longer a stop of its own in the tab order. A
+  row carried one each, so a long feed cost a Tab press per row and every stop
+  said the same date. The full timestamp is still the element's accessible
+  name and its hover title, a press or a tap still swaps it in, and the row is
+  now what the tab ring reaches. A painted list parks its selection on the
+  first row, so the list opens to a reader who has never pressed `j`.
+* **Update**: The single-key shortcuts can be switched off. Settings carries
+  the switch beside the theme and the density, the help panel says where it
+  is, and with it off no character key fires. Esc and Tab are unaffected.
+* **Update**: The focus ring survives forced-colours mode. It was a box
+  shadow, which such a browser drops, over an outline the rules turned off, so
+  a reader there saw no ring anywhere. A transparent outline now sits under
+  the designed shadow.
+* **Update**: A text field's border is drawn one step darker than the design's
+  hairline. An empty field has nothing inside it that says a control is there,
+  so its border alone carries the 3:1 non-text minimum. Outline buttons keep
+  the hairline, because their own label identifies them.
+* **Update**: A toast no longer takes the keyboard from a reader who is
+  writing. It still moves focus to its undo otherwise, and the live region
+  announces the message and the way back either way.
+* **Note**: Described in [human interface](design/human-interface.md) and
+  [human surface](architecture/human-surface.md).
+
 ## 2026-09-18, remembering an artifact password, honestly
 
 * **Update**: The password gate offers to remember a password only where the
