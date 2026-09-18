@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, unlocking a protected artifact inside the app
+
+* **Note**: Unlocking now runs from the Unlock button's activation, which Enter
+  in the password field reaches too. Opened from inside the app the artifact
+  runs in a frame where the browser blocks a form submission outright, so until
+  now the button did nothing there.
+
 ## 2026-09-18, time, keys, and a theme that keeps up
 
 * **Update**: A timestamp is a component rather than a truncated ISO string. A

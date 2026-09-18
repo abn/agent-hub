@@ -946,6 +946,31 @@ def check_shortcut_help(page, watch: Watch) -> None:
     page.keyboard.press("Escape")
     if not settle(page, "!document.querySelector('dialog.keymap[open]')"):
         watch.fail("Esc left the shortcut list open")
+def gate_of(page):
+    """The password gate inside the in-app viewer frame."""
+    return page.frame_locator("main iframe")
+
+
+def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> None:
+    """A protected artifact opens from inside the app, not only on its own page."""
+    watch.enter("artifacts: the gate in the app")
+    page.evaluate(f"location.hash = '#/artifacts?project={quote(project)}'")
+    page.wait_for_timeout(500)
+    page.click(f'[data-action="artifact-open"][data-id="{artifact}"]')
+    gate = gate_of(page)
+    try:
+        gate.locator("#hub-password").wait_for(timeout=10000)
+    except Exception as error:
+        watch.fail(f"the gate never appeared in the frame: {error}")
+        return
+    gate.locator("#hub-password").fill(harness.PROTECTED_PASSWORD)
+    gate.locator('#hub-unlock-form button[type="submit"]').click()
+    try:
+        gate.frame_locator("#hub-frame").get_by_text(harness.PROTECTED_BODY_MARK).wait_for(
+            timeout=15000
+        )
+    except Exception as error:
+        watch.fail(f"typing the password did not show the artifact: {error}")
     watch.drain_rejections()
 
 
@@ -1033,6 +1058,7 @@ def run() -> int:
             check_answer(page, watch, project)
             check_approve(page, watch)
             check_prune(page, watch, project, seeded["session_id"])
+            check_gate_in_the_app(page, watch, project, seeded["protected_id"])
 
             context.close()
             browser.close()

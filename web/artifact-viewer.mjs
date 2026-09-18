@@ -364,8 +364,7 @@ function init() {
       errorLine.textContent = "";
       errorLine.hidden = true;
     });
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    const attempt = async () => {
       errorLine.textContent = "";
       errorLine.hidden = true;
       const secret = password.value;
@@ -376,7 +375,19 @@ function init() {
       }
       if (result !== "unsupported") password.value = "";
       if (result === "ok") password.blur();
-    });
+    };
+    // The app embeds this page in a frame sandboxed without form permission,
+    // where a submission is blocked before any submit event fires. Unlocking
+    // hangs off the button's activation, which Enter in the field reaches
+    // too, and the form itself never submits anywhere.
+    form.addEventListener("submit", (event) => event.preventDefault());
+    const unlockButton = form.querySelector('button[type="submit"]');
+    if (unlockButton) {
+      unlockButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        attempt();
+      });
+    }
     // A remembered password unlocks without asking again. A stale one
     // fails silently back to the form and is forgotten; an envelope this
     // viewer will not open says so and keeps the password, which is not

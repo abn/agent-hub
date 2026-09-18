@@ -48,6 +48,25 @@ ARTIFACT_TITLE = "Check note"
 # for it returns grouped hits rather than an empty state.
 SEARCH_TERM = "nightly"
 
+# A protected artifact, so the password gate can be driven for real. The
+# ciphertext was sealed once by web/crypto.mjs under PROTECTED_PASSWORD
+# (`node --input-type=module -e "import { encrypt } from './web/crypto.mjs'"`),
+# and the checks decrypt it in the browser through that same module, so a
+# change to the format shows up here as a gate that no longer opens.
+PROTECTED_TITLE = "Check sealed note"
+PROTECTED_PASSWORD = "open sesame"
+PROTECTED_BODY_MARK = "The sealed note opened."
+PROTECTED_ENVELOPE = {
+    "alg": "AES-256-GCM",
+    "kdf": "PBKDF2-HMAC-SHA256",
+    "iterations": 600000,
+    "salt": "ChSWXU12X6bscw3zzyawEA==",
+    "iv": "l+2FyzScbmMjDaWf",
+}
+PROTECTED_CIPHERTEXT = (
+    "dRJDZwTaa3LRtXzCOOVvkNwTHu/VgqumT4PmLgvBha48u7jpHgl5rKV+hqNeC3jKhBlbpXCMXw=="
+)
+
 
 def skip(name: str, message: str) -> None:
     """Report a missing part of the toolchain and leave the gate green."""
@@ -143,12 +162,27 @@ def seed(port: int) -> dict[str, str]:
         },
     )
     mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    # Each call is named so two uses of one tool keep their own result.
     calls = [
-        ("signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
-        ("signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
-        ("signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
-        ("question_post", {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT}),
+        ("finished", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
+        ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
+        ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
+        ("question", "question_post", {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT}),
+        # Published before the plain one so the gallery, newest first, still
+        # opens the plain artifact for the checks that click the first card.
         (
+            "protected",
+            "artifact_publish",
+            {
+                "project_id": PROJECT_ID,
+                "title": PROTECTED_TITLE,
+                "kind": "markdown",
+                "content": PROTECTED_CIPHERTEXT,
+                "envelope": PROTECTED_ENVELOPE,
+            },
+        ),
+        (
+            "artifact",
             "artifact_publish",
             {
                 "project_id": PROJECT_ID,
@@ -157,14 +191,15 @@ def seed(port: int) -> dict[str, str]:
                 "content": "# check",
             },
         ),
-        ("session_start", {"project_id": PROJECT_ID, "session_name": SESSION_NAME}),
+        ("session", "session_start", {"project_id": PROJECT_ID, "session_name": SESSION_NAME}),
         (
+            "brain",
             "brain_put",
             {"store": "session", "path": BRAIN_PATH, "content": BRAIN_VALUE},
         ),
     ]
     results: dict[str, dict] = {}
-    for index, (tool, arguments) in enumerate(calls, start=2):
+    for index, (name, tool, arguments) in enumerate(calls, start=2):
         answer = mcp_call(
             port,
             session,
@@ -195,9 +230,10 @@ def seed(port: int) -> dict[str, str]:
     request(port, "POST", f"/api/v1/questions/{resolved}/answer", {"body": SEEDED_ANSWER})
     return {
         "project_id": PROJECT_ID,
-        "session_id": results.get("session_start", {}).get("session_id", ""),
-        "artifact_id": results.get("artifact_publish", {}).get("artifact_id", ""),
-        "question_id": results.get("question_post", {}).get("question_id", ""),
+        "session_id": results.get("session", {}).get("session_id", ""),
+        "artifact_id": results.get("artifact", {}).get("artifact_id", ""),
+        "protected_id": results.get("protected", {}).get("artifact_id", ""),
+        "question_id": results.get("question", {}).get("question_id", ""),
     }
 
 
