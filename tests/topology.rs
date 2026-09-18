@@ -7,9 +7,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use agent_hub::app::AppState;
 use agent_hub::brain::BrainStore;
+use agent_hub::config::{Config, TrustDefault};
+use agent_hub::http::router;
 use agent_hub::principal::Trust;
 use agent_hub::store::{identity, migrate, open_engine, prune, sessions};
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode, header};
+use serde_json::Value as Json;
+use tower::ServiceExt;
 use turso::Value;
 
 const ADMIN_TOKEN: &str = "topology-admin-token";
@@ -212,4 +219,68 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
 
     drop(child);
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// State over a fresh data directory, for the in-process probe tests.
+async fn probe_state(tag: &str) -> AppState {
+    AppState::open(Config {
+        data_dir: temp_dir(tag),
+        bind: "127.0.0.1:0".parse().expect("socket address"),
+        admin_token: Some(ADMIN_TOKEN.to_string()),
+        trust_default: TrustDefault::Trusted,
+        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
+    })
+    .await
+    .expect("open state")
+}
+
+async fn probe(state: AppState) -> (StatusCode, Option<String>, Json) {
+    let request = Request::builder()
+        .uri("/readyz")
+        .body(Body::empty())
+        .expect("build request");
+    let response = router(state).oneshot(request).await.expect("request");
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    (
+        status,
+        content_type,
+        serde_json::from_slice(&bytes).expect("json body"),
+    )
+}
+
+#[tokio::test]
+async fn readyz_reports_ready_when_the_engine_answers() {
+    let state = probe_state("topology-ready").await;
+    let schema_version = state.schema_version;
+
+    let (status, _, body) = probe(state).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ready");
+    assert_eq!(body["schema_version"], schema_version);
+}
+
+#[tokio::test]
+async fn readyz_reports_unavailable_when_the_engine_does_not_answer() {
+    let state = probe_state("topology-unready").await;
+
+    // The store stops answering the readiness query, as it would if the data
+    // volume went away under a running process.
+    let conn = state.db.connect().expect("connect");
+    conn.execute("DROP TABLE schema_version", ())
+        .await
+        .expect("drop the version table");
+    drop(conn);
+
+    let (status, content_type, body) = probe(state).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    assert_eq!(body["code"], "unavailable");
 }

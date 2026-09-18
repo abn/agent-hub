@@ -7,7 +7,12 @@ use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
-use crate::limits;
+use crate::{limits, store};
+
+/// How long the readiness probe waits for the engine before calling it
+/// unavailable. Shorter than the store's lock wait, so the probe answers
+/// instead of queueing behind a writer.
+const READY_PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub mod agents;
 pub mod artifacts;
@@ -102,15 +107,42 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Liveness: the process is running and serving. It touches nothing else.
 async fn healthz() -> &'static str {
     "ok"
 }
 
-async fn readyz(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({
+/// Readiness: the engine answers and carries the schema the process opened.
+///
+/// A probe that reported only the version cached at startup stayed ready
+/// through an unmounted volume or a replaced store, which is the failure a
+/// healthcheck exists to catch.
+async fn readyz(State(state): State<AppState>) -> std::result::Result<Json<Value>, Problem> {
+    let probe = tokio::time::timeout(READY_PROBE_WAIT, store::applied_version(&state.db)).await;
+    let version = match probe {
+        Ok(Ok(version)) => version,
+        Ok(Err(err)) => {
+            return Err(Problem::from_error(&Error::Unavailable(format!(
+                "the store did not answer: {err}"
+            ))));
+        }
+        Err(_) => {
+            return Err(Problem::from_error(&Error::Unavailable(
+                "the store did not answer the readiness query in time".to_string(),
+            )));
+        }
+    };
+    if version != state.schema_version {
+        return Err(Problem::from_error(&Error::Unavailable(format!(
+            "the store is at schema version {version}, the process opened {}",
+            state.schema_version
+        ))));
+    }
+
+    Ok(Json(json!({
         "status": "ready",
-        "schema_version": state.schema_version,
-    }))
+        "schema_version": version,
+    })))
 }
 
 async fn not_found() -> Problem {

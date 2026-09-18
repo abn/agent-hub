@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, readiness asks the engine
+
+* **Update**: `/readyz` now queries the store for its schema version instead
+  of repeating the version cached at startup, and reports `503` problem
+  details when the store does not answer or has drifted from it. `/healthz`
+  stays a liveness check. Documented on the
+  [human surface](architecture/human-surface.md) and in the
+  [quickstart](usage/quickstart.md).
+
 ## 2026-09-18, every REST refusal is problem details
 
 * **Update**: The [human surface](architecture/human-surface.md) states the

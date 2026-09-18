@@ -74,6 +74,13 @@ for a protected artifact. Deletion removes the artifact, its history, and
 its search entry, and records a `deleted` event. The public page serves
 `?version=N` the same way.
 
+The two probes differ on purpose. `GET /healthz` is liveness: the process is
+up. `GET /readyz` is readiness: it queries the engine for its schema version
+and answers `200` with that version only when the store replies and is at the
+version the process opened. Otherwise it is a `503` problem, so an orchestrator
+takes the node out of rotation instead of holding it there while every call
+fails.
+
 The whole REST surface is the human control surface and is admin-only: it
 accepts the configured admin token and nothing else, so an agent token is
 rejected there. Agents reach the hub over MCP.

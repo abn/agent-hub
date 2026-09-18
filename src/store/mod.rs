@@ -90,6 +90,15 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
     read_version(&conn).await
 }
 
+/// Read the applied schema version over a fresh connection.
+///
+/// The readiness probe uses this to ask the engine a real question rather than
+/// trusting the version it cached at startup.
+pub async fn applied_version(db: &turso::Database) -> Result<i64> {
+    let conn = connect(db)?;
+    read_version(&conn).await
+}
+
 async fn read_version(conn: &turso::Connection) -> Result<i64> {
     let mut rows = conn
         .query("SELECT COALESCE(MAX(version), 0) FROM schema_version", ())

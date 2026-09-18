@@ -72,6 +72,10 @@ curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 ```
 
+The first answers `ok` while the process runs. The second asks the engine for
+its schema version and answers with it, or a `503` problem when the store does
+not reply, which is the one to point a container healthcheck at.
+
 On start the binary creates the data directory and its `sessions/` and
 `artifacts/` children, then opens `hub.db` at the top of the data directory.
 Back up the whole data directory as one unit.
