@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agent_hub::principal::Trust;
 use agent_hub::store::artifacts::{self, NewArtifact};
+use agent_hub::store::comments;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, migrate, open_engine, projects};
 use serde_json::json;
@@ -569,6 +570,113 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
         "no existence oracle on deleted artifacts: {}",
         gone.raw
     );
+
+    drop(_child);
+    drop(data_dir);
+}
+
+#[tokio::test]
+async fn comment_mutations_are_concealed_from_strangers() {
+    let data_dir = TempDir::new("comment-conceal");
+
+    let db = open_engine(&data_dir.0.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    let _strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared project");
+    let strict_token = identity::issue_token(&db, "strict")
+        .await
+        .expect("strict token")
+        .token;
+    let foreign = artifacts::publish(
+        &db,
+        &data_dir.0,
+        NewArtifact {
+            actor: "human",
+            project_id: "shared",
+            title: "Shared notes",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"# notes",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("shared artifact")
+    .id;
+    let (comment, _) = comments::add_comment(
+        &db,
+        &foreign,
+        "human",
+        "Needs work.",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("seed comment");
+    drop(db);
+
+    let port = free_port();
+    let _child = spawn(&data_dir.0, port);
+    wait_for_port(port);
+
+    let strict_session = initialize(port, &strict_token);
+
+    for (tool, args) in [
+        (
+            "comment_resolve",
+            json!({"artifact_id": foreign, "comment_id": comment.id, "done": true}),
+        ),
+        (
+            "comment_delete",
+            json!({"artifact_id": foreign, "comment_id": comment.id}),
+        ),
+        (
+            "comment_resolve",
+            json!({"artifact_id": foreign, "comment_id": "ghost-comment", "done": true}),
+        ),
+    ] {
+        let denied = call(port, &strict_token, &strict_session, tool, args);
+        assert!(
+            denied.raw.contains("forbidden"),
+            "{tool} without access is forbidden: {}",
+            denied.raw
+        );
+        assert!(
+            !denied.raw.contains("not_found"),
+            "{tool} carries no existence oracle: {}",
+            denied.raw
+        );
+    }
+
+    // A wrong delete token is the same denial, not a hint, whether the
+    // comment exists or not.
+    for args in [
+        json!({"artifact_id": foreign, "comment_id": comment.id, "delete_token": "wrong"}),
+        json!({"artifact_id": foreign, "comment_id": "ghost-comment", "delete_token": "wrong"}),
+    ] {
+        let denied = call(port, &strict_token, &strict_session, "comment_delete", args);
+        assert!(
+            denied.raw.contains("forbidden"),
+            "a wrong token is forbidden: {}",
+            denied.raw
+        );
+        assert!(
+            !denied.raw.contains("not_found"),
+            "a wrong token carries no existence oracle: {}",
+            denied.raw
+        );
+    }
 
     drop(_child);
     drop(data_dir);

@@ -13,11 +13,12 @@
 
 use axum::Json;
 use axum::body::Body;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
@@ -25,6 +26,7 @@ use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
 use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
+use crate::store::comments::{self as comment_store, AnchorInput, Comment};
 
 /// The artifacts of one project.
 #[derive(Debug, Serialize)]
@@ -180,6 +182,208 @@ pub async fn versions(
     Ok(Json(VersionList { versions }))
 }
 
+/// The comment to post on an artifact.
+#[derive(Debug, Deserialize)]
+pub struct CommentPostBody {
+    /// The comment text.
+    pub body: String,
+    /// Optional anchor: `{mode: "point", x, y}` or `{mode: "text", quote}`.
+    #[serde(default)]
+    pub anchor: Option<Value>,
+    /// Optional anchored version; omitted stamps the current version.
+    #[serde(default)]
+    pub anchor_version: Option<i64>,
+    /// Optional idempotency key, so a retried post returns the original.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+}
+
+/// The resolution flip for a comment.
+#[derive(Debug, Deserialize)]
+pub struct CommentResolveBody {
+    /// Whether the comment is done.
+    pub done: bool,
+}
+
+/// `GET /api/v1/artifacts/{id}/comments`
+///
+/// Admin-only. Returns the artifact's comments, oldest first.
+pub async fn comment_list(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let listed = comment_store::list_comments(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(json!({
+        "comments": listed.iter().map(comment_view).collect::<Vec<_>>(),
+    })))
+}
+
+/// `POST /api/v1/artifacts/{id}/comments`
+///
+/// Admin-only. Authors the comment as `"human"` and stores no delete token;
+/// later mutations go through the admin gate alone. A replayed idempotency
+/// key returns the recorded comment.
+pub async fn comment_post(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<CommentPostBody>, JsonRejection>,
+) -> std::result::Result<Json<Value>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let Json(payload) = body.map_err(|rejection| {
+        Problem::from_error(&Error::InvalidArgument(format!(
+            "the comment body must be JSON with a body field: {rejection}"
+        )))
+    })?;
+    let anchor = parse_anchor(payload.anchor).map_err(|err| Problem::from_error(&err))?;
+    let (comment, _replayed) = comment_store::add_comment(
+        &state.db,
+        &artifact_id,
+        "human",
+        &payload.body,
+        anchor,
+        payload.anchor_version,
+        None,
+        payload.idempotency_key.as_deref(),
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(comment_view(&comment)))
+}
+
+/// `PATCH /api/v1/artifacts/{id}/comments/{commentId}`
+///
+/// Admin-only. Flips the resolution of one comment. A comment of another
+/// artifact, like an unknown id, is a 404.
+pub async fn comment_resolve(
+    State(state): State<AppState>,
+    Path((artifact_id, comment_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<CommentResolveBody>, JsonRejection>,
+) -> std::result::Result<Json<Value>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let Json(payload) = body.map_err(|rejection| {
+        Problem::from_error(&Error::InvalidArgument(format!(
+            "the resolve body must be JSON with a done field: {rejection}"
+        )))
+    })?;
+    let comment = comment_store::get_comment(&state.db, &comment_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    if comment.artifact_id != artifact_id {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "comment {comment_id} not found"
+        ))));
+    }
+    let updated = comment_store::set_comment_done(&state.db, &comment_id, payload.done)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(comment_view(&updated)))
+}
+
+/// `DELETE /api/v1/artifacts/{id}/comments/{commentId}`
+///
+/// Admin-only. Removes one comment. A comment of another artifact, like an
+/// unknown id, is a 404.
+pub async fn comment_remove(
+    State(state): State<AppState>,
+    Path((artifact_id, comment_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<DestroyResult>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let comment = comment_store::get_comment(&state.db, &comment_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    if comment.artifact_id != artifact_id {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "comment {comment_id} not found"
+        ))));
+    }
+    comment_store::delete_comment(&state.db, &comment_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(DestroyResult { ok: true }))
+}
+
+/// The public shape of a comment. The delete token hash stays internal, so
+/// rows posted over MCP never leak it through the admin listing.
+fn comment_view(comment: &Comment) -> Value {
+    json!({
+        "id": comment.id,
+        "artifact_id": comment.artifact_id,
+        "author": comment.author,
+        "body": comment.body,
+        "anchor": comment.anchor.clone().unwrap_or(Value::Null),
+        "anchor_version": comment.anchor_version,
+        "done": comment.done,
+        "created_at": comment.created_at,
+    })
+}
+
+/// Parse the wire anchor into a validated store input. Unknown modes are
+/// rejected; the store checks coordinates, quotes, and sizes.
+fn parse_anchor(value: Option<Value>) -> Result<Option<AnchorInput>, Error> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let obj = value.as_object().ok_or_else(|| {
+        Error::InvalidArgument("unknown anchor mode, expected point or text".to_string())
+    })?;
+    match obj.get("mode").and_then(Value::as_str) {
+        Some("point") => {
+            let x = obj.get("x").and_then(Value::as_f64).ok_or_else(|| {
+                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
+            })?;
+            let y = obj.get("y").and_then(Value::as_f64).ok_or_else(|| {
+                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
+            })?;
+            Ok(Some(AnchorInput::Point { x, y }))
+        }
+        Some("text") => {
+            let quote = obj
+                .get("quote")
+                .and_then(Value::as_str)
+                .ok_or_else(|| Error::InvalidArgument("text anchor needs a quote".to_string()))?;
+            Ok(Some(AnchorInput::Text {
+                quote: quote.to_string(),
+            }))
+        }
+        _ => Err(Error::InvalidArgument(
+            "unknown anchor mode, expected point or text".to_string(),
+        )),
+    }
+}
+
 /// `DELETE /api/v1/artifacts/{id}`
 ///
 /// Admin-only. Deletes the artifact and its history.
@@ -290,7 +494,12 @@ pub async fn host(
         let versions = artifact_store::list_versions(&state.db, &artifact_id)
             .await
             .map_err(|err| Problem::from_error(&err))?;
-        reader_shell(&artifact, &bytes, shown, pinned, &versions, &origin)
+        let thread = comment_store::list_comments(&state.db, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        reader_shell(
+            &artifact, &bytes, shown, pinned, &versions, &thread, &origin,
+        )
     };
     Ok(host_response(document))
 }
@@ -541,6 +750,7 @@ fn reader_shell(
     shown: i64,
     pinned: bool,
     versions: &[ArtifactVersion],
+    thread: &[Comment],
     origin: &str,
 ) -> String {
     let title = escape_html(&artifact.title);
@@ -588,11 +798,12 @@ fn reader_shell(
     } else {
         "null".to_string()
     };
+    let thread_html = thread_html(thread, shown);
     format!(
         "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
-         <body>\n<header>\n<h1>{title}</h1>\n{picker}\
-         <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n{frame}\
-         </main>\n\
+          <body>\n<header>\n<h1>{title}</h1>\n{picker}\
+          <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n{frame}\
+          {thread_html}</main>\n\
          <script type=\"application/json\" id=\"hub-meta\">{meta}</script>\n\
          <script type=\"application/json\" id=\"hub-versions\">{version_blob}</script>\n\
          <script type=\"application/json\" id=\"hub-markdown-body\">{markdown_blob}</script>\n\
@@ -677,7 +888,13 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          button:focus-visible,select:focus-visible,input:focus-visible{{outline:2px solid #4d7cfe;outline-offset:2px}}\n\
          main{{padding:0}}\n\
          main>p,main>form{{margin:1rem;max-width:44rem}}\n\
-         iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
+          iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
+          section#hub-comments{{margin:1rem;max-width:44rem}}\n\
+          section#hub-comments ol{{list-style:none;margin:0;padding:0}}\n\
+          section#hub-comments li{{border-top:1px solid #888888;padding:.5rem 0}}\n\
+          .hub-comment-meta{{font-size:.8rem;margin:0 0 .25rem}}\n\
+          .hub-comment-body{{margin:0 0 .25rem;overflow-wrap:anywhere}}\n\
+          .hub-comment-anchor{{font-size:.8rem;margin:0}}\n\
          </style>\n\
          <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
@@ -691,6 +908,72 @@ fn bytes_contains_mermaid(bytes: &[u8]) -> bool {
     bytes
         .windows(b"mermaid".len())
         .any(|window| window == b"mermaid")
+}
+
+/// The read-only discussion thread for the reader shell. Only comments at or
+/// below the shown version appear; unanchored comments and ones without a
+/// stamped version always show. Empty threads render nothing. Every authored
+/// string is escaped. The locked shell never calls this: discussion of a
+/// protected artifact stays behind auth.
+fn thread_html(thread: &[Comment], shown: i64) -> String {
+    let visible: Vec<&Comment> = thread
+        .iter()
+        .filter(|comment| {
+            comment
+                .anchor_version
+                .is_none_or(|version| version <= shown)
+        })
+        .collect();
+    if visible.is_empty() {
+        return String::new();
+    }
+    let mut items = String::new();
+    for comment in &visible {
+        let author = escape_html(&comment.author);
+        let time = escape_html(&comment.created_at);
+        let body = escape_html(&comment.body);
+        let state = if comment.done { "Resolved" } else { "Open" };
+        let marker = anchor_marker(comment);
+        let id = escape_html(&comment.id);
+        items.push_str(&format!(
+            "<li data-comment-id=\"{id}\">\n<p class=\"hub-comment-meta\">{author} · {time} · {state}</p>\n\
+             <p class=\"hub-comment-body\">{body}</p>\n{marker}</li>\n"
+        ));
+    }
+    format!(
+        "<section id=\"hub-comments\">\n<h2>Comments ({})</h2>\n<ol>\n{items}</ol>\n</section>\n",
+        visible.len(),
+    )
+}
+
+/// The anchor marker line for one comment, empty when unanchored.
+fn anchor_marker(comment: &Comment) -> String {
+    let Some(anchor) = comment.anchor.as_ref().and_then(Value::as_object) else {
+        return String::new();
+    };
+    let version = comment
+        .anchor_version
+        .map(|version| format!(" on version {version}"))
+        .unwrap_or_default();
+    let text = match anchor.get("mode").and_then(Value::as_str) {
+        Some("point") => {
+            let x = anchor.get("x").and_then(Value::as_f64).unwrap_or(0.0);
+            let y = anchor.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+            format!("Pinned to point ({x}, {y}){version}")
+        }
+        Some("text") => {
+            let quote = anchor
+                .get("quote")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            format!("Quoting {quote:?}{version}")
+        }
+        _ => format!("Anchored{version}"),
+    };
+    format!(
+        "<p class=\"hub-comment-anchor\">{}</p>\n",
+        escape_html(&text)
+    )
 }
 
 /// The version picker, newest first and capped at 50. Plain artifacts only.

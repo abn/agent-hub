@@ -62,6 +62,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/artifacts/{id}/versions", get(artifacts::versions))
         .route("/api/v1/artifacts/{id}/raw", get(artifacts::raw))
+        .route(
+            "/api/v1/artifacts/{id}/comments",
+            get(artifacts::comment_list).post(artifacts::comment_post),
+        )
+        .route(
+            "/api/v1/artifacts/{id}/comments/{comment_id}",
+            patch(artifacts::comment_resolve).delete(artifacts::comment_remove),
+        )
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/stream", get(stream::stream))

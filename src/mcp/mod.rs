@@ -27,6 +27,7 @@ use crate::principal::{Principal, Trust};
 
 mod artifacts;
 mod brain;
+mod comments;
 mod feed;
 mod identity;
 mod inbox;
@@ -53,6 +54,7 @@ impl HubServer {
                 + Self::brain_router()
                 + Self::inbox_router()
                 + Self::artifacts_router()
+                + Self::comments_router()
                 + Self::search_router()
                 + Self::identity_router(),
             state,
