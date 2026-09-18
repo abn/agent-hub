@@ -464,13 +464,13 @@ impl Store {
 const SESSION_REF: &str = "session names one session, either by session_id or \
                            by agent and name";
 
-/// Why a write never names a session.
+/// Why a write reaches only the caller's own active session.
 ///
 /// One session file has one writer. Two agents writing one working state clobber
 /// each other, and what they meant to share belongs in the project knowledge
 /// base, which is built for it.
-const SESSION_READ_ONLY: &str = "a write takes no session argument: it always goes to your own active session. \
-     Another session's brain is read-only, and knowledge to share belongs in the project store";
+const SESSION_READ_ONLY: &str =
+    "a session brain is written only through its owner's active session";
 
 /// `session` names a session brain, so it says nothing about the project store.
 const SESSION_WITH_PROJECT: &str =
@@ -488,12 +488,14 @@ fn check_session_project_id(project_id: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Refuse a `session` on a write, in the terms of the store it was aimed at.
+/// Refuse a `session` the project store cannot honour.
+///
+/// The session store checks its own argument against the active session once it
+/// has resolved it, which the project store has nothing to compare against.
 fn check_write_session(store: Store, session: Option<&SessionRef>) -> Result<()> {
     match (store, session) {
-        (_, None) => Ok(()),
-        (Store::Session, Some(_)) => Err(Error::InvalidArgument(SESSION_READ_ONLY.to_string())),
         (Store::Project, Some(_)) => Err(Error::InvalidArgument(SESSION_WITH_PROJECT.to_string())),
+        _ => Ok(()),
     }
 }
 
@@ -840,14 +842,26 @@ impl HubServer {
         principal: &Principal,
         store: Store,
         project_id: Option<&str>,
-        session: Option<&SessionRef>,
+        session_ref: Option<&SessionRef>,
     ) -> Result<Target> {
-        check_write_session(store, session)?;
+        check_write_session(store, session_ref)?;
         match store {
             Store::Session => {
                 let session = self
                     .session_target(principal, project_id, Access::Write)
                     .await?;
+                // A named session is honoured only when it is the one the
+                // caller is already writing, so one client can pass the same
+                // argument to a read and a write without branching.
+                if let Some(reference) = session_ref {
+                    let named = self.resolve_session(principal, reference, None).await?;
+                    if named.id != session.id {
+                        return Err(Error::Forbidden(format!(
+                            "{SESSION_READ_ONLY} owner={}",
+                            named.agent
+                        )));
+                    }
+                }
                 let session_id = session.id.clone();
                 // A sweep takes the same lock to remove the file, so the
                 // liveness check above is only ordered against it when it is
@@ -1117,8 +1131,7 @@ struct BrainPutParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
-    /// Refused: a session brain is written only through its owner's active
-    /// session.
+    /// The session written, which must be the caller's own active session.
     #[serde(default)]
     session: Option<SessionRef>,
 }
@@ -1145,8 +1158,7 @@ struct BrainDeleteParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
-    /// Refused: a session brain is written only through its owner's active
-    /// session.
+    /// The session written, which must be the caller's own active session.
     #[serde(default)]
     session: Option<SessionRef>,
 }

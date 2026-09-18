@@ -1375,12 +1375,12 @@ fn a_write_cannot_name_another_session() {
     );
     assert_eq!(
         error_code(&refused),
-        "invalid_argument",
+        "forbidden",
         "a write into another session is refused, got {refused}"
     );
     assert!(
-        error_message(&refused).contains("read-only"),
-        "the refusal says another session's brain is read-only, got {refused}"
+        error_message(&refused).contains("owner="),
+        "the refusal names the session's owner, got {refused}"
     );
 
     let deleted = server.call_tool(
@@ -1389,7 +1389,7 @@ fn a_write_cannot_name_another_session() {
     );
     assert_eq!(
         error_code(&deleted),
-        "invalid_argument",
+        "forbidden",
         "a delete in another session is refused, got {deleted}"
     );
 
@@ -1410,6 +1410,24 @@ fn a_write_cannot_name_another_session() {
             .join(format!("{reader_id}.db"))
             .exists(),
         "a refused write creates no brain file for the caller"
+    );
+
+    // Naming the session the caller is already writing is the caller's own
+    // active session, so a client that passes the same argument to a read and
+    // a write does not have to branch.
+    let own = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/kv/plan",
+            "content": "mine",
+            "store": "session",
+            "session": {"session_id": reader_id},
+        }),
+    );
+    assert_eq!(
+        structured(&own)["ok"],
+        true,
+        "a write naming the caller's own active session lands, got {own}"
     );
 }
 
