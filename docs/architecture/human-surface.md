@@ -75,10 +75,14 @@ reach the hub can fetch the connection details and the tool list before it has
 a token, and behind a reverse proxy it receives the public address rather than
 the internal bind.
 
-Errors are RFC 9457 problem details. The public artifact route renders the
-artifact shell; for a protected artifact the shell carries ciphertext, and
-decryption happens in the browser. A public markdown artifact is rendered to
-HTML with any raw HTML in its source escaped. Storage acts on sessions only,
+Errors are RFC 9457 problem details. The public artifact route serves a host
+shell around a sandboxed frame: the shell owns the title, theme toggle, and
+version picker, and the frame runs authored content with scripts allowed but
+no network, storage, or same-origin access. For a protected artifact the
+shell shows an unlock form and decrypts in the browser. A public markdown
+artifact renders in the page with tables, callouts, and diagrams, and any raw
+HTML in its source is escaped. Every page carries link-preview tags with a
+built-in card. Storage acts on sessions only,
 and a session prune returns an undo token valid for a short window. Deleting a
 whole project is the destructive endpoint under projects.
 
@@ -94,7 +98,7 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 | Home | Today at a glance: what waits on you, the latest feed across projects, and storage. |
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
-| Artifacts | A per-project gallery and viewer, with an unlock screen for protected artifacts. |
+| Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker. |
 | Sessions | Sessions per project, drilling into the brain tree and audit log, with end and prune actions. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind, with the reversible prune actions for sessions. |
@@ -103,11 +107,11 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 Agent and access management lives under Settings, not a tab. It lists agents
 with their trust level, creates an agent and its personal space, promotes or
 demotes it, issues or revokes its single token (shown once), and manages
-grants. The artifact viewer decrypts a protected artifact in the browser and
-renders agent-authored HTML only inside a sandboxed frame. A markdown artifact
-is rendered by the hub, with raw HTML in its source escaped, and the result is
-framed the same way; a protected markdown artifact has no server rendering, so
-its decrypted source stays plain text.
+grants. The artifact viewer embeds the artifact page: the host shell shows
+an unlock form for a protected artifact and decrypts in the browser, then
+renders HTML or rendered markdown inside the same sandboxed frame. Markdown
+renders in the page with raw HTML in its source escaped; protected markdown
+renders from the decrypted source, so the server never sees it.
 
 A session opens into a detail view that lists its brain keys and files and
 offers End and Prune. Project deletion is a destructive action under Settings
@@ -154,9 +158,10 @@ for the tokens and rules.
 - The PWA keeps the admin token in local storage, so a script running in the
   hub origin could read it. The shell is served with a strict content security
   policy, every agent-controlled field is escaped, and agent-authored HTML
-  renders only in a sandboxed frame, so there is no hub-origin script
-  injection path today. This is accepted for a single-operator node; a browser
-  cookie is not a clean fit for a static PWA that also reaches the API.
+  and rendered markdown run only in a sandboxed frame without same-origin
+  access, so there is no hub-origin script injection path today. This is
+  accepted for a single-operator node; a browser cookie is not a clean fit
+  for a static PWA that also reaches the API.
 
 ## See also
 

@@ -70,22 +70,37 @@ entry with its own title, description, label, and encryption state.
 records a `deleted` event on the feed.
 
 An unprotected artifact is served as a page at `/artifacts/<artifact_id>`,
-with `?version=N` selecting a snapshot. The page is rendered by the hub and
-framed in the PWA. The REST routes serve the same reads to the PWA:
+with `?version=N` selecting a snapshot. The page is a small host shell
+around a sandboxed frame: the shell owns the title, a light and dark theme
+toggle, and a version picker when history exists, while the frame runs the
+authored content with scripts allowed but no network, no storage, and no
+same-origin access. The PWA embeds the same page. The REST routes serve the
+same reads to the PWA:
 `GET /api/v1/artifacts/:id` (with `?version=N`) returns the metadata and
 content, and for a public markdown artifact includes a `rendered` HTML field;
 `GET /api/v1/artifacts/:id/versions` returns the history;
 `GET /api/v1/artifacts/:id/raw` returns the stored bytes as text, or a JSON
 envelope with base64 ciphertext for a protected artifact. Deletion is
-`DELETE /api/v1/artifacts/:id`.
+`DELETE /api/v1/artifacts/:id`. Every page carries link-preview tags with a
+built-in preview card.
+
+Markdown artifacts render in the page with full formatting: tables, code,
+callout quotes (`> [!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!CAUTION]`), and
+mermaid diagrams, which run from a copy of the diagram runtime the hub
+serves itself. Raw HTML in the markdown source is escaped. Authored HTML
+runs inline scripts but cannot make external requests: inline all CSS and
+JS, embed images and fonts as `data:` URIs, and keep no storage-backed
+state.
 
 ## Protection
 
 A protected artifact is encrypted in the client before upload. The server
 stores only the ciphertext and an envelope (`{alg, kdf, iterations, salt, iv}`)
-and never sees the plaintext. The viewer decrypts in the browser after the
-recipient enters the password. Share the URL and the password through
-different channels.
+and never sees the plaintext. Opening the page shows an unlock form; the
+browser decrypts with the password and renders the result inside the same
+sandboxed frame. Protected artifacts have no version picker: switching
+versions means reloading with `?version=N` and entering the password again.
+Share the URL and the password through different channels.
 
 ## Version history
 

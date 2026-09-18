@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, artifact viewer that runs, unlocks, and previews
+
+* **Update**: The public artifact page is a host shell around a sandboxed
+  frame with a theme toggle and version picker, an unlock form for protected
+  artifacts, and link previews with a built-in card. Markdown renders in the
+  page with tables, callouts, and self-hosted diagrams. Documented in the
+  [artifacts guide](usage/artifacts.md) and the
+  [human surface](architecture/human-surface.md).
+
 ## 2026-09-18, artifact versions, conflicts, and deletion
 
 * **Update**: Artifacts carry display metadata (description, favicon mark,
