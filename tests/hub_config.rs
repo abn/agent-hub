@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_hub::config::ClientConfig;
+use agent_hub::config::{ClientConfig, Config};
 
 /// A temp directory holding one config file, removed when the test ends.
 struct TempHome(PathBuf);
@@ -232,4 +232,52 @@ fn the_call_limit_defaults_and_can_be_set() {
             "{bad} should be refused"
         );
     }
+}
+
+#[test]
+fn the_active_window_defaults_to_fifteen_minutes() {
+    for unset in [None, Some(""), Some("  ")] {
+        assert_eq!(
+            Config::parse_active_window(unset).expect("parse"),
+            std::time::Duration::from_secs(900),
+            "{unset:?}"
+        );
+    }
+}
+
+#[test]
+fn the_active_window_is_read_from_the_setting() {
+    assert_eq!(
+        Config::parse_active_window(Some("60")).expect("parse"),
+        std::time::Duration::from_secs(60)
+    );
+}
+
+#[test]
+fn an_active_window_that_counts_nobody_is_rejected() {
+    for value in ["0", "-5", "fifteen", "90.5"] {
+        let err = Config::parse_active_window(Some(value)).expect_err("rejected");
+        assert!(
+            err.to_string().contains("HUB_ACTIVE_WINDOW_SECS"),
+            "the error names the variable: {err}"
+        );
+        assert!(matches!(err, agent_hub::error::Error::Config(_)), "{value}");
+    }
+}
+
+#[test]
+fn an_active_window_no_clock_can_subtract_is_rejected() {
+    for value in ["2592001", &u64::MAX.to_string()] {
+        let err = Config::parse_active_window(Some(value)).expect_err("rejected");
+        assert!(
+            err.to_string().contains("HUB_ACTIVE_WINDOW_SECS"),
+            "the error names the variable: {err}"
+        );
+        assert!(matches!(err, agent_hub::error::Error::Config(_)), "{value}");
+    }
+    assert_eq!(
+        Config::parse_active_window(Some("2592000")).expect("parse"),
+        std::time::Duration::from_secs(2_592_000),
+        "the ceiling itself is accepted"
+    );
 }

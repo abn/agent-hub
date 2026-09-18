@@ -708,11 +708,28 @@ impl HubServer {
     /// session detail screen can count what the session produced. A write into
     /// another project is not this session's work, so it carries no session.
     pub(super) async fn session_in(&self, project_id: &str) -> Option<String> {
-        let active = self.active.lock().await;
-        active
-            .as_ref()
-            .filter(|(project, _)| project == project_id)
-            .map(|(_, session_id)| session_id.clone())
+        let session_id = {
+            let active = self.active.lock().await;
+            active
+                .as_ref()
+                .filter(|(project, _)| project == project_id)
+                .map(|(_, session_id)| session_id.clone())
+        };
+        if let Some(session_id) = &session_id {
+            self.touch_activity(session_id).await;
+        }
+        session_id
+    }
+
+    /// Record that the session is still at work.
+    ///
+    /// Best effort by design. The timestamp feeds a count on a screen, so a
+    /// store that is busy must not fail the call the agent actually made, nor
+    /// make a brain read wait out the busy timeout for a write it never needed.
+    async fn touch_activity(&self, session_id: &str) {
+        if let Err(err) = self.state.activity.touch(&self.state.db, session_id).await {
+            tracing::debug!(session_id, error = %err, "could not record session activity");
+        }
     }
 
     /// The recorded active session, or a conflict when none was started.
@@ -749,6 +766,10 @@ impl HubServer {
         let (_, session_id) = self.active_session().await?;
         let session = self.live_session(&session_id).await?;
         policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
+        // Resolving a session is what a session doing work looks like: brain
+        // traffic emits no events, so without this an agent writing for an hour
+        // would fall out of the active count while it worked.
+        self.touch_activity(&session.id).await;
         // The slot remembers a session this connection started, but the session
         // may have moved since: the human ended it and another agent picked it
         // up, or the human reassigned it. One brain has one writer, so a

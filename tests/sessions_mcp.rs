@@ -1012,3 +1012,41 @@ async fn a_confined_agent_lists_only_the_sessions_it_may_read() {
         "naming a project it may not read is refused"
     );
 }
+
+/// One session's recorded last activity, as its owner's listing reports it.
+fn last_activity(agent: &Agent, session_id: &str) -> String {
+    let listed = agent.call("session_list", json!({"project_id": PROJECT}));
+    listed
+        .get("sessions")
+        .and_then(Value::as_array)
+        .expect("sessions")
+        .iter()
+        .find(|session| session["session_id"] == session_id)
+        .map(|session| text(session, "last_activity"))
+        .unwrap_or_else(|| panic!("session {session_id} is not listed: {listed}"))
+}
+
+#[tokio::test]
+async fn an_agent_that_only_posts_signals_still_counts_as_working() {
+    let fleet = Fleet::new("activity", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+
+    let started = agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "triage"}),
+    );
+    let session_id = text(&started, "session_id");
+    let at_start = last_activity(agent, &session_id);
+
+    // A triage agent that never writes a brain is still at work, so the tool
+    // it does use has to move the timestamp the active count reads.
+    agent.call(
+        "signal_append",
+        json!({"project_id": PROJECT, "kind": "signal", "summary": "watched something"}),
+    );
+    let after_signal = last_activity(agent, &session_id);
+    assert!(
+        after_signal > at_start,
+        "posting a signal is work: {at_start} then {after_signal}"
+    );
+}

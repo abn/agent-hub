@@ -21,6 +21,7 @@ fn config(trust_default: TrustDefault) -> Config {
         admin_token: Some(ADMIN_TOKEN.to_string()),
         trust_default,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
+        active_window: std::time::Duration::from_secs(900),
     }
 }
 

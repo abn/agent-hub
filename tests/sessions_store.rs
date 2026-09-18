@@ -500,3 +500,195 @@ async fn the_human_reassigns_an_active_session() {
         "the human feed shows the reassignment"
     );
 }
+
+/// A fixed instant, so the coalescing window and the active window are read
+/// against explicit times rather than a sleep.
+fn at(offset_secs: i64) -> time::OffsetDateTime {
+    time::OffsetDateTime::from_unix_timestamp(1_790_000_000).expect("a valid instant")
+        + time::Duration::seconds(offset_secs)
+}
+
+fn stamp(offset_secs: i64) -> String {
+    at(offset_secs)
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format")
+}
+
+#[tokio::test]
+async fn a_touch_is_written_once_per_coalescing_window() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let activity = sessions::Activity::new();
+
+    assert!(
+        activity
+            .touch_at(&db, &session.id, at(0))
+            .await
+            .expect("touch"),
+        "the first touch of a session is written"
+    );
+    assert!(
+        !activity
+            .touch_at(&db, &session.id, at(59))
+            .await
+            .expect("touch"),
+        "a busy agent does not turn every call into a write"
+    );
+    assert_eq!(
+        sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .expect("exists")
+            .last_activity,
+        stamp(0),
+        "the coalesced call leaves the row as the first touch wrote it"
+    );
+
+    assert!(
+        activity
+            .touch_at(&db, &session.id, at(60))
+            .await
+            .expect("touch"),
+        "once the window has passed the next call is written"
+    );
+    assert_eq!(
+        sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .expect("exists")
+            .last_activity,
+        stamp(60)
+    );
+}
+
+#[tokio::test]
+async fn a_touch_never_moves_activity_backwards() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let activity = sessions::Activity::new();
+
+    activity
+        .touch_at(&db, &session.id, at(600))
+        .await
+        .expect("touch");
+    // A second server clock reading behind the first must not undo it.
+    sessions::Activity::new()
+        .touch_at(&db, &session.id, at(60))
+        .await
+        .expect("touch");
+
+    assert_eq!(
+        sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .expect("exists")
+            .last_activity,
+        stamp(600)
+    );
+}
+
+#[tokio::test]
+async fn an_agent_is_active_while_its_session_is_inside_the_window() {
+    let db = open().await;
+    let activity = sessions::Activity::new();
+    for name in ["nightly", "backfill"] {
+        let session = sessions::start(&db, "proj", name, "agent-one")
+            .await
+            .expect("start");
+        activity
+            .touch_at(&db, &session.id, at(0))
+            .await
+            .expect("touch");
+    }
+    let other = sessions::start(&db, "proj", "nightly", "agent-two")
+        .await
+        .expect("start");
+    activity
+        .touch_at(&db, &other.id, at(0))
+        .await
+        .expect("touch");
+    let elsewhere = sessions::start(&db, "other", "nightly", "agent-three")
+        .await
+        .expect("start");
+    activity
+        .touch_at(&db, &elsewhere.id, at(0))
+        .await
+        .expect("touch");
+
+    // One second before the boundary every agent still counts, and an agent
+    // with two sessions counts once.
+    assert_eq!(
+        sessions::agents_active(&db, &stamp(-899), None)
+            .await
+            .expect("count"),
+        3
+    );
+    assert_eq!(
+        sessions::agents_active(&db, &stamp(-899), Some("proj"))
+            .await
+            .expect("count"),
+        2,
+        "a project counts the agents working in it"
+    );
+
+    // The boundary is inclusive, so a session touched exactly a window ago is
+    // still active; a second later it is not.
+    assert_eq!(
+        sessions::agents_active(&db, &stamp(0), None)
+            .await
+            .expect("count"),
+        3
+    );
+    assert_eq!(
+        sessions::agents_active(&db, &stamp(1), None)
+            .await
+            .expect("count"),
+        0,
+        "an agent drops out one window after its last call"
+    );
+}
+
+#[tokio::test]
+async fn an_ended_or_pruned_session_makes_no_agent_active() {
+    let db = open().await;
+    let activity = sessions::Activity::new();
+    let ended = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let pruned = sessions::start(&db, "proj", "scratch", "agent-two")
+        .await
+        .expect("start");
+    for session in [&ended, &pruned] {
+        activity
+            .touch_at(&db, &session.id, at(0))
+            .await
+            .expect("touch");
+    }
+    let live = sessions::start(&db, "proj", "live", "agent-three")
+        .await
+        .expect("start");
+    activity
+        .touch_at(&db, &live.id, at(0))
+        .await
+        .expect("touch");
+
+    sessions::end(&db, &ended.id, "agent-one", None)
+        .await
+        .expect("end");
+    sessions::end(&db, &pruned.id, "agent-two", None)
+        .await
+        .expect("end");
+    prune::prune_session(&db, &pruned.id).await.expect("prune");
+
+    assert_eq!(
+        sessions::agents_active(&db, &stamp(-900), None)
+            .await
+            .expect("count"),
+        1,
+        "only the agent still running a session counts"
+    );
+}

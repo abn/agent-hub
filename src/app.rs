@@ -26,6 +26,9 @@ pub struct AppState {
     pub knowledge: BrainStore,
     /// Token resolver.
     pub auth: Arc<Auth>,
+    /// When each session was last touched, so an agent at work stays counted
+    /// as active without a store write per tool call.
+    pub activity: Arc<store::sessions::Activity>,
     /// Freshness ticks for the human stream. A write that changes the inbox or
     /// feed sends one; the stream carries no data, only the nudge to refetch.
     pub ticker: tokio::sync::broadcast::Sender<()>,
@@ -63,6 +66,7 @@ impl AppState {
         let brain = BrainStore::new(config.sessions_dir());
         let knowledge = BrainStore::new(config.knowledge_dir());
         let auth = Arc::new(Auth::from_config(&config));
+        let activity = Arc::new(store::sessions::Activity::new());
         let (ticker, _) = tokio::sync::broadcast::channel(16);
         Ok(Self {
             config: Arc::new(config),
@@ -72,6 +76,7 @@ impl AppState {
             brain,
             knowledge,
             auth,
+            activity,
             ticker,
         })
     }

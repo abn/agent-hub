@@ -242,7 +242,24 @@ pub struct Config {
     pub trust_default: TrustDefault,
     /// Ceilings on the open action items an agent may leave on the human.
     pub inbox_caps: InboxCaps,
+    /// How long after its last tool call a session still counts its owner as
+    /// an agent at work.
+    pub active_window: std::time::Duration,
 }
+
+/// The default for `HUB_ACTIVE_WINDOW_SECS`. Long enough that an agent
+/// thinking between tool calls does not blink out of the count, short enough
+/// that a fleet gone quiet shows as quiet.
+const ACTIVE_WINDOW_SECS: u64 = 900;
+
+/// The largest window the setting accepts, thirty days.
+///
+/// An agent whose last call was a month ago is not at work by any reading, so
+/// nothing above this is a window an operator meant. The ceiling is also what
+/// keeps the value one a date can be stepped back by: the subtraction in
+/// [`Config::active_since`] would otherwise be handed a span no calendar
+/// covers.
+const ACTIVE_WINDOW_SECS_MAX: u64 = 30 * 24 * 60 * 60;
 
 /// The embedded tailnet endpoint configuration.
 ///
@@ -321,6 +338,9 @@ impl Config {
                 .as_deref(),
         )?;
 
+        let active_window =
+            Self::parse_active_window(std::env::var("HUB_ACTIVE_WINDOW_SECS").ok().as_deref())?;
+
         Ok(Self {
             data_dir,
             bind,
@@ -328,7 +348,48 @@ impl Config {
             admin_token,
             trust_default,
             inbox_caps,
+            active_window,
         })
+    }
+
+    /// Read the window an agent stays counted as active for.
+    ///
+    /// Takes the value rather than reading it, so the rule is testable without
+    /// mutating the process environment under the other tests.
+    pub fn parse_active_window(value: Option<&str>) -> Result<std::time::Duration> {
+        let secs = match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => ACTIVE_WINDOW_SECS,
+            Some(value) => match value.parse::<u64>() {
+                Ok(secs) if secs > 0 && secs <= ACTIVE_WINDOW_SECS_MAX => secs,
+                _ => {
+                    return Err(Error::Config(format!(
+                        "HUB_ACTIVE_WINDOW_SECS must be a whole number of seconds from 1 to {ACTIVE_WINDOW_SECS_MAX}, got '{value}'"
+                    )));
+                }
+            },
+        };
+        Ok(std::time::Duration::from_secs(secs))
+    }
+
+    /// The instant a session must have been touched since to count as active.
+    ///
+    /// The parser bounds the window, so the subtraction is in range; it is
+    /// still done checked. A read surface that panicked over a timestamp would
+    /// take Home down on every request, and a configuration this cannot
+    /// express is better served by counting nobody than by a dead screen.
+    pub fn active_since(&self) -> String {
+        let now = time::OffsetDateTime::now_utc();
+        let window = time::Duration::try_from(self.active_window).unwrap_or(time::Duration::MAX);
+        let since = now.checked_sub(window).unwrap_or_else(|| {
+            tracing::warn!(
+                window_secs = self.active_window.as_secs(),
+                "the active window reaches beyond the calendar; counting from the earliest date"
+            );
+            time::OffsetDateTime::UNIX_EPOCH
+        });
+        since
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default()
     }
 
     /// Normalise the operator's external origin.

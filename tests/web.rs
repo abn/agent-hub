@@ -48,6 +48,7 @@ async fn state_with_public_url(public_url: Option<&str>) -> AppState {
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
+        active_window: std::time::Duration::from_secs(900),
     })
     .await
     .expect("open state")

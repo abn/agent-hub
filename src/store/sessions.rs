@@ -586,6 +586,104 @@ pub async fn end(
     Ok(())
 }
 
+/// How often one session's activity timestamp reaches the store.
+///
+/// A constant, not configuration: it is the write rate, not the meaning of the
+/// number. A busy agent makes many calls a minute and every one of them
+/// resolves its session, so writing each would turn brain traffic into hub
+/// writes for a timestamp no surface reads at that resolution.
+pub const ACTIVITY_COALESCE_SECS: i64 = 60;
+
+/// What the server remembers about when each session was last touched.
+///
+/// `last_activity` on a row means activity only if something writes it while
+/// the agent works. Every tool call that resolves an active session touches it
+/// through here, and this coalesces the writes.
+#[derive(Debug, Default)]
+pub struct Activity {
+    last: std::sync::Mutex<std::collections::HashMap<String, time::OffsetDateTime>>,
+}
+
+impl Activity {
+    /// A record with nothing touched yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark a session active now.
+    pub async fn touch(&self, db: &Database, session_id: &str) -> Result<bool> {
+        self.touch_at(db, session_id, time::OffsetDateTime::now_utc())
+            .await
+    }
+
+    /// Mark a session active at a given instant, reporting whether the row was
+    /// written. Takes the instant so the coalescing window is testable without
+    /// waiting out a minute.
+    pub async fn touch_at(
+        &self,
+        db: &Database,
+        session_id: &str,
+        now: time::OffsetDateTime,
+    ) -> Result<bool> {
+        if !self.due(session_id, now) {
+            return Ok(false);
+        }
+        let stamp = now
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
+        let conn = super::connect(db)?;
+        // The guard keeps the timestamp monotonic: a server clock that reads
+        // behind an earlier touch must not move a session back out of the
+        // active window.
+        conn.execute(
+            "UPDATE sessions SET last_activity = ?1 WHERE id = ?2 AND last_activity < ?1",
+            vec![Value::Text(stamp), Value::Text(session_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+        Ok(true)
+    }
+
+    /// Whether this session's next write is due, recording it when it is.
+    fn due(&self, session_id: &str, now: time::OffsetDateTime) -> bool {
+        let mut last = match self.last.lock() {
+            Ok(last) => last,
+            // A poisoned lock means a panic while holding it. The record is a
+            // write-rate hint, so losing it costs one extra update.
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(at) = last.get(session_id)
+            && (now - *at).whole_seconds() < ACTIVITY_COALESCE_SECS
+        {
+            return false;
+        }
+        // Runs at most once per session per window, so the sweep of sessions
+        // that have gone quiet costs nothing on the hot path.
+        last.retain(|_, at| (now - *at).whole_seconds() < ACTIVITY_COALESCE_SECS * 2);
+        last.insert(session_id.to_string(), now);
+        true
+    }
+}
+
+/// How many agents are working, fleet-wide or in one project.
+///
+/// An agent is active when it owns a live session that was touched inside the
+/// window, so an agent with two sessions counts once and an agent whose token
+/// was used but which holds no session does not count at all.
+pub async fn agents_active(db: &Database, since: &str, project_id: Option<&str>) -> Result<i64> {
+    let mut sql = String::from(
+        "SELECT COUNT(DISTINCT agent) FROM sessions
+         WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1",
+    );
+    let mut params = vec![Value::Text(since.to_string())];
+    if let Some(project_id) = project_id {
+        params.push(Value::Text(project_id.to_string()));
+        sql.push_str(" AND project_id = ?2");
+    }
+    let conn = super::connect(db)?;
+    crate::store::events::count_on(&conn, &sql, params).await
+}
+
 /// Fetch one session by id.
 pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
     let conn = super::connect(db)?;
