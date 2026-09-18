@@ -71,10 +71,12 @@ fn get_with_host(uri: &str, host: &str) -> Request<Body> {
 /// The exact host shell policy from the viewer contract.
 const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// The exact frame policy from the viewer contract for one origin.
+/// The exact frame policy from the viewer contract for one origin. It
+/// carries no `frame-ancestors`: the designed viewer nests it inside the
+/// opaque host frame, which `'self'` never matches.
 fn frame_csp(origin: &str) -> String {
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src {origin} 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+        "sandbox allow-scripts; default-src 'none'; script-src {origin} 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"
     )
 }
 

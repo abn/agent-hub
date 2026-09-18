@@ -664,12 +664,19 @@ fn host_response(body: String) -> Response {
 
 /// Serve a frame document with the policy naming the request origin. The
 /// origin is built from validated host characters, so it is header-safe.
+///
+/// No `frame-ancestors` here on purpose: the designed viewer nests this
+/// route inside the opaque host frame (the app embeds the host, the host
+/// embeds this), and `'self'` never matches an opaque origin. The route
+/// serves public HTML only, always sandboxed without same-origin access
+/// and without ambient credentials, so any embedder learns nothing and
+/// reaches nothing.
 fn frame_response(body: String, origin: &str) -> Response {
     let policy = format!(
         "sandbox allow-scripts; default-src 'none'; script-src {origin} 'unsafe-inline'; \
          style-src 'unsafe-inline'; img-src data: blob:; font-src data:; \
          media-src data: blob:; connect-src 'none'; form-action 'none'; \
-         base-uri 'none'; frame-ancestors 'self'"
+         base-uri 'none'"
     );
     let mut response = Response::new(Body::from(body));
     let headers = response.headers_mut();

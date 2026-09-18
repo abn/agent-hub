@@ -97,6 +97,14 @@ fn asset(body: &'static str, content_type: &'static str) -> Response {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // Module scripts always fetch with CORS, so the artifact host page
+    // cannot load its viewer from the PWA's opaque embed without this.
+    // Nothing here needs ambient credentials: the API takes bearer tokens
+    // in headers, and no response carries per-user secrets.
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
     if content_type.starts_with("text/html") {
         // The app is same-origin with the API and loads only its own assets.
         headers.insert(

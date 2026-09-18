@@ -140,6 +140,10 @@ async fn serves_every_shell_asset_with_a_policy() {
         ("/app.js", "/artifacts/"),
         ("/app.css", "var(--"),
         ("/crypto.mjs", "export"),
+        ("/artifact-viewer.mjs", "hub-frame"),
+        ("/frame-loader.js", "postMessage"),
+        ("/vendor/marked.js", "marked"),
+        ("/vendor/mermaid.runtime.js", "mermaid"),
         ("/manifest.webmanifest", "Agent Hub"),
         ("/sw.js", "caches"),
         ("/icon.svg", "<svg"),
@@ -147,6 +151,14 @@ async fn serves_every_shell_asset_with_a_policy() {
         let app = router(state.clone());
         let response = app.oneshot(get(path, None)).await.expect("request");
         assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("*"),
+            "{path} loads cross-origin for module scripts in opaque embeds"
+        );
         assert!(text(response).await.contains(needle), "{path} content");
     }
 
