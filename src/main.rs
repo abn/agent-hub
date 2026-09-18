@@ -5,8 +5,13 @@ use agent_hub::error::{Error, Result};
 
 const USAGE: &str = "\
 usage:
-  agent-hub [serve]   serve the hub over HTTP (the default)
-  agent-hub mcp       bridge stdio MCP to the hub named by HUB_URL
+  agent-hub [serve]              serve the hub over HTTP (the default)
+  agent-hub mcp                  bridge stdio MCP to the hub named by HUB_URL
+  agent-hub call <tool> [json]   call one tool and print its JSON result
+  agent-hub tools                list the hub's tools
+
+The hub is named by HUB_URL, HUB_TOKEN and HUB_AGENT_ID, in the environment
+or in ~/.agent-hub/config (HUB_CONFIG names another file).
 ";
 
 fn main() -> ExitCode {
@@ -16,9 +21,12 @@ fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .init();
 
-    match std::env::args().nth(1).as_deref() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
         None | Some("serve") => report(serve()),
         Some("mcp") => mcp(),
+        Some("call") => call(&args[1..]),
+        Some("tools") => tools(),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -93,6 +101,105 @@ fn proxy(_client: ClientConfig) -> ExitCode {
         "agent-hub: HUB_URL names a hub to proxy to, but this binary was built without the \
          client feature"
     );
+    ExitCode::from(78)
+}
+
+/// Call one tool and print its result as JSON on stdout.
+///
+/// The arguments are a JSON object on the command line, or on stdin when the
+/// argument is `-`. A tool that takes none needs neither, so a hook calling
+/// one is not left reading a stdin the harness never closes.
+#[cfg(feature = "client")]
+fn call(args: &[String]) -> ExitCode {
+    use agent_hub::client::Failure;
+
+    let Some(tool) = args.first() else {
+        return fail(&Failure::Usage(
+            "call needs a tool name: agent-hub call <tool> [json]".to_string(),
+        ));
+    };
+    let arguments = match args.get(1).map(String::as_str) {
+        None => serde_json::json!({}),
+        Some(source) => {
+            let text = match source {
+                "-" => match std::io::read_to_string(std::io::stdin()) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        return fail(&Failure::Usage(format!("stdin could not be read: {err}")));
+                    }
+                },
+                argument => argument.to_string(),
+            };
+            match serde_json::from_str(&text) {
+                Ok(arguments) => arguments,
+                Err(err) => {
+                    return fail(&Failure::Usage(format!(
+                        "the tool arguments are not JSON: {err}"
+                    )));
+                }
+            }
+        }
+    };
+
+    let (config, runtime) = match client_runtime() {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    emit(runtime.block_on(agent_hub::client::call(&config, tool, arguments)))
+}
+
+/// List the hub's tools and their descriptions.
+#[cfg(feature = "client")]
+fn tools() -> ExitCode {
+    let (config, runtime) = match client_runtime() {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    emit(runtime.block_on(agent_hub::client::tools(&config)))
+}
+
+/// The client settings and a runtime, or the code that says why not.
+#[cfg(feature = "client")]
+fn client_runtime() -> std::result::Result<(ClientConfig, tokio::runtime::Runtime), ExitCode> {
+    let config = ClientConfig::from_env().map_err(|err| {
+        eprintln!("agent-hub: {err}");
+        ExitCode::from(78)
+    })?;
+    let runtime = runtime().map_err(|err| report(Err(err)))?;
+    Ok((config, runtime))
+}
+
+/// Print one JSON object on stdout, or report the failure on stderr.
+#[cfg(feature = "client")]
+fn emit(result: std::result::Result<serde_json::Value, agent_hub::client::Failure>) -> ExitCode {
+    match result {
+        Ok(value) => {
+            println!("{value}");
+            ExitCode::SUCCESS
+        }
+        Err(failure) => fail(&failure),
+    }
+}
+
+#[cfg(feature = "client")]
+fn fail(failure: &agent_hub::client::Failure) -> ExitCode {
+    failure.report();
+    ExitCode::from(failure.exit_code())
+}
+
+#[cfg(not(feature = "client"))]
+fn call(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn tools() -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn without_client() -> ExitCode {
+    eprintln!("agent-hub: this binary was built without the client feature");
     ExitCode::from(78)
 }
 

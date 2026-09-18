@@ -116,17 +116,35 @@ pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient,
 
 /// Classify a failed handshake.
 ///
-/// The transport reports a rejected token as an HTTP status inside an opaque
-/// client error, so the status text is what there is to read; everything else
-/// is the hub being out of reach.
+/// The transport has no typed status to offer, but it folds the hub's own
+/// response body into its error text, so a refusal the hub explained comes
+/// back as the hub's object. Anything else is the hub being out of reach.
 fn connect_failure(endpoint: &str, message: &str) -> Failure {
+    if let Some((code, error)) = embedded_error(message)
+        && matches!(code.as_str(), "unauthenticated" | "forbidden")
+    {
+        return Failure::Denied(error);
+    }
     if message.contains("401 Unauthorized") || message.contains("403 Forbidden") {
         return Failure::Denied(error_object(
             "unauthenticated",
-            &format!("{endpoint} rejected the token"),
+            &format!("{endpoint} refused the token"),
         ));
     }
     Failure::Unavailable(format!("{endpoint} is unreachable: {message}"))
+}
+
+/// The hub's error object inside a transport error's text, with its code.
+fn embedded_error(message: &str) -> Option<(String, Value)> {
+    let start = message.find('{')?;
+    // The body is followed by the transport's own words, so the parse reads
+    // one value and leaves the rest.
+    let error: Value = serde_json::Deserializer::from_str(&message[start..])
+        .into_iter()
+        .next()?
+        .ok()?;
+    let code = error.get("error")?.get("code")?.as_str()?.to_string();
+    Some((code, error))
 }
 
 /// Call one tool and return its result as JSON.
@@ -137,20 +155,42 @@ pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result
         ));
     };
     let hub = connect(config).await?;
-    let result = hub
-        .peer()
-        .call_tool(CallToolRequestParams::new(tool.to_string()).with_arguments(arguments))
-        .await
-        .map_err(tool_failure)?;
+    let result = within(
+        config,
+        hub.peer()
+            .call_tool(CallToolRequestParams::new(tool.to_string()).with_arguments(arguments)),
+    )
+    .await?
+    .map_err(tool_failure)?;
+    // The hub's own refusals arrive as protocol errors, handled above. What is
+    // left is a result flagged as an error, which is how the protocol reports
+    // arguments it could not read. It is a failure like any other: a hook
+    // reads only stdout and the exit code, so it must see neither as success.
+    let rejected = result.is_error == Some(true);
     let value = result_json(result);
     hub.cancel().await.ok();
+    if rejected {
+        let error = match value.get("error") {
+            Some(_) => value,
+            None => error_object(
+                "invalid_argument",
+                value
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ),
+        };
+        return Err(Failure::Tool(error));
+    }
     Ok(value)
 }
 
 /// List the hub's tools, as name and description pairs.
 pub async fn tools(config: &ClientConfig) -> Result<Value, Failure> {
     let hub = connect(config).await?;
-    let tools = hub.peer().list_all_tools().await.map_err(tool_failure)?;
+    let tools = within(config, hub.peer().list_all_tools())
+        .await?
+        .map_err(tool_failure)?;
     let listed: Vec<Value> = tools
         .into_iter()
         .map(|tool| {
@@ -162,6 +202,21 @@ pub async fn tools(config: &ClientConfig) -> Result<Value, Failure> {
         .collect();
     hub.cancel().await.ok();
     Ok(json!({ "tools": listed }))
+}
+
+/// Bound one request by the configured limit.
+///
+/// The transport only times out its own control traffic, so without this a
+/// hub that accepts the call and never answers holds a hook open for good.
+async fn within<T>(config: &ClientConfig, request: impl Future<Output = T>) -> Result<T, Failure> {
+    tokio::time::timeout(config.timeout, request)
+        .await
+        .map_err(|_| {
+            Failure::Unavailable(format!(
+                "the hub did not answer within {} seconds",
+                config.timeout.as_secs_f64()
+            ))
+        })
 }
 
 /// The JSON a caller wanted: the structured result, or the text the tool sent.
