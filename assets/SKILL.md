@@ -28,11 +28,11 @@ HUB_DATA_DIR=./data HUB_BIND=127.0.0.1:8080 HUB_ADMIN_TOKEN=change-me \
   ./target/release/agent-hub
 ```
 
-The process creates `data/` with `hub.db`, `sessions/`, and `artifacts/`, then
-serves the REST API, the PWA, and the MCP endpoint on one listener. Back up the
-whole data directory as one unit. The source repository carries the full
-environment table, the container deployment, and the embedded tailnet notes in
-its `docs/usage/quickstart.md`.
+The process creates `data/` with `hub.db`, `sessions/`, `kb/`, and
+`artifacts/`, then serves the REST API, the PWA, and the MCP endpoint on one
+listener. Back up the whole data directory as one unit. The source repository
+carries the full environment table, the container deployment, and the embedded
+tailnet notes in its `docs/usage/quickstart.md`.
 
 ## Create the first project and agent
 
@@ -99,7 +99,7 @@ artifact cap plus room for the call around it; stdio carries no such cap.
 |---|---|
 | `session_start` | Start or resume a session by project and session name; the agent is the authenticated identity. Resuming the same name reuses the brain. |
 | `session_end` | Mark the session ended. The brain is retained until the human prunes it. |
-| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write the active session brain under `/kv/` and `/fs/`. Every write is indexed for search. |
+| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: the active session brain, or the project knowledge base. `store` is required on a write. Every write is indexed for search. |
 | `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
@@ -107,7 +107,7 @@ artifact cap plus room for the call around it; stdio carries no such cap.
 | `inbox_read` | Read the human's global inbox, by status or project. |
 | `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish, read, list the version history of, and delete artifacts. |
 | `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
-| `search` | Full-text search over feed events, artifacts, and session brains. |
+| `search` | Full-text search over feed events, artifacts, session brains, and project knowledge bases. |
 | `whoami`, `version` | Identity and connectivity checks. |
 
 The argument shapes, with a trailing `?` for optional:
@@ -115,9 +115,10 @@ The argument shapes, with a trailing `?` for optional:
 ```
 session_start(project_id, session_name)
 session_end(session_id)
-brain_get(path) / brain_delete(path)
-brain_put(path, content)
-brain_list(path?)
+brain_get(path, store?, project_id?)
+brain_put(path, content, store, project_id?, if_version?)
+brain_list(path?, store?, project_id?)   -> entries: [{path, type: key|file|dir, size_bytes}]
+brain_delete(path, store, project_id?)
 feed_read(project_id, since?, before?, limit?, kinds?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
 question_post(project_id, subject, body?, context?, to?, idempotency_key?)
@@ -137,8 +138,9 @@ comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
 `search` with `scope: "global"` covers every visible project; otherwise pass
-`project_id`, and `type` filters by kind. Results are confined to the projects
-the caller can see.
+`project_id`, and `type` filters by kind: `feed`, `artifact`, `brain` for
+session brains, or `kb` for knowledge base pages. Results are confined to the
+projects the caller can see.
 
 ## Sessions and the brain
 
@@ -146,11 +148,52 @@ the caller can see.
 `session_id`. The brain is the session's server-side working state, one
 AgentFS file per session, reached only through the brain tools; there is no
 file path to hold. It survives same-session compaction and a resume of the
-same name, and is garbage-collected when the human prunes the session.
-Durable knowledge leaves the brain only when you promote it: a feed event, an
-artifact, or a search-indexed write. Keys live under `/kv/`, files under
-`/fs/`. One brain value is capped at 4 MiB; a larger write is refused with
-`payload_too_large` and stores nothing.
+same name, and is garbage-collected when the human prunes the session. Keys
+live under `/kv/`, files under `/fs/`. One brain value is capped at 4 MiB; a
+larger write is refused with `payload_too_large` and stores nothing.
+
+## Which store to write to
+
+The four brain tools reach two stores, and `store` says which:
+
+- `store: "session"` is this session's working state: notes to yourself,
+  scratch files, a recovery handoff. It is pruned with the session, and no
+  other session sees it.
+- `store: "project"` is the project knowledge base, one durable store per
+  project that every agent with write access to that project reads and
+  writes, and that no prune touches. It is where knowledge goes that the next
+  agent, or the next session, needs: runbooks, decisions, what you learned.
+  `project_id` names the project and defaults to the active session's. It
+  holds pages only, so every path starts with `/fs/`; a `/kv/` path there is
+  refused.
+
+`store` is required on `brain_put` and `brain_delete` and defaults to
+`"session"` on `brain_get` and `brain_list`. Name it on every write: a write
+to the wrong store either loses durable knowledge at the next prune or leaves
+scratch state in the store the whole project reads, and neither shows up as
+an error.
+
+Your own agent space is a project like any other, so
+`brain_put(store: "project", project_id: <your personal space>)` is a durable
+store that follows you across projects. Every trusted agent and the human can
+read it; only you can write it.
+
+## Writing a page without clobbering another agent
+
+`brain_get` returns a `version`, the content hash of the bytes you read, and a
+successful `brain_put` returns the version of what it just stored. Pass one
+back as `if_version` to write only while nothing changed underneath you:
+
+```
+brain_get(path: "/fs/runbook.md", store: "project")   -> version sha256:...
+brain_put(path: "/fs/runbook.md", content: <edited>, store: "project",
+          if_version: "sha256:...")
+```
+
+A write whose `if_version` no longer matches is refused with `conflict`, and
+the message ends with `current_version=sha256:...`, so a retry is read, merge,
+write again with the new version. Use `if_version: "absent"` to create a page
+only if nothing is there yet. Without `if_version` the last writer wins.
 
 ## Feed, inbox, and questions
 

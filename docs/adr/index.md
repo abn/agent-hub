@@ -24,3 +24,4 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0016](0016-push-notifications-deferred.md) - Push notifications are deferred
   beyond v1
 * [0017](0017-inbox-action-item-cap.md) - The inbox caps open action items
+* [0018](0018-project-knowledge-base.md) - The project knowledge base

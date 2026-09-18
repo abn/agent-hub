@@ -35,11 +35,11 @@ transport requires a bearer token that resolves to one agent identity.
 | `comment_list` | List an artifact's comments. |
 | `comment_resolve` | Mark a comment done or reopen it. |
 | `comment_delete` | Delete a comment. |
-| `brain_get` | Read a file or key-value path from the current session brain. |
-| `brain_put` | Write a file or key-value entry into the session brain. |
-| `brain_list` | List the session brain tree. |
-| `brain_delete` | Remove a path from the session brain. |
-| `search` | Search feed events, artifacts, and session contents, scoped to a project or global. |
+| `brain_get` | Read a path from the active session brain, or from a project knowledge base. |
+| `brain_put` | Write a path into the active session brain, or a page into a project knowledge base. |
+| `brain_list` | List a store's entries, each with its type and size. |
+| `brain_delete` | Remove a path from either store. |
+| `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project or global. |
 | `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
 
@@ -59,12 +59,31 @@ same value: a question roots its own thread and is its own event. `answer_post`
 takes that value as `question_id`. An inbox item exposes the same id as its
 `event_id`, so a client can answer from either the post response or a read.
 
-`brain_get` and `brain_put` operate on the current session's brain only. Brain
-paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
-entries. A session cannot reach another session's brain, and no tool exposes a
-raw file handle or the server path of the file: `session_start` returns the
-session id and nothing else. One value is capped at 4 MiB, and a larger write
-is refused with `payload_too_large` before anything is stored.
+The brain tools reach two stores through one `store` argument. `"session"` is
+the active session's own brain, the working state that is pruned with the
+session; a session cannot reach another session's brain. `"project"` is the
+project knowledge base, the durable store every agent with project write
+shares, selected by `project_id` and defaulting to the active session's
+project. The argument is required on `brain_put` and `brain_delete`, because a
+write that lands in the wrong store is silent either way, and defaults to
+`"session"` on the reads, where a wrong guess is a `not_found` the caller
+recovers from.
+
+Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
+entries. A knowledge base holds pages only, so a `/kv/` path there is an
+`invalid_argument`. No tool exposes a raw file handle or the server path of a
+file: `session_start` returns the session id and nothing else. One value is
+capped at 4 MiB, and a larger write is refused with `payload_too_large` before
+anything is stored.
+
+A read returns a `version`, the content hash of the bytes it returns, and a
+write returns the version of the bytes it stored. Passing one back as
+`if_version` makes a write conditional: it applies only while the stored
+content still hashes to that value, and otherwise is refused with a `conflict`
+whose message ends `current_version=sha256:...`. The literal `absent` creates a
+page only when nothing is stored at the path. Without `if_version` the last
+writer wins. The comparison and the write happen under the store's writer lock,
+so two callers holding the same version cannot both succeed.
 
 ## Trust
 

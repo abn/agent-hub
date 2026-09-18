@@ -16,10 +16,11 @@ contract; this file is the operating detail behind it.
 ## Storage and engines
 
 - One engine everywhere: the Turso Database Rust engine backs the hub event
-  store, per-session AgentFS files, and artifact storage. Do not introduce a
+  store, the per-session and per-project AgentFS files, and artifact storage. Do not introduce a
   second engine, and do not fall back to SQLite C bindings or libSQL.
 - The hub wraps AgentFS rather than reimplementing it. Keep exactly one writer
-  per session file at the process boundary; agents reach state over MCP only.
+  per file at the process boundary, for a session brain and for a project
+  knowledge base alike; agents reach state over MCP only.
 - Schema migrations run in single-writer mode. Do not run DDL inside a
   concurrent write transaction.
 - The storage facade exists for testing and portability hygiene, not as
@@ -28,7 +29,8 @@ contract; this file is the operating detail behind it.
 ## Retention
 
 - No automatic expiry ships in v1. The human prunes through the PWA.
-- Retention is per layer (feed events, session brains, artifacts). Carry the
+- Retention is per layer (feed events, session brains, artifacts). A project
+  knowledge base is outside session life and prune never touches it. Carry the
   timestamps and hints the later layers need in the schema, but do not ship a
   policy the human has not asked for.
 

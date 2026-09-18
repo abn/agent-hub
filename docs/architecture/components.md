@@ -22,18 +22,18 @@ One Rust process serves three client-facing endpoints over a shared core:
 - the **core**, which owns the event store, authentication and authorization,
   and search.
 
-The AgentFS wrapper sits between the core and the session files. It holds one
-write handle per active session, so writes to a given session file are
-serialised by construction and cross-session conflicts are structurally
-impossible. The hub event store runs under the engine's concurrent journal
+The AgentFS wrapper sits between the core and the AgentFS files, one per
+session and one per project. It holds one write handle per file, so writes to a
+given file are serialised by construction and cross-session conflicts are
+structurally impossible. The hub event store runs under the engine's concurrent journal
 mode. The wrapper is also the single place that writes the search index, on
 every change it makes.
 
 ## Boundaries
 
 - **Agents never touch files.** An agent speaks MCP to the wrapper, which is
-  the single writer for a session file. There is no path by which an agent
-  opens a brain file directly.
+  the single writer for a file, a session brain and a project knowledge base
+  alike. There is no path by which an agent opens one directly.
 - **The wrapper is the only AgentFS caller.** No other component embeds or
   reimplements AgentFS; the hub wraps it. The SDK is vendored so its engine
   matches the hub's single pinned engine.

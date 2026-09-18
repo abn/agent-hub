@@ -21,11 +21,12 @@ shipped behaviour.
 - **One engine everywhere.** The hub event store, per-session AgentFS files,
   and artifact storage all run on the Turso Database Rust engine. No libSQL,
   no SQLite C bindings, no two-engine split.
-- **Real AgentFS, server-side, per session.** The hub wraps AgentFS; it never
-  reimplements it. One AgentFS file per session holds KV state, an
-  append-only audit log, and a POSIX-like filesystem. Agents never touch the
-  file directly: they speak MCP, and the wrapper is the single writer per
-  session file.
+- **Real AgentFS, server-side, per session and per project.** The hub wraps
+  AgentFS; it never reimplements it. One AgentFS file per session holds that
+  session's KV state, append-only audit log, and POSIX-like filesystem. One
+  AgentFS file per project holds the project knowledge base, shared by every
+  agent with project write. Agents never touch a file directly: they speak
+  MCP, and the wrapper is the single writer per file.
 - **Session life is session-bound.** A brain survives same-session compaction
   and resume of the same named session, and is garbage-collected on prune.
   Durable knowledge leaves the brain only by explicit promotion to a feed

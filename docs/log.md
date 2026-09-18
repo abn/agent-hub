@@ -4,6 +4,29 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a durable knowledge base per project
+
+* **Update**: The brain tools now reach two stores. `store: "session"` is the
+  session's working state as before; `store: "project"` is a durable knowledge
+  base, one per project, that every agent with project write shares and that
+  no prune touches. `store` is required on a write and defaults to `"session"`
+  on a read. Documented in the [agent surface](architecture/agent-surface.md),
+  the [data model](architecture/data-model.md), the served skill contract, and
+  [decision 0018](adr/0018-project-knowledge-base.md).
+* **Update**: A read returns a `version`, the content hash of what it read, and
+  a write accepts it back as `if_version` so a page is written only while
+  nothing changed underneath. `absent` creates a page that does not exist yet.
+  A mismatch is a `conflict` whose message ends `current_version=sha256:...`.
+* **Update**: The AgentFS invariant in the contract now reads "per session and
+  per project": one file per session and one per project, both behind the one
+  wrapper that is the single writer per file.
+* **Update**: A listing entry is now an object with its path, its type and its
+  size rather than a bare path, and knowledge base pages are searchable as the
+  `kb` family. Storage usage reports a project's knowledge base bytes, which
+  are never prunable.
+* **Note**: Deleting a project removes its knowledge base with everything else
+  it owns. That is the only thing that removes one.
+
 ## 2026-09-18, what the artifact cap promises over HTTP
 
 * **Note**: The served skill contract no longer reads as if 50 MiB of content

@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Data model
-description: The hub store tables and the per-session brain file.
+description: The hub store tables, the session brain files, and the project knowledge bases.
 tags: [architecture, data-model, schema]
 status: draft
 ---
@@ -10,7 +10,8 @@ status: draft
 
 The hub keeps two kinds of durable state: the hub store, one database for
 projects, events, artifact metadata, inbox status, and session metadata; and
-the per-session brain files. Both run on the same engine.
+the AgentFS files, one per session and one per project. All of them run on the
+same engine.
 
 ## Hub store
 
@@ -29,7 +30,7 @@ inbox, which is global.
 | `agents` | Agent identity, display name, trust level (`trusted` or `untrusted`), and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
 | `grants` | An agent, a project, and read or write access, for opening a project to an untrusted agent. |
-| `search_docs` | The search corpus: one row per indexed document (feed, artifact, or brain path) with a full-text index over title and body. |
+| `search_docs` | The search corpus: one row per indexed document (feed, artifact, session brain path, or knowledge base page) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable
 lookups cheap. Indexes support paging a project feed newest first and
@@ -84,14 +85,39 @@ Durable knowledge leaves it only by explicit promotion.
 A recovery handoff document is a convention on a well-known path inside the
 brain, not a separate subsystem.
 
-## Multi-writer sessions
+## Project knowledge base
+
+There is one AgentFS file per project, beside the session files rather than
+under them, holding that project's knowledge base. It is the same file format
+behind the same wrapper and the same single-writer lock, so it needs no store,
+no table and no locking of its own. It holds pages only, under `/fs/`, and
+carries no key-value namespace: a knowledge base is content with a shape, not a
+second scratch store.
+
+Its life is the project's, not a session's. No prune reaches it, and it is
+removed only when the project is deleted, together with its pages' search rows.
+Pages are indexed as their own corpus family, so a search can ask the shared
+knowledge base a question without every session brain answering first.
+
+Every agent with write access to the project may write every page, which is
+what a shared store means. A write can carry the version it is based on, a
+content hash of the bytes the writer read, and the hub applies it only while
+the stored content still hashes to that value; the comparison and the write
+happen under the same writer lock, so two writers holding one version cannot
+both win. An agent's personal space is a project, so it gets a knowledge base
+like any other: a durable store the agent alone writes, and every trusted agent
+and the human can read.
+
+## Multi-writer stores
 
 When several agents share one named session, they still write through the
-wrapper. The hub process is the single writer per session file, so it
-serialises writers with a per-session lock; writers to distinct sessions never
-block each other. Optimistic locking is not used in v1 because it needs a
-version column the store does not carry and a multi-process model the hub does
-not have; a version column is reserved for later.
+wrapper. The hub process is the single writer per file, so it serialises
+writers with a per-file lock; writers to distinct files never block each other.
+The same lock orders the many writers a project knowledge base has by design,
+and carries its compare-and-set. No version column is used for this: the token
+is a hash of the content itself, so it cannot drift from what it describes. A
+reserved version column in the session schema is left for a future
+multi-process model and nothing depends on it.
 
 ## See also
 
