@@ -55,6 +55,7 @@ fn config() -> Config {
     Config {
         data_dir: PathBuf::from("/tmp/agent-hub-tailnet-test"),
         bind: "127.0.0.1:0".parse::<SocketAddr>().expect("address"),
+        public_url: None,
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),

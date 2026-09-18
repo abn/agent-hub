@@ -22,6 +22,10 @@ const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 
 async fn state() -> AppState {
+    state_with_public_url(None).await
+}
+
+async fn state_with_public_url(public_url: Option<&str>) -> AppState {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
@@ -34,6 +38,7 @@ async fn state() -> AppState {
     AppState::open(Config {
         data_dir: dir,
         bind: "127.0.0.1:0".parse().expect("addr"),
+        public_url: public_url.map(str::to_string),
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
@@ -395,6 +400,28 @@ async fn the_skill_prefers_forwarded_headers() {
     assert!(
         !body.contains("https://internal") && !body.contains("http://internal"),
         "the internal host is not exposed"
+    );
+}
+
+#[tokio::test]
+async fn the_skill_prefers_the_configured_public_url() {
+    let app = router(state_with_public_url(Some("https://hub.example")).await);
+    let request = Request::builder()
+        .uri("/SKILL.md")
+        .method("GET")
+        .header("host", "internal:8080")
+        .header("x-forwarded-host", "other.example")
+        .body(Body::empty())
+        .expect("request");
+    let response = app.oneshot(request).await.expect("request");
+    let body = text(response).await;
+    assert!(
+        body.contains("https://hub.example"),
+        "the configured origin wins over every header"
+    );
+    assert!(
+        !body.contains("internal:8080") && !body.contains("other.example"),
+        "no request header reaches the document"
     );
 }
 

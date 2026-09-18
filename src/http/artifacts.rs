@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
+use crate::http::origin::request_origin;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
@@ -471,7 +472,7 @@ pub async fn host(
     };
     let shown = query.version.unwrap_or(artifact.version);
     let pinned = query.version.is_some();
-    let origin = request_origin(&state, &headers);
+    let origin = request_origin(&state.config, &headers);
 
     let document = if artifact.protected {
         // The stored bytes are the client's base64 ciphertext text; they
@@ -545,7 +546,7 @@ pub async fn frame(
         _ => "light",
     };
     let content = String::from_utf8_lossy(&bytes);
-    let origin = request_origin(&state, &headers);
+    let origin = request_origin(&state.config, &headers);
     Ok(frame_response(
         frame_document(&artifact.title, &content, theme),
         &origin,
@@ -578,55 +579,6 @@ pub async fn og_svg(
 /// The host shell policy: scripts only from the hub origin, no network, the
 /// artifact frame only from the hub origin, no inline scripts.
 const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
-
-/// The hub origin as the caller reached it, for the frame policy and the
-/// absolute preview URLs. Mirrors the scheme and host logic of the skill
-/// route: the forwarded scheme and host win, then the request host, then the
-/// configured bind.
-fn request_origin(state: &AppState, headers: &HeaderMap) -> String {
-    let scheme = match first_header_value(headers, "x-forwarded-proto").as_deref() {
-        Some(value) if value.eq_ignore_ascii_case("https") => "https",
-        _ => "http",
-    };
-    let host = first_header_value(headers, "x-forwarded-host")
-        .filter(|value| is_safe_host(value))
-        .or_else(|| first_header_value(headers, "host").filter(|value| is_safe_host(value)))
-        .unwrap_or_else(|| fallback_authority(state.config.bind));
-    format!("{scheme}://{host}")
-}
-
-/// The authority to use when no request host is available. An unspecified
-/// bind such as `0.0.0.0:8080` is not a usable URL, so it becomes loopback on
-/// the same port.
-fn fallback_authority(bind: std::net::SocketAddr) -> String {
-    if bind.ip().is_unspecified() {
-        format!("localhost:{}", bind.port())
-    } else {
-        bind.to_string()
-    }
-}
-
-/// The first value of a possibly comma-separated header.
-fn first_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-/// Whether a host is safe to echo into a document. The value lands in a URL
-/// in served HTML, so it is restricted to the characters a host and optional
-/// port can contain.
-fn is_safe_host(host: &str) -> bool {
-    !host.is_empty()
-        && host.len() <= 255
-        && host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-}
 
 fn host_response(body: String) -> Response {
     let mut response = Response::new(Body::from(body));

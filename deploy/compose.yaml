@@ -7,6 +7,10 @@ services:
       HUB_DATA_DIR: /data
       HUB_BIND: 0.0.0.0:8080
       HUB_ADMIN_TOKEN: ${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in the environment or a .env file}
+      # Behind a reverse proxy that rewrites the host, name the address callers
+      # use, so the artifact frame policy, the link previews, and the served
+      # skill all point at it:
+      # HUB_PUBLIC_URL: https://hub.example
     ports:
       - "8080:8080"
     volumes:

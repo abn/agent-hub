@@ -27,6 +27,7 @@ async fn state() -> AppState {
     AppState::open(Config {
         data_dir: dir,
         bind: "127.0.0.1:0".parse().expect("addr"),
+        public_url: None,
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),

@@ -38,6 +38,7 @@ The binary reads its configuration from the environment.
 |---|---|---|
 | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
 | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
+| `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
 | `HUB_AGENT_ID` | `local` | Actor label recorded for the stdio admin process, effective only with `mcp` |
 | `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
@@ -46,6 +47,15 @@ The binary reads its configuration from the environment.
 | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
+
+Without `HUB_PUBLIC_URL` the hub reads its own address off each request: the
+forwarded scheme and host, then the request host, then the bind. Set it when a
+reverse proxy rewrites the host to the upstream address, since the address the
+hub then sees is not the one callers use. It takes a bare origin, scheme and
+host with an optional port and no path, and a bad value fails startup. The
+value is what the artifact frame policy names, what a shared artifact link
+carries in its preview tags, and what `GET /SKILL.md` hands a bootstrapping
+agent.
 
 The embedded tailnet endpoint is experimental and needs a binary built with
 the `tailnet` feature (`cargo build --features tailnet`). Setting `HUB_TAILNET`

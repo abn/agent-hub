@@ -24,6 +24,10 @@ const PLAINTEXT: &str = "plaintext-should-never-appear";
 static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
 async fn state() -> AppState {
+    state_with_public_url(None).await
+}
+
+async fn state_with_public_url(public_url: Option<&str>) -> AppState {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before epoch")
@@ -36,6 +40,7 @@ async fn state() -> AppState {
     AppState::open(Config {
         data_dir: dir,
         bind: "127.0.0.1:0".parse().expect("socket address"),
+        public_url: public_url.map(str::to_string),
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
@@ -658,6 +663,54 @@ async fn frame_names_a_safe_spoofed_origin_and_rejects_a_hostile_one() {
     assert!(
         policy.contains("script-src http://127.0.0.1:0 "),
         "a hostile host falls back to the bind: {policy}"
+    );
+}
+
+#[tokio::test]
+async fn a_configured_public_url_wins_over_the_request_origin() {
+    use axum::http::HeaderName;
+    let state = state_with_public_url(Some("https://hub.example")).await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let forwarded = HeaderName::from_static("x-forwarded-host");
+    let app = router(state.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/artifacts/{id}/frame"))
+                .header(header::HOST, "internal:8080")
+                .header(forwarded, "other.example")
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        csp(&response),
+        frame_csp("https://hub.example"),
+        "the configured origin names the frame policy, no header reaches it"
+    );
+
+    let app = router(state);
+    let response = app
+        .oneshot(get_with_host(&format!("/artifacts/{id}"), "internal:8080"))
+        .await
+        .expect("request");
+    let body = text_body(response).await;
+    assert!(
+        body.contains(&format!(
+            "<meta property=\"og:url\" content=\"https://hub.example/artifacts/{id}\">"
+        )),
+        "the preview link is the configured origin"
+    );
+    assert!(
+        body.contains(&format!("https://hub.example/artifacts/{id}/og.svg")),
+        "the preview image is the configured origin"
+    );
+    assert!(
+        !body.contains("internal:8080"),
+        "the bind host is not shown"
     );
 }
 

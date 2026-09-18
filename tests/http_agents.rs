@@ -27,6 +27,7 @@ async fn state_with(trust_default: TrustDefault) -> AppState {
     AppState::open(Config {
         data_dir: dir,
         bind: "127.0.0.1:0".parse().expect("socket address"),
+        public_url: None,
         admin_token: Some("token".to_string()),
         trust_default,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),

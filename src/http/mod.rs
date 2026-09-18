@@ -19,6 +19,7 @@ pub mod artifacts;
 pub mod auth;
 pub mod feed;
 pub mod inbox;
+pub mod origin;
 pub mod problem;
 pub mod projects;
 pub mod search;

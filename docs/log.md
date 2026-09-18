@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, an external origin the operator can set
+
+* **Update**: `HUB_PUBLIC_URL` names the address callers reach the hub at.
+  When set it is what the artifact frame policy, the artifact link previews,
+  and the served bootstrap skill all use, instead of the address derived from
+  the request headers and the bind. Documented in the
+  [quickstart](usage/quickstart.md) with the other environment keys.
+
 ## 2026-09-18, the identity trail is the human's to read
 
 * **Update**: Identity audit events stay out of the search corpus, and an
