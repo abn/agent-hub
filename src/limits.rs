@@ -34,8 +34,11 @@ pub const BRAIN_VALUE_BYTES_MAX: usize = REQUEST_BODY_BYTES_MAX;
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
-/// Maximum rows a confined search reads before it stops, bounding the scan
-/// while still reaching deeper than a page of visible hits.
+/// Maximum search page size.
+pub const SEARCH_LIMIT_MAX: i64 = 100;
+
+/// Maximum rows a filtered search reads before it stops, bounding the scan
+/// while still reaching far past a page of matching hits.
 pub const SEARCH_FETCH_MAX: i64 = 5000;
 
 /// Default feed page size.

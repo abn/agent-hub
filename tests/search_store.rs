@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agent_hub::error::ErrorCode;
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{NewEvent, append};
-use agent_hub::store::search::{self, SearchQuery};
+use agent_hub::store::search::{self, SearchDoc, SearchQuery};
 use agent_hub::store::{migrate, open_engine};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -193,4 +193,191 @@ async fn ranking_prefers_the_higher_term_frequency() {
         "the higher-scoring document ranks first, got {:?}",
         hits[0].snippet
     );
+}
+
+/// Fill the corpus with documents that outrank everything the test cares
+/// about, so the wanted document sits far below any ranked prefix.
+async fn bury(db: &turso::Database, project_id: &str, kind: &str, count: usize) {
+    let conn = db.connect().expect("connect");
+    for index in 0..count {
+        let doc_id = format!("noise:{project_id}:{kind}:{index}");
+        search::index_doc(
+            &conn,
+            SearchDoc {
+                doc_id: &doc_id,
+                project_id,
+                kind,
+                ref_id: &doc_id,
+                session_id: None,
+                title: Some("noise"),
+                body: "needle needle needle needle needle",
+                updated_at: "2026-09-18T00:00:00Z",
+            },
+        )
+        .await
+        .expect("index noise");
+    }
+}
+
+async fn plant(db: &turso::Database, doc_id: &str, project_id: &str, kind: &str, body: &str) {
+    let conn = db.connect().expect("connect");
+    search::index_doc(
+        &conn,
+        SearchDoc {
+            doc_id,
+            project_id,
+            kind,
+            ref_id: doc_id,
+            session_id: None,
+            title: Some("wanted"),
+            body,
+            updated_at: "2026-09-18T00:00:00Z",
+        },
+    )
+    .await
+    .expect("index wanted");
+}
+
+#[tokio::test]
+async fn a_project_scope_reaches_below_the_ranked_prefix() {
+    let dir = temp_dir("search-scope-deep");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 600).await;
+    plant(&db, "wanted", "quiet", "feed", "needle").await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: Some("quiet".to_string()),
+            kind: None,
+            limit: 50,
+        },
+    )
+    .await
+    .expect("scoped search");
+    assert_eq!(hits.len(), 1, "the scoped project's only match is returned");
+    assert_eq!(hits[0].doc_id, "wanted");
+}
+
+#[tokio::test]
+async fn a_type_scope_reaches_below_the_ranked_prefix() {
+    let dir = temp_dir("search-type-deep");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 600).await;
+    plant(&db, "wanted", "noisy", "brain", "needle").await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: Some("brain".to_string()),
+            limit: 50,
+        },
+    )
+    .await
+    .expect("scoped search");
+    assert_eq!(hits.len(), 1, "the scoped family's only match is returned");
+    assert_eq!(hits[0].doc_id, "wanted");
+}
+
+/// Index three documents of rising relevance in rising order, so the wanted
+/// ranking is the exact reverse of the write order. A ranking that has
+/// silently collapsed to a constant score keeps the write order and fails.
+async fn plant_rising(db: &turso::Database, project_id: &str, kind: &str) {
+    plant(db, "third", project_id, kind, "needle").await;
+    plant(db, "second", project_id, kind, "needle needle").await;
+    plant(db, "first", project_id, kind, "needle needle needle needle").await;
+}
+
+const RISING: [&str; 3] = ["first", "second", "third"];
+
+fn order(hits: &[search::SearchHit]) -> Vec<&str> {
+    hits.iter().map(|hit| hit.doc_id.as_str()).collect()
+}
+
+#[tokio::test]
+async fn a_project_scope_keeps_relevance_order() {
+    let dir = temp_dir("search-scope-rank");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 20).await;
+    plant_rising(&db, "quiet", "feed").await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: Some("quiet".to_string()),
+            kind: None,
+            limit: 50,
+        },
+    )
+    .await
+    .expect("scoped search");
+    assert_eq!(order(&hits), RISING, "relevance orders a project scope");
+}
+
+#[tokio::test]
+async fn a_type_scope_keeps_relevance_order() {
+    let dir = temp_dir("search-type-rank");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 20).await;
+    plant_rising(&db, "noisy", "brain").await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: Some("brain".to_string()),
+            limit: 50,
+        },
+    )
+    .await
+    .expect("scoped search");
+    assert_eq!(order(&hits), RISING, "relevance orders a family scope");
+}
+
+#[tokio::test]
+async fn a_confined_search_keeps_relevance_order() {
+    let dir = temp_dir("search-confined-rank");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 20).await;
+    plant_rising(&db, "quiet", "feed").await;
+
+    let visible = vec!["quiet".to_string()];
+    let hits = search::query_visible(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: None,
+            limit: 50,
+        },
+        Some(&visible),
+    )
+    .await
+    .expect("confined search");
+    assert_eq!(order(&hits), RISING, "relevance orders a confined page");
+}
+
+#[tokio::test]
+async fn the_page_is_capped_at_the_search_limit() {
+    let dir = temp_dir("search-cap");
+    let db = open(&dir).await;
+    bury(&db, "noisy", "feed", 150).await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: None,
+            limit: 500,
+        },
+    )
+    .await
+    .expect("search");
+    assert_eq!(hits.len(), agent_hub::limits::SEARCH_LIMIT_MAX as usize);
 }

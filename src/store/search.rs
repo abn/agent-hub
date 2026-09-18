@@ -1,10 +1,12 @@
 //! The search corpus: the write-through seam every writer calls, and the query
 //! path over it.
 //!
-//! Ranking uses the engine's full-text index, which only produces a real score
-//! for a query shaped the way its index method recognises: a single
-//! `fts_match` over the indexed columns with `fts_score` ordering. Project and
-//! type filters are applied after the ranked fetch, so the ranking stays live.
+//! Ranking uses the engine's full-text index. Its index method only pushes the
+//! ordering and the page down for a query shaped exactly the way it
+//! recognises: a single `fts_match` over the indexed columns with `fts_score`
+//! ordering. Add any other predicate and the ordering is silently dropped
+//! while `fts_score` stays readable per row, so a filtered query asks the
+//! engine to match and filter, reads the scores, and ranks here.
 
 use turso::{Connection, Database, Row, Value};
 
@@ -87,23 +89,23 @@ pub struct SearchHit {
     pub updated_at: String,
 }
 
-/// Query the corpus, ranked by text relevance, then filtered by project and
-/// corpus family.
-///
-/// The ranked fetch uses the index method's recognised shape; filters and the
-/// final limit are applied afterwards. More candidates are fetched than
-/// returned so a filter does not starve the page.
+/// The corpus columns a hit is built from, in the order `hit_from_row` reads.
+const COLUMNS: &str = "doc_id, project_id, type, ref_id, session_id, title, body, updated_at";
+
+/// Query the corpus, ranked by text relevance, scoped by project and corpus
+/// family.
 pub async fn query(db: &Database, search: &SearchQuery) -> Result<Vec<SearchHit>> {
     query_visible(db, search, None).await
 }
 
 /// Query the corpus with an optional project confinement.
 ///
-/// `None` means every project (the admin surface), fetched with a cap. `Some`
-/// confines the result, and the ranked query is left uncapped so a confined
-/// caller is not starved by higher-ranked projects it cannot see. The engine's
-/// full-text score only survives the query's exact shape, so the confinement
-/// is applied while reading the ranked rows rather than as a SQL predicate.
+/// `None` means every project (the admin surface); `Some` confines the result
+/// to those projects. The confinement joins the project and family scopes as
+/// one more SQL predicate, so a scope never starves the page: the engine
+/// matches and filters, and the hits are ranked here from the scores it
+/// returns. A scope that matches more than `SEARCH_FETCH_MAX` documents is
+/// ranked over that many, which bounds the scan.
 pub async fn query_visible(
     db: &Database,
     search: &SearchQuery,
@@ -122,54 +124,71 @@ pub async fn query_visible(
     {
         return Ok(Vec::new());
     }
-    let limit = search.limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
+    let limit = search.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
 
-    // A confined caller reads the ranked rows with a generous cap rather than
-    // a fixed page, since the confinement is applied while reading. The cap
-    // bounds the scan while still reaching deeper than a page.
-    let fetch = if visible.is_none() {
-        (limit.saturating_mul(20)).clamp(limit, crate::limits::FEED_LIMIT_MAX)
-    } else {
-        (limit.saturating_mul(200)).clamp(limit, crate::limits::SEARCH_FETCH_MAX)
-    };
-
-    let mut sql = String::from(
-        "SELECT * FROM search_docs WHERE fts_match(title, body, ?1)
-         ORDER BY fts_score(title, body, ?1) DESC",
-    );
     let mut params = vec![Value::Text(search.text.clone())];
-    params.push(Value::Integer(fetch));
-    sql.push_str(&format!(" LIMIT ?{}", params.len()));
+    let mut scopes = String::new();
+    if let Some(project_id) = &search.project_id {
+        params.push(Value::Text(project_id.clone()));
+        scopes.push_str(&format!(" AND project_id = ?{}", params.len()));
+    }
+    if let Some(kind) = &search.kind {
+        params.push(Value::Text(kind.clone()));
+        scopes.push_str(&format!(" AND type = ?{}", params.len()));
+    }
+    if let Some(visible) = visible {
+        let holes: Vec<String> = visible
+            .iter()
+            .enumerate()
+            .map(|(offset, _)| format!("?{}", params.len() + offset + 1))
+            .collect();
+        params.extend(visible.iter().map(|id| Value::Text(id.clone())));
+        scopes.push_str(&format!(" AND project_id IN ({})", holes.join(", ")));
+    }
+
+    let sql = if scopes.is_empty() {
+        params.push(Value::Integer(limit));
+        format!(
+            "SELECT {COLUMNS} FROM search_docs WHERE fts_match(title, body, ?1)
+             ORDER BY fts_score(title, body, ?1) DESC LIMIT ?{}",
+            params.len()
+        )
+    } else {
+        // No ORDER BY or LIMIT here on purpose. The index method declines both
+        // once the query carries a predicate it does not cover, and the
+        // `fts_score` left in an ORDER BY then scores every row zero, which
+        // reads as a ranked page and is not one. The score in the column list
+        // is the one the index method still fills in.
+        format!(
+            "SELECT {COLUMNS}, fts_score(title, body, ?1) FROM search_docs
+             WHERE fts_match(title, body, ?1){scopes}"
+        )
+    };
 
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(&sql, params)
         .await
         .map_err(crate::store::engine)?;
-    let mut hits = Vec::new();
+    if scopes.is_empty() {
+        // The engine ranked and paged this one.
+        let mut hits = Vec::new();
+        while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
+            hits.push(hit_from_row(&row)?);
+        }
+        return Ok(hits);
+    }
+
+    let mut scored = Vec::new();
     while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
-        let hit = hit_from_row(&row)?;
-        if let Some(project_id) = &search.project_id
-            && &hit.project_id != project_id
-        {
-            continue;
-        }
-        if let Some(kind) = &search.kind
-            && &hit.kind != kind
-        {
-            continue;
-        }
-        if let Some(visible) = visible
-            && !visible.iter().any(|id| id == &hit.project_id)
-        {
-            continue;
-        }
-        hits.push(hit);
-        if hits.len() as i64 == limit {
+        scored.push((score_at(&row, 8)?, hit_from_row(&row)?));
+        if scored.len() as i64 == crate::limits::SEARCH_FETCH_MAX {
             break;
         }
     }
-    Ok(hits)
+    scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+    scored.truncate(limit as usize);
+    Ok(scored.into_iter().map(|(_, hit)| hit).collect())
 }
 
 /// A group of hits sharing one corpus family.
@@ -237,6 +256,16 @@ fn validate_kind(kind: &str) -> Result<()> {
 
 fn required(row: &Row, index: usize) -> Result<String> {
     text_at(row, index)?.ok_or_else(|| Error::Engine("search row is missing a column".to_string()))
+}
+
+fn score_at(row: &Row, index: usize) -> Result<f64> {
+    match row.get_value(index).map_err(crate::store::engine)? {
+        Value::Real(score) => Ok(score),
+        Value::Integer(score) => Ok(score as f64),
+        other => Err(Error::Engine(format!(
+            "expected a relevance score, found {other:?}"
+        ))),
+    }
 }
 
 fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
