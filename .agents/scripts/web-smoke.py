@@ -822,6 +822,192 @@ def check_time_counts_up(browser, watch: Watch, port: int) -> None:
     watch.page.bring_to_front()
 
 
+# What the focused element draws around itself, and what kind of thing it is.
+# The designed ring is a shadow; forced-colours mode throws shadows away, so
+# what has to be there is an outline the system can colour in.
+FOCUS_RING = (
+    "(() => { const el = document.activeElement;"
+    " if (!el || el === document.body || el === document.getElementById('main')) return null;"
+    " const s = getComputedStyle(el);"
+    " const kind = el.matches('.row') ? 'a row'"
+    "  : el.tagName === 'A' ? 'a link'"
+    "  : el.tagName === 'BUTTON' ? 'a button'"
+    "  : ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) ? 'a field' : '';"
+    " return { kind, what: el.tagName.toLowerCase() + '.' + (el.className || '').split(' ')[0],"
+    " style: s.outlineStyle, width: s.outlineWidth, colour: s.outlineColor,"
+    " shadow: s.boxShadow }; })()"
+)
+RING_KINDS = ("a link", "a field", "a button", "a row")
+
+
+def ring_failure(ring: dict) -> str:
+    """Why this ring would not be seen, or an empty string when it would."""
+    if ring["style"] == "none":
+        return "its rule turns the outline off"
+    if ring["colour"].replace(" ", "").endswith(",0)"):
+        return f"its outline stays transparent ({ring['colour']})"
+    return ""
+
+
+def check_forced_colours_ring(page, watch: Watch) -> None:
+    """Every control keeps a visible focus ring in forced-colours mode.
+
+    The ring the design draws is a box shadow, and a browser in forced colours
+    drops shadows outright. A control whose own rule also turns the outline off
+    then has no focus indicator at all. The ring is walked with real Tab
+    presses, because a programmatic focus does not always make it show.
+    """
+    watch.enter("forced colours: the focus ring")
+    page.emulate_media(forced_colors="active")
+    try:
+        found: dict[str, dict] = {}
+        goto(page, "#/settings", "Settings")
+        page.evaluate("document.activeElement.blur()")
+        for _ in range(25):
+            page.keyboard.press("Tab")
+            ring = page.evaluate(FOCUS_RING)
+            if ring and ring["kind"]:
+                found.setdefault(ring["kind"], ring)
+
+        goto(page, "#/inbox", "Inbox")
+        if not settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')"):
+            watch.fail("the inbox painted no row for the tab ring to reach")
+        page.evaluate("document.activeElement.blur()")
+        for _ in range(25):
+            page.keyboard.press("Tab")
+            ring = page.evaluate(FOCUS_RING)
+            if ring and ring["kind"]:
+                found.setdefault(ring["kind"], ring)
+            if ring and ring["kind"] == "a row":
+                break
+
+        goto(page, "#/settings", "Settings")
+        page.click('[data-action="project-delete"]')
+        page.wait_for_selector("dialog.dialog[open]")
+        page.keyboard.press("Tab")
+        found["a dialog button"] = page.evaluate(FOCUS_RING)
+        page.keyboard.press("Escape")
+        page.wait_for_selector("dialog.dialog", state="detached")
+
+        for kind in (*RING_KINDS, "a dialog button"):
+            ring = found.get(kind)
+            if not ring:
+                watch.fail(f"the tab ring never reached {kind}, so its ring is unchecked")
+                continue
+            why = ring_failure(ring)
+            if why:
+                watch.fail(
+                    f"{kind} ({ring['what']}) shows nothing when focused in forced"
+                    f" colours: {why}"
+                )
+    finally:
+        page.emulate_media(forced_colors="none")
+    watch.drain_rejections()
+
+
+def set_shortcuts(page, value: str) -> None:
+    """Turn the single-key shortcuts on or off the way the reader does."""
+    goto(page, "#/settings", "Settings")
+    page.select_option("#shortcuts", value)
+    page.click('form[data-action="prefs"] button[type="submit"]')
+    settle(page, f"localStorage.getItem('hub.shortcuts') === {value!r}")
+
+
+def check_shortcuts_can_be_turned_off(page, watch: Watch) -> None:
+    """The single-key shortcuts have an off switch, and it survives a reload.
+
+    A key that needs no modifier fires on anything the reader's own dictation,
+    switch or stray hand puts through the keyboard, so there has to be a way to
+    stop it. Esc and Tab are not character keys and stay either way.
+    """
+    watch.enter("settings: the shortcuts switch")
+    if page.evaluate("!document.querySelector('#shortcuts')"):
+        goto(page, "#/settings", "Settings")
+    if page.evaluate("!document.querySelector('#shortcuts')"):
+        watch.fail("Settings offers no control for the single-key shortcuts")
+        return
+    labelled = page.evaluate(
+        "(() => { const field = document.getElementById('shortcuts');"
+        " const label = document.querySelector('label[for=\"shortcuts\"]');"
+        " return { label: label && label.textContent.trim(),"
+        " beside: !!(label && field.closest('form') === label.closest('form')"
+        "  && field.closest('form').querySelector('#theme')) }; })()"
+    )
+    if not labelled["label"] or not labelled["beside"]:
+        watch.fail(f"the shortcuts control reads {labelled}, not a labelled field beside the theme")
+
+    set_shortcuts(page, "off")
+    goto(page, "#/inbox", "Inbox")
+    if not settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')"):
+        watch.fail("the inbox painted no row to move a selection through")
+        return
+    # The approve key acts on the selected row, so the stop is moved onto a row
+    # that offers the verb. The map reads the stop off the markup, which is
+    # what the keys would act on if anything still let them through.
+    if not page.evaluate(
+        "(() => { const rows = [...document.querySelectorAll('main .row')];"
+        " const want = rows.find((r) => r.querySelector('[data-action=\"approve\"]'));"
+        " if (!want) return false;"
+        " for (const row of rows) row.tabIndex = row === want ? 0 : -1;"
+        " return true; })()"
+    ):
+        watch.fail("no inbox row offers the approve verb, so the key is unchecked")
+        return
+    # One key at a time, each from a clean state: a key that does fire changes
+    # what the next one would have found.
+    page.keyboard.press("a")
+    page.wait_for_timeout(200)
+    if page.evaluate("!!document.querySelector('dialog.dialog[open]')"):
+        watch.fail("the approve key still opened its dialog with the shortcuts off")
+        page.keyboard.press("Escape")
+        page.wait_for_selector("dialog.dialog", state="detached")
+    parked = page.evaluate(SELECTED_TAB)
+    for key in ("j", "j"):
+        page.keyboard.press(key)
+        page.wait_for_timeout(120)
+    if page.evaluate(SELECTED_TAB) != parked:
+        watch.fail("a row key still moved the selection with the shortcuts off")
+    page.keyboard.press("?")
+    page.wait_for_timeout(200)
+    if page.evaluate("!!document.querySelector('dialog.keymap[open]')"):
+        watch.fail("the help key still opened the panel with the shortcuts off")
+        page.keyboard.press("Escape")
+        settle(page, "!document.querySelector('dialog.keymap[open]')")
+    page.keyboard.press("/")
+    page.wait_for_timeout(200)
+    if page.evaluate("location.hash").startswith("#/search"):
+        watch.fail("the search key still took over with the shortcuts off")
+
+    # A preference the reader set is theirs across a reload, not only a tab.
+    page.reload(wait_until="load")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')")
+    parked = page.evaluate(SELECTED_TAB)
+    page.keyboard.press("j")
+    page.wait_for_timeout(200)
+    if page.evaluate(SELECTED_TAB) != parked:
+        watch.fail("the shortcuts came back on after a reload")
+
+    set_shortcuts(page, "on")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')")
+    parked = page.evaluate(SELECTED_TAB)
+    page.keyboard.press("j")
+    page.wait_for_timeout(200)
+    if page.evaluate(SELECTED_TAB) == parked:
+        watch.fail("turning the shortcuts back on did not give the row keys back")
+    page.keyboard.press("?")
+    if not settle(page, "!!document.querySelector('dialog.keymap[open]')"):
+        watch.fail("the help key did not come back with the shortcuts")
+    else:
+        said = page.evaluate("document.querySelector('dialog.keymap').textContent")
+        if "Settings" not in said:
+            watch.fail(f"the help panel does not say where to turn these off: {said!r}")
+        page.keyboard.press("Escape")
+        settle(page, "!document.querySelector('dialog.keymap[open]')")
+    watch.drain_rejections()
+
+
 def check_search_key(page, watch: Watch) -> None:
     """Slash reaches the search field from a screen that has no search field."""
     watch.enter("keys: slash")
@@ -1160,6 +1346,7 @@ def run() -> int:
             check_artifact(page, watch, project)
             check_theme(page, watch)
             check_system_theme(page, watch)
+            check_forced_colours_ring(page, watch)
             check_empty_state(page, watch)
             check_search(page, watch)
             check_answer(page, watch, project)

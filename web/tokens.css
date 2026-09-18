@@ -83,7 +83,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); }
-:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+/* The designed ring is the shadow. The outline under it is transparent, so it
+   changes nothing here and is the only part left for a browser in forced
+   colours, which drops shadows outright and then colours the outline in. */
+:focus-visible {
+  outline: 2px solid transparent; outline-offset: 2px;
+  box-shadow: var(--focus); border-radius: var(--r-1);
+}
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

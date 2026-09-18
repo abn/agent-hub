@@ -218,20 +218,9 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   border: 1px solid var(--line); border-radius: var(--r-1);
   background: var(--surface);
 }
-#hub-frame:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
 #hub-theme-toggle { min-height: 44px; }
 #hub-version-select { min-height: 44px; }
 #hub-unlock-form button { min-height: 44px; }
-#hub-theme-toggle:focus-visible,
-#hub-version-select:focus-visible,
-#hub-password:focus-visible,
-.hub-viewer-bar a:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
 #hub-unlock-error { color: var(--danger); font-size: var(--t-13); }
 .hub-callout {
   border-left: 4px solid var(--line-strong);
@@ -304,12 +293,6 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 }
 .drawer-error { color: var(--danger); font-size: var(--t-13); margin: 0; }
 .drawer-error[hidden] { display: none; }
-.comments-drawer-head button:focus-visible,
-.comment-actions button:focus-visible,
-.comments-toggle:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
 
 /* component: dialog. The confirm in front of a decision that cannot be taken
    back. It appears outright, with no motion to reduce. */
@@ -366,9 +349,6 @@ html.has-dialog { overflow: hidden; }
   font-size: var(--t-13); font-weight: 600;
 }
 .toast-close { display: inline-flex; align-items: center; justify-content: center; }
-.toast-undo:focus-visible, .toast-close:focus-visible {
-  outline: none; box-shadow: var(--focus);
-}
 @media (pointer: coarse) {
   /* The drawn box stays 32px, as the design has it; the finger gets 44. */
   .toast-undo::after, .toast-close::after { content: ""; position: absolute; inset: -6px; }
@@ -394,7 +374,12 @@ html.has-dialog { overflow: hidden; }
   font-size: var(--t-15); line-height: 28px; resize: none; overflow-y: auto;
 }
 .composer-field::placeholder { color: var(--ink-3); }
-.composer-field:focus-visible { outline: none; box-shadow: none; }
+/* The ring is drawn around the whole composer row, so the field inside it
+   does not draw a second one. The transparent outline is what a browser in
+   forced colours has left to colour in, where the row's shadow is gone. */
+.composer-field:focus-visible {
+  outline: 2px solid transparent; outline-offset: 2px; box-shadow: none;
+}
 .composer-send {
   align-self: center; flex: none; position: relative;
   width: 36px; height: 36px; min-height: 36px; padding: 0;
