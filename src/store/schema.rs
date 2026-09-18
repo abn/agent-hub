@@ -38,6 +38,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 6,
         ddl: V6,
     },
+    Migration {
+        version: 7,
+        ddl: V7,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -243,4 +247,41 @@ ALTER TABLE idempotency ADD COLUMN comment_id TEXT;
 const V6: &str = r#"
 DELETE FROM search_docs
 WHERE doc_id IN (SELECT 'event:' || id FROM events WHERE kind = 'system');
+"#;
+
+/// Version 7: a session belongs to the agent that started it, and carries the
+/// lineage and handoff a pickup leaves behind.
+///
+/// The name is keyed per owner, so two agents that choose one name get two
+/// sessions instead of silently sharing a brain. The uniqueness is a partial
+/// index over live rows rather than a table constraint: a soft-deleted session
+/// inside its undo window must not hold its name against the lookups, which all
+/// filter `deleted_at IS NULL`. The old constraint is a table constraint, so the
+/// table is rebuilt; every column is copied as it stands, tombstones included.
+const V7: &str = r#"
+CREATE TABLE sessions_v7(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  session_name TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  brain_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_activity TEXT NOT NULL,
+  deleted_at TEXT,
+  forked_from TEXT,
+  adopted_from TEXT,
+  handoff TEXT
+);
+INSERT INTO sessions_v7(id, project_id, session_name, agent, status,
+  brain_path, created_at, last_activity, deleted_at)
+  SELECT id, project_id, session_name, agent, status,
+    brain_path, created_at, last_activity, deleted_at FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_v7 RENAME TO sessions;
+CREATE UNIQUE INDEX sessions_owner_name
+  ON sessions(project_id, agent, session_name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project_id, last_activity DESC);
+CREATE INDEX IF NOT EXISTS sessions_active ON sessions(status, last_activity DESC);
+CREATE INDEX IF NOT EXISTS sessions_agent ON sessions(agent, status);
 "#;

@@ -36,10 +36,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 6, "migrations are forward only and apply once");
+    assert_eq!(again, 7, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -226,7 +226,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let mut rows = conn
         .query(
@@ -270,6 +270,186 @@ async fn migration_four_backfills_version_history() {
     assert_eq!(row.get::<String>(1).expect("favicon"), "");
 
     drop(meta);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn migration_seven_rekeys_sessions_without_losing_rows() {
+    let dir = temp_dir("store-schema-v7");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-6 database holding a live session, an ended one, and one inside
+    // its prune undo window, including the local admin's own over stdio.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 7) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    let before = [
+        ("live", "nightly", "agent-one", "active", None),
+        ("done", "review", "local", "ended", None),
+        (
+            "gone",
+            "scratch",
+            "agent-two",
+            "ended",
+            Some("2026-09-16T00:05:00Z"),
+        ),
+    ];
+    for (id, name, agent, status, deleted_at) in before {
+        conn.execute(
+            "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at) \
+             VALUES (?1, 'proj', ?2, ?3, ?4, ?5, '2026-09-16T00:00:00Z', '2026-09-16T00:01:00Z', ?6)",
+            turso::params::Params::Positional(vec![
+                turso::Value::Text(id.to_string()),
+                turso::Value::Text(name.to_string()),
+                turso::Value::Text(agent.to_string()),
+                turso::Value::Text(status.to_string()),
+                turso::Value::Text(format!("sessions/proj/{id}.db")),
+                deleted_at.map_or(turso::Value::Null, |at| turso::Value::Text(at.to_string())),
+            ]),
+        )
+        .await
+        .expect("insert session");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 7);
+
+    let mut rows = conn
+        .query(
+            "SELECT id, session_name, agent, status, brain_path, deleted_at, forked_from, adopted_from, handoff \
+             FROM sessions ORDER BY id",
+            (),
+        )
+        .await
+        .expect("query sessions");
+    let mut migrated = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        migrated.push((
+            row.get::<String>(0).expect("id"),
+            row.get::<String>(1).expect("name"),
+            row.get::<String>(2).expect("agent"),
+            row.get::<String>(3).expect("status"),
+            row.get::<String>(4).expect("brain_path"),
+            matches!(row.get_value(5).expect("deleted_at"), turso::Value::Text(_)),
+            matches!(row.get_value(6).expect("forked_from"), turso::Value::Null)
+                && matches!(row.get_value(7).expect("adopted_from"), turso::Value::Null)
+                && matches!(row.get_value(8).expect("handoff"), turso::Value::Null),
+        ));
+    }
+    drop(rows);
+    assert_eq!(
+        migrated,
+        vec![
+            (
+                "done".to_string(),
+                "review".to_string(),
+                "local".to_string(),
+                "ended".to_string(),
+                "sessions/proj/done.db".to_string(),
+                false,
+                true
+            ),
+            (
+                "gone".to_string(),
+                "scratch".to_string(),
+                "agent-two".to_string(),
+                "ended".to_string(),
+                "sessions/proj/gone.db".to_string(),
+                true,
+                true
+            ),
+            (
+                "live".to_string(),
+                "nightly".to_string(),
+                "agent-one".to_string(),
+                "active".to_string(),
+                "sessions/proj/live.db".to_string(),
+                false,
+                true
+            ),
+        ],
+        "every row keeps its id, owner, state and brain path"
+    );
+
+    // The owner still resumes the same session by name after the re-key.
+    let resumed = agent_hub::store::sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("resume");
+    assert_eq!(resumed.id, "live");
+
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
+    let dir = temp_dir("store-schema-owner-key");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    migrate(&db).await.expect("migrate");
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+
+    let insert = |id: &'static str, agent: &'static str| {
+        let conn = conn.clone();
+        async move {
+            conn.execute(
+                "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity) \
+                 VALUES (?1, 'proj', 'nightly', ?2, 'active', 'sessions/proj/x.db', '2026-09-16T00:00:00Z', '2026-09-16T00:00:00Z')",
+                [id, agent],
+            )
+            .await
+        }
+    };
+
+    insert("one", "agent-one").await.expect("first owner");
+    insert("two", "agent-two")
+        .await
+        .expect("another agent holds the same name");
+    insert("three", "agent-one")
+        .await
+        .expect_err("one owner cannot hold the same live name twice");
+
+    // A soft-deleted row is outside the index, so the name it held is free
+    // again and the tombstone keeps its id for an undo.
+    conn.execute(
+        "UPDATE sessions SET deleted_at = '2026-09-16T00:01:00Z' WHERE id = 'one'",
+        (),
+    )
+    .await
+    .expect("soft delete");
+    insert("three", "agent-one")
+        .await
+        .expect("a pruned name no longer holds the key");
+
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&dir).expect("clean temp dir");
@@ -326,7 +506,7 @@ async fn migration_six_clears_indexed_audit_events() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let mut rows = conn
         .query("SELECT doc_id FROM search_docs ORDER BY doc_id", ())
