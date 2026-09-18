@@ -83,6 +83,47 @@ fn arguments_come_from_the_command_line() {
 }
 
 #[test]
+fn a_hook_reads_and_writes_project_knowledge_with_no_session() {
+    let hub = Hub::start("call-knowledge");
+
+    // One call is one connection, so nothing has started a session. The project
+    // store is addressed by project alone, which is what lets a session-start
+    // hook pull shared knowledge into context before any session exists.
+    let put = run(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            &format!(
+                r##"{{"store":"project","project_id":"{PROJECT}","path":"/fs/index.md","content":"# Homelab\n\nStart here."}}"##
+            ),
+        ],
+    );
+    assert_eq!(put.status.code(), Some(0), "{put:?}");
+
+    let get = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(r#"{{"store":"project","project_id":"{PROJECT}","path":"/fs/index.md"}}"#),
+        ],
+    );
+    assert_eq!(get.status.code(), Some(0), "{get:?}");
+    let page = stdout_json(&get);
+    assert!(
+        page["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("Start here.")),
+        "the page written by one call is read by the next: {page}"
+    );
+
+    // The session store has no such address, and says so rather than guessing.
+    let sessionless = run(&hub, &["call", "brain_get", r#"{"path":"/kv/anything"}"#]);
+    assert_eq!(sessionless.status.code(), Some(1), "{sessionless:?}");
+}
+
+#[test]
 fn arguments_the_hub_rejects_are_a_failure_not_a_result() {
     let hub = Hub::start("call-rejected-args");
 
