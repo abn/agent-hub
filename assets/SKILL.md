@@ -177,7 +177,9 @@ refused with `rate_limited` and changes nothing.
 An artifact is a titled blob with an immutable version history. Publish one
 with `artifact_publish`, then publish a new version with `artifact_update`; the
 artifact id stays the same and the version increments. Kinds are `html` and
-`markdown`, and the blob is capped at 50 MiB over either transport.
+`markdown`, and the content is capped at 50 MiB. Over HTTP the whole tool call
+has to fit the transport limit as well, so content that needs a lot of JSON
+escaping, such as minified markup full of quotes, has less than 50 MiB of room.
 
 ```
 artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)

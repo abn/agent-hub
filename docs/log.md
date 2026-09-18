@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, what the artifact cap promises over HTTP
+
+* **Note**: The served skill contract no longer reads as if 50 MiB of content
+  always fits down the wire. The content cap is 50 MiB; over HTTP the whole
+  tool call also has to fit the transport limit, so content that needs a lot
+  of JSON escaping has less than 50 MiB of room. No limit changed.
+
 ## 2026-09-18, the iteration range the artifact viewer accepts
 
 * **Update**: The protected-artifact envelope is accepted only with an
