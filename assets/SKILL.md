@@ -120,6 +120,10 @@ artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
 artifact_list(project_id)
 artifact_delete(artifact_id)
+comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
+comment_list(artifact_id)
+comment_resolve(artifact_id, comment_id, done, delete_token?)
+comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
 `search` with `scope: "global"` covers every visible project; otherwise pass
@@ -169,6 +173,10 @@ artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
 artifact_list(project_id)
 artifact_delete(artifact_id)
+comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
+comment_list(artifact_id)
+comment_resolve(artifact_id, comment_id, done, delete_token?)
+comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
 A publish carries a description, a favicon mark, and a version label. Pass
@@ -176,6 +184,9 @@ the version the edit is based on as `base_version`: a stale base is refused
 with a conflict naming the current version unless `force` is set. Read one
 snapshot with `artifact_get` plus `version`, list history with
 `artifact_versions`, and remove an artifact with `artifact_delete`.
+Comment with `comment_post` (a point or quote anchor is optional), read
+with `comment_list`, and resolve or delete with the returned delete token
+or write access. Quotes are refused on protected versions.
 
 A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
 with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown artifacts are rendered by the hub with raw

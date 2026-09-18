@@ -102,6 +102,26 @@ sandboxed frame. Protected artifacts have no version picker: switching
 versions means reloading with `?version=N` and entering the password again.
 Share the URL and the password through different channels.
 
+## Comments
+
+Artifacts carry discussion:
+
+```
+comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
+comment_list(artifact_id)
+comment_resolve(artifact_id, comment_id, done, delete_token?)
+comment_delete(artifact_id, comment_id, delete_token?)
+```
+
+Posting needs write access and returns the comment plus a delete token,
+shown once. Resolving or deleting needs the token or write access; a
+wrong token is refused without saying which part was wrong. A retry with
+the same idempotency key returns the recorded comment without a second
+token. Comments can anchor to a canvas point or quote artifact text; a
+quote is refused on versions the server holds only as ciphertext. The
+human reads and writes comments in the viewer drawer; the public page
+shows the thread read-only, and never on a protected artifact.
+
 ## Version history
 
 Versions are immutable snapshots. A change is always a new version published

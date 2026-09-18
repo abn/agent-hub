@@ -48,6 +48,10 @@ GET    /api/v1/artifacts/:id
 GET    /api/v1/artifacts/:id/versions
 GET    /api/v1/artifacts/:id/raw
 DELETE /api/v1/artifacts/:id
+GET    /api/v1/artifacts/:id/comments
+POST   /api/v1/artifacts/:id/comments
+PATCH  /api/v1/artifacts/:id/comments/:commentId
+DELETE /api/v1/artifacts/:id/comments/:commentId
 GET    /api/v1/storage
 DELETE /api/v1/storage/sessions/:id
 POST   /api/v1/prune/undo/:token
@@ -98,7 +102,7 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 | Home | Today at a glance: what waits on you, the latest feed across projects, and storage. |
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
-| Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker. |
+| Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
 | Sessions | Sessions per project, drilling into the brain tree and audit log, with end and prune actions. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind, with the reversible prune actions for sessions. |

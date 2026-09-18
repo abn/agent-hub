@@ -31,6 +31,10 @@ transport requires a bearer token that resolves to one agent identity.
 | `artifact_versions` | List an artifact's immutable version history. |
 | `artifact_list` | List a project's artifacts. |
 | `artifact_delete` | Delete an artifact, its history, and its index row. |
+| `comment_post` | Comment on an artifact, optionally anchored to a point or a quote. |
+| `comment_list` | List an artifact's comments. |
+| `comment_resolve` | Mark a comment done or reopen it. |
+| `comment_delete` | Delete a comment. |
 | `brain_get` | Read a file or key-value path from the current session brain. |
 | `brain_put` | Write a file or key-value entry into the session brain. |
 | `brain_list` | List the session brain tree. |
@@ -45,7 +49,10 @@ A publish carries a description, a favicon mark, and a version label.
 current version unless `force` is passed, so two writers never silently
 overwrite each other. History and deletion follow the same trust rules
 as reads and writes, and an artifact a caller may not reach reads as
-forbidden whether it is missing or denied.
+forbidden whether it is missing or denied. Commenting works the same
+way: posting needs write access and returns a delete token shown once,
+and resolving or deleting needs the token or write access. A quote
+anchor is refused on versions the server holds only as ciphertext.
 
 `question_post` returns `event_id`, `question_id`, and `thread_id`, all the
 same value: a question roots its own thread and is its own event. `answer_post`

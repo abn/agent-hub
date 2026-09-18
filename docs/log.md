@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, comments on artifacts
+
+* **Update**: Artifacts carry discussion with optional point or quote
+  anchors, resolution state, and per-comment delete tokens. Documented in
+  the [artifacts guide](usage/artifacts.md), the
+  [agent surface](architecture/agent-surface.md), the
+  [human surface](architecture/human-surface.md) (routes and viewer drawer),
+  the [data model](architecture/data-model.md), and the served skill
+  contract. Quotes are refused on protected versions, and the public page
+  shows the thread read-only, never on a protected artifact.
+
 ## 2026-09-18, artifact viewer that runs, unlocks, and previews
 
 * **Update**: The public artifact page is a host shell around a sandboxed
