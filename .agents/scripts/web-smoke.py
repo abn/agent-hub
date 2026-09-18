@@ -377,6 +377,55 @@ def check_answer(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_toast_leaves_a_writer_alone(page, watch: Watch, project: str) -> None:
+    """A toast does not take the keyboard off a reader who is mid-sentence.
+
+    Undo is the only way back from what just happened, so a toast moves focus
+    there. Not while the reader is writing: the words and the caret are theirs,
+    and the live region announces the message and the way back either way.
+
+    No screen raises an undo toast from inside the composer today, so the toast
+    is raised through its own module from the page, which is the case the next
+    caller to pass an undo would land in.
+    """
+    watch.enter("inbox: a toast while typing")
+    page.evaluate("location.hash = '#/inbox'")
+    page.wait_for_selector('[data-action="answer"]')
+    page.click('[data-action="answer"]')
+    page.wait_for_selector(".composer-field")
+    typed = "half written reply"
+    page.fill(".composer-field", typed)
+    page.click(".composer-field")
+    page.keyboard.press("End")
+    page.evaluate(
+        "import('/toast.mjs').then((m) => m.toast('Pruned 1 session.', () => {}))"
+    )
+    page.wait_for_selector(".toast-undo")
+    after = page.evaluate(
+        "(() => { const el = document.activeElement; const field ="
+        " document.querySelector('.composer-field');"
+        " return { onField: el === field, value: field ? field.value : null,"
+        " where: el ? (el.className || el.tagName) : '' }; })()"
+    )
+    if not after["onField"]:
+        watch.fail(f"the toast took focus off the composer, onto {after['where']!r}")
+    if after["value"] != typed:
+        watch.fail(f"the toast cost the reader what they typed, the field reads {after['value']!r}")
+    region = page.evaluate(
+        "(() => { const r = document.querySelector('.toast-region');"
+        " return r && { live: r.getAttribute('aria-live'), text: r.textContent }; })()"
+    )
+    if not region or region["live"] != "polite" or "Pruned 1 session." not in region["text"]:
+        watch.fail(f"the toast was not announced instead, the region reads {region}")
+    if page.evaluate("!document.querySelector('.toast-undo')"):
+        watch.fail("the way back is not on screen for the reader to reach")
+    page.evaluate("document.querySelector('.toast-close').click()")
+    # The composer is left open on the question the next check answers.
+    page.evaluate("location.hash = '#/inbox'")
+    goto(page, "#/inbox", "Inbox")
+    watch.drain_rejections()
+
+
 def check_approve(page, watch: Watch) -> None:
     """A decision is asked for in the app's own dialog, not the browser's."""
     watch.enter("inbox: approve")
@@ -706,10 +755,13 @@ FIRST_TIME = (
     " tab: t.tabIndex, role: t.getAttribute('role') || '',"
     " font: getComputedStyle(t).fontFamily }; })()"
 )
-SELECTED_ROW = (
-    "(() => { const row = document.activeElement.closest"
-    " && document.activeElement.closest('main .row');"
-    " return row && { text: row.textContent.trim(), tab: row.tabIndex,"
+# The map's own selection, read where the map keeps it: the roving stop is the
+# row carrying tabindex 0. Reading the focused element instead would go blind
+# exactly when it matters, because a browser refuses focus to an inert page
+# behind a modal and the selection can move without anything showing it.
+SELECTED_TAB = (
+    "(() => { const row = document.querySelector('main .row[tabindex=\"0\"]');"
+    " return row && { text: row.textContent.trim(),"
     " focused: row === document.activeElement }; })()"
 )
 # The screen a check drives has to be the screen that painted, not the one
@@ -820,6 +872,112 @@ def check_time_counts_up(browser, watch: Watch, port: int) -> None:
     # The page under test stops being the visible one while this context is
     # open, and a page the browser considers hidden animates nothing.
     watch.page.bring_to_front()
+
+
+def seed_long_feed(port: int, project: str, count: int) -> None:
+    """A project whose feed is long enough for a per-row tab stop to be felt.
+
+    Its own project, so the screens the rest of the run asserts against keep
+    the events they were seeded with.
+    """
+    harness.request(port, "POST", "/api/v1/projects", {"id": project, "display_name": "Long feed"})
+    session: list[str] = []
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    for index in range(count):
+        harness.mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": index + 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "signal_append",
+                    "arguments": {
+                        "project_id": project,
+                        "kind": "signal",
+                        "summary": f"long feed note {index}",
+                    },
+                },
+            },
+        )
+
+
+LONG_FEED_PROJECT = "long-feed"
+LONG_FEED_EVENTS = 60
+# What crossing a screen may cost, whatever it holds: a picker, the kind
+# filters, and one stop for the list itself. The budget is a constant on
+# purpose, so a stop that is drawn once per row fails it however long the feed.
+TAB_BUDGET = 16
+# Enough presses to leave a screen that spends one per row, so the failure
+# reports the real count rather than the cap.
+TAB_WALK = 90
+
+
+def check_tab_budget(page, watch: Watch, port: int) -> None:
+    """Crossing a long feed costs a bounded number of Tab presses.
+
+    A reader who never presses `j` still has to get past the list to whatever
+    follows it, and has to be able to get into it: the rows are one stop, not
+    one per row.
+
+    Seeds sixty events, so it runs last: the screens before it assert on the
+    events the hub was seeded with.
+    """
+    watch.enter("feed: the tab ring")
+    seed_long_feed(port, LONG_FEED_PROJECT, LONG_FEED_EVENTS)
+    goto(page, f"#/feed?project={quote(LONG_FEED_PROJECT)}", "Project feed")
+    if not settle(
+        page,
+        f"document.querySelectorAll('main .row').length >= {LONG_FEED_EVENTS}",
+    ):
+        watch.fail(
+            "the long feed did not paint its rows"
+            f" ({page.evaluate('document.querySelectorAll(\"main .row\").length')})"
+        )
+        return
+
+    page.evaluate("document.querySelector('.skip-link').focus()")
+    presses = 0
+    entered = False
+    reached_row = False
+    while presses < TAB_WALK:
+        page.keyboard.press("Tab")
+        presses += 1
+        where = page.evaluate(
+            "(() => { const el = document.activeElement; const region ="
+            " document.getElementById('main');"
+            " return { inside: !!(el && region.contains(el) && el !== region),"
+            " row: !!(el && el.matches && el.matches('main .row')) }; })()"
+        )
+        if where["row"]:
+            reached_row = True
+        if where["inside"]:
+            entered = True
+        elif entered:
+            break
+    if presses >= TAB_WALK or presses > TAB_BUDGET:
+        watch.fail(
+            f"crossing a {LONG_FEED_EVENTS}-event feed takes {presses} Tab"
+            f" presses, over the {TAB_BUDGET} a screen may cost"
+        )
+    if not reached_row:
+        watch.fail("no Tab press reaches a row, so the list opens only to someone who knows `j`")
+    watch.drain_rejections()
 
 
 # What the focused element draws around itself, and what kind of thing it is.
@@ -1027,12 +1185,13 @@ def check_typing_is_not_a_shortcut(page, watch: Watch) -> None:
     watch.enter("keys: typing")
     page.evaluate(f"location.hash = '#/search?q={quote(harness.SEARCH_TERM)}'")
     settle(page, "!!document.querySelector('main .row')")
+    before = page.evaluate(SELECTED_TAB)
     page.click("#q")
     page.keyboard.press("End")
     page.keyboard.type("j")
     if not settle(page, "document.getElementById('q').value.endsWith('j')"):
         watch.fail("the letter did not reach the field")
-    if page.evaluate('!!document.querySelector(\'main .row[tabindex="0"]\')'):
+    if page.evaluate(SELECTED_TAB) != before:
         watch.fail("typing in the field moved the selection")
     if page.evaluate("document.activeElement.id") != "q":
         watch.fail("typing in the field moved focus off it")
@@ -1040,29 +1199,34 @@ def check_typing_is_not_a_shortcut(page, watch: Watch) -> None:
 
 
 def check_row_keys(page, watch: Watch) -> None:
-    """The selection moves, comes back, and takes focus with it."""
+    """The selection starts on the first row, moves, comes back, and takes focus."""
     watch.enter("keys: rows")
     page.evaluate("location.hash = '#/inbox'")
-    if not settle(page, f"{ON_INBOX} && document.querySelectorAll('main .row').length > 1"):
+    if not settle(page, f"{ON_INBOX} && document.querySelectorAll('main .row').length > 2"):
         watch.fail("the inbox has too few rows to move through")
         return
     titles = page.evaluate(
         "[...document.querySelectorAll('main .row .title')].map((t) => t.textContent.trim())"
     )
+    parked = page.evaluate(SELECTED_TAB)
+    if not parked or titles[0] not in parked["text"]:
+        watch.fail(f"a painted list parks its selection on {parked and parked['text'][:40]!r}")
+    elif parked["focused"]:
+        watch.fail("painting a list took focus off whatever the reader was on")
     page.keyboard.press("Control+j")
     page.wait_for_timeout(200)
-    if page.evaluate('!!document.querySelector(\'main .row[tabindex="0"]\')'):
+    if page.evaluate(SELECTED_TAB) != parked:
         watch.fail("a shortcut fired with a modifier held")
     for key in ("j", "j", "k"):
         page.keyboard.press(key)
         page.wait_for_timeout(120)
-    row = page.evaluate(SELECTED_ROW)
+    row = page.evaluate(SELECTED_TAB)
     if not row:
-        watch.fail("moving the selection left focus off the rows")
+        watch.fail("moving the selection left no row selected")
         return
-    if titles[0] not in row["text"]:
-        watch.fail(f"down, down, up landed on {row['text'][:40]!r}, expected {titles[0]!r}")
-    if row["tab"] != 0 or not row["focused"]:
+    if titles[1] not in row["text"]:
+        watch.fail(f"down, down, up landed on {row['text'][:40]!r}, expected {titles[1]!r}")
+    if not row["focused"]:
         watch.fail("the selected row is not the row that has focus")
     watch.drain_rejections()
 
@@ -1093,12 +1257,12 @@ def check_approve_key(page, watch: Watch) -> None:
     before = page.evaluate("document.querySelectorAll('[data-action=\"approve\"]').length")
     reached = False
     for _ in range(12):
-        page.keyboard.press("j")
-        page.wait_for_timeout(150)
-        row = page.evaluate(SELECTED_ROW)
+        row = page.evaluate(SELECTED_TAB)
         if row and harness.APPROVAL_SUMMARY in row["text"]:
             reached = True
             break
+        page.keyboard.press("j")
+        page.wait_for_timeout(150)
     if not reached:
         watch.fail("the selection never reached the waiting approval")
         return
@@ -1108,11 +1272,13 @@ def check_approve_key(page, watch: Watch) -> None:
     page.wait_for_selector("dialog.dialog[open]")
     if not page.evaluate(FOCUS_IN_DIALOG):
         watch.fail("the approve key opened the dialog without moving focus into it")
-    # While the dialog is open the row keys belong to it, not to the list behind.
-    selected = page.evaluate(SELECTED_ROW)
+    # While the dialog is open the row keys belong to it, not to the list
+    # behind. The selection is read where the map keeps it: a modal makes the
+    # page behind inert, so a moved selection shows in nothing else.
+    selected = page.evaluate(SELECTED_TAB)
     page.keyboard.press("j")
     page.wait_for_timeout(150)
-    if page.evaluate(SELECTED_ROW) != selected or not page.evaluate(FOCUS_IN_DIALOG):
+    if page.evaluate(SELECTED_TAB) != selected or not page.evaluate(FOCUS_IN_DIALOG):
         watch.fail("a row key moved the list behind an open dialog")
     if page.evaluate("document.querySelectorAll('[data-action=\"approve\"]').length") != before:
         watch.fail("the approval was sent before the dialog was answered")
@@ -1141,6 +1307,9 @@ def check_shortcut_help(page, watch: Watch) -> None:
     page.keyboard.press("Escape")
     if not settle(page, "!document.querySelector('dialog.keymap[open]')"):
         watch.fail("Esc left the shortcut list open")
+    watch.drain_rejections()
+
+
 def gate_of(page):
     """The password gate inside the in-app viewer frame."""
     return page.frame_locator("main iframe")
@@ -1347,8 +1516,10 @@ def run() -> int:
             check_theme(page, watch)
             check_system_theme(page, watch)
             check_forced_colours_ring(page, watch)
+            check_shortcuts_can_be_turned_off(page, watch)
             check_empty_state(page, watch)
             check_search(page, watch)
+            check_toast_leaves_a_writer_alone(page, watch, project)
             check_answer(page, watch, project)
             check_approve(page, watch)
             check_prune(page, watch, project, seeded["session_id"])
@@ -1358,6 +1529,9 @@ def run() -> int:
                 port, context, project, seeded["protected_id"]
             ):
                 watch.fail(failure)
+            # Last: it seeds sixty more events, which every check above would
+            # have to look past.
+            check_tab_budget(page, watch, port)
 
             context.close()
             browser.close()
