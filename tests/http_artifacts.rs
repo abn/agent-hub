@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 /// The ciphertext published for the protected render test.
-const CIPHERTEXT: &str = "cipher-mark-7f3a9c";
+const CIPHERTEXT: &str = "Y2lwaGVyLW1hcmstN2YzYTlj";
 
 /// A marker that never reaches the server for a protected artifact.
 const PLAINTEXT: &str = "plaintext-should-never-appear";
@@ -624,12 +624,8 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     assert!(body.contains("id=\"hub-ciphertext\""));
     assert!(body.contains("AES-256-GCM"));
     assert!(
-        body.contains("Y2lwaGVyLW1hcmstN2YzYTlj"),
-        "the shell carries the ciphertext base64"
-    );
-    assert!(
-        !body.contains(CIPHERTEXT),
-        "the shell carries no raw body bytes"
+        body.contains(CIPHERTEXT),
+        "the shell carries the stored ciphertext verbatim, so the browser decodes exactly once"
     );
     assert!(
         !body.contains(PLAINTEXT),
@@ -940,7 +936,10 @@ async fn raw_serves_envelope_and_ciphertext_for_a_protected_artifact() {
     assert_eq!(content_type(&response).as_deref(), Some("application/json"),);
     let body = json_body(response).await;
     assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
-    assert_eq!(body["ciphertext"], "Y2lwaGVyLW1hcmstN2YzYTlj");
+    assert_eq!(
+        body["ciphertext"], CIPHERTEXT,
+        "raw passes stored ciphertext through verbatim for a single browser decode"
+    );
     assert!(
         !body.to_string().contains(PLAINTEXT),
         "raw never carries plaintext"

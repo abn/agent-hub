@@ -230,9 +230,17 @@ pub async fn raw(
     };
 
     if artifact.protected {
+        // The stored bytes are the client's base64 ciphertext text, so they
+        // travel verbatim: encoding them again would break the browser
+        // decryptor, which decodes exactly once.
+        let ciphertext = String::from_utf8(bytes).map_err(|_| {
+            Problem::from_error(&Error::InvalidArgument(format!(
+                "artifact {artifact_id} ciphertext is not UTF-8 text"
+            )))
+        })?;
         let body = serde_json::json!({
             "envelope": artifact.envelope,
-            "ciphertext": base64_encode(&bytes),
+            "ciphertext": ciphertext,
         });
         Ok(raw_json_response(body.to_string()))
     } else {
@@ -270,7 +278,14 @@ pub async fn host(
     let origin = request_origin(&state, &headers);
 
     let document = if artifact.protected {
-        locked_shell(&artifact, &bytes, shown, pinned, &origin)
+        // The stored bytes are the client's base64 ciphertext text; they
+        // travel verbatim so the browser decryptor decodes exactly once.
+        let ciphertext = String::from_utf8(bytes).map_err(|_| {
+            Problem::from_error(&Error::InvalidArgument(format!(
+                "artifact {artifact_id} ciphertext is not UTF-8 text"
+            )))
+        })?;
+        locked_shell(&artifact, &ciphertext, shown, pinned, &origin)
     } else {
         let versions = artifact_store::list_versions(&state.db, &artifact_id)
             .await
@@ -516,28 +531,6 @@ fn raw_json_response(body: String) -> Response {
     response
 }
 
-/// Encode bytes with the standard base64 alphabet for the raw protected body.
-fn base64_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let mut block: u32 = 0;
-        for &byte in chunk {
-            block = (block << 8) | u32::from(byte);
-        }
-        block <<= (3 - chunk.len()) * 8;
-        for i in 0..4 {
-            if i <= chunk.len() {
-                let index = ((block >> (18 - 6 * i)) & 0x3f) as usize;
-                out.push(ALPHABET[index] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
 /// The reader shell for a plain artifact. The shell carries no author bytes:
 /// HTML artifacts load through the frame route, markdown artifacts render in
 /// the host page from the inlined source. The version picker appears only
@@ -613,7 +606,7 @@ fn reader_shell(
 /// bytes. The empty frame is filled by the viewer after unlock.
 fn locked_shell(
     artifact: &Artifact,
-    ciphertext: &[u8],
+    ciphertext: &str,
     shown: i64,
     pinned: bool,
     origin: &str,
@@ -631,7 +624,7 @@ fn locked_shell(
         .as_ref()
         .map(script_json)
         .unwrap_or_else(|| "null".to_string());
-    let encoded = base64_encode(ciphertext);
+    let encoded = script_json(&serde_json::Value::String(ciphertext.to_string()));
     format!(
         "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
          <body>\n<header>\n<h1>{title}</h1>\n\
@@ -648,7 +641,7 @@ fn locked_shell(
          <script type=\"application/json\" id=\"hub-versions\">null</script>\n\
          <script type=\"application/json\" id=\"hub-markdown-body\">null</script>\n\
          <script type=\"application/json\" id=\"hub-envelope\">{envelope}</script>\n\
-         <script type=\"application/json\" id=\"hub-ciphertext\">\"{encoded}\"</script>\n\
+         <script type=\"application/json\" id=\"hub-ciphertext\">{encoded}</script>\n\
          </body>\n</html>\n",
         head = shell_head(artifact, shown, pinned, origin, &[], true),
     )
@@ -790,21 +783,4 @@ fn script_json(value: &serde_json::Value) -> String {
         .replace('&', "\\u0026")
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::base64_encode;
-
-    #[test]
-    fn base64_matches_the_standard_vectors() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
-        assert_eq!(base64_encode(&[0xff, 0xfe, 0x00, 0x01]), "//4AAQ==");
-    }
 }
