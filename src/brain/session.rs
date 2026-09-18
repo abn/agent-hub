@@ -268,8 +268,10 @@ impl Brain {
 
     /// Store bytes, creating the entry and any missing parent directories.
     ///
-    /// Takes the session write lock.
+    /// Takes the session write lock. A value over the cap is refused before
+    /// anything is written.
     pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        crate::limits::check_brain_value(bytes.len())?;
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;

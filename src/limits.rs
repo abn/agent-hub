@@ -23,6 +23,14 @@ pub const ARTIFACT_BYTES_MAX: usize = 50 * 1024 * 1024;
 pub const AGENT_BODY_BYTES_MAX: usize =
     ARTIFACT_BYTES_MAX + ARTIFACT_BYTES_MAX / 8 + REQUEST_BODY_BYTES_MAX;
 
+/// Maximum bytes of one session brain value.
+///
+/// The agent transport is sized to carry an artifact, so it does not bound a
+/// brain value; this does. A brain holds working state, not documents, and
+/// keeping a value under the REST body ceiling also keeps a brain file inside
+/// its own budget for any sane number of entries.
+pub const BRAIN_VALUE_BYTES_MAX: usize = REQUEST_BODY_BYTES_MAX;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
@@ -111,6 +119,16 @@ pub fn check_event(summary: &str, payload_bytes: usize) -> Result<()> {
     if payload_bytes > EVENT_PAYLOAD_BYTES_MAX {
         return Err(Error::PayloadTooLarge(format!(
             "event payload exceeds {EVENT_PAYLOAD_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a session brain value over the cap.
+pub fn check_brain_value(bytes: usize) -> Result<()> {
+    if bytes > BRAIN_VALUE_BYTES_MAX {
+        return Err(Error::PayloadTooLarge(format!(
+            "brain value exceeds {BRAIN_VALUE_BYTES_MAX} bytes"
         )));
     }
     Ok(())

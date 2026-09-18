@@ -453,6 +453,37 @@ fn a_brain_read_does_not_create_the_session_file() {
 }
 
 #[test]
+fn an_oversized_brain_put_is_refused() {
+    let data_dir = TempDir::new("oversized");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    let oversized = "x".repeat(agent_hub::limits::BRAIN_VALUE_BYTES_MAX + 1);
+    let response = server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/big", "content": oversized}),
+    );
+    assert_eq!(
+        error_code(&response),
+        "payload_too_large",
+        "a brain value over the cap is refused"
+    );
+
+    let stored = server.call_tool("brain_get", json!({"path": "/kv/big"}));
+    assert_eq!(
+        error_code(&stored),
+        "not_found",
+        "a refused brain_put stores nothing"
+    );
+}
+
+#[test]
 fn brain_tools_require_an_active_session() {
     let data_dir = TempDir::new("no-session");
     let mut server = McpServer::spawn(&data_dir.0);
