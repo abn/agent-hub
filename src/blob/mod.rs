@@ -3,6 +3,12 @@
 //! Blobs live at `artifacts/<project>/<artifact>/v<version>.<ext>`, relative
 //! to the data directory. The path column stores that relative path.
 //!
+//! An update only learns its version number under the store's write lock, so
+//! its content lands beside the versions under a `pending-<token>` name and is
+//! renamed into place once the number is allocated. A pending file that never
+//! made it that far is inert: no row points at it, and it goes with the tree
+//! when the artifact or the project is deleted.
+//!
 //! The IO here is blocking and is called from async handlers. At the artifact
 //! cap and the single-operator scale this is accepted: the worst case is one
 //! Tokio worker stalled for the duration of a large transfer. Revisit with
@@ -32,11 +38,47 @@ pub fn write(
 ) -> Result<String> {
     crate::limits::check_artifact(bytes.len())?;
     let rel = blob_path(project_id, artifact_id, version, kind)?;
-    let path = resolve(data_dir, &rel)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, bytes)?;
+    write_at(data_dir, &rel, bytes)?;
+    Ok(rel)
+}
+
+/// Write a blob under a pending name and return its relative path.
+///
+/// The name is unique to the call, so a writer that does not yet know its
+/// version number cannot collide with another writer or with a committed
+/// version.
+pub fn write_pending(
+    data_dir: &Path,
+    project_id: &str,
+    artifact_id: &str,
+    kind: &str,
+    bytes: &[u8],
+) -> Result<String> {
+    crate::limits::check_artifact(bytes.len())?;
+    let ext = extension(kind)?;
+    let token = ulid::Ulid::generate();
+    let rel = format!("artifacts/{project_id}/{artifact_id}/pending-{token}.{ext}");
+    write_at(data_dir, &rel, bytes)?;
+    Ok(rel)
+}
+
+/// Rename a pending blob onto its version path and return that path.
+///
+/// Both names sit in the same directory, so the rename is one cheap atomic
+/// step and is safe to run under the write lock. It replaces an orphan left
+/// at that version path by an earlier write that never committed.
+pub fn promote(
+    data_dir: &Path,
+    pending: &str,
+    project_id: &str,
+    artifact_id: &str,
+    version: i64,
+    kind: &str,
+) -> Result<String> {
+    let rel = blob_path(project_id, artifact_id, version, kind)?;
+    let from = resolve(data_dir, pending)?;
+    let to = resolve(data_dir, &rel)?;
+    std::fs::rename(from, to)?;
     Ok(rel)
 }
 
@@ -67,6 +109,15 @@ pub fn remove_tree(data_dir: &Path, rel: &str) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
+}
+
+fn write_at(data_dir: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
+    let path = resolve(data_dir, rel)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, bytes)?;
+    Ok(())
 }
 
 fn extension(kind: &str) -> Result<&'static str> {

@@ -94,8 +94,21 @@ pub struct UpdateOptions<'a> {
     pub label: Option<&'a str>,
 }
 
+/// What the metadata transaction did with the blob written before it opened.
+enum Written {
+    /// The transaction committed, and the blob is the version it recorded.
+    Kept(Artifact),
+    /// An idempotent replay answered the call, so the blob is dead weight.
+    Dropped(Artifact),
+}
+
 /// Publish an artifact: write the blob, record the metadata and its first
 /// version row, append a feed event, and index it.
+///
+/// The blob is written before the transaction opens, so the store's write lock
+/// is never held across a transfer of up to the artifact cap. The id is minted
+/// here and no row names it yet, so nothing else can reach that path, and a
+/// transaction that does not commit takes the blob with it.
 pub async fn publish(
     db: &Database,
     data_dir: &Path,
@@ -109,22 +122,22 @@ pub async fn publish(
     let label = check_label(artifact.label)?;
 
     let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
 
     // A retry with the same key returns what the first call produced, so a
-    // dropped response does not leave a duplicate artifact.
+    // dropped response does not leave a duplicate artifact. The lookup runs
+    // here so a retry writes no blob at all, and again inside the transaction,
+    // where the first call's record is certain to be visible.
     if let Some(key) = idempotency_key
         && let Some(entry) =
-            idempotency::lookup_entry(&tx, artifact.project_id, "artifact", key).await?
+            idempotency::lookup_entry(&conn, artifact.project_id, "artifact", key).await?
     {
-        return replay(&tx, &entry, None).await;
+        return replay(&conn, &entry, None).await;
     }
 
     let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
+    let envelope_json = artifact.envelope.as_ref().map(|value| value.to_string());
+    let protected = envelope_json.is_some();
     let rel = blob::write(
         data_dir,
         artifact.project_id,
@@ -134,10 +147,34 @@ pub async fn publish(
         artifact.content,
     )?;
 
-    let envelope_json = artifact.envelope.as_ref().map(|value| value.to_string());
-    let protected = envelope_json.is_some();
+    let published = Artifact {
+        id: id.clone(),
+        project_id: artifact.project_id.to_string(),
+        title: title.clone(),
+        description: description.clone(),
+        favicon: favicon.clone(),
+        label: label.clone(),
+        kind: artifact.kind.to_string(),
+        version: 1,
+        protected,
+        envelope: artifact.envelope.clone(),
+        size_bytes: artifact.content.len() as i64,
+        created_at: created_at.clone(),
+        updated_at: created_at.clone(),
+        path: rel.clone(),
+    };
 
     let write = async {
+        let tx = conn
+            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+            .await
+            .map_err(engine)?;
+        if let Some(key) = idempotency_key
+            && let Some(entry) =
+                idempotency::lookup_entry(&tx, artifact.project_id, "artifact", key).await?
+        {
+            return Ok(Written::Dropped(replay(&tx, &entry, None).await?));
+        }
         tx.execute(
             "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11)",
@@ -204,16 +241,22 @@ pub async fn publish(
             idempotency::record_artifact(&tx, artifact.project_id, key, &event_id, &id, 1, &created_at)
                 .await?;
         }
-        tx.commit().await.map_err(engine)
+        tx.commit().await.map_err(engine)?;
+        Ok(Written::Kept(published))
     }
     .await;
 
-    if let Err(err) = write {
-        let _ = blob::remove(data_dir, &rel);
-        return Err(err);
+    match write {
+        Ok(Written::Kept(published)) => Ok(published),
+        Ok(Written::Dropped(replayed)) => {
+            let _ = blob::remove(data_dir, &rel);
+            Ok(replayed)
+        }
+        Err(err) => {
+            let _ = blob::remove(data_dir, &rel);
+            Err(err)
+        }
     }
-
-    get(db, data_dir, &id).await.map(|(artifact, _)| artifact)
 }
 
 /// Publish a new version of an existing artifact.
@@ -221,6 +264,11 @@ pub async fn publish(
 /// The version bump is read inside the immediate transaction, so concurrent
 /// updates serialise and each writes a distinct version file. A stale
 /// `base_version` without `force` is a conflict, not an overwrite.
+///
+/// The content is written under a pending name before the transaction opens,
+/// so the store's write lock is never held across a transfer of up to the
+/// artifact cap, and is renamed onto its version path once the number is
+/// allocated. A transaction that does not commit takes the blob with it.
 #[allow(clippy::too_many_arguments)]
 pub async fn update(
     db: &Database,
@@ -236,48 +284,76 @@ pub async fn update(
     let label = check_label(opts.label)?;
 
     let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
-    let existing = row_on(&tx, artifact_id)
+    // Only the project and the kind are taken from this read, and neither ever
+    // changes for an artifact, so it is enough to name the pending file. Every
+    // decision below is made on the row the transaction reads.
+    let current = row_on(&conn, artifact_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
 
     // A retry with the same key returns the version the first call granted.
+    // As in publish, the lookup runs before the blob write and again inside
+    // the transaction.
     if let Some(key) = idempotency_key
         && let Some(entry) =
-            idempotency::lookup_entry(&tx, &existing.project_id, "artifact", key).await?
+            idempotency::lookup_entry(&conn, &current.project_id, "artifact", key).await?
     {
-        return replay(&tx, &entry, Some(artifact_id)).await;
+        return replay(&conn, &entry, Some(artifact_id)).await;
     }
 
-    if let Some(base) = opts.base_version
-        && base != existing.version
-        && !opts.force
-    {
-        return Err(Error::Conflict(format!(
-            "artifact {artifact_id} is at version {}, not base version {base}",
-            existing.version
-        )));
-    }
-
-    let version = existing.version + 1;
-    let rel = blob::write(
+    let pending = blob::write_pending(
         data_dir,
-        &existing.project_id,
+        &current.project_id,
         artifact_id,
-        version,
-        &existing.kind,
+        &current.kind,
         content,
     )?;
-    let envelope = envelope.or(existing.envelope.clone());
-    let envelope_json = envelope.as_ref().map(|value| value.to_string());
-    let protected = envelope_json.is_some();
-    let label = label.or(existing.label.clone());
     let updated_at = crate::store::now_rfc3339();
+    let mut promoted = None;
 
     let write = async {
+        let tx = conn
+            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+            .await
+            .map_err(engine)?;
+        let existing = row_on(&tx, artifact_id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+        if let Some(key) = idempotency_key
+            && let Some(entry) =
+                idempotency::lookup_entry(&tx, &existing.project_id, "artifact", key).await?
+        {
+            return Ok(Written::Dropped(
+                replay(&tx, &entry, Some(artifact_id)).await?,
+            ));
+        }
+
+        if let Some(base) = opts.base_version
+            && base != existing.version
+            && !opts.force
+        {
+            return Err(Error::Conflict(format!(
+                "artifact {artifact_id} is at version {}, not base version {base}",
+                existing.version
+            )));
+        }
+
+        let version = existing.version + 1;
+        let rel = blob::promote(
+            data_dir,
+            &pending,
+            &existing.project_id,
+            artifact_id,
+            version,
+            &existing.kind,
+        )?;
+        promoted = Some(rel.clone());
+        let envelope = envelope.or(existing.envelope.clone());
+        let envelope_json = envelope.as_ref().map(|value| value.to_string());
+        let protected = envelope_json.is_some();
+        let label = label.or(existing.label.clone());
+
         tx.execute(
             "UPDATE artifacts SET current_ver = ?1, label = ?2, envelope = ?3, path = ?4, size_bytes = ?5, updated_at = ?6 WHERE id = ?7",
             vec![
@@ -347,18 +423,48 @@ pub async fn update(
             )
             .await?;
         }
-        tx.commit().await.map_err(engine)
+        tx.commit().await.map_err(engine)?;
+        Ok(Written::Kept(Artifact {
+            id: artifact_id.to_string(),
+            project_id: existing.project_id,
+            title: existing.title,
+            description: existing.description,
+            favicon: existing.favicon,
+            label,
+            kind: existing.kind,
+            version,
+            protected,
+            envelope,
+            size_bytes: content.len() as i64,
+            created_at: existing.created_at,
+            updated_at,
+            path: rel,
+        }))
     }
     .await;
 
-    if let Err(err) = write {
-        let _ = blob::remove(data_dir, &rel);
-        return Err(err);
+    // The write lock is gone by now, so only the pending name is safe to
+    // remove: nobody else can name it. Once the rename ran, the version path
+    // is left alone even on failure, because another update may already have
+    // been granted the same number, renamed its own content onto that path and
+    // committed. An unreferenced version file is harmless, and the next update
+    // renames over it.
+    let cleanup = || {
+        if promoted.is_none() {
+            let _ = blob::remove(data_dir, &pending);
+        }
+    };
+    match write {
+        Ok(Written::Kept(updated)) => Ok(updated),
+        Ok(Written::Dropped(replayed)) => {
+            cleanup();
+            Ok(replayed)
+        }
+        Err(err) => {
+            cleanup();
+            Err(err)
+        }
     }
-
-    get(db, data_dir, artifact_id)
-        .await
-        .map(|(artifact, _)| artifact)
 }
 
 /// Delete an artifact and its history.
@@ -689,7 +795,7 @@ async fn append_event(
 /// Only the id and version are authoritative on a replay; the other fields are
 /// the artifact's current metadata, which a later update may have moved on.
 async fn replay(
-    tx: &turso::transaction::Transaction<'_>,
+    conn: &turso::Connection,
     entry: &idempotency::Entry,
     expected: Option<&str>,
 ) -> Result<Artifact> {
@@ -703,7 +809,7 @@ async fn replay(
             "idempotency key was used for a different artifact".to_string(),
         ));
     }
-    let mut artifact = row_on(tx, artifact_id).await?.ok_or_else(|| {
+    let mut artifact = row_on(conn, artifact_id).await?.ok_or_else(|| {
         Error::Engine(format!(
             "an idempotency record points at missing artifact {artifact_id}"
         ))

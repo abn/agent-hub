@@ -719,6 +719,283 @@ async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
 }
 
 #[tokio::test]
+async fn a_conflicting_update_leaves_no_blob_behind() {
+    let dir = temp_dir("artifact-conflict-blob");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"v1"), None)
+        .await
+        .expect("publish");
+
+    let stale = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"v2-stale",
+        None,
+        UpdateOptions {
+            base_version: Some(999),
+            force: false,
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect_err("stale base conflicts");
+    assert_eq!(stale.code(), ErrorCode::Conflict);
+
+    assert_eq!(
+        blob_files(&dir),
+        vec![format!("proj/{}/v1.html", artifact.id)],
+        "a refused update leaves nothing on the volume"
+    );
+}
+
+#[tokio::test]
+async fn a_replayed_write_leaves_no_extra_blob() {
+    let dir = temp_dir("artifact-replay-blob");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
+        .await
+        .expect("publish");
+    artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
+        .await
+        .expect("publish replay");
+    assert_eq!(
+        blob_files(&dir),
+        vec![format!("proj/{}/v1.html", artifact.id)],
+        "a replayed publish writes no second blob"
+    );
+
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second",
+        None,
+        UpdateOptions::default(),
+        Some("upd-key"),
+    )
+    .await
+    .expect("update");
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"another",
+        None,
+        UpdateOptions::default(),
+        Some("upd-key"),
+    )
+    .await
+    .expect("update replay");
+    assert_eq!(
+        blob_files(&dir),
+        vec![
+            format!("proj/{}/v1.html", artifact.id),
+            format!("proj/{}/v2.html", artifact.id),
+        ],
+        "a replayed update writes no third blob"
+    );
+}
+
+#[tokio::test]
+async fn sequential_updates_keep_every_version_blob() {
+    let dir = temp_dir("artifact-version-blobs");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+    let second = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("second");
+    let third = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"third",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("third");
+    assert_eq!(second.version, 2);
+    assert_eq!(third.version, 3);
+
+    for (version, expected) in [(1, &b"first"[..]), (2, b"second"), (3, b"third")] {
+        let (read, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, version)
+            .await
+            .expect("version read");
+        assert_eq!(read.version, version);
+        assert_eq!(bytes, expected, "version {version} keeps its own bytes");
+    }
+    assert_eq!(
+        blob_files(&dir),
+        vec![
+            format!("proj/{}/v1.html", artifact.id),
+            format!("proj/{}/v2.html", artifact.id),
+            format!("proj/{}/v3.html", artifact.id),
+        ],
+        "each version has one blob and nothing else is left over"
+    );
+}
+
+#[tokio::test]
+async fn publish_and_update_return_the_metadata_they_committed() {
+    let dir = temp_dir("artifact-committed-metadata");
+    let db = open(&dir).await;
+    let published = artifacts::publish(
+        &db,
+        &dir,
+        NewArtifact {
+            description: "Quarterly numbers",
+            favicon: "chart",
+            label: Some("q3"),
+            ..public("Report", b"<h1>hits</h1>")
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+    let stored = artifacts::metadata(&db, &published.id)
+        .await
+        .expect("stored metadata");
+    assert_eq!(
+        serde_json::to_value(&published).expect("published json"),
+        serde_json::to_value(&stored).expect("stored json"),
+        "publish returns the metadata it committed"
+    );
+    assert_eq!(published.path, stored.path);
+    assert_eq!(
+        published.path,
+        format!("artifacts/proj/{}/v1.html", stored.id)
+    );
+
+    let updated = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"<h1>more hits</h1>",
+        None,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+    let stored = artifacts::metadata(&db, &published.id)
+        .await
+        .expect("stored metadata");
+    assert_eq!(
+        serde_json::to_value(&updated).expect("updated json"),
+        serde_json::to_value(&stored).expect("stored json"),
+        "update returns the metadata it committed"
+    );
+    assert_eq!(updated.path, stored.path);
+    assert_eq!(updated.size_bytes, b"<h1>more hits</h1>".len() as i64);
+    assert_eq!(updated.created_at, published.created_at);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_update_writes_its_blob_before_taking_the_write_lock() {
+    let dir = temp_dir("artifact-lock-free-write");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+
+    let mut holder = db.connect().expect("connect");
+    let lock = holder
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .expect("take the write lock");
+
+    let updating = tokio::spawn({
+        let db = db.clone();
+        let dir = dir.clone();
+        let id = artifact.id.clone();
+        async move {
+            artifacts::update(
+                &db,
+                &dir,
+                "agent-one",
+                &id,
+                b"second",
+                None,
+                UpdateOptions::default(),
+                None,
+            )
+            .await
+        }
+    });
+
+    // Well inside the five second lock wait: the content is on the volume
+    // while another writer still holds the lock, so the transfer never
+    // blocks the store.
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let written: Vec<String> = blob_files(&dir)
+        .into_iter()
+        .filter(|name| !name.ends_with("v1.html"))
+        .collect();
+    lock.rollback().await.expect("release the write lock");
+    assert_eq!(
+        written.len(),
+        1,
+        "the update writes its blob before it waits for the lock, found {written:?}"
+    );
+
+    let updated = updating
+        .await
+        .expect("join")
+        .expect("update once the lock is free");
+    assert_eq!(updated.version, 2);
+    assert_eq!(
+        blob_files(&dir),
+        vec![
+            format!("proj/{}/v1.html", artifact.id),
+            format!("proj/{}/v2.html", artifact.id),
+        ],
+        "the pending blob is renamed onto its version path"
+    );
+}
+
+/// Every artifact blob on the volume, relative to the artifacts root, sorted.
+fn blob_files(dir: &std::path::Path) -> Vec<String> {
+    let root = dir.join("artifacts");
+    let mut found = Vec::new();
+    collect_files(&root, &root, &mut found);
+    found.sort();
+    found
+}
+
+fn collect_files(root: &std::path::Path, at: &std::path::Path, found: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(at) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(root, &path, found);
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            found.push(rel.to_string_lossy().into_owned());
+        }
+    }
+}
+
+#[tokio::test]
 async fn project_delete_drops_version_rows() {
     let dir = temp_dir("artifact-project-delete");
     let db = open(&dir).await;
