@@ -299,6 +299,42 @@ impl Brain {
         &self.session_id
     }
 
+    /// Copy this brain into a new file through the engine.
+    ///
+    /// The engine's own copy, never a filesystem one: it snapshots every table,
+    /// the append-only tool call log included, and writes one self-contained
+    /// file with no sidecar of its own. `alive` runs under the write lock, like
+    /// [`BrainStore::open_live`], so a caller that checked the session is still
+    /// there before the lock re-checks it here, where a prune cannot land in
+    /// between and leave a copy of a file it is removing.
+    pub async fn vacuum_into(
+        &self,
+        destination: &Path,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<()> {
+        let destination = destination.to_str().ok_or_else(|| {
+            Error::Config("brain copy destination is not valid UTF-8".to_string())
+        })?;
+        // The engine reads the destination as a string literal and takes no
+        // bound parameter there, so a quote in the path would end the
+        // statement. Every path the store builds comes from a validated
+        // project and session id and can hold none; anything else is refused
+        // here rather than trusted.
+        if destination.contains('\'') {
+            return Err(Error::InvalidArgument(
+                "a brain copy destination may not contain a quote".to_string(),
+            ));
+        }
+        let _guard = self.lock.lock().await;
+        alive().await?;
+        self.ensure_present()?;
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        conn.execute(&format!("VACUUM INTO '{destination}'"), ())
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        Ok(())
+    }
+
     /// Read a value. Returns `None` when nothing is stored at the path.
     ///
     /// A directory under `/fs/` reads as `None`; only regular files have

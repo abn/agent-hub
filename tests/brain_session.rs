@@ -553,3 +553,81 @@ async fn a_reader_handle_sees_a_live_writer_handle_on_one_file() {
         "a reader handle sees a later write through the other handle"
     );
 }
+
+#[tokio::test]
+async fn a_copy_through_the_engine_carries_state_and_its_audit_log() {
+    let store = BrainStore::new(temp_dir("engine-copy"));
+    let source = store.open("proj", "source").await.expect("open source");
+    source.put("/kv/plan", b"first").await.expect("write key");
+    source
+        .put("/fs/notes/plan.md", b"# plan\n")
+        .await
+        .expect("write file");
+
+    // The append-only tool call log is the provenance a copy must keep, so a
+    // row goes in before the copy and is looked for after it.
+    let source_path = store.brain_path("proj", "source").expect("source path");
+    let log = agentfs_sdk::ToolCalls::new(source_path.to_str().expect("utf-8 path"))
+        .await
+        .expect("open the audit log");
+    log.record("brain.write", 1, 2, None, None, None)
+        .await
+        .expect("record a call");
+
+    // The copy runs on a handle of its own while the owner's handle stays
+    // open: a fork never asks the source's owner to stop.
+    let destination = store.brain_path("proj", "copy").expect("destination path");
+    let reader = store
+        .open_existing("proj", "source")
+        .await
+        .expect("open a second handle")
+        .expect("the source exists");
+    reader
+        .vacuum_into(&destination, async || Ok(()))
+        .await
+        .expect("copy through the engine");
+    assert!(destination.exists(), "the copy is written");
+    let mut sidecar = destination.clone().into_os_string();
+    sidecar.push("-wal");
+    // The engine opens the destination and so leaves a write-ahead log beside
+    // it, but the copy is complete in the file itself: the log is empty.
+    let sidecar_bytes = std::fs::metadata(&sidecar).map_or(0, |meta| meta.len());
+    assert_eq!(sidecar_bytes, 0, "the copy needs nothing from a sidecar");
+
+    let copy = store
+        .open_existing("proj", "copy")
+        .await
+        .expect("open the copy")
+        .expect("the copy exists");
+    assert_eq!(
+        copy.get("/kv/plan").await.expect("read key"),
+        Some(b"first".to_vec())
+    );
+    assert_eq!(
+        copy.get("/fs/notes/plan.md").await.expect("read file"),
+        Some(b"# plan\n".to_vec())
+    );
+
+    let copied_log = agentfs_sdk::ToolCalls::new(destination.to_str().expect("utf-8 path"))
+        .await
+        .expect("open the copied audit log");
+    let calls = copied_log.recent(Some(10)).await.expect("read the log");
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["brain.write"],
+        "the copy keeps the audit trail"
+    );
+
+    source
+        .put("/kv/plan", b"second")
+        .await
+        .expect("the source keeps its writer");
+    assert_eq!(
+        copy.get("/kv/plan").await.expect("read key again"),
+        Some(b"first".to_vec()),
+        "a later write to the source does not reach the copy"
+    );
+}
