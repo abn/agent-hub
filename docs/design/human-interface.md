@@ -24,7 +24,9 @@ A fixed token set carries both themes and both densities. It is reused
 verbatim, not reinterpreted.
 
 - **Themes.** Warm paper in light, warm charcoal in dark, switched by a
-  `data-theme` attribute and following the operating system by default.
+  `data-theme` attribute and following the operating system by default. A
+  system that changes while the app is open changes the app with it, status
+  bar included; a theme the reader chose follows nothing.
 - **Surfaces.** A canvas, a row and card surface, and an inset surface, with
   two line weights for dividers and control borders.
 - **Ink.** A primary, a secondary at 6.3 to 1, and a meta tone at 5 to 1 on the
@@ -82,6 +84,16 @@ single-column screens with a top bar.
 - Read is explicit, by opening an item or a swipe; never scroll-past. This is
   intended design, not yet shipped: nothing marks an item read today.
 - Feeds are grouped by day, with kind filters as chips.
+- Time is short on a row and whole on request. A row carries a compact relative
+  form in the reader's own locale, counting itself up while the app is open;
+  the full local timestamp is the element's accessible name, its hover title,
+  and what one press shows, so a reader who cannot hover still gets it.
+- Keyboard: `/` focuses search, `j` and `k` move a selection through the rows
+  of the current screen, Enter opens the selected row, `a` approves and `r`
+  replies on it, and Esc closes what is on top. `?` lists them. The selection
+  is a real focus move, so the ring shows it and a reader following focus goes
+  with it. Nothing fires while the reader is typing, while a modifier is held,
+  or while a dialog holds the keyboard.
 - Prune is confirmed in a dialog, then reversible for a short window, then
   committed. The dialog holds focus inside itself, opens with the safe action
   focused, treats Esc as keeping, and hands focus back to the control that
@@ -125,8 +137,11 @@ build, and skip cleanly when they are absent.
 
 Agent voice, past tense, no exclamation marks. Approvals name the action and
 its blast radius. Toasts state what happened and the reversible path. Empty
-states say what this is and what to do. There is no emoji anywhere; icons are
-inline SVG line glyphs or typographic marks.
+states say what this is and what to do, in four parts: the screen's own name in
+mono, a title, one line, and at most one way to act, with no illustration. The
+copy for each screen lives in one table rather than inside eight screens; the
+screens adopt the component as each is reworked. There is no emoji anywhere;
+icons are inline SVG line glyphs or typographic marks.
 
 ## See also
 

@@ -4,6 +4,27 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, time, keys, and a theme that keeps up
+
+* **Update**: A timestamp is a component rather than a truncated ISO string. A
+  row shows a compact relative form in the reader's own locale and counts it up
+  while the app is open; the full local timestamp is the element's accessible
+  name, its hover title, and what one press shows. Described in the
+  [human interface](design/human-interface.md).
+* **Update**: The screens with rows share one keyboard map: `/` for search,
+  `j` and `k` through the rows, Enter to open, `a` and `r` for the two inbox
+  verbs, Esc for what is on top, and `?` for the list. The selection is a real
+  focus move, and nothing fires while the reader is typing or while a dialog
+  holds the keyboard.
+* **Update**: With the theme preference on "system", an operating system that
+  changes while the app is open now changes the app with it, status bar
+  included. It previously waited for the next navigation. The preference is
+  read back defensively, so a value this app never wrote cannot reach the root
+  element.
+* **Note**: An empty-state component carries the design's four parts and the
+  copy for each screen in one table. The screens still show their own single
+  sentence; each adopts the component as it is reworked.
+
 ## 2026-09-18, the app asks and reports in its own components
 
 * **Update**: Pruning a session now asks first. A confirmation dialog names the

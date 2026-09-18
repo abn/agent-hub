@@ -239,9 +239,13 @@ The app ships as ES modules with no bundler and no build step. `app.js` is
 the entry: it names the screens the router can paint and routes the delegated
 click, submit, and change events to the handler that owns each action.
 Beside it sit a shared core (the API client, the router, the DOM and escaping
-helpers, time formatting, preferences, the confirmation dialog, the toast, the
-reply composer, the freshness stream and badge, and the project picker) and one
-module per screen, with the comments drawer in its own. The binary embeds every one of them in the same table it
+helpers, the relative-time component, preferences, the keyboard map, the
+empty-state component, the confirmation dialog, the toast, the reply composer,
+the freshness stream and badge, and the project picker) and one module per
+screen, with the comments drawer in its own. The keyboard map is one module the
+screens with rows register with, so the shortcuts and the roving selection are
+defined once rather than per screen, and a dialog can take the map out of the
+way while it holds the keyboard. The binary embeds every one of them in the same table it
 serves, precaches, and digests for the service worker's cache name, so a
 module the hub does not serve cannot ship. Each render carries a number, and
 a screen whose fetches resolve after the reader has moved on does not paint
