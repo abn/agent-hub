@@ -257,7 +257,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 .seg a {
   position: relative; display: inline-flex; align-items: center;
   min-height: 44px; padding: 0 var(--s-1);
-  color: var(--ink-3); font-size: var(--t-15); font-weight: 500;
+  color: var(--ink-3); font-size: 14px; font-weight: 500;
   text-decoration: none; white-space: nowrap;
 }
 .seg a[aria-current="page"] {
