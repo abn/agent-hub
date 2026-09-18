@@ -173,8 +173,15 @@ def goto(page, hash_value: str, title: str) -> None:
 
 
 def marked_routes(page) -> list[str]:
+    """The nav marking, read from the shell's own nav links alone.
+
+    A screen such as the project view carries its own current-state links
+    (the segment tabs) with `aria-current`, so reading every marked element
+    would count those against the tab marking. The nav is what `visit` checks.
+    """
     return page.evaluate(
-        "(() => [...document.querySelectorAll('[aria-current=\"page\"]')]"
+        "(() => [...document.querySelectorAll('.tabbar a, .topbar nav a')]"
+        ".filter((a) => a.getAttribute('aria-current') === 'page')"
         ".map((a) => (a.getAttribute('href') || '').replace(/^#\\//, '').split('?')[0]))()"
     )
 
@@ -627,9 +634,13 @@ def check_kind_glyphs(page, watch: Watch, project: str) -> None:
 
 
 def check_type_scale(page, watch: Watch, project: str) -> None:
-    """The top and the bottom of the scale, measured as the browser renders it."""
-    watch.enter("feed: type scale")
-    goto(page, f"#/feed?project={quote(project)}", "Project feed")
+    """The top and the bottom of the scale, measured as the browser renders it.
+
+    The design gives the page title 28px and the project screen's name 22px,
+    so Home holds the page title and the project view holds the section one.
+    """
+    watch.enter("type scale: the page title")
+    goto(page, "#/home", "Home")
     title = page.evaluate(
         "(() => { const el = document.querySelector('main h1'); if (!el) return null;"
         " const s = getComputedStyle(el);"
@@ -637,6 +648,15 @@ def check_type_scale(page, watch: Watch, project: str) -> None:
     )
     if title != {"size": "28px", "weight": "600"}:
         watch.fail(f"the page title renders {title}, expected 28px at 600")
+    watch.enter("type scale: the project name")
+    goto(page, f"#/projects/{quote(project)}/feed", "Checks")
+    title = page.evaluate(
+        "(() => { const el = document.querySelector('main h1'); if (!el) return null;"
+        " const s = getComputedStyle(el);"
+        " return {size: s.fontSize, weight: s.fontWeight}; })()"
+    )
+    if title != {"size": "22px", "weight": "600"}:
+        watch.fail(f"the project name renders {title}, expected 22px at 600")
     label = page.evaluate(
         "(() => { const el = document.querySelector('main h2.day'); if (!el) return null;"
         " const s = getComputedStyle(el);"
@@ -734,11 +754,12 @@ def check_controls(page, watch: Watch, routes: list) -> None:
 def check_artifact(page, watch: Watch, project: str) -> None:
     watch.enter("artifacts: open")
     page.evaluate(f"location.hash = '#/artifacts?project={quote(project)}'")
-    page.wait_for_timeout(500)
+    settle(page, "!!document.querySelector('main .artifact-card')")
     page.click('[data-action="artifact-open"]')
-    page.wait_for_timeout(1200)
-    body = page.evaluate("document.querySelector('main').textContent")
-    if "Back to artifacts" not in body:
+    if not settle(page, "location.hash.startsWith('#/artifacts/')"):
+        watch.fail(f"opening a card did not route to the viewer: {page.evaluate('location.hash')!r}")
+    settle(page, "!!document.querySelector('main .hub-viewer')")
+    if not page.evaluate("!!document.querySelector('main [data-action=\"viewer-back\"]')"):
         watch.fail("the viewer has no way back to the gallery")
     frames = page.evaluate(
         "(() => [...document.querySelectorAll('main iframe')].map((f) => f.getAttribute('src')))()"
@@ -1233,9 +1254,8 @@ def check_row_keys(page, watch: Watch) -> None:
 
 def check_enter_opens(page, watch: Watch, project: str) -> None:
     watch.enter("keys: enter")
-    page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
-    if not settle(page, "!!document.querySelector('main .row a[href]')"
-                  " && location.hash.startsWith('#/sessions')"):
+    page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
+    if not settle(page, "!!document.querySelector('main .row a[href]')"):
         watch.fail("the sessions screen has no row to open")
         return
     page.keyboard.press("j")
@@ -1436,6 +1456,366 @@ def check_public_gate_remembers_and_forgets(port: int, context, project: str, ar
     return failures
 
 
+def check_shell_tabs(page, watch: Watch) -> None:
+    """The tab bar is four labelled icon tabs, and Inbox carries the live badge."""
+    watch.enter("shell: tab bar")
+    goto(page, "#/home", "Home")
+    tabs = page.evaluate(
+        "(() => [...document.querySelectorAll('.tabbar a')].map((a) => ({"
+        " href: a.getAttribute('href'),"
+        " label: (a.querySelector('.tab-label') || {}).textContent"
+        "  ? a.querySelector('.tab-label').textContent.trim() : a.textContent.trim(),"
+        " svg: a.querySelector('svg') !== null,"
+        " current: a.getAttribute('aria-current'),"
+        " h: a.getBoundingClientRect().height })))()"
+    )
+    if len(tabs) != 4:
+        watch.fail(f"the tab bar has {len(tabs)} tabs, not four")
+    if [t["label"] for t in tabs] != ["Home", "Inbox", "Projects", "Search"]:
+        watch.fail(f"the tab labels read {[t['label'] for t in tabs]!r}")
+    if not all(t["svg"] for t in tabs):
+        watch.fail("a tab draws no icon")
+    if [t["current"] for t in tabs] != ["page", None, None, None]:
+        watch.fail(f"the home tab is not the current one: {[t['current'] for t in tabs]!r}")
+    if any(t["h"] + 0.5 < 44 for t in tabs):
+        watch.fail(f"a tab target is under 44px: {[round(t['h']) for t in tabs]!r}")
+    if page.evaluate(
+        "(() => { const badge = document.getElementById('tab-badge');"
+        " const icon = badge && badge.closest('.tab-icon');"
+        " return !(icon && icon.querySelector('svg')); })()"
+    ):
+        watch.fail("the inbox badge does not sit over the inbox icon")
+    count = json.loads(harness.request(watch.port, "GET", "/api/v1/home"))["waiting"]
+    badge = page.evaluate(
+        "(() => { const b = document.getElementById('tab-badge');"
+        " return { hidden: b.hidden, text: b.textContent }; })()"
+    )
+    if count > 0 and (badge["hidden"] or badge["text"] != str(count)):
+        watch.fail(f"the unread badge reads {badge}, expected the live count {count}")
+    if count == 0 and not badge["hidden"]:
+        watch.fail("the unread badge shows a zero count")
+    watch.drain_rejections()
+
+
+def check_mobile_tabbar(page, watch: Watch) -> None:
+    """At 390px the tab bar does not overflow and every target is thumb-sized."""
+    watch.enter("shell: tab bar at 390px")
+    goto(page, "#/home", "Home")
+    if page.evaluate(
+        "(() => { const bar = document.querySelector('.tabbar');"
+        " return bar.scrollWidth > bar.getBoundingClientRect().width; })()"
+    ):
+        watch.fail("the tab bar overflows at 390px")
+    if page.evaluate(
+        "(() => [...document.querySelectorAll('.tabbar a')]"
+        ".filter((a) => a.getBoundingClientRect().height + 0.5 < 44).length)()"
+    ):
+        watch.fail("a tab target is under 44px at 390px")
+    watch.drain_rejections()
+
+
+def check_artifact_link(page, watch: Watch, project: str) -> None:
+    """A project's segmented tabs are the only way into the gallery, and they reach it."""
+    watch.enter("projects: the artifacts segment is reachable")
+    goto(page, f"#/projects/{quote(project)}/feed", "Checks")
+    tabs = page.evaluate(
+        "(() => [...document.querySelectorAll('main .seg a')].map((a) =>"
+        " (a.getAttribute('href') || '').replace(/^#\\//, '')))()"
+    )
+    if f"projects/{quote(project)}/artifacts" not in tabs:
+        watch.fail(f"no segmented tab leads to the gallery, tabs: {tabs}")
+    if len(tabs) != 3:
+        watch.fail(f"the project has {len(tabs)} segments, not three")
+        return
+    page.click('main .seg a[href$="/artifacts"]')
+    if not settle(page, f"location.hash === '#/projects/{quote(project)}/artifacts'"):
+        watch.fail("the artifacts segment has no address of its own")
+    settle(page, "!!document.querySelector('main .artifact-card')")
+    body = page.evaluate("document.querySelector('main').textContent")
+    if harness.ARTIFACT_TITLE not in body:
+        watch.fail("the gallery did not paint the seeded artifact")
+    watch.drain_rejections()
+
+
+def check_segmented_tabs(page, watch: Watch, project: str) -> None:
+    """Each segment switches, marks itself current, and keeps its own address."""
+    watch.enter("projects: segmented tabs")
+    for segment, needle in (
+        ("feed", harness.FINISHED_SUMMARY),
+        ("artifacts", harness.ARTIFACT_TITLE),
+        ("sessions", harness.SESSION_NAME),
+    ):
+        goto(page, f"#/projects/{quote(project)}/{segment}", "Checks")
+        # The shell's title is the project name on every segment, so the
+        # screen is painted only when the active tab and the content arrive.
+        wanted = f"#/projects/{quote(project)}/{segment}"
+        active_tab_js = (
+            "(() => { const a = [...document.querySelectorAll('main .seg a')]"
+            ".find((x) => x.getAttribute('aria-current') === 'page');"
+            " return a ? a.getAttribute('href') : null; })()"
+        )
+        settle(
+            page,
+            f"(() => {{ const a = [...document.querySelectorAll('main .seg a')]"
+            ".find((x) => x.getAttribute('aria-current') === 'page');"
+            f" return a && a.getAttribute('href') === "
+            + json.dumps(wanted)
+            + "; })()",
+        )
+        settle(
+            page,
+            f"document.querySelector('main').textContent.includes({json.dumps(needle)})",
+        )
+        current = page.evaluate(active_tab_js)
+        if current != wanted:
+            watch.fail(f"the {segment} segment is not marked current, the active tab is {current!r}")
+        body = page.evaluate("document.querySelector('main').textContent")
+        if needle not in body:
+            watch.fail(f"the {segment} segment does not show {needle!r}")
+    watch.drain_rejections()
+
+
+def check_artifact_gallery(page, watch: Watch, project: str) -> None:
+    """The gallery draws cards with a preview tile and real version, size and age."""
+    watch.enter("artifacts: gallery cards")
+    listing = json.loads(
+        harness.request(watch.port, "GET", f"/api/v1/projects/{quote(project)}/artifacts")
+    )
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Checks")
+    if not settle(page, "!!document.querySelector('main .artifact-card')"):
+        watch.fail("the gallery painted no cards")
+        return
+    cards = page.evaluate(
+        "(() => [...document.querySelectorAll('main .artifact-card')].map((c) => ({"
+        " id: c.getAttribute('data-id'),"
+        " lock: !!c.querySelector('svg.lock'), doc: !!c.querySelector('svg.doc'),"
+        " meta: (c.querySelector('.artifact-meta') || {}).textContent || '' })))()"
+    )
+    if len(cards) < len(listing["artifacts"]):
+        watch.fail(f"the gallery shows {len(cards)} cards, expected {len(listing['artifacts'])}")
+    size_labels = []
+    for artifact in listing["artifacts"]:
+        card = next((c for c in cards if c["id"] == artifact["id"]), None)
+        if not card:
+            watch.fail(f"no gallery card for artifact {artifact['id']!r}")
+            continue
+        if artifact["protected"] and not card["lock"]:
+            watch.fail(f"the protected {artifact['title']!r} card draws no lock glyph")
+        if not artifact["protected"] and not card["doc"]:
+            watch.fail(f"the plain {artifact['title']!r} card draws no document glyph")
+        if f"v{artifact['version']}" not in card["meta"]:
+            watch.fail(f"the card meta is {card['meta']!r}, missing v{artifact['version']}")
+        if " bytes" in card["meta"] or "B · " not in card["meta"]:
+            watch.fail(f"the card meta is {card['meta']!r}, not a formatted size with a time")
+    watch.drain_rejections()
+
+
+def check_viewer_route(page, watch: Watch, project: str, artifact: str) -> None:
+    """The viewer is a route: the hash moves, reload keeps it, Back returns."""
+    watch.enter("artifacts: the viewer is a route")
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Checks")
+    if not settle(page, "!!document.querySelector('main .artifact-card')"):
+        watch.fail("the gallery painted no card to open")
+        return
+    page.click(f'[data-action="artifact-open"][data-id="{artifact}"]')
+    if not settle(page, f"location.hash.startsWith('#/artifacts/{artifact}')"):
+        watch.fail(f"opening a card did not move the hash: {page.evaluate('location.hash')!r}")
+    if not settle(page, "!!document.querySelector('main .hub-viewer')"):
+        watch.fail("the viewer did not paint")
+    if not settle(
+        page,
+        "(() => [...document.querySelectorAll('main iframe')]"
+        ".some((f) => (f.getAttribute('src') || '').includes('/artifacts/')))()",
+    ):
+        watch.fail("the viewer embeds no artifact frame")
+
+    page.go_back()
+    if not settle(
+        page,
+        f"location.hash.startsWith('#/projects/{quote(project)}/artifacts') &&"
+        " !!document.querySelector('main .artifact-card')",
+    ):
+        watch.fail("browser Back from the viewer left the gallery")
+    page.go_forward()
+    if not settle(page, f"location.hash.startsWith('#/artifacts/{artifact}')"):
+        watch.fail("browser Forward did not return to the viewer")
+
+    page.reload(wait_until="load")
+    if not settle(page, f"location.hash === '#/artifacts/{artifact}?project={quote(project)}'"):
+        watch.fail(f"reload lost the viewer: {page.evaluate('location.hash')!r}")
+    if not settle(page, "!!document.querySelector('main .hub-viewer')"):
+        watch.fail("reload did not restore the viewer")
+    watch.drain_rejections()
+
+
+def check_viewer_back_button(page, watch: Watch, project: str, artifact: str) -> None:
+    """The chrome's back button returns to the gallery."""
+    watch.enter("artifacts: the viewer back button")
+    page.evaluate(f"location.hash = '#/artifacts/{artifact}?project={quote(project)}'")
+    if not settle(page, "!!document.querySelector('main .hub-viewer')"):
+        watch.fail("the viewer did not paint for the back-button check")
+        return
+    page.click('[data-action="viewer-back"]')
+    if not settle(page, "location.hash.startsWith('#/projects/')"):
+        watch.fail(f"the back button left the app: {page.evaluate('location.hash')!r}")
+    settle(page, "!!document.querySelector('main .artifact-card')")
+    watch.drain_rejections()
+
+
+def check_version_list(page, watch: Watch, port: int, project: str) -> None:
+    """The version control lists the real versions; choosing one reloads it."""
+    watch.enter("artifacts: the version list")
+    artifact = harness.seed_versioned_artifact(port, project)
+    listed = json.loads(
+        harness.request(watch.port, "GET", f"/api/v1/artifacts/{artifact}/versions")
+    )
+    versions = sorted(v["version"] for v in listed["versions"])
+    if len(versions) < 2:
+        watch.fail(f"the version list is too short to open: {versions}")
+        return
+    page.evaluate(f"location.hash = '#/artifacts/{artifact}'")
+    if not settle(page, "!!document.querySelector('main .hub-version-toggle')"):
+        watch.fail("the viewer carries no version control")
+        return
+    page.click(".hub-version-toggle")
+    if not settle(page, "!document.querySelector('.hub-version-menu').hidden"):
+        watch.fail("the version control opened nothing")
+    labels = page.evaluate(
+        "(() => [...document.querySelectorAll('.hub-version-menu button')]"
+        ".map((b) => b.getAttribute('data-version')))()"
+    )
+    if sorted(int(v) for v in labels) != versions:
+        watch.fail(f"the version list reads {labels}, expected {versions}")
+    oldest = str(versions[0])
+    page.click(f'.hub-version-menu button[data-version="{oldest}"]')
+    if not settle(page, f"location.hash.includes('version={oldest}')"):
+        watch.fail("choosing a version did not reload that version's address")
+    if not settle(
+        page,
+        f"!!document.querySelector('main .hub-version-toggle')"
+        f" && (document.querySelector('main .hub-version-toggle').textContent || '').includes('v{oldest}')",
+    ):
+        watch.fail("the version control does not say the picked version")
+    watch.drain_rejections()
+
+
+def check_empty_project(page, watch: Watch, port: int) -> None:
+    """An empty project shows the design's empty state, not a blank card."""
+    watch.enter("projects: the empty state")
+    harness.request(port, "POST", "/api/v1/projects", {"id": "fresh", "display_name": "Fresh"})
+    for segment, needles in (
+        ("artifacts", ("artifacts", "No artifacts.", "appear here, versioned")),
+        ("feed", ("project feed", "No events yet in fresh.", "Agents post here over MCP")),
+    ):
+        goto(page, f"#/projects/fresh/{segment}", "Fresh")
+        if not settle(
+            page,
+            f"(() => {{ const a = [...document.querySelectorAll('main .seg a')]"
+            ".find((x) => x.getAttribute('aria-current') === 'page');"
+            f" return a && a.getAttribute('href') === "
+            + json.dumps(f"#/projects/fresh/{segment}")
+            + "; })()",
+        ):
+            watch.fail(f"the empty {segment} state never became current")
+        body = page.evaluate("document.querySelector('main').textContent")
+        for needle in needles:
+            if needle not in body:
+                watch.fail(f"the empty {segment} state does not say {needle!r}: {body[:120]!r}")
+    watch.drain_rejections()
+
+
+def check_desktop_two_pane(browser, watch: Watch, port: int, project: str) -> None:
+    """At desktop width Sessions is a 420px list pane plus a detail pane."""
+    watch.enter("desktop: the two-pane layout")
+    context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"desktop: uncaught error: {error}"))
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+    page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
+    if not settle(page, "!!document.querySelector('main .panes')"):
+        watch.fail("the sessions screen does not use the two-pane container")
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+        return
+    width = page.evaluate(
+        "(() => { const pane = document.querySelector('main .pane-list');"
+        " return pane ? pane.getBoundingClientRect().width : 0; })()"
+    )
+    if abs(width - 420) > 1:
+        watch.fail(f"the list pane is {width:.0f}px wide, not the design's 420px")
+    if not page.evaluate("(() => { const p = document.querySelector('main .pane-detail'); return !!p && getComputedStyle(p).display !== 'none'; })()"):
+        watch.fail("the detail pane is hidden at desktop width")
+    if harness.SESSION_NAME not in page.evaluate(
+        "(() => { const p = document.querySelector('main .pane-detail'); return p ? p.textContent : ''; })()"
+    ):
+        watch.fail("the detail pane does not carry the session")
+    if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
+        watch.fail("the top bar is not visible at desktop width")
+    context.close()
+    watch.page.bring_to_front()
+    watch.drain_rejections()
+
+
+def check_desktop_topbar(browser, watch: Watch, port: int) -> None:
+    """The top bar carries the search field, the node line, and the gear."""
+    watch.enter("desktop: the top bar")
+    context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        "localStorage.setItem('hub.theme', 'light');"
+    )
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"topbar: uncaught error: {error}"))
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+    page.wait_for_timeout(400)
+    if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
+        watch.fail("the top bar is not visible at desktop width")
+    box = page.evaluate(
+        "(() => { const pill = document.querySelector('.topsearch');"
+        " const field = document.getElementById('top-search');"
+        " if (!pill || !field) return null;"
+        " const pillBox = pill.getBoundingClientRect();"
+        " const fieldBox = field.getBoundingClientRect();"
+        " return { w: pillBox.width, h: fieldBox.height }; })()"
+    )
+    if not box or box["w"] + 0.5 < 280 or box["h"] + 0.5 < 44:
+        watch.fail(f"the top bar search field is {box}")
+    if not page.evaluate("!!document.querySelector('.topsearch-hint')"):
+        watch.fail("the top bar search field carries no slash hint")
+    node = page.evaluate("(document.getElementById('top-node') || {}).textContent.trim() || ''")
+    if not node or " · " not in node:
+        watch.fail(f"the top bar node line is {node!r}")
+    stored = json.loads(harness.request(watch.port, "GET", "/api/v1/storage"))
+    wanted = f"{stored['node']['host']} · {stored['node']['mode']}"
+    if node != wanted:
+        watch.fail(f"the node line reads {node!r}, expected {wanted!r}")
+    if not page.evaluate("!!document.querySelector('.topbar a[href=\"#/settings\"] svg')"):
+        watch.fail("the top bar settings control draws no gear")
+    page.keyboard.press("/")
+    if not settle(page, "document.activeElement && document.activeElement.id === 'top-search'"):
+        watch.fail(f"slash left the top bar field without focus: {page.evaluate('document.activeElement?.id')!r}")
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+        return
+    page.fill("#top-search", harness.SEARCH_TERM)
+    page.keyboard.press("Enter")
+    if not settle(page, f"location.hash.startsWith('#/search?q={quote(harness.SEARCH_TERM)}')"):
+        watch.fail(f"Enter on the top bar field did not reach Search: {page.evaluate('location.hash')!r}")
+    if not settle(
+        page,
+        f"document.querySelector('main').textContent.includes({json.dumps(harness.FINISHED_SUMMARY)})",
+    ):
+        watch.fail("the top bar search results do not carry the seeded event")
+    context.close()
+    watch.page.bring_to_front()
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -1462,15 +1842,21 @@ def run() -> int:
                 ("home", "#/home", "Home", [harness.FINISHED_SUMMARY, "waiting on you"]),
                 ("inbox", "#/inbox", "Inbox", [harness.QUESTION_SUBJECT]),
                 (
-                    "feed",
-                    f"#/feed?project={quote(project)}",
-                    "Project feed",
+                    "projects",
+                    f"#/projects/{quote(project)}/feed",
+                    "Checks",
                     [harness.FINISHED_SUMMARY],
                 ),
                 (
-                    "sessions",
-                    f"#/sessions?project={quote(project)}",
-                    "Sessions",
+                    "projects",
+                    f"#/projects/{quote(project)}/artifacts",
+                    "Checks",
+                    [harness.ARTIFACT_TITLE],
+                ),
+                (
+                    "projects",
+                    f"#/projects/{quote(project)}/sessions",
+                    "Checks",
                     [harness.SESSION_NAME],
                 ),
                 (
@@ -1487,12 +1873,6 @@ def run() -> int:
                     [harness.FINISHED_SUMMARY],
                 ),
                 ("settings", "#/settings", "Settings", [harness.AGENT_NAME]),
-                (
-                    "artifacts",
-                    f"#/artifacts?project={quote(project)}",
-                    "Artifacts",
-                    [harness.ARTIFACT_TITLE],
-                ),
             ]
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
@@ -1529,6 +1909,17 @@ def run() -> int:
                 port, context, project, seeded["protected_id"]
             ):
                 watch.fail(failure)
+            check_shell_tabs(page, watch)
+            check_mobile_tabbar(page, watch)
+            check_artifact_link(page, watch, project)
+            check_segmented_tabs(page, watch, project)
+            check_artifact_gallery(page, watch, project)
+            check_viewer_route(page, watch, project, seeded["artifact_id"])
+            check_viewer_back_button(page, watch, project, seeded["artifact_id"])
+            check_version_list(page, watch, port, project)
+            check_empty_project(page, watch, port)
+            check_desktop_two_pane(browser, watch, port, project)
+            check_desktop_topbar(browser, watch, port)
             # Last: it seeds sixty more events, which every check above would
             # have to look past.
             check_tab_budget(page, watch, port)

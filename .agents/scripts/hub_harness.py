@@ -71,6 +71,65 @@ PROTECTED_CIPHERTEXT = (
 )
 
 
+def seed_versioned_artifact(port: int, project_id: str) -> str:
+    """A plain artifact with two versions, for the version-list check.
+
+    Its own MCP session, so the update lands under the same actor as the
+    publish and the main seed's event order stays untouched.
+    """
+    session: list[str] = []
+    mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    published = mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_publish",
+                "arguments": {
+                    "project_id": project_id,
+                    "title": "Versioned note",
+                    "kind": "markdown",
+                    "content": "# v1",
+                },
+            },
+        },
+    )
+    artifact_id = (published.get("result", {}).get("structuredContent", {}) or {}).get(
+        "artifact_id", ""
+    )
+    mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_update",
+                "arguments": {"artifact_id": artifact_id, "content": "# v2"},
+            },
+        },
+    )
+    return artifact_id
+
+
 def skip(name: str, message: str) -> None:
     """Report a missing part of the toolchain and leave the gate green."""
     print(f"{name}: {message}; skipping")
