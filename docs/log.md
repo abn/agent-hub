@@ -4,6 +4,22 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the app is one module per screen
+
+* **Update**: The PWA is now a set of ES modules rather than one script: an
+  entry that names the screens and wires the events, a shared core, and one
+  module per screen with the comments drawer in its own. Nothing the interface
+  shows changed. Described in the
+  [human surface](architecture/human-surface.md).
+* **Update**: A screen whose requests come back after the reader has moved on
+  no longer paints over the screen that replaced it, and Home reads its
+  endpoint once per visit instead of twice.
+* **Note**: A browser smoke pass joins the gates, beside the accessibility
+  audit: it visits every route against a seeded hub and fails on a missing
+  heading, a console error, an unhandled rejection or a failed request. Like
+  the audit it skips where the browser toolchain is absent. Listed in the
+  [contributor guide](contribution/guide.md).
+
 ## 2026-09-18, a session belongs to the agent that started it
 
 * **Note**: Sessions started before this change keep the owner they were

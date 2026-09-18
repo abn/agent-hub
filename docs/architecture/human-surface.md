@@ -154,6 +154,24 @@ they degrade silently. True background push is deferred, by
 freshness stream and refreshes its waiting badge on a tick, with a slow poll
 as the fallback.
 
+The app ships as ES modules with no bundler and no build step. `app.js` is
+the entry: it names the screens the router can paint and routes the delegated
+click, submit, and change events to the handler that owns each action.
+Beside it sit a shared core (the API client, the router, the DOM and escaping
+helpers, time formatting, preferences, the toast, the freshness stream and
+badge, and the project picker) and one module per screen, with the comments
+drawer in its own. The binary embeds every one of them in the same table it
+serves, precaches, and digests for the service worker's cache name, so a
+module the hub does not serve cannot ship. Each render carries a number, and
+a screen whose fetches resolve after the reader has moved on does not paint
+over the screen that replaced it.
+
+Two optional browser gates cover the surface: an accessibility audit over the
+rendered screens in both themes, and a smoke pass that visits every route
+against a seeded hub and checks the heading, the seeded data, the nav
+marking, the actions that write, and that nothing logged an error or left a
+request failing. Both skip cleanly where the browser toolchain is absent.
+
 The freshness stream carries no event data. It signals that a write changed
 the inbox or the feed, and the client refetches its waiting badge, so it is a
 mailbox nudge rather than a chat channel and the asynchronous interaction

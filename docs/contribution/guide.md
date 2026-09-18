@@ -29,6 +29,9 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
 - `make fmt`: applies formatting fixes
 - `make fmt/check`: fails if formatting differs
 - `make docs/check`: validates the docs bundle against OKF v0.2
+- `make web/check`: static checks over the PWA assets
+- `make web/a11y`: the headless accessibility audit over the rendered screens
+- `make web/smoke`: drives the PWA in a browser against a seeded hub
 - `make check`: the full gate: hooks, linter, formatting, and tests
 
 ## The workflow
