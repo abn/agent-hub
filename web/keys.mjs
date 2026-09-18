@@ -4,6 +4,7 @@
 // describe themselves, so a screen joins the map by having rows.
 
 import { main } from "./dom.mjs";
+import { prefs } from "./prefs.mjs";
 
 // What a key does to a row, found in the markup the screens already paint: the
 // row's own link is what Enter follows, and the two verbs are the buttons the
@@ -36,6 +37,9 @@ const SHORTCUTS = [
   ["Esc", "Close what is on top"],
   ["?", "This list"],
 ];
+// The panel is where the keys are discovered, so it is also where the reader
+// is told they are theirs to switch off.
+const OFF_SWITCH = "Turn these off under Single-key shortcuts in Settings. Esc and Tab stay.";
 
 // The screen the selection belongs to, and which of its rows is selected.
 let current = "";
@@ -166,11 +170,14 @@ function buildPanel() {
     said.textContent = what;
     list.append(term, said);
   }
+  const note = document.createElement("p");
+  note.className = "keymap-note";
+  note.textContent = OFF_SWITCH;
   const close = document.createElement("button");
   close.type = "button";
   close.textContent = "Close";
   close.addEventListener("click", () => dialog.close());
-  dialog.append(title, list, close);
+  dialog.append(title, list, note, close);
   document.body.appendChild(dialog);
   return dialog;
 }
@@ -198,13 +205,15 @@ function typing(target) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-// Never while the reader is writing, never as half of a browser or system
-// shortcut, and never while a dialog owns the keyboard. An open dialog is the one thing that holds the map, asked of
+// Never when the reader has turned them off, never while they are writing,
+// never as half of a browser or system shortcut, and never while a dialog owns
+// the keyboard. An open dialog is the one thing that holds the map, asked of
 // the document rather than told to the map, so every dialog holds it: the
 // app's own, this module's shortcut panel, and any the browser puts in the top
 // layer.
 function blocked(event) {
   return (
+    prefs.shortcuts !== "on" ||
     event.altKey ||
     event.ctrlKey ||
     event.metaKey ||

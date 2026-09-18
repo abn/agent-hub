@@ -76,6 +76,11 @@ export async function settingsScreen(gen) {
         <option value="comfortable"${prefs.density === "comfortable" ? " selected" : ""}>Comfortable</option>
         <option value="compact"${prefs.density === "compact" ? " selected" : ""}>Compact</option>
       </select>
+      <label for="shortcuts">Single-key shortcuts</label>
+      <select id="shortcuts" name="shortcuts">
+        <option value="on"${prefs.shortcuts === "on" ? " selected" : ""}>On</option>
+        <option value="off"${prefs.shortcuts === "off" ? " selected" : ""}>Off</option>
+      </select>
       <p><button class="primary" type="submit">Save</button></p>
     </form>
     <form class="card" data-action="project">

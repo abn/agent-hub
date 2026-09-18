@@ -84,6 +84,7 @@ main.addEventListener("submit", (event) => {
       token: data.get("token"),
       theme: data.get("theme"),
       density: data.get("density"),
+      shortcuts: data.get("shortcuts"),
     });
     render();
   } else if (action === "project") {

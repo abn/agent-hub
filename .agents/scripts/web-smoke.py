@@ -228,6 +228,40 @@ def check_theme(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+def check_system_theme(page, watch: Watch) -> None:
+    """On "system" the app follows the OS while it is open, not only on load.
+
+    A preference the reader chose is theirs: it does not follow anything.
+    """
+    watch.enter("settings: system theme")
+    page.evaluate("location.hash = '#/settings'")
+    settle(page, "!!document.getElementById('theme')")
+    page.select_option("#theme", "system")
+    page.click('form[data-action="prefs"] button[type="submit"]')
+    settle(page, "localStorage.getItem('hub.theme') === 'system'")
+    page.emulate_media(color_scheme="dark")
+    if not settle(page, "document.documentElement.dataset.theme === 'dark'"):
+        found = page.evaluate("document.documentElement.dataset.theme")
+        watch.fail(f"the system turned dark and the open app stayed {found!r}")
+    bar = page.evaluate("document.querySelector('meta[name=\"theme-color\"]').content")
+    page.emulate_media(color_scheme="light")
+    if not settle(page, "document.documentElement.dataset.theme === 'light'"):
+        found = page.evaluate("document.documentElement.dataset.theme")
+        watch.fail(f"the system turned light and the open app stayed {found!r}")
+    if bar == page.evaluate("document.querySelector('meta[name=\"theme-color\"]').content"):
+        watch.fail(f"the installed app's own bar stayed {bar!r} through both")
+    page.select_option("#theme", "light")
+    page.click('form[data-action="prefs"] button[type="submit"]')
+    settle(page, "localStorage.getItem('hub.theme') === 'light'")
+    page.emulate_media(color_scheme="dark")
+    page.wait_for_timeout(500)
+    chosen = page.evaluate("document.documentElement.dataset.theme")
+    if chosen != "light":
+        watch.fail(f"a chosen theme followed the system anyway, to {chosen!r}")
+    page.emulate_media(color_scheme="light")
+    watch.drain_rejections()
+
+
 def check_search(page, watch: Watch) -> None:
     watch.enter("search: submit")
     page.evaluate("location.hash = '#/search'")
@@ -618,6 +652,9 @@ SELECTED_ROW = (
     " return row && { text: row.textContent.trim(), tab: row.tabIndex,"
     " focused: row === document.activeElement }; })()"
 )
+# The screen a check drives has to be the screen that painted, not the one
+# still on the way out: every screen draws rows into the same region.
+ON_INBOX = "(document.querySelector('main h1') || {}).textContent === 'Inbox'"
 FIRST_TIME_TEXT = (
     "(() => { const t = document.querySelector('main time.ts');"
     " return t && t.textContent.trim(); })()"
@@ -760,7 +797,7 @@ def check_row_keys(page, watch: Watch) -> None:
     """The selection moves, comes back, and takes focus with it."""
     watch.enter("keys: rows")
     page.evaluate("location.hash = '#/inbox'")
-    if not settle(page, "document.querySelectorAll('main .row').length > 1"):
+    if not settle(page, f"{ON_INBOX} && document.querySelectorAll('main .row').length > 1"):
         watch.fail("the inbox has too few rows to move through")
         return
     titles = page.evaluate(
@@ -787,7 +824,8 @@ def check_row_keys(page, watch: Watch) -> None:
 def check_enter_opens(page, watch: Watch, project: str) -> None:
     watch.enter("keys: enter")
     page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
-    if not settle(page, "!!document.querySelector('main .row a[href]')"):
+    if not settle(page, "!!document.querySelector('main .row a[href]')"
+                  " && location.hash.startsWith('#/sessions')"):
         watch.fail("the sessions screen has no row to open")
         return
     page.keyboard.press("j")
@@ -802,7 +840,8 @@ def check_approve_key(page, watch: Watch) -> None:
     """The approve key sends the decision the approve button sends."""
     watch.enter("keys: approve")
     page.evaluate("location.hash = '#/inbox'")
-    if not settle(page, "document.querySelectorAll('[data-action=\"approve\"]').length > 0"):
+    if not settle(page, f"{ON_INBOX} &&"
+                  " document.querySelectorAll('[data-action=\"approve\"]').length > 0"):
         watch.fail("no approval is waiting on the reader")
         return
     before = page.evaluate("document.querySelectorAll('[data-action=\"approve\"]').length")
@@ -928,6 +967,7 @@ def run() -> int:
             check_stale_render(page, watch, project)
             check_artifact(page, watch, project)
             check_theme(page, watch)
+            check_system_theme(page, watch)
             check_search(page, watch)
             check_answer(page, watch, project)
             check_approve(page, watch)

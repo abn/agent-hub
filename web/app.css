@@ -448,6 +448,9 @@ dialog.keymap dl {
 }
 dialog.keymap dt, dialog.keymap dd { margin: 0; }
 dialog.keymap dd { color: var(--ink-2); }
+dialog.keymap .keymap-note {
+  margin: 0 0 var(--s-3); font-size: var(--t-12); color: var(--ink-3);
+}
 dialog.keymap kbd {
   font-family: var(--font-mono); font-size: var(--t-12);
   border: 1px solid var(--line-strong); border-radius: var(--r-1);
