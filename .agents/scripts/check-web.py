@@ -215,6 +215,13 @@ def main() -> int:
     if "serviceWorker" not in app_js:
         errors.append("web/app.js: does not register the service worker")
 
+    # The hub fills these in from the assets it embeds. Hand-writing either one
+    # back pins the installed shell to whatever the last edit said.
+    sw = (WEB / "sw.js").read_text(encoding="utf-8") if (WEB / "sw.js").is_file() else ""
+    for placeholder in ("{{version}}", "{{assets}}", "{{on_demand}}"):
+        if placeholder not in sw:
+            errors.append(f"web/sw.js: the server stamps {placeholder}; keep it in the source")
+
     check_design_contract(errors, css, app_css)
     check_first_party_syntax(errors)
 

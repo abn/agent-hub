@@ -1,17 +1,27 @@
 // Agent Hub service worker: offline shell for static assets, live for the API.
-const SHELL = "agent-hub-shell-v3";
-const ASSETS = [
-  "/",
-  "/app.js",
-  "/app.css",
-  "/tokens.css",
-  "/crypto.mjs",
-  "/manifest.webmanifest",
-  "/icon.svg",
-];
+//
+// The hub stamps both values below when it serves this file. VERSION is a
+// digest of the embedded assets, so an upgrade that changes any of them
+// changes this file, which is what makes a browser install the new worker and
+// drop the shell it replaces. PRECACHE and ON_DEMAND together are the static
+// routes the hub serves, so the offline shell cannot drift from what the app
+// loads.
+const VERSION = "{{version}}";
+const PRECACHE = "{{assets}}".split(",");
+const ON_DEMAND = "{{on_demand}}".split(",").filter(Boolean);
+const SHELL = `agent-hub-shell-${VERSION}`;
 
+// addAll is all or nothing, and a worker whose install fails never activates.
+// The shell is small, so it is required. ON_DEMAND is the large runtime only
+// some pages load: it is tried here, and cached on first use if this misses,
+// so a dropped connection on a phone costs a diagram offline, not the app.
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches.open(SHELL).then(async (cache) => {
+      await cache.addAll(PRECACHE);
+      await Promise.allSettled(ON_DEMAND.map((path) => cache.add(path)));
+    })
+  );
   self.skipWaiting();
 });
 
@@ -34,7 +44,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      if (!ON_DEMAND.includes(url.pathname)) return fetch(event.request);
+      return fetch(event.request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          event.waitUntil(caches.open(SHELL).then((cache) => cache.put(event.request, copy)));
+        }
+        return response;
+      });
+    })
   );
 });
 

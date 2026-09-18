@@ -232,6 +232,107 @@ async fn serves_every_shell_asset_with_a_policy() {
     );
 }
 
+/// Every static path the PWA serves, in the order `src/http/web.rs` tables
+/// them. The service worker precaches exactly this list and names its cache
+/// after a digest of the bodies behind it.
+const SHELL_PATHS: [&str; 11] = [
+    "/",
+    "/app.js",
+    "/app.css",
+    "/tokens.css",
+    "/manifest.webmanifest",
+    "/icon.svg",
+    "/crypto.mjs",
+    "/vendor/marked.js",
+    "/vendor/mermaid.runtime.js",
+    "/artifact-viewer.mjs",
+    "/frame-loader.js",
+];
+
+/// The large runtime only a page with a diagram loads. The worker fetches it
+/// after the shell is installed rather than as part of it.
+const ON_DEMAND_PATHS: [&str; 1] = ["/vendor/mermaid.runtime.js"];
+
+/// A path list the served worker carries, read out of the stamped source.
+fn stamped_paths<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
+    let marker = format!("const {name} = \"");
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("the worker lists {name}"))
+        + marker.len();
+    let rest = &source[start..];
+    let end = rest.find('"').expect("the list is a string");
+    rest[..end]
+        .split(',')
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+#[tokio::test]
+async fn service_worker_precaches_every_static_route() {
+    let app = router(state().await);
+    let response = app.oneshot(get("/sw.js", None)).await.expect("request");
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-cache"),
+        "the worker is revalidated, so an upgraded binary is picked up"
+    );
+    let body = text(response).await;
+    let precached = stamped_paths(&body, "PRECACHE");
+    let on_demand = stamped_paths(&body, "ON_DEMAND");
+    for path in SHELL_PATHS {
+        assert!(
+            precached.contains(&path) || on_demand.contains(&path),
+            "{path} is cached, so the offline shell is what the app loads"
+        );
+    }
+    for path in ON_DEMAND_PATHS {
+        assert!(
+            on_demand.contains(&path) && !precached.contains(&path),
+            "{path} does not gate the install: one failed fetch of a large file \
+             would otherwise leave the app with no worker at all"
+        );
+    }
+    assert!(
+        !body.contains("{{"),
+        "the server leaves no placeholder unstamped"
+    );
+}
+
+#[tokio::test]
+async fn service_worker_cache_name_follows_the_assets() {
+    use sha2::{Digest, Sha256};
+
+    let state = state().await;
+    let mut hasher = Sha256::new();
+    for path in SHELL_PATHS {
+        let app = router(state.clone());
+        let response = app.oneshot(get(path, None)).await.expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update(text(response).await.as_bytes());
+        hasher.update([0]);
+    }
+    let version: String = hasher
+        .finalize()
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+
+    let app = router(state);
+    let response = app.oneshot(get("/sw.js", None)).await.expect("request");
+    let body = text(response).await;
+    assert!(
+        body.contains(&format!("const VERSION = \"{version}\"")),
+        "the cache name tracks the bytes of what it caches"
+    );
+}
+
 #[tokio::test]
 async fn service_worker_handles_notifications() {
     let app = router(state().await);
