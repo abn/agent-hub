@@ -116,6 +116,55 @@ async fn sweep_commits_an_expired_prune() {
 }
 
 #[tokio::test]
+async fn sweep_skips_a_session_it_cannot_commit() {
+    let dir = temp_dir("prune-sweep-skip");
+    let db = open(&dir).await;
+
+    let blocked = sessions::start(&db, "proj", "blocked", "agent-one")
+        .await
+        .expect("start");
+    let next = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    for session in [&blocked, &next] {
+        sessions::end(&db, &session.id, "agent-one")
+            .await
+            .expect("end");
+        prune::prune_session(&db, &session.id).await.expect("prune");
+    }
+
+    // A directory where the brain file belongs cannot be removed as a file, so
+    // this session's commit fails every time it is swept.
+    std::fs::create_dir_all(dir.join(&blocked.brain_path)).expect("brain directory");
+
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?1 WHERE deleted_at IS NOT NULL",
+        vec![turso::Value::Text(
+            old.format(&time::format_description::well_known::Rfc3339)
+                .expect("format"),
+        )],
+    )
+    .await
+    .expect("age");
+
+    let committed = prune::sweep(&db, &dir).await.expect("sweep");
+    assert_eq!(committed, 1, "the session that can be committed is");
+    assert!(
+        sessions::get(&db, &next.id).await.expect("get").is_none(),
+        "the session behind the blocked one is committed"
+    );
+    assert!(
+        sessions::get(&db, &blocked.id)
+            .await
+            .expect("get")
+            .is_some(),
+        "the session that could not be committed keeps its tombstone"
+    );
+}
+
+#[tokio::test]
 async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
     let dir = temp_dir("prune-keys");
     let db = open(&dir).await;

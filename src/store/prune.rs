@@ -138,7 +138,12 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
         if (now - pruned_at).whole_seconds() < UNDO_WINDOW_SECS {
             continue;
         }
-        commit(db, data_dir, &id, &project_id).await?;
+        // One session whose brain file cannot be removed would otherwise be
+        // retried first on every tick and hold up every prune behind it.
+        if let Err(err) = commit(db, data_dir, &id, &project_id).await {
+            tracing::warn!(session_id = %id, error = %err, "prune commit failed");
+            continue;
+        }
         committed += 1;
     }
     Ok(committed)
