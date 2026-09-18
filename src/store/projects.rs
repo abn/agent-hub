@@ -96,6 +96,46 @@ pub(crate) async fn insert_owned(
 }
 
 /// Fetch one project.
+/// The counts a project header and its tab row show.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectStats {
+    pub project_id: String,
+    /// Feed events in the project, the hub's own audit trail excluded.
+    pub events: i64,
+    pub artifacts: i64,
+    /// Live sessions, pruned ones excluded.
+    pub sessions: i64,
+    /// Pages in the project knowledge base.
+    pub kb_pages: i64,
+    /// Agents with a session in this project touched inside the active window.
+    pub agents_active: i64,
+}
+
+/// Count what a project holds.
+///
+/// Five indexed counts, no walk and nothing per row: a project tab row costs
+/// one request whatever the project holds.
+pub async fn stats(db: &Database, id: &str, active_since: &str) -> Result<ProjectStats> {
+    let conn = super::connect(db)?;
+    let project = Value::Text(id.to_string());
+    let count =
+        async |sql: &str| crate::store::events::count_on(&conn, sql, vec![project.clone()]).await;
+    Ok(ProjectStats {
+        project_id: id.to_string(),
+        events: crate::store::events::count_for_project(db, id).await?,
+        artifacts: count("SELECT COUNT(*) FROM artifacts WHERE project_id = ?1").await?,
+        sessions: count(
+            "SELECT COUNT(*) FROM sessions WHERE project_id = ?1 AND deleted_at IS NULL",
+        )
+        .await?,
+        // The corpus is the cheap and correct source: every page is indexed on
+        // write and its row goes on delete, so this needs no walk of the file.
+        kb_pages: count("SELECT COUNT(*) FROM search_docs WHERE project_id = ?1 AND type = 'kb'")
+            .await?,
+        agents_active: crate::store::sessions::agents_active(db, active_since, Some(id)).await?,
+    })
+}
+
 pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn

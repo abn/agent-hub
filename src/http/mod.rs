@@ -85,6 +85,7 @@ pub fn router(state: AppState) -> Router {
             get(projects::list).post(projects::create),
         )
         .route("/api/v1/projects/{id}", delete(projects::delete))
+        .route("/api/v1/projects/{id}/stats", get(projects::stats))
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
         .route("/api/v1/sessions", get(sessions::list))

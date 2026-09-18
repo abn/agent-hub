@@ -16,6 +16,10 @@ use tower::ServiceExt;
 static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
 async fn state() -> AppState {
+    state_with_window(std::time::Duration::from_secs(900)).await
+}
+
+async fn state_with_window(active_window: std::time::Duration) -> AppState {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock before epoch")
@@ -32,7 +36,7 @@ async fn state() -> AppState {
         admin_token: Some("token".to_string()),
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
+        active_window,
         node_name: Some("node-under-test".to_string()),
     })
     .await
@@ -499,4 +503,107 @@ async fn an_agent_that_has_gone_quiet_is_not_counted_as_active() {
         body["agents_active"], 0,
         "a session last touched long ago makes nobody active"
     );
+}
+
+#[tokio::test]
+async fn project_stats_count_what_the_header_and_the_tab_row_show() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
+    agent_hub::store::projects::create(&state.db, "other", "Other")
+        .await
+        .expect("create project");
+
+    // One live session, one ended, one pruned, plus a session elsewhere.
+    let live = sessions::start(&state.db, "proj", "live", "agent-one")
+        .await
+        .expect("start");
+    state
+        .activity
+        .touch(&state.db, &live.id)
+        .await
+        .expect("touch");
+    ended_session(&state, "proj", "nightly").await;
+    let gone = ended_session(&state, "proj", "scratch").await;
+    prune::prune_session(&state.db, &gone.id)
+        .await
+        .expect("prune");
+    let elsewhere = sessions::start(&state.db, "other", "live", "agent-two")
+        .await
+        .expect("start");
+    state
+        .activity
+        .touch(&state.db, &elsewhere.id)
+        .await
+        .expect("touch");
+
+    // Two knowledge base pages in this project, one in the other.
+    let conn = state.db.connect().expect("connect");
+    for (doc, project) in [
+        ("kb:proj:/fs/one.md", "proj"),
+        ("kb:proj:/fs/two.md", "proj"),
+        ("kb:other:/fs/one.md", "other"),
+    ] {
+        conn.execute(
+            "INSERT INTO search_docs(doc_id, project_id, type, ref_id, title, body, updated_at) \
+             VALUES (?1, ?2, 'kb', '/fs/one.md', 'a page', 'text', '2026-09-16T00:00:00Z')",
+            [doc, project],
+        )
+        .await
+        .expect("index a page");
+    }
+
+    let (status, body) = call(&state, "GET", "/api/v1/projects/proj/stats").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["project_id"], "proj");
+    assert_eq!(
+        body["sessions"], 2,
+        "the live and the ended one, never the pruned one: {body}"
+    );
+    assert_eq!(body["kb_pages"], 2, "only this project's pages");
+    assert_eq!(
+        body["agents_active"], 1,
+        "the agent working elsewhere is not working here"
+    );
+    assert_eq!(
+        body["events"], 5,
+        "three starts and two ends, all in this project"
+    );
+    assert_eq!(body["artifacts"], 0);
+}
+
+#[tokio::test]
+async fn stats_for_a_project_that_does_not_exist_are_not_invented() {
+    let state = state().await;
+    let (status, _) = call(&state, "GET", "/api/v1/projects/missing/stats").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_active_window_beyond_the_calendar_does_not_take_the_read_surfaces_down() {
+    // The setting is bounded, so this window can only be built in code. The
+    // read surfaces still have to answer: a screen that panics over a
+    // timestamp is worse than one that counts nobody.
+    let state = state_with_window(std::time::Duration::MAX).await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    state
+        .activity
+        .touch(&state.db, &session.id)
+        .await
+        .expect("touch");
+
+    for uri in ["/api/v1/home", "/api/v1/projects/proj/stats"] {
+        let (status, body) = call(&state, "GET", uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri} answered {body}");
+        assert!(
+            body["agents_active"].as_i64().is_some(),
+            "{uri} still reports a count: {body}"
+        );
+    }
 }

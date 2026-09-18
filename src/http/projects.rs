@@ -61,6 +61,35 @@ pub async fn create(
     Ok(Json(project))
 }
 
+/// `GET /api/v1/projects/{id}/stats`
+///
+/// A valid bearer token is required. An unknown project is a 404.
+pub async fn stats(
+    State(state): State<AppState>,
+    ProblemPath(id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<projects::ProjectStats>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    if projects::get(&state.db, &id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .is_none()
+    {
+        return Err(Problem::from_error(&crate::error::Error::NotFound(
+            format!("project {id} not found"),
+        )));
+    }
+
+    let stats = projects::stats(&state.db, &id, &state.config.active_since())
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    Ok(Json(stats))
+}
+
 /// `DELETE /api/v1/projects/{id}`
 ///
 /// A valid bearer token is required. An unknown project is a 404, and an
