@@ -34,6 +34,29 @@ pub struct ListedSession {
     /// Where the work came from, resolved so the screen can render it without
     /// a second lookup.
     pub lineage: Option<Lineage>,
+    /// The brain file's bytes, write-ahead log included.
+    pub brain_bytes: i64,
+}
+
+/// One session with the numbers its detail screen shows.
+#[derive(Debug, Serialize)]
+pub struct SessionDetail {
+    #[serde(flatten)]
+    pub listed: ListedSession,
+    /// Events this session produced.
+    pub events: i64,
+    /// The newest event the session produced, absent when it produced none.
+    /// Named for what it is: the tool-call log inside the brain file records
+    /// nothing yet, so this is a feed line and must not be shown as one.
+    pub last_event: Option<LastEvent>,
+}
+
+/// The newest thing a session put on the feed, as one line.
+#[derive(Debug, Serialize)]
+pub struct LastEvent {
+    pub at: String,
+    pub actor: String,
+    pub summary: String,
 }
 
 /// The session this one was picked up from.
@@ -105,13 +128,80 @@ pub async fn list(
 
     let mut listed = Vec::with_capacity(sessions.len());
     for session in sessions {
-        let lineage = lineage(&state, &session)
-            .await
-            .map_err(|err| Problem::from_error(&err))?;
-        listed.push(ListedSession { session, lineage });
+        listed.push(
+            list_entry(&state, session)
+                .await
+                .map_err(|err| Problem::from_error(&err))?,
+        );
     }
 
     Ok(Json(SessionList { sessions: listed }))
+}
+
+/// `GET /api/v1/sessions/{id}`
+///
+/// A valid bearer token is required. An unknown or pruned session is a 404.
+pub async fn detail(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<SessionDetail>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let session = live(&state, &session_id).await?;
+    let events = crate::store::events::count_for_session(&state.db, &session.id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    let last_event = crate::store::events::latest_for_session(&state.db, &session.id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .map(|event| LastEvent {
+            at: event.created_at,
+            actor: event.actor,
+            summary: event.summary,
+        });
+    let listed = list_entry(&state, session)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(SessionDetail {
+        listed,
+        events,
+        last_event,
+    }))
+}
+
+/// One listing row: the session, where it came from, and what it occupies.
+async fn list_entry(state: &AppState, session: Session) -> crate::error::Result<ListedSession> {
+    let lineage = lineage(state, &session).await?;
+    let brain_bytes = match state.brain.brain_path(&session.project_id, &session.id) {
+        Ok(path) => crate::brain::file_bytes(&path),
+        // The path is derived from ids the store validated on the way in, so
+        // this only fires on a row no writer could have produced.
+        Err(err) => {
+            tracing::warn!(session_id = %session.id, error = %err, "no brain path for a session row");
+            0
+        }
+    };
+    Ok(ListedSession {
+        session,
+        lineage,
+        brain_bytes,
+    })
+}
+
+/// The session a route names, while it is still there.
+async fn live(state: &AppState, session_id: &str) -> std::result::Result<Session, Problem> {
+    session_store::get(&state.db, session_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .filter(|session| session.deleted_at.is_none())
+        .ok_or_else(|| {
+            Problem::from_error(&Error::NotFound(format!("session {session_id} not found")))
+        })
 }
 
 /// Resolve where a session was picked up from.
@@ -201,13 +291,7 @@ pub async fn brain(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let session = session_store::get(&state.db, &session_id)
-        .await
-        .map_err(|err| Problem::from_error(&err))?
-        .filter(|session| session.deleted_at.is_none())
-        .ok_or_else(|| {
-            Problem::from_error(&Error::NotFound(format!("session {session_id} not found")))
-        })?;
+    let session = live(&state, &session_id).await?;
 
     // A read does not create a brain: a session whose file is absent simply
     // has no entries yet.

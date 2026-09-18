@@ -501,3 +501,172 @@ async fn reassign_without_token_is_a_problem() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(problem_body(response).await["code"], "unauthenticated");
 }
+
+/// Write to a session's brain through the wrapper and report the file's bytes.
+async fn write_brain(state: &AppState, session: &sessions::Session) -> i64 {
+    state
+        .brain
+        .open(&session.project_id, &session.id)
+        .await
+        .expect("open brain")
+        .put("/kv/note", &vec![b'x'; 2048])
+        .await
+        .expect("put");
+    agent_hub::brain::file_bytes(&state.data_dir.join(&session.brain_path))
+}
+
+#[tokio::test]
+async fn a_session_detail_carries_its_size_events_and_last_line() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let brain_bytes = write_brain(&state, &session).await;
+    assert!(brain_bytes > 0);
+
+    // Work the session did, plus a signal from elsewhere that is not its own.
+    for summary in ["first report", "second report"] {
+        agent_hub::store::events::append(
+            &state.db,
+            "agent-one",
+            None,
+            agent_hub::store::events::NewEvent {
+                project_id: "proj".to_string(),
+                kind: "signal".to_string(),
+                summary: summary.to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: Some(session.id.clone()),
+            },
+        )
+        .await
+        .expect("append");
+    }
+    agent_hub::store::events::append(
+        &state.db,
+        "agent-two",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "another agent's work".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+
+    assert_eq!(body["id"], session.id.as_str());
+    assert_eq!(body["agent"], "agent-one");
+    assert_eq!(body["created_at"], session.created_at.as_str());
+    assert_eq!(body["brain_bytes"], brain_bytes);
+    assert_eq!(
+        body["events"], 3,
+        "the started event plus the two the session wrote: {body}"
+    );
+    assert_eq!(body["last_event"]["summary"], "second report");
+    assert_eq!(body["last_event"]["actor"], "agent-one");
+    assert!(
+        body["last_event"]["at"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "the line says when"
+    );
+}
+
+#[tokio::test]
+async fn a_session_that_wrote_nothing_has_no_line_invented_for_it() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    // The lifecycle event the start wrote is the session's own, so the line is
+    // real; a session whose events are gone has none.
+    let conn = state.db.connect().expect("connect");
+    conn.execute("DELETE FROM events", ()).await.expect("clear");
+
+    let app = router(state.clone());
+    let body = json_body(
+        app.oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("response"),
+    )
+    .await;
+    assert_eq!(body["events"], 0);
+    assert!(
+        body["last_event"].is_null(),
+        "no writes means no line: {body}"
+    );
+    assert_eq!(
+        body["brain_bytes"], 0,
+        "a session that never wrote has no brain file"
+    );
+}
+
+#[tokio::test]
+async fn a_pruned_session_has_no_detail() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&state.db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    agent_hub::store::prune::prune_session(&state.db, &session.id)
+        .await
+        .expect("prune");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    problem_body(response).await;
+}
+
+#[tokio::test]
+async fn a_listing_row_carries_the_brain_size_the_prune_button_shows() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let brain_bytes = write_brain(&state, &session).await;
+
+    let app = router(state.clone());
+    let body = json_body(
+        app.oneshot(request(
+            "GET",
+            "/api/v1/sessions?project=proj",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("response"),
+    )
+    .await;
+    assert_eq!(body["sessions"][0]["brain_bytes"], brain_bytes);
+}
