@@ -407,3 +407,26 @@ html.has-dialog { overflow: hidden; }
 }
 .composer-error { margin: var(--s-2) 0 0; color: var(--danger); font-size: var(--t-13); }
 .composer-error[hidden] { display: none; }
+/* component: relative time */
+/* A timestamp is short on the row and whole on press. The compact form is the
+   data the design puts in mono; the full local time is the accessible name and
+   the hover title, and a press swaps it in for a reader who cannot hover. */
+.ts {
+  position: relative;
+  font-family: var(--font-mono); font-size: var(--t-12);
+  color: var(--ink-3); white-space: nowrap;
+  background: none; border: 0; padding: 0; cursor: pointer;
+}
+/* The drawn box stays the 14px the design gives it, and the target it answers
+   to is the 32px a control drawn inline in a row is allowed, 44px under a
+   finger. The overlay sits outside the flow, so neither moves the text. */
+.ts::after { content: ""; position: absolute; inset: -9px -4px; }
+@media (pointer: coarse) {
+  .ts::after { inset: -16px -4px; }
+}
+/* A row title clips its overflow so a long one ends in an ellipsis. Where the
+   title is a timestamp there is nothing to clip, and the clip would take the
+   target with it. */
+.row .title:has(.ts) { overflow: visible; }
+/* A field that is not a time has nothing to press and nothing to count up. */
+.ts-unknown { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }

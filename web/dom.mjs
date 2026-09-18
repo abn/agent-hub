@@ -1,6 +1,6 @@
 // The markup helpers every screen shares, and the element they paint into.
 
-import { byDay, stamp } from "./time.mjs";
+import { byDay, timeHTML } from "./time.mjs";
 
 export const main = document.getElementById("main");
 
@@ -75,7 +75,7 @@ export const glyph = (kind) =>
     MARKS[kind] || MARKS.signal
   }</span><span class="sr-only">${esc(NAMES[kind] || kind)}</span>`;
 
-export const when = (ts) => esc(stamp(ts));
+export const when = (ts) => timeHTML(ts);
 
 // The action a caller can take on an event. A question is answered; an
 // approval is a decision. Both are the human's to act on, so the row carries

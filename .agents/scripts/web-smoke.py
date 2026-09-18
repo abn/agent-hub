@@ -12,6 +12,7 @@ toolchain is absent.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import time
@@ -604,6 +605,96 @@ def check_artifact(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+FIRST_TIME = (
+    "(() => { const t = document.querySelector('main time.ts');"
+    " return t && { datetime: t.getAttribute('datetime'), text: t.textContent.trim(),"
+    " name: t.getAttribute('aria-label') || '', title: t.getAttribute('title') || '',"
+    " tab: t.tabIndex, role: t.getAttribute('role') || '',"
+    " font: getComputedStyle(t).fontFamily }; })()"
+)
+
+
+def check_relative_time(page, watch: Watch) -> None:
+    """A timestamp is a component: machine time, compact text, the whole stamp.
+
+    The compact text is what the row carries, and the full local timestamp has
+    to reach a reader who cannot hover: it is the accessible name, so it is
+    read wherever the row is read, and a press swaps it in for a pointer. It is
+    not a stop of its own: a screen holds one per row, and a hundred identical
+    date stops would be the whole tab ring.
+    """
+    watch.enter("home: relative time")
+    page.evaluate("location.hash = '#/home'")
+    page.wait_for_timeout(600)
+    stamp = page.evaluate(FIRST_TIME)
+    if not stamp:
+        watch.fail("a seeded event's time is not a <time> element")
+        return
+    if not re.match(r"\d{4}-\d\d-\d\dT", stamp["datetime"] or ""):
+        watch.fail(f"the machine timestamp is {stamp['datetime']!r}")
+    if len(stamp["text"]) > 10 or "-" in stamp["text"]:
+        watch.fail(f"the row reads {stamp['text']!r}, which is not a compact relative time")
+    year = (stamp["datetime"] or "")[:4]
+    if year not in stamp["name"] or stamp["name"] == stamp["text"]:
+        watch.fail(f"the accessible name is {stamp['name']!r}, not the full timestamp")
+    if stamp["name"] != stamp["title"]:
+        watch.fail("hovering says something other than the accessible name")
+    if stamp["tab"] >= 0 or stamp["role"] == "button":
+        watch.fail(
+            f"the timestamp is its own tab stop (tabindex {stamp['tab']},"
+            f" role {stamp['role']!r}), so a feed costs one stop per row"
+        )
+    if "mono" not in stamp["font"].lower():
+        watch.fail(f"the time is drawn in {stamp['font']!r}, not the mono data face")
+    pressed = page.evaluate(
+        "(() => { const t = document.querySelector('main time.ts'); t.click();"
+        " return t.textContent.trim(); })()"
+    )
+    if pressed != stamp["name"]:
+        watch.fail(f"pressing the time shows {pressed!r}, not the full timestamp")
+    broken = page.evaluate(
+        "import('/time.mjs').then((m) => { const n = m.timeNode('whenever');"
+        " return { text: n.textContent, tag: n.tagName }; })"
+    )
+    if "NaN" in broken["text"] or "Invalid" in broken["text"] or not broken["text"].strip():
+        watch.fail(f"a timestamp that is not a time renders {broken['text']!r}")
+    watch.drain_rejections()
+
+
+def check_time_counts_up(browser, watch: Watch, port: int) -> None:
+    """The text follows the clock without the screen being painted again.
+
+    A separate context so the fake clock cannot disturb the rest of the run.
+    """
+    watch.enter("time: the clock moves")
+    context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    page.clock.install()
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+    page.evaluate("location.hash = '#/home'")
+    page.wait_for_timeout(800)
+    read = "(() => { const t = document.querySelector('main time.ts'); return t && t.textContent.trim(); })()"
+    before = page.evaluate(read)
+    where = page.evaluate("location.hash")
+    if not before:
+        watch.fail("no seeded event carries a time element")
+        context.close()
+        return
+    page.clock.fast_forward("05:00")
+    page.wait_for_timeout(300)
+    after = page.evaluate(read)
+    if after == before:
+        watch.fail(f"five minutes on, the time still reads {after!r}")
+    elif "5" not in after:
+        watch.fail(f"five minutes on, the time reads {after!r}")
+    if page.evaluate("location.hash") != where:
+        watch.fail("the time only changed because the screen was painted again")
+    context.close()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -669,6 +760,8 @@ def run() -> int:
             check_type_scale(page, watch, project)
             check_text_floor(page, watch, routes)
             check_controls(page, watch, routes)
+            check_relative_time(page, watch)
+            check_time_counts_up(browser, watch, port)
             check_agent_markup_is_text(page, watch)
             check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)

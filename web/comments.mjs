@@ -6,7 +6,7 @@
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { stamp } from "./time.mjs";
+import { timeNode } from "./time.mjs";
 
 const commentsDrawer = {
   artifactId: null,
@@ -64,9 +64,7 @@ function commentRow(comment) {
   const author = document.createElement("span");
   author.className = "comment-author";
   author.textContent = comment.author;
-  const time = document.createElement("span");
-  time.className = "meta";
-  time.textContent = stamp(comment.created_at);
+  const time = timeNode(comment.created_at);
   head.append(author, time);
   const marker = anchorMarker(comment);
   if (marker) {
