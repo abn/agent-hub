@@ -147,12 +147,15 @@ async fn list_entries(
     brain: &crate::brain::Brain,
     path: Option<&str>,
 ) -> crate::error::Result<Vec<String>> {
-    match path {
-        Some(path) => brain.list(path).await,
+    let entries = match path {
+        Some(path) => brain.list(path).await?,
         None => {
             let mut entries = brain.list("/kv").await?;
             entries.extend(brain.list("/fs").await?);
-            Ok(entries)
+            entries
         }
-    }
+    };
+    // The session detail view lists paths; the per-entry type and size belong
+    // to the brain tree it does not draw yet.
+    Ok(entries.into_iter().map(|entry| entry.path).collect())
 }

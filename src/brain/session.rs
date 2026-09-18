@@ -38,6 +38,30 @@ impl StoredValue {
     }
 }
 
+/// One entry in a listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Entry {
+    /// The namespaced path, as a brain tool addresses it.
+    pub path: String,
+    /// What is stored there.
+    #[serde(rename = "type")]
+    pub kind: EntryKind,
+    /// Bytes stored at the entry.
+    pub size_bytes: i64,
+}
+
+/// What a listed entry is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    /// A key-value entry.
+    Key,
+    /// A regular file.
+    File,
+    /// A directory.
+    Dir,
+}
+
 /// The two path namespaces a brain exposes.
 enum Namespace<'a> {
     Kv(&'a str),
@@ -353,13 +377,31 @@ impl Brain {
     /// as `/kv/<key>`. For `/fs/<dir>` it returns the immediate children of
     /// the directory, as `/fs/<dir>/<name>`. A prefix with nothing under it
     /// yields an empty list.
-    pub async fn list(&self, prefix: &str) -> Result<Vec<String>> {
+    pub async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
         match parse_path(prefix)? {
             Namespace::Kv(key_prefix) => {
                 let mut keys = self.agent.kv.keys().await.map_err(engine_error)?;
                 keys.retain(|key| key.starts_with(key_prefix));
                 keys.sort();
-                Ok(keys.into_iter().map(|key| format!("/kv/{key}")).collect())
+                let mut entries = Vec::with_capacity(keys.len());
+                for key in keys {
+                    // The size is of the value a read hands back, not of the
+                    // JSON the store holds it in, so it matches the bytes the
+                    // caller would get.
+                    let size_bytes = self
+                        .agent
+                        .kv
+                        .get::<StoredValue>(&key)
+                        .await
+                        .map_err(engine_error)?
+                        .map_or(0, |value| value.into_bytes().len() as i64);
+                    entries.push(Entry {
+                        path: format!("/kv/{key}"),
+                        kind: EntryKind::Key,
+                        size_bytes,
+                    });
+                }
+                Ok(entries)
             }
             Namespace::Fs(path) => {
                 let dir = fs_path(path);
@@ -369,25 +411,53 @@ impl Brain {
                 if !stats.is_directory() {
                     return Ok(Vec::new());
                 }
-                let mut names = self
-                    .agent
-                    .fs
-                    .readdir(stats.ino)
-                    .await
-                    .map_err(engine_error)?
-                    .unwrap_or_default();
-                names.sort();
                 let base = if dir == "/" {
                     "/fs".to_string()
                 } else {
                     format!("/fs{dir}")
                 };
-                Ok(names
-                    .into_iter()
-                    .map(|name| format!("{base}/{name}"))
-                    .collect())
+                let mut entries = Vec::new();
+                for child in self.children(stats.ino).await? {
+                    let (kind, size_bytes) = if child.stats.is_directory() {
+                        (EntryKind::Dir, self.directory_bytes(child.stats.ino).await?)
+                    } else {
+                        (EntryKind::File, child.stats.size)
+                    };
+                    entries.push(Entry {
+                        path: format!("{base}/{}", child.name),
+                        kind,
+                        size_bytes,
+                    });
+                }
+                Ok(entries)
             }
         }
+    }
+
+    /// The bytes held directly under a directory.
+    ///
+    /// The sum over the immediate children, so a listing shows a directory
+    /// total without a second walk. A child directory holds no bytes of its
+    /// own, so a deeper tree is not counted here.
+    async fn directory_bytes(&self, ino: i64) -> Result<i64> {
+        Ok(self
+            .children(ino)
+            .await?
+            .iter()
+            .map(|child| child.stats.size)
+            .sum())
+    }
+
+    /// The immediate children of a directory, by name, with their stats.
+    async fn children(&self, ino: i64) -> Result<Vec<agentfs_sdk::filesystem::DirEntry>> {
+        // The stats come back with the names in one query, so a listing does
+        // not stat every entry it names.
+        self.agent
+            .fs
+            .readdir_plus(ino)
+            .await
+            .map(Option::unwrap_or_default)
+            .map_err(engine_error)
     }
 
     /// Delete an entry. Deleting something that is already absent is a no-op.

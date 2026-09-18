@@ -243,11 +243,15 @@ fn session_and_brain_tools_round_trip_over_stdio() {
         .as_array()
         .expect("brain_list returns entries");
     assert!(
-        entries.iter().any(|entry| entry == "/kv/note"),
+        entries
+            .iter()
+            .any(|entry| entry["path"] == "/kv/note" && entry["type"] == "key"),
         "brain_list reports the kv entry, got {entries:?}"
     );
     assert!(
-        entries.iter().any(|entry| entry == "/fs/RECOVERY.md"),
+        entries
+            .iter()
+            .any(|entry| entry["path"] == "/fs/RECOVERY.md" && entry["type"] == "file"),
         "brain_list reports the file entry, got {entries:?}"
     );
 
@@ -260,7 +264,11 @@ fn session_and_brain_tools_round_trip_over_stdio() {
         1,
         "a /kv prefix lists only keys, got {kv_entries:?}"
     );
-    assert_eq!(kv_entries[0], "/kv/note");
+    assert_eq!(kv_entries[0]["path"], "/kv/note");
+    assert_eq!(
+        kv_entries[0]["size_bytes"], 16,
+        "an entry carries the bytes stored at it, got {kv_entries:?}"
+    );
 
     let ended = server.call_tool("session_end", json!({"session_id": session_id}));
     assert_eq!(structured(&ended)["ok"], true, "session_end returns ok");

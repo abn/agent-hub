@@ -7,8 +7,12 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_hub::brain::{BrainStore, version};
+use agent_hub::brain::{BrainStore, Entry, EntryKind, version};
 use agent_hub::error::Error;
+
+fn paths(entries: &[Entry]) -> Vec<String> {
+    entries.iter().map(|entry| entry.path.clone()).collect()
+}
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
@@ -44,11 +48,11 @@ async fn kv_and_file_round_trip() {
     );
 
     assert_eq!(
-        brain.list("/fs/notes").await.expect("list files"),
+        paths(&brain.list("/fs/notes").await.expect("list files")),
         vec!["/fs/notes/plan.md".to_string()]
     );
     assert_eq!(
-        brain.list("/kv/").await.expect("list keys"),
+        paths(&brain.list("/kv/").await.expect("list keys")),
         vec!["/kv/recovery".to_string()]
     );
 
@@ -458,5 +462,57 @@ async fn a_conditional_write_over_the_cap_is_refused() {
     assert!(
         brain.get("/fs/page.md").await.expect("read back").is_none(),
         "a refused write stores nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_listing_reports_each_entry_type_and_size() {
+    let store = BrainStore::new(temp_dir("list-entries"));
+    let brain = store.open("proj", "session").await.expect("open brain");
+
+    brain.put("/kv/note", b"four").await.expect("put key");
+    brain
+        .put("/fs/notes/plan.md", b"# plan\n")
+        .await
+        .expect("put file");
+    brain
+        .put("/fs/notes/deep/more.md", b"more")
+        .await
+        .expect("put nested file");
+
+    assert_eq!(
+        brain.list("/kv").await.expect("list keys"),
+        vec![Entry {
+            path: "/kv/note".to_string(),
+            kind: EntryKind::Key,
+            size_bytes: 4,
+        }],
+        "a key reports the bytes a read hands back"
+    );
+
+    assert_eq!(
+        brain.list("/fs").await.expect("list the root"),
+        vec![Entry {
+            path: "/fs/notes".to_string(),
+            kind: EntryKind::Dir,
+            // The sum over the immediate children, so a tree header shows a
+            // directory total without a second walk. A child directory holds
+            // no bytes of its own and so adds nothing.
+            size_bytes: 7,
+        }],
+        "a directory reports the bytes of its immediate children"
+    );
+
+    let notes = brain.list("/fs/notes").await.expect("list a directory");
+    assert_eq!(
+        notes
+            .iter()
+            .map(|entry| (entry.path.as_str(), entry.kind, entry.size_bytes))
+            .collect::<Vec<_>>(),
+        vec![
+            ("/fs/notes/deep", EntryKind::Dir, 4),
+            ("/fs/notes/plan.md", EntryKind::File, 7),
+        ],
+        "a file reports its own size and a directory the sum of its children"
     );
 }
