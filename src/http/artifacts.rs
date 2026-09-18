@@ -1,12 +1,15 @@
-//! Artifact REST routes: the project listing and the public render shell.
+//! Artifact REST routes: the project listing and the public viewer.
 //!
-//! Agent-authored content is untrusted. A public artifact's HTML is served as
-//! authored but always framed without same-origin access; a markdown artifact
-//! is rendered to HTML by [`crate::markdown`] first, so raw HTML embedded in
-//! the source is escaped rather than passed through. Every page the hub builds
-//! around an artifact escapes the title first. A protected artifact has no
-//! plaintext on the server, so its route can only carry the envelope and the
-//! ciphertext for the browser to decrypt.
+//! Agent-authored content is untrusted. The public viewer splits into two
+//! documents. The host shell at `/artifacts/{id}` carries the title, the
+//! version picker data, and JSON blobs the first-party viewer module reads;
+//! it never carries author bytes. The frame at `/artifacts/{id}/frame`
+//! serves an HTML artifact's bytes verbatim inside a sandboxed document
+//! whose policy names the request origin. A markdown artifact renders in the
+//! host page from the inlined source, so the frame refuses it. A protected
+//! artifact has no plaintext on the server: its host shell carries only the
+//! envelope and the ciphertext for the browser to decrypt, with no picker
+//! and no body bytes.
 
 use axum::Json;
 use axum::body::Body;
@@ -14,6 +17,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::app::AppState;
 use crate::error::Error;
@@ -82,6 +86,15 @@ pub struct ArtifactContent {
 pub struct VersionQuery {
     /// The version to read. Omitted, the current version is read.
     pub version: Option<i64>,
+}
+
+/// The `?version=N&theme=light|dark` selector of the frame route.
+#[derive(Debug, Default, Deserialize)]
+pub struct FrameQuery {
+    /// The version to read. Omitted, the current version is read.
+    pub version: Option<i64>,
+    /// The frame theme. Only `dark` selects dark; anything else is light.
+    pub theme: Option<String>,
 }
 
 /// The version history of one artifact, oldest first.
@@ -229,16 +242,57 @@ pub async fn raw(
 
 /// `GET /artifacts/{id}`
 ///
-/// Public: a recipient opens the link without a token. The artifact is always
-/// wrapped in a document the hub controls and framed without same-origin
-/// access, so agent-authored content never runs in the hub origin. A protected
-/// artifact returns an unlock shell carrying the envelope and ciphertext; the
-/// server holds no plaintext to leak. With `?version=N`, serves that version
-/// instead of the current one.
-pub async fn render(
+/// Public: a recipient opens the link without a token. The host shell carries
+/// no author bytes: a plain HTML artifact is viewed through the frame route,
+/// a plain markdown artifact renders in the host page from the inlined
+/// source, and a protected artifact shows the unlock form with the envelope
+/// and ciphertext. With `?version=N`, serves that version instead of the
+/// current one. All logic lives in the viewer module and the vendor scripts;
+/// the shell itself has no inline scripts.
+pub async fn host(
     State(state): State<AppState>,
     Path(artifact_id): Path<String>,
     Query(query): Query<VersionQuery>,
+    headers: HeaderMap,
+) -> std::result::Result<Response, Problem> {
+    let (artifact, bytes) = match query.version {
+        Some(version) => {
+            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
+                .await
+                .map_err(|err| Problem::from_error(&err))?
+        }
+        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?,
+    };
+    let shown = query.version.unwrap_or(artifact.version);
+    let pinned = query.version.is_some();
+    let origin = request_origin(&state, &headers);
+
+    let document = if artifact.protected {
+        locked_shell(&artifact, &bytes, shown, pinned, &origin)
+    } else {
+        let versions = artifact_store::list_versions(&state.db, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        reader_shell(&artifact, &bytes, shown, pinned, &versions, &origin)
+    };
+    Ok(host_response(document))
+}
+
+/// `GET /artifacts/{id}/frame`
+///
+/// Public: the sandboxed body of a plain HTML artifact, served verbatim. A
+/// markdown artifact renders in the host page, so this route refuses it with
+/// `invalid_argument`; a protected artifact has no servable plaintext and is
+/// refused the same way. With `?version=N`, serves that version instead of
+/// the current one. With `?theme=dark`, stamps the dark theme; anything else
+/// is light.
+pub async fn frame(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    Query(query): Query<FrameQuery>,
+    headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
     let (artifact, bytes) = match query.version {
         Some(version) => {
@@ -251,21 +305,115 @@ pub async fn render(
             .map_err(|err| Problem::from_error(&err))?,
     };
 
-    let document = if artifact.protected {
-        unlock_shell(&artifact, &bytes)
-    } else {
-        let content = String::from_utf8_lossy(&bytes);
-        match artifact.kind.as_str() {
-            "html" => framed_document(&artifact.title, &content),
-            "markdown" => rendered_document(&artifact.title, &crate::markdown::to_html(&content)),
-            _ => plain_document(&artifact.title, &content),
+    if artifact.protected {
+        return Err(Problem::from_error(&Error::InvalidArgument(format!(
+            "artifact {artifact_id} is protected; it unlocks in the host page"
+        ))));
+    }
+    match artifact.kind.as_str() {
+        "html" => {}
+        "markdown" => {
+            return Err(Problem::from_error(&Error::InvalidArgument(
+                "markdown renders in the host page".to_string(),
+            )));
         }
+        other => {
+            return Err(Problem::from_error(&Error::InvalidArgument(format!(
+                "artifact {artifact_id} kind '{other}' has no frame view"
+            ))));
+        }
+    }
+
+    let theme = match query.theme.as_deref() {
+        Some("dark") => "dark",
+        _ => "light",
     };
-    Ok(html_response(document))
+    let content = String::from_utf8_lossy(&bytes);
+    let origin = request_origin(&state, &headers);
+    Ok(frame_response(
+        frame_document(&artifact.title, &content, theme),
+        &origin,
+    ))
 }
 
-fn html_response(body: impl Into<Body>) -> Response {
-    let mut response = Response::new(body.into());
+/// `GET /artifacts/{id}/og.svg`
+///
+/// Public: a static preview card with the escaped title and description plus
+/// the hub wordmark. No external references. With `?version=N`, cards that
+/// version instead of the current one.
+pub async fn og_svg(
+    State(state): State<AppState>,
+    Path(artifact_id): Path<String>,
+    Query(query): Query<VersionQuery>,
+) -> std::result::Result<Response, Problem> {
+    let (artifact, _bytes) = match query.version {
+        Some(version) => {
+            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
+                .await
+                .map_err(|err| Problem::from_error(&err))?
+        }
+        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?,
+    };
+    Ok(og_response(og_card(&artifact)))
+}
+
+/// The host shell policy: scripts only from the hub origin, no network, the
+/// artifact frame only from the hub origin, no inline scripts.
+const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+
+/// The hub origin as the caller reached it, for the frame policy and the
+/// absolute preview URLs. Mirrors the scheme and host logic of the skill
+/// route: the forwarded scheme and host win, then the request host, then the
+/// configured bind.
+fn request_origin(state: &AppState, headers: &HeaderMap) -> String {
+    let scheme = match first_header_value(headers, "x-forwarded-proto").as_deref() {
+        Some(value) if value.eq_ignore_ascii_case("https") => "https",
+        _ => "http",
+    };
+    let host = first_header_value(headers, "x-forwarded-host")
+        .filter(|value| is_safe_host(value))
+        .or_else(|| first_header_value(headers, "host").filter(|value| is_safe_host(value)))
+        .unwrap_or_else(|| fallback_authority(state.config.bind));
+    format!("{scheme}://{host}")
+}
+
+/// The authority to use when no request host is available. An unspecified
+/// bind such as `0.0.0.0:8080` is not a usable URL, so it becomes loopback on
+/// the same port.
+fn fallback_authority(bind: std::net::SocketAddr) -> String {
+    if bind.ip().is_unspecified() {
+        format!("localhost:{}", bind.port())
+    } else {
+        bind.to_string()
+    }
+}
+
+/// The first value of a possibly comma-separated header.
+fn first_header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// Whether a host is safe to echo into a document. The value lands in a URL
+/// in served HTML, so it is restricted to the characters a host and optional
+/// port can contain.
+fn is_safe_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 255
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+}
+
+fn host_response(body: String) -> Response {
+    let mut response = Response::new(Body::from(body));
     let headers = response.headers_mut();
     headers.insert(
         header::CONTENT_TYPE,
@@ -275,12 +423,63 @@ fn html_response(body: impl Into<Body>) -> Response {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
-    // No scripts, no external loads, no navigation, and no same-origin access.
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox",
-        ),
+        HeaderValue::from_static(HOST_CSP),
+    );
+    // The preview URLs vary with the request host, so a shared cache must
+    // not pin one caller's origin and serve it to another. Matches the
+    // skill route posture: no-store plus the full origin vary set.
+    headers.insert(
+        header::VARY,
+        HeaderValue::from_static("Host, X-Forwarded-Host, X-Forwarded-Proto"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+/// Serve a frame document with the policy naming the request origin. The
+/// origin is built from validated host characters, so it is header-safe.
+fn frame_response(body: String, origin: &str) -> Response {
+    let policy = format!(
+        "sandbox allow-scripts; default-src 'none'; script-src {origin} 'unsafe-inline'; \
+         style-src 'unsafe-inline'; img-src data: blob:; font-src data:; \
+         media-src data: blob:; connect-src 'none'; form-action 'none'; \
+         base-uri 'none'; frame-ancestors 'self'"
+    );
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&policy).expect("frame policy is header-safe"),
+    );
+    headers.insert(
+        header::VARY,
+        HeaderValue::from_static("Host, X-Forwarded-Host, X-Forwarded-Proto"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+/// Serve a preview card. Only the content type and nosniff travel with it.
+fn og_response(body: String) -> Response {
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("image/svg+xml"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
     );
     response
 }
@@ -339,79 +538,248 @@ fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Frame untrusted HTML in a sandboxed document. The frame has no
-/// same-origin access and the content policy disables scripts and external
-/// loads, so a published page cannot touch the hub origin.
-fn framed_document(title: &str, content: &str) -> String {
-    let title = escape_html(title);
-    let srcdoc = escape_html(content);
-    format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n\
-<body style=\"margin:0\">\n<iframe title=\"{title}\" sandbox srcdoc=\"{srcdoc}\" \
-style=\"position:fixed;inset:0;width:100%;height:100%;border:0\"></iframe>\n</body>\n</html>\n"
-    )
-}
-
-/// Wrap rendered markdown in a readable document.
-///
-/// The body is hub-generated HTML: [`crate::markdown`] escapes every source
-/// character, so raw HTML in the markdown is text, not markup. The response
-/// still carries the restrictive policy and `sandbox` directive of every
-/// artifact page, so the document cannot script or load anything external.
-fn rendered_document(title: &str, body: &str) -> String {
-    let title = escape_html(title);
-    // The artifact title names the document; show it as a heading only when
-    // the markdown does not carry its own, so it never appears twice.
-    let heading = if body.contains("<h") {
-        String::new()
+/// The reader shell for a plain artifact. The shell carries no author bytes:
+/// HTML artifacts load through the frame route, markdown artifacts render in
+/// the host page from the inlined source. The version picker appears only
+/// when the artifact has more than one version.
+fn reader_shell(
+    artifact: &Artifact,
+    bytes: &[u8],
+    shown: i64,
+    pinned: bool,
+    versions: &[ArtifactVersion],
+    origin: &str,
+) -> String {
+    let title = escape_html(&artifact.title);
+    let with_history = versions.len() > 1;
+    let picker = if with_history {
+        picker_html(versions, shown)
     } else {
-        format!("<h1>{title}</h1>\n")
+        String::new()
+    };
+    let frame = if artifact.kind == "html" {
+        format!(
+            "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"/artifacts/{}/frame?version={shown}&amp;theme=light\"></iframe>\n",
+            artifact.id,
+        )
+    } else {
+        format!("<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\"></iframe>\n")
+    };
+    let meta = script_json(&json!({
+        "id": artifact.id,
+        "title": artifact.title,
+        "kind": artifact.kind,
+        "version": shown,
+        "protected": false,
+    }));
+    let version_blob = if with_history {
+        let list: Vec<serde_json::Value> = versions
+            .iter()
+            .rev()
+            .take(50)
+            .map(|version| {
+                json!({
+                    "version": version.version,
+                    "label": version.label,
+                    "created_at": version.created_at,
+                })
+            })
+            .collect();
+        script_json(&json!(list))
+    } else {
+        "null".to_string()
+    };
+    let markdown_blob = if artifact.kind == "markdown" {
+        let source = String::from_utf8_lossy(bytes);
+        script_json(&json!(source.as_ref()))
+    } else {
+        "null".to_string()
     };
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n<body>\n\
-<main>\n{heading}{body}</main>\n</body>\n</html>\n"
+        "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
+         <body>\n<header>\n<h1>{title}</h1>\n{picker}\
+         <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n{frame}\
+         </main>\n\
+         <script type=\"application/json\" id=\"hub-meta\">{meta}</script>\n\
+         <script type=\"application/json\" id=\"hub-versions\">{version_blob}</script>\n\
+         <script type=\"application/json\" id=\"hub-markdown-body\">{markdown_blob}</script>\n\
+         </body>\n</html>\n",
+        head = shell_head(artifact, shown, pinned, origin, bytes, false),
     )
 }
 
-/// Wrap content of an unknown kind in a readable document. The source stays
-/// text, so the `<pre>` body is escaped rather than interpreted.
-fn plain_document(title: &str, content: &str) -> String {
-    let title = escape_html(title);
-    let body = escape_html(content);
-    format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n<body>\n\
-<main>\n<h1>{title}</h1>\n<pre>{body}</pre>\n</main>\n</body>\n</html>\n"
-    )
-}
-
-/// The page shown for a protected artifact. The browser decrypts it; the
-/// envelope and ciphertext are all a client needs.
-fn unlock_shell(artifact: &Artifact, ciphertext: &[u8]) -> String {
+/// The locked shell for a protected artifact. It carries the envelope and the
+/// ciphertext for the browser decryptor, and nothing else: no picker, no body
+/// bytes. The empty frame is filled by the viewer after unlock.
+fn locked_shell(
+    artifact: &Artifact,
+    ciphertext: &[u8],
+    shown: i64,
+    pinned: bool,
+    origin: &str,
+) -> String {
     let title = escape_html(&artifact.title);
+    let meta = script_json(&json!({
+        "id": artifact.id,
+        "title": artifact.title,
+        "kind": artifact.kind,
+        "version": shown,
+        "protected": true,
+    }));
     let envelope = artifact
         .envelope
         .as_ref()
         .map(script_json)
         .unwrap_or_else(|| "null".to_string());
-    let ciphertext = json_byte_string(ciphertext);
+    let encoded = base64_encode(ciphertext);
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-<meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n</head>\n<body>\n\
-<main>\n<h1>{title}</h1>\n\
-<p>This artifact is encrypted. The server does not hold its plaintext. \
-Decryption happens in your browser with the password the sender shared.</p>\n\
-<p>The unlock interface arrives with the hub app. Until then the envelope and \
-ciphertext below are what a client needs to decrypt it.</p>\n\
-<script type=\"application/json\" id=\"artifact-envelope\">{envelope}</script>\n\
-<script type=\"application/json\" id=\"artifact-ciphertext\">{ciphertext}</script>\n\
-</main>\n</body>\n</html>\n"
+        "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
+         <body>\n<header>\n<h1>{title}</h1>\n\
+         <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n\
+         <p>This artifact is encrypted. The server does not hold its plaintext. \
+         Decryption happens in your browser with the password the sender shared.</p>\n\
+         <form id=\"hub-unlock-form\">\n\
+         <label for=\"hub-password\">Password</label>\n\
+         <input id=\"hub-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\">\n\
+         <p id=\"hub-unlock-error\" hidden></p>\n\
+         <button type=\"submit\">Unlock</button>\n</form>\n\
+         <iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\"></iframe>\n</main>\n\
+         <script type=\"application/json\" id=\"hub-meta\">{meta}</script>\n\
+         <script type=\"application/json\" id=\"hub-versions\">null</script>\n\
+         <script type=\"application/json\" id=\"hub-markdown-body\">null</script>\n\
+         <script type=\"application/json\" id=\"hub-envelope\">{envelope}</script>\n\
+         <script type=\"application/json\" id=\"hub-ciphertext\">\"{encoded}\"</script>\n\
+         </body>\n</html>\n",
+        head = shell_head(artifact, shown, pinned, origin, &[], true),
+    )
+}
+
+/// The head shared by both shell variants: preview meta tags plus the vendor
+/// and viewer scripts. No inline scripts, no stylesheets.
+fn shell_head(
+    artifact: &Artifact,
+    shown: i64,
+    pinned: bool,
+    origin: &str,
+    bytes: &[u8],
+    locked: bool,
+) -> String {
+    let title = escape_html(&artifact.title);
+    let description = escape_html(&artifact.description);
+    let pinned = match pinned {
+        true => format!("?version={shown}"),
+        false => String::new(),
+    };
+    let mermaid = if !locked && bytes_contains_mermaid(bytes) {
+        "<script src=\"/vendor/mermaid.runtime.js\"></script>\n".to_string()
+    } else {
+        String::new()
+    };
+    format!(
+        "<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n\
+         <meta property=\"og:title\" content=\"{title}\">\n\
+         <meta property=\"og:description\" content=\"{description}\">\n\
+         <meta property=\"og:image\" content=\"{origin}/artifacts/{id}/og.svg{pinned}\">\n\
+         <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
+         <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
+         <script src=\"/vendor/marked.js\"></script>\n{mermaid}\
+         <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
+        id = artifact.id,
+    )
+}
+
+/// Whether the served bytes mention mermaid, in which case the document
+/// includes the runtime so fenced diagrams can render.
+fn bytes_contains_mermaid(bytes: &[u8]) -> bool {
+    bytes
+        .windows(b"mermaid".len())
+        .any(|window| window == b"mermaid")
+}
+
+/// The version picker, newest first and capped at 50. Plain artifacts only.
+fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
+    let mut options = String::new();
+    for version in versions.iter().rev().take(50) {
+        let fallback = format!("Version {}", version.version);
+        let label = version.label.as_deref().unwrap_or(&fallback);
+        let label = escape_html(label);
+        let selected = if version.version == shown {
+            " selected"
+        } else {
+            ""
+        };
+        options.push_str(&format!(
+            "<option value=\"{n}\"{selected}>{label}</option>\n",
+            n = version.version,
+        ));
+    }
+    format!(
+        "<div id=\"hub-picker-wrap\">\n<label for=\"hub-version-select\">Version</label>\n\
+         <select id=\"hub-version-select\">\n{options}</select>\n</div>\n"
+    )
+}
+
+/// The sandboxed body of a plain HTML artifact. Author bytes travel verbatim;
+/// the policy around them names the request origin and never grants
+/// same-origin access. When the bytes mention mermaid, the runtime and the
+/// loader ride along so fenced diagrams render in the frame theme.
+fn frame_document(title: &str, content: &str, theme: &str) -> String {
+    let title = escape_html(title);
+    let mermaid = if bytes_contains_mermaid(content.as_bytes()) {
+        let mermaid_theme = match theme {
+            "dark" => "dark",
+            _ => "default",
+        };
+        format!(
+            "<script src=\"/vendor/mermaid.runtime.js\"></script>\n\
+             <script>\n\
+             // Mirrors the mermaid loader in web/artifact-viewer.mjs (host srcdoc path); keep the two copies in sync.\n\
+             document.addEventListener('DOMContentLoaded', function () {{\n\
+             if (window.mermaid && document.querySelector('.mermaid')) {{\n\
+             mermaid.initialize({{ startOnLoad: false, theme: '{mermaid_theme}' }});\n\
+             mermaid.run({{ querySelector: '.mermaid' }});\n\
+             }}\n\
+             }});\n\
+             </script>\n"
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<!doctype html>\n<html lang=\"en\" data-theme=\"{theme}\">\n<head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n\
+         <style>html[data-theme=\"light\"]{{color-scheme:light;background:#ffffff;color:#111111}}\
+         html[data-theme=\"dark\"]{{color-scheme:dark;background:#111111;color:#eeeeee}}</style>\n\
+         {mermaid}</head>\n<body>\n{content}</body>\n</html>\n"
+    )
+}
+
+/// The static preview card: 1200 by 630, escaped title and description, the
+/// hub wordmark, and no external references.
+fn og_card(artifact: &Artifact) -> String {
+    let title: String = artifact.title.chars().take(90).collect();
+    let description: String = artifact.description.chars().take(160).collect();
+    let title = escape_html(&title);
+    let description = escape_html(&description);
+    let description_text = if description.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<text x=\"96\" y=\"420\" font-family=\"sans-serif\" font-size=\"36\" fill=\"#8b95a5\">{description}</text>\n"
+        )
+    };
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"630\" viewBox=\"0 0 1200 630\" role=\"img\" aria-label=\"{title}\">\n\
+         <title>{title}</title>\n\
+         <rect width=\"1200\" height=\"630\" fill=\"#101418\"/>\n\
+         <rect x=\"48\" y=\"48\" width=\"1104\" height=\"534\" fill=\"none\" stroke=\"#2a3340\" stroke-width=\"2\"/>\n\
+         <text x=\"96\" y=\"140\" font-family=\"sans-serif\" font-size=\"40\" fill=\"#8b95a5\">Agent Hub</text>\n\
+         <text x=\"96\" y=\"270\" font-family=\"sans-serif\" font-size=\"72\" fill=\"#ffffff\">{title}</text>\n\
+         {description_text}</svg>\n"
     )
 }
 
@@ -422,34 +790,6 @@ fn script_json(value: &serde_json::Value) -> String {
         .replace('&', "\\u0026")
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
-}
-
-/// Encode bytes as the body of a JSON string, one code point per byte.
-///
-/// This carries arbitrary ciphertext without padding: a client recovers the
-/// exact bytes from the string's code units. Printable ASCII stays literal so
-/// the shell remains inspectable.
-fn json_byte_string(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() + 2);
-    out.push('"');
-    for &byte in bytes {
-        match byte {
-            b'"' => out.push_str("\\\""),
-            b'\\' => out.push_str("\\\\"),
-            b'<' => out.push_str("\\u003c"),
-            b'>' => out.push_str("\\u003e"),
-            b'&' => out.push_str("\\u0026"),
-            0x20..=0x7e => out.push(byte as char),
-            other => {
-                out.push_str("\\u00");
-                out.push(HEX[(other >> 4) as usize] as char);
-                out.push(HEX[(other & 0x0f) as usize] as char);
-            }
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]

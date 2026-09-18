@@ -619,8 +619,12 @@ async fn protected_artifact_serves_the_locked_host_shell() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = text(response).await;
     assert!(
-        body.contains("artifact-envelope") && body.contains("artifact-ciphertext"),
+        body.contains("hub-envelope") && body.contains("hub-ciphertext"),
         "the locked shell carries the unlock data"
+    );
+    assert!(
+        body.contains("hub-unlock-form") && body.contains("hub-password"),
+        "the locked shell carries the unlock form"
     );
     assert!(
         body.contains("encrypted"),

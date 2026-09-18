@@ -12,6 +12,9 @@ const MANIFEST: &str = include_str!("../../web/manifest.webmanifest");
 const SERVICE_WORKER: &str = include_str!("../../web/sw.js");
 const ICON: &str = include_str!("../../web/icon.svg");
 const CRYPTO_JS: &str = include_str!("../../web/crypto.mjs");
+const MARKED_JS: &str = include_str!("../../web/vendor/marked.js");
+const MERMAID_JS: &str = include_str!("../../web/vendor/mermaid.runtime.js");
+const VIEWER_MJS: &str = include_str!("../../web/artifact-viewer.mjs");
 
 /// `GET /`
 pub async fn index() -> Response {
@@ -53,6 +56,27 @@ pub async fn icon() -> Response {
 /// The artifact encryption module, shared by the PWA and the offline check.
 pub async fn crypto_js() -> Response {
     asset(CRYPTO_JS, "text/javascript; charset=utf-8")
+}
+
+/// `GET /vendor/marked.js`
+///
+/// The pinned markdown parser the artifact host shell runs in the browser.
+pub async fn marked_js() -> Response {
+    asset(MARKED_JS, "application/javascript; charset=utf-8")
+}
+
+/// `GET /vendor/mermaid.runtime.js`
+///
+/// The pinned diagram runtime the artifact frame and host srcdoc path share.
+pub async fn mermaid_js() -> Response {
+    asset(MERMAID_JS, "application/javascript; charset=utf-8")
+}
+
+/// `GET /artifact-viewer.mjs`
+///
+/// The first-party viewer module bound to the host shell element ids.
+pub async fn viewer_js() -> Response {
+    asset(VIEWER_MJS, "application/javascript; charset=utf-8")
 }
 
 fn asset(body: &'static str, content_type: &'static str) -> Response {
