@@ -1074,3 +1074,430 @@ fn a_project_page_is_searchable_under_its_own_kind() {
         "a deleted page leaves no searchable row: {after}"
     );
 }
+
+#[test]
+fn another_session_in_the_project_is_readable() {
+    let data_dir = TempDir::new("cross-session");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "writer"}),
+    );
+    let writer_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    let put = server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
+    );
+    assert_eq!(structured(&put)["ok"], true, "the first session writes");
+
+    // Starting the second session makes it the active one, so every read below
+    // reaches the first session only through the argument.
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "reader"}),
+    );
+    let own = server.call_tool("brain_get", json!({"path": "/kv/plan"}));
+    assert_eq!(
+        error_code(&own),
+        "not_found",
+        "the reader's own brain holds nothing"
+    );
+
+    let by_id = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        structured(&by_id)["content"],
+        "the plan",
+        "a session id reads the other session, got {by_id}"
+    );
+
+    let by_name = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"agent": "local", "name": "writer"}}),
+    );
+    assert_eq!(
+        structured(&by_name)["content"],
+        "the plan",
+        "an agent and a name read the other session, got {by_name}"
+    );
+
+    let listed = server.call_tool("brain_list", json!({"session": {"session_id": writer_id}}));
+    let entries = structured(&listed)["entries"]
+        .as_array()
+        .expect("brain_list returns entries");
+    assert!(
+        entries.iter().any(|entry| entry["path"] == "/kv/plan"),
+        "brain_list reaches the other session, got {entries:?}"
+    );
+}
+
+#[test]
+fn reading_another_session_needs_no_active_session() {
+    let data_dir = TempDir::new("no-active-read");
+    common::seed_project(&data_dir.0, "proj");
+
+    let writer_id = {
+        let mut server = McpServer::spawn(&data_dir.0);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "writer"}),
+        );
+        let id = structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let put = server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
+        );
+        assert_eq!(structured(&put)["ok"], true, "the write lands");
+        id
+    };
+
+    // A fresh server has no active session, and reading another one must not
+    // need one: the caller may never start a session of its own.
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        structured(&read)["content"],
+        "the plan",
+        "a caller with no session of its own reads another one, got {read}"
+    );
+}
+
+#[test]
+fn reading_a_session_that_wrote_nothing_creates_no_file() {
+    let data_dir = TempDir::new("cross-no-create");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "silent"}),
+    );
+    let silent_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "reader"}),
+    );
+    // The reader holds the same path, so a read that quietly fell back to the
+    // active session would answer with the wrong session's bytes.
+    server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/plan", "content": "the reader's own", "store": "session"}),
+    );
+
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": silent_id}}),
+    );
+    assert_eq!(
+        error_code(&read),
+        "not_found",
+        "a session that wrote nothing has no value"
+    );
+    let listed = server.call_tool("brain_list", json!({"session": {"session_id": silent_id}}));
+    assert!(
+        structured(&listed)["entries"]
+            .as_array()
+            .expect("entries")
+            .is_empty(),
+        "a session that wrote nothing lists nothing, got {listed}"
+    );
+    assert!(
+        !data_dir
+            .0
+            .join("sessions")
+            .join("proj")
+            .join(format!("{silent_id}.db"))
+            .exists(),
+        "reading another session never creates its brain file"
+    );
+}
+
+#[test]
+fn a_pruned_session_is_not_readable() {
+    let data_dir = TempDir::new("cross-pruned");
+    common::seed_project(&data_dir.0, "proj");
+
+    let writer_id = {
+        let mut server = McpServer::spawn(&data_dir.0);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "writer"}),
+        );
+        let id = structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let put = server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
+        );
+        assert_eq!(structured(&put)["ok"], true, "the write lands");
+        id
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build a runtime");
+    runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open engine");
+        agent_hub::store::sessions::end(&db, &writer_id, "local")
+            .await
+            .expect("end");
+        agent_hub::store::prune::prune_session(&db, &writer_id)
+            .await
+            .expect("prune");
+    });
+
+    // The tombstone is fresh, so the undo window is still open and the bytes
+    // are still on disk. A reader is not a party to that: the session is gone.
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    let inside = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        error_code(&inside),
+        "not_found",
+        "a session pruned a moment ago is gone to a reader, got {inside}"
+    );
+    let named = server.call_tool(
+        "brain_get",
+        json!({
+            "path": "/kv/plan",
+            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
+        }),
+    );
+    assert_eq!(
+        error_code(&named),
+        "not_found",
+        "the name of a pruned session resolves to nothing, got {named}"
+    );
+    drop(server);
+
+    runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open engine");
+        let old = (time::OffsetDateTime::now_utc() - time::Duration::seconds(120))
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("format");
+        db.connect()
+            .expect("connect")
+            .execute(
+                "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+                vec![
+                    turso::Value::Text(old),
+                    turso::Value::Text(writer_id.clone()),
+                ],
+            )
+            .await
+            .expect("age the tombstone");
+        agent_hub::store::prune::sweep(&db, &data_dir.0)
+            .await
+            .expect("sweep");
+    });
+
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    let swept = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        error_code(&swept),
+        "not_found",
+        "a swept session stays gone, got {swept}"
+    );
+}
+
+#[test]
+fn a_write_cannot_name_another_session() {
+    let data_dir = TempDir::new("cross-write");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "writer"}),
+    );
+    let writer_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
+    );
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "reader"}),
+    );
+    let reader_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let refused = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/kv/plan",
+            "content": "overwritten",
+            "store": "session",
+            "session": {"session_id": writer_id},
+        }),
+    );
+    assert_eq!(
+        error_code(&refused),
+        "invalid_argument",
+        "a write into another session is refused, got {refused}"
+    );
+    assert!(
+        error_message(&refused).contains("read-only"),
+        "the refusal says another session's brain is read-only, got {refused}"
+    );
+
+    let deleted = server.call_tool(
+        "brain_delete",
+        json!({"path": "/kv/plan", "store": "session", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        error_code(&deleted),
+        "invalid_argument",
+        "a delete in another session is refused, got {deleted}"
+    );
+
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        structured(&read)["content"],
+        "the plan",
+        "the refused write changed nothing, got {read}"
+    );
+    assert!(
+        !data_dir
+            .0
+            .join("sessions")
+            .join("proj")
+            .join(format!("{reader_id}.db"))
+            .exists(),
+        "a refused write creates no brain file for the caller"
+    );
+}
+
+#[test]
+fn a_session_argument_has_no_meaning_for_the_project_store() {
+    let data_dir = TempDir::new("cross-store");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "writer"}),
+    );
+    let writer_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let read = server.call_tool(
+        "brain_get",
+        json!({
+            "path": "/fs/page.md",
+            "store": "project",
+            "session": {"session_id": writer_id},
+        }),
+    );
+    assert_eq!(
+        error_code(&read),
+        "invalid_argument",
+        "the project store takes no session, got {read}"
+    );
+
+    let write = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/page.md",
+            "content": "a page",
+            "store": "project",
+            "session": {"session_id": writer_id},
+        }),
+    );
+    assert_eq!(
+        error_code(&write),
+        "invalid_argument",
+        "a project write takes no session either, got {write}"
+    );
+}
+
+#[test]
+fn a_session_is_named_one_way_or_the_other() {
+    let data_dir = TempDir::new("cross-ref");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "writer"}),
+    );
+
+    let both = server.call_tool(
+        "brain_get",
+        json!({
+            "path": "/kv/plan",
+            "session": {"session_id": "01J", "agent": "local", "name": "writer"},
+        }),
+    );
+    assert_eq!(
+        error_code(&both),
+        "invalid_argument",
+        "naming a session twice is refused, got {both}"
+    );
+
+    let neither = server.call_tool("brain_get", json!({"path": "/kv/plan", "session": {}}));
+    assert_eq!(
+        error_code(&neither),
+        "invalid_argument",
+        "naming no session at all is refused, got {neither}"
+    );
+
+    let half = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"agent": "local"}}),
+    );
+    assert_eq!(
+        error_code(&half),
+        "invalid_argument",
+        "an agent without a name is refused, got {half}"
+    );
+}

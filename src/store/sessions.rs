@@ -209,6 +209,37 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
     Ok(sessions)
 }
 
+/// Find a live session by the agent that owns it and the name it runs under.
+///
+/// A name is unique inside a project today, so the agent is matched rather
+/// than keyed on; once sessions are keyed by their owner this is the key
+/// lookup and the answer does not change.
+pub async fn find_owned(
+    db: &Database,
+    project_id: &str,
+    agent: &str,
+    session_name: &str,
+) -> Result<Option<Session>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at
+             FROM sessions
+             WHERE project_id = ?1 AND session_name = ?2 AND agent = ?3 AND deleted_at IS NULL",
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(session_name.to_string()),
+                Value::Text(agent.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(session_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
 async fn find_by_name(
     conn: &turso::Connection,
     project_id: &str,

@@ -103,7 +103,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read one value. store is \"session\" (the default), this session's own working state, or \"project\", the durable knowledge base shared by every agent on the project. Returns the content and its version token."
+        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names another session to read, by session_id or by agent and name; omitted, it is this session. Returns the content and its version token."
     )]
     async fn brain_get(
         &self,
@@ -120,7 +120,12 @@ impl HubServer {
             )))
         };
         let target = self
-            .target_for_read(&principal, store, params.project_id.as_deref())
+            .target_for_read(
+                &principal,
+                store,
+                params.project_id.as_deref(),
+                params.session.as_ref(),
+            )
             .await
             .map_err(to_error_data)?
             .ok_or_else(absent)?;
@@ -163,7 +168,12 @@ impl HubServer {
         // canonical path and an alias never becomes a second search row.
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
         let target = self
-            .target_for_write(&principal, store, params.project_id.as_deref())
+            .target_for_write(
+                &principal,
+                store,
+                params.project_id.as_deref(),
+                params.session.as_ref(),
+            )
             .await
             .map_err(to_error_data)?;
         let version = target
@@ -202,7 +212,12 @@ impl HubServer {
             store.check_path(path).map_err(to_error_data)?;
         }
         let entries = match self
-            .target_for_read(&principal, store, params.project_id.as_deref())
+            .target_for_read(
+                &principal,
+                store,
+                params.project_id.as_deref(),
+                params.session.as_ref(),
+            )
             .await
             .map_err(to_error_data)?
         {
@@ -241,7 +256,12 @@ impl HubServer {
         store.check_path(&params.path).map_err(to_error_data)?;
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
         let target = self
-            .target_for_write(&principal, store, params.project_id.as_deref())
+            .target_for_write(
+                &principal,
+                store,
+                params.project_id.as_deref(),
+                params.session.as_ref(),
+            )
             .await
             .map_err(to_error_data)?;
         target.brain.delete(&path).await.map_err(to_error_data)?;
@@ -327,6 +347,44 @@ impl Store {
     }
 }
 
+/// How `session` names one session, quoted in every refusal that a caller got
+/// the shape wrong.
+const SESSION_REF: &str = "session names one session, either by session_id or \
+                           by agent and name";
+
+/// Why a write never names a session.
+///
+/// One session file has one writer. Two agents writing one working state clobber
+/// each other, and what they meant to share belongs in the project knowledge
+/// base, which is built for it.
+const SESSION_READ_ONLY: &str = "a write takes no session argument: it always goes to your own active session. \
+     Another session's brain is read-only, and knowledge to share belongs in the project store";
+
+/// `session` names a session brain, so it says nothing about the project store.
+const SESSION_WITH_PROJECT: &str =
+    "session names a session brain; the project knowledge base is reached with project_id";
+
+/// The session store acts on a session, so a project id there would name a
+/// target the tool cannot honour; saying so is better than ignoring the
+/// argument and reading or writing somewhere else.
+fn check_session_project_id(project_id: Option<&str>) -> Result<()> {
+    if project_id.is_some() {
+        return Err(Error::InvalidArgument(
+            "project_id selects a project knowledge base; the session store acts on the active session".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Refuse a `session` on a write, in the terms of the store it was aimed at.
+fn check_write_session(store: Store, session: Option<&SessionRef>) -> Result<()> {
+    match (store, session) {
+        (_, None) => Ok(()),
+        (Store::Session, Some(_)) => Err(Error::InvalidArgument(SESSION_READ_ONLY.to_string())),
+        (Store::Project, Some(_)) => Err(Error::InvalidArgument(SESSION_WITH_PROJECT.to_string())),
+    }
+}
+
 /// An opened store, with what the search corpus needs to name its documents.
 struct Target {
     /// The project the store belongs to.
@@ -392,13 +450,85 @@ impl HubServer {
         Ok(session)
     }
 
+    /// The session a call names, once the caller may read its project.
+    ///
+    /// Reading another session never touches the caller's own, so a caller
+    /// that never started a session still reaches one. Both reference forms
+    /// resolve here, so re-keying sessions by their owner is a change to one
+    /// function.
+    async fn referenced_session(
+        &self,
+        principal: &Principal,
+        reference: &SessionRef,
+    ) -> Result<sessions::Session> {
+        let session = match (
+            reference.session_id.as_deref(),
+            reference.agent.as_deref(),
+            reference.name.as_deref(),
+        ) {
+            (Some(session_id), None, None) => {
+                if reference.project_id.is_some() {
+                    return Err(Error::InvalidArgument(
+                        "a session_id names a session on its own; project_id belongs to the agent and name form".to_string(),
+                    ));
+                }
+                // The row is read before the caller is authorized for it, so an
+                // id that resolves to nothing is concealed: which ids exist is
+                // not something a refusal may leak.
+                let session = sessions::get(&self.state.db, session_id)
+                    .await?
+                    .ok_or_else(|| {
+                        policy::conceal(
+                            principal,
+                            Error::NotFound(format!("session {session_id} not found")),
+                        )
+                    })?;
+                policy::authorize(&self.state.db, principal, &session.project_id, Access::Read)
+                    .await?;
+                session
+            }
+            (None, Some(agent), Some(name)) => {
+                let project_id = match reference.project_id.as_deref() {
+                    Some(project_id) => project_id.to_string(),
+                    None => self.active_session().await.map_err(|_| {
+                        Error::InvalidArgument(
+                            "a session named by agent and name needs a project_id, or an active session to take one from"
+                                .to_string(),
+                        )
+                    })?.0,
+                };
+                policy::authorize(&self.state.db, principal, &project_id, Access::Read).await?;
+                sessions::find_owned(&self.state.db, &project_id, agent, name)
+                    .await?
+                    .ok_or_else(|| {
+                        Error::NotFound(format!(
+                            "no session '{name}' for agent '{agent}' in project {project_id}"
+                        ))
+                    })?
+            }
+            _ => return Err(Error::InvalidArgument(SESSION_REF.to_string())),
+        };
+        // A pruned session is gone from a reader's point of view, undo window
+        // or not: whether the bytes survive another moment is the human's
+        // business, and the file is never opened to find out.
+        if session.deleted_at.is_some() {
+            return Err(Error::NotFound(format!(
+                "session {} has been pruned",
+                session.id
+            )));
+        }
+        Ok(session)
+    }
+
     /// Authorize and open the store a write acts on.
     async fn target_for_write(
         &self,
         principal: &Principal,
         store: Store,
         project_id: Option<&str>,
+        session: Option<&SessionRef>,
     ) -> Result<Target> {
+        check_write_session(store, session)?;
         match store {
             Store::Session => {
                 let session = self
@@ -461,12 +591,20 @@ impl HubServer {
         principal: &Principal,
         store: Store,
         project_id: Option<&str>,
+        session: Option<&SessionRef>,
     ) -> Result<Option<Target>> {
         match store {
             Store::Session => {
-                let session = self
-                    .session_target(principal, project_id, Access::Read)
-                    .await?;
+                let session = match session {
+                    Some(reference) => {
+                        check_session_project_id(project_id)?;
+                        self.referenced_session(principal, reference).await?
+                    }
+                    None => {
+                        self.session_target(principal, project_id, Access::Read)
+                            .await?
+                    }
+                };
                 Ok(self
                     .state
                     .brain
@@ -479,6 +617,9 @@ impl HubServer {
                     }))
             }
             Store::Project => {
+                if session.is_some() {
+                    return Err(Error::InvalidArgument(SESSION_WITH_PROJECT.to_string()));
+                }
                 let project_id = self
                     .knowledge_project(principal, project_id, Access::Read)
                     .await?;
@@ -497,21 +638,13 @@ impl HubServer {
     }
 
     /// The active session a session-store call acts on.
-    ///
-    /// The session store follows the active session, so a project id there
-    /// would name a target the tool cannot honour; saying so is better than
-    /// ignoring the argument and writing somewhere else.
     async fn session_target(
         &self,
         principal: &Principal,
         project_id: Option<&str>,
         access: Access,
     ) -> Result<sessions::Session> {
-        if project_id.is_some() {
-            return Err(Error::InvalidArgument(
-                "project_id selects a project knowledge base; the session store acts on the active session".to_string(),
-            ));
-        }
+        check_session_project_id(project_id)?;
         self.session_for(principal, access).await
     }
 
@@ -601,6 +734,28 @@ struct SessionEndParams {
     session_id: String,
 }
 
+/// How a call names the session it reads.
+///
+/// Either a hub session id, or the agent that owns the session and the name it
+/// runs under, inside a project. Exactly one form, so a call that names a
+/// session names one session.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionRef {
+    /// The hub session id, on its own.
+    #[serde(default)]
+    session_id: Option<String>,
+    /// The agent that owns the session, with `name`.
+    #[serde(default)]
+    agent: Option<String>,
+    /// The session name, with `agent`.
+    #[serde(default)]
+    name: Option<String>,
+    /// The project the named session runs in. Defaults to the active session's
+    /// project.
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
 /// Arguments for `brain_get`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrainGetParams {
@@ -609,6 +764,9 @@ struct BrainGetParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
+    /// The session to read. Omitted, it is the active session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// Arguments for `brain_put`.
@@ -622,6 +780,10 @@ struct BrainPutParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
+    /// Refused: a session brain is written only through its owner's active
+    /// session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// Arguments for `brain_list`.
@@ -633,6 +795,9 @@ struct BrainListParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
+    /// The session to list. Omitted, it is the active session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// Arguments for `brain_delete`.
@@ -643,4 +808,8 @@ struct BrainDeleteParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
+    /// Refused: a session brain is written only through its owner's active
+    /// session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }

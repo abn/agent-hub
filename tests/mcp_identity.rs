@@ -1015,3 +1015,191 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         trusted_write.raw
     );
 }
+
+#[tokio::test]
+async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
+    let data_dir = TempDir::new("cross-session");
+
+    let db = open_engine(&data_dir.0.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    identity::create_agent(&db, "one", "One", Trust::Trusted)
+        .await
+        .expect("create one");
+    identity::create_agent(&db, "two", "Two", Trust::Trusted)
+        .await
+        .expect("create two");
+    identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    identity::create_agent(&db, "holder", "Holder", Trust::Untrusted)
+        .await
+        .expect("create holder");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared project");
+    identity::add_grant(&db, "holder", "shared", "read")
+        .await
+        .expect("read grant");
+    let one_token = identity::issue_token(&db, "one")
+        .await
+        .expect("token")
+        .token;
+    let two_token = identity::issue_token(&db, "two")
+        .await
+        .expect("token")
+        .token;
+    let strict_token = identity::issue_token(&db, "strict")
+        .await
+        .expect("token")
+        .token;
+    let holder_token = identity::issue_token(&db, "holder")
+        .await
+        .expect("token")
+        .token;
+    drop(db);
+
+    let port = free_port();
+    let _child = spawn(&data_dir.0, port);
+    wait_for_port(port);
+
+    let one = initialize(port, &one_token);
+    let started = call(
+        port,
+        &one_token,
+        &one,
+        "session_start",
+        json!({"project_id": "shared", "session_name": "first"}),
+    );
+    assert_eq!(started.status, 200, "session_start: {}", started.raw);
+    let session_id = started
+        .raw
+        .rsplit_once("\\\"session_id\\\":\\\"")
+        .and_then(|(_, rest)| rest.split_once("\\\""))
+        .map(|(id, _)| id.to_string())
+        .unwrap_or_else(|| panic!("session_start returns a session id: {}", started.raw));
+    let written = call(
+        port,
+        &one_token,
+        &one,
+        "brain_put",
+        json!({
+            "path": "/kv/plan",
+            "content": "drain the queue before the restart",
+            "store": "session",
+        }),
+    );
+    assert_eq!(written.status, 200, "the owner writes: {}", written.raw);
+
+    // The second agent is at work in its own space, so the session it reads is
+    // in a project other than the one its own session belongs to.
+    let two = initialize(port, &two_token);
+    call(
+        port,
+        &two_token,
+        &two,
+        "session_start",
+        json!({"project_id": "shared", "session_name": "second"}),
+    );
+    let by_id = call(
+        port,
+        &two_token,
+        &two,
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": session_id.clone()}}),
+    );
+    assert!(
+        by_id.raw.contains("drain the queue"),
+        "a trusted agent reads another session: {}",
+        by_id.raw
+    );
+    let by_name = call(
+        port,
+        &two_token,
+        &two,
+        "brain_get",
+        json!({
+            "path": "/kv/plan",
+            "session": {"agent": "one", "name": "first", "project_id": "shared"},
+        }),
+    );
+    assert!(
+        by_name.raw.contains("drain the queue"),
+        "an agent and a name name the same session: {}",
+        by_name.raw
+    );
+    let listed = call(
+        port,
+        &two_token,
+        &two,
+        "brain_list",
+        json!({"session": {"session_id": session_id.clone()}}),
+    );
+    assert!(
+        listed.raw.contains("/kv/plan"),
+        "a listing reaches another session: {}",
+        listed.raw
+    );
+
+    // An untrusted agent with no grant on the project is refused, and the
+    // refusal is the same whether the session is there or not.
+    let strict_session = initialize(port, &strict_token);
+    let existing = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": session_id.clone()}}),
+    );
+    let ghost = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": "01JGHOSTGHOSTGHOSTGHOSTGHO"}}),
+    );
+    assert!(
+        existing.raw.contains("forbidden") && existing.raw.contains("not found or not permitted"),
+        "an agent without a grant is refused: {}",
+        existing.raw
+    );
+    assert!(
+        !existing.raw.contains("drain the queue"),
+        "the refusal carries none of the content: {}",
+        existing.raw
+    );
+    // The event stream numbers its own frames, so the comparison is over the
+    // payload the caller reads, which is the whole of what it learns.
+    let payload = |response: &HttpResponse| {
+        response
+            .raw
+            .lines()
+            .find(|line| line.starts_with("data: {\"jsonrpc\""))
+            .map(str::to_string)
+            .unwrap_or_else(|| panic!("a response carries a payload: {}", response.raw))
+    };
+    assert_eq!(
+        payload(&existing),
+        payload(&ghost),
+        "a session that exists and one that does not answer identically"
+    );
+
+    // A read grant is all it takes: the same agent shape with a grant reads.
+    let holder_session = initialize(port, &holder_token);
+    let granted = call(
+        port,
+        &holder_token,
+        &holder_session,
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": session_id.clone()}}),
+    );
+    assert!(
+        granted.raw.contains("drain the queue"),
+        "a read grant reaches the session brain: {}",
+        granted.raw
+    );
+
+    drop(_child);
+    drop(data_dir);
+}
