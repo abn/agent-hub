@@ -11,6 +11,10 @@ services:
       # use, so the artifact frame policy, the link previews, and the served
       # skill all point at it:
       # HUB_PUBLIC_URL: https://hub.example
+    # Plain HTTP on every interface of the host: the admin token and every
+    # response cross the network unencrypted. To close that, either publish to
+    # loopback ("127.0.0.1:8080:8080") with a TLS-terminating reverse proxy in
+    # front and HUB_PUBLIC_URL set, or reach the hub over a tailnet.
     ports:
       - "8080:8080"
     volumes:

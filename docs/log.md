@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, what the published container port carries
+
+* **Note**: The [quickstart](usage/quickstart.md) compose section now states
+  that the published port is plain HTTP on every interface, so the admin
+  token and the responses cross the network unencrypted, and names the two
+  supported ways to close that: a TLS-terminating reverse proxy with
+  `HUB_PUBLIC_URL` set, or a tailnet. No default changed.
+
 ## 2026-09-18, an external origin the operator can set
 
 * **Update**: `HUB_PUBLIC_URL` names the address callers reach the hub at.

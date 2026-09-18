@@ -142,6 +142,23 @@ so the rest of the filesystem can be read-only. Pass `HUB_ADMIN_TOKEN` in the
 environment if the control surface needs it. Stop the stack with
 `docker compose -f deploy/compose.yaml down`; the named volume keeps the data.
 
+### What the published port carries
+
+The compose file publishes 8080 on every interface of the host, and the hub
+speaks plain HTTP. The admin token travels in an `Authorization` header on
+every call from the PWA and every admin request, so on that port it crosses
+the network unencrypted, as does everything the hub returns. On a trusted
+home network that may be the deployment you want; two supported ways to close
+it are:
+
+- Put a TLS-terminating reverse proxy in front, publish the container port to
+  loopback (`"127.0.0.1:8080:8080"`) or a private network only, and set
+  `HUB_PUBLIC_URL` to the address the proxy serves. This is the default
+  deployment in [ADR 0014](../adr/0014-optional-embedded-tailnet.md).
+- Reach the hub over a tailnet, either through a Tailscale node on the host or
+  through the optional embedded endpoint (`HUB_TAILNET`), which carries plain
+  HTTP inside the tailnet's own tunnel.
+
 ## See also
 
 - [Human interface](../design/human-interface.md) - the intended human surface
