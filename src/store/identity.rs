@@ -208,7 +208,7 @@ pub async fn create_agent(
     validate_agent_id(id)?;
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
-    let personal_project_id = format!("space-{}", ulid::Ulid::generate());
+    let personal_project_id = format!("space-{}", crate::store::next_id());
     let personal_display_name = format!("{display_name} (personal)");
 
     let mut conn = super::connect(db)?;

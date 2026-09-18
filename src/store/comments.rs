@@ -131,7 +131,7 @@ pub async fn add_comment(
         ));
     }
 
-    let id = ulid::Ulid::generate().to_string();
+    let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
     tx.execute(
         "INSERT INTO comments(id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at)

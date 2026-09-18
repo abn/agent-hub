@@ -123,7 +123,7 @@ pub async fn publish(
         return replay(&tx, &entry, None).await;
     }
 
-    let id = ulid::Ulid::generate().to_string();
+    let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
     let rel = blob::write(
         data_dir,

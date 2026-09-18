@@ -60,7 +60,7 @@ pub async fn start(
             session
         }
         None => {
-            let id = ulid::Ulid::generate().to_string();
+            let id = crate::store::next_id();
             let brain_path = format!("sessions/{project_id}/{id}.db");
             tx.execute(
                 "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity)

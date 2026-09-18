@@ -1,9 +1,11 @@
 //! Feed store tests: append, read, idempotency, paging, limits, indexing.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
+use agent_hub::limits::FEED_LIMIT_MAX;
 use agent_hub::store::events::{FeedQuery, NewEvent, append, read_feed};
 use agent_hub::store::{migrate, open_engine};
 
@@ -215,4 +217,121 @@ async fn before_cursor_pages_backwards_with_both_cursors() {
         second_page.next_before.as_deref(),
         Some(second_page.events[0].id.as_str())
     );
+}
+
+#[tokio::test]
+async fn forward_polling_a_burst_reaches_every_event() {
+    const BURST: usize = 300;
+
+    let db = open().await;
+    let mut ids = Vec::with_capacity(BURST);
+    for index in 0..BURST {
+        ids.push(
+            append(&db, "a", None, event(&format!("burst {index}")))
+                .await
+                .expect("append"),
+        );
+    }
+
+    for (index, pair) in ids.windows(2).enumerate() {
+        assert!(
+            pair[0] < pair[1],
+            "event {index} sorts before the event appended after it: {pair:?}"
+        );
+    }
+
+    // What a poller does: keep the last id it saw and ask for what came after
+    // it. An id that sorts below its predecessor is skipped by that `>` and is
+    // then lost to that client for good, so the walk has to see all of them.
+    let mut cursor = ids[0].clone();
+    let mut walked = Vec::with_capacity(BURST);
+    loop {
+        let page = read_feed(
+            &db,
+            "proj",
+            &FeedQuery {
+                since: Some(cursor.clone()),
+                limit: 50,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("poll forward");
+        if page.events.is_empty() {
+            break;
+        }
+        walked.extend(page.events.iter().map(|e| e.id.clone()));
+        cursor = page.next_since.expect("a cursor to continue from");
+    }
+    assert_eq!(walked, ids[1..], "the walk reaches every later event");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_appends_keep_ids_in_commit_order() {
+    const WRITERS: usize = 4;
+    const PER_WRITER: usize = 25;
+
+    let db = Arc::new(open().await);
+    let mut handles = Vec::new();
+    for writer in 0..WRITERS {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            let mut ids = Vec::with_capacity(PER_WRITER);
+            for index in 0..PER_WRITER {
+                ids.push(
+                    append(
+                        &db,
+                        "a",
+                        None,
+                        event(&format!("writer {writer} event {index}")),
+                    )
+                    .await
+                    .expect("append"),
+                );
+            }
+            ids
+        }));
+    }
+
+    let mut appended = Vec::new();
+    for handle in handles {
+        appended.push(handle.await.expect("join"));
+    }
+
+    // Each writer awaits its own appends, so its events committed in that
+    // order. Id order is the only order the feed exposes, so it has to agree.
+    for (writer, ids) in appended.iter().enumerate() {
+        for (index, pair) in ids.windows(2).enumerate() {
+            assert!(
+                pair[0] < pair[1],
+                "writer {writer} event {index} sorts before its successor: {pair:?}"
+            );
+        }
+    }
+
+    let page = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            limit: FEED_LIMIT_MAX,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read feed");
+    assert_eq!(page.events.len(), WRITERS * PER_WRITER);
+    let oldest_first: Vec<&str> = page.events.iter().map(|e| e.id.as_str()).rev().collect();
+    for (writer, ids) in appended.iter().enumerate() {
+        let mut cursor = 0;
+        for (index, id) in ids.iter().enumerate() {
+            let found = oldest_first[cursor..]
+                .iter()
+                .position(|candidate| *candidate == id)
+                .map(|offset| cursor + offset)
+                .unwrap_or_else(|| {
+                    panic!("writer {writer} event {index} reads after its predecessor")
+                });
+            cursor = found + 1;
+        }
+    }
 }

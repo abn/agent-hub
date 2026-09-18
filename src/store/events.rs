@@ -169,7 +169,7 @@ async fn append_in_tx_capped(
         crate::store::inbox::enforce_open_cap(tx, &event.project_id, actor, caps).await?;
     }
 
-    let id = ulid::Ulid::generate().to_string();
+    let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
     let thread_id = if event.kind == "question" {
         Some(id.clone())

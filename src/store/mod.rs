@@ -111,3 +111,75 @@ pub(crate) fn now_rfc3339() -> String {
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
 }
+
+/// Mint the next store id.
+///
+/// Ids are ULIDs and every ordered read compares them as text, the feed
+/// cursors above all. A plain `Ulid::generate` draws fresh random bits each
+/// time, so two ids minted inside one millisecond sort in arbitrary order and
+/// a forward poll can step past an event that was committed after its cursor.
+/// One process-wide monotonic generator closes that: the hub is the only
+/// writer, and an event id is minted with the write lock already held, so id
+/// order is commit order.
+pub(crate) fn next_id() -> String {
+    static GENERATOR: std::sync::Mutex<ulid::Generator> =
+        std::sync::Mutex::new(ulid::Generator::new());
+
+    let mut generator = GENERATOR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match generator.generate() {
+        Ok(id) => id,
+        // Reachable only after 2^80 ids inside one millisecond. Rolling into
+        // the next millisecond keeps the sequence increasing rather than
+        // failing a write that has nothing wrong with it.
+        Err(overflow) => overflow.commit_overflow_increment(),
+    }
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_id;
+
+    #[test]
+    fn ids_increase_in_generation_order() {
+        let ids: Vec<String> = (0..10_000).map(|_| next_id()).collect();
+        for (index, pair) in ids.windows(2).enumerate() {
+            assert!(
+                pair[0] < pair[1],
+                "id {index} sorts before the one minted after it: {pair:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ids_stay_ordered_across_threads() {
+        let minted: Vec<Vec<String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| (0..2_000).map(|_| next_id()).collect::<Vec<_>>()))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("join"))
+                .collect()
+        });
+
+        // Each thread sees its own calls in order, and no two threads are ever
+        // handed the same id.
+        let mut all = Vec::new();
+        for ids in &minted {
+            for (index, pair) in ids.windows(2).enumerate() {
+                assert!(
+                    pair[0] < pair[1],
+                    "id {index} precedes its successor: {pair:?}"
+                );
+            }
+            all.extend(ids.iter().cloned());
+        }
+        let total = all.len();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), total, "every id is distinct");
+    }
+}
