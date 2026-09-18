@@ -21,9 +21,13 @@ export function focusAfterRender(kind) {
 }
 
 function setCurrent(screen) {
+  // The project-owned screens sit under the Projects tab: the segmented
+  // project view has that tab on every segment, and the artifact viewer is
+  // the artifact inside a project, so it keeps the tab where it was opened.
+  const nav = screen === "artifacts" ? "projects" : screen;
   document.querySelectorAll(".tabbar a, .topbar nav a").forEach((anchor) => {
     const target = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
-    if (target === screen) anchor.setAttribute("aria-current", "page");
+    if (target === nav) anchor.setAttribute("aria-current", "page");
     else anchor.removeAttribute("aria-current");
   });
   document.title = screen.charAt(0).toUpperCase() + screen.slice(1) + " · Agent Hub";
@@ -38,7 +42,10 @@ export async function render() {
   const screen = path.split("/")[1] || "home";
   setCurrent(screen);
   try {
-    refreshBadge(await (screens[screen] || screens.home)(params, gen));
+    // The path is handed over so a route with an id of its own, such as the
+    // project view and the artifact viewer, can read its segment without
+    // reaching into the location itself.
+    refreshBadge(await (screens[screen] || screens.home)(params, gen, path));
   } catch (error) {
     paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
   }

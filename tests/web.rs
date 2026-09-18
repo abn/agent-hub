@@ -301,7 +301,7 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 33] = [
+const SHELL_PATHS: [&str; 35] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -320,6 +320,8 @@ const SHELL_PATHS: [&str; 33] = [
     "/inbox.mjs",
     "/feed.mjs",
     "/sessions.mjs",
+    "/project.mjs",
+    "/shell.mjs",
     "/storage.mjs",
     "/search.mjs",
     "/settings.mjs",
@@ -912,8 +914,12 @@ fn app_embeds_the_public_host_page() {
         "no in-app decrypt error remains"
     );
     assert!(
-        !ARTIFACTS_JS.contains("srcdoc"),
-        "no srcdoc fallback remains"
+        !ARTIFACTS_JS.contains("hub-markdown-body"),
+        "markdown rendering is the host page's, not the app's"
+    );
+    assert!(
+        ARTIFACTS_JS.contains("viewer.raw") && ARTIFACTS_JS.contains("srcdoc"),
+        "the raw-view toggle is the only srcdoc the app composes"
     );
     assert!(
         INBOX_JS.contains("Your answer"),

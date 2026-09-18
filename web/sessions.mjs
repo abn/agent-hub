@@ -11,32 +11,35 @@ import { toast } from "./toast.mjs";
 export async function sessionsScreen(selected, gen) {
   const empty = `<h1>Sessions</h1><p class="empty">No projects yet.</p>`;
   await withProject({ selected, gen, empty }, async (current, picker) => {
-    const { sessions } = await api(`/api/v1/sessions?project=${encodeURIComponent(current)}`);
-    const rows = sessions
-      .map(
-        (s) => `<div class="row">
-        ${glyph("session")}
-        <div class="grow">
-          <div class="title">${esc(s.session_name)}</div>
-          <div class="meta mono">${esc(s.agent)} · ${esc(s.status)} · ${when(s.last_activity)}</div>
-        </div>
-        <a class="button" href="#/session?project=${encodeURIComponent(current)}&id=${esc(s.id)}" aria-label="Open ${esc(s.session_name)}">Open</a>
-        ${
-          s.status === "ended"
-            ? `<button type="button" class="danger" data-action="prune" data-id="${esc(s.id)}" data-agent="${esc(s.agent)}">Prune</button>`
-            : `<button type="button" data-action="end" data-id="${esc(s.id)}">End</button>`
-        }
-      </div>`,
-      )
-      .join("");
-    paint(
-      gen,
-      `
-    <h1>Sessions</h1>
-    ${picker}
-    <div class="card">${rows || '<p class="empty">No sessions yet.</p>'}</div>`,
-    );
+    paint(gen, `<h1>Sessions</h1>${picker}${await sessionsSection(current)}`);
   });
+}
+
+// The list the standalone screen and the segmented project view both paint.
+export function sessionRow(s, current) {
+  return `<div class="row">
+    ${glyph("session")}
+    <div class="grow">
+      <div class="title">${esc(s.session_name)}</div>
+      <div class="meta mono">${esc(s.agent)} · ${esc(s.status)} · ${when(s.last_activity)}</div>
+    </div>
+    <a class="button" href="#/session?project=${encodeURIComponent(current)}&id=${esc(s.id)}" aria-label="Open ${esc(s.session_name)}">Open</a>
+    ${
+      s.status === "ended"
+        ? `<button type="button" class="danger" data-action="prune" data-id="${esc(s.id)}" data-agent="${esc(s.agent)}">Prune</button>`
+        : `<button type="button" data-action="end" data-id="${esc(s.id)}">End</button>`
+    }
+  </div>`;
+}
+
+export async function sessionRows(current) {
+  const { sessions } = await api(`/api/v1/sessions?project=${encodeURIComponent(current)}`);
+  const rows = sessions.map((s) => sessionRow(s, current)).join("");
+  return { sessions, card: `<div class="card">${rows || '<p class="empty">No sessions yet.</p>'}</div>` };
+}
+
+export async function sessionsSection(current) {
+  return (await sessionRows(current)).card;
 }
 
 export async function sessionDetail(project, id, gen) {

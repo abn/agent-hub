@@ -110,6 +110,16 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/project.mjs",
+        body: include_str!("../../web/project.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/shell.mjs",
+        body: include_str!("../../web/shell.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/storage.mjs",
         body: include_str!("../../web/storage.mjs"),
         content_type: "text/javascript; charset=utf-8",

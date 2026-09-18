@@ -6,29 +6,62 @@
 
 import { reissueToken, revokeToken, setAgentTrust, ungrant } from "./agents.mjs";
 import { api } from "./api.mjs";
-import { artifactsScreen, openArtifact } from "./artifacts.mjs";
+import {
+  openArtifact,
+  pickVersion,
+  toggleRaw,
+  toggleVersionMenu,
+  toggleViewerTheme,
+  viewerBack,
+  viewerRoute,
+} from "./artifacts.mjs";
 import { main } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
-import { projectsScreen, toggleKind } from "./feed.mjs";
+import { toggleKind } from "./feed.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
 import { installKeys } from "./keys.mjs";
 import { savePrefs } from "./prefs.mjs";
+import { projectFromHash, projectScreen } from "./project.mjs";
 import { render, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
-import { endSession, pruneSession, sessionDetail, sessionsScreen } from "./sessions.mjs";
+import { endSession, pruneSession, sessionDetail } from "./sessions.mjs";
 import { deleteProject, enableNotifications, settingsScreen } from "./settings.mjs";
+import { installShell } from "./shell.mjs";
 import { storageScreen } from "./storage.mjs";
 import { toast } from "./toast.mjs";
+
+// The legacy per-project addresses feed, sessions and artifacts now live at
+// `#/projects/<id>/<segment>`. A hash that names one redirects so a saved
+// link keeps working; a bare one lands on the first project.
+const toFirstProject = (segment) => async () => {
+  const { projects } = await api("/api/v1/projects");
+  const target = projects.length
+    ? `#/projects/${encodeURIComponent(projects[0].id)}/${segment}`
+    : "#/projects";
+  location.hash = target;
+};
 
 setScreens({
   home: (params, gen) => home(gen),
   inbox: (params, gen) => inbox(gen),
-  feed: (params, gen) => projectsScreen(params.get("project"), gen),
-  search: (params, gen) => searchScreen(params.get("q"), gen),
-  artifacts: (params, gen) => artifactsScreen(params.get("project"), gen),
-  sessions: (params, gen) => sessionsScreen(params.get("project"), gen),
+  projects: (params, gen, path) => projectScreen(params, gen, path),
+  feed: (params, gen) => {
+    if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/feed`;
+    else toFirstProject("feed")();
+  },
+  sessions: (params, gen) => {
+    if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/sessions`;
+    else toFirstProject("sessions")();
+  },
+  artifacts: (params, gen, path) => {
+    const segments = (path || "").split("/");
+    if (segments[2]) viewerRoute(params, gen, path);
+    else if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/artifacts`;
+    else toFirstProject("artifacts")();
+  },
   session: (params, gen) => sessionDetail(params.get("project"), params.get("id"), gen),
+  search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
 });
@@ -58,8 +91,7 @@ main.addEventListener("click", (event) => {
   const { action, id } = button.dataset;
   if (action === "answer") acted(button, answer(id, button));
   if (action === "approve") acted(button, approve(id, button.dataset.summary));
-  if (action === "kind")
-    toggleKind(button.dataset.kind, main.querySelector('[data-role="project"]')?.value);
+  if (action === "kind") toggleKind(button.dataset.kind, projectFromHash());
   if (action === "end") acted(button, endSession(id));
   if (action === "prune") acted(button, pruneSession(id, button.dataset.agent));
   if (action === "agent-trust") acted(button, setAgentTrust(id, button.dataset.trust));
@@ -67,19 +99,41 @@ main.addEventListener("click", (event) => {
   if (action === "agent-revoke") acted(button, revokeToken(id));
   if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));
   if (action === "artifact-open") openArtifact(id);
+  if (action === "viewer-back") viewerBack();
+  if (action === "project-back") projectBack();
+  if (action === "version-toggle") toggleVersionMenu(button);
+  if (action === "version-pick") pickVersion(id, button.dataset.version);
+  if (action === "viewer-raw") toggleRaw(button);
+  if (action === "viewer-theme") toggleViewerTheme();
   if (action === "project-delete") acted(button, deleteProject(id));
   if (action === "notification-enable") acted(button, enableNotifications());
 });
 
+function projectBack() {
+  if (window.history.length > 1) {
+    window.history.back();
+    return;
+  }
+  location.hash = "#/projects";
+}
+
+// Search forms live in the top bar and on the Search screen, so the submit
+// listener is on the document rather than on the screen region alone.
+document.addEventListener("submit", (event) => {
+  const form = event.target.closest("form[data-action]");
+  if (!form || form.dataset.action !== "search") return;
+  event.preventDefault();
+  const data = new FormData(form);
+  location.hash = `#/search?q=${encodeURIComponent(data.get("q") || "")}`;
+});
+
 main.addEventListener("submit", (event) => {
   const form = event.target.closest("form[data-action]");
-  if (!form) return;
+  if (!form || form.dataset.action === "search") return;
   event.preventDefault();
   const data = new FormData(form);
   const action = form.dataset.action;
-  if (action === "search") {
-    location.hash = `#/search?q=${encodeURIComponent(data.get("q") || "")}`;
-  } else if (action === "prefs") {
+  if (action === "prefs") {
     savePrefs({
       token: data.get("token"),
       theme: data.get("theme"),
@@ -133,6 +187,7 @@ if ("serviceWorker" in navigator) {
 }
 
 installKeys();
+installShell();
 
 // The freshness stream nudges a refetch when a write lands; the slow poll is
 // the fallback if the stream drops or the browser cannot stream a fetch.
