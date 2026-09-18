@@ -123,3 +123,141 @@ async fn search_rejects_an_unknown_type() {
         .expect("request");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn results_carry_the_hit_count_and_how_long_the_query_took() {
+    let state = state().await;
+    // Three hits in two families, so the total is not any one group's count.
+    for summary in ["needle one", "needle two"] {
+        append(
+            &state.db,
+            "agent-one",
+            None,
+            NewEvent {
+                project_id: "proj".to_string(),
+                kind: "signal".to_string(),
+                summary: summary.to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append");
+    }
+    let conn = state.db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO search_docs(doc_id, project_id, type, ref_id, session_id, title, body, updated_at) \
+         VALUES ('brain:one', 'proj', 'brain', '/kv/note', 'sess', 'a note', 'needle three', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("index a brain entry");
+
+    let app = router(state.clone());
+    let body = json_body(
+        app.oneshot(get("/api/v1/search?q=needle", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+
+    let groups = body["groups"].as_array().expect("groups");
+    let grouped: i64 = groups
+        .iter()
+        .map(|group| group["hits"].as_array().expect("hits").len() as i64)
+        .sum();
+    assert_eq!(body["count"], 3, "every hit is counted: {body}");
+    assert_eq!(
+        body["count"].as_i64().expect("count"),
+        grouped,
+        "the total is the hits across the groups"
+    );
+    for group in groups {
+        assert_eq!(
+            group["count"].as_i64().expect("group count"),
+            group["hits"].as_array().expect("hits").len() as i64,
+            "a group header counts its own hits"
+        );
+    }
+    assert!(
+        body["took_ms"].as_u64().is_some(),
+        "the results line says how long the query took: {body}"
+    );
+
+    // A warm query answers the same way, timing included.
+    let app = router(state);
+    let again = json_body(
+        app.oneshot(get("/api/v1/search?q=needle", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(again["count"], 3);
+    assert!(again["took_ms"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn a_search_that_finds_nothing_counts_nothing() {
+    let state = state().await;
+    let app = router(state);
+    let body = json_body(
+        app.oneshot(get("/api/v1/search?q=nothing", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(body["count"], 0);
+    assert_eq!(body["groups"].as_array().expect("groups").len(), 0);
+    assert!(body["took_ms"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn a_capped_result_page_says_it_was_capped() {
+    let state = state().await;
+    let conn = state.db.connect().expect("connect");
+    for index in 0..6 {
+        conn.execute(
+            "INSERT INTO search_docs(doc_id, project_id, type, ref_id, session_id, title, body, updated_at) \
+             VALUES (?1, 'proj', 'brain', '/kv/note', 'sess', 'a note', 'needle here', '2026-09-16T00:00:00Z')",
+            [format!("brain:{index}")],
+        )
+        .await
+        .expect("index a brain entry");
+    }
+
+    // Under the limit: the count is every hit there is, and nothing was cut.
+    let app = router(state.clone());
+    let whole = json_body(
+        app.oneshot(get("/api/v1/search?q=needle&limit=6", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(whole["count"], 6);
+    assert_eq!(
+        whole["truncated"], false,
+        "a page that holds everything is not capped: {whole}"
+    );
+
+    // At the boundary: six hits, five asked for. The count is what came back,
+    // and the flag is what stops it reading as a total.
+    let app = router(state);
+    let capped = json_body(
+        app.oneshot(get("/api/v1/search?q=needle&limit=5", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(capped["count"], 5, "the count is the page: {capped}");
+    assert_eq!(
+        capped["groups"][0]["hits"].as_array().expect("hits").len(),
+        5,
+        "the limit is still honoured"
+    );
+    assert_eq!(
+        capped["truncated"], true,
+        "a capped page says so rather than reading as a total: {capped}"
+    );
+}

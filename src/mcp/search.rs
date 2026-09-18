@@ -62,11 +62,14 @@ impl HubServer {
             session_id: params.session_id,
             limit: params.limit.unwrap_or(50),
         };
-        let results = search::query_visible(&self.state.db, &query, visible.as_filter())
+        let results = search::search(&self.state.db, &query, visible.as_filter())
             .await
             .map_err(to_error_data)?;
-        Ok(CallToolResult::structured(
-            json!({ "groups": search::group(results) }),
-        ))
+        Ok(CallToolResult::structured(json!({
+            "count": results.count,
+            "truncated": results.truncated,
+            "took_ms": results.took_ms,
+            "groups": results.groups,
+        })))
     }
 }

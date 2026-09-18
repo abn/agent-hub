@@ -3,20 +3,12 @@
 use axum::Json;
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
-use serde::Serialize;
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::Problem;
-use crate::store::search::{self, SearchGroup, SearchQuery};
-
-/// The results of a search, grouped by corpus family.
-#[derive(Debug, Serialize)]
-pub struct SearchResults {
-    /// The groups, best first.
-    pub groups: Vec<SearchGroup>,
-}
+use crate::store::search::{self, SearchQuery, SearchResults};
 
 /// `GET /api/v1/search?q=&scope=&project=&type=&limit=`
 ///
@@ -34,12 +26,11 @@ pub async fn search(
 
     let params = parse(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
 
-    let results = search::query(&state.db, &params)
+    let results = search::search(&state.db, &params, None)
         .await
         .map_err(|err| Problem::from_error(&err))?;
-    let groups = search::group(results);
 
-    Ok(Json(SearchResults { groups }))
+    Ok(Json(results))
 }
 
 fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {

@@ -114,6 +114,21 @@ pub async fn query_visible(
     search: &SearchQuery,
     visible: Option<&[String]>,
 ) -> Result<Vec<SearchHit>> {
+    let limit = search.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
+    query_limited(db, search, visible, limit).await
+}
+
+/// The query path with the page size already resolved.
+///
+/// [`search`] asks for one row past the page it will serve, which is how it
+/// tells a full page from a cut one. That probe is the store's own business,
+/// so it is not a limit a caller can ask for.
+async fn query_limited(
+    db: &Database,
+    search: &SearchQuery,
+    visible: Option<&[String]>,
+    limit: i64,
+) -> Result<Vec<SearchHit>> {
     if search.text.trim().is_empty() {
         return Err(Error::InvalidArgument(
             "a search query is required".to_string(),
@@ -127,7 +142,6 @@ pub async fn query_visible(
     {
         return Ok(Vec::new());
     }
-    let limit = search.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
 
     let mut params = vec![Value::Text(search.text.clone())];
     let mut scopes = String::new();
@@ -202,7 +216,49 @@ pub async fn query_visible(
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchGroup {
     pub kind: String,
+    /// Hits in this group, so a group header counts without walking the list.
+    pub count: usize,
     pub hits: Vec<SearchHit>,
+}
+
+/// A ranked page with the two numbers the results line shows.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SearchResults {
+    /// Hits on this page, before grouping. It is what came back, not how many
+    /// documents match: `truncated` says when those differ.
+    pub count: usize,
+    /// Whether the limit cut the result, so a surface never prints a capped
+    /// page as a total.
+    pub truncated: bool,
+    /// How long the query itself took, floored at zero.
+    pub took_ms: u64,
+    pub groups: Vec<SearchGroup>,
+}
+
+/// Run a query and report what it found and how long it took.
+///
+/// The clock spans the store call and nothing else: the results line says how
+/// fast the index is, not how fast the process serialised JSON.
+///
+/// One row beyond the limit is asked for and thrown away, which is what tells
+/// a full page from a cut one without a second count over the same predicate.
+pub async fn search(
+    db: &Database,
+    query: &SearchQuery,
+    visible: Option<&[String]>,
+) -> Result<SearchResults> {
+    let limit = query.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
+    let started = std::time::Instant::now();
+    let mut hits = query_limited(db, query, visible, limit.saturating_add(1)).await?;
+    let took_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let truncated = hits.len() as i64 > limit;
+    hits.truncate(limit as usize);
+    Ok(SearchResults {
+        count: hits.len(),
+        truncated,
+        took_ms,
+        groups: group(hits),
+    })
 }
 
 /// Group hits by corpus family, preserving the ranked order inside each group
@@ -214,9 +270,13 @@ pub fn group(hits: Vec<SearchHit>) -> Vec<SearchGroup> {
             Some(group) => group.hits.push(hit),
             None => groups.push(SearchGroup {
                 kind: hit.kind.clone(),
+                count: 0,
                 hits: vec![hit],
             }),
         }
+    }
+    for group in &mut groups {
+        group.count = group.hits.len();
     }
     groups
 }
