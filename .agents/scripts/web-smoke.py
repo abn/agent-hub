@@ -42,6 +42,13 @@ KIND_LABELS = {
     "artifact": "Artifact",
     "session": "Session",
 }
+# The design's copy for one screen, held here so the check reads the strings
+# it asserts rather than the ones the module happens to hold.
+EMPTY_COPY_INBOX = {
+    "title": "Inbox is clear.",
+    "body": "Finished work and questions from your agents will land here.",
+    "link": "Show read items",
+}
 # The session listing the stale-render check holds back. Long enough that the
 # screen the reader moved on to has painted first.
 SESSION_LIST = re.compile(r"/api/v1/sessions\?")
@@ -259,6 +266,59 @@ def check_system_theme(page, watch: Watch) -> None:
     if chosen != "light":
         watch.fail(f"a chosen theme followed the system anyway, to {chosen!r}")
     page.emulate_media(color_scheme="light")
+    watch.drain_rejections()
+
+
+def check_empty_state(page, watch: Watch) -> None:
+    """The empty state draws four parts at the sizes the design gives them.
+
+    Mounted by this check rather than taken off a screen: the screens adopt the
+    component as they are reworked, and their copy is not this check's to move.
+    """
+    watch.enter("empty state: the component")
+    # Home by name, not by "a heading is up": the screen being left carries one
+    # too, and mounting into it would be painted over a moment later.
+    goto(page, "#/home", "Home")
+    try:
+        drawn = page.evaluate(
+            "import('/empty.mjs').then((m) => {"
+            " const box = m.emptyState(m.EMPTY_COPY.inbox, {}, { href: '#/inbox' });"
+            " document.querySelector('main').appendChild(box);"
+            " const part = (sel) => { const el = box.querySelector(sel); const s = el &&"
+            " getComputedStyle(el); return el && { text: el.textContent.trim(),"
+            " tag: el.tagName, size: s.fontSize, font: s.fontFamily, weight: s.fontWeight,"
+            " height: el.getBoundingClientRect().height }; };"
+            " return { screens: Object.keys(m.EMPTY_COPY).length,"
+            " name: part('.empty-screen'), title: part('.empty-title'),"
+            " body: part('.empty-body'), link: part('.empty-link'),"
+            " pictures: box.querySelectorAll('img, svg').length }; })"
+        )
+    except Exception as error:
+        watch.fail(f"the empty state cannot be built: {str(error).splitlines()[0]}")
+        return
+    copy = EMPTY_COPY_INBOX
+    if drawn["screens"] < 8:
+        watch.fail(f"the copy table carries {drawn['screens']} screens")
+    name, title, body, link = drawn["name"], drawn["title"], drawn["body"], drawn["link"]
+    if not name or name["text"] != "inbox":
+        watch.fail(f"the screen name is {name and name['text']!r}")
+    elif name["size"] != "12px" or "mono" not in name["font"].lower():
+        watch.fail(f"the screen name is {name['size']} in {name['font']!r}")
+    if not title or title["tag"] != "H2" or title["text"] != copy["title"]:
+        watch.fail(f"the title is {title and title['text']!r} in a {title and title['tag']}")
+    elif title["size"] != "17px" or title["weight"] != "600":
+        watch.fail(f"the title is {title['size']}/{title['weight']}")
+    if not body or body["text"] != copy["body"]:
+        watch.fail(f"the line under the title is {body and body['text']!r}")
+    elif body["size"] != "13px":
+        watch.fail(f"the line under the title is {body['size']}")
+    if not link or link["tag"] != "A" or link["text"] != copy["link"]:
+        watch.fail(f"the action is {link and link['text']!r} in a {link and link['tag']}")
+    elif link["height"] < 44:
+        watch.fail(f"the action is {link['height']:.0f}px tall, under the 44px minimum")
+    if drawn["pictures"]:
+        watch.fail(f"the empty state draws {drawn['pictures']} illustration(s)")
+    page.evaluate("document.querySelector('main .empty-state').remove()")
     watch.drain_rejections()
 
 
@@ -968,6 +1028,7 @@ def run() -> int:
             check_artifact(page, watch, project)
             check_theme(page, watch)
             check_system_theme(page, watch)
+            check_empty_state(page, watch)
             check_search(page, watch)
             check_answer(page, watch, project)
             check_approve(page, watch)
