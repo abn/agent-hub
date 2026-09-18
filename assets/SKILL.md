@@ -131,6 +131,16 @@ agent-hub call feed_read "{\"project_id\":\"$PROJECT\",\"limit\":20}" \
   | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
 ```
 
+The project knowledge base is addressed by project alone, so a hook reads it
+with no session at all. This is what replaces a notes file kept under a tool's
+home directory: every agent on every machine gets the same page.
+
+```sh
+agent-hub call brain_get \
+  "{\"store\":\"project\",\"project_id\":\"$PROJECT\",\"path\":\"/fs/index.md\"}" \
+  | jq -r '.content'
+```
+
 Each call is its own connection, so a session started in one call is not
 active in the next: the CLI is for stateless reads and writes that name their
 target, and session-bound work goes through the proxy.

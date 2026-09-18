@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a hook reads the project knowledge base
+
+* **Update**: The served skill contract shows a one-shot call reading a
+  project knowledge base page with no session, which is how a harness hook
+  puts shared knowledge into context on any machine.
+
 ## 2026-09-18, reaching the hub from another machine
 
 * **Update**: `agent-hub mcp` is a proxy to a running hub whenever `HUB_URL`
