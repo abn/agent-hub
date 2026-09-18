@@ -604,6 +604,135 @@ async fn public_artifact_page_loads_for_the_embed() {
 }
 
 #[tokio::test]
+async fn comments_store_round_trip_behind_the_drawer() {
+    // The drawer is client-rendered, so no server HTML covers it. This pins
+    // the data contract the drawer consumes: post, list, resolve, delete.
+    // The router CRUD over the admin gate is proven in tests/comments_http.rs;
+    // the drawer targets that frozen surface.
+    use agent_hub::store::comments;
+    let state = state().await;
+    let published = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "human",
+            project_id: "proj",
+            title: "Note",
+            kind: "markdown",
+            content: b"hello",
+            envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+
+    let (comment, replayed) = comments::add_comment(
+        &state.db,
+        &published.id,
+        "human",
+        "Looks good",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("post");
+    assert!(!replayed);
+    assert_eq!(comment.body, "Looks good");
+    assert!(!comment.done);
+
+    let listed = comments::list_comments(&state.db, &published.id)
+        .await
+        .expect("list");
+    assert_eq!(listed.len(), 1, "the post shows in the list");
+    assert_eq!(listed[0].id, comment.id);
+
+    let resolved = comments::set_comment_done(&state.db, &comment.id, true)
+        .await
+        .expect("resolve");
+    assert!(resolved.done, "the resolve toggle flips done");
+
+    comments::delete_comment(&state.db, &comment.id)
+        .await
+        .expect("delete");
+    let listed = comments::list_comments(&state.db, &published.id)
+        .await
+        .expect("list");
+    assert!(listed.is_empty(), "the delete removes the comment");
+}
+
+#[test]
+fn app_drawer_wiring_for_comments() {
+    // The drawer interaction itself (open, post, resolve, delete, focus)
+    // is proven in a browser pass; these asserts pin the wiring strings.
+    for needle in [
+        "comments-drawer",
+        "comments-toggle",
+        "comments-badge",
+        "comment-body",
+        "comments-compose",
+        "drawer-error",
+        "Comments",
+        "No comments yet. Be the first to leave one.",
+        "Write a comment before posting.",
+        "Pinned",
+        "Quoted",
+        "/comments",
+        "PATCH",
+        "DELETE",
+        "confirm(",
+        "Escape",
+        "aria-expanded",
+        "aria-modal",
+    ] {
+        assert!(APP_JS.contains(needle), "the drawer wires {needle}");
+    }
+    assert!(
+        APP_JS.contains("drawerError(error.message)"),
+        "drawer failures surface inline"
+    );
+    let start = APP_JS.find("const commentsDrawer").expect("drawer state");
+    let end = APP_JS
+        .find("function setCurrent")
+        .expect("drawer block end");
+    assert!(
+        !APP_JS[start..end].contains("alert("),
+        "the drawer never uses alert"
+    );
+}
+
+#[test]
+fn app_css_carries_drawer_styles_on_tokens() {
+    for needle in [
+        "comments-drawer",
+        "drawer-backdrop",
+        "comments-toolbar",
+        "comments-badge",
+        "comments-list",
+        "comment-body",
+        "comment.done",
+        "comments-compose",
+        "drawer-error",
+        "prefers-reduced-motion",
+    ] {
+        assert!(APP_CSS.contains(needle), "the drawer styles carry {needle}");
+    }
+    assert!(
+        APP_CSS.contains("var(--"),
+        "drawer styles reuse the hub tokens"
+    );
+    assert!(
+        APP_CSS.contains("position: fixed"),
+        "the drawer overlays from the right"
+    );
+}
+
+#[tokio::test]
 async fn protected_artifact_serves_the_locked_host_shell() {
     let state = state().await;
     let published = artifacts::publish(
