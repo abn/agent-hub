@@ -1,5 +1,6 @@
 //! Prune tests: soft delete, undo within the window, and commit after it.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -206,6 +207,44 @@ async fn pruning_an_active_session_is_rejected() {
         .await
         .expect_err("an active session cannot be pruned");
     assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
+    let dir = temp_dir("prune-resume-race");
+    let db = Arc::new(open(&dir).await);
+
+    // The window between the prune's status check and its write is narrow, so
+    // the race is run repeatedly against a fresh session each round.
+    for round in 0..20 {
+        let name = format!("nightly-{round}");
+        let session = sessions::start(&db, "proj", &name, "agent-one")
+            .await
+            .expect("start");
+        sessions::end(&db, &session.id, "agent-one")
+            .await
+            .expect("end");
+
+        let pruning = db.clone();
+        let id = session.id.clone();
+        let prune = tokio::spawn(async move { prune::prune_session(&pruning, &id).await });
+        let resuming = db.clone();
+        let resume =
+            tokio::spawn(
+                async move { sessions::start(&resuming, "proj", &name, "agent-one").await },
+            );
+        let _ = prune.await.expect("join prune");
+        let _ = resume.await.expect("join resume");
+
+        let row = sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .expect("the row is still there");
+        assert!(
+            row.status != "active" || row.deleted_at.is_none(),
+            "round {round}: a pruned session is active, so the sweep would remove a live brain"
+        );
+    }
 }
 
 #[tokio::test]

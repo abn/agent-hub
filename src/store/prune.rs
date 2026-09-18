@@ -43,15 +43,26 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
 
     let now = time::OffsetDateTime::now_utc();
     let conn = super::connect(db)?;
-    conn.execute(
-        "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
-        vec![
-            Value::Text(format_time(now)),
-            Value::Text(session.id.clone()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
+    // The checks above are advisory: they name the reason precisely, but the
+    // row can change under them. The write carries them too, so a resume that
+    // lands in between cannot leave a session both active and pruned, with the
+    // sweep about to remove the brain the agent is writing to.
+    let pruned = conn
+        .execute(
+            "UPDATE sessions SET deleted_at = ?1
+             WHERE id = ?2 AND deleted_at IS NULL AND status = 'ended'",
+            vec![
+                Value::Text(format_time(now)),
+                Value::Text(session.id.clone()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    if pruned == 0 {
+        return Err(Error::Conflict(
+            "end the session before pruning it".to_string(),
+        ));
+    }
 
     Ok(PruneToken {
         undo_token: session.id,
