@@ -206,6 +206,41 @@ async fn the_agent_transport_refuses_a_body_over_its_limit() {
     assert_eq!(over.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
+/// The served router is the merge of the two, so the two limits have to
+/// survive being merged: a body the REST surface refuses on size must still
+/// reach the agent transport.
+#[tokio::test]
+async fn the_merged_router_keeps_both_body_limits() {
+    let state = state("hardening-merged-limits").await;
+    let app = router(state.clone()).merge(http_router(state));
+
+    // Over the REST limit, well under the agent one.
+    let padding = "x".repeat(REQUEST_BODY_BYTES_MAX + 1024);
+    let rest = app
+        .clone()
+        .oneshot(post(
+            "/api/v1/projects",
+            json!({"id": "pad", "display_name": padding}),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(rest.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(
+        rest.headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/problem+json"),
+        "the REST refusal is problem details"
+    );
+
+    let agent = app.oneshot(mcp_post(None, padding)).await.expect("request");
+    assert_ne!(
+        agent.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "the same size is not too large for the agent transport"
+    );
+}
+
 #[test]
 fn the_blob_layer_enforces_the_artifact_cap() {
     let dir = temp_dir("hardening-blob");

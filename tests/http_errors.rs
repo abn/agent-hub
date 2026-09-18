@@ -7,10 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::app::AppState;
 use agent_hub::config::{Config, TrustDefault};
+use agent_hub::http::problem::ProblemPath;
 use agent_hub::http::router;
 use agent_hub::limits::REQUEST_BODY_BYTES_MAX;
+use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
+use axum::routing::get;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -160,6 +163,31 @@ async fn an_unparsable_path_is_a_problem() {
     let (status, problem) = problem(response).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(problem["code"], "invalid_argument");
+}
+
+/// A handler that reads more path parameters than its route declares is a
+/// server fault, and the framework says so with a 500. No production route
+/// does that, so the test declares the broken pair itself.
+#[tokio::test]
+async fn a_path_the_route_cannot_satisfy_stays_a_server_error() {
+    async fn mismatched(ProblemPath((one, two)): ProblemPath<(String, String)>) -> String {
+        format!("{one}{two}")
+    }
+
+    let response = Router::new()
+        .route("/mismatched/{id}", get(mismatched))
+        .oneshot(request("GET", "/mismatched/only-one", None, Body::empty()))
+        .await
+        .expect("request");
+
+    let (status, problem) = problem(response).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(problem["code"], "internal");
+    let detail = problem["detail"].as_str().unwrap_or_default();
+    assert!(
+        !detail.contains("path arguments"),
+        "the framework's own wording stays off the wire: {detail}"
+    );
 }
 
 #[tokio::test]

@@ -123,7 +123,18 @@ where
             .await
             .map(|Path(path)| Self(path))
             .map_err(|rejection| {
-                Problem::from_error(&Error::InvalidArgument(rejection.body_text()))
+                // A handler that reads parameters the route does not declare is
+                // a server fault, and the framework answers 5xx to say so.
+                // Flattening that to 400 would blame the caller for a routing
+                // bug, and the framework's wording describes the route, not the
+                // request, so it stays off the wire.
+                if rejection.status().is_server_error() {
+                    Problem::from_error(&Error::Config(
+                        "this route cannot read the path it matched".to_string(),
+                    ))
+                } else {
+                    Problem::from_error(&Error::InvalidArgument(rejection.body_text()))
+                }
             })
     }
 }
