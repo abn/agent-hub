@@ -69,6 +69,79 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
     })
 }
 
+/// One session a batch prune soft-deleted, with the token that restores it.
+#[derive(Debug, Clone, Serialize)]
+pub struct PrunedSession {
+    pub session_id: String,
+    pub undo_token: String,
+}
+
+/// What a batch prune removed, and how to put it back.
+///
+/// The batch carries one token per session rather than a token of its own: a
+/// batch token would need a record of its own to resolve, and every session in
+/// the batch is already addressable by the token a single prune returns. Undo
+/// is the same route, once per token.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchPrune {
+    pub sessions: Vec<PrunedSession>,
+    pub undo_expires_at: String,
+}
+
+/// Soft-delete every ended session, in one project or in all of them.
+///
+/// Same soft delete, same undo window, same sweep as a single prune: this only
+/// chooses the rows. An active session is never touched, whoever owns it, and
+/// neither are feed events, artifacts or a project knowledge base.
+pub async fn prune_ended(db: &Database, project_id: Option<&str>) -> Result<BatchPrune> {
+    let now = time::OffsetDateTime::now_utc();
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    // The read and the write share the transaction and the predicate, so the
+    // ids reported back are exactly the rows the update moved.
+    const ENDED: &str = "deleted_at IS NULL AND status = 'ended'";
+    let (read, write, project) = match project_id {
+        Some(project_id) => (
+            format!("SELECT id FROM sessions WHERE {ENDED} AND project_id = ?1 ORDER BY id"),
+            format!("UPDATE sessions SET deleted_at = ?1 WHERE {ENDED} AND project_id = ?2"),
+            vec![Value::Text(project_id.to_string())],
+        ),
+        None => (
+            format!("SELECT id FROM sessions WHERE {ENDED} ORDER BY id"),
+            format!("UPDATE sessions SET deleted_at = ?1 WHERE {ENDED}"),
+            Vec::new(),
+        ),
+    };
+
+    let mut rows = tx.query(&read, project.clone()).await.map_err(engine)?;
+    let mut sessions = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let Value::Text(id) = row.get_value(0).map_err(engine)? {
+            sessions.push(PrunedSession {
+                undo_token: id.clone(),
+                session_id: id,
+            });
+        }
+    }
+    drop(rows);
+
+    if !sessions.is_empty() {
+        let mut params = vec![Value::Text(format_time(now))];
+        params.extend(project);
+        tx.execute(&write, params).await.map_err(engine)?;
+    }
+    tx.commit().await.map_err(engine)?;
+
+    Ok(BatchPrune {
+        sessions,
+        undo_expires_at: format_time(now + time::Duration::seconds(UNDO_WINDOW_SECS)),
+    })
+}
+
 /// Restore a session pruned within the window.
 pub async fn undo(db: &Database, token: &str) -> Result<()> {
     let session = crate::store::sessions::get(db, token)

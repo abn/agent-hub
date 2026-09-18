@@ -201,3 +201,233 @@ async fn usage_without_a_token_is_refused() {
         .expect("response");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+async fn call(state: &AppState, method: &str, uri: &str) -> (StatusCode, Value) {
+    let response = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .method(method)
+                .header(header::AUTHORIZATION, "Bearer token")
+                .body(Body::empty())
+                .expect("build request"),
+        )
+        .await
+        .expect("response");
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// An ended session in a project, with a brain file behind it.
+async fn ended_session(state: &AppState, project: &str, name: &str) -> sessions::Session {
+    let session = sessions::start(&state.db, project, name, "agent-one")
+        .await
+        .expect("start");
+    write_brain(state, &session).await;
+    sessions::end(&state.db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    session
+}
+
+#[tokio::test]
+async fn pruning_a_project_takes_its_ended_sessions_and_leaves_the_rest() {
+    let state = state().await;
+    for project in ["proj", "other"] {
+        agent_hub::store::projects::create(&state.db, project, "Project")
+            .await
+            .expect("create project");
+    }
+    let first = ended_session(&state, "proj", "nightly").await;
+    let second = ended_session(&state, "proj", "backfill").await;
+    let running = sessions::start(&state.db, "proj", "live", "agent-two")
+        .await
+        .expect("start");
+    let elsewhere = ended_session(&state, "other", "nightly").await;
+    state.notify();
+
+    let (status, body) = call(&state, "DELETE", "/api/v1/storage/projects/proj/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let mut pruned: Vec<&str> = body["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .map(|entry| entry["session_id"].as_str().expect("id"))
+        .collect();
+    pruned.sort_unstable();
+    let mut expected = vec![first.id.as_str(), second.id.as_str()];
+    expected.sort_unstable();
+    assert_eq!(pruned, expected, "only this project's ended sessions");
+    assert!(
+        body["undo_expires_at"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty()),
+        "the batch says how long it can be undone for"
+    );
+    for entry in body["sessions"].as_array().expect("sessions") {
+        assert_eq!(entry["undo_token"], entry["session_id"]);
+    }
+
+    for session in [&first, &second] {
+        assert!(
+            sessions::get(&state.db, &session.id)
+                .await
+                .expect("get")
+                .expect("row")
+                .deleted_at
+                .is_some()
+        );
+    }
+    assert!(
+        sessions::get(&state.db, &running.id)
+            .await
+            .expect("get")
+            .expect("row")
+            .deleted_at
+            .is_none(),
+        "an active session is never pruned"
+    );
+    assert!(
+        sessions::get(&state.db, &elsewhere.id)
+            .await
+            .expect("get")
+            .expect("row")
+            .deleted_at
+            .is_none(),
+        "another project's ended session is not this project's to prune"
+    );
+}
+
+#[tokio::test]
+async fn undoing_a_batch_restores_every_session_in_it() {
+    let state = state().await;
+    let first = ended_session(&state, "proj", "nightly").await;
+    let second = ended_session(&state, "proj", "backfill").await;
+
+    let (_, body) = call(&state, "DELETE", "/api/v1/storage/sessions").await;
+    let tokens: Vec<String> = body["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .map(|entry| entry["undo_token"].as_str().expect("token").to_string())
+        .collect();
+    assert_eq!(tokens.len(), 2);
+    assert!(
+        sessions::list(&state.db, "proj")
+            .await
+            .expect("list")
+            .is_empty()
+    );
+
+    for token in &tokens {
+        let (status, _) = call(&state, "POST", &format!("/api/v1/prune/undo/{token}")).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let restored = sessions::list(&state.db, "proj").await.expect("list");
+    assert_eq!(restored.len(), 2, "undo puts the whole batch back");
+    for session in [&first, &second] {
+        assert!(restored.iter().any(|row| row.id == session.id));
+    }
+}
+
+#[tokio::test]
+async fn the_sweep_commits_every_session_a_batch_pruned() {
+    let state = state().await;
+    let first = ended_session(&state, "proj", "nightly").await;
+    let second = ended_session(&state, "proj", "backfill").await;
+    call(&state, "DELETE", "/api/v1/storage/sessions").await;
+
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    let conn = state.db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?1 WHERE deleted_at IS NOT NULL",
+        vec![turso::Value::Text(
+            old.format(&time::format_description::well_known::Rfc3339)
+                .expect("format"),
+        )],
+    )
+    .await
+    .expect("age");
+
+    let committed = prune::sweep(&state.db, &state.data_dir)
+        .await
+        .expect("sweep");
+    assert_eq!(committed, 2);
+    for session in [&first, &second] {
+        assert!(
+            sessions::get(&state.db, &session.id)
+                .await
+                .expect("get")
+                .is_none()
+        );
+        assert!(
+            !state.data_dir.join(&session.brain_path).exists(),
+            "the brain file goes with the row"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pruning_a_project_with_nothing_ended_removes_nothing() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
+    sessions::start(&state.db, "proj", "live", "agent-one")
+        .await
+        .expect("start");
+
+    let (status, body) = call(&state, "DELETE", "/api/v1/storage/projects/proj/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["sessions"].as_array().expect("sessions").len(),
+        0,
+        "nothing to reclaim is not an error"
+    );
+    assert_eq!(
+        sessions::list(&state.db, "proj").await.expect("list").len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn pruning_a_project_that_does_not_exist_says_so() {
+    let state = state().await;
+    // A typo must read as "no such project", the way the other project routes
+    // read it, not as "nothing to reclaim".
+    let (status, _) = call(
+        &state,
+        "DELETE",
+        "/api/v1/storage/projects/missing/sessions",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_batch_prune_without_a_token_is_refused() {
+    let state = state().await;
+    for uri in [
+        "/api/v1/storage/sessions",
+        "/api/v1/storage/projects/proj/sessions",
+    ] {
+        let response = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .method("DELETE")
+                    .body(Body::empty())
+                    .expect("build request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}

@@ -92,7 +92,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sessions/{id}/reassign", post(sessions::reassign))
         .route("/api/v1/sessions/{id}/brain", get(sessions::brain))
         .route("/api/v1/storage", get(storage::usage))
+        .route("/api/v1/storage/sessions", delete(storage::prune_all))
         .route("/api/v1/storage/sessions/{id}", delete(storage::prune))
+        .route(
+            "/api/v1/storage/projects/{id}/sessions",
+            delete(storage::prune_project),
+        )
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
         .route("/api/v1/search", get(search::search))
         .route("/artifacts/{id}", get(artifacts::host))
