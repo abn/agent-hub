@@ -105,20 +105,22 @@ impl HubServer {
         Parameters(params): Parameters<BrainPathParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let (_, _, brain) = self
-            .brain_for(&principal, Access::Read)
+        let absent = || {
+            to_error_data(Error::NotFound(format!(
+                "no brain value at '{}'",
+                params.path
+            )))
+        };
+        let brain = self
+            .brain_for_read(&principal)
             .await
-            .map_err(to_error_data)?;
+            .map_err(to_error_data)?
+            .ok_or_else(absent)?;
         let bytes = brain
             .get(&params.path)
             .await
             .map_err(to_error_data)?
-            .ok_or_else(|| {
-                to_error_data(Error::NotFound(format!(
-                    "no brain value at '{}'",
-                    params.path
-                )))
-            })?;
+            .ok_or_else(absent)?;
         let content = String::from_utf8(bytes).map_err(|_| {
             to_error_data(Error::InvalidArgument(format!(
                 "brain value at '{}' is not UTF-8 text",
@@ -161,17 +163,20 @@ impl HubServer {
         Parameters(params): Parameters<BrainListParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let (_, _, brain) = self
-            .brain_for(&principal, Access::Read)
+        let entries = match self
+            .brain_for_read(&principal)
             .await
-            .map_err(to_error_data)?;
-        let entries = match params.path.as_deref() {
-            Some(path) => brain.list(path).await.map_err(to_error_data)?,
-            None => {
-                let mut entries = brain.list("/kv").await.map_err(to_error_data)?;
-                entries.extend(brain.list("/fs").await.map_err(to_error_data)?);
-                entries
-            }
+            .map_err(to_error_data)?
+        {
+            Some(brain) => match params.path.as_deref() {
+                Some(path) => brain.list(path).await.map_err(to_error_data)?,
+                None => {
+                    let mut entries = brain.list("/kv").await.map_err(to_error_data)?;
+                    entries.extend(brain.list("/fs").await.map_err(to_error_data)?);
+                    entries
+                }
+            },
+            None => Vec::new(),
         };
 
         Ok(CallToolResult::structured(json!({ "entries": entries })))
@@ -206,33 +211,65 @@ impl HubServer {
         })
     }
 
-    /// Authorize and open the active session's brain.
+    /// The active session while it is still live.
     ///
     /// The session row must still exist: a prune removes it, and opening the
     /// brain afterwards would recreate the file and an orphaned search row. A
     /// pruned session is a conflict, so the tool fails rather than resurrecting
     /// it.
-    async fn brain_for(
-        &self,
-        principal: &Principal,
-        access: Access,
-    ) -> Result<(String, String, Brain)> {
-        let (_, session_id) = self.active_session().await?;
-        let session = sessions::get(&self.state.db, &session_id)
+    async fn live_session(&self, session_id: &str) -> Result<sessions::Session> {
+        sessions::get(&self.state.db, session_id)
             .await?
             .filter(|session| session.deleted_at.is_none())
             .ok_or_else(|| {
                 Error::Conflict(format!(
                     "session {session_id} is no longer available; start a session"
                 ))
-            })?;
+            })
+    }
+
+    /// Authorize the active session for one access.
+    async fn session_for(
+        &self,
+        principal: &Principal,
+        access: Access,
+    ) -> Result<sessions::Session> {
+        let (_, session_id) = self.active_session().await?;
+        let session = self.live_session(&session_id).await?;
         policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
+        Ok(session)
+    }
+
+    /// Authorize and open the active session's brain for a write.
+    async fn brain_for(
+        &self,
+        principal: &Principal,
+        access: Access,
+    ) -> Result<(String, String, Brain)> {
+        let session = self.session_for(principal, access).await?;
+        let session_id = session.id.clone();
+        // A sweep takes the same lock to remove the file, so the liveness
+        // check above is only ordered against it when it is made again here.
         let brain = self
             .state
             .brain
-            .open(&session.project_id, &session.id)
+            .open_live(&session.project_id, &session.id, async || {
+                self.live_session(&session_id).await.map(|_| ())
+            })
             .await?;
         Ok((session.project_id, session.id, brain))
+    }
+
+    /// Authorize and open the active session's brain for a read.
+    ///
+    /// A read never creates the file, so a session nothing was written to has
+    /// no brain and `None` stands for an empty one.
+    async fn brain_for_read(&self, principal: &Principal) -> Result<Option<Brain>> {
+        let session = self.session_for(principal, Access::Read).await?;
+        self.state
+            .brain
+            .open_existing(&session.project_id, &session.id)
+            .await
     }
 
     /// Index a brain value: path as title, content as body.

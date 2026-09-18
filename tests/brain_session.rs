@@ -8,6 +8,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::brain::BrainStore;
+use agent_hub::error::Error;
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let nanos = SystemTime::now()
@@ -131,6 +132,145 @@ async fn same_session_writes_serialise_and_persist() {
     assert_eq!(
         reopened.get("/kv/b").await.expect("get b"),
         Some(b"two".to_vec())
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_first_opens_of_one_session_all_succeed() {
+    let store = BrainStore::new(temp_dir("concurrent-open"));
+
+    let mut opens = tokio::task::JoinSet::new();
+    for _ in 0..16 {
+        let store = store.clone();
+        opens.spawn(async move { store.open("proj", "shared").await.map(|_| ()) });
+    }
+
+    while let Some(joined) = opens.join_next().await {
+        joined.expect("open task").expect("open a fresh brain");
+    }
+}
+
+#[tokio::test]
+async fn an_open_refused_under_the_lock_creates_no_file() {
+    let root = temp_dir("swept-open");
+    let store = BrainStore::new(&root);
+    let path = store.brain_path("proj", "swept").expect("brain path");
+
+    // The check stands in for a sweep landing between a caller's own liveness
+    // check and this open. It runs under the write lock the sweep takes to
+    // remove the file, and before the file would be created.
+    let refused = store
+        .open_live("proj", "swept", async || {
+            assert!(!path.exists(), "the check runs before the file is created");
+            Err(Error::Conflict("session swept".to_string()))
+        })
+        .await;
+
+    assert!(
+        matches!(refused, Err(Error::Conflict(_))),
+        "a refused check refuses the open"
+    );
+    assert!(
+        !store
+            .brain_path("proj", "swept")
+            .expect("brain path")
+            .exists(),
+        "a refused open creates no brain file"
+    );
+}
+
+#[tokio::test]
+async fn a_write_through_a_handle_whose_brain_was_pruned_is_refused() {
+    let root = temp_dir("pruned-handle");
+    let store = BrainStore::new(&root);
+    let path = store.brain_path("proj", "gone").expect("brain path");
+
+    let brain = store.open("proj", "gone").await.expect("open");
+    brain.put("/kv/seed", b"1").await.expect("first write");
+
+    // A prune commit removes the file under the session lock. A handle opened
+    // before it must not write on into the unlinked file as if nothing
+    // happened, because the caller then indexes a row for a dead session.
+    assert!(store.remove("proj", "gone").await.expect("remove"));
+
+    let refused = brain.put("/kv/late", b"2").await;
+    assert!(
+        matches!(refused, Err(Error::Conflict(_))),
+        "a write after the prune is refused, got {refused:?}"
+    );
+    assert!(
+        matches!(brain.delete("/kv/seed").await, Err(Error::Conflict(_))),
+        "a delete after the prune is refused"
+    );
+    assert!(
+        !path.exists(),
+        "a refused write does not bring the file back"
+    );
+}
+
+#[tokio::test]
+async fn a_read_racing_a_prune_does_not_bring_the_brain_back() {
+    let root = temp_dir("read-vs-prune");
+    let store = std::sync::Arc::new(BrainStore::new(&root));
+    let path = store.brain_path("proj", "racing").expect("brain path");
+    store
+        .open("proj", "racing")
+        .await
+        .expect("open")
+        .put("/kv/seed", b"1")
+        .await
+        .expect("seed");
+
+    // Hold the session lock the way an in-flight operation would, so the read
+    // below queues behind it having already seen the file.
+    let (release, held) = tokio::sync::oneshot::channel::<()>();
+    let holder = {
+        let store = store.clone();
+        tokio::spawn(async move {
+            let _ = store
+                .open_live("proj", "racing", async || {
+                    let _ = held.await;
+                    Err(Error::Conflict("stand-in holder".to_string()))
+                })
+                .await;
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let reader = {
+        let store = store.clone();
+        tokio::spawn(async move { store.open_existing("proj", "racing").await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    // The prune lands while the read waits for the lock.
+    std::fs::remove_file(&path).expect("remove the brain file");
+    release.send(()).expect("release the lock");
+    holder.await.expect("holder");
+
+    let read = reader.await.expect("reader").expect("open existing");
+    assert!(read.is_none(), "the read finds no brain");
+    assert!(!path.exists(), "the read does not recreate a pruned brain");
+}
+
+#[tokio::test]
+async fn a_read_of_an_unwritten_session_creates_no_file() {
+    let root = temp_dir("read-only");
+    let store = BrainStore::new(&root);
+
+    assert!(
+        store
+            .open_existing("proj", "unwritten")
+            .await
+            .expect("open existing")
+            .is_none()
+    );
+    assert!(
+        !store
+            .brain_path("proj", "unwritten")
+            .expect("brain path")
+            .exists(),
+        "a read does not create a brain file"
     );
 }
 

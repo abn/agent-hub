@@ -410,6 +410,49 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
 }
 
 #[test]
+fn a_brain_read_does_not_create_the_session_file() {
+    let data_dir = TempDir::new("read-only");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+    let session_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let missing = server.call_tool("brain_get", json!({"path": "/kv/note"}));
+    assert_eq!(
+        error_code(&missing),
+        "not_found",
+        "an unwritten brain has no value"
+    );
+
+    let listed = server.call_tool("brain_list", json!({}));
+    let entries = structured(&listed)["entries"]
+        .as_array()
+        .expect("brain_list returns entries");
+    assert!(
+        entries.is_empty(),
+        "an unwritten brain lists nothing, got {entries:?}"
+    );
+
+    assert!(
+        !data_dir
+            .0
+            .join("sessions")
+            .join("proj")
+            .join(format!("{session_id}.db"))
+            .exists(),
+        "reading a brain that was never written does not create its file"
+    );
+}
+
+#[test]
 fn brain_tools_require_an_active_session() {
     let data_dir = TempDir::new("no-session");
     let mut server = McpServer::spawn(&data_dir.0);

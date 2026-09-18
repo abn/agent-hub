@@ -95,27 +95,28 @@ impl BrainStore {
 
     /// Open the brain for a session, locating or creating its file.
     pub async fn open(&self, project_id: &str, session_id: &str) -> Result<Brain> {
-        let path = self.brain_path(project_id, session_id)?;
+        self.open_live(project_id, session_id, async || Ok(()))
+            .await
+    }
+
+    /// Open the brain for a session once `alive` confirms it is still there.
+    ///
+    /// `alive` runs under the session's write lock, which a prune also takes
+    /// before it removes the file. A caller that checks liveness on its own
+    /// checks it before the lock, so a sweep can land in between and the open
+    /// recreates the file the sweep just removed; re-checking here is what
+    /// orders the two.
+    pub async fn open_live(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<Brain> {
         std::fs::create_dir_all(self.root.join(project_id))?;
-        let lock = lock_for(&path);
-
-        let path = path
-            .to_str()
-            .ok_or_else(|| Error::Config("session brain path is not valid UTF-8".to_string()))?
-            .to_string();
-
-        let agent = AgentFS::open(AgentFSOptions {
-            path: Some(path),
-            ..Default::default()
-        })
-        .await
-        .map_err(engine_error)?;
-
-        Ok(Brain {
-            agent,
-            lock,
-            session_id: session_id.to_string(),
-        })
+        let brain = self.open_under_lock(project_id, session_id, true, alive);
+        Ok(brain
+            .await?
+            .expect("an open that may create always yields a brain"))
     }
 
     /// Open the brain for a session only when its file already exists.
@@ -123,11 +124,52 @@ impl BrainStore {
     /// A read path uses this so it never creates a brain for a session whose
     /// file is absent; `None` means there is nothing stored yet.
     pub async fn open_existing(&self, project_id: &str, session_id: &str) -> Result<Option<Brain>> {
+        self.open_under_lock(project_id, session_id, false, async || Ok(()))
+            .await
+    }
+
+    /// The one place a brain file is opened, always under the session lock.
+    ///
+    /// Opening is not a read: the SDK creates its tables, so two first opens
+    /// of one file would race on the engine's file lock, and an open of a
+    /// missing file creates it. Both the liveness check and the existence
+    /// test therefore run under the lock a prune takes to remove the file; a
+    /// test made before the lock can be stale by the time the open runs, and
+    /// the open would then bring a pruned brain back with no session row left
+    /// for any later sweep to find.
+    async fn open_under_lock(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        create: bool,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<Option<Brain>> {
         let path = self.brain_path(project_id, session_id)?;
-        if !path.exists() {
+        let lock = lock_for(&path);
+        let engine_path = path
+            .to_str()
+            .ok_or_else(|| Error::Config("session brain path is not valid UTF-8".to_string()))?
+            .to_string();
+
+        let guard = lock.lock().await;
+        alive().await?;
+        if !create && !path.exists() {
             return Ok(None);
         }
-        Ok(Some(self.open(project_id, session_id).await?))
+        let agent = AgentFS::open(AgentFSOptions {
+            path: Some(engine_path),
+            ..Default::default()
+        })
+        .await
+        .map_err(engine_error)?;
+        drop(guard);
+
+        Ok(Some(Brain {
+            agent,
+            lock,
+            path,
+            session_id: session_id.to_string(),
+        }))
     }
 
     /// Remove a session's brain file while holding its write lock.
@@ -169,10 +211,28 @@ fn lock_for(path: &Path) -> Arc<AsyncMutex<()>> {
 pub struct Brain {
     agent: AgentFS,
     lock: Arc<AsyncMutex<()>>,
+    path: PathBuf,
     session_id: String,
 }
 
 impl Brain {
+    /// Refuse a write once a prune has removed the file under this handle.
+    ///
+    /// The handle is opened under the session lock but outlives it, so a prune
+    /// can remove the file before the write retakes the lock. The engine would
+    /// keep writing into the unlinked file and the caller would index a row
+    /// for a session that no longer exists. Called with the lock held, which
+    /// the prune also holds to remove the file, so the answer cannot go stale.
+    fn ensure_present(&self) -> Result<()> {
+        if self.path.exists() {
+            return Ok(());
+        }
+        Err(Error::Conflict(format!(
+            "session {} is no longer available; start a session",
+            self.session_id
+        )))
+    }
+
     /// The session this brain belongs to.
     pub fn session_id(&self) -> &str {
         &self.session_id
@@ -212,6 +272,7 @@ impl Brain {
     pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<()> {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         match namespace {
             Namespace::Kv(key) => {
                 let key = require_key(key)?;
@@ -271,6 +332,7 @@ impl Brain {
     pub async fn delete(&self, path: &str) -> Result<()> {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         match namespace {
             Namespace::Kv(key) => {
                 let key = require_key(key)?;
