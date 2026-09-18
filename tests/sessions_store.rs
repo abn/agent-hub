@@ -5,8 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
 use agent_hub::store::events::{FeedQuery, read_feed};
-use agent_hub::store::sessions;
-use agent_hub::store::{migrate, open_engine};
+use agent_hub::store::{migrate, open_engine, prune, sessions};
 
 static NEXT_DB: AtomicU64 = AtomicU64::new(0);
 
@@ -58,6 +57,65 @@ async fn start_is_idempotent_on_the_session_name() {
         .filter(|event| event.kind == "session" && event.summary.contains("started"))
         .count();
     assert_eq!(starts, 1, "a resume does not emit another start event");
+}
+
+#[tokio::test]
+async fn two_agents_using_one_name_get_two_sessions() {
+    let db = open().await;
+    let one = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("first agent");
+    let two = sessions::start(&db, "proj", "nightly", "agent-two")
+        .await
+        .expect("second agent");
+
+    assert_ne!(
+        one.id, two.id,
+        "a name under another owner is another session"
+    );
+    assert_ne!(
+        one.brain_path, two.brain_path,
+        "two sessions never share a brain file"
+    );
+    assert_eq!(two.agent, "agent-two");
+
+    let resumed = sessions::start(&db, "proj", "nightly", "agent-two")
+        .await
+        .expect("resume");
+    assert_eq!(resumed.id, two.id, "each owner resumes its own session");
+}
+
+#[tokio::test]
+async fn resuming_a_pruned_name_is_a_conflict() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&db, &session.id, "agent-one")
+        .await
+        .expect("end");
+    let token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+    let err = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect_err("the pruned name is not free");
+    assert_eq!(err.code(), ErrorCode::Conflict);
+    assert!(
+        err.to_string()
+            .contains(&format!("pruned_session_id={}", session.id)),
+        "the refusal names the pruned session: {err}"
+    );
+
+    let listed = sessions::list(&db, "proj").await.expect("list");
+    assert!(listed.is_empty(), "no second session was created");
+
+    prune::undo(&db, &token.undo_token)
+        .await
+        .expect("the undo token still works");
+    let restored = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("resume after undo");
+    assert_eq!(restored.id, session.id);
 }
 
 #[tokio::test]

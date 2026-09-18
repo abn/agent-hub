@@ -22,7 +22,17 @@ pub struct Session {
     pub created_at: String,
     pub last_activity: String,
     pub deleted_at: Option<String>,
+    /// The session this one was forked from, if any.
+    pub forked_from: Option<String>,
+    /// The session this one was adopted from, when the previous owner differs.
+    pub adopted_from: Option<String>,
+    /// The note the owner left when it ended the session.
+    pub handoff: Option<String>,
 }
+
+/// Every session column, in the order [`session_from_row`] reads them.
+const COLUMNS: &str = "id, project_id, session_name, agent, status, brain_path, \
+                       created_at, last_activity, deleted_at, forked_from, adopted_from, handoff";
 
 /// Start a session, or resume it when the same project and name already exist.
 ///
@@ -43,7 +53,18 @@ pub async fn start(
         .await
         .map_err(engine)?;
 
-    let existing = find_by_name(&tx, project_id, session_name).await?;
+    let existing = find_owned_on(&tx, project_id, agent, session_name).await?;
+    if existing.is_none()
+        && let Some(pruned) = find_pruned_on(&tx, project_id, agent, session_name).await?
+    {
+        // The name is held by a session the human pruned. Taking it would put a
+        // second session behind an undo token that still points at the first,
+        // and the hub does not restore what the human deleted.
+        return Err(Error::Conflict(format!(
+            "session '{session_name}' was pruned and can be restored with undo, or started under another name pruned_session_id={}",
+            pruned.id
+        )));
+    }
     let created = existing.is_none();
     let now = crate::store::now_rfc3339();
 
@@ -87,6 +108,9 @@ pub async fn start(
                 created_at: now.clone(),
                 last_activity: now,
                 deleted_at: None,
+                forked_from: None,
+                adopted_from: None,
+                handoff: None,
             }
         }
     };
@@ -176,18 +200,12 @@ pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
 }
 
 async fn get_on(conn: &turso::Connection, session_id: &str) -> Result<Option<Session>> {
-    let mut rows = conn
-        .query(
-            "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at
-             FROM sessions WHERE id = ?1",
-            vec![Value::Text(session_id.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => Ok(Some(session_from_row(&row)?)),
-        None => Ok(None),
-    }
+    one(
+        conn,
+        "WHERE id = ?1",
+        vec![Value::Text(session_id.to_string())],
+    )
+    .await
 }
 
 /// List a project's sessions, most recently active first.
@@ -195,9 +213,11 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at
-             FROM sessions WHERE project_id = ?1 AND deleted_at IS NULL
-             ORDER BY last_activity DESC",
+            &format!(
+                "SELECT {COLUMNS} FROM sessions
+                 WHERE project_id = ?1 AND deleted_at IS NULL
+                 ORDER BY last_activity DESC"
+            ),
             vec![Value::Text(project_id.to_string())],
         )
         .await
@@ -211,9 +231,8 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
 
 /// Find a live session by the agent that owns it and the name it runs under.
 ///
-/// A name is unique inside a project today, so the agent is matched rather
-/// than keyed on; once sessions are keyed by their owner this is the key
-/// lookup and the answer does not change.
+/// This is the key lookup: a name belongs to one owner inside a project, so
+/// another agent's session of the same name is a different session.
 pub async fn find_owned(
     db: &Database,
     project_id: &str,
@@ -221,39 +240,60 @@ pub async fn find_owned(
     session_name: &str,
 ) -> Result<Option<Session>> {
     let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at
-             FROM sessions
-             WHERE project_id = ?1 AND session_name = ?2 AND agent = ?3 AND deleted_at IS NULL",
-            vec![
-                Value::Text(project_id.to_string()),
-                Value::Text(session_name.to_string()),
-                Value::Text(agent.to_string()),
-            ],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => Ok(Some(session_from_row(&row)?)),
-        None => Ok(None),
-    }
+    find_owned_on(&conn, project_id, agent, session_name).await
 }
 
-async fn find_by_name(
+/// Find the caller's own live session of a name, inside a caller's connection.
+async fn find_owned_on(
     conn: &turso::Connection,
     project_id: &str,
+    agent: &str,
     session_name: &str,
 ) -> Result<Option<Session>> {
+    one(
+        conn,
+        "WHERE project_id = ?1 AND session_name = ?2 AND agent = ?3 AND deleted_at IS NULL",
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(session_name.to_string()),
+            Value::Text(agent.to_string()),
+        ],
+    )
+    .await
+}
+
+/// Find a pruned session still holding a name, tombstone and all.
+///
+/// The undo window is not the boundary: a row the sweep is about to remove is
+/// not a name an agent may quietly re-take either, and once the sweep runs the
+/// name is free.
+async fn find_pruned_on(
+    conn: &turso::Connection,
+    project_id: &str,
+    agent: &str,
+    session_name: &str,
+) -> Result<Option<Session>> {
+    one(
+        conn,
+        "WHERE project_id = ?1 AND session_name = ?2 AND agent = ?3 AND deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC",
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(session_name.to_string()),
+            Value::Text(agent.to_string()),
+        ],
+    )
+    .await
+}
+
+/// The first session matching a clause, or none.
+async fn one(
+    conn: &turso::Connection,
+    clause: &str,
+    params: Vec<Value>,
+) -> Result<Option<Session>> {
     let mut rows = conn
-        .query(
-            "SELECT id, project_id, session_name, agent, status, brain_path, created_at, last_activity, deleted_at
-             FROM sessions WHERE project_id = ?1 AND session_name = ?2 AND deleted_at IS NULL",
-            vec![
-                Value::Text(project_id.to_string()),
-                Value::Text(session_name.to_string()),
-            ],
-        )
+        .query(&format!("SELECT {COLUMNS} FROM sessions {clause}"), params)
         .await
         .map_err(engine)?;
     match rows.next().await.map_err(engine)? {
@@ -271,9 +311,11 @@ fn session_from_row(row: &Row) -> Result<Session> {
             ))),
         }
     };
-    let deleted_at = match row.get_value(8).map_err(engine)? {
-        Value::Text(value) => Some(value),
-        _ => None,
+    let optional = |index: usize| -> Result<Option<String>> {
+        Ok(match row.get_value(index).map_err(engine)? {
+            Value::Text(value) => Some(value),
+            _ => None,
+        })
     };
     Ok(Session {
         id: text(0)?,
@@ -284,7 +326,10 @@ fn session_from_row(row: &Row) -> Result<Session> {
         brain_path: text(5)?,
         created_at: text(6)?,
         last_activity: text(7)?,
-        deleted_at,
+        deleted_at: optional(8)?,
+        forked_from: optional(9)?,
+        adopted_from: optional(10)?,
+        handoff: optional(11)?,
     })
 }
 
