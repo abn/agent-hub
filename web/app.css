@@ -129,8 +129,10 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   main { padding-bottom: var(--s-6); }
 }
 
-/* Artifact host chrome. The frame document carries its own copy of the
-   callout rules inside the srcdoc; these style the host shell around it. */
+/* Artifact host chrome. Reserved for the in-app viewer: nothing this
+   stylesheet reaches carries these names yet. The frame document carries its
+   own copy of the callout rules inside the srcdoc; these style the host shell
+   around it. */
 .hub-viewer { display: flex; flex-direction: column; gap: var(--s-3); }
 .hub-viewer-bar {
   display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
@@ -174,8 +176,8 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 }
 
 /* Artifact comments drawer. A fixed right overlay on hub tokens, readable in
-   both themes through data-theme variables. Motion applies only when the
-   reader has not asked for reduced motion. */
+   both themes through data-theme variables. It is shown and hidden outright,
+   with no motion to reduce. */
 .comments-toolbar {
   display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
 }
@@ -201,9 +203,6 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   border-left: 1px solid var(--line); box-shadow: var(--shadow-2);
 }
 .comments-drawer[hidden] { display: none; }
-@media (prefers-reduced-motion: no-preference) {
-  .comments-drawer { transition: transform 0.18s ease-out; }
-}
 .comments-drawer-head {
   display: flex; gap: var(--s-2); align-items: center;
   padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line);

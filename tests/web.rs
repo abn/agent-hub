@@ -1054,10 +1054,15 @@ fn app_css_carries_drawer_styles_on_tokens() {
         "comment.done",
         "comments-compose",
         "drawer-error",
-        "prefers-reduced-motion",
     ] {
         assert!(APP_CSS.contains(needle), "the drawer styles carry {needle}");
     }
+    // The drawer is shown and hidden outright. A transition here could never
+    // run, and the reduced-motion contract is held in the tokens.
+    assert!(
+        !APP_CSS.contains("transition"),
+        "the drawer promises no motion it cannot deliver"
+    );
     assert!(
         APP_CSS.contains("var(--"),
         "drawer styles reuse the hub tokens"
