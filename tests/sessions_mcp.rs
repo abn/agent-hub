@@ -1050,3 +1050,39 @@ async fn an_agent_that_only_posts_signals_still_counts_as_working() {
         "posting a signal is work: {at_start} then {after_signal}"
     );
 }
+
+#[tokio::test]
+async fn a_session_ended_over_mcp_is_offered_for_pruning_at_once() {
+    let fleet = Fleet::new("prunable", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+    let started = agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "nightly"}),
+    );
+    let session_id = text(&started, "session_id");
+    agent.call(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/note", "content": "something to reclaim"}),
+    );
+
+    // Read the number first, so the memo behind it is warm and only an
+    // invalidation can move it.
+    let prunable = |port| -> Value {
+        let (status, body) = admin(port, "GET", "/api/v1/storage", None);
+        assert_eq!(status, 200, "storage: {body}");
+        serde_json::from_str::<Value>(&body).expect("storage is JSON")["prunable"].clone()
+    };
+    assert_eq!(prunable(fleet.port)["sessions"], 0);
+
+    agent.call("session_end", json!({"session_id": session_id}));
+
+    let after = prunable(fleet.port);
+    assert_eq!(
+        after["sessions"], 1,
+        "the human sees the session it can reclaim without waiting the memo out: {after}"
+    );
+    assert!(
+        after["bytes"].as_i64().expect("bytes") > 0,
+        "and the bytes it would free: {after}"
+    );
+}

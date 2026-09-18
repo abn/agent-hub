@@ -693,13 +693,7 @@ impl HubServer {
         else {
             return 0;
         };
-        let mut sidecar = path.clone().into_os_string();
-        sidecar.push("-wal");
-        [path, std::path::PathBuf::from(sidecar)]
-            .iter()
-            .filter_map(|path| std::fs::metadata(path).ok())
-            .map(|meta| meta.len() as i64)
-            .sum()
+        crate::brain::file_bytes(&path)
     }
 
     /// The active session's id when it belongs to this project.
@@ -1195,4 +1189,64 @@ struct BrainDeleteParams {
     /// The session written, which must be the caller's own active session.
     #[serde(default)]
     session: Option<SessionRef>,
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::AppState;
+    use crate::config::{Config, TrustDefault};
+
+    async fn state(tag: &str) -> AppState {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        AppState::open(Config {
+            data_dir: std::env::temp_dir()
+                .join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id())),
+            bind: "127.0.0.1:0".parse().expect("socket address"),
+            public_url: None,
+            admin_token: Some("token".to_string()),
+            trust_default: TrustDefault::Trusted,
+            inbox_caps: crate::limits::InboxCaps::disabled(),
+            active_window: std::time::Duration::from_secs(900),
+            node_name: None,
+        })
+        .await
+        .expect("open state")
+    }
+
+    /// A touch is bookkeeping for a number on a screen. A store busy enough to
+    /// refuse it must not take the call the agent actually made down with it,
+    /// so the tool path swallows what the store returns.
+    #[tokio::test]
+    async fn a_touch_the_store_refuses_does_not_reach_the_caller() {
+        let state = state("brain-touch").await;
+        let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+            .await
+            .expect("start");
+        let server = HubServer::new(state.clone());
+
+        let mut holder = state.db.connect().expect("connect");
+        let blocking = holder
+            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+            .await
+            .expect("hold the writer");
+
+        // The store cannot take the write while another writer holds it, so
+        // this is the failing path, reached the way a tool call reaches it.
+        server.touch_activity(&session.id).await;
+        blocking.rollback().await.expect("release the writer");
+
+        assert_eq!(
+            sessions::get(&state.db, &session.id)
+                .await
+                .expect("get")
+                .expect("row")
+                .last_activity,
+            session.last_activity,
+            "the touch really was refused, and the caller was never told"
+        );
+        let _ = std::fs::remove_dir_all(&state.data_dir);
+    }
 }

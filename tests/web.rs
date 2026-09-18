@@ -49,6 +49,7 @@ async fn state_with_public_url(public_url: Option<&str>) -> AppState {
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
         active_window: std::time::Duration::from_secs(900),
+        node_name: None,
     })
     .await
     .expect("open state")
@@ -234,6 +235,9 @@ async fn storage_usage_counts_a_project_knowledge_base() {
         .put("/fs/runbook.md", b"durable knowledge")
         .await
         .expect("write a page");
+    // The file numbers are memoised behind a generation counter, and this
+    // write went straight to the store rather than through a handler.
+    state.notify();
 
     let app = router(state.clone());
     let after = json(

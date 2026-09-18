@@ -20,5 +20,5 @@ mod session;
 
 pub use session::{
     Brain, BrainStore, Entry, EntryKind, KNOWLEDGE_FILE, VERSION_ABSENT, canonical_path,
-    knowledge_dir, version,
+    file_bytes, knowledge_dir, version,
 };

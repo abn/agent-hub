@@ -231,6 +231,7 @@ async fn probe_state(tag: &str) -> AppState {
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
         active_window: std::time::Duration::from_secs(900),
+        node_name: None,
     })
     .await
     .expect("open state")

@@ -245,6 +245,8 @@ pub struct Config {
     /// How long after its last tool call a session still counts its owner as
     /// an agent at work.
     pub active_window: std::time::Duration,
+    /// The name the human sees for this node, when the operator set one.
+    pub node_name: Option<String>,
 }
 
 /// The default for `HUB_ACTIVE_WINDOW_SECS`. Long enough that an agent
@@ -341,6 +343,11 @@ impl Config {
         let active_window =
             Self::parse_active_window(std::env::var("HUB_ACTIVE_WINDOW_SECS").ok().as_deref())?;
 
+        let node_name = std::env::var("HUB_NODE_NAME")
+            .ok()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty());
+
         Ok(Self {
             data_dir,
             bind,
@@ -349,6 +356,7 @@ impl Config {
             trust_default,
             inbox_caps,
             active_window,
+            node_name,
         })
     }
 

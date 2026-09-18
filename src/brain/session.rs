@@ -649,6 +649,21 @@ pub const VERSION_ABSENT: &str = "absent";
 /// session id, so one project has exactly one knowledge base.
 pub const KNOWLEDGE_FILE: &str = "kb";
 
+/// The bytes one brain file occupies on disk.
+///
+/// The write-ahead log beside the file counts: it holds frames the engine has
+/// not folded back yet, so a stat of the file alone under-reports a brain that
+/// was just written to, sometimes by most of its size.
+pub fn file_bytes(path: &Path) -> i64 {
+    let mut sidecar = path.to_path_buf().into_os_string();
+    sidecar.push("-wal");
+    [path.to_path_buf(), PathBuf::from(sidecar)]
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .map(|meta| meta.len() as i64)
+        .sum()
+}
+
 /// The directory holding one knowledge base file per project.
 pub fn knowledge_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("kb")

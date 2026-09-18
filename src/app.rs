@@ -29,6 +29,13 @@ pub struct AppState {
     /// When each session was last touched, so an agent at work stays counted
     /// as active without a store write per tool call.
     pub activity: Arc<store::sessions::Activity>,
+    /// The memo over the numbers that cost a syscall or a file walk.
+    pub stats: Arc<store::storage::StatsCache>,
+    /// Bumped by every write, so the memo can tell a stale entry from a fresh
+    /// one without knowing what changed.
+    pub generation: Arc<std::sync::atomic::AtomicU64>,
+    /// The name this node shows the human.
+    pub host: String,
     /// Freshness ticks for the human stream. A write that changes the inbox or
     /// feed sends one; the stream carries no data, only the nudge to refetch.
     pub ticker: tokio::sync::broadcast::Sender<()>,
@@ -67,6 +74,7 @@ impl AppState {
         let knowledge = BrainStore::new(config.knowledge_dir());
         let auth = Arc::new(Auth::from_config(&config));
         let activity = Arc::new(store::sessions::Activity::new());
+        let host = store::storage::host_name(config.node_name.as_deref());
         let (ticker, _) = tokio::sync::broadcast::channel(16);
         Ok(Self {
             config: Arc::new(config),
@@ -77,6 +85,9 @@ impl AppState {
             knowledge,
             auth,
             activity,
+            stats: Arc::new(store::storage::StatsCache::new()),
+            generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            host,
             ticker,
         })
     }
@@ -84,7 +95,14 @@ impl AppState {
     /// Nudge every stream subscriber to refetch. A send with no subscribers is
     /// not an error; the next subscriber gets the state on its next write.
     pub fn notify(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _ = self.ticker.send(());
+    }
+
+    /// The generation a cached number must have been computed at to be served.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 

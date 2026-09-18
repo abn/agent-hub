@@ -56,6 +56,7 @@ dependencies = [
  "http-body-util",
  "rand 0.9.5",
  "rmcp",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2",

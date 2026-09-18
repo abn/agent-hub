@@ -9,7 +9,7 @@ use crate::app::AppState;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath};
 use crate::store::prune::{self, PruneToken};
-use crate::store::storage::{self, StorageUsage};
+use crate::store::storage::StorageUsage;
 
 /// The acknowledgement returned when a prune is undone.
 #[derive(Debug, Serialize)]
@@ -63,8 +63,9 @@ pub async fn undo(
 
 /// `GET /api/v1/storage`
 ///
-/// A valid bearer token is required. Reports bytes on the data volume, broken
-/// down by project.
+/// A valid bearer token is required. Reports what the data volume holds, by
+/// kind and by project, what a prune would reclaim, and the volume's own
+/// capacity and free space when they can be measured.
 pub async fn usage(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -74,7 +75,9 @@ pub async fn usage(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let usage = storage::usage(&state.db, &state.data_dir)
+    let usage = state
+        .stats
+        .usage(&state.db, &state.data_dir, &state.host, state.generation())
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(usage))

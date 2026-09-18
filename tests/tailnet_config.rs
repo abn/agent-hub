@@ -60,6 +60,7 @@ fn config() -> Config {
         trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
         active_window: std::time::Duration::from_secs(900),
+        node_name: None,
     }
 }
 
