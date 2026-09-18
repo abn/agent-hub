@@ -55,6 +55,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/keys.mjs",
+        body: include_str!("../../web/keys.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/toast.mjs",
         body: include_str!("../../web/toast.mjs"),
         content_type: "text/javascript; charset=utf-8",

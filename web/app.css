@@ -430,3 +430,26 @@ html.has-dialog { overflow: hidden; }
 .row .title:has(.ts) { overflow: visible; }
 /* A field that is not a time has nothing to press and nothing to count up. */
 .ts-unknown { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
+
+/* component: keyboard help */
+/* The shortcut list the map opens on "?". A native dialog, so the focus trap
+   and Esc are the browser's and nothing here waits on the app's own. */
+dialog.keymap {
+  border: 1px solid var(--line-strong); border-radius: var(--r-2);
+  background: var(--surface); color: var(--ink);
+  box-shadow: var(--shadow-2); padding: var(--s-4);
+  width: min(320px, calc(100vw - var(--s-6)));
+}
+dialog.keymap::backdrop { background: rgba(20, 19, 17, 0.4); }
+dialog.keymap h2 { margin: 0 0 var(--s-3); font-size: var(--t-17); }
+dialog.keymap dl {
+  display: grid; grid-template-columns: auto 1fr; gap: var(--s-2) var(--s-3);
+  margin: 0 0 var(--s-3); font-size: var(--t-13);
+}
+dialog.keymap dt, dialog.keymap dd { margin: 0; }
+dialog.keymap dd { color: var(--ink-2); }
+dialog.keymap kbd {
+  font-family: var(--font-mono); font-size: var(--t-12);
+  border: 1px solid var(--line-strong); border-radius: var(--r-1);
+  background: var(--surface-2); padding: 2px 6px;
+}

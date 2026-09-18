@@ -12,6 +12,7 @@ import { refreshBadge, startStream } from "./events.mjs";
 import { projectsScreen, toggleKind } from "./feed.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
+import { installKeys } from "./keys.mjs";
 import { savePrefs } from "./prefs.mjs";
 import { render, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
@@ -129,6 +130,8 @@ window.addEventListener("hashchange", render);
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+installKeys();
 
 // The freshness stream nudges a refetch when a write lands; the slow poll is
 // the fallback if the stream drops or the browser cannot stream a fetch.

@@ -612,6 +612,31 @@ FIRST_TIME = (
     " tab: t.tabIndex, role: t.getAttribute('role') || '',"
     " font: getComputedStyle(t).fontFamily }; })()"
 )
+SELECTED_ROW = (
+    "(() => { const row = document.activeElement.closest"
+    " && document.activeElement.closest('main .row');"
+    " return row && { text: row.textContent.trim(), tab: row.tabIndex,"
+    " focused: row === document.activeElement }; })()"
+)
+FIRST_TIME_TEXT = (
+    "(() => { const t = document.querySelector('main time.ts');"
+    " return t && t.textContent.trim(); })()"
+)
+
+
+def settle(page, expression: str, timeout: int = 8000) -> bool:
+    """Wait on a condition in the page rather than on a guessed number of ms.
+
+    Polled from here rather than with a page-side waiter: the shell is served
+    under a content security policy that refuses evaluated source.
+    """
+    deadline = time.monotonic() + timeout / 1000
+    while True:
+        if page.evaluate(f"!!({expression})"):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(100)
 
 
 def check_relative_time(page, watch: Watch) -> None:
@@ -625,11 +650,10 @@ def check_relative_time(page, watch: Watch) -> None:
     """
     watch.enter("home: relative time")
     page.evaluate("location.hash = '#/home'")
-    page.wait_for_timeout(600)
-    stamp = page.evaluate(FIRST_TIME)
-    if not stamp:
+    if not settle(page, "!!document.querySelector('main time.ts')"):
         watch.fail("a seeded event's time is not a <time> element")
         return
+    stamp = page.evaluate(FIRST_TIME)
     if not re.match(r"\d{4}-\d\d-\d\dT", stamp["datetime"] or ""):
         watch.fail(f"the machine timestamp is {stamp['datetime']!r}")
     if len(stamp["text"]) > 10 or "-" in stamp["text"]:
@@ -664,7 +688,7 @@ def check_relative_time(page, watch: Watch) -> None:
 def check_time_counts_up(browser, watch: Watch, port: int) -> None:
     """The text follows the clock without the screen being painted again.
 
-    A separate context so the fake clock cannot disturb the rest of the run.
+    A separate context, so the fake clock cannot disturb the rest of the run.
     """
     watch.enter("time: the clock moves")
     context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
@@ -675,24 +699,155 @@ def check_time_counts_up(browser, watch: Watch, port: int) -> None:
     page.clock.install()
     page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
     page.evaluate("location.hash = '#/home'")
-    page.wait_for_timeout(800)
-    read = "(() => { const t = document.querySelector('main time.ts'); return t && t.textContent.trim(); })()"
-    before = page.evaluate(read)
-    where = page.evaluate("location.hash")
-    if not before:
+    if not settle(page, "!!document.querySelector('main time.ts')"):
         watch.fail("no seeded event carries a time element")
         context.close()
         return
+    before = page.evaluate(FIRST_TIME_TEXT)
+    where = page.evaluate("location.hash")
     page.clock.fast_forward("05:00")
-    page.wait_for_timeout(300)
-    after = page.evaluate(read)
-    if after == before:
+    moved = settle(
+        page,
+        "!!document.querySelector('main time.ts') &&"
+        " document.querySelector('main time.ts').textContent.trim()"
+        f" !== {json.dumps(before)}",
+    )
+    after = page.evaluate(FIRST_TIME_TEXT) or ""
+    if not moved:
         watch.fail(f"five minutes on, the time still reads {after!r}")
     elif "5" not in after:
         watch.fail(f"five minutes on, the time reads {after!r}")
     if page.evaluate("location.hash") != where:
         watch.fail("the time only changed because the screen was painted again")
     context.close()
+    # The page under test stops being the visible one while this context is
+    # open, and a page the browser considers hidden animates nothing.
+    watch.page.bring_to_front()
+
+
+def check_search_key(page, watch: Watch) -> None:
+    """Slash reaches the search field from a screen that has no search field."""
+    watch.enter("keys: slash")
+    page.evaluate("location.hash = '#/home'")
+    settle(page, "!!document.querySelector('main h1')")
+    page.keyboard.press("/")
+    if not settle(page, "document.activeElement && document.activeElement.id === 'q'"):
+        watch.fail(
+            "slash left the search field without focus"
+            f" (hash {page.evaluate('location.hash')!r})"
+        )
+    watch.drain_rejections()
+
+
+def check_typing_is_not_a_shortcut(page, watch: Watch) -> None:
+    """A letter typed into a field is a letter, not a command."""
+    watch.enter("keys: typing")
+    page.evaluate(f"location.hash = '#/search?q={quote(harness.SEARCH_TERM)}'")
+    settle(page, "!!document.querySelector('main .row')")
+    page.click("#q")
+    page.keyboard.press("End")
+    page.keyboard.type("j")
+    if not settle(page, "document.getElementById('q').value.endsWith('j')"):
+        watch.fail("the letter did not reach the field")
+    if page.evaluate('!!document.querySelector(\'main .row[tabindex="0"]\')'):
+        watch.fail("typing in the field moved the selection")
+    if page.evaluate("document.activeElement.id") != "q":
+        watch.fail("typing in the field moved focus off it")
+    watch.drain_rejections()
+
+
+def check_row_keys(page, watch: Watch) -> None:
+    """The selection moves, comes back, and takes focus with it."""
+    watch.enter("keys: rows")
+    page.evaluate("location.hash = '#/inbox'")
+    if not settle(page, "document.querySelectorAll('main .row').length > 1"):
+        watch.fail("the inbox has too few rows to move through")
+        return
+    titles = page.evaluate(
+        "[...document.querySelectorAll('main .row .title')].map((t) => t.textContent.trim())"
+    )
+    page.keyboard.press("Control+j")
+    page.wait_for_timeout(200)
+    if page.evaluate('!!document.querySelector(\'main .row[tabindex="0"]\')'):
+        watch.fail("a shortcut fired with a modifier held")
+    for key in ("j", "j", "k"):
+        page.keyboard.press(key)
+        page.wait_for_timeout(120)
+    row = page.evaluate(SELECTED_ROW)
+    if not row:
+        watch.fail("moving the selection left focus off the rows")
+        return
+    if titles[0] not in row["text"]:
+        watch.fail(f"down, down, up landed on {row['text'][:40]!r}, expected {titles[0]!r}")
+    if row["tab"] != 0 or not row["focused"]:
+        watch.fail("the selected row is not the row that has focus")
+    watch.drain_rejections()
+
+
+def check_enter_opens(page, watch: Watch, project: str) -> None:
+    watch.enter("keys: enter")
+    page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
+    if not settle(page, "!!document.querySelector('main .row a[href]')"):
+        watch.fail("the sessions screen has no row to open")
+        return
+    page.keyboard.press("j")
+    page.wait_for_timeout(200)
+    page.keyboard.press("Enter")
+    if not settle(page, "location.hash.startsWith('#/session?')"):
+        watch.fail(f"Enter on the selected row opened {heading(page)!r}")
+    watch.drain_rejections()
+
+
+def check_approve_key(page, watch: Watch) -> None:
+    """The approve key sends the decision the approve button sends."""
+    watch.enter("keys: approve")
+    page.evaluate("location.hash = '#/inbox'")
+    if not settle(page, "document.querySelectorAll('[data-action=\"approve\"]').length > 0"):
+        watch.fail("no approval is waiting on the reader")
+        return
+    before = page.evaluate("document.querySelectorAll('[data-action=\"approve\"]').length")
+    reached = False
+    for _ in range(12):
+        page.keyboard.press("j")
+        page.wait_for_timeout(150)
+        row = page.evaluate(SELECTED_ROW)
+        if row and harness.APPROVAL_SUMMARY in row["text"]:
+            reached = True
+            break
+    if not reached:
+        watch.fail("the selection never reached the waiting approval")
+        return
+    accept = lambda dialog: dialog.accept()  # noqa: E731
+    page.on("dialog", accept)
+    try:
+        page.keyboard.press("a")
+        if not settle(
+            page,
+            "document.querySelectorAll('[data-action=\"approve\"]').length < "
+            + str(before),
+        ):
+            watch.fail(f"the approval still waits after the key ({before} rows)")
+    finally:
+        page.remove_listener("dialog", accept)
+    watch.drain_rejections()
+
+
+def check_shortcut_help(page, watch: Watch) -> None:
+    """The map says what it knows, from any screen, and closes on Esc."""
+    watch.enter("keys: help")
+    page.evaluate("location.hash = '#/home'")
+    settle(page, "!!document.querySelector('main h1')")
+    page.keyboard.press("?")
+    if not settle(page, "!!document.querySelector('dialog.keymap[open]')"):
+        watch.fail("the shortcut list did not open")
+        return
+    listed = page.evaluate("document.querySelector('dialog.keymap').querySelectorAll('dt').length")
+    if listed < 8:
+        watch.fail(f"the shortcut list shows {listed} keys")
+    page.keyboard.press("Escape")
+    if not settle(page, "!document.querySelector('dialog.keymap[open]')"):
+        watch.fail("Esc left the shortcut list open")
+    watch.drain_rejections()
 
 
 def run() -> int:
@@ -762,6 +917,12 @@ def run() -> int:
             check_controls(page, watch, routes)
             check_relative_time(page, watch)
             check_time_counts_up(browser, watch, port)
+            check_search_key(page, watch)
+            check_typing_is_not_a_shortcut(page, watch)
+            check_row_keys(page, watch)
+            check_enter_opens(page, watch, project)
+            check_shortcut_help(page, watch)
+            check_approve_key(page, watch)
             check_agent_markup_is_text(page, watch)
             check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)
