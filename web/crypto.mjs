@@ -9,6 +9,7 @@
 // runs, so it must stay free of any Node-only or browser-only API.
 
 const ITERATIONS = 600000;
+const MIN_ITERATIONS = 100000;
 const MAX_ITERATIONS = 10000000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -47,7 +48,7 @@ function envelopeAad(envelope) {
 
 function iterationsOf(envelope) {
   const count = Number(envelope.iterations);
-  if (!Number.isInteger(count) || count < 1 || count > MAX_ITERATIONS) {
+  if (!Number.isInteger(count) || count < MIN_ITERATIONS || count > MAX_ITERATIONS) {
     throw new Error("unsupported iteration count");
   }
   return count;
@@ -73,17 +74,23 @@ async function deriveKey(password, salt, iterations) {
 // Encrypt plaintext with a password. Returns the envelope and a base64
 // ciphertext, both ready to store as text.
 export async function encrypt(password, plaintext) {
+  return seal(password, plaintext, ITERATIONS);
+}
+
+// The iteration count is a parameter only so the self-test can seal a valid
+// envelope below the floor and prove decrypt refuses it.
+async function seal(password, plaintext, iterations) {
   if (!password) throw new Error("a password is required");
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const envelope = {
     alg: "AES-256-GCM",
     kdf: "PBKDF2-HMAC-SHA256",
-    iterations: ITERATIONS,
+    iterations,
     salt: bytesToBase64(salt),
     iv: bytesToBase64(iv),
   };
-  const key = await deriveKey(password, salt, ITERATIONS);
+  const key = await deriveKey(password, salt, iterations);
   const sealed = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: encoder.encode(envelopeAad(envelope)) },
     key,
@@ -146,5 +153,32 @@ export async function selfTest() {
     wrongRejected = true;
   }
   if (!wrongRejected) throw new Error("a wrong password decrypted the ciphertext");
+  // Sealed for real below the floor, so only the floor check can refuse it.
+  const weak = await seal("correct horse", plaintext, MIN_ITERATIONS - 1);
+  let weakRejected = false;
+  try {
+    await decrypt("correct horse", weak.envelope, weak.ciphertext);
+  } catch {
+    weakRejected = true;
+  }
+  if (!weakRejected) throw new Error("an envelope below the iteration floor was accepted");
+  const flipped = base64ToBytes(first.ciphertext);
+  flipped[0] ^= 0xff;
+  let ciphertextRejected = false;
+  try {
+    await decrypt("correct horse", first.envelope, bytesToBase64(flipped));
+  } catch {
+    ciphertextRejected = true;
+  }
+  if (!ciphertextRejected) throw new Error("a tampered ciphertext byte decrypted");
+  // `kdf` feeds neither the key nor the cipher, so only the binding catches it.
+  const relabelled = { ...first.envelope, kdf: "PBKDF2-HMAC-SHA512" };
+  let aadRejected = false;
+  try {
+    await decrypt("correct horse", relabelled, first.ciphertext);
+  } catch {
+    aadRejected = true;
+  }
+  if (!aadRejected) throw new Error("a tampered authenticated field decrypted");
   console.log("web/crypto: round-trip passed");
 }
