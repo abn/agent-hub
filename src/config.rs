@@ -1,10 +1,213 @@
 //! Process configuration, read from the environment.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::limits::InboxCaps;
+
+/// The settings that name the hub a client reaches.
+///
+/// The same three keys come from the environment or from an env-style file, so
+/// a hook can export them or source the file and get the same behaviour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientConfig {
+    /// Base URL of a running hub, such as `http://hub.lan:8080`.
+    pub url: Option<String>,
+    /// Bearer token the hub resolves to an agent.
+    pub token: Option<String>,
+    /// Advisory agent label. The hub derives the actor from the token.
+    pub agent_id: Option<String>,
+    /// How long one call may take, handshake to answer. A hook that waits on a
+    /// stalled hub forever stalls the harness that ran it.
+    pub timeout: std::time::Duration,
+}
+
+/// The default for `HUB_TIMEOUT`. Long enough for a large artifact on a slow
+/// link, short enough that a hung hub is noticed.
+const CLIENT_TIMEOUT_SECS: f64 = 120.0;
+
+/// Keys the config file carries. Anything else is a setting this build does
+/// not know, so it is ignored rather than refused.
+const CLIENT_KEYS: [&str; 4] = ["HUB_URL", "HUB_TOKEN", "HUB_AGENT_ID", "HUB_TIMEOUT"];
+
+impl Default for ClientConfig {
+    /// Nothing set, with the default time limit: a derived default would make
+    /// the limit zero, which no call can meet.
+    fn default() -> Self {
+        Self {
+            url: None,
+            token: None,
+            agent_id: None,
+            timeout: std::time::Duration::from_secs_f64(CLIENT_TIMEOUT_SECS),
+        }
+    }
+}
+
+impl ClientConfig {
+    /// Read the settings from the process environment and the config file.
+    pub fn from_env() -> Result<Self> {
+        Self::resolve(&|key| std::env::var(key).ok())
+    }
+
+    /// Resolve the settings from an environment lookup and the config file.
+    ///
+    /// The lookup is an argument so the precedence rule is testable without
+    /// mutating the process environment. The environment wins over the file,
+    /// key by key, so a per-invocation override needs no edit.
+    pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
+        let file = match client_config_path(env) {
+            Some(path) => read_client_config(&path)?,
+            None => Vec::new(),
+        };
+        let pick = |key: &str| {
+            present(env(key)).or_else(|| {
+                file.iter()
+                    .rev()
+                    .find(|(name, _)| name == key)
+                    .and_then(|(_, value)| present(Some(value.clone())))
+            })
+        };
+        let timeout = match pick("HUB_TIMEOUT") {
+            None => CLIENT_TIMEOUT_SECS,
+            Some(value) => match value.parse::<f64>() {
+                Ok(seconds) if seconds.is_finite() && seconds > 0.0 => seconds,
+                _ => {
+                    return Err(Error::Config(format!(
+                        "HUB_TIMEOUT must be a number of seconds above zero, got '{value}'"
+                    )));
+                }
+            },
+        };
+        Ok(Self {
+            url: pick("HUB_URL"),
+            token: pick("HUB_TOKEN"),
+            agent_id: pick("HUB_AGENT_ID"),
+            timeout: std::time::Duration::from_secs_f64(timeout),
+        })
+    }
+}
+
+/// An empty value is the same as an unset one, so a blanked variable does not
+/// shadow the file with nothing.
+fn present(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty())
+}
+
+/// The config file this client reads: `HUB_CONFIG`, or `~/.agent-hub/config`.
+///
+/// The home directory comes from `HOME`, which every supported platform sets;
+/// resolving it any other way would mean a dependency for one path join.
+fn client_config_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    if let Some(path) = present(env("HUB_CONFIG")) {
+        return Some(PathBuf::from(path));
+    }
+    present(env("HOME")).map(|home| PathBuf::from(home).join(".agent-hub").join("config"))
+}
+
+/// Read and parse the config file, if it is there.
+///
+/// A missing file is not an error: the environment alone is a complete
+/// configuration, and the embedded stdio mode needs neither.
+fn read_client_config(path: &Path) -> Result<Vec<(String, String)>> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(Error::Config(format!(
+                "{} could not be read: {err}",
+                path.display()
+            )));
+        }
+    };
+    let entries = parse_client_config(&contents, path)?;
+    warn_on_permissions(path, &entries);
+    Ok(entries)
+}
+
+/// Parse env-style `KEY=value` lines.
+///
+/// Blank lines and `#` comments are skipped, surrounding quotes are stripped,
+/// and nothing is interpolated: the file holds three scalars, so a shell-like
+/// expansion would be surprise, not convenience.
+fn parse_client_config(contents: &str, path: &Path) -> Result<Vec<(String, String)>> {
+    let mut entries = Vec::new();
+    for (index, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(Error::Config(format!(
+                "{}: line {} is not a KEY=value setting, a comment, or blank",
+                path.display(),
+                index + 1
+            )));
+        };
+        let key = key.trim().to_string();
+        if !CLIENT_KEYS.contains(&key.as_str()) {
+            tracing::debug!(key, path = %path.display(), "ignoring an unknown config key");
+            continue;
+        }
+        entries.push((key, unquote(value.trim()).to_string()));
+    }
+    Ok(entries)
+}
+
+/// Strip one layer of matching surrounding quotes.
+fn unquote(value: &str) -> &str {
+    for quote in ['"', '\''] {
+        if let Some(inner) = value
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+        {
+            return inner;
+        }
+    }
+    value
+}
+
+/// Tell the operator when a file holding a token is readable by others.
+///
+/// A warning, never a refusal: refusing would break a working setup on a
+/// machine the operator already controls.
+fn warn_on_permissions(path: &Path, entries: &[(String, String)]) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let has_token = entries.iter().any(|(key, _)| key == "HUB_TOKEN");
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return;
+        };
+        if let Some(warning) =
+            config_permissions_warning(path, metadata.permissions().mode(), has_token)
+        {
+            // Written straight to stderr rather than through tracing: the
+            // warning has to reach an operator who set no log filter, and
+            // stdout is the protocol or the hook's JSON.
+            eprintln!("agent-hub: {warning}");
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, entries);
+    }
+}
+
+/// The warning a config file's mode earns, if any.
+///
+/// Takes the mode rather than reading it, so the rule is testable without
+/// a file whose permissions a test harness may not be able to set.
+#[cfg(unix)]
+pub fn config_permissions_warning(path: &Path, mode: u32, has_token: bool) -> Option<String> {
+    (has_token && mode & 0o077 != 0).then(|| {
+        format!(
+            "{} holds HUB_TOKEN and is readable beyond its owner; chmod 600 it",
+            path.display()
+        )
+    })
+}
 
 /// The default trust posture a new agent is created with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
