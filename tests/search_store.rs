@@ -381,3 +381,34 @@ async fn the_page_is_capped_at_the_search_limit() {
     .expect("search");
     assert_eq!(hits.len(), agent_hub::limits::SEARCH_LIMIT_MAX as usize);
 }
+
+#[tokio::test]
+async fn the_knowledge_base_is_a_corpus_family_of_its_own() {
+    let dir = temp_dir("search-kb");
+    let db = open(&dir).await;
+    plant(&db, "kb:quiet:/fs/runbook.md", "quiet", "kb", "needle").await;
+    plant(&db, "brain:one:/fs/note.md", "quiet", "brain", "needle").await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: Some("kb".to_string()),
+            limit: 50,
+        },
+    )
+    .await
+    .expect("a knowledge base search");
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.doc_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["kb:quiet:/fs/runbook.md"],
+        "the knowledge base family is searchable on its own"
+    );
+    assert!(
+        hits[0].session_id.is_none(),
+        "a knowledge base page belongs to no session"
+    );
+}

@@ -959,6 +959,26 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
     );
     assert!(!own.raw.contains("forbidden"), "{}", own.raw);
 
+    // Search is confined the same way: the pages of a project an agent cannot
+    // reach are not in its results, and its own are.
+    let searched = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "search",
+        json!({"query": "learned OR console", "scope": "global"}),
+    );
+    assert!(
+        searched.raw.contains("what I learned"),
+        "an agent finds its own knowledge base page: {}",
+        searched.raw
+    );
+    assert!(
+        !searched.raw.contains("restart the node"),
+        "a knowledge base page of an unreachable project is not in the results: {}",
+        searched.raw
+    );
+
     // A trusted agent reads that space but may not write it, which is the
     // existing policy rule and not a knowledge base rule.
     let trusted_read = call(

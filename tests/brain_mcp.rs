@@ -1008,3 +1008,69 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
         "the pruned session's working state is gone"
     );
 }
+
+#[test]
+fn a_project_page_is_searchable_under_its_own_kind() {
+    let data_dir = TempDir::new("project-search");
+    common::seed_project(&data_dir.0, "proj");
+    common::seed_project(&data_dir.0, "other");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    // A path with a step back in it names the same page as the canonical one,
+    // so it must not become a second row.
+    let put = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/deploy/../runbook.md",
+            "content": "the capstan winch is checked first",
+            "store": "project",
+        }),
+    );
+    assert_eq!(structured(&put)["path"], "/fs/runbook.md");
+
+    let found = server.call_tool("search", json!({"query": "capstan", "type": "kb"}));
+    let groups = structured(&found)["groups"]
+        .as_array()
+        .expect("search returns groups")
+        .clone();
+    assert_eq!(groups.len(), 1, "one family matches, got {groups:?}");
+    assert_eq!(groups[0]["kind"], "kb");
+    let hits = groups[0]["hits"].as_array().expect("hits");
+    assert_eq!(hits.len(), 1, "the page is one row, got {hits:?}");
+    assert_eq!(hits[0]["doc_id"], "kb:proj:/fs/runbook.md");
+    assert_eq!(hits[0]["project_id"], "proj");
+    assert!(
+        hits[0]["session_id"].is_null(),
+        "a page belongs to no session, got {hits:?}"
+    );
+
+    let elsewhere = server.call_tool(
+        "search",
+        json!({"query": "capstan", "type": "kb", "project_id": "other"}),
+    );
+    assert!(
+        structured(&elsewhere)["groups"]
+            .as_array()
+            .expect("groups")
+            .is_empty(),
+        "another project's search does not reach the page: {elsewhere}"
+    );
+
+    server.call_tool(
+        "brain_delete",
+        json!({"path": "/fs/runbook.md", "store": "project"}),
+    );
+    let after = server.call_tool("search", json!({"query": "capstan", "type": "kb"}));
+    assert!(
+        structured(&after)["groups"]
+            .as_array()
+            .expect("groups")
+            .is_empty(),
+        "a deleted page leaves no searchable row: {after}"
+    );
+}

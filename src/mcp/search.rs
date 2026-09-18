@@ -29,7 +29,9 @@ struct SearchParams {
 
 #[tool_router(router = search_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Search feed events, artifacts, and session brain content.")]
+    #[tool(
+        description = "Search feed events, artifacts, session brain content, and project knowledge base pages. type filters by family: \"feed\", \"artifact\", \"brain\", or \"kb\"."
+    )]
     async fn search(
         &self,
         context: RequestContext<RoleServer>,

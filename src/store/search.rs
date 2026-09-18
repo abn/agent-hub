@@ -18,11 +18,12 @@ pub struct SearchDoc<'a> {
     pub doc_id: &'a str,
     /// Owning project.
     pub project_id: &'a str,
-    /// Corpus family: `feed`, `artifact`, or `brain`.
+    /// Corpus family: `feed`, `artifact`, `brain`, or `kb`.
     pub kind: &'a str,
     /// Id of the underlying row.
     pub ref_id: &'a str,
-    /// Session this belongs to, when it is brain content.
+    /// Session this belongs to, when it is session brain content. A project
+    /// knowledge base page belongs to no session.
     pub session_id: Option<&'a str>,
     /// Short title, for listings.
     pub title: Option<&'a str>,
@@ -70,7 +71,7 @@ pub struct SearchQuery {
     pub text: String,
     /// Restrict to one project.
     pub project_id: Option<String>,
-    /// Restrict to one corpus family: `feed`, `artifact`, or `brain`.
+    /// Restrict to one corpus family: `feed`, `artifact`, `brain`, or `kb`.
     pub kind: Option<String>,
     /// Maximum hits to return.
     pub limit: i64,
@@ -247,7 +248,7 @@ fn snippet(title: Option<&str>, body: &str) -> String {
 
 fn validate_kind(kind: &str) -> Result<()> {
     match kind {
-        "feed" | "artifact" | "brain" => Ok(()),
+        "feed" | "artifact" | "brain" | "kb" => Ok(()),
         other => Err(Error::InvalidArgument(format!(
             "unknown search type '{other}'"
         ))),
