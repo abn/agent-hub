@@ -29,6 +29,28 @@ software release notes and the repository changelog.
 * **Note**: Described in [human interface](design/human-interface.md) and
   [human surface](architecture/human-surface.md).
 
+## 2026-09-18, the shell and the project view
+
+* **Update**: The mobile tab bar draws the four destinations as labelled icon
+  tabs, with the Inbox unread badge riding on the icon; the desktop top bar
+  carries the wordmark, the nav links with the same badge, an inline search
+  field with a slash hint, the node line from the storage response and a gear
+  to Settings.
+* **Update**: Each project is an address of its own. The feed, the artifact
+  gallery and the sessions list are segmented tabs under
+  `#/projects/<id>/`, every segment marked current with its own route, and
+  the older per-project addresses redirect there. The artifact gallery is the
+  design's card grid, with a preview tile per card and a real version, size
+  and age line. The artifact viewer is a route too (`#/artifacts/<id>`), so
+  reload and the browser's Back keep the artifact on screen, and its chrome
+  adds a back button, a title and meta line, a version list, a theme control
+  and, on desktop, an Open raw view.
+* **Update**: A desktop list plus detail layout is a layout primitive screens
+  opt into. Sessions is the first consumer, with a 420px list pane beside a
+  detail pane at wide widths and the same stacked view on the phone.
+* **Note**: Described in [human interface](design/human-interface.md) and
+  [human surface](architecture/human-surface.md).
+
 ## 2026-09-18, remembering an artifact password, honestly
 
 * **Update**: The password gate offers to remember a password only where the

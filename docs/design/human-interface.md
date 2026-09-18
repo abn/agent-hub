@@ -72,9 +72,16 @@ Eight screens: Home, Inbox, Project feed, Artifacts and viewer, Sessions and
 session, Search, Storage and prune, Project settings. Project settings is
 intended design, not yet shipped; agent and access management ships today as a
 section of the global Settings screen rather than under Project settings.
-Mobile is primary with a four tab bar; a desktop list plus detail layout is
-intended design, not yet shipped, and desktop today shows the same
-single-column screens with a top bar.
+Mobile is primary with a four-tab bar of labelled icons (Home, Inbox,
+Projects, Search); desktop swaps in a 52px top bar with the wordmark, the
+three nav links (Inbox carrying the same badge), an inline search field with
+a slash hint, the node line and a gear to Settings. A project is its own
+address: the feed, the artifact gallery and the sessions list sit under the
+project as segmented tabs, each with its own route, and each section is the
+same project view. The artifact viewer is itself a route, so reload and the
+browser's Back keep the artifact on screen. A desktop list plus detail layout
+is a layout primitive screens opt into; Sessions is the first to use it, with
+a 420px list beside a detail pane.
 
 ## Interaction rules
 

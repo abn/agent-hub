@@ -194,10 +194,17 @@ undo is the route it already was, once per token.
 
 The interface follows the design foundation, whose tokens, type, spacing,
 states, and copy are final. It installs to a phone home screen and works
-equally well on desktop. Mobile is primary, with a four-tab bar (Home, Inbox,
-Projects, Search); desktop adds a top bar and shows the same single-column
-screens. A desktop list plus detail layout is intended design, not yet
-shipped.
+equally well on desktop. Mobile is primary, with a four-tab bar of labelled
+icons (Home, Inbox, Projects, Search) ending in a safe-area bottom edge;
+desktop swaps it for a top bar that adds an inline search field with a slash
+hint, the node line naming the hub the storage response reports, and a gear
+to Settings. Each project is an address of its own: the feed, the artifact
+gallery and the sessions list are segmented tabs under `#/projects/<id>/`,
+every one with its own route, and the artifact viewer is a route too
+(`#/artifacts/<id>`), so reload and the browser's Back keep the artifact on
+screen. A desktop list plus detail layout (a 420px list pane beside a detail
+pane) is a layout primitive screens opt into; Sessions is the first to use
+it, and the project tabs sit in the same shell.
 
 | Screen | Purpose |
 |---|---|
