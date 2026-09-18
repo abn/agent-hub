@@ -13,6 +13,7 @@ pub struct ProjectUsage {
     pub project_id: String,
     pub artifact_bytes: i64,
     pub session_bytes: i64,
+    pub kb_bytes: i64,
 }
 
 /// Total storage used, and a per-project breakdown.
@@ -22,7 +23,8 @@ pub struct StorageUsage {
     pub projects: Vec<ProjectUsage>,
 }
 
-/// Compute storage usage from artifact sizes and session brain file sizes.
+/// Compute storage usage from artifact sizes, session brain file sizes, and
+/// knowledge base file sizes.
 pub async fn usage(db: &Database, data_dir: &Path) -> Result<StorageUsage> {
     let conn = super::connect(db)?;
 
@@ -33,6 +35,7 @@ pub async fn usage(db: &Database, data_dir: &Path) -> Result<StorageUsage> {
                 project_id: project_id.to_string(),
                 artifact_bytes: 0,
                 session_bytes: 0,
+                kb_bytes: 0,
             });
         }
     };
@@ -76,15 +79,51 @@ pub async fn usage(db: &Database, data_dir: &Path) -> Result<StorageUsage> {
         }
     }
 
+    // A knowledge base is never pruned, so it appears here and never in what
+    // the human can reclaim. Only a project that has one is listed, so the
+    // report still names the projects that hold something.
+    let mut projects = conn
+        .query("SELECT id FROM projects", ())
+        .await
+        .map_err(engine)?;
+    while let Some(row) = projects.next().await.map_err(engine)? {
+        let project_id = text(row.get_value(0).map_err(engine)?);
+        let bytes = knowledge_bytes(data_dir, &project_id);
+        if bytes == 0 {
+            continue;
+        }
+        ensure(&mut by_project, &project_id);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
+            entry.kb_bytes = bytes;
+        }
+    }
+
     by_project.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     let total_bytes = by_project
         .iter()
-        .map(|p| p.artifact_bytes + p.session_bytes)
+        .map(|p| p.artifact_bytes + p.session_bytes + p.kb_bytes)
         .sum();
     Ok(StorageUsage {
         total_bytes,
         projects: by_project,
     })
+}
+
+/// The bytes a project's knowledge base holds, including what the engine
+/// keeps in the write-ahead log beside it.
+fn knowledge_bytes(data_dir: &Path, project_id: &str) -> i64 {
+    let file = crate::brain::knowledge_dir(data_dir)
+        .join(project_id)
+        .join(format!("{}.db", crate::brain::KNOWLEDGE_FILE));
+    let sidecar = file.with_extension("db-wal");
+    [file, sidecar]
+        .iter()
+        .map(|path| {
+            std::fs::metadata(path)
+                .map(|meta| meta.len() as i64)
+                .unwrap_or(0)
+        })
+        .sum()
 }
 
 fn text(value: Value) -> String {

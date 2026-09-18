@@ -390,7 +390,7 @@ async function storageScreen() {
   const rows = usage.projects
     .map(
       (p) => `<div class="row"><div class="grow"><div class="title">${esc(p.project_id)}</div>
-        <div class="meta mono">artifacts ${mb(p.artifact_bytes)} · sessions ${mb(p.session_bytes)}</div></div></div>`,
+        <div class="meta mono">artifacts ${mb(p.artifact_bytes)} · sessions ${mb(p.session_bytes)} · knowledge ${mb(p.kb_bytes)}</div></div></div>`,
     )
     .join("");
   main.innerHTML = `

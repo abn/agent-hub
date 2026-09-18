@@ -204,6 +204,53 @@ async fn storage_usage_sums_every_stored_version() {
 }
 
 #[tokio::test]
+async fn storage_usage_counts_a_project_knowledge_base() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "homelab", "Homelab")
+        .await
+        .expect("create project");
+
+    let app = router(state.clone());
+    let before = json(
+        app.oneshot(get("/api/v1/storage", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(
+        before["total_bytes"], 0,
+        "nothing is stored yet, got {before}"
+    );
+
+    state
+        .knowledge
+        .open("homelab", agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open the knowledge base")
+        .put("/fs/runbook.md", b"durable knowledge")
+        .await
+        .expect("write a page");
+
+    let app = router(state.clone());
+    let after = json(
+        app.oneshot(get("/api/v1/storage", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await;
+    let kb_bytes = after["projects"][0]["kb_bytes"].as_i64().expect("kb bytes");
+    assert!(
+        kb_bytes > 0,
+        "the knowledge base file is counted, got {after}"
+    );
+    assert_eq!(
+        after["total_bytes"].as_i64().expect("total"),
+        kb_bytes,
+        "the total carries the knowledge base, got {after}"
+    );
+}
+
+#[tokio::test]
 async fn serves_every_shell_asset_with_a_policy() {
     let state = state().await;
     for (path, needle) in [
