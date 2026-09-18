@@ -22,7 +22,8 @@ every writer and the prune sweeper always runs.
 
 ## REST API
 
-A versioned JSON API backs the PWA and any other client:
+A versioned JSON API backs the PWA and any other client. A request body is
+capped at 4 MiB:
 
 ```
 GET    /api/v1/home

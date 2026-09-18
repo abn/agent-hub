@@ -145,12 +145,18 @@ pub async fn serve_stdio(config: Config) -> crate::Result<()> {
 /// bearer gate so agents on the LAN or tailnet can reach the hub by its own
 /// address. The router sets no fallback: it is merged into the server router,
 /// and a fallback on both sides panics at startup.
+///
+/// The request body limit is the hub's own rather than the transport default,
+/// and it is the agent limit: an artifact travels as a tool argument, so a
+/// publish at the artifact cap has to fit in one body.
 pub fn http_router(state: AppState) -> axum::Router {
     let factory_state = state.clone();
     let service = StreamableHttpService::new(
         move || Ok(HubServer::new(factory_state.clone())),
         Arc::new(LocalSessionManager::default()),
-        StreamableHttpServerConfig::default().disable_allowed_hosts(),
+        StreamableHttpServerConfig::default()
+            .disable_allowed_hosts()
+            .with_max_request_body_bytes(crate::limits::AGENT_BODY_BYTES_MAX),
     );
 
     axum::Router::new()

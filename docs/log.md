@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, request body limits per surface
+
+* **Update**: The 4 MiB cap on a REST request body is stated on the
+  [human surface](architecture/human-surface.md), and the served skill
+  contract states the larger cap the agent transport carries.
+* **Note**: The agent transport carries the artifact cap plus the call around
+  it, so a 50 MiB artifact publishes over HTTP as well as over stdio.
+
 ## 2026-09-18, corrections against shipped behaviour
 
 * **Update**: The served skill guide now says plainly that local stdio opens

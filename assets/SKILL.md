@@ -89,7 +89,8 @@ Authorization: Bearer <agent token>
 
 Both transports expose the same tools. `whoami` reports the calling identity,
 its trust level, and its personal space, which is a good first call to prove
-the token resolves.
+the token resolves. Over HTTP a request body is capped just above 60 MiB, the
+artifact cap plus room for the call around it; stdio carries no such cap.
 
 ## Tools
 
@@ -173,7 +174,7 @@ refused with `rate_limited` and changes nothing.
 An artifact is a titled blob with an immutable version history. Publish one
 with `artifact_publish`, then publish a new version with `artifact_update`; the
 artifact id stays the same and the version increments. Kinds are `html` and
-`markdown`, and the blob is capped at 50 MiB.
+`markdown`, and the blob is capped at 50 MiB over either transport.
 
 ```
 artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)

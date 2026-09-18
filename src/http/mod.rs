@@ -1,12 +1,13 @@
 //! HTTP API and static PWA surface.
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
+use crate::limits;
 
 pub mod agents;
 pub mod artifacts;
@@ -25,6 +26,9 @@ pub mod web;
 use problem::Problem;
 
 /// Build the HTTP router.
+///
+/// The request body limit is the hub's own, set here rather than left to the
+/// framework default, so the documented limit is the one callers meet.
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
@@ -93,6 +97,7 @@ pub fn router(state: AppState) -> Router {
         .route("/artifacts/{id}/frame", get(artifacts::frame))
         .route("/artifacts/{id}/og.svg", get(artifacts::og_svg))
         .fallback(not_found)
+        .layer(DefaultBodyLimit::max(limits::REQUEST_BODY_BYTES_MAX))
         .with_state(state)
 }
 

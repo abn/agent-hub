@@ -14,6 +14,15 @@ pub const REQUEST_BODY_BYTES_MAX: usize = 4 * 1024 * 1024;
 /// Maximum bytes of an artifact blob.
 pub const ARTIFACT_BYTES_MAX: usize = 50 * 1024 * 1024;
 
+/// Maximum bytes of a request body on the agent transport.
+///
+/// An artifact reaches the hub as a JSON string argument, so the transport has
+/// to carry the artifact cap plus the escaping that JSON adds to it and the
+/// rest of the call around it. What a tool then accepts stays with the tool's
+/// own check; this only keeps the transport from refusing first.
+pub const AGENT_BODY_BYTES_MAX: usize =
+    ARTIFACT_BYTES_MAX + ARTIFACT_BYTES_MAX / 8 + REQUEST_BODY_BYTES_MAX;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
