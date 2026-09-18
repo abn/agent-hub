@@ -205,6 +205,7 @@ async fn search_and_inbox_respect_the_confined_set() {
         text: "alpha".to_string(),
         project_id: None,
         kind: None,
+        session_id: None,
         limit: 10,
     };
     let confined = vec!["p1".to_string()];
@@ -270,6 +271,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
         text: "needle".to_string(),
         project_id: None,
         kind: None,
+        session_id: None,
         limit: 1,
     };
     let visible = vec!["mine".to_string()];
@@ -303,6 +305,7 @@ async fn a_confined_search_keeps_relevance_order() {
         text: "needle".to_string(),
         project_id: None,
         kind: None,
+        session_id: None,
         limit: 2,
     };
     let visible = vec!["mine".to_string()];

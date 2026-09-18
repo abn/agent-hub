@@ -1200,6 +1200,32 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         granted.raw
     );
 
+    // Search narrows to one session the same way, under the same confinement.
+    let found = call(
+        port,
+        &two_token,
+        &two,
+        "search",
+        json!({"query": "drain", "scope": "global", "session_id": session_id.clone()}),
+    );
+    assert!(
+        found.raw.contains("drain the queue"),
+        "a search narrowed to one session finds its content: {}",
+        found.raw
+    );
+    let denied = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "search",
+        json!({"query": "drain", "scope": "global", "session_id": session_id.clone()}),
+    );
+    assert!(
+        !denied.raw.contains("drain the queue"),
+        "a session in an unreachable project is not searchable: {}",
+        denied.raw
+    );
+
     drop(_child);
     drop(data_dir);
 }

@@ -23,6 +23,9 @@ struct SearchParams {
     project_id: Option<String>,
     #[serde(default, rename = "type")]
     kind: Option<String>,
+    /// Restrict the results to one session's brain content.
+    #[serde(default)]
+    session_id: Option<String>,
     #[serde(default)]
     limit: Option<i64>,
 }
@@ -30,7 +33,7 @@ struct SearchParams {
 #[tool_router(router = search_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Search feed events, artifacts, session brain content, and project knowledge base pages. type filters by family: \"feed\", \"artifact\", \"brain\", or \"kb\"."
+        description = "Search feed events, artifacts, session brain content, and project knowledge base pages. type filters by family: \"feed\", \"artifact\", \"brain\", or \"kb\". session_id narrows the results to one session's brain."
     )]
     async fn search(
         &self,
@@ -56,6 +59,7 @@ impl HubServer {
             text: params.query,
             project_id,
             kind: params.kind,
+            session_id: params.session_id,
             limit: params.limit.unwrap_or(50),
         };
         let results = search::query_visible(&self.state.db, &query, visible.as_filter())

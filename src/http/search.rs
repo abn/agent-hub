@@ -90,6 +90,7 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
         text: query,
         project_id,
         kind,
+        session_id: None,
         limit,
     })
 }

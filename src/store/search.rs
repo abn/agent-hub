@@ -73,6 +73,8 @@ pub struct SearchQuery {
     pub project_id: Option<String>,
     /// Restrict to one corpus family: `feed`, `artifact`, `brain`, or `kb`.
     pub kind: Option<String>,
+    /// Restrict to the content of one session's brain.
+    pub session_id: Option<String>,
     /// Maximum hits to return.
     pub limit: i64,
 }
@@ -136,6 +138,10 @@ pub async fn query_visible(
     if let Some(kind) = &search.kind {
         params.push(Value::Text(kind.clone()));
         scopes.push_str(&format!(" AND type = ?{}", params.len()));
+    }
+    if let Some(session_id) = &search.session_id {
+        params.push(Value::Text(session_id.clone()));
+        scopes.push_str(&format!(" AND session_id = ?{}", params.len()));
     }
     if let Some(visible) = visible {
         let holes: Vec<String> = visible

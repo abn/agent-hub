@@ -67,6 +67,7 @@ fn q(text: &str) -> SearchQuery {
         text: text.to_string(),
         project_id: None,
         kind: None,
+        session_id: None,
         limit: 50,
     }
 }
@@ -99,6 +100,7 @@ async fn filters_by_type_and_project() {
             text: "engine".to_string(),
             project_id: Some("proj".to_string()),
             kind: Some("artifact".to_string()),
+            session_id: None,
             limit: 50,
         },
     )
@@ -113,6 +115,7 @@ async fn filters_by_type_and_project() {
             text: "engine".to_string(),
             project_id: Some("elsewhere".to_string()),
             kind: None,
+            session_id: None,
             limit: 50,
         },
     )
@@ -139,6 +142,7 @@ async fn unknown_type_is_rejected() {
             text: "engine".to_string(),
             project_id: None,
             kind: Some("nonsense".to_string()),
+            session_id: None,
             limit: 50,
         },
     )
@@ -251,6 +255,7 @@ async fn a_project_scope_reaches_below_the_ranked_prefix() {
             text: "needle".to_string(),
             project_id: Some("quiet".to_string()),
             kind: None,
+            session_id: None,
             limit: 50,
         },
     )
@@ -273,6 +278,7 @@ async fn a_type_scope_reaches_below_the_ranked_prefix() {
             text: "needle".to_string(),
             project_id: None,
             kind: Some("brain".to_string()),
+            session_id: None,
             limit: 50,
         },
     )
@@ -310,6 +316,7 @@ async fn a_project_scope_keeps_relevance_order() {
             text: "needle".to_string(),
             project_id: Some("quiet".to_string()),
             kind: None,
+            session_id: None,
             limit: 50,
         },
     )
@@ -331,6 +338,7 @@ async fn a_type_scope_keeps_relevance_order() {
             text: "needle".to_string(),
             project_id: None,
             kind: Some("brain".to_string()),
+            session_id: None,
             limit: 50,
         },
     )
@@ -353,6 +361,7 @@ async fn a_confined_search_keeps_relevance_order() {
             text: "needle".to_string(),
             project_id: None,
             kind: None,
+            session_id: None,
             limit: 50,
         },
         Some(&visible),
@@ -374,6 +383,7 @@ async fn the_page_is_capped_at_the_search_limit() {
             text: "needle".to_string(),
             project_id: None,
             kind: None,
+            session_id: None,
             limit: 500,
         },
     )
@@ -395,6 +405,7 @@ async fn the_knowledge_base_is_a_corpus_family_of_its_own() {
             text: "needle".to_string(),
             project_id: None,
             kind: Some("kb".to_string()),
+            session_id: None,
             limit: 50,
         },
     )
@@ -410,5 +421,103 @@ async fn the_knowledge_base_is_a_corpus_family_of_its_own() {
     assert!(
         hits[0].session_id.is_none(),
         "a knowledge base page belongs to no session"
+    );
+}
+
+async fn plant_in_session(
+    db: &turso::Database,
+    doc_id: &str,
+    project_id: &str,
+    session_id: &str,
+    body: &str,
+) {
+    let conn = db.connect().expect("connect");
+    search::index_doc(
+        &conn,
+        SearchDoc {
+            doc_id,
+            project_id,
+            kind: "brain",
+            ref_id: doc_id,
+            session_id: Some(session_id),
+            title: Some("wanted"),
+            body,
+            updated_at: "2026-09-18T00:00:00Z",
+        },
+    )
+    .await
+    .expect("index a session entry");
+}
+
+#[tokio::test]
+async fn a_session_scope_returns_only_that_session_in_relevance_order() {
+    let dir = temp_dir("search-session-scope");
+    let db = open(&dir).await;
+    bury(&db, "proj", "feed", 20).await;
+    plant_in_session(
+        &db,
+        "other",
+        "proj",
+        "sibling",
+        "needle needle needle needle needle",
+    )
+    .await;
+    plant_in_session(&db, "third", "proj", "wanted-session", "needle").await;
+    plant_in_session(&db, "second", "proj", "wanted-session", "needle needle").await;
+    plant_in_session(
+        &db,
+        "first",
+        "proj",
+        "wanted-session",
+        "needle needle needle needle",
+    )
+    .await;
+
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: None,
+            session_id: Some("wanted-session".to_string()),
+            limit: 50,
+        },
+    )
+    .await
+    .expect("session scoped search");
+    assert_eq!(
+        order(&hits),
+        RISING,
+        "a session scope returns that session's entries in relevance order"
+    );
+}
+
+#[tokio::test]
+async fn a_session_scope_is_confined_like_every_other() {
+    let dir = temp_dir("search-session-confined");
+    let db = open(&dir).await;
+    // One session name, two projects: the reachable one answers and the other
+    // does not, so the scope never widens what a caller may see.
+    plant_in_session(&db, "hidden", "closed", "wanted-session", "needle").await;
+    plant_in_session(&db, "shown", "open", "wanted-session", "needle").await;
+
+    let visible = vec!["open".to_string()];
+    let hits = search::query_visible(
+        &db,
+        &SearchQuery {
+            text: "needle".to_string(),
+            project_id: None,
+            kind: None,
+            session_id: Some("wanted-session".to_string()),
+            limit: 50,
+        },
+        Some(&visible),
+    )
+    .await
+    .expect("confined session search");
+    assert_eq!(
+        order(&hits),
+        vec!["shown"],
+        "a session in an unreachable project stays out of the results"
     );
 }
