@@ -41,6 +41,7 @@ fn question(subject: &str) -> NewQuestion<'_> {
         context: None,
         to: None,
         idempotency_key: None,
+        session_id: None,
     }
 }
 
@@ -53,6 +54,7 @@ fn question_by<'a>(actor: &'a str, subject: &'a str) -> NewQuestion<'a> {
         context: None,
         to: None,
         idempotency_key: None,
+        session_id: None,
     }
 }
 
@@ -71,6 +73,7 @@ fn finished(summary: &str) -> NewEvent {
         payload: None,
         needs_action: false,
         thread_id: None,
+        session_id: None,
     }
 }
 
@@ -82,6 +85,7 @@ fn approval(summary: &str) -> NewEvent {
         payload: None,
         needs_action: false,
         thread_id: None,
+        session_id: None,
     }
 }
 
@@ -360,6 +364,7 @@ async fn signals_do_not_land_in_the_inbox() {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -447,6 +452,7 @@ async fn signal_append_question_still_lands_in_the_inbox() {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -483,6 +489,7 @@ async fn an_orphan_answer_is_rejected() {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await

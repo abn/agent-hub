@@ -23,6 +23,8 @@ pub struct NewQuestion<'a> {
     pub to: Option<&'a str>,
     /// Optional idempotency key.
     pub idempotency_key: Option<&'a str>,
+    /// The session the asker had open, when it had one.
+    pub session_id: Option<&'a str>,
 }
 
 /// Post a question. It opens a thread, lands on the feed, and enters the inbox
@@ -43,6 +45,7 @@ pub async fn post(
         context,
         to,
         idempotency_key,
+        session_id,
     } = question;
 
     let mut payload = serde_json::Map::new();
@@ -78,6 +81,7 @@ pub async fn post(
             },
             needs_action: true,
             thread_id: None,
+            session_id: session_id.map(str::to_string),
         },
     )
     .await?;
@@ -125,6 +129,7 @@ pub async fn answer(
             payload: Some(serde_json::json!({ "body": body })),
             needs_action: false,
             thread_id: Some(question_id.to_string()),
+            session_id: None,
         },
     )
     .await?;
@@ -212,6 +217,7 @@ pub async fn decide(
             })),
             needs_action: false,
             thread_id: Some(approval_id.to_string()),
+            session_id: None,
         },
     )
     .await?;

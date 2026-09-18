@@ -196,6 +196,7 @@ fn signal(project_id: &str, summary: &str) -> NewEvent {
         payload: None,
         needs_action: false,
         thread_id: None,
+        session_id: None,
     }
 }
 

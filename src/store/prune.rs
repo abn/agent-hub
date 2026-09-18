@@ -173,17 +173,20 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
-    // The session's lifecycle events are indexed; drop their rows first.
+    // Only the session's own lifecycle events go. `kind = 'session'` stays in
+    // the predicate: the column also names the signals, questions, approvals
+    // and artifacts the session wrote, and storage acts on sessions, never on
+    // feed events or artifacts.
     tx.execute(
         "DELETE FROM search_docs WHERE doc_id IN
-         (SELECT 'event:' || id FROM events WHERE kind = 'session' AND payload LIKE ?1)",
-        vec![Value::Text(format!("%\"session_id\":\"{session_id}\"%"))],
+         (SELECT 'event:' || id FROM events WHERE kind = 'session' AND session_id = ?1)",
+        vec![Value::Text(session_id.to_string())],
     )
     .await
     .map_err(engine)?;
     tx.execute(
-        "DELETE FROM events WHERE kind = 'session' AND payload LIKE ?1",
-        vec![Value::Text(format!("%\"session_id\":\"{session_id}\"%"))],
+        "DELETE FROM events WHERE kind = 'session' AND session_id = ?1",
+        vec![Value::Text(session_id.to_string())],
     )
     .await
     .map_err(engine)?;

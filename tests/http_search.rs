@@ -48,6 +48,7 @@ async fn seed(state: &AppState) {
             payload: Some(serde_json::json!({"body": "the engine keeps session state"})),
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await

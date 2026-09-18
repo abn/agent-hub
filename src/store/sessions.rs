@@ -146,6 +146,7 @@ pub async fn start_resumed(
                 })),
                 needs_action: false,
                 thread_id: None,
+                session_id: Some(session.id.clone()),
             },
         )
         .await?;
@@ -291,6 +292,7 @@ pub async fn start_from(
             })),
             needs_action: false,
             thread_id: None,
+            session_id: Some(source.id.clone()),
         },
     )
     .await?;
@@ -379,6 +381,7 @@ pub async fn insert_fork(
             })),
             needs_action: false,
             thread_id: None,
+            session_id: Some(new_id.to_string()),
         },
     )
     .await?;
@@ -482,6 +485,7 @@ pub async fn reassign(
             })),
             needs_action: false,
             thread_id: None,
+            session_id: Some(session.id.clone()),
         },
     )
     .await?;
@@ -574,6 +578,7 @@ pub async fn end(
             })),
             needs_action: false,
             thread_id: None,
+            session_id: Some(session.id.clone()),
         },
     )
     .await?;

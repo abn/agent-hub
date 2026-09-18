@@ -125,6 +125,7 @@ async fn concurrent_same_key_questions_serialize() {
                     context: None,
                     to: None,
                     idempotency_key: Some("q-key"),
+                    session_id: None,
                 },
             )
             .await
@@ -168,6 +169,7 @@ async fn concurrent_same_key_answers_serialize() {
             context: None,
             to: None,
             idempotency_key: None,
+            session_id: None,
         },
     )
     .await

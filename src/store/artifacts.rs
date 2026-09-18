@@ -784,6 +784,7 @@ async fn append_event(
             })),
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await

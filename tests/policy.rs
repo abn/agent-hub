@@ -19,6 +19,7 @@ fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
         payload: None,
         needs_action: false,
         thread_id: None,
+        session_id: None,
     }
 }
 

@@ -42,6 +42,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 7,
         ddl: V7,
     },
+    Migration {
+        version: 8,
+        ddl: V8,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -284,4 +288,26 @@ CREATE UNIQUE INDEX sessions_owner_name
 CREATE INDEX IF NOT EXISTS sessions_project ON sessions(project_id, last_activity DESC);
 CREATE INDEX IF NOT EXISTS sessions_active ON sessions(status, last_activity DESC);
 CREATE INDEX IF NOT EXISTS sessions_agent ON sessions(agent, status);
+"#;
+
+/// Version 8: an event names the session it was written during.
+///
+/// The column answers "how many events did this session produce" with one
+/// indexed count instead of a substring scan over every payload. Existing rows
+/// are backfilled from the lifecycle payloads, the only ones that carried a
+/// session id before the writer set the column. A payload that does not parse
+/// is left without a session rather than failing the migration: no writer in
+/// the tree can produce one, and a hub that will not start is a worse answer
+/// to a row that should not exist than a count that omits it.
+///
+/// The two counting indexes come with it: a project's artifacts and its
+/// knowledge base pages are both counted per project, and neither had an index
+/// to count over.
+const V8: &str = r#"
+ALTER TABLE events ADD COLUMN session_id TEXT;
+CREATE INDEX IF NOT EXISTS events_session ON events(session_id, id DESC);
+UPDATE events SET session_id = json_extract(payload, '$.session_id')
+ WHERE kind = 'session' AND payload IS NOT NULL AND json_valid(payload);
+CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id);
+CREATE INDEX IF NOT EXISTS search_docs_project_type ON search_docs(project_id, type);
 "#;

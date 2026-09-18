@@ -36,10 +36,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 7, "migrations are forward only and apply once");
+    assert_eq!(again, 8, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -226,7 +226,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let mut rows = conn
         .query(
@@ -335,7 +335,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let mut rows = conn
         .query(
@@ -456,6 +456,126 @@ async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
 }
 
 #[tokio::test]
+async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
+    let dir = temp_dir("store-schema-v8");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-7 database whose events only carry the session id in a payload.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 8) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    let before: [(&str, &str, Option<&str>); 7] = [
+        (
+            "started",
+            "session",
+            Some(r#"{"action":"started","session_id":"sess-one"}"#),
+        ),
+        (
+            "forked",
+            "session",
+            Some(r#"{"action":"forked","session_id":"sess-two","from_session_id":"sess-one"}"#),
+        ),
+        (
+            "signal",
+            "signal",
+            Some(r#"{"note":"written while sess-one ran"}"#),
+        ),
+        ("bare", "session", None),
+        // A payload no writer in the tree can produce, but which a hand-edited
+        // or half-written row could hold. One of these must not stop the hub
+        // from ever starting again.
+        ("broken", "session", Some("")),
+        ("garbage", "session", Some("not json at all")),
+        ("cut", "session", Some(r#"{"session_id":"sess-th"#)),
+    ];
+    for (id, kind, payload) in before {
+        conn.execute(
+            "INSERT INTO events(id, project_id, kind, actor, summary, payload, created_at) \
+             VALUES (?1, 'proj', ?2, 'agent-one', 'an event', ?3, '2026-09-16T00:00:00Z')",
+            turso::params::Params::Positional(vec![
+                turso::Value::Text(id.to_string()),
+                turso::Value::Text(kind.to_string()),
+                payload.map_or(turso::Value::Null, |text| {
+                    turso::Value::Text(text.to_string())
+                }),
+            ]),
+        )
+        .await
+        .expect("insert event");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 8);
+
+    let mut rows = conn
+        .query("SELECT id, session_id FROM events ORDER BY id", ())
+        .await
+        .expect("query events");
+    let mut backfilled = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        backfilled.push((
+            row.get::<String>(0).expect("id"),
+            match row.get_value(1).expect("session_id") {
+                turso::Value::Text(value) => Some(value),
+                _ => None,
+            },
+        ));
+    }
+    drop(rows);
+    assert_eq!(
+        backfilled,
+        vec![
+            ("bare".to_string(), None),
+            ("broken".to_string(), None),
+            ("cut".to_string(), None),
+            ("forked".to_string(), Some("sess-two".to_string())),
+            ("garbage".to_string(), None),
+            ("signal".to_string(), None),
+            ("started".to_string(), Some("sess-one".to_string())),
+        ],
+        "a lifecycle event names the session its payload names, and nothing else is claimed"
+    );
+
+    let mut index = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'events_session'",
+            (),
+        )
+        .await
+        .expect("index query");
+    assert!(
+        index.next().await.expect("row").is_some(),
+        "missing events_session index"
+    );
+
+    drop(index);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
 async fn migration_six_clears_indexed_audit_events() {
     let dir = temp_dir("store-schema-v6");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
@@ -506,7 +626,7 @@ async fn migration_six_clears_indexed_audit_events() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let mut rows = conn
         .query("SELECT doc_id FROM search_docs ORDER BY doc_id", ())

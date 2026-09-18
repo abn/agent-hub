@@ -45,6 +45,10 @@ pub struct NewEvent {
     pub payload: Option<serde_json::Value>,
     pub needs_action: bool,
     pub thread_id: Option<String>,
+    /// The session the write happened during, when one is in scope. It is what
+    /// a session detail screen counts over, so it covers ordinary work as well
+    /// as the lifecycle events that name a session in their payload.
+    pub session_id: Option<String>,
 }
 
 /// How to read a page of the feed.
@@ -189,8 +193,8 @@ async fn append_in_tx_capped(
     };
 
     tx.execute(
-        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at, session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         vec![
             Value::Text(id.clone()),
             Value::Text(event.project_id.clone()),
@@ -201,6 +205,7 @@ async fn append_in_tx_capped(
             optional_text(thread_id.as_deref()),
             Value::Integer(i64::from(needs_action)),
             Value::Text(created_at.clone()),
+            optional_text(event.session_id.as_deref()),
         ],
     )
     .await
@@ -236,6 +241,61 @@ async fn append_in_tx_capped(
     }
 
     Ok(id)
+}
+
+/// How many events one session produced.
+///
+/// One count over `events_session`, so a session detail screen shows a real
+/// number without reading a single payload.
+pub async fn count_for_session(db: &Database, session_id: &str) -> Result<i64> {
+    let conn = super::connect(db)?;
+    count_on(
+        &conn,
+        "SELECT COUNT(*) FROM events WHERE session_id = ?1",
+        vec![Value::Text(session_id.to_string())],
+    )
+    .await
+}
+
+/// How many events a project holds, the hub's own audit trail excluded.
+pub async fn count_for_project(db: &Database, project_id: &str) -> Result<i64> {
+    let conn = super::connect(db)?;
+    count_on(
+        &conn,
+        "SELECT COUNT(*) FROM events WHERE project_id = ?1 AND kind <> 'system'",
+        vec![Value::Text(project_id.to_string())],
+    )
+    .await
+}
+
+/// The newest event a session produced, which is the line a session detail
+/// shows as its audit row.
+pub async fn latest_for_session(db: &Database, session_id: &str) -> Result<Option<Event>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+             FROM events e LEFT JOIN inbox i ON i.event_id = e.id
+             WHERE e.session_id = ?1 ORDER BY e.id DESC LIMIT 1",
+            vec![Value::Text(session_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(event_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
+pub(crate) async fn count_on(conn: &Connection, sql: &str, params: Vec<Value>) -> Result<i64> {
+    let mut rows = conn.query(sql, params).await.map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(match row.get_value(0).map_err(engine)? {
+            Value::Integer(count) => count,
+            _ => 0,
+        }),
+        None => Ok(0),
+    }
 }
 
 /// Fetch one event by id.

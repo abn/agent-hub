@@ -578,6 +578,7 @@ async fn audit(
             payload: Some(payload),
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await?;

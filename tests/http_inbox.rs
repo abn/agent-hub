@@ -83,6 +83,7 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
             context: None,
             to: None,
             idempotency_key: None,
+            session_id: None,
         },
     )
     .await
@@ -101,6 +102,7 @@ async fn seed_finished(state: &AppState, summary: &str) -> String {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -119,6 +121,7 @@ async fn seed_approval(state: &AppState, summary: &str) -> String {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -543,6 +546,7 @@ async fn the_inbox_listing_honours_the_limit() {
                 payload: None,
                 needs_action: false,
                 thread_id: None,
+                session_id: None,
             },
         )
         .await

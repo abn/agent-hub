@@ -702,6 +702,19 @@ impl HubServer {
             .sum()
     }
 
+    /// The active session's id when it belongs to this project.
+    ///
+    /// An event written while a session is open belongs to that session, so a
+    /// session detail screen can count what the session produced. A write into
+    /// another project is not this session's work, so it carries no session.
+    pub(super) async fn session_in(&self, project_id: &str) -> Option<String> {
+        let active = self.active.lock().await;
+        active
+            .as_ref()
+            .filter(|(project, _)| project == project_id)
+            .map(|(_, session_id)| session_id.clone())
+    }
+
     /// The recorded active session, or a conflict when none was started.
     async fn active_session(&self) -> Result<(String, String)> {
         let active = self.active.lock().await;

@@ -38,6 +38,7 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let session_id = self.session_in(&params.project_id).await;
         let event_id = questions::post(
             &self.state.db,
             &self.state.config.inbox_caps,
@@ -49,6 +50,7 @@ impl HubServer {
                 context: params.context.as_deref(),
                 to: params.to.as_deref(),
                 idempotency_key: params.idempotency_key.as_deref(),
+                session_id: session_id.as_deref(),
             },
         )
         .await

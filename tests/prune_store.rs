@@ -164,6 +164,161 @@ async fn sweep_skips_a_session_it_cannot_commit() {
     );
 }
 
+/// Age a session's tombstone past the undo window so the next sweep commits it.
+async fn age_tombstone(db: &turso::Database, session_id: &str) {
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+        vec![
+            turso::Value::Text(
+                old.format(&time::format_description::well_known::Rfc3339)
+                    .expect("format"),
+            ),
+            turso::Value::Text(session_id.to_string()),
+        ],
+    )
+    .await
+    .expect("age");
+}
+
+/// Every event id in the store, oldest first.
+async fn event_ids(db: &turso::Database) -> Vec<String> {
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("SELECT id FROM events ORDER BY id", ())
+        .await
+        .expect("query events");
+    let mut ids = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        ids.push(row.get::<String>(0).expect("id"));
+    }
+    ids
+}
+
+/// The event ids the payload substring scan used to select for a session.
+async fn ids_matching_payload_scan(db: &turso::Database, session_id: &str) -> Vec<String> {
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT id FROM events WHERE kind = 'session' AND payload LIKE ?1 ORDER BY id",
+            vec![turso::Value::Text(format!(
+                "%\"session_id\":\"{session_id}\"%"
+            ))],
+        )
+        .await
+        .expect("query events");
+    let mut ids = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        ids.push(row.get::<String>(0).expect("id"));
+    }
+    ids
+}
+
+#[tokio::test]
+async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
+    let dir = temp_dir("prune-set");
+    let db = open(&dir).await;
+
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    // Ordinary work written during the session, one of every kind storage must
+    // never touch, each carrying the session id on the new column.
+    for (kind, summary) in [
+        ("signal", "a signal"),
+        ("finished", "work done"),
+        ("approval", "may I"),
+        ("artifact", "published"),
+    ] {
+        events::append(
+            &db,
+            "agent-one",
+            None,
+            NewEvent {
+                project_id: "proj".to_string(),
+                kind: kind.to_string(),
+                summary: summary.to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: Some(session.id.clone()),
+            },
+        )
+        .await
+        .expect("append");
+    }
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+
+    // What the payload substring scan selected, captured before the prune so
+    // the two predicates are compared over the same rows.
+    let scanned = ids_matching_payload_scan(&db, &session.id).await;
+    assert_eq!(scanned.len(), 2, "a started and an ended lifecycle event");
+    let before = event_ids(&db).await;
+
+    prune::prune_session(&db, &session.id).await.expect("prune");
+    age_tombstone(&db, &session.id).await;
+    assert_eq!(prune::sweep(&db, &dir).await.expect("sweep"), 1);
+
+    let after = event_ids(&db).await;
+    let removed: Vec<String> = before
+        .into_iter()
+        .filter(|id| !after.contains(id))
+        .collect();
+    assert_eq!(
+        removed, scanned,
+        "the indexed column removes the same events the payload scan did"
+    );
+    assert_eq!(
+        after.len(),
+        4,
+        "every signal, question, approval and artifact the session wrote stays"
+    );
+}
+
+#[tokio::test]
+async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
+    let dir = temp_dir("prune-fork");
+    let db = open(&dir).await;
+
+    let source = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let fork = sessions::insert_fork(&db, &source, "nightly-copy", "agent-two", "forked-one")
+        .await
+        .expect("fork");
+    sessions::end(&db, &source.id, "agent-one", None)
+        .await
+        .expect("end");
+
+    prune::prune_session(&db, &source.id).await.expect("prune");
+    age_tombstone(&db, &source.id).await;
+    assert_eq!(prune::sweep(&db, &dir).await.expect("sweep"), 1);
+
+    let feed = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("feed");
+    let summaries: Vec<&str> = feed
+        .events
+        .iter()
+        .map(|event| event.summary.as_str())
+        .collect();
+    assert_eq!(
+        summaries,
+        vec!["session nightly-copy forked from agent-one"],
+        "the fork's own lifecycle event names the source and belongs to the fork"
+    );
+    assert!(
+        sessions::get(&db, &fork.id)
+            .await
+            .expect("get")
+            .is_some_and(|session| session.deleted_at.is_none()),
+        "pruning the source leaves the fork alone"
+    );
+}
+
 #[tokio::test]
 async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
     let dir = temp_dir("prune-keys");
@@ -176,6 +331,7 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
         payload: None,
         needs_action: false,
         thread_id: None,
+        session_id: None,
     };
     let kept = events::append(&db, "agent-one", Some("keep-key"), event())
         .await

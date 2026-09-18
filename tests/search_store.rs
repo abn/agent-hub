@@ -39,6 +39,7 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
         payload: Some(serde_json::json!({"body": "the engine keeps session state"})),
         needs_action: false,
         thread_id: None,
+        session_id: None,
     };
     append(db, "agent-one", None, event).await.expect("append");
 
@@ -168,6 +169,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
             payload: Some(serde_json::json!({"body": "engine engine engine alpha"})),
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -185,6 +187,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
             payload: Some(serde_json::json!({"body": "engine beta"})),
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await

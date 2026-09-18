@@ -40,6 +40,7 @@ fn event(summary: &str) -> NewEvent {
         payload: Some(serde_json::json!({"body": summary})),
         needs_action: false,
         thread_id: None,
+        session_id: None,
     }
 }
 
@@ -353,4 +354,47 @@ async fn concurrent_appends_keep_ids_in_commit_order() {
             cursor = found + 1;
         }
     }
+}
+
+#[tokio::test]
+async fn a_sessions_events_are_counted_over_its_own_column() {
+    let db = open().await;
+
+    let mine = NewEvent {
+        session_id: Some("sess-one".to_string()),
+        ..event("written while the session ran")
+    };
+    append(&db, "agent-one", None, mine).await.expect("append");
+    append(&db, "agent-one", None, event("someone else's work"))
+        .await
+        .expect("append");
+    let theirs = NewEvent {
+        session_id: Some("sess-two".to_string()),
+        ..event("another session's work")
+    };
+    append(&db, "agent-two", None, theirs)
+        .await
+        .expect("append");
+
+    assert_eq!(
+        agent_hub::store::events::count_for_session(&db, "sess-one")
+            .await
+            .expect("count"),
+        1,
+        "a session counts its own events and no one else's"
+    );
+    assert_eq!(
+        agent_hub::store::events::count_for_session(&db, "sess-three")
+            .await
+            .expect("count"),
+        0,
+        "a session that wrote nothing counts zero, not the whole feed"
+    );
+
+    let latest = agent_hub::store::events::latest_for_session(&db, "sess-one")
+        .await
+        .expect("latest")
+        .expect("one event");
+    assert_eq!(latest.summary, "written while the session ran");
+    assert_eq!(latest.actor, "agent-one");
 }

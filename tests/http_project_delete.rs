@@ -71,6 +71,7 @@ async fn delete_project_cascades_its_data() {
             payload: None,
             needs_action: true,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -291,6 +292,7 @@ async fn delete_project_cascades_its_data() {
             payload: None,
             needs_action: false,
             thread_id: None,
+            session_id: None,
         },
     )
     .await
@@ -323,6 +325,7 @@ async fn delete_leaves_other_projects_untouched() {
                 payload: None,
                 needs_action: false,
                 thread_id: None,
+                session_id: None,
             },
         )
         .await
