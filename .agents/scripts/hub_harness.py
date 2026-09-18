@@ -33,6 +33,9 @@ SESSION_NAME = "nightly"
 BRAIN_PATH = "/kv/last-run"
 BRAIN_VALUE = "green"
 FINISHED_SUMMARY = "nightly report done"
+# An agent writes this. It must reach the screen as text, never as an element:
+# the escaping helper every screen shares is what stands between the two.
+MARKUP_SUMMARY = 'plan <b id="pwned">rewrite</b> the loader'
 APPROVAL_SUMMARY = "Deploy the release to production"
 QUESTION_SUBJECT = "Ship the release?"
 ARTIFACT_TITLE = "Check note"
@@ -137,6 +140,7 @@ def seed(port: int) -> dict[str, str]:
     mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
     calls = [
         ("signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
+        ("signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
         ("question_post", {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT}),
         (

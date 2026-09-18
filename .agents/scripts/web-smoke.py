@@ -195,6 +195,19 @@ def check_answer(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_agent_markup_is_text(page, watch: Watch) -> None:
+    """One shared helper escapes every screen, so its loss must not pass quietly."""
+    watch.enter("home: agent markup")
+    page.evaluate("location.hash = '#/home'")
+    page.wait_for_timeout(500)
+    if page.evaluate("!!document.getElementById('pwned')"):
+        watch.fail("an agent's markup became an element")
+    body = page.evaluate("document.querySelector('main').textContent")
+    if harness.MARKUP_SUMMARY not in body:
+        watch.fail("the agent's markup does not render as text")
+    watch.drain_rejections()
+
+
 def check_home_fetches_once(page, watch: Watch) -> None:
     """Home holds the payload the badge wants, so it is one request, not two."""
     watch.enter("home: one fetch")
@@ -315,6 +328,7 @@ def run() -> int:
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
 
+            check_agent_markup_is_text(page, watch)
             check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)
             check_artifact(page, watch, project)
