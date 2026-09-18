@@ -8,7 +8,7 @@ use crate::limits::InboxCaps;
 
 /// The settings that name the hub a client reaches.
 ///
-/// The same three keys come from the environment or from an env-style file, so
+/// The same keys come from the environment or from an env-style file, so
 /// a hook can export them or source the file and get the same behaviour.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientConfig {
@@ -18,6 +18,8 @@ pub struct ClientConfig {
     pub token: Option<String>,
     /// Advisory agent label. The hub derives the actor from the token.
     pub agent_id: Option<String>,
+    /// The project the knowledge-base shorthands act on, when no flag names one.
+    pub project: Option<String>,
     /// How long one call may take, handshake to answer. A hook that waits on a
     /// stalled hub forever stalls the harness that ran it.
     pub timeout: std::time::Duration,
@@ -29,7 +31,13 @@ const CLIENT_TIMEOUT_SECS: f64 = 120.0;
 
 /// Keys the config file carries. Anything else is a setting this build does
 /// not know, so it is ignored rather than refused.
-const CLIENT_KEYS: [&str; 4] = ["HUB_URL", "HUB_TOKEN", "HUB_AGENT_ID", "HUB_TIMEOUT"];
+const CLIENT_KEYS: [&str; 5] = [
+    "HUB_URL",
+    "HUB_TOKEN",
+    "HUB_AGENT_ID",
+    "HUB_PROJECT",
+    "HUB_TIMEOUT",
+];
 
 impl Default for ClientConfig {
     /// Nothing set, with the default time limit: a derived default would make
@@ -39,6 +47,7 @@ impl Default for ClientConfig {
             url: None,
             token: None,
             agent_id: None,
+            project: None,
             timeout: std::time::Duration::from_secs_f64(CLIENT_TIMEOUT_SECS),
         }
     }
@@ -83,6 +92,7 @@ impl ClientConfig {
             url: pick("HUB_URL"),
             token: pick("HUB_TOKEN"),
             agent_id: pick("HUB_AGENT_ID"),
+            project: pick("HUB_PROJECT"),
             timeout: std::time::Duration::from_secs_f64(timeout),
         })
     }
