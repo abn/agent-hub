@@ -296,6 +296,53 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
+    let dir = temp_dir("prune-undo-commit-race");
+    let db = Arc::new(open(&dir).await);
+
+    // The gap between the undo's window check and its write is narrow, so the
+    // race is run repeatedly against a fresh session each round.
+    for round in 0..20 {
+        let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
+            .await
+            .expect("start");
+        sessions::end(&db, &session.id, "agent-one")
+            .await
+            .expect("end");
+        let token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+        let undoing = db.clone();
+        let id = token.undo_token.clone();
+        let undo = tokio::spawn(async move { prune::undo(&undoing, &id).await });
+        // The sweep's commit removes the row only while the prune still
+        // stands, which is the predicate that makes the race observable.
+        let committing = db.clone();
+        let id = session.id.clone();
+        let commit = tokio::spawn(async move {
+            let conn = committing.connect().expect("connect");
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .expect("busy timeout");
+            conn.execute(
+                "DELETE FROM sessions WHERE id = ?1 AND deleted_at IS NOT NULL",
+                vec![turso::Value::Text(id)],
+            )
+            .await
+            .expect("commit the prune")
+        });
+        let undone = undo.await.expect("join undo");
+        commit.await.expect("join commit");
+
+        let row = sessions::get(&db, &session.id).await.expect("get");
+        if row.is_none() {
+            assert!(
+                undone.is_err(),
+                "round {round}: the undo reported a restore for a session the commit removed"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn undo_after_the_window_is_rejected() {
     let dir = temp_dir("prune-late-undo");

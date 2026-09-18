@@ -90,12 +90,22 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
     }
 
     let conn = super::connect(db)?;
-    conn.execute(
-        "UPDATE sessions SET deleted_at = NULL WHERE id = ?1",
-        vec![Value::Text(token.to_string())],
-    )
-    .await
-    .map_err(engine)?;
+    // The window check above is advisory: the sweep can commit the row between
+    // it and the write, and the boundary is where both fire. The write carries
+    // the tombstone it was checked against, so a commit that lands in between
+    // matches no row and the human is told the prune stands.
+    let restored = conn
+        .execute(
+            "UPDATE sessions SET deleted_at = NULL WHERE id = ?1 AND deleted_at = ?2",
+            vec![Value::Text(token.to_string()), Value::Text(deleted_at)],
+        )
+        .await
+        .map_err(engine)?;
+    if restored == 0 {
+        return Err(Error::Conflict(format!(
+            "session {token} changed while undoing the prune; it was not restored"
+        )));
+    }
     Ok(())
 }
 
