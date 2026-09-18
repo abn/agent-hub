@@ -451,6 +451,10 @@ async fn host_shows_the_thread_only_when_non_empty() {
     assert!(body.contains("id=\"hub-comments\""));
     assert!(body.contains("Needs a second look"));
     assert!(body.contains("Open"));
+    assert!(
+        body.contains(">1m</span>"),
+        "comment times read relative with the full stamp on hover"
+    );
 }
 
 #[tokio::test]
@@ -515,7 +519,7 @@ async fn locked_shell_carries_no_thread() {
         .expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     let body = text_body(response).await;
-    assert!(body.contains("This artifact is encrypted"));
+    assert!(body.contains("Encrypted artifact"));
     assert!(
         !body.contains("id=\"hub-comments\""),
         "the locked shell carries no thread"

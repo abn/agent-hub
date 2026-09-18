@@ -100,19 +100,43 @@ function frameLoader() {
   return `<script src="/frame-loader.js"></script>`;
 }
 
+// Mirror of web/tokens.css values for the srcdoc frame: an opaque origin
+// cannot load the file, so the frame carries the values inline. Body copy
+// follows the foundation prose scale: 15px/1.6 ink-2, headings ink, 640px
+// measure. Keep in sync with tokens.css when it changes.
 function frameStyle() {
   return (
     `<style>` +
-    `html[data-theme="light"]{color-scheme:light;background:#fff;color:#1d1c19}` +
-    `html[data-theme="dark"]{color-scheme:dark;background:#141311;color:#ece8e0}` +
-    `body{font-family:system-ui,sans-serif;line-height:1.5;max-width:44rem;margin:0 auto;padding:1rem}` +
-    `pre{background:rgba(127,127,127,.12);padding:.75rem;overflow:auto;border-radius:.375rem}` +
-    `.hub-callout{border-left:.25rem solid #888;background:rgba(127,127,127,.12);` +
-    `padding:.75rem 1rem;margin:1rem 0;border-radius:.375rem}` +
-    `.hub-callout.note{border-color:#2f5fa8}` +
-    `.hub-callout.tip{border-color:#2e7d4f}` +
-    `.hub-callout.warning{border-color:#95590b}` +
-    `.hub-callout.caution{border-color:#9e3b2b}` +
+    `html[data-theme="light"]{color-scheme:light;background:#F5F3EE;color:#1D1C19}` +
+    `html[data-theme="dark"]{color-scheme:dark;background:#141311;color:#ECE8E0}` +
+    `body{font-family:"Avenir Next","Seravek","Segoe UI Variable Text","Segoe UI",Ubuntu,Cantarell,system-ui,sans-serif;` +
+    `font-size:15px;line-height:1.6;color:#5C584F;max-width:640px;margin:0 auto;padding:1.5rem 1.25rem 4rem}` +
+    `html[data-theme="dark"] body{color:#B3ADA2}` +
+    `h1,h2,h3{color:#1D1C19;line-height:1.3;text-wrap:balance}` +
+    `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#ECE8E0}` +
+    `a{color:#2F5FA8}` +
+    `html[data-theme="dark"] a{color:#8AAAE8}` +
+    `pre{background:#EDEAE3;border:1px solid #E4E0D8;border-radius:6px;padding:.75rem 1rem;overflow:auto}` +
+    `html[data-theme="dark"] pre{background:#26241F;border-color:#2F2C26}` +
+    `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}` +
+    `:not(pre)>code{background:#EDEAE3;border:1px solid #E4E0D8;border-radius:4px;padding:.1em .35em}` +
+    `html[data-theme="dark"] :not(pre)>code{background:#26241F;border-color:#2F2C26}` +
+    `table{border-collapse:collapse;display:block;overflow-x:auto}` +
+    `th,td{border:1px solid #E4E0D8;padding:.4rem .7rem;text-align:left}` +
+    `html[data-theme="dark"] th,html[data-theme="dark"] td{border-color:#2F2C26}` +
+    `blockquote{margin:0;padding-left:1rem;border-left:3px solid #E4E0D8;color:#6F6A61}` +
+    `html[data-theme="dark"] blockquote{border-color:#2F2C26;color:#948E83}` +
+    `.hub-callout{background:#EDEAE3;border-left:.25rem solid #888;border-radius:6px;` +
+    `padding:.75rem 1rem;margin:1rem 0}` +
+    `html[data-theme="dark"] .hub-callout{background:#26241F}` +
+    `.hub-callout.note{border-color:#2F5FA8}` +
+    `html[data-theme="dark"] .hub-callout.note{border-color:#8AAAE8}` +
+    `.hub-callout.tip{border-color:#2E7D4F}` +
+    `html[data-theme="dark"] .hub-callout.tip{border-color:#6FC08C}` +
+    `.hub-callout.warning{border-color:#95590B}` +
+    `html[data-theme="dark"] .hub-callout.warning{border-color:#DDA44E}` +
+    `.hub-callout.caution{border-color:#9E3B2B}` +
+    `html[data-theme="dark"] .hub-callout.caution{border-color:#E08373}` +
     `</style>`
   );
 }
@@ -190,6 +214,43 @@ function renderForTheme(state, theme) {
   if (meta.kind === "html") frame.src = frameUrl(meta, theme);
 }
 
+// Passwords remembered per project, device-local, never sent anywhere.
+// One JSON object under a single key; storage failures drop the write
+// rather than breaking unlock.
+function passwordStore() {
+  const key = "hub-artifact-passwords";
+  const readAll = () => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+  return {
+    read(projectId) {
+      const passwords = readAll();
+      const saved = passwords[projectId];
+      return typeof saved === "string" ? saved : null;
+    },
+    write(projectId, secret) {
+      const passwords = readAll();
+      passwords[projectId] = secret;
+      try {
+        window.localStorage.setItem(key, JSON.stringify(passwords));
+      } catch {}
+    },
+    remove(projectId) {
+      const passwords = readAll();
+      delete passwords[projectId];
+      try {
+        window.localStorage.setItem(key, JSON.stringify(passwords));
+      } catch {}
+    },
+  };
+}
+
 function init() {
   const meta = readJson("hub-meta");
   if (!meta) return;
@@ -203,13 +264,34 @@ function init() {
   };
   document.documentElement.setAttribute("data-theme", state.theme);
 
+  const back = document.getElementById("hub-back");
+  if (back) {
+    if (window.history.length > 1) back.hidden = false;
+    back.addEventListener("click", () => window.history.back());
+  }
+
   const toggle = document.getElementById("hub-theme-toggle");
+  const showThemeIcon = () => {
+    const svgs = toggle ? toggle.querySelectorAll("svg") : [];
+    // The first glyph names the active theme: sun in light, moon in dark.
+    svgs.forEach((svg, index) => {
+      svg.hidden = state.theme === "dark" ? index === 0 : index !== 0;
+    });
+    if (toggle) {
+      toggle.setAttribute(
+        "aria-label",
+        state.theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+      );
+    }
+  };
   if (toggle) {
     toggle.addEventListener("click", () => {
       state.theme = state.theme === "dark" ? "light" : "dark";
       store.write(state.theme);
+      showThemeIcon();
       renderForTheme(state, state.theme);
     });
+    showThemeIcon();
   }
 
   // Size the frame to its body. The frame is opaque, so the host cannot
@@ -239,6 +321,33 @@ function init() {
   const form = document.getElementById("hub-unlock-form");
   const password = document.getElementById("hub-password");
   const errorLine = document.getElementById("hub-unlock-error");
+  const remember = document.getElementById("hub-remember");
+  const passwords = passwordStore();
+  const unlock = async (secret) => {
+    const envelope = readJson("hub-envelope");
+    const ciphertext = readJson("hub-ciphertext");
+      if (!envelope || typeof ciphertext !== "string") {
+        errorLine.textContent = "This artifact has no unlock data.";
+        errorLine.hidden = false;
+        password.focus();
+        return false;
+      }
+    try {
+      // Nothing is fetched; the ciphertext already on the page decrypts
+      // locally, so connect-src stays closed.
+      state.unlocked = await decrypt(secret, envelope, ciphertext);
+      form.hidden = true;
+      const copy = form.closest(".hub-gate")?.querySelector(".hub-gate-copy");
+      if (copy) copy.hidden = true;
+      renderForTheme(state, state.theme);
+      return true;
+    } catch {
+      errorLine.textContent = "Wrong password. Nothing was sent anywhere.";
+      errorLine.hidden = false;
+      password.focus();
+      return false;
+    }
+  };
   if (form && password && errorLine) {
     password.addEventListener("input", () => {
       errorLine.textContent = "";
@@ -248,25 +357,30 @@ function init() {
       event.preventDefault();
       errorLine.textContent = "";
       errorLine.hidden = true;
-      const envelope = readJson("hub-envelope");
-      const ciphertext = readJson("hub-ciphertext");
-      if (!envelope || typeof ciphertext !== "string") {
-        errorLine.textContent = "This artifact has no unlock data.";
-        errorLine.hidden = false;
-        return;
+      const secret = password.value;
+      const ok = await unlock(secret);
+      if (remember && meta.project_id) {
+        if (ok && remember.checked) passwords.write(meta.project_id, secret);
+        else if (!remember.checked) passwords.remove(meta.project_id);
       }
-      try {
-        // Nothing is fetched; the ciphertext already on the page decrypts
-        // locally, so connect-src stays closed.
-        const plaintext = await decrypt(password.value, envelope, ciphertext);
-        state.unlocked = plaintext;
-        form.hidden = true;
-        renderForTheme(state, state.theme);
-      } catch {
-        errorLine.textContent = "Could not decrypt: check the password.";
-        errorLine.hidden = false;
-      }
+      password.value = "";
+      if (ok) password.blur();
     });
+    // A remembered password unlocks without asking again. A stale one
+    // fails silently back to the form.
+    if (meta.project_id) {
+      const saved = passwords.read(meta.project_id);
+      if (saved) {
+        if (remember) remember.checked = true;
+        unlock(saved).then((ok) => {
+          if (!ok) {
+            passwords.remove(meta.project_id);
+            password.value = "";
+            password.focus();
+          }
+        });
+      }
+    }
   }
 
   renderForTheme(state, state.theme);

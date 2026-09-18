@@ -80,10 +80,12 @@ a token, and behind a reverse proxy it receives the public address rather than
 the internal bind.
 
 Errors are RFC 9457 problem details. The public artifact route serves a host
-shell around a sandboxed frame: the shell owns the title, theme toggle, and
-version picker, and the frame runs authored content with scripts allowed but
+shell around a sandboxed frame: the shell owns the back button, title,
+version line, version picker, and theme toggle on the design tokens, and
+the frame runs authored content with scripts allowed but
 no network, storage, or same-origin access. For a protected artifact the
-shell shows an unlock form and decrypts in the browser. A public markdown
+shell shows a password gate with a ciphertext fingerprint and an optional
+device-local remember; it decrypts in the browser. A public markdown
 artifact renders in the page with tables, callouts, and diagrams, and any raw
 HTML in its source is escaped. Every page carries link-preview tags with a
 built-in card. Storage acts on sessions only,

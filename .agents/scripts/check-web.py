@@ -216,6 +216,7 @@ def main() -> int:
         errors.append("web/app.js: does not register the service worker")
 
     check_design_contract(errors, css, app_css)
+    check_first_party_syntax(errors)
 
     for error in dict.fromkeys(errors):
         print(f"web: {error}", file=sys.stderr)
@@ -223,6 +224,28 @@ def main() -> int:
         return 1
     print("web: static checks passed")
     return 0
+
+
+def check_first_party_syntax(errors: list[str]) -> None:
+    """Parse every first-party script with node when it exists.
+
+    The text scans above cannot catch a broken module, and a viewer that
+    fails to parse renders nothing. Vendored bundles are exempt: they are
+    pinned bytes reviewed at vendoring time. Absent node, this skips
+    cleanly like the crypto round trip does.
+    """
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        return
+    for path in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.mjs")):
+        result = subprocess.run(
+            [node, "--check", str(path)], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            errors.append(f"{path}: node cannot parse it ({result.stderr.strip()})")
 
 
 if __name__ == "__main__":

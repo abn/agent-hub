@@ -446,11 +446,13 @@ fn viewer_module_binds_the_frozen_shell_ids() {
     // viewer drives it through hub-version-select.
     for id in [
         "hub-frame",
+        "hub-back",
         "hub-theme-toggle",
         "hub-picker-wrap",
         "hub-version-select",
         "hub-unlock-form",
         "hub-password",
+        "hub-remember",
         "hub-unlock-error",
         "hub-meta",
         "hub-markdown-body",
@@ -518,9 +520,33 @@ fn viewer_module_renders_unlocks_and_themes() {
         "the picker navigates with ?version=N"
     );
     assert!(
-        VIEWER_JS.contains("Could not decrypt"),
+        VIEWER_JS.contains("Wrong password. Nothing was sent anywhere."),
         "a wrong password renders the error line"
     );
+    assert!(
+        VIEWER_JS.contains("hub-artifact-passwords")
+            && VIEWER_JS.contains("hub-back")
+            && VIEWER_JS.contains("history.back()"),
+        "remembered passwords and the back guard live in the viewer"
+    );
+    for value in [
+        "#F5F3EE",
+        "#141311",
+        "#1D1C19",
+        "#ECE8E0",
+        "#5C584F",
+        "#B3ADA2",
+        "#EDEAE3",
+        "#26241F",
+        "#E4E0D8",
+        "#2F2C26",
+        "max-width:640px",
+    ] {
+        assert!(
+            VIEWER_JS.contains(value),
+            "the frame mirror carries {value} from the tokens"
+        );
+    }
     assert!(
         VIEWER_JS.contains("addEventListener"),
         "the module binds behavior without inline scripts"
@@ -782,7 +808,11 @@ async fn protected_artifact_serves_the_locked_host_shell() {
         "the locked shell carries the unlock form"
     );
     assert!(
-        body.contains("encrypted"),
+        body.contains("hub-remember") && body.contains("hub-fingerprint"),
+        "the gate offers remember and names its fingerprint"
+    );
+    assert!(
+        body.contains("Encrypted artifact"),
         "the locked shell names its state"
     );
 }

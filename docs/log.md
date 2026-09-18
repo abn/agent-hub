@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, artifact viewer on the design foundation
+
+* **Update**: The public artifact page reuses the design tokens: warm
+  canvas, humanist type, a header with back button, title, version line,
+  picker, and theme icons, a foundation password gate with lock tile,
+  remember-me, and ciphertext fingerprint, and a prose baseline for
+  rendered markdown. Documented in the
+  [artifacts guide](usage/artifacts.md) and the
+  [human surface](architecture/human-surface.md).
+
 ## 2026-09-18, comments on artifacts
 
 * **Update**: Artifacts carry discussion with optional point or quote

@@ -69,7 +69,7 @@ fn get_with_host(uri: &str, host: &str) -> Request<Body> {
 }
 
 /// The exact host shell policy from the viewer contract.
-const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The exact frame policy from the viewer contract for one origin. It
 /// carries no `frame-ancestors`: the designed viewer nests it inside the
@@ -269,6 +269,35 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
     let body = text_body(response).await;
     assert!(body.contains("<h1>Report</h1>"), "the shell owns the title");
     assert!(body.contains("id=\"hub-theme-toggle\""));
+    assert!(
+        body.contains("id=\"hub-back\""),
+        "the shell owns a back button"
+    );
+    {
+        let toggle = body
+            .find("id=\"hub-theme-toggle\"")
+            .map(|start| &body[start..(start + 1200).min(body.len())])
+            .unwrap_or("");
+        let sun = toggle.find("<circle");
+        let moon = toggle.find("M 20 13A8");
+        assert!(
+            sun.is_some_and(|sun| moon.is_some_and(|moon| sun < moon)),
+            "the sun glyph leads the moon glyph"
+        );
+        assert!(
+            toggle.contains("aria-hidden=\"true\" hidden>"),
+            "the moon glyph starts hidden"
+        );
+    }
+    assert!(
+        body.contains("id=\"hub-meta-line\"") && body.contains("v1 · proj ·"),
+        "the shell names version, project, and age"
+    );
+    assert_eq!(
+        body.matches("id=\"hub-meta-line\"").count(),
+        1,
+        "the meta line renders exactly once"
+    );
     assert!(body.contains("id=\"hub-frame\""));
     assert!(
         body.contains("sandbox=\"allow-scripts\""),
@@ -286,7 +315,7 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
     );
     assert!(!body.contains("srcdoc"), "the shell has no srcdoc");
     assert!(
-        !body.contains("hub-picker-wrap"),
+        !body.contains("id=\"hub-picker-wrap\""),
         "a single version has no picker"
     );
     assert!(body.contains("id=\"hub-meta\""));
@@ -450,8 +479,10 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
         .expect("request");
     let body = text_body(response).await;
     assert!(
-        body.contains("font-family:system-ui") && body.contains("data-theme=\"light\""),
-        "the host chrome carries its own styles"
+        body.contains("<link rel=\"stylesheet\" href=\"/tokens.css\">")
+            && body.contains("var(--surface)")
+            && body.contains("data-theme=\"light\""),
+        "the host chrome reuses the design tokens"
     );
     assert!(
         body.contains("min-height:44px"),
@@ -462,8 +493,8 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
         "the frame has a styled no-JS minimum"
     );
     assert!(
-        body.contains(":focus-visible"),
-        "host controls show a focus ring"
+        !body.contains("outline:none"),
+        "host controls never kill the token focus ring"
     );
 }
 
@@ -649,11 +680,23 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     assert_eq!(csp(&response), HOST_CSP);
 
     let body = text_body(response).await;
-    assert!(body.contains("This artifact is encrypted"));
-    assert!(body.contains("Decryption happens in your browser"));
+    assert!(body.contains("Encrypted artifact"));
+    assert!(body.contains("Decrypted on your device"));
+    assert!(body.contains("hub-lock-tile"));
     assert!(body.contains("id=\"hub-unlock-form\""));
     assert!(body.contains("id=\"hub-password\""));
+    assert!(body.contains("id=\"hub-remember\""));
     assert!(body.contains("id=\"hub-unlock-error\""));
+    assert!(
+        body.contains("hub-lock-tile"),
+        "the gate shows its lock tile"
+    );
+    assert!(body.contains("id=\"hub-fingerprint\""));
+    assert!(
+        body.contains("sha256 ") && body.contains("ciphertext"),
+        "the fingerprint names algorithm and what the server holds"
+    );
+    assert!(body.contains("ciphertext"));
     assert!(body.contains("id=\"hub-envelope\""));
     assert!(body.contains("id=\"hub-ciphertext\""));
     assert!(body.contains("AES-256-GCM"));
@@ -666,10 +709,10 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
         "the shell must not carry any plaintext"
     );
     assert!(
-        !body.contains("hub-picker-wrap"),
+        !body.contains("id=\"hub-picker-wrap\""),
         "a protected artifact has no picker"
     );
-    assert!(!body.contains("hub-version-select"));
+    assert!(!body.contains("id=\"hub-version-select\""));
     assert!(body.contains("\"protected\":true"));
     assert!(body.contains("id=\"hub-versions\">null<"));
     assert!(body.contains("id=\"hub-markdown-body\">null<"));

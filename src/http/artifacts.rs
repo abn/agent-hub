@@ -585,7 +585,7 @@ pub async fn og_svg(
 
 /// The host shell policy: scripts only from the hub origin, no network, the
 /// artifact frame only from the hub origin, no inline scripts.
-const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The hub origin as the caller reached it, for the frame policy and the
 /// absolute preview URLs. Mirrors the scheme and host logic of the skill
@@ -781,6 +781,9 @@ fn reader_shell(
         "kind": artifact.kind,
         "version": shown,
         "protected": false,
+        "project_id": artifact.project_id,
+        "created_at": artifact.created_at,
+        "size_bytes": artifact.size_bytes,
     }));
     let version_blob = if with_history {
         let list: Vec<serde_json::Value> = versions
@@ -806,11 +809,17 @@ fn reader_shell(
         "null".to_string()
     };
     let thread_html = thread_html(thread, shown);
+    let meta_line = format!(
+        "<p id=\"hub-meta-line\" class=\"mono\" title=\"{}\">v{shown} · {} · {}</p>\n",
+        escape_html(&artifact.created_at),
+        escape_html(&artifact.project_id),
+        escape_html(&relative_age(&artifact.created_at)),
+    );
+    let header = header_html(&title, &meta_line, &picker);
     format!(
         "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
-          <body>\n<header>\n<h1>{title}</h1>\n{picker}\
-          <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n{frame}\
-          {thread_html}</main>\n\
+         <body>\n{header}<main>\n{frame}\
+         {thread_html}</main>\n\
          <script type=\"application/json\" id=\"hub-meta\">{meta}</script>\n\
          <script type=\"application/json\" id=\"hub-versions\">{version_blob}</script>\n\
          <script type=\"application/json\" id=\"hub-markdown-body\">{markdown_blob}</script>\n\
@@ -836,6 +845,9 @@ fn locked_shell(
         "kind": artifact.kind,
         "version": shown,
         "protected": true,
+        "project_id": artifact.project_id,
+        "created_at": artifact.created_at,
+        "size_bytes": artifact.size_bytes,
     }));
     let envelope = artifact
         .envelope
@@ -843,18 +855,36 @@ fn locked_shell(
         .map(script_json)
         .unwrap_or_else(|| "null".to_string());
     let encoded = script_json(&serde_json::Value::String(ciphertext.to_string()));
+    let fingerprint = artifact
+        .envelope
+        .as_ref()
+        .and_then(|envelope| envelope.get("salt"))
+        .and_then(serde_json::Value::as_str)
+        .map(|salt| {
+            format!(
+                "sha256 {} · {} ciphertext",
+                salt_fingerprint(salt),
+                format_size(ciphertext.len())
+            )
+        })
+        .unwrap_or_else(|| format!("{} ciphertext", format_size(ciphertext.len())));
+    let fingerprint = escape_html(&fingerprint);
+    let header = header_html(&title, "", "");
     format!(
         "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
-         <body>\n<header>\n<h1>{title}</h1>\n\
-         <button id=\"hub-theme-toggle\" type=\"button\">Toggle theme</button>\n</header>\n<main>\n\
-         <p>This artifact is encrypted. The server does not hold its plaintext. \
-         Decryption happens in your browser with the password the sender shared.</p>\n\
+         <body>\n{header}<main>\n<div class=\"hub-gate\">\n\
+         <div class=\"hub-lock-tile\">{lock}</div>\n\
+         <h2>Encrypted artifact</h2>\n\
+         <p class=\"hub-gate-copy\">Decrypted on your device. The server stores ciphertext only and never sees the password.</p>\n\
          <form id=\"hub-unlock-form\">\n\
          <label for=\"hub-password\">Password</label>\n\
          <input type=\"text\" name=\"username\" value=\"artifact\" autocomplete=\"username\" hidden>\n\
-         <input id=\"hub-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\">\n\
+         <input id=\"hub-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Artifact password\">\n\
+         <label class=\"hub-remember\"><input id=\"hub-remember\" type=\"checkbox\" name=\"remember\"> Remember on this device</label>\n\
          <p id=\"hub-unlock-error\" hidden></p>\n\
          <button type=\"submit\">Unlock</button>\n</form>\n\
+         <p id=\"hub-fingerprint\" class=\"mono\">{fingerprint}</p>\n\
+         </div>\n\
          <iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\"></iframe>\n</main>\n\
          <script type=\"application/json\" id=\"hub-meta\">{meta}</script>\n\
          <script type=\"application/json\" id=\"hub-versions\">null</script>\n\
@@ -863,11 +893,13 @@ fn locked_shell(
          <script type=\"application/json\" id=\"hub-ciphertext\">{encoded}</script>\n\
          </body>\n</html>\n",
         head = shell_head(artifact, shown, pinned, origin),
+        lock = LOCK_SVG,
     )
 }
 
-/// The head shared by both shell variants: preview meta tags plus the vendor
-/// and viewer scripts. No inline scripts, no stylesheets.
+/// The head shared by both shell variants: preview meta tags, the design
+/// tokens reused verbatim, a small chrome layer on those tokens, plus the
+/// vendor and viewer scripts. No inline scripts.
 fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> String {
     let title = escape_html(&artifact.title);
     let description = escape_html(&artifact.description);
@@ -884,24 +916,44 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta property=\"og:image\" content=\"{origin}/artifacts/{id}/og.svg{pinned}\">\n\
          <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
+         <link rel=\"stylesheet\" href=\"/tokens.css\">\n\
          <style>\n\
-         :root{{color-scheme:light dark}}\n\
-         html,body{{margin:0;padding:0}}\n\
-         body{{font-family:system-ui,-apple-system,\"Segoe UI\",sans-serif;line-height:1.5;background:#ffffff;color:#111111}}\n\
-         html[data-theme=\"dark\"] body{{background:#141311;color:#ece8e0}}\n\
-         body>header{{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem .75rem;border-bottom:1px solid #888888}}\n\
-         body>header h1{{font-size:1rem;font-weight:600;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
-         body>header button,body>header select,body>header input{{font:inherit;font-size:.85rem;padding:.4rem .6rem;min-height:44px}}\n\
-         button:focus-visible,select:focus-visible,input:focus-visible{{outline:2px solid #4d7cfe;outline-offset:2px}}\n\
+         body>header{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap;padding:var(--s-2) var(--s-4);background:var(--surface);border-bottom:1px solid var(--line)}}\n\
+         #hub-back{{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;border-radius:var(--r-1);color:var(--ink);cursor:pointer}}\n\
+         #hub-back[hidden]{{display:none}}\n\
+         #hub-back svg{{width:20px;height:20px}}\n\
+         .hub-titleblock{{flex:1;min-width:0}}\n\
+         body>header h1{{font-size:var(--t-15);font-weight:600;line-height:1.3;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
+         #hub-meta-line{{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
+         #hub-theme-toggle{{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;border-radius:var(--r-1);color:var(--ink-2);cursor:pointer}}\n\
+         #hub-theme-toggle svg{{width:18px;height:18px}}\n\
+         #hub-version-select{{font:inherit;min-height:36px;padding:.25rem .5rem;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink)}}\n\
+         #hub-picker-wrap{{display:flex;align-items:center;gap:var(--s-2);font-size:var(--t-13);color:var(--ink-2)}}\n\
          main{{padding:0}}\n\
-         main>p,main>form{{margin:1rem;max-width:44rem}}\n\
-          iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
-          section#hub-comments{{margin:1rem;max-width:44rem}}\n\
-          section#hub-comments ol{{list-style:none;margin:0;padding:0}}\n\
-          section#hub-comments li{{border-top:1px solid #888888;padding:.5rem 0}}\n\
-          .hub-comment-meta{{font-size:.8rem;margin:0 0 .25rem}}\n\
-          .hub-comment-body{{margin:0 0 .25rem;overflow-wrap:anywhere}}\n\
-          .hub-comment-anchor{{font-size:.8rem;margin:0}}\n\
+         iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
+         .hub-gate{{margin:0 auto;max-width:40rem;padding:var(--s-6) var(--s-4)}}\n\
+         .hub-lock-tile{{width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--surface-2);border-radius:var(--r-2)}}\n\
+         .hub-lock-tile svg{{width:24px;height:24px}}\n\
+         .hub-gate h2{{font-size:var(--t-22);font-weight:600;margin:var(--s-4) 0 var(--s-2)}}\n\
+         .hub-gate p{{font-size:var(--t-15);line-height:1.45;color:var(--ink-2);margin:0 0 var(--s-3)}}\n\
+         #hub-unlock-form label{{display:block;font-size:var(--t-13);margin:0 0 var(--s-2)}}\n\
+         #hub-password{{width:100%;min-height:48px;font-size:17px;padding:0 var(--s-3);border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);box-sizing:border-box}}\n\
+         .hub-remember{{display:flex;align-items:center;gap:var(--s-2);margin:var(--s-3) 0;font-size:var(--t-13);color:var(--ink-2)}}\n\
+         .hub-remember input{{width:20px;height:20px;accent-color:var(--accent)}}\n\
+         #hub-unlock-form button[type=\"submit\"]{{width:100%;min-height:48px;font-size:17px;font-weight:600;border:0;border-radius:var(--r-1);background:var(--ink);color:var(--ink-inverse);cursor:pointer}}\n\
+         #hub-unlock-error{{font-size:12px;color:var(--danger)}}\n\
+         #hub-fingerprint{{font-family:var(--font-mono);font-size:12px;color:var(--ink-3)}}\n\
+         section#hub-comments{{margin:var(--s-4) auto;max-width:40rem;padding:0 var(--s-4)}}\n\
+         section#hub-comments h2{{font-size:var(--t-17);font-weight:600}}\n\
+         section#hub-comments ol{{list-style:none;margin:0;padding:0}}\n\
+         section#hub-comments li{{border-top:1px solid var(--line);padding:var(--s-3) 0}}\n\
+         .hub-comment-meta{{font-size:var(--t-13);color:var(--ink-3);margin:0 0 var(--s-2)}}\n\
+         .hub-comment-body{{margin:0 0 var(--s-2);overflow-wrap:anywhere}}\n\
+         .hub-comment-anchor{{font-size:var(--t-13);color:var(--ink-3);margin:0}}\n\
+         @media (pointer:coarse){{\n\
+         #hub-back,#hub-theme-toggle{{width:44px;height:44px}}\n\
+         #hub-version-select{{min-height:44px}}\n\
+         }}\n\
          </style>\n\
          <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
@@ -937,13 +989,14 @@ fn thread_html(thread: &[Comment], shown: i64) -> String {
     let mut items = String::new();
     for comment in &visible {
         let author = escape_html(&comment.author);
-        let time = escape_html(&comment.created_at);
+        let time = escape_html(&relative_age(&comment.created_at));
+        let full_time = escape_html(&comment.created_at);
         let body = escape_html(&comment.body);
         let state = if comment.done { "Resolved" } else { "Open" };
         let marker = anchor_marker(comment);
         let id = escape_html(&comment.id);
         items.push_str(&format!(
-            "<li data-comment-id=\"{id}\">\n<p class=\"hub-comment-meta\">{author} · {time} · {state}</p>\n\
+            "<li data-comment-id=\"{id}\">\n<p class=\"hub-comment-meta\">{author} · <span title=\"{full_time}\">{time}</span> · {state}</p>\n\
              <p class=\"hub-comment-body\">{body}</p>\n{marker}</li>\n"
         ));
     }
@@ -980,6 +1033,83 @@ fn anchor_marker(comment: &Comment) -> String {
     format!(
         "<p class=\"hub-comment-anchor\">{}</p>\n",
         escape_html(&text)
+    )
+}
+
+/// Inline line glyphs for the viewer chrome: 1.8px stroke, currentColor.
+/// The space after each moveto renders identically and keeps `M` plus
+/// digits from reading as something else.
+const CHEVRON_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M 15 5l-7 7 7 7\"/></svg>";
+const SUN_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M 12 2v2M 12 20v2M 4.9 4.9l1.4 1.4M 17.7 17.7l1.4 1.4M 2 12h2M 20 12h2M 4.9 19.1l1.4-1.4M 17.7 6.3l1.4-1.4\"/></svg>";
+const MOON_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" hidden><path d=\"M 20 13A8 8 0 1 1 11 4a6.5 6.5 0 0 0 9 9z\"/></svg>";
+const LOCK_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" aria-hidden=\"true\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"9\" rx=\"2\"/><path d=\"M 8 11V8a4 4 0 0 1 8 0v3\"/></svg>";
+
+/// The viewer header: back, title with its meta line, then the controls.
+/// The viewer shows which theme is active and hides the back button when
+/// there is no history to go back to.
+fn header_html(title: &str, meta_html: &str, controls: &str) -> String {
+    format!(
+        "<header>\n<button id=\"hub-back\" type=\"button\" aria-label=\"Back\" hidden>{chevron}</button>\n\
+         <div class=\"hub-titleblock\">\n<h1>{title}</h1>\n{meta_html}</div>\n{controls}\
+         <button id=\"hub-theme-toggle\" type=\"button\" aria-label=\"Toggle theme\">{sun}{moon}</button>\n</header>\n",
+        chevron = CHEVRON_SVG,
+        sun = SUN_SVG,
+        moon = MOON_SVG,
+    )
+}
+
+/// Human age of an RFC 3339 timestamp: minutes, hours, days, else the date.
+fn relative_age(created_at: &str) -> String {
+    let parsed =
+        time::OffsetDateTime::parse(created_at, &time::format_description::well_known::Rfc3339);
+    let now = time::OffsetDateTime::now_utc();
+    match parsed {
+        Ok(then) => {
+            let seconds = (now - then).whole_seconds().max(0);
+            if seconds < 3600 {
+                format!("{}m", (seconds.max(1) + 59) / 60)
+            } else if seconds < 172800 {
+                format!("{}h", seconds / 3600)
+            } else if seconds < 2592000 {
+                format!("{}d", seconds / 86400)
+            } else {
+                then.date().to_string()
+            }
+        }
+        Err(_) => created_at.to_string(),
+    }
+}
+
+/// Short size for the fingerprint line: bytes, kilobytes, or megabytes.
+fn format_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        let kb = bytes as f64 / 1024.0;
+        if kb.fract() == 0.0 {
+            format!("{kb:.0} KB")
+        } else {
+            format!("{kb:.1} KB")
+        }
+    } else {
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        if mb.fract() == 0.0 {
+            format!("{mb:.0} MB")
+        } else {
+            format!("{mb:.1} MB")
+        }
+    }
+}
+
+/// Short identifier of the key-derivation salt for the fingerprint line:
+/// the first and last two bytes as hex. The salt is derivation identity,
+/// not a secret.
+fn salt_fingerprint(salt_b64: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(salt_b64.as_bytes());
+    format!(
+        "{:02x}{:02x}…{:02x}{:02x}",
+        digest[0], digest[1], digest[30], digest[31]
     )
 }
 
@@ -1061,4 +1191,43 @@ fn script_json(value: &serde_json::Value) -> String {
         .replace('&', "\\u0026")
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_size, relative_age, salt_fingerprint};
+
+    #[test]
+    fn sizes_read_as_bytes_kilobytes_and_megabytes() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(18), "18 B");
+        assert_eq!(format_size(18432), "18 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(2 * 1024 * 1024), "2 MB");
+    }
+
+    #[test]
+    fn ages_read_as_minutes_hours_days_and_dates() {
+        let now = time::OffsetDateTime::now_utc();
+        let stamp = |seconds: i64| {
+            (now - time::Duration::seconds(seconds))
+                .format(&time::format_description::well_known::Rfc3339)
+                .expect("format")
+        };
+        assert_eq!(relative_age(&stamp(30)), "1m");
+        assert_eq!(relative_age(&stamp(3000)), "50m");
+        assert_eq!(relative_age(&stamp(90000)), "25h");
+        assert_eq!(relative_age(&stamp(900000)), "10d");
+        assert_eq!(relative_age("2001-02-03T04:05:06Z"), "2001-02-03");
+        assert_eq!(relative_age("not a time"), "not a time");
+    }
+
+    #[test]
+    fn fingerprints_name_the_salt_ends() {
+        let fingerprint = salt_fingerprint("c2FsdA==");
+        assert_eq!(fingerprint.len(), 4 + 3 + 4);
+        assert!(fingerprint.contains('…'));
+        assert_eq!(fingerprint, salt_fingerprint("c2FsdA=="));
+        assert_ne!(fingerprint, salt_fingerprint("c2FsdB=="));
+    }
 }

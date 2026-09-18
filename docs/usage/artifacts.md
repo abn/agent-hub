@@ -96,11 +96,13 @@ state.
 
 A protected artifact is encrypted in the client before upload. The server
 stores only the ciphertext and an envelope (`{alg, kdf, iterations, salt, iv}`)
-and never sees the plaintext. Opening the page shows an unlock form; the
-browser decrypts with the password and renders the result inside the same
-sandboxed frame. Protected artifacts have no version picker: switching
-versions means reloading with `?version=N` and entering the password again.
-Share the URL and the password through different channels.
+and never sees the plaintext. Opening the page shows a password gate with the
+ciphertext fingerprint; the browser decrypts with the password and renders
+the result in the same sandboxed frame. A remembered password unlocks again
+without asking and stays on the device. Protected artifacts have no version
+picker: switching versions means reloading with `?version=N` and entering
+the password again. Share the URL and the password through
+different channels.
 
 ## Comments
 
