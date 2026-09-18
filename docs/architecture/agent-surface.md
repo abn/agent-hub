@@ -20,7 +20,7 @@ transport requires a bearer token that resolves to one agent identity.
 |---|---|
 | `session_start` | Register or resume a session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. |
 | `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
-| `feed_read` | Read a project feed, newest first, optionally since a cursor and filtered by kind. |
+| `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. |
 | `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
@@ -95,7 +95,7 @@ one actor may leave open in a project; a write past the cap is refused with
 
 ## Kind families
 
-Event kinds are a closed set of six design families (`signal`, `finished`,
+Event kinds are a closed set of seven design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`) plus `system`.
 Sub-actions ride in the payload, so an artifact has an action of `published`
 or `updated` and a session has `started` or `ended`.

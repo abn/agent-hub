@@ -13,8 +13,10 @@ mobile-first PWA served as static assets from the same binary. The feed,
 session, inbox, home, artifact, prune, search, and identity routes ship, along
 with the installable PWA shell and its screens: Home, Inbox, Project feed,
 Artifacts and viewer, Sessions, Storage, Search, and Settings with the Agents
-and access section, a session detail view with the brain tree, and project
-deletion under Settings. The binary serves the REST API, the PWA, and the MCP
+and access section, a session detail view, and project deletion under
+Settings. The session detail view lists brain keys and files as a flat list
+today; a tree with expand, collapse, and keyboard navigation is intended
+design, not yet shipped. The binary serves the REST API, the PWA, and the MCP
 endpoint on one listener in one process, so the per-session write lock covers
 every writer and the prune sweeper always runs.
 
@@ -29,7 +31,7 @@ POST   /api/v1/projects
 DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
-GET    /api/v1/inbox?status=&limit=
+GET    /api/v1/inbox?status=&project=&limit=
 GET    /api/v1/stream
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
@@ -55,10 +57,12 @@ DELETE /api/v1/artifacts/:id/comments/:commentId
 GET    /api/v1/storage
 DELETE /api/v1/storage/sessions/:id
 POST   /api/v1/prune/undo/:token
-GET    /api/v1/search?q=&scope=&type=
+GET    /api/v1/search?q=&scope=&project=&type=&limit=
 GET    /healthz
 GET    /readyz
 GET    /artifacts/:id
+GET    /artifacts/:id/frame
+GET    /artifacts/:id/og.svg
 GET    /SKILL.md
 ```
 
@@ -97,7 +101,9 @@ whole project is the destructive endpoint under projects.
 The interface follows the design foundation, whose tokens, type, spacing,
 states, and copy are final. It installs to a phone home screen and works
 equally well on desktop. Mobile is primary, with a four-tab bar (Home, Inbox,
-Projects, Search); desktop adds a top bar and a list plus detail layout.
+Projects, Search); desktop adds a top bar and shows the same single-column
+screens. A desktop list plus detail layout is intended design, not yet
+shipped.
 
 | Screen | Purpose |
 |---|---|
@@ -105,10 +111,10 @@ Projects, Search); desktop adds a top bar and a list plus detail layout.
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
-| Sessions | Sessions per project, drilling into the brain tree and audit log, with end and prune actions. |
+| Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log are intended design, not yet shipped. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind, with the reversible prune actions for sessions. |
-| Project settings | Project fields, artifact password policy, reserved retention hints, and deletion. |
+| Project settings | Deletion ships, under the global Settings screen. A dedicated Project settings screen with project fields, artifact password policy, and reserved retention hints is intended design, not yet shipped. |
 
 Agent and access management lives under Settings, not a tab. It lists agents
 with their trust level, creates an agent and its personal space, promotes or
@@ -148,9 +154,10 @@ window, then committed.
 
 The design carries hard invariants: no emoji, WCAG AA in both themes, a 12px
 UI text floor, 44px tap targets, a visible focus ring, a full keyboard path,
-no colour-only meaning, and swipe gestures that are always non-destructive and
-always have a tap equivalent. See the [human interface](../design/human-interface.md)
-for the tokens and rules.
+and no colour-only meaning. Swipe gestures that are always non-destructive and
+always have a tap equivalent are intended design, not yet shipped; no swipe or
+touch gesture exists today. See the
+[human interface](../design/human-interface.md) for the tokens and rules.
 
 ## Auth
 

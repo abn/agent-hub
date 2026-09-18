@@ -10,9 +10,11 @@ status: draft
 
 The human surface is a calm mailroom for the operator's agents: quiet by
 default, one step louder when something waits, never alarming. This page
-records the design system behind it. The installable PWA shell, its eight
-screens, the Agents and access section under Settings, session detail, project
-deletion, and opt-in inbox notifications ship.
+records the design system behind it. The installable PWA shell, its screens,
+the Agents and access section under Settings, session detail, project
+deletion, and opt-in inbox notifications ship. Project settings as its own
+screen, an explicit read state, swipe gestures, and a desktop list plus detail
+layout are intended design, not yet shipped.
 
 ## Tokens
 
@@ -41,21 +43,26 @@ CDN.
 ## Screens
 
 Eight screens: Home, Inbox, Project feed, Artifacts and viewer, Sessions and
-session, Search, Storage and prune, Project settings. Agent and access
-management sits under Project settings. Mobile is primary with a four tab bar;
-desktop adds a top bar and a list plus detail layout.
+session, Search, Storage and prune, Project settings. Project settings is
+intended design, not yet shipped; agent and access management ships today as a
+section of the global Settings screen rather than under Project settings.
+Mobile is primary with a four tab bar; a desktop list plus detail layout is
+intended design, not yet shipped, and desktop today shows the same
+single-column screens with a top bar.
 
 ## Interaction rules
 
 - Every verb is reachable in two taps from Home: read, answer, approve, prune.
 - Action items are inline in the Inbox as the first group, above unread, and
   grouped by actor within that group.
-- Read is explicit, by opening an item or a swipe; never scroll-past.
+- Read is explicit, by opening an item or a swipe; never scroll-past. This is
+  intended design, not yet shipped: nothing marks an item read today.
 - Feeds are grouped by day, with kind filters as chips.
 - Prune is confirmed in a dialog, then reversible for a short window, then
   committed.
 - Swipes are first-class on mobile, never destructive, and always have a tap
-  equivalent.
+  equivalent. This is intended design, not yet shipped: no swipe gestures
+  exist today.
 
 ## Alert hierarchy
 

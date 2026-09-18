@@ -14,8 +14,9 @@ covering the project's public design, architecture, decisions, and
 contribution guidance. It is maintained to reflect status quo as the project
 evolves. The working specification is held outside this bundle.
 
-The hub is an early work in progress: the binary skeleton and its packaging
-exist, and most features are still intended design. Each page says which it is.
+The hub is an early work in progress: the core surface ships (the feed,
+session brains, the inbox, artifacts, search, and per-agent identity), and
+some features remain intended design. Each page says which it is.
 
 ## Getting started
 

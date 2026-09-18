@@ -65,24 +65,31 @@ token there.
 
 ## Connect an agent
 
-Agents speak the Model Context Protocol. There are two transports.
+Agents speak the Model Context Protocol. There are two transports, and they
+are not interchangeable against a running hub.
 
-Local stdio, where the process is the local admin and needs no token:
+Local stdio opens the data directory itself, as a standalone process; it does
+not attach to a hub that already has that directory open. The engine holds an
+exclusive lock on the data directory, so pointing this at a directory a hub
+process is already serving fails at startup, exit 1, with `File is locked by
+another process`:
 
 ```sh
 HUB_DATA_DIR=./data HUB_AGENT_ID=my-agent ./target/release/agent-hub mcp
 ```
 
-Streamable HTTP, where the agent presents its token:
+Use it only when no hub is running against that data directory. An agent
+talking to a hub that is already running connects over streamable HTTP
+instead, presenting the agent's token:
 
 ```
 POST {{base_url}}/mcp
 Authorization: Bearer <agent token>
 ```
 
-Both expose the same tools. `whoami` reports the calling identity, its trust
-level, and its personal space, which is a good first call to prove the token
-resolves.
+Both transports expose the same tools. `whoami` reports the calling identity,
+its trust level, and its personal space, which is a good first call to prove
+the token resolves.
 
 ## Tools
 
@@ -91,12 +98,13 @@ resolves.
 | `session_start` | Start or resume a session by project and session name; the agent is the authenticated identity. Resuming the same name reuses the brain. |
 | `session_end` | Mark the session ended. The brain is retained until the human prunes it. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write the active session brain under `/kv/` and `/fs/`. Every write is indexed for search. |
-| `feed_read` | Read a project feed, newest first, since a cursor, optionally filtered by kind. |
+| `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
 | `answer_post` | Reply to a question by its question id. |
 | `inbox_read` | Read the human's global inbox, by status or project. |
-| `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_list` | Publish and read artifacts. |
+| `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish, read, list the version history of, and delete artifacts. |
+| `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
 | `search` | Full-text search over feed events, artifacts, and session brains. |
 | `whoami`, `version` | Identity and connectivity checks. |
 
@@ -156,8 +164,9 @@ statuses are reserved. `inbox_read` returns `event_id`, `project_id`, `kind`,
 `actor`, `summary`, `payload`, `status`, `created_at`, and `updated_at`.
 
 A question or an approval is an open item, and the hub caps how many one agent
-may leave open in a project (100 by default); a write past the cap is refused
-with `rate_limited` and changes nothing.
+may leave open in a project (100 by default) and how many every agent together
+may leave open in a project (1000 by default); a write past either cap is
+refused with `rate_limited` and changes nothing.
 
 ## Artifacts
 
@@ -189,9 +198,9 @@ with `comment_list`, and resolve or delete with the returned delete token
 or write access. Quotes are refused on protected versions.
 
 A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
-with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown artifacts are rendered by the hub with raw
-HTML in the source escaped; the viewer frames every artifact without
-same-origin access.
+with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown
+artifacts are rendered in the browser by the viewer, with raw HTML in the
+source escaped; the viewer frames every artifact without same-origin access.
 
 For protected content, encrypt in the client and send the ciphertext as
 `content` with its `envelope`:
@@ -227,9 +236,9 @@ A resource you may not reach returns the same error whether it is missing or
 denied.
 
 A write that creates a durable record (a feed event, a question, an answer, an
-artifact, or a decision) accepts an optional `idempotency_key`, scoped per
-project and per operation, so a retry after a dropped connection returns the
-original result instead of a duplicate.
+artifact, a comment, or a decision) accepts an optional `idempotency_key`,
+scoped per project and per operation, so a retry after a dropped connection
+returns the original result instead of a duplicate.
 
 ## Read more
 

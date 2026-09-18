@@ -4,6 +4,26 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, corrections against shipped behaviour
+
+* **Update**: The served skill guide now says plainly that local stdio opens
+  the data directory itself as a standalone process, cannot attach to a data
+  directory a hub process already has open, and fails at startup on the
+  engine's exclusive lock; an agent that wants a running hub uses streamable
+  HTTP. It also fixes the feed read order description, states that markdown
+  artifacts render in the browser rather than on the hub, documents the
+  per-project open inbox cap next to the per-agent one, lists every
+  registered tool including the version, deletion, and comment tools, and
+  notes that a comment also accepts an idempotency key.
+* **Update**: The README and the wiki index no longer claim the session
+  detail view and the embedded tailnet are still intended design; both ship.
+* **Update**: The human interface and human surface pages now mark swipe
+  gestures, an explicit read state, the brain tree, the desktop list plus
+  detail layout, and a dedicated project settings screen as intended design,
+  not yet shipped, matching what the PWA actually renders today.
+* **Update**: The agent surface page's event kind family count and the human
+  surface page's route table are corrected to match the code.
+
 ## 2026-09-18, artifact viewer on the design foundation
 
 * **Update**: The public artifact page reuses the design tokens: warm
@@ -263,7 +283,7 @@ software release notes and the repository changelog.
   render only in a sandboxed frame, and the static web check runs as part of
   the gate.
 * **Note**: The Agents and access surface, the session detail view, and project
-  deletion are still intended design; they land with the identity wave.
+  deletion are still intended design; they land in a later change.
 
 ## 2026-09-16, search
 
