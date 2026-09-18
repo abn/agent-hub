@@ -82,6 +82,13 @@ session-bound: it survives same-session compaction and resume of the same
 named session, and it is removed only when the human prunes the session.
 Durable knowledge leaves it only by explicit promotion.
 
+A brain is written only through its owner's active session, and read by anyone
+who may read the session's project. The single writer is what keeps one working
+state coherent; the open read is what lets a fleet of agents see what a sibling
+is working from. Reads never create a brain file, so a session that wrote
+nothing leaves nothing on disk, and a pruned session is unreadable from the
+moment it is marked.
+
 A recovery handoff document is a convention on a well-known path inside the
 brain, not a separate subsystem.
 

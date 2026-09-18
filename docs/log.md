@@ -4,6 +4,24 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, reading another session's brain
+
+* **Update**: `brain_get` and `brain_list` take an optional `session`, either
+  `{session_id}` or `{agent, name}` with a `project_id`, and read that
+  session's brain. Read access to the target's project is the whole rule, and
+  reading needs no active session of the caller's own. Documented in the
+  [agent surface](architecture/agent-surface.md), the
+  [data model](architecture/data-model.md), and the served skill contract.
+* **Note**: Writes are unchanged and stay with the owner's active session:
+  `brain_put` and `brain_delete` refuse a `session` argument, because one
+  working-state file has one writer. Knowledge meant for another agent belongs
+  in the project knowledge base.
+* **Note**: A read never creates a brain file, and a session the human has
+  pruned reads as `not_found` from the moment it is marked. An agent without
+  access cannot tell a session it may not read from one that does not exist.
+* **Update**: `search` takes `session_id` to narrow results to one session's
+  brain content, under the same project confinement as every other search.
+
 ## 2026-09-18, a hook reads the project knowledge base
 
 * **Update**: The served skill contract shows a one-shot call reading a

@@ -51,11 +51,11 @@ and session-bound work goes through the proxy.
 | `comment_list` | List an artifact's comments. |
 | `comment_resolve` | Mark a comment done or reopen it. |
 | `comment_delete` | Delete a comment. |
-| `brain_get` | Read a path from the active session brain, or from a project knowledge base. |
+| `brain_get` | Read a path from a session brain, the caller's own or another named by `session`, or from a project knowledge base. |
 | `brain_put` | Write a path into the active session brain, or a page into a project knowledge base. |
 | `brain_list` | List a store's entries, each with its type and size. |
 | `brain_delete` | Remove a path from either store. |
-| `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project or global. |
+| `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
 | `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
 
@@ -76,14 +76,35 @@ takes that value as `question_id`. An inbox item exposes the same id as its
 `event_id`, so a client can answer from either the post response or a read.
 
 The brain tools reach two stores through one `store` argument. `"session"` is
-the active session's own brain, the working state that is pruned with the
-session; a session cannot reach another session's brain. `"project"` is the
+a session's own brain, the working state that is pruned with the session.
+`"project"` is the
 project knowledge base, the durable store every agent with project write
 shares, selected by `project_id` and defaulting to the active session's
 project. The argument is required on `brain_put` and `brain_delete`, because a
 write that lands in the wrong store is silent either way, and defaults to
 `"session"` on the reads, where a wrong guess is a `not_found` the caller
 recovers from.
+
+`brain_get` and `brain_list` take an optional `session` naming another session
+to read, either `{session_id}` or `{agent, name}` with a `project_id` that
+defaults to the active session's project; omitted, it is the active session.
+Read access to the target's project is the whole rule, which in the default
+trusted posture means every agent reads every session. Reading another session
+touches neither the caller's active session nor its existence, so a caller that
+never started one still reads. A read opens no file that is not already there,
+and a session the human has pruned is `not_found` from the moment it is marked.
+Once the undo window has passed the row is gone, so the hub can no longer tell
+which project it belonged to, and it answers as it does for any session that
+never existed. An agent without access cannot tell a session it may not
+read from one that does not exist: both are the same `forbidden`.
+
+Writes stay with the owner's active session. `brain_put` and `brain_delete`
+refuse a `session` argument with an `invalid_argument`, because one
+working-state file has one writer and two would clobber each other. Knowledge
+meant for another agent belongs in the project knowledge base.
+
+`search` takes `session_id` to narrow results to one session's brain content,
+under the same project confinement as every other search.
 
 Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A knowledge base holds pages only, so a `/kv/` path there is an

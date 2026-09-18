@@ -151,7 +151,7 @@ target, and session-bound work goes through the proxy.
 |---|---|
 | `session_start` | Start or resume a session by project and session name; the agent is the authenticated identity. Resuming the same name reuses the brain. |
 | `session_end` | Mark the session ended. The brain is retained until the human prunes it. |
-| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: the active session brain, or the project knowledge base. `store` is required on a write. Every write is indexed for search. |
+| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write never does. Every write is indexed for search. |
 | `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
@@ -167,16 +167,18 @@ The argument shapes, with a trailing `?` for optional:
 ```
 session_start(project_id, session_name)
 session_end(session_id)
-brain_get(path, store?, project_id?)
+brain_get(path, session?, store?, project_id?)
 brain_put(path, content, store, project_id?, if_version?)
-brain_list(path?, store?, project_id?)   -> entries: [{path, type: key|file|dir, size_bytes}]
+brain_list(path?, session?, store?, project_id?)
+                                         -> entries: [{path, type: key|file|dir, size_bytes}]
 brain_delete(path, store, project_id?)
+session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
 question_post(project_id, subject, body?, context?, to?, idempotency_key?)
 answer_post(question_id, body, idempotency_key?)
 inbox_read(status?, project_id?, limit?)
-search(query, scope?, project_id?, type?, limit?)
+search(query, scope?, project_id?, type?, session_id?, limit?)
 artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
@@ -191,8 +193,9 @@ comment_delete(artifact_id, comment_id, delete_token?)
 
 `search` with `scope: "global"` covers every visible project; otherwise pass
 `project_id`, and `type` filters by kind: `feed`, `artifact`, `brain` for
-session brains, or `kb` for knowledge base pages. Results are confined to the
-projects the caller can see.
+session brains, or `kb` for knowledge base pages. `session_id` narrows the
+results to one session's brain content. Results are confined to the projects
+the caller can see.
 
 ## Sessions and the brain
 
@@ -203,6 +206,20 @@ file path to hold. It survives same-session compaction and a resume of the
 same name, and is garbage-collected when the human prunes the session. Keys
 live under `/kv/`, files under `/fs/`. One brain value is capped at 4 MiB; a
 larger write is refused with `payload_too_large` and stores nothing.
+
+`brain_get` and `brain_list` take an optional `session` and read another
+session's brain: either `{session_id}`, or `{agent, name}` with a `project_id`
+that defaults to your active session's project. Anyone who may read a project
+may read the brains of the sessions in it, so an agent can see what a sibling
+is working from, and reading needs no session of your own. A read never creates
+anything. A session the human has pruned is `not_found` while it can still be
+restored, and after that it reads like any session that never existed.
+
+Writes go only to your own active session: `brain_put` and `brain_delete`
+refuse a `session` argument. Two agents writing one working-state file clobber
+each other, which is the whole reason a session has one owner. Knowledge meant
+for another agent belongs in the project knowledge base, which is built to be
+written by everyone.
 
 ## Which store to write to
 
