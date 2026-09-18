@@ -375,3 +375,74 @@ fn approval_signal_is_refused_at_the_inbox_cap() {
         "the cap refuses a second open approval"
     );
 }
+
+/// Seed one finished event and let the human read it, before the hub starts.
+///
+/// Only one process may hold the engine, so the human's side of this happens
+/// in the test rather than over the REST surface of a running hub.
+fn seed_read_report(data_dir: &Path, summary: &str) -> String {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build runtime");
+    runtime.block_on(async {
+        let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
+            .await
+            .expect("open engine");
+        agent_hub::store::migrate(&db).await.expect("migrate");
+        let event_id = agent_hub::store::events::append(
+            &db,
+            AGENT_ID,
+            None,
+            agent_hub::store::events::NewEvent {
+                project_id: "proj".to_string(),
+                kind: "finished".to_string(),
+                summary: summary.to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append finished");
+        agent_hub::store::inbox::mark_read(&db, &event_id)
+            .await
+            .expect("the human reads it");
+        event_id
+    })
+}
+
+#[test]
+fn an_agent_is_not_told_what_the_human_has_read() {
+    let data_dir = TempDir::new("read-state");
+    common::seed_project(&data_dir.0, "proj");
+    let event_id = seed_read_report(&data_dir.0, "nightly report done");
+    let mut server = McpServer::spawn(&data_dir.0, &[]);
+    server.initialize();
+
+    let all = server.call_tool("inbox_read", json!({}));
+    let item = item_with_id(items(&all), &event_id);
+    assert_eq!(
+        item["status"], "unread",
+        "the human opening a report is not the agent's business"
+    );
+    assert_eq!(
+        item["updated_at"], item["created_at"],
+        "and neither is the moment they opened it"
+    );
+
+    let unread = server.call_tool("inbox_read", json!({"status": "unread"}));
+    assert_eq!(
+        items(&unread).len(),
+        1,
+        "a read report does not disappear from the agent's unread filter"
+    );
+
+    let refused = server.call_tool("inbox_read", json!({"status": "read"}));
+    assert_eq!(
+        error_code(&refused),
+        "invalid_argument",
+        "there is no read status for an agent to ask about"
+    );
+}

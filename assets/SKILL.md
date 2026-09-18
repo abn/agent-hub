@@ -384,9 +384,14 @@ value as `question_id`. `signal_append` accepts only `signal`, `finished`, and
 client.
 
 An inbox item is `unread` for finished work, `action` while it waits on the
-human, and `resolved` once answered or decided. The `waiting` and `read`
-statuses are reserved. `inbox_read` returns `event_id`, `project_id`, `kind`,
-`actor`, `summary`, `payload`, `status`, `created_at`, and `updated_at`.
+human, and `resolved` once answered or decided. The `waiting` status is
+reserved. `inbox_read` returns `event_id`, `project_id`, `kind`, `actor`,
+`summary`, `payload`, `status`, `created_at`, and `updated_at`, newest first
+by event id, so nothing the human does moves a row or shifts a page.
+
+Whether the human has read an item is not reported. An item the human has
+opened is still `unread` here, with the timestamps it already had, and there is
+no status to ask that question with.
 
 A question or an approval is an open item, and the hub caps how many one agent
 may leave open in a project (100 by default) and how many every agent together

@@ -33,7 +33,10 @@ DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
-GET    /api/v1/inbox?status=&project=&limit=
+GET    /api/v1/inbox?status=&project=&limit=&unread_only=
+POST   /api/v1/inbox/:id/read
+POST   /api/v1/inbox/:id/unread
+POST   /api/v1/inbox/read-all
 GET    /api/v1/stream
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
@@ -128,6 +131,8 @@ than zero.
 | `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
 | `GET /api/v1/sessions/:id/brain?path=` | `entries[]` with `path`, `type` (`key`, `file` or `dir`) and `size_bytes`, one directory level per request, with `path` echoed and `truncated` when the level held more |
 | `GET /api/v1/search` | `count`, the hits on this page before grouping, `truncated` when the limit cut the result, `took_ms` around the store call, and `groups[]` each with its own `count` |
+| `POST /api/v1/inbox/:id/read` and `.../unread` | `event_id`, the `status` the entry carries now, and `changed`, false when the entry was already there or carries no read state |
+| `POST /api/v1/inbox/read-all` | `marked`, how many entries moved |
 
 `count` is the hits the page carries, not how many documents match, and
 `truncated` says when the limit cut it, so a capped page is never printed as a
@@ -139,6 +144,16 @@ the call fails, `capacity_bytes` and `free_bytes` are `null` and the rest of the
 response is still served, so a surface renders "unknown" rather than 0 of 0.
 The numbers that cost a syscall or a file stat are memoised for ten seconds
 behind a counter every write bumps; the counts are indexed and never cached.
+
+Read is explicit. The human marks one inbox entry read or unread, or marks
+every unread entry read, optionally within one project; nothing is read by
+scrolling past it. The read routes move an entry between `unread` and `read`
+and nothing else: an entry that waits on the human, or one already resolved,
+is answered with its unchanged status and `changed` false, so marking an
+approval read never takes it out of what waits on you. They are idempotent,
+and an event with no inbox entry is a 404. The listing's `unread_only` is the
+Inbox header's filter and is refused when it contradicts an explicit `status`.
+The routes ship; the PWA does not call them yet.
 
 A batch prune takes every ended session of one project, or of every project,
 with the same soft delete, undo window and sweep as pruning one. It never
@@ -158,7 +173,7 @@ shipped.
 | Screen | Purpose |
 |---|---|
 | Home | Today at a glance: what waits on you, the latest feed across projects, and storage. |
-| Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
+| Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. Explicit read state ships on the routes; the "Mark all read" and "Unread only" controls are intended design, not yet shipped. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
 | Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |

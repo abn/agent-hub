@@ -627,3 +627,211 @@ async fn two_writers_one_under_the_actor_cap_admit_exactly_one() {
     assert_eq!(admitted, 1, "exactly one write is admitted");
     assert_eq!(refused, 1, "the other write is refused");
 }
+
+#[tokio::test]
+async fn finished_work_is_read_and_unread_again() {
+    let db = open().await;
+    let event_id = append(&db, "agent-one", None, finished("nightly report"))
+        .await
+        .expect("append finished");
+    assert_eq!(inbox::counts(&db).await.expect("counts").unread, 1);
+
+    let read = inbox::mark_read(&db, &event_id).await.expect("mark read");
+    assert_eq!(read.status, "read");
+    assert!(read.changed, "the row moved off unread");
+    assert_eq!(inbox::counts(&db).await.expect("counts").unread, 0);
+
+    let again = inbox::mark_read(&db, &event_id).await.expect("mark read");
+    assert_eq!(again.status, "read");
+    assert!(!again.changed, "marking a read row read changes nothing");
+
+    let unread = inbox::mark_unread(&db, &event_id)
+        .await
+        .expect("mark unread");
+    assert_eq!(unread.status, "unread");
+    assert!(unread.changed, "the row came back to unread");
+    assert_eq!(inbox::counts(&db).await.expect("counts").unread, 1);
+}
+
+#[tokio::test]
+async fn a_waiting_row_keeps_its_place_when_it_is_marked_read() {
+    let db = open().await;
+    let approval_id = append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    let marked = inbox::mark_read(&db, &approval_id)
+        .await
+        .expect("mark read");
+    assert_eq!(
+        marked.status, "action",
+        "an item that waits on the human carries no read state"
+    );
+    assert!(!marked.changed);
+
+    let waiting = inbox::list(&db, Some("action"), None, 50)
+        .await
+        .expect("list");
+    assert_eq!(
+        waiting.len(),
+        1,
+        "the approval is still listed under what waits on the human"
+    );
+    assert_eq!(inbox::counts(&db).await.expect("counts").waiting, 1);
+}
+
+#[tokio::test]
+async fn marking_everything_read_stops_at_the_project_it_was_given() {
+    let db = open().await;
+    let mine = append(&db, "agent-one", None, finished("here"))
+        .await
+        .expect("append finished");
+    let mut elsewhere = finished("there");
+    elsewhere.project_id = "other".to_string();
+    let theirs = append(&db, "agent-one", None, elsewhere)
+        .await
+        .expect("append finished");
+    let approval_id = append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+        .await
+        .expect("append approval");
+
+    let marked = inbox::mark_all_read(&db, Some("proj"))
+        .await
+        .expect("mark all read");
+    assert_eq!(marked, 1, "only the one unread row in the project moves");
+
+    let status = |id: String| {
+        let db = &db;
+        async move {
+            events::get(db, &id)
+                .await
+                .expect("get")
+                .expect("exists")
+                .inbox_status
+                .expect("an inbox row")
+        }
+    };
+    assert_eq!(status(mine).await, "read");
+    assert_eq!(status(theirs).await, "unread", "another project is left be");
+    assert_eq!(
+        status(approval_id).await,
+        "action",
+        "an item waiting on the human is not read away"
+    );
+}
+
+#[tokio::test]
+async fn marking_an_event_read_that_has_no_inbox_row_is_not_found() {
+    let db = open().await;
+    let signal_id = append(
+        &db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "noted".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append signal");
+
+    let missing = inbox::mark_read(&db, &signal_id)
+        .await
+        .expect_err("a signal never enters the inbox");
+    assert_eq!(missing.code(), ErrorCode::NotFound);
+
+    let unknown = inbox::mark_read(&db, "no-such-event")
+        .await
+        .expect_err("unknown event");
+    assert_eq!(unknown.code(), ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn reading_a_row_does_not_move_it_in_the_listing() {
+    let db = open().await;
+    let older = append(&db, "agent-one", None, finished("older"))
+        .await
+        .expect("append finished");
+    let newer = append(&db, "agent-one", None, finished("newer"))
+        .await
+        .expect("append finished");
+
+    let order = || {
+        let db = &db;
+        async move {
+            inbox::list(db, None, None, 50)
+                .await
+                .expect("list")
+                .into_iter()
+                .map(|item| item.event_id)
+                .collect::<Vec<_>>()
+        }
+    };
+    let before = order().await;
+    assert_eq!(before, vec![newer.clone(), older.clone()], "newest first");
+
+    inbox::mark_read(&db, &older).await.expect("mark read");
+    assert_eq!(
+        order().await,
+        before,
+        "reading an item is not a reason to move it"
+    );
+
+    inbox::mark_unread(&db, &older).await.expect("mark unread");
+    assert_eq!(order().await, before, "nor is unreading it");
+}
+
+#[tokio::test]
+async fn an_agent_listing_cannot_tell_a_read_row_from_an_unread_one() {
+    let db = open().await;
+    let event_id = append(&db, "agent-one", None, finished("nightly report"))
+        .await
+        .expect("append finished");
+
+    let agent_view = || {
+        let db = &db;
+        async move {
+            inbox::list_for_agent(db, None, None, 50, None)
+                .await
+                .expect("list")
+                .into_iter()
+                .map(|item| (item.event_id, item.status, item.updated_at))
+                .collect::<Vec<_>>()
+        }
+    };
+    let before = agent_view().await;
+    assert_eq!(before.len(), 1);
+
+    inbox::mark_read(&db, &event_id).await.expect("mark read");
+
+    assert_eq!(
+        agent_view().await,
+        before,
+        "the human reading an item is not the agent's business"
+    );
+    let unread = inbox::list_for_agent(&db, Some("unread"), None, 50, None)
+        .await
+        .expect("list");
+    assert_eq!(
+        unread.len(),
+        1,
+        "a read row does not vanish from an agent's unread filter"
+    );
+
+    let refused = inbox::list_for_agent(&db, Some("read"), None, 50, None)
+        .await
+        .expect_err("an agent has no read status to ask about");
+    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
+
+    // The human's own surface keeps the truth.
+    let human = inbox::list(&db, Some("read"), None, 50)
+        .await
+        .expect("list");
+    assert_eq!(human.len(), 1);
+    assert_eq!(human[0].status, "read");
+}

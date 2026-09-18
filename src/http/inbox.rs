@@ -26,6 +26,8 @@ pub struct InboxParams {
     pub project: Option<String>,
     /// Maximum entries to return, clamped by the store to the feed page cap.
     pub limit: Option<i64>,
+    /// Keep only what has not been read, which is the Inbox header's filter.
+    pub unread_only: Option<bool>,
 }
 
 /// The inbox entries matching the filters.
@@ -33,6 +35,104 @@ pub struct InboxParams {
 pub struct InboxList {
     /// The entries, most recently updated first.
     pub items: Vec<InboxItem>,
+}
+
+/// The optional confinement for marking everything read.
+#[derive(Debug, Deserialize, Default)]
+pub struct ReadAllBody {
+    /// Restrict to one project; absent means every project.
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
+/// How many entries a bulk read moved.
+#[derive(Debug, Serialize)]
+pub struct ReadAllResult {
+    pub marked: i64,
+}
+
+/// `POST /api/v1/inbox/{event_id}/read`
+///
+/// A valid bearer token is required. Idempotent: an entry already read is
+/// answered with `changed` false, and so is one that waits on the human or has
+/// been resolved, since neither carries read state. An event with no inbox
+/// entry is a 404.
+pub async fn read(
+    State(state): State<AppState>,
+    ProblemPath(event_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<inbox_store::ReadState>, Problem> {
+    mark(state, &headers, &event_id, true).await
+}
+
+/// `POST /api/v1/inbox/{event_id}/unread`
+///
+/// The other direction of the swipe, on the same terms as [`read`].
+pub async fn unread(
+    State(state): State<AppState>,
+    ProblemPath(event_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<inbox_store::ReadState>, Problem> {
+    mark(state, &headers, &event_id, false).await
+}
+
+async fn mark(
+    state: AppState,
+    headers: &HeaderMap,
+    event_id: &str,
+    read: bool,
+) -> std::result::Result<Json<inbox_store::ReadState>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let marked = if read {
+        inbox_store::mark_read(&state.db, event_id).await
+    } else {
+        inbox_store::mark_unread(&state.db, event_id).await
+    }
+    .map_err(|err| Problem::from_error(&err))?;
+
+    if marked.changed {
+        state.notify();
+    }
+    Ok(Json(marked))
+}
+
+/// `POST /api/v1/inbox/read-all`
+///
+/// A valid bearer token is required. The optional `project_id` confines it to
+/// one project. Only unread entries move: what waits on the human stays where
+/// it is.
+pub async fn read_all(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<ReadAllBody>, JsonRejection>,
+) -> std::result::Result<Json<ReadAllResult>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    // An empty body is the whole inbox, which is what the header control does.
+    let payload = match body {
+        Ok(Json(payload)) => payload,
+        Err(_) => ReadAllBody::default(),
+    };
+    let project = payload
+        .project_id
+        .as_deref()
+        .filter(|project| !project.is_empty());
+
+    let marked = inbox_store::mark_all_read(&state.db, project)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    if marked > 0 {
+        state.notify();
+    }
+    Ok(Json(ReadAllResult { marked }))
 }
 
 /// The answer to post against a question.
@@ -103,6 +203,18 @@ pub async fn list(
         .project
         .as_deref()
         .filter(|project| !project.is_empty());
+
+    // The two ways of naming a status must not disagree: a listing that
+    // silently honoured one of them would answer a question nobody asked.
+    let status = match (params.unread_only.unwrap_or(false), status) {
+        (true, Some(status)) if status != "unread" => {
+            return Err(Problem::from_error(&Error::InvalidArgument(format!(
+                "unread_only asks for unread entries and status asks for '{status}'"
+            ))));
+        }
+        (true, _) => Some("unread"),
+        (false, status) => status,
+    };
 
     let limit = params.limit.unwrap_or(crate::limits::FEED_LIMIT_DEFAULT);
     let items = inbox_store::list(&state.db, status, project, limit)

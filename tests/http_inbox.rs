@@ -573,3 +573,198 @@ async fn the_inbox_listing_honours_the_limit() {
         "the limit caps the page"
     );
 }
+
+async fn seed_finished_in(state: &AppState, project_id: &str, summary: &str) -> String {
+    events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: project_id.to_string(),
+            kind: "finished".to_string(),
+            summary: summary.to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append finished")
+}
+
+/// The counts Home reports and the sizes of the two listings that feed them.
+async fn counted(state: &AppState) -> (i64, i64, usize, usize) {
+    let app = router(state.clone());
+    let home = json_body(
+        app.oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
+            .await
+            .expect("request"),
+    )
+    .await;
+
+    let app = router(state.clone());
+    let unread = json_body(
+        app.oneshot(request(
+            "GET",
+            "/api/v1/inbox?unread_only=true",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request"),
+    )
+    .await;
+
+    let app = router(state.clone());
+    let waiting = json_body(
+        app.oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=action",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request"),
+    )
+    .await;
+
+    (
+        home["unread"].as_i64().expect("unread count"),
+        home["waiting"].as_i64().expect("waiting count"),
+        unread["items"].as_array().expect("items").len(),
+        waiting["items"].as_array().expect("items").len(),
+    )
+}
+
+async fn post(state: &AppState, path: &str, body: Option<Value>) -> axum::response::Response {
+    router(state.clone())
+        .oneshot(request("POST", path, Some("Bearer token"), body))
+        .await
+        .expect("request")
+}
+
+#[tokio::test]
+async fn an_item_is_read_then_unread_and_the_counts_follow() {
+    let state = state().await;
+    let event_id = seed_finished(&state, "nightly report done").await;
+    seed_question(&state, "Ship it?").await;
+    assert_eq!(counted(&state).await, (1, 1, 1, 1));
+
+    let response = post(&state, &format!("/api/v1/inbox/{event_id}/read"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["status"], "read");
+    assert_eq!(body["changed"], true);
+    assert_eq!(
+        counted(&state).await,
+        (0, 1, 0, 1),
+        "the unread count, the unread listing and the waiting queue agree"
+    );
+
+    let replay = post(&state, &format!("/api/v1/inbox/{event_id}/read"), None).await;
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(json_body(replay).await["changed"], false);
+    assert_eq!(counted(&state).await, (0, 1, 0, 1));
+
+    let response = post(&state, &format!("/api/v1/inbox/{event_id}/unread"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["status"], "unread");
+    assert_eq!(body["changed"], true);
+    assert_eq!(counted(&state).await, (1, 1, 1, 1));
+}
+
+#[tokio::test]
+async fn marking_a_waiting_item_read_leaves_it_waiting() {
+    let state = state().await;
+    let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
+
+    let response = post(&state, &format!("/api/v1/inbox/{approval_id}/read"), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(
+        body["status"], "action",
+        "what waits on the human carries no read state"
+    );
+    assert_eq!(body["changed"], false);
+
+    let (unread, waiting, unread_rows, waiting_rows) = counted(&state).await;
+    assert_eq!((unread, waiting), (0, 1));
+    assert_eq!(unread_rows, 0);
+    assert_eq!(waiting_rows, 1, "the approval still waits on the human");
+}
+
+#[tokio::test]
+async fn marking_everything_read_is_scoped_by_project() {
+    let state = state().await;
+    seed_finished(&state, "here").await;
+    seed_finished_in(&state, "other", "there").await;
+    seed_question(&state, "Ship it?").await;
+
+    let response = post(
+        &state,
+        "/api/v1/inbox/read-all",
+        Some(json!({ "project_id": "proj" })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["marked"], 1);
+
+    let (unread, waiting, unread_rows, waiting_rows) = counted(&state).await;
+    assert_eq!(unread, 1, "the other project keeps its unread item");
+    assert_eq!(unread_rows, 1);
+    assert_eq!((waiting, waiting_rows), (1, 1));
+
+    let response = post(&state, "/api/v1/inbox/read-all", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["marked"], 1);
+    assert_eq!(counted(&state).await, (0, 1, 0, 1));
+}
+
+#[tokio::test]
+async fn reading_an_unknown_item_is_not_found() {
+    let state = state().await;
+    let response = post(&state, "/api/v1/inbox/no-such-event/read", None).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem_body(response).await["code"], "not_found");
+}
+
+#[tokio::test]
+async fn the_read_routes_need_a_token() {
+    let state = state().await;
+    let event_id = seed_finished(&state, "nightly report done").await;
+
+    for path in [
+        format!("/api/v1/inbox/{event_id}/read"),
+        format!("/api/v1/inbox/{event_id}/unread"),
+        "/api/v1/inbox/read-all".to_string(),
+    ] {
+        let response = router(state.clone())
+            .oneshot(request("POST", &path, None, None))
+            .await
+            .expect("request");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path} is admin only"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unread_only_cannot_contradict_the_status_filter() {
+    let state = state().await;
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?unread_only=true&status=action",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(response).await["code"], "invalid_argument");
+}

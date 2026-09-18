@@ -121,7 +121,7 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
         let limit = params.limit.unwrap_or(FEED_LIMIT_DEFAULT);
-        let items = inbox::list_visible(
+        let items = inbox::list_for_agent(
             &self.state.db,
             params.status.as_deref(),
             params.project_id.as_deref(),

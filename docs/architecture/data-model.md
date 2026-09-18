@@ -48,6 +48,22 @@ the session's own lifecycle events, because storage acts on sessions and never
 on feed events or artifacts, and the work a session left in the feed outlives
 the session.
 
+An inbox status carries two independent things, and the human's read verb
+touches only one of them. `unread` and `read` are the read axis: the human
+marks an entry read, unmarks it, or marks every unread entry read. `action`
+and `waiting` mean the item waits on a decision, and `resolved` means that
+decision was made; none of the three has a read state, and marking one read is
+answered as unchanged rather than converting it. Read state is never inferred
+from a scroll position.
+
+It does not reach agents at all. The routes that set it are part of the
+admin-only human surface, and the agents' own inbox read collapses the axis:
+an entry the human has read is reported as `unread`, carrying the timestamp it
+had before, and `read` is not a status an agent can filter on. An agent
+therefore cannot poll the inbox to learn which of its reports the human has
+opened, or when. The listing is ordered by event id, which is minted in commit
+order, so reading an item never moves it or shifts the page a limit cuts.
+
 Identity is a first-class table rather than a field on a token, so the server
 sets the `actor` on every event and a request cannot forge another agent. The
 trust model and grants are described in [agent identity and

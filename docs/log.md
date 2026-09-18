@@ -4,6 +4,25 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, the human can mark inbox items read
+
+* **Update**: The inbox carries explicit read state. One entry is marked read
+  or unread, and every unread entry can be marked read at once, optionally
+  within one project. The listing takes `unread_only`. The routes are in the
+  [human surface](architecture/human-surface.md); the screens do not call them
+  yet.
+* **Note**: Read is one axis and waiting on you is another. An entry that waits
+  on a decision, or one already resolved, has no read state: marking it read
+  answers with its unchanged status rather than taking it out of the waiting
+  queue. Nothing is read by scrolling past it. The
+  [data model](architecture/data-model.md) says what read means and does not
+  mean.
+* **Note**: Read state does not reach agents. The agents' inbox read reports an
+  entry the human has read as unread, with the timestamps it already had, and
+  has no read status to filter on, so no agent can learn which of its reports
+  the human opened or when. The inbox listing is ordered by event id rather
+  than by update time, so reading an item never moves it or shifts a page.
+
 ## 2026-09-18, every number the human surface shows has a route
 
 * **Update**: The human surface reported bytes, counts and timings that no

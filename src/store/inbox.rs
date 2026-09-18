@@ -127,7 +127,8 @@ pub async fn list(
 /// List inbox entries with an optional project confinement.
 ///
 /// `None` means every project (the admin surface). `Some(set)` keeps only
-/// entries from those projects; an empty set yields nothing.
+/// entries from those projects; an empty set yields nothing. The entries carry
+/// their real status, so this is the human's own view.
 pub async fn list_visible(
     db: &Database,
     status: Option<&str>,
@@ -135,7 +136,40 @@ pub async fn list_visible(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Vec<InboxItem>> {
+    list_as(db, status, project_id, limit, visible, false).await
+}
+
+/// The same listing as an agent may see it.
+///
+/// Whether the human has read something is the human's business, so the read
+/// axis is collapsed: a `read` entry is reported as `unread`, carrying the
+/// timestamp it carried before it was read, and `read` is not a status an agent
+/// can filter on. An agent therefore sees exactly what it saw before the human
+/// opened the item, and cannot poll the inbox to find out when that was.
+pub async fn list_for_agent(
+    db: &Database,
+    status: Option<&str>,
+    project_id: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<Vec<InboxItem>> {
+    list_as(db, status, project_id, limit, visible, true).await
+}
+
+async fn list_as(
+    db: &Database,
+    status: Option<&str>,
+    project_id: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+    collapse_read: bool,
+) -> Result<Vec<InboxItem>> {
     if let Some(status) = status {
+        if collapse_read && status == "read" {
+            return Err(Error::InvalidArgument(format!(
+                "unknown inbox status '{status}'"
+            )));
+        }
         validate_status(status)?;
     }
     let limit = limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
@@ -145,15 +179,30 @@ pub async fn list_visible(
         return Ok(Vec::new());
     }
 
-    let mut sql = String::from(
+    // A read entry reads as unread and keeps the time it entered the inbox, so
+    // no column of the answer moves when the human opens it.
+    let projection = if collapse_read {
+        "CASE WHEN i.status = 'read' THEN 'unread' ELSE i.status END,
+                e.created_at,
+                CASE WHEN i.status IN ('unread', 'read') THEN e.created_at ELSE i.updated_at END"
+    } else {
+        "i.status, e.created_at, i.updated_at"
+    };
+    let mut sql = format!(
         "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
-                i.status, e.created_at, i.updated_at
-         FROM inbox i JOIN events e ON e.id = i.event_id WHERE 1 = 1",
+                {projection}
+         FROM inbox i JOIN events e ON e.id = i.event_id WHERE 1 = 1"
     );
     let mut params: Vec<Value> = Vec::new();
     if let Some(status) = status {
         params.push(Value::Text(status.to_string()));
-        sql.push_str(&format!(" AND i.status = ?{}", params.len()));
+        // An agent asking for unread work is asking for work the human has not
+        // dealt with, which a read entry still is.
+        if collapse_read && status == "unread" {
+            sql.push_str(&format!(" AND i.status IN (?{}, 'read')", params.len()));
+        } else {
+            sql.push_str(&format!(" AND i.status = ?{}", params.len()));
+        }
     }
     if let Some(project_id) = project_id {
         params.push(Value::Text(project_id.to_string()));
@@ -170,11 +219,12 @@ pub async fn list_visible(
             placeholders.join(", ")
         ));
     }
+    // Ordered by the event id, which is minted in commit order and never
+    // changes. Ordering on the entry's update time would let reading an item
+    // pull it to the head of the list, above work that is genuinely newer, and
+    // would shift the page a limit cuts.
     params.push(Value::Integer(limit));
-    sql.push_str(&format!(
-        " ORDER BY i.updated_at DESC, e.id DESC LIMIT ?{}",
-        params.len()
-    ));
+    sql.push_str(&format!(" ORDER BY e.id DESC LIMIT ?{}", params.len()));
 
     let conn = super::connect(db)?;
     let mut rows = conn.query(&sql, params).await.map_err(engine)?;
@@ -206,6 +256,81 @@ pub(crate) async fn status_in_tx(conn: &Connection, event_id: &str) -> Result<Op
         },
         None => Ok(None),
     }
+}
+
+/// The two statuses the human's read verb moves between.
+///
+/// Read state is one axis and waiting on the human is another. An item that
+/// waits, or one already resolved, carries no read state at all: marking an
+/// approval read must not take it out of what waits on the human.
+const READ_AXIS: &[&str] = &["unread", "read"];
+
+/// What a read or unread call left behind.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadState {
+    pub event_id: String,
+    /// The status the entry carries now.
+    pub status: String,
+    /// Whether this call moved it. False when the entry was already there and
+    /// false when it carries no read state.
+    pub changed: bool,
+}
+
+/// Mark one inbox entry read.
+pub async fn mark_read(db: &Database, event_id: &str) -> Result<ReadState> {
+    set_read(db, event_id, "read").await
+}
+
+/// Mark one inbox entry unread.
+pub async fn mark_unread(db: &Database, event_id: &str) -> Result<ReadState> {
+    set_read(db, event_id, "unread").await
+}
+
+/// Move one entry along the read axis, leaving every other status alone.
+///
+/// The read and the write share an immediate transaction, so the status a
+/// decision was made on is the status that is written over.
+async fn set_read(db: &Database, event_id: &str, target: &str) -> Result<ReadState> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let current = status_in_tx(&tx, event_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("event {event_id} has no inbox entry to read")))?;
+    if !READ_AXIS.contains(&current.as_str()) || current == target {
+        return Ok(ReadState {
+            event_id: event_id.to_string(),
+            status: current,
+            changed: false,
+        });
+    }
+    set_status_in_tx(&tx, event_id, target).await?;
+    tx.commit().await.map_err(engine)?;
+    Ok(ReadState {
+        event_id: event_id.to_string(),
+        status: target.to_string(),
+        changed: true,
+    })
+}
+
+/// Mark every unread entry read, optionally within one project, and return how
+/// many moved. Entries waiting on the human are left where they are.
+pub async fn mark_all_read(db: &Database, project_id: Option<&str>) -> Result<i64> {
+    let conn = super::connect(db)?;
+    let mut sql =
+        String::from("UPDATE inbox SET status = 'read', updated_at = ?1 WHERE status = 'unread'");
+    let mut params = vec![Value::Text(crate::store::now_rfc3339())];
+    if let Some(project_id) = project_id {
+        params.push(Value::Text(project_id.to_string()));
+        sql.push_str(&format!(
+            " AND event_id IN (SELECT id FROM events WHERE project_id = ?{})",
+            params.len()
+        ));
+    }
+    let moved = conn.execute(&sql, params).await.map_err(engine)?;
+    Ok(moved as i64)
 }
 
 /// Set an inbox entry's status.
