@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y web/smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -59,18 +59,30 @@ web/crypto: ## Run the artifact encryption round-trip self-test
 	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
-# The headless accessibility audit over the rendered screens. It needs
-# Playwright, a browser, and an axe build, so it runs when a Python with
-# playwright is found and skips cleanly otherwise; the static checks in
-# web/check always run.
-web/a11y: build ## Run the headless accessibility audit
+# The browser checks run under the first interpreter that can import
+# playwright: the default python3, or the one the playwright launcher itself
+# runs under. Absent both, the target says so and passes, so a machine with
+# only the static checks is not blocked.
+define browser_check
 	@found=""; \
 	for python in python3 "$$(head -1 "$$(command -v playwright 2>/dev/null)" 2>/dev/null | sed -e 's|^#!||' -e 's| .*$$||')"; do \
 	  [ -n "$$python" ] || continue; \
 	  if "$$python" -c 'import playwright' >/dev/null 2>&1; then found="$$python"; break; fi; \
 	done; \
-	if [ -z "$$found" ]; then printf 'web/a11y: playwright is not installed, skipped\n'; exit 0; fi; \
-	"$$found" .agents/scripts/a11y.py
+	if [ -z "$$found" ]; then printf '$(1): playwright is not installed, skipped\n'; exit 0; fi; \
+	"$$found" $(2)
+endef
+
+# The headless accessibility audit over the rendered screens. It needs
+# Playwright, a browser, and an axe build; the static checks in web/check
+# always run.
+web/a11y: build ## Run the headless accessibility audit
+	$(call browser_check,web/a11y,.agents/scripts/a11y.py)
+
+# The behavioural smoke run: every route painted, every write landing, in a
+# real browser. Nothing else executes the app's own JavaScript.
+web/smoke: build ## Run the headless smoke pass over the PWA
+	$(call browser_check,web/smoke,.agents/scripts/web-smoke.py)
 
 net/check: ## Compile and test the optional embedded tailnet build
 	cargo check --features tailnet
@@ -81,7 +93,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y web/smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
