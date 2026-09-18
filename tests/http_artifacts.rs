@@ -325,6 +325,10 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
         !body.contains("id=\"hub-picker-wrap\""),
         "a single version has no picker"
     );
+    assert!(
+        !body.contains("id=\"hub-forget\""),
+        "an artifact with no password has nothing to forget"
+    );
     assert!(body.contains("id=\"hub-meta\""));
     assert!(body.contains("\"version\":1"));
     assert!(body.contains("\"protected\":false"));
@@ -744,6 +748,26 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     // One refusal deliberately leaves focus where it is, so the line has to
     // announce itself rather than rely on a focus move to be heard.
     assert!(body.contains("<p id=\"hub-unlock-error\" role=\"alert\" hidden>"));
+    // A password the gate remembered unlocks without showing the gate again,
+    // so the chrome carries the way to forget it, and a live region rather
+    // than a native dialog says that it is gone.
+    assert!(
+        body.contains("<button id=\"hub-forget\"") && body.contains(">Forget password</button>"),
+        "the chrome offers to forget a remembered password"
+    );
+    assert!(
+        body.contains("aria-label=\"Forget password remembered for this project on this device\""),
+        "the control names what it forgets and where"
+    );
+    assert!(body.contains("<p id=\"hub-forget-note\" role=\"status\">"));
+    assert!(
+        body.contains("#hub-forget{flex:none;min-height:32px"),
+        "the control is drawn to the inline button size"
+    );
+    assert!(
+        body.contains("#hub-forget{min-height:44px}"),
+        "a coarse pointer gets the full hit area"
+    );
     assert!(
         body.contains("hub-lock-tile"),
         "the gate shows its lock tile"

@@ -952,7 +952,11 @@ def gate_of(page):
 
 
 def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> None:
-    """A protected artifact opens from inside the app, not only on its own page."""
+    """The in-app frame has an opaque origin, so remembering cannot work there.
+
+    An option that cannot work is not offered: the checkbox is absent from the
+    gate, not merely disabled. Unlocking still works, from typing alone.
+    """
     watch.enter("artifacts: the gate in the app")
     page.evaluate(f"location.hash = '#/artifacts?project={quote(project)}'")
     page.wait_for_timeout(500)
@@ -963,6 +967,12 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
     except Exception as error:
         watch.fail(f"the gate never appeared in the frame: {error}")
         return
+    if gate.locator("#hub-remember").count() != 0:
+        watch.fail("the sandboxed viewer offers a remember box that cannot store anything")
+    if gate.locator("#hub-forget").count() != 1:
+        watch.fail("the viewer chrome carries no forget control")
+    if not gate.locator("#hub-forget").is_hidden():
+        watch.fail("the forget control shows with nothing remembered")
     gate.locator("#hub-password").fill(harness.PROTECTED_PASSWORD)
     gate.locator('#hub-unlock-form button[type="submit"]').click()
     try:
@@ -972,6 +982,94 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
     except Exception as error:
         watch.fail(f"typing the password did not show the artifact: {error}")
     watch.drain_rejections()
+
+
+def stored_password(page, project: str):
+    return page.evaluate(
+        "(project) => { try { const raw = localStorage.getItem('hub-artifact-passwords');"
+        " return raw ? (JSON.parse(raw) || {})[project] ?? null : null; }"
+        " catch { return null; } }",
+        project,
+    )
+
+
+def check_public_gate_remembers_and_forgets(port: int, context, project: str, artifact: str):
+    """The public page is a top-level document, so the store works there.
+
+    Remembering unlocks the next visit without asking, the chrome then offers
+    to forget it, and forgetting sends the next visit back to the gate. A
+    remembered password that no longer opens the artifact is dropped.
+    """
+    failures: list[str] = []
+    page = context.new_page()
+    page.on("dialog", lambda dialog: failures.append(f"a native dialog fired: {dialog.message}"))
+    page.on("pageerror", lambda error: failures.append(f"uncaught error: {error}"))
+    url = f"http://127.0.0.1:{port}/artifacts/{artifact}"
+    content = page.frame_locator("#hub-frame")
+
+    page.goto(url, wait_until="load")
+    page.wait_for_selector("#hub-password")
+    if page.locator("#hub-remember").count() != 1:
+        failures.append("the public gate does not offer to remember the password")
+    if not page.locator("#hub-forget").is_hidden():
+        failures.append("the forget control shows before anything is remembered")
+    page.fill("#hub-password", harness.PROTECTED_PASSWORD)
+    page.check("#hub-remember")
+    page.click('#hub-unlock-form button[type="submit"]')
+    try:
+        content.get_by_text(harness.PROTECTED_BODY_MARK).wait_for(timeout=15000)
+    except Exception as error:
+        failures.append(f"the password did not open the artifact: {error}")
+    if stored_password(page, project) != harness.PROTECTED_PASSWORD:
+        failures.append("the ticked box remembered nothing")
+
+    page.goto(url, wait_until="load")
+    try:
+        content.get_by_text(harness.PROTECTED_BODY_MARK).wait_for(timeout=15000)
+    except Exception as error:
+        failures.append(f"the remembered password did not unlock the next visit: {error}")
+    if not page.locator("#hub-unlock-form").is_hidden():
+        failures.append("the gate still asks after unlocking from the remembered password")
+    forget = page.locator("#hub-forget")
+    try:
+        forget.wait_for(state="visible", timeout=5000)
+    except Exception as error:
+        failures.append(f"an auto-unlocked artifact offers no way to forget the password: {error}")
+    else:
+        forget.click()
+        note = page.locator("#hub-forget-note")
+        if note.get_attribute("role") != "status":
+            failures.append("forgetting is not announced in a live region")
+        if not (note.inner_text() or "").strip():
+            failures.append("forgetting says nothing in the page")
+        if stored_password(page, project) is not None:
+            failures.append("forgetting left the password in the store")
+
+    page.goto(url, wait_until="load")
+    page.wait_for_selector("#hub-password")
+    if page.locator("#hub-unlock-form").is_hidden():
+        failures.append("the gate did not come back after the password was forgotten")
+
+    page.evaluate(
+        "(project) => localStorage.setItem('hub-artifact-passwords',"
+        " JSON.stringify({ [project]: 'not the password' }))",
+        project,
+    )
+    page.goto(url, wait_until="load")
+    error_line = page.locator("#hub-unlock-error")
+    try:
+        error_line.wait_for(state="visible", timeout=15000)
+    except Exception as error:
+        failures.append(f"a stale remembered password reported nothing: {error}")
+    else:
+        if "Wrong password" not in (error_line.inner_text() or ""):
+            failures.append(f"the stale password said {error_line.inner_text()!r}")
+        if page.evaluate("document.activeElement && document.activeElement.id") != "hub-password":
+            failures.append("the field does not hold focus after a wrong password")
+        if stored_password(page, project) is not None:
+            failures.append("a wrong remembered password stayed in the store")
+    page.close()
+    return failures
 
 
 def run() -> int:
@@ -1059,6 +1157,11 @@ def run() -> int:
             check_approve(page, watch)
             check_prune(page, watch, project, seeded["session_id"])
             check_gate_in_the_app(page, watch, project, seeded["protected_id"])
+            watch.enter("artifacts: the gate on the public page")
+            for failure in check_public_gate_remembers_and_forgets(
+                port, context, project, seeded["protected_id"]
+            ):
+                watch.fail(failure)
 
             context.close()
             browser.close()

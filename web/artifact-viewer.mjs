@@ -215,7 +215,22 @@ function renderForTheme(state, theme) {
   if (meta.kind === "html") frame.src = frameUrl(meta, theme);
 }
 
-// Passwords remembered per project, device-local, never sent anywhere.
+// Whether this document may keep anything at all. Inside the viewer frame the
+// origin is opaque and every access throws, so the probe runs once and the
+// gate offers remembering only where it can actually happen.
+function storageWorks() {
+  const probe = "hub-artifact-probe";
+  try {
+    window.localStorage.setItem(probe, "1");
+    window.localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Passwords remembered per project, device-local, never sent anywhere, and
+// held as typed: any key that could encrypt them would sit in the same store.
 // One JSON object under a single key; storage failures drop the write
 // rather than breaking unlock.
 function passwordStore() {
@@ -322,8 +337,28 @@ function init() {
   const form = document.getElementById("hub-unlock-form");
   const password = document.getElementById("hub-password");
   const errorLine = document.getElementById("hub-unlock-error");
-  const remember = document.getElementById("hub-remember");
+  const forget = document.getElementById("hub-forget");
+  const forgetNote = document.getElementById("hub-forget-note");
   const passwords = passwordStore();
+  let remember = document.getElementById("hub-remember");
+  // An option that cannot work is not offered: where the store throws, the
+  // checkbox leaves the page rather than sitting there doing nothing.
+  if (remember && !storageWorks()) {
+    (remember.closest(".hub-remember") || remember).remove();
+    remember = null;
+  }
+  // The gate that remembered a password is hidden once it unlocks by itself,
+  // so forgetting needs its own control in the chrome.
+  if (forget) {
+    forget.addEventListener("click", () => {
+      if (meta.project_id) passwords.remove(meta.project_id);
+      forget.hidden = true;
+      if (forgetNote) {
+        forgetNote.textContent =
+          "Password forgotten on this device. This artifact will ask for it again.";
+      }
+    });
+  }
   // Returns "ok", "retry" when another attempt could work, or "unsupported"
   // when no password can open this envelope.
   const unlock = async (secret) => {
@@ -370,8 +405,10 @@ function init() {
       const secret = password.value;
       const result = await unlock(secret);
       if (remember && meta.project_id) {
-        if (result === "ok" && remember.checked) passwords.write(meta.project_id, secret);
-        else if (!remember.checked) passwords.remove(meta.project_id);
+        if (result === "ok" && remember.checked) {
+          passwords.write(meta.project_id, secret);
+          if (forget) forget.hidden = false;
+        } else if (!remember.checked) passwords.remove(meta.project_id);
       }
       if (result !== "unsupported") password.value = "";
       if (result === "ok") password.blur();
@@ -401,7 +438,11 @@ function init() {
             passwords.remove(meta.project_id);
             password.value = "";
             password.focus();
+            return;
           }
+          // Opened, or refused for a reason the password cannot fix: either
+          // way it is still remembered, so offer to forget it.
+          if (forget) forget.hidden = false;
         });
       }
     }

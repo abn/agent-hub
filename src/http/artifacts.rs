@@ -813,10 +813,11 @@ fn locked_shell(
         })
         .unwrap_or_else(|| format!("{} ciphertext", format_size(ciphertext.len())));
     let fingerprint = escape_html(&fingerprint);
-    let header = header_html(&title, "", "");
+    let header = header_html(&title, "", FORGET_CONTROL);
     format!(
         "<!doctype html>\n<html lang=\"en\" data-theme=\"light\">\n<head>\n{head}\
-         <body>\n{header}<main>\n<div class=\"hub-gate\">\n\
+         <body>\n{header}<main>\n<p id=\"hub-forget-note\" role=\"status\"></p>\n\
+         <div class=\"hub-gate\">\n\
          <div class=\"hub-lock-tile\">{lock}</div>\n\
          <h2>Encrypted artifact</h2>\n\
          <p class=\"hub-gate-copy\">Decrypted on your device. The server stores ciphertext only and never sees the password.</p>\n\
@@ -871,6 +872,10 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          #hub-meta-line{{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
          #hub-theme-toggle{{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;border-radius:var(--r-1);color:var(--ink-2);cursor:pointer}}\n\
          #hub-theme-toggle svg{{width:18px;height:18px}}\n\
+         #hub-forget{{flex:none;min-height:32px;padding:0 var(--s-2);font:inherit;font-size:var(--t-13);white-space:nowrap;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-1);color:var(--ink-2);cursor:pointer}}\n\
+         #hub-forget[hidden]{{display:none}}\n\
+         #hub-forget-note{{margin:0;padding:var(--s-3) var(--s-4) 0;font-size:12px;color:var(--ink-3)}}\n\
+         #hub-forget-note:empty{{display:none}}\n\
          #hub-version-select{{font:inherit;min-height:36px;padding:.25rem .5rem;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink)}}\n\
          #hub-picker-wrap{{display:flex;align-items:center;gap:var(--s-2);font-size:var(--t-13);color:var(--ink-2)}}\n\
          main{{padding:0}}\n\
@@ -896,6 +901,7 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          .hub-comment-anchor{{font-size:var(--t-13);color:var(--ink-3);margin:0}}\n\
          @media (pointer:coarse){{\n\
          #hub-back,#hub-theme-toggle{{width:44px;height:44px}}\n\
+         #hub-forget{{min-height:44px}}\n\
          #hub-version-select{{min-height:44px}}\n\
          }}\n\
          </style>\n\
@@ -986,6 +992,13 @@ fn anchor_marker(comment: &Comment) -> String {
 const CHEVRON_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M 15 5l-7 7 7 7\"/></svg>";
 const SUN_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M 12 2v2M 12 20v2M 4.9 4.9l1.4 1.4M 17.7 17.7l1.4 1.4M 2 12h2M 20 12h2M 4.9 19.1l1.4-1.4M 17.7 6.3l1.4-1.4\"/></svg>";
 const MOON_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\" hidden><path d=\"M 20 13A8 8 0 1 1 11 4a6.5 6.5 0 0 0 9 9z\"/></svg>";
+/// The forget control, in the chrome beside the theme toggle. A remembered
+/// password unlocks the artifact without ever showing the gate, so the
+/// checkbox that stored it is out of reach by then; the viewer reveals this
+/// button in its place, and answers in the live region below the header
+/// rather than in a dialog.
+const FORGET_CONTROL: &str = "<button id=\"hub-forget\" type=\"button\" aria-label=\"Forget password remembered for this project on this device\" hidden>Forget password</button>\n";
+
 const LOCK_SVG: &str = "<svg viewBox=\"0 0 24 24\" width=\"24\" height=\"24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" aria-hidden=\"true\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"9\" rx=\"2\"/><path d=\"M 8 11V8a4 4 0 0 1 8 0v3\"/></svg>";
 
 /// The viewer header: back, title with its meta line, then the controls.

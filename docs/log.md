@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, remembering an artifact password, honestly
+
+* **Update**: The password gate offers to remember a password only where the
+  browser will actually keep it. Opened from inside the app the artifact runs
+  in a frame with no origin of its own, where storage is refused, so there the
+  checkbox is not shown at all rather than shown and ignored.
+* **Update**: A password remembered on an artifact's own page can now be
+  forgotten. Once it unlocks the artifact by itself, the page header carries a
+  "Forget password" control that drops the stored password and says so in the
+  page, and the next visit asks for it again. Described in
+  [artifacts](usage/artifacts.md).
+
 ## 2026-09-18, unlocking a protected artifact inside the app
 
 * **Note**: Unlocking now runs from the Unlock button's activation, which Enter

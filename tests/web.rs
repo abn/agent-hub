@@ -736,6 +736,8 @@ fn viewer_module_binds_the_frozen_shell_ids() {
         "hub-unlock-form",
         "hub-password",
         "hub-remember",
+        "hub-forget",
+        "hub-forget-note",
         "hub-unlock-error",
         "hub-meta",
         "hub-markdown-body",
@@ -817,6 +819,28 @@ fn viewer_module_renders_unlocks_and_themes() {
             && VIEWER_JS.contains("hub-back")
             && VIEWER_JS.contains("history.back()"),
         "remembered passwords and the back guard live in the viewer"
+    );
+    assert!(
+        VIEWER_JS.contains("hub-artifact-probe") && VIEWER_JS.contains("remember = null"),
+        "one probe decides whether remembering is offered at all"
+    );
+    assert!(
+        VIEWER_JS.contains(".remove()"),
+        "where the store throws the checkbox leaves the page"
+    );
+    assert!(
+        VIEWER_JS.contains("hub-forget")
+            && VIEWER_JS.contains("hub-forget-note")
+            && VIEWER_JS.contains("Password forgotten on this device."),
+        "the chrome forgets a remembered password and says so in the page"
+    );
+    assert!(
+        !VIEWER_JS.contains("confirm(") && !VIEWER_JS.contains("alert("),
+        "nothing in the viewer asks through a native dialog"
+    );
+    assert!(
+        VIEWER_JS.contains("button[type=\"submit\"]"),
+        "unlocking hangs off the button, which the sandboxed frame allows"
     );
     for value in [
         "#F5F3EE",

@@ -103,8 +103,19 @@ tried: the page says the artifact was encrypted with settings the viewer does
 not accept, rather than reporting a wrong password, because no password would
 open it. Opening the page shows a password gate with the ciphertext
 fingerprint; the browser decrypts with the password and renders the result in
-the same sandboxed frame. A remembered password unlocks again without asking
-and stays on the device. Protected artifacts have no version picker: switching
+the same sandboxed frame.
+
+On the artifact's own page the gate offers to remember the password for that
+project on that device. It is kept as typed, in the browser's own storage, for
+that origin: anything that could encrypt it would sit beside it. A remembered
+password unlocks the next visit without asking, and the page then carries a
+"Forget password" control that drops it and says so, after which the gate asks
+again. A remembered password that no longer opens the artifact is dropped on
+the spot. Opened from inside the app the artifact runs in a frame with no
+origin of its own, where the browser refuses storage, so there the gate does
+not offer to remember anything.
+
+Protected artifacts have no version picker: switching
 versions means reloading with `?version=N` and entering the password again.
 Share the URL and the password through different channels.
 
