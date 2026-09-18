@@ -22,11 +22,25 @@ import hub_harness as harness
 NAME = "web-smoke"
 
 try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
 except ImportError:
     harness.skip(NAME, "playwright is not installed")
 
 ANSWER_BODY = "Yes, ship it."
+# Every kind a row can carry, and the word the row is expected to say about it.
+# The badge has to draw a different shape for each one and name it exactly
+# once, so neither a reader who cannot tell the colours apart nor one who hears
+# the page is left with colour as the only difference.
+KIND_LABELS = {
+    "signal": "Update",
+    "finished": "Finished",
+    "question": "Question",
+    "answer": "Answer",
+    "approval": "Approval",
+    "artifact": "Artifact",
+    "session": "Session",
+}
 # The session listing the stale-render check holds back. Long enough that the
 # screen the reader moved on to has painted first.
 SESSION_LIST = re.compile(r"/api/v1/sessions\?")
@@ -94,6 +108,25 @@ def heading(page) -> str:
     )
 
 
+def goto(page, hash_value: str, title: str) -> None:
+    """Move to a route and wait for it to paint, rather than for a clock.
+
+    A screen writes its heading and its data in one paint, so the heading
+    arriving is the whole screen arriving. On a slow fetch the wait times out
+    and the caller's own assertion reports what was on screen instead.
+    """
+    page.evaluate(f"location.hash = {hash_value!r}")
+    try:
+        page.wait_for_function(
+            "(want) => { const h = document.querySelector('main h1');"
+            " return !!h && h.textContent.trim() === want; }",
+            arg=title,
+            timeout=5000,
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+
 def marked_routes(page) -> list[str]:
     return page.evaluate(
         "(() => [...document.querySelectorAll('[aria-current=\"page\"]')]"
@@ -111,8 +144,7 @@ def nav_targets(page) -> list[str]:
 
 def visit(page, watch: Watch, route: str, hash_value: str, title: str, data: list[str]) -> None:
     watch.enter(hash_value)
-    page.evaluate(f"location.hash = {hash_value!r}")
-    page.wait_for_timeout(400)
+    goto(page, hash_value, title)
     found = heading(page)
     if found != title:
         watch.fail(f"the heading is {found!r}, expected {title!r}")
@@ -175,15 +207,21 @@ def check_search(page, watch: Watch) -> None:
 
 def check_answer(page, watch: Watch, project: str) -> None:
     watch.enter("inbox: answer")
-    page.evaluate("location.hash = '#/inbox'")
-    page.wait_for_timeout(500)
+    goto(page, "#/inbox", "Inbox")
     before = page.evaluate("document.querySelectorAll('[data-action=\"answer\"]').length")
     if before == 0:
         watch.fail("no question is waiting to be answered")
         return
     page.once("dialog", lambda dialog: dialog.accept(ANSWER_BODY))
     page.click('[data-action="answer"]')
-    page.wait_for_timeout(800)
+    try:
+        page.wait_for_function(
+            "(was) => document.querySelectorAll('[data-action=\"answer\"]').length < was",
+            arg=before,
+            timeout=5000,
+        )
+    except PlaywrightTimeoutError:
+        pass
     after = page.evaluate("document.querySelectorAll('[data-action=\"answer\"]').length")
     if after >= before:
         watch.fail(f"the answered question still waits ({before} then {after})")
@@ -247,6 +285,54 @@ def check_stale_render(page, watch: Watch, project: str) -> None:
             watch.fail(f"the screen left behind painted over the current one, showing {found!r}")
     finally:
         page.unroute(SESSION_LIST, hold)
+    watch.drain_rejections()
+
+
+def kind_badges(page) -> list[dict]:
+    """What every row on screen draws and says about its kind."""
+    return page.evaluate(
+        "(() => [...document.querySelectorAll('main .row')].map((row) => {"
+        " const badge = row.querySelector('.glyph');"
+        " return {"
+        "  kind: badge ? badge.getAttribute('data-kind') : null,"
+        "  mark: badge ? badge.innerHTML.replace(/\\s+/g, ' ').trim() : '',"
+        "  hidden: badge ? badge.getAttribute('aria-hidden') : null,"
+        "  labels: [...row.querySelectorAll('.sr-only')].map((n) => n.textContent.trim()),"
+        "  text: row.textContent,"
+        " };"
+        "}))()"
+    )
+
+
+def check_kind_glyphs(page, watch: Watch, project: str) -> None:
+    """A kind is a shape, not a colour, and the row says which kind once."""
+    watch.enter("feed: kind badges")
+    goto(page, f"#/feed?project={quote(project)}", "Project feed")
+    rows = kind_badges(page)
+    marks: dict[str, str] = {}
+    for row in rows:
+        kind = row["kind"]
+        if kind is None:
+            watch.fail("a row carries no kind badge")
+            continue
+        if not row["mark"]:
+            watch.fail(f"the {kind} badge draws nothing")
+        if row["hidden"] != "true":
+            watch.fail(f"the {kind} badge is not hidden from assistive technology")
+        label = KIND_LABELS.get(kind, kind)
+        if row["labels"] != [label]:
+            watch.fail(f"the {kind} row names its kind as {row['labels']}, expected [{label!r}]")
+        elif row["text"].count(label) != 1:
+            watch.fail(f"the {kind} row says {label!r} {row['text'].count(label)} times")
+        drawn = marks.setdefault(kind, row["mark"])
+        if drawn != row["mark"]:
+            watch.fail(f"two {kind} rows draw different badges")
+    for kind in KIND_LABELS:
+        if kind not in marks:
+            watch.fail(f"the feed shows no {kind} row, so its badge is unchecked")
+    shared = [kind for kind, mark in marks.items() if list(marks.values()).count(mark) > 1]
+    if shared:
+        watch.fail(f"these kinds draw the same badge, leaving colour to tell them apart: {shared}")
     watch.drain_rejections()
 
 
@@ -328,6 +414,7 @@ def run() -> int:
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
 
+            check_kind_glyphs(page, watch, project)
             check_agent_markup_is_text(page, watch)
             check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)

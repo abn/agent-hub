@@ -61,17 +61,34 @@ h3.group {
 .row .grow { flex: 1; min-width: 0; }
 .row .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.unread .title { font-weight: 600; color: var(--ink); }
+/* component: kind glyph */
+/* One pair of locals per kind, so the badge and the kind chip pick up a kind
+   without either of them repeating the six-way fan-out. An unknown kind keeps
+   the signal pair rather than falling out of the palette. */
+.glyph, .kind-chip { --kind: var(--k-signal); --kind-bg: var(--k-signal-bg); }
+.glyph[data-kind="finished"], .kind-chip[data-kind="finished"] {
+  --kind: var(--k-finished); --kind-bg: var(--k-finished-bg);
+}
+.glyph[data-kind="question"], .kind-chip[data-kind="question"],
+.glyph[data-kind="answer"], .kind-chip[data-kind="answer"] {
+  --kind: var(--k-question); --kind-bg: var(--k-question-bg);
+}
+.glyph[data-kind="approval"], .kind-chip[data-kind="approval"] {
+  --kind: var(--k-approval); --kind-bg: var(--k-approval-bg);
+}
+.glyph[data-kind="artifact"], .kind-chip[data-kind="artifact"] {
+  --kind: var(--k-artifact); --kind-bg: var(--k-artifact-bg);
+}
+.glyph[data-kind="session"], .kind-chip[data-kind="session"] {
+  --kind: var(--k-session); --kind-bg: var(--k-session-bg);
+}
 .glyph {
   width: 24px; height: 24px; border-radius: 50%; flex: none;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: var(--t-13); font-weight: 600;
-  background: var(--k-signal-bg); color: var(--k-signal);
+  line-height: 1; background: var(--kind-bg); color: var(--kind);
 }
-.glyph[data-kind="finished"] { background: var(--k-finished-bg); color: var(--k-finished); }
-.glyph[data-kind="question"] { background: var(--k-question-bg); color: var(--k-question); }
-.glyph[data-kind="approval"] { background: var(--k-approval-bg); color: var(--k-approval); }
-.glyph[data-kind="artifact"] { background: var(--k-artifact-bg); color: var(--k-artifact); }
-.glyph[data-kind="session"] { background: var(--k-session-bg); color: var(--k-session); }
+/* end component: kind glyph */
 
 .pill {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);

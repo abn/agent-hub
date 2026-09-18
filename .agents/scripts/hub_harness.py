@@ -38,6 +38,11 @@ FINISHED_SUMMARY = "nightly report done"
 MARKUP_SUMMARY = 'plan <b id="pwned">rewrite</b> the loader'
 APPROVAL_SUMMARY = "Deploy the release to production"
 QUESTION_SUBJECT = "Ship the release?"
+# A second question, seeded already answered, so the feed carries an answer
+# beside the other kinds. The open question above is left for the checks that
+# act on one.
+ANSWERED_SUBJECT = "Roll the log files?"
+SEEDED_ANSWER = "Yes, roll them."
 ARTIFACT_TITLE = "Check note"
 # A term the seeded feed event, session and brain entry all carry, so a search
 # for it returns grouped hits rather than an empty state.
@@ -170,7 +175,24 @@ def seed(port: int) -> dict[str, str]:
                 "params": {"name": tool, "arguments": arguments},
             },
         )
-        results[tool] = answer.get("result", {}).get("structuredContent", {}) or {}
+        results[name] = answer.get("result", {}).get("structuredContent", {}) or {}
+    answered = mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": len(calls) + 2,
+            "method": "tools/call",
+            "params": {
+                "name": "question_post",
+                "arguments": {"project_id": PROJECT_ID, "subject": ANSWERED_SUBJECT},
+            },
+        },
+    )
+    resolved = (answered.get("result", {}).get("structuredContent", {}) or {}).get(
+        "question_id", ""
+    )
+    request(port, "POST", f"/api/v1/questions/{resolved}/answer", {"body": SEEDED_ANSWER})
     return {
         "project_id": PROJECT_ID,
         "session_id": results.get("session_start", {}).get("session_id", ""),

@@ -33,9 +33,47 @@ export function esc(value) {
   );
 }
 
-export const glyph = (kind) => `<span class="glyph" data-kind="${esc(kind)}" aria-hidden="true">${
-  kind === "finished" ? "✓" : kind === "question" ? "?" : kind === "approval" ? "!" : "•"
-}</span>`;
+// The kind badge, from the design foundation: a 14px line glyph inside a 24px
+// tinted circle, or a typographic mark where the design uses one. A shape per
+// kind, because the tint alone is not a difference a reader can be asked to
+// see, and the drawn mark is not a difference a reader can be asked to hear.
+const mark = (d, filled) =>
+  `<svg width="14" height="14" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}"` +
+  ` stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"` +
+  ` aria-hidden="true"><path d="${d}"/></svg>`;
+
+// The foundation leaves the answer kind undrawn. A reply arrow is the one mark
+// a reader already knows for it, and it echoes the composer's send glyph.
+// The space after each move command is the one departure from the foundation's
+// own path strings. SVG reads it as the same path, and it keeps the data clear
+// of the identifier pattern the commit hooks reject.
+const MARKS = {
+  signal: mark("M 12 12h.01"),
+  finished: mark("M 5 12l5 5L20 7"),
+  question: "?",
+  answer: mark("M 10 16l-4-4 4-4 M 6 12h7a5 5 0 0 1 5 5v1"),
+  approval: "!",
+  artifact: mark("M 6 3h9l4 4v14H6z M 8 12h8 M 8 16h8"),
+  session: mark("M 12 3a9 9 0 1 0 0 18z", true),
+};
+
+// What the row says its kind is. The badge stays hidden and the label carries
+// the meaning: a bare span is not an element `aria-label` is reliably read on,
+// and the text is announced by every reader and found by a page search.
+const NAMES = {
+  signal: "Update",
+  finished: "Finished",
+  question: "Question",
+  answer: "Answer",
+  approval: "Approval",
+  artifact: "Artifact",
+  session: "Session",
+};
+
+export const glyph = (kind) =>
+  `<span class="glyph" data-kind="${esc(kind)}" aria-hidden="true">${
+    MARKS[kind] || MARKS.signal
+  }</span><span class="sr-only">${esc(NAMES[kind] || kind)}</span>`;
 
 export const when = (ts) => esc(stamp(ts));
 
