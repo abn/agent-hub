@@ -46,6 +46,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 8,
         ddl: V8,
     },
+    Migration {
+        version: 9,
+        ddl: V9,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -310,4 +314,25 @@ UPDATE events SET session_id = json_extract(payload, '$.session_id')
  WHERE kind = 'session' AND payload IS NOT NULL AND json_valid(payload);
 CREATE INDEX IF NOT EXISTS artifacts_project ON artifacts(project_id);
 CREATE INDEX IF NOT EXISTS search_docs_project_type ON search_docs(project_id, type);
+"#;
+
+/// Version 9: what a project asks of a protected artifact, and how far the
+/// human has read its feed.
+///
+/// The policy is its own column rather than a key in the reserved settings
+/// JSON: every publish reads it, and a column keeps that read typed and cheap.
+/// Existing projects take `optional`, which is what the hub did before the
+/// column existed, so no artifact becomes invalid on upgrade.
+///
+/// The cursor is one row per project, since there is one human operator and the
+/// question it answers is per project. It starts absent, which reads as nothing
+/// seen, so an upgrade does not silently mark a backlog read. The feed index
+/// over `(project_id, id DESC)` already covers counting what lies above it.
+const V9: &str = r#"
+ALTER TABLE projects ADD COLUMN artifact_password_policy TEXT NOT NULL DEFAULT 'optional';
+CREATE TABLE IF NOT EXISTS project_feed_cursors(
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 "#;

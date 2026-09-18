@@ -19,6 +19,7 @@ const TABLES: &[&str] = &[
     "grants",
     "idempotency",
     "search_docs",
+    "project_feed_cursors",
 ];
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -36,10 +37,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 8, "migrations are forward only and apply once");
+    assert_eq!(again, 9, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -226,7 +227,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let mut rows = conn
         .query(
@@ -335,7 +336,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let mut rows = conn
         .query(
@@ -526,7 +527,7 @@ async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let mut rows = conn
         .query("SELECT id, session_id FROM events ORDER BY id", ())
@@ -570,6 +571,106 @@ async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
     );
 
     drop(index);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
+    let dir = temp_dir("store-schema-v9");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-8 database holding a project and one event of its feed.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 9) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    conn.execute(
+        "INSERT INTO projects(id, display_name, owner_agent, created_at) \
+         VALUES ('proj', 'Proj', 'agent-one', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    conn.execute(
+        "INSERT INTO events(id, project_id, kind, actor, summary, created_at) \
+         VALUES ('one', 'proj', 'signal', 'agent-one', 'an event', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert event");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 9);
+
+    let mut rows = conn
+        .query(
+            "SELECT display_name, owner_agent, created_at, artifact_password_policy FROM projects",
+            (),
+        )
+        .await
+        .expect("query projects");
+    let row = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("the project survives");
+    assert_eq!(row.get::<String>(0).expect("display name"), "Proj");
+    assert_eq!(row.get::<String>(1).expect("owner"), "agent-one");
+    assert_eq!(
+        row.get::<String>(2).expect("created"),
+        "2026-09-16T00:00:00Z"
+    );
+    assert_eq!(
+        row.get::<String>(3).expect("policy"),
+        "optional",
+        "an existing project keeps today's behaviour"
+    );
+    assert!(
+        rows.next().await.expect("row").is_none(),
+        "no project is duplicated"
+    );
+    drop(rows);
+
+    let mut events = conn
+        .query("SELECT COUNT(*) FROM events", ())
+        .await
+        .expect("count events");
+    let row = events.next().await.expect("row").expect("a count");
+    assert_eq!(
+        row.get::<i64>(0).expect("count"),
+        1,
+        "the feed is untouched"
+    );
+    drop(events);
+
+    // The cursor table starts empty: nothing has been seen until the human
+    // opens a feed.
+    let mut cursors = conn
+        .query(
+            "SELECT project_id, last_seen_event_id, updated_at FROM project_feed_cursors",
+            (),
+        )
+        .await
+        .expect("query cursors");
+    assert!(cursors.next().await.expect("row").is_none());
+
+    drop(cursors);
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&dir).expect("clean temp dir");
@@ -626,7 +727,7 @@ async fn migration_six_clears_indexed_audit_events() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let mut rows = conn
         .query("SELECT doc_id FROM search_docs ORDER BY doc_id", ())
