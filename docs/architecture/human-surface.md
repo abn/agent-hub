@@ -30,6 +30,7 @@ GET    /api/v1/home
 GET    /api/v1/projects
 POST   /api/v1/projects
 DELETE /api/v1/projects/:id
+GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=&project=&limit=
@@ -39,6 +40,7 @@ POST   /api/v1/approvals/:id/decision
 POST   /api/v1/sessions/:id/end
 POST   /api/v1/sessions/:id/reassign
 GET    /api/v1/sessions?project=
+GET    /api/v1/sessions/:id
 GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/agents
 POST   /api/v1/agents
@@ -58,6 +60,8 @@ PATCH  /api/v1/artifacts/:id/comments/:commentId
 DELETE /api/v1/artifacts/:id/comments/:commentId
 GET    /api/v1/storage
 DELETE /api/v1/storage/sessions/:id
+DELETE /api/v1/storage/sessions
+DELETE /api/v1/storage/projects/:id/sessions
 POST   /api/v1/prune/undo/:token
 GET    /api/v1/search?q=&scope=&project=&type=&limit=
 GET    /healthz
@@ -109,6 +113,39 @@ built-in card. Storage acts on sessions only,
 and a session prune returns an undo token valid for a short window. Deleting a
 whole project is the destructive endpoint under projects.
 
+### What each response carries
+
+Every number a surface shows comes from one of these fields. Nothing is
+derived from a proxy, and a number that cannot be measured is absent rather
+than zero.
+
+| Route | Carries |
+|---|---|
+| `GET /api/v1/home` | `unread`, `waiting`, `agents_active`, `last_event_at`, `recent`, `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Home makes one request |
+| `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `prunable`, and a row per project with its artifact, session, knowledge and prunable bytes |
+| `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages` and `agents_active` for the project header and its tab labels |
+| `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
+| `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
+| `GET /api/v1/sessions/:id/brain?path=` | `entries[]` with `path`, `type` (`key`, `file` or `dir`) and `size_bytes`, one directory level per request, with `path` echoed and `truncated` when the level held more |
+| `GET /api/v1/search` | `count`, the hits on this page before grouping, `truncated` when the limit cut the result, `took_ms` around the store call, and `groups[]` each with its own `count` |
+
+`count` is the hits the page carries, not how many documents match, and
+`truncated` says when the limit cut it, so a capped page is never printed as a
+total.
+
+The volume's capacity and free space come from one `statvfs` on the data
+directory, and the free figure is what a writer that is not root can use. When
+the call fails, `capacity_bytes` and `free_bytes` are `null` and the rest of the
+response is still served, so a surface renders "unknown" rather than 0 of 0.
+The numbers that cost a syscall or a file stat are memoised for ten seconds
+behind a counter every write bumps; the counts are indexed and never cached.
+
+A batch prune takes every ended session of one project, or of every project,
+with the same soft delete, undo window and sweep as pruning one. It never
+touches an active session, a feed event, an artifact or a project knowledge
+base. It returns one undo token per session rather than a token of its own, so
+undo is the route it already was, once per token.
+
 ## PWA
 
 The interface follows the design foundation, whose tokens, type, spacing,
@@ -124,9 +161,9 @@ shipped.
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
-| Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log are intended design, not yet shipped. |
+| Sessions | Sessions per project, with end and prune actions. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
-| Storage | Usage by project and kind, with the reversible prune actions for sessions. |
+| Storage | Usage by project and kind against the volume's own capacity, with the reversible prune actions for one session, one project, or every project. |
 | Project settings | Deletion ships, under the global Settings screen. A dedicated Project settings screen with project fields, artifact password policy, and reserved retention hints is intended design, not yet shipped. |
 
 Agent and access management lives under Settings, not a tab. It lists agents

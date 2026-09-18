@@ -222,7 +222,9 @@ comment_delete(artifact_id, comment_id, delete_token?)
 `project_id`, and `type` filters by kind: `feed`, `artifact`, `brain` for
 session brains, or `kb` for knowledge base pages. `session_id` narrows the
 results to one session's brain content. Results are confined to the projects
-the caller can see.
+the caller can see, and come back with `count`, the hits this page carries
+before grouping, `truncated` when the limit cut the result, and `took_ms`, how
+long the query itself took.
 
 ## Sessions and the brain
 

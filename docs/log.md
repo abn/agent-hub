@@ -4,6 +4,40 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, every number the human surface shows has a route
+
+* **Update**: The human surface reported bytes, counts and timings that no
+  route carried. Each now has one: the volume's capacity and free space beside
+  what the data directory holds, totals by kind, what a prune would reclaim,
+  per-session brain size, a session's event count and its last line, per-project
+  event, artifact, session and wiki page counts, agents at work, and a search
+  result count, with whether the page was capped, and the time the query itself
+  took. A brain listing returns
+  entry objects with a type and a size, one directory level at a time. Every
+  field is listed in the [human surface](architecture/human-surface.md).
+* **Update**: A volume that cannot be measured reports its capacity and free
+  space as absent, and the surface says it does not know rather than showing
+  zero of zero. File and volume numbers are memoised for ten seconds behind a
+  counter every write bumps; counts are indexed and never cached.
+* **Update**: Storage can prune every ended session of one project, or of every
+  project, with the same soft delete, undo window and sweep as pruning one. It
+  never touches an active session, a feed event, an artifact or a project
+  knowledge base, and returns one undo token per session.
+* **Update**: An agent counts as active while it owns a live session touched
+  inside a window, and a session is now touched by every tool call that resolves
+  it rather than only at start and end, so an agent that only posts signals or
+  asks questions still counts. The window is `HUB_ACTIVE_WINDOW_SECS`, capped at
+  thirty days, and the node's name is `HUB_NODE_NAME`, both in the
+  [quickstart](usage/quickstart.md).
+* **Note**: An event now names the session it was written during. Existing
+  events are backfilled from the lifecycle payloads that already carried one, and
+  a payload that does not parse is left without a session rather than stopping
+  the upgrade;
+  everything written before this change keeps no session on ordinary work, so a
+  session detail count covers what happened after the upgrade. Pruning deletes
+  exactly what it did before, which the [data model](architecture/data-model.md)
+  states.
+
 ## 2026-09-18, the app is one module per screen
 
 * **Update**: The PWA is now a set of ES modules rather than one script: an

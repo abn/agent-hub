@@ -21,7 +21,7 @@ inbox, which is global.
 | Table | Holds |
 |---|---|
 | `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, reserved retention hints, and a JSON settings column such as the artifact password policy. |
-| `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, and a thread link for question and answer. |
+| `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
 | `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, and the blob path. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
@@ -40,6 +40,14 @@ kind is a closed set of the six design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`) plus `system`;
 sub-actions such as an artifact publish or update ride in the payload.
 
+An event also names the session it was written during, indexed, so a session
+detail screen counts what the session produced without reading a payload. The
+column is wider than the lifecycle events: an agent's signals, questions and
+approvals carry it too. Pruning is not wider for it. A prune still removes only
+the session's own lifecycle events, because storage acts on sessions and never
+on feed events or artifacts, and the work a session left in the feed outlives
+the session.
+
 Identity is a first-class table rather than a field on a token, so the server
 sets the `actor` on every event and a request cannot forge another agent. The
 trust model and grants are described in [agent identity and
@@ -53,6 +61,16 @@ personal space; a grant lands in the project it opens. The trail is the human's
 to read: a `system` event is left out of the search corpus, and an agent's feed
 read never returns one, whatever kinds it asks for. The admin reads it through
 the project feed route, by kind.
+
+A session's last activity means activity. Every tool call that resolves the
+caller's active session touches it, whether it writes a brain, posts a signal
+or asks the human, coalesced so a busy agent writes the timestamp at most once
+a minute. An agent counts as active while it owns a live session touched inside
+the active window. The touch is bookkeeping: a store too busy to take it never
+fails the call that triggered it. An agent with two sessions
+counts once, an agent with no session never counts, and a token last used a
+moment ago is not the same thing: `agents.last_seen_at` answers that question
+and is not this one.
 
 Retention is deliberately a per-layer concept. The schema carries
 `created_at`, `last_activity`, a `retention` column, and room for an
