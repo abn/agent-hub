@@ -154,6 +154,12 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     .await
     .map_err(engine)?;
     tx.execute(
+        "DELETE FROM comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project_id = ?1)",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
         "DELETE FROM artifacts WHERE project_id = ?1",
         vec![Value::Text(id.to_string())],
     )

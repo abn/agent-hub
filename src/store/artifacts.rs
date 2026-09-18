@@ -363,8 +363,8 @@ pub async fn update(
 
 /// Delete an artifact and its history.
 ///
-/// The version rows, search row, and idempotency rows go in the same
-/// transaction as a `deleted` feed event, so a replay after the delete
+/// The version rows, comment rows, search row, and idempotency rows go in the
+/// same transaction as a `deleted` feed event, so a replay after the delete
 /// records fresh instead of resolving to a missing row. The blob tree is
 /// removed best effort after the commit; a missing tree is not an error.
 pub async fn delete(
@@ -384,6 +384,18 @@ pub async fn delete(
 
     tx.execute(
         "DELETE FROM artifact_versions WHERE artifact_id = ?1",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM idempotency WHERE comment_id IN (SELECT id FROM comments WHERE artifact_id = ?1)",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
+        "DELETE FROM comments WHERE artifact_id = ?1",
         vec![Value::Text(artifact_id.to_string())],
     )
     .await

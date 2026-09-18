@@ -13,6 +13,7 @@ use crate::error::{Error, Result};
 const EVENT: &str = "event";
 const DECISION: &str = "decision";
 const ARTIFACT: &str = "artifact";
+const COMMENT: &str = "comment";
 
 /// What a key produced, when it was recorded.
 #[derive(Debug, Clone)]
@@ -23,6 +24,8 @@ pub struct Entry {
     pub artifact_id: Option<String>,
     /// The artifact version the write granted, if any.
     pub version: Option<i64>,
+    /// The comment the write posted, if any.
+    pub comment_id: Option<String>,
 }
 
 /// Return what a key produced for one operation, if it is recorded.
@@ -34,7 +37,7 @@ pub async fn lookup_entry(
 ) -> Result<Option<Entry>> {
     let mut rows = conn
         .query(
-            "SELECT event_id, artifact_id, version FROM idempotency
+            "SELECT event_id, artifact_id, version, comment_id FROM idempotency
              WHERE project_id = ?1 AND operation = ?2 AND idempotency_key = ?3",
             vec![
                 Value::Text(project_id.to_string()),
@@ -59,6 +62,7 @@ pub async fn lookup_entry(
         event_id: text(row.get_value(0).map_err(engine)?),
         artifact_id: text(row.get_value(1).map_err(engine)?),
         version,
+        comment_id: text(row.get_value(3).map_err(engine)?),
     }))
 }
 
@@ -78,7 +82,15 @@ pub async fn record(
     created_at: &str,
 ) -> Result<()> {
     record_row(
-        conn, project_id, EVENT, key, event_id, None, None, created_at,
+        conn,
+        project_id,
+        EVENT,
+        key,
+        Some(event_id),
+        None,
+        None,
+        None,
+        created_at,
     )
     .await
 }
@@ -92,7 +104,38 @@ pub async fn record_decision(
     created_at: &str,
 ) -> Result<()> {
     record_row(
-        conn, project_id, DECISION, key, event_id, None, None, created_at,
+        conn,
+        project_id,
+        DECISION,
+        key,
+        Some(event_id),
+        None,
+        None,
+        None,
+        created_at,
+    )
+    .await
+}
+
+/// Record a comment key against the comment it posted. Comments append no
+/// feed event, so only the comment id is recorded.
+pub async fn record_comment(
+    conn: &Connection,
+    project_id: &str,
+    key: &str,
+    comment_id: &str,
+    created_at: &str,
+) -> Result<()> {
+    record_row(
+        conn,
+        project_id,
+        COMMENT,
+        key,
+        None,
+        None,
+        None,
+        Some(comment_id),
+        created_at,
     )
     .await
 }
@@ -112,9 +155,10 @@ pub async fn record_artifact(
         project_id,
         ARTIFACT,
         key,
-        event_id,
+        Some(event_id),
         Some(artifact_id),
         Some(version),
+        None,
         created_at,
     )
     .await
@@ -126,29 +170,30 @@ async fn record_row(
     project_id: &str,
     operation: &str,
     key: &str,
-    event_id: &str,
+    event_id: Option<&str>,
     artifact_id: Option<&str>,
     version: Option<i64>,
+    comment_id: Option<&str>,
     created_at: &str,
 ) -> Result<()> {
-    let artifact_id = match artifact_id {
-        Some(id) => Value::Text(id.to_string()),
-        None => Value::Null,
-    };
-    let version = match version {
-        Some(version) => Value::Integer(version),
+    let optional_text = |value: Option<&str>| match value {
+        Some(text) => Value::Text(text.to_string()),
         None => Value::Null,
     };
     conn.execute(
-        "INSERT INTO idempotency(project_id, operation, idempotency_key, event_id, artifact_id, version, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO idempotency(project_id, operation, idempotency_key, event_id, artifact_id, version, comment_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         vec![
             Value::Text(project_id.to_string()),
             Value::Text(operation.to_string()),
             Value::Text(key.to_string()),
-            Value::Text(event_id.to_string()),
-            artifact_id,
-            version,
+            optional_text(event_id),
+            optional_text(artifact_id),
+            match version {
+                Some(version) => Value::Integer(version),
+                None => Value::Null,
+            },
+            optional_text(comment_id),
             Value::Text(created_at.to_string()),
         ],
     )

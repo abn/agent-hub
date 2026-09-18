@@ -12,6 +12,7 @@ const TABLES: &[&str] = &[
     "inbox",
     "artifacts",
     "artifact_versions",
+    "comments",
     "sessions",
     "agents",
     "agent_tokens",
@@ -35,10 +36,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = temp_dir("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 4, "migrations are forward only and apply once");
+    assert_eq!(again, 5, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -100,6 +101,37 @@ async fn migrate_creates_schema_and_search_index() {
         .expect("artifacts.description, favicon and label exist");
     assert!(meta.next().await.expect("row").is_none());
     drop(meta);
+
+    // Migration 5 adds discussion plus the idempotency column recording it.
+    let mut comments = conn
+        .query(
+            "SELECT author, body, anchor, anchor_version, done, delete_token_hash FROM comments LIMIT 1",
+            (),
+        )
+        .await
+        .expect("comments columns exist");
+    assert!(comments.next().await.expect("row").is_none());
+    drop(comments);
+
+    let mut comment_key = conn
+        .query("SELECT comment_id FROM idempotency LIMIT 1", ())
+        .await
+        .expect("idempotency.comment_id exists");
+    assert!(comment_key.next().await.expect("row").is_none());
+    drop(comment_key);
+
+    let mut comment_index = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'comments_artifact'",
+            (),
+        )
+        .await
+        .expect("index query");
+    assert!(
+        comment_index.next().await.expect("row").is_some(),
+        "missing comments_artifact index"
+    );
+    drop(comment_index);
 
     for id in ["a", "b"] {
         conn.execute(
@@ -194,7 +226,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let mut rows = conn
         .query(

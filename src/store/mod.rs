@@ -5,6 +5,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 
 pub mod artifacts;
+pub mod comments;
 pub mod events;
 pub mod home;
 pub mod idempotency;

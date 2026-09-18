@@ -30,6 +30,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 4,
         ddl: V4,
     },
+    Migration {
+        version: 5,
+        ddl: V5,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -201,4 +205,28 @@ INSERT INTO artifact_versions(artifact_id, version, title, description,
   SELECT id, current_ver, title, '', '', kind, NULL,
     CASE WHEN envelope IS NULL THEN 0 ELSE 1 END,
     envelope, size_bytes, path, updated_at FROM artifacts;
+"#;
+
+/// Version 5: discussion on artifacts, plus the idempotency column that
+/// records what a comment write produced.
+///
+/// Comments hang off their artifact; deleting the artifact or its project
+/// removes them in the same transaction. A text anchor quotes artifact
+/// content, so the anchored version's encryption state gates it at the
+/// store boundary; the schema only carries the fields.
+const V5: &str = r#"
+CREATE TABLE IF NOT EXISTS comments(
+  id TEXT PRIMARY KEY,
+  artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  anchor TEXT,
+  anchor_version INTEGER,
+  done INTEGER NOT NULL DEFAULT 0,
+  delete_token_hash TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comments_artifact
+  ON comments(artifact_id, created_at, id);
+ALTER TABLE idempotency ADD COLUMN comment_id TEXT;
 "#;
