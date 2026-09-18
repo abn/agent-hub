@@ -431,3 +431,72 @@ async fn a_batch_prune_without_a_token_is_refused() {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
     }
 }
+
+#[tokio::test]
+async fn home_carries_the_counts_its_summary_line_and_cards_show() {
+    let state = state().await;
+    let ended = ended_session(&state, "proj", "nightly").await;
+    let brain_bytes = agent_hub::brain::file_bytes(&state.data_dir.join(&ended.brain_path));
+    // One agent with two live sessions, and a second agent with one.
+    for name in ["live", "second"] {
+        let session = sessions::start(&state.db, "proj", name, "agent-two")
+            .await
+            .expect("start");
+        state
+            .activity
+            .touch(&state.db, &session.id)
+            .await
+            .expect("touch");
+    }
+    let other = sessions::start(&state.db, "proj", "live", "agent-three")
+        .await
+        .expect("start");
+    state
+        .activity
+        .touch(&state.db, &other.id)
+        .await
+        .expect("touch");
+    state.notify();
+
+    let (status, body) = call(&state, "GET", "/api/v1/home").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["agents_active"], 2,
+        "an agent with two sessions counts once, an ended one not at all: {body}"
+    );
+    assert_eq!(body["prunable"]["sessions"], 1);
+    assert_eq!(body["prunable"]["bytes"], brain_bytes);
+    assert!(body["storage"]["used_bytes"].as_i64().expect("used") > 0);
+    assert!(
+        body["storage"]["capacity_bytes"]
+            .as_i64()
+            .expect("capacity")
+            >= body["storage"]["free_bytes"].as_i64().expect("free")
+    );
+    assert_eq!(
+        body["last_event_at"], body["recent"][0]["created_at"],
+        "the empty state's last event time is the newest event's own"
+    );
+    assert!(body["unread"].is_number() && body["waiting"].is_number());
+}
+
+#[tokio::test]
+async fn an_agent_that_has_gone_quiet_is_not_counted_as_active() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let conn = state.db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET last_activity = '2026-09-16T00:00:00Z' WHERE id = ?1",
+        vec![turso::Value::Text(session.id.clone())],
+    )
+    .await
+    .expect("age the activity");
+
+    let (_, body) = call(&state, "GET", "/api/v1/home").await;
+    assert_eq!(
+        body["agents_active"], 0,
+        "a session last touched long ago makes nobody active"
+    );
+}

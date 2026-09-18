@@ -65,9 +65,21 @@ pub async fn home(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let summary = home_store::home(&state.db, HOME_RECENT_LIMIT)
+    // The file and volume numbers come from the memo, so Home's one request
+    // does not restat the data directory on every poll.
+    let usage = state
+        .stats
+        .usage(&state.db, &state.data_dir, &state.host, state.generation())
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    let summary = home_store::home(
+        &state.db,
+        HOME_RECENT_LIMIT,
+        &state.config.active_since(),
+        usage,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(summary))
 }

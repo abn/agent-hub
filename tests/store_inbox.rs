@@ -344,7 +344,12 @@ async fn finished_work_lands_as_unread_and_counts() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].status, "unread");
 
-    let summary = home::home(&db, 10).await.expect("home");
+    let usage = agent_hub::store::storage::usage(&db, std::path::Path::new("."), "node")
+        .await
+        .expect("usage");
+    let summary = home::home(&db, 10, "2026-09-16T00:00:00Z", usage)
+        .await
+        .expect("home");
     assert_eq!(summary.unread, 1);
     assert_eq!(summary.waiting, 0);
     assert_eq!(summary.recent.len(), 1);
