@@ -27,3 +27,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0018](0018-project-knowledge-base.md) - The project knowledge base
 * [0019](0019-hub-client-proxy-and-cli.md) - The hub client is a proxy and a
   CLI
+* [0020](0020-sessions-belong-to-their-agent.md) - Sessions belong to their
+  agent

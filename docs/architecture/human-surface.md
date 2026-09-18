@@ -37,6 +37,7 @@ GET    /api/v1/stream
 POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
 POST   /api/v1/sessions/:id/end
+POST   /api/v1/sessions/:id/reassign
 GET    /api/v1/sessions?project=
 GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/agents
@@ -137,8 +138,14 @@ renders HTML or rendered markdown inside the same sandboxed frame. Markdown
 renders in the page with raw HTML in its source escaped; protected markdown
 renders from the decrypted source, so the server never sees it.
 
-A session opens into a detail view that lists its brain keys and files and
-offers End and Prune. Project deletion is a destructive action under Settings
+The session listing route carries the agent that owns each session, the
+handoff note its last owner left, and its lineage: whether the work was adopted
+or forked, from which session and which agent, and whether that source has since
+been pruned. The PWA does not render those fields yet; that is intended design.
+A session opens into a detail view that lists its brain keys and files
+and offers End and Prune. Reassigning a session to another agent is the
+human's move for an agent that is not coming back, over the reassign route; the
+PWA has no control for it yet. Agents pick work up themselves and ask nobody. Project deletion is a destructive action under Settings
 behind a confirmation; an agent's personal space cannot be deleted. Inbox
 notifications are opt-in from Settings, request permission only on that
 action, and carry only waiting-on-you items; without permission or support

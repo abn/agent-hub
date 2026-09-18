@@ -34,8 +34,9 @@ and session-bound work goes through the proxy.
 
 | Tool | Purpose |
 |---|---|
-| `session_start` | Register or resume a session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. |
-| `session_end` | Mark a session ended. The brain is retained until the human prunes it. |
+| `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. With `from`, it picks up another agent's session. |
+| `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. The brain is retained until the human prunes it. |
+| `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. |
 | `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
@@ -99,9 +100,10 @@ never existed. An agent without access cannot tell a session it may not
 read from one that does not exist: both are the same `forbidden`.
 
 Writes stay with the owner's active session. `brain_put` and `brain_delete`
-refuse a `session` argument with an `invalid_argument`, because one
-working-state file has one writer and two would clobber each other. Knowledge
-meant for another agent belongs in the project knowledge base.
+accept a `session` only when it names that session, and refuse any other with
+`forbidden` and an `owner=` tail, because one working-state file has one writer
+and two would clobber each other. Knowledge meant for another agent belongs in
+the project knowledge base.
 
 `search` takes `session_id` to narrow results to one session's brain content,
 under the same project confinement as every other search.
@@ -109,7 +111,8 @@ under the same project confinement as every other search.
 Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A knowledge base holds pages only, so a `/kv/` path there is an
 `invalid_argument`. No tool exposes a raw file handle or the server path of a
-file: `session_start` returns the session id and nothing else. One value is
+file: `session_start` returns the session id, its owner and status, the two
+namespaces to address the brain with, and the conventional recovery path. One value is
 capped at 4 MiB, and a larger write is refused with `payload_too_large` before
 anything is stored.
 
@@ -159,7 +162,31 @@ one actor may leave open in a project; a write past the cap is refused with
 Event kinds are a closed set of seven design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`) plus `system`.
 Sub-actions ride in the payload, so an artifact has an action of `published`
-or `updated` and a session has `started` or `ended`.
+or `updated` and a session has `started`, `ended`, `adopted`, `forked`, or
+`reassigned`.
+
+## Session ownership and pickup
+
+A session belongs to the agent that started it. A name is unique per owner
+inside a project, so two agents that choose `nightly` get two sessions and two
+brains rather than silently sharing one, and each resumes its own. A name a
+pruned session still holds is refused with a `conflict` naming it, because the
+human can still undo that prune.
+
+An agent picks work up by passing `from` to `session_start`, naming a session
+by id or by agent and name. The hub chooses the mechanism from the source's
+state, because the caller cannot tell from outside whether that session is
+still running: an ended session is **adopted**, keeping its id, its brain and
+its handoff note while ownership moves; a running one is **forked** into a new
+session whose brain is copied through the engine, leaving the source untouched.
+The result reports which happened and returns the note the previous owner left.
+Every agent that may write the project may adopt an ended session there, and
+the human approves nothing: adopt, fork, reassign and end-with-handoff all
+reach the feed as ordinary session events.
+
+The human's own move is the reverse one: reassigning a running session to
+another agent from the control surface, for the case where the agent holding it
+is not coming back.
 
 ## Bootstrap convention
 

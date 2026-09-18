@@ -26,7 +26,7 @@ inbox, which is global.
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
-| `sessions` | Session metadata: project, the agent-supplied session name, agent, status, the brain file path, timestamps, and a soft-delete marker. State itself lives in the brain file. |
+| `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
 | `agents` | Agent identity, display name, trust level (`trusted` or `untrusted`), and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
 | `grants` | An agent, a project, and read or write access, for opening a project to an untrusted agent. |
@@ -78,8 +78,9 @@ There is one AgentFS file per session. It hosts three things in one file:
   plans, temporary outputs, and handoff documents.
 
 A brain is arbitrary session-scoped state, not a curated subset. Its life is
-session-bound: it survives same-session compaction and resume of the same
-named session, and it is removed only when the human prunes the session.
+session-bound: it belongs to the agent that started the session, survives
+same-session compaction and resume of that name by its owner, can be adopted or
+forked by another agent, and is removed only when the human prunes the session.
 Durable knowledge leaves it only by explicit promotion.
 
 A brain is written only through its owner's active session, and read by anyone
@@ -89,8 +90,19 @@ is working from. Reads never create a brain file, so a session that wrote
 nothing leaves nothing on disk, and a pruned session is unreadable from the
 moment it is marked.
 
-A recovery handoff document is a convention on a well-known path inside the
-brain, not a separate subsystem.
+Ownership moves two ways, and the hub picks which from the source's state.
+Adopting an ended session moves the owner and nothing else: the id, the file
+and every search row stay as they are. Forking a running one copies the file
+through the engine, which takes the audit log with it, and writes a second set
+of search rows under the new session id; the source is not told and not
+touched. Either way the lineage is recorded on the row, and it stays recorded
+after the source is pruned, where the surfaces render it as a session that is
+gone rather than repairing it.
+
+The handoff note a session leaves when it ends lives on the session row and in
+the feed event, never in the brain: a session that never wrote must not get a
+brain file merely because it ended. A recovery handoff document is a separate
+convention, on a well-known path inside the brain, not a separate subsystem.
 
 ## Project knowledge base
 
@@ -117,9 +129,9 @@ and the human can read.
 
 ## Multi-writer stores
 
-When several agents share one named session, they still write through the
-wrapper. The hub process is the single writer per file, so it serialises
-writers with a per-file lock; writers to distinct files never block each other.
+Agents write through the wrapper, never the file. The hub process is the single
+writer per file, so it serialises writers with a per-file lock; writers to
+distinct files never block each other.
 The same lock orders the many writers a project knowledge base has by design,
 and carries its compare-and-set. No version column is used for this: the token
 is a hash of the content itself, so it cannot drift from what it describes. A

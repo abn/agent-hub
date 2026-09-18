@@ -29,10 +29,15 @@ contract; this file is the operating detail behind it.
 ## Retention
 
 - No automatic expiry ships in v1. The human prunes through the PWA.
-- Retention is per layer (feed events, session brains, artifacts). A project
-  knowledge base is outside session life and prune never touches it. Carry the
-  timestamps and hints the later layers need in the schema, but do not ship a
-  policy the human has not asked for.
+- Retention is per layer (feed events, session brains, artifacts). A session
+  brain belongs to the agent that started it. It survives same-session
+  compaction and resume of the same named session by its owner, can be adopted
+  or forked by another agent, and is garbage-collected on prune. The project
+  knowledge base is outside session life: prune never touches it. Durable
+  knowledge leaves a session brain only by explicit promotion to a feed event,
+  an artifact, or the project knowledge base. Carry the timestamps and hints
+  the later layers need in the schema, but do not ship a policy the human has
+  not asked for.
 
 ## Clean committed tree
 

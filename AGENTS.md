@@ -27,10 +27,13 @@ shipped behaviour.
   AgentFS file per project holds the project knowledge base, shared by every
   agent with project write. Agents never touch a file directly: they speak
   MCP, and the wrapper is the single writer per file.
-- **Session life is session-bound.** A brain survives same-session compaction
-  and resume of the same named session, and is garbage-collected on prune.
-  Durable knowledge leaves the brain only by explicit promotion to a feed
-  event, an artifact, or a memory write.
+- **Session life is session-bound.** A session brain belongs to the agent that
+  started it. It survives same-session compaction and resume of the same named
+  session by its owner, can be adopted or forked by another agent, and is
+  garbage-collected on prune. The project knowledge base is outside session
+  life: prune never touches it. Durable knowledge leaves a session brain only
+  by explicit promotion to a feed event, an artifact, or the project knowledge
+  base.
 - **The human is the garbage collector in v1.** No automatic expiry ships.
   Retention is a per-layer concept, and the schema carries the timestamps and
   hints the later layers need.

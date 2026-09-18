@@ -4,6 +4,43 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a session belongs to the agent that started it
+
+* **Note**: Sessions started before this change keep the owner they were
+  written with. A standalone `agent-hub mcp` records `HUB_AGENT_ID`, or `local`
+  when it is unset, while a token transport records the token's agent. An agent
+  that moves from standalone stdio to the proxy under a different identity
+  starts fresh sessions, and reaches its earlier work by picking it up with
+  `from`. The served skill contract says how.
+* **Update**: A session name is now the caller's own. The same name under
+  another agent is a different session with its own brain, so two agents that
+  pick `nightly` no longer share working state, and each resumes its own.
+  Asking for a name a pruned session still holds is refused with `conflict` and
+  a `pruned_session_id=` tail while the human's undo can still restore it.
+  Documented in the [data model](architecture/data-model.md), the
+  [agent surface](architecture/agent-surface.md), and the served skill
+  contract.
+* **Update**: `session_start` takes `from` and picks up another agent's work
+  without the human arranging anything. The hub chooses what that means from
+  the source's state: an ended session is adopted, keeping its id, brain and
+  handoff note while ownership moves, and a running one is forked into a copy
+  that leaves the source undisturbed. The result reports `pickup` with the mode
+  and the note. Recorded in
+  [sessions belong to their agent](adr/0020-sessions-belong-to-their-agent.md).
+* **Update**: `session_end` takes an optional `handoff` note, kept on the
+  session and in the feed event and returned to whoever picks the session up.
+  It never enters the brain, so ending a session that never wrote still leaves
+  no brain file. Only a session's owner may end it; the local admin still can.
+* **Update**: `session_list` gives an agent the sessions it may read, with
+  owner, status, last activity, handoff summary and lineage. The REST session
+  listing gains the same owner and handoff plus a resolved `lineage` object,
+  and a session the human needs to move has a reassign route.
+* **Note**: `brain_put` and `brain_delete` now accept a `session` that names
+  the caller's own active session, so one client passes the same argument to a
+  read and a write. Any other session is `forbidden` with an `owner=` tail.
+* **Note**: Adopt, fork, reassign and end-with-handoff reach the human feed as
+  ordinary session events. Nothing here waits on human approval.
+
 ## 2026-09-18, a one-line read of the project knowledge base
 
 * **Update**: `agent-hub kb get|put|list|delete` reads and writes the project
