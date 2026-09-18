@@ -285,3 +285,30 @@ async fn readyz_reports_unavailable_when_the_engine_does_not_answer() {
     assert_eq!(content_type.as_deref(), Some("application/problem+json"));
     assert_eq!(body["code"], "unavailable");
 }
+
+#[tokio::test]
+async fn readyz_reports_unavailable_when_the_store_moved_schema() {
+    let state = probe_state("topology-unready-schema").await;
+    let opened = state.schema_version;
+
+    // Another process migrated the same store: the engine still answers, but
+    // not at the version this process opened.
+    let conn = state.db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO schema_version(version) VALUES (?1)",
+        (opened + 1,),
+    )
+    .await
+    .expect("record a later version");
+    drop(conn);
+
+    let (status, content_type, body) = probe(state).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    assert_eq!(body["code"], "unavailable");
+    let detail = body["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains(&(opened + 1).to_string()) && detail.contains(&opened.to_string()),
+        "the problem names both versions: {detail}"
+    );
+}
