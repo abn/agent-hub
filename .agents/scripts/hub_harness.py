@@ -37,6 +37,9 @@ FINISHED_SUMMARY = "nightly report done"
 # the escaping helper every screen shares is what stands between the two.
 MARKUP_SUMMARY = 'plan <b id="pwned">rewrite</b> the loader'
 APPROVAL_SUMMARY = "Deploy the release to production"
+# A second approval, so the check that approves by key and the one that approves
+# by button each have one of their own to decide.
+SECOND_APPROVAL_SUMMARY = "Rotate the signing key on the build host"
 QUESTION_SUBJECT = "Ship the release?"
 # A second question, seeded already answered, so the feed carries an answer
 # beside the other kinds. The open question above is left for the checks that
@@ -167,6 +170,7 @@ def seed(port: int) -> dict[str, str]:
         ("finished", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
         ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
+        ("approval-two", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": SECOND_APPROVAL_SUMMARY}),
         ("question", "question_post", {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT}),
         # Published before the plain one so the gallery, newest first, still
         # opens the plain artifact for the checks that click the first card.

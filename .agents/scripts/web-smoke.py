@@ -385,7 +385,7 @@ def check_approve(page, watch: Watch) -> None:
     page.click('[data-action="approve"]')
     page.wait_for_selector("dialog.dialog[open]")
     asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
-    if harness.APPROVAL_SUMMARY not in asked:
+    if harness.SECOND_APPROVAL_SUMMARY not in asked:
         watch.fail("the dialog does not name what is being approved")
     page.click(".dialog-commit")
     page.wait_for_function("() => !document.querySelector('[data-action=\"approve\"]')")
@@ -916,18 +916,27 @@ def check_approve_key(page, watch: Watch) -> None:
     if not reached:
         watch.fail("the selection never reached the waiting approval")
         return
-    accept = lambda dialog: dialog.accept()  # noqa: E731
-    page.on("dialog", accept)
-    try:
-        page.keyboard.press("a")
-        if not settle(
-            page,
-            "document.querySelectorAll('[data-action=\"approve\"]').length < "
-            + str(before),
-        ):
-            watch.fail(f"the approval still waits after the key ({before} rows)")
-    finally:
-        page.remove_listener("dialog", accept)
+    # The key asks the same question the button asks, in the app's own dialog,
+    # and nothing is sent until the reader answers it.
+    page.keyboard.press("a")
+    page.wait_for_selector("dialog.dialog[open]")
+    if not page.evaluate(FOCUS_IN_DIALOG):
+        watch.fail("the approve key opened the dialog without moving focus into it")
+    # While the dialog is open the row keys belong to it, not to the list behind.
+    selected = page.evaluate(SELECTED_ROW)
+    page.keyboard.press("j")
+    page.wait_for_timeout(150)
+    if page.evaluate(SELECTED_ROW) != selected or not page.evaluate(FOCUS_IN_DIALOG):
+        watch.fail("a row key moved the list behind an open dialog")
+    if page.evaluate("document.querySelectorAll('[data-action=\"approve\"]').length") != before:
+        watch.fail("the approval was sent before the dialog was answered")
+    page.click("dialog.dialog .dialog-commit")
+    if not settle(
+        page,
+        "document.querySelectorAll('[data-action=\"approve\"]').length < "
+        + str(before),
+    ):
+        watch.fail(f"the approval still waits after the key ({before} rows)")
     watch.drain_rejections()
 
 
