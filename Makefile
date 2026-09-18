@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y net/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -76,7 +76,12 @@ net/check: ## Compile and test the optional embedded tailnet build
 	cargo check --features tailnet
 	cargo test --features tailnet --test tailnet_config
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y net/check test ## Full quality gate
+# The container image serves only and is built without the client. Nothing else
+# compiles that configuration, so without this its cfg arms rot unseen.
+serve/check: ## Compile the serve-only build the container image uses
+	cargo check --no-default-features
+
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container

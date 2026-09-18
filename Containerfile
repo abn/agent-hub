@@ -13,7 +13,9 @@ COPY vendor ./vendor
 COPY src ./src
 COPY web ./web
 
-RUN cargo build --release --locked
+# The image only serves, so it leaves out the client: the stdio proxy and the
+# one-shot calls run on the agents' machines, not here.
+RUN cargo build --release --locked --no-default-features
 
 RUN mkdir -p /data && chown 65532:65532 /data
 

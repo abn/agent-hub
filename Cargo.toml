@@ -31,7 +31,17 @@ sha2 = "0.10"
 tailscale = { version = "0.5", features = ["axum"], optional = true }
 
 [features]
-default = []
+default = ["client"]
+# The client side: the stdio proxy and the one-shot calls. Default on, so a
+# published binary proxies out of the box; the container, which only serves,
+# builds without it. rmcp's reqwest transport is taken whole rather than
+# implementing its client trait here, and it is rustls only: an OpenSSL
+# linkage would break the distroless image.
+client = [
+  "rmcp/client",
+  "rmcp/reqwest",
+  "rmcp/transport-streamable-http-client-reqwest",
+]
 tailnet = ["dep:tailscale"]
 
 [dev-dependencies]
