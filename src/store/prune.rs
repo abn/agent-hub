@@ -28,17 +28,9 @@ pub struct PruneToken {
 pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken> {
     let session = crate::store::sessions::get(db, session_id)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
-
-    if session.deleted_at.is_some() {
-        return Err(Error::Conflict(format!(
-            "session {session_id} is already pruned"
-        )));
-    }
-    if session.status != "ended" {
-        return Err(Error::Conflict(
-            "end the session before pruning it".to_string(),
-        ));
+        .ok_or_else(|| not_found(session_id))?;
+    if let Some(err) = refusal(&session) {
+        return Err(err);
     }
 
     let now = time::OffsetDateTime::now_utc();
@@ -59,9 +51,16 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
         .await
         .map_err(engine)?;
     if pruned == 0 {
-        return Err(Error::Conflict(
-            "end the session before pruning it".to_string(),
-        ));
+        // Another prune, a resume, or a commit moved the row, and only the row
+        // as it stands now says which; the checks above ran against the state
+        // the write missed on.
+        let current = crate::store::sessions::get(db, session_id).await?;
+        return Err(match current {
+            None => not_found(session_id),
+            Some(session) => refusal(&session).unwrap_or_else(|| {
+                Error::Conflict(format!("session {session_id} changed while pruning it"))
+            }),
+        });
     }
 
     Ok(PruneToken {
@@ -212,6 +211,26 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     .await
     .map_err(engine)?;
     tx.commit().await.map_err(engine)
+}
+
+/// Why this session cannot be pruned as it stands, if it cannot.
+fn refusal(session: &crate::store::sessions::Session) -> Option<Error> {
+    if session.deleted_at.is_some() {
+        return Some(Error::Conflict(format!(
+            "session {} is already pruned",
+            session.id
+        )));
+    }
+    if session.status != "ended" {
+        return Some(Error::Conflict(
+            "end the session before pruning it".to_string(),
+        ));
+    }
+    None
+}
+
+fn not_found(session_id: &str) -> Error {
+    Error::NotFound(format!("session {session_id} not found"))
 }
 
 fn format_time(ts: time::OffsetDateTime) -> String {

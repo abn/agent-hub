@@ -297,6 +297,48 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_prune_that_loses_to_another_prune_says_the_session_is_pruned() {
+    let dir = temp_dir("prune-twice");
+    let db = Arc::new(open(&dir).await);
+
+    // Two humans, or two tabs, prune the same ended session. The loser's write
+    // misses on the tombstone, which is only reached when the two overlap.
+    for round in 0..20 {
+        let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
+            .await
+            .expect("start");
+        sessions::end(&db, &session.id, "agent-one")
+            .await
+            .expect("end");
+
+        let one = db.clone();
+        let id = session.id.clone();
+        let first = tokio::spawn(async move { prune::prune_session(&one, &id).await });
+        let two = db.clone();
+        let id = session.id.clone();
+        let second = tokio::spawn(async move { prune::prune_session(&two, &id).await });
+        let results = [
+            first.await.expect("join first"),
+            second.await.expect("join second"),
+        ];
+
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "round {round}: exactly one prune takes the session"
+        );
+        let err = results
+            .into_iter()
+            .find_map(|result| result.err())
+            .expect("the prune that lost");
+        assert!(
+            err.to_string().contains("already pruned"),
+            "round {round}: the losing prune reported {err}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
     let dir = temp_dir("prune-undo-commit-race");
     let db = Arc::new(open(&dir).await);
