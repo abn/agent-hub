@@ -123,16 +123,17 @@ under Settings or through the agent routes; see the
 
 ## Reach the hub from a client machine
 
-The same binary is the client. It reads three keys, from the environment first
-and then from `~/.agent-hub/config`, an env-style file with the same names
-that a shell can source; `HUB_CONFIG` names another file, a missing file is
-not an error, and a file holding a token that others can read warns on stderr
-and still works.
+The same binary is the client. It reads its settings from the environment
+first and then from `~/.agent-hub/config`, an env-style file with the same
+names that a shell can source; `HUB_CONFIG` names another file, a missing file
+is not an error, and a file holding a token that others can read warns on
+stderr and still works.
 
 ```
 HUB_URL=http://hub.lan:8080
 HUB_TOKEN=...
 HUB_AGENT_ID=my-agent
+HUB_PROJECT=homelab
 ```
 
 A harness that speaks only stdio MCP runs the proxy, which forwards every
@@ -157,6 +158,27 @@ agent-hub tools
 agent-hub call whoami
 agent-hub call feed_read '{"project_id":"homelab","limit":20}'
 ```
+
+The project knowledge base has a shorthand, because a session-start hook
+reads it on every machine and should not have to quote a JSON object.
+`agent-hub kb get` prints `/fs/index.md` as markdown, ready to pipe into a
+context window; `--json` prints the tool's result instead, with the version a
+conditional write needs. A path outside `/fs` is taken as relative to it, and
+the project comes from `--project` or from `HUB_PROJECT`.
+
+```sh
+agent-hub kb get                            # the index page, as markdown
+agent-hub kb get runbooks/deploy.md
+agent-hub kb put runbooks/deploy.md --file deploy.md
+agent-hub kb put runbooks/deploy.md --if-version "$V" - < deploy.md
+agent-hub kb list                           # one page path per line
+agent-hub kb delete runbooks/deploy.md
+```
+
+A failed read prints nothing on stdout and says why in its exit code: 1 means
+the hub answered that the page is not there, anything else means the hub did
+not answer or refused the token. A hook should branch on that rather than end
+the line with `|| true`, which would hide a hub that is down.
 
 Each call is its own connection and holds no session, so `session_start`
 in one call is not active in the next. Session-bound work belongs in the

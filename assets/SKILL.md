@@ -83,7 +83,7 @@ the hub with the environment or the config file:
 HUB_URL={{base_url}} HUB_TOKEN=<agent token> agent-hub mcp
 ```
 
-The settings are three keys, read from the environment first and then from
+The settings are read from the environment first and then from
 `~/.agent-hub/config`, which is an env-style file a shell can also source.
 `HUB_CONFIG` names another file. A file holding a token that others can read
 warns and still works.
@@ -115,31 +115,50 @@ the token was refused, 78 nothing names a hub.
 ```sh
 agent-hub tools                                    # names and descriptions
 agent-hub call whoami                              # no arguments
-agent-hub call feed_read '{"project_id":"homelab","limit":20}'
+agent-hub call feed_read '{"project_id":"homelab","limit":20}' \
+  | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
 agent-hub call signal_append - < payload.json      # arguments from stdin
 ```
 
-A session-start hook that puts recent project activity into the context window
-is three lines:
+The project knowledge base is addressed by project alone, so a hook reads it
+with no session at all. It has a shorthand, because putting a page into a
+context window should not need a quoted JSON object:
+
+```sh
+agent-hub kb get                       # /fs/index.md, printed as markdown
+agent-hub kb get runbooks/deploy.md    # a path outside /fs is taken under it
+agent-hub kb get --json                # the tool's result: content, version
+agent-hub kb put notes.md --file notes.md
+agent-hub kb put notes.md - < notes.md          # or from stdin
+agent-hub kb put notes.md --if-version "$V" -   # write only if unchanged
+agent-hub kb list                      # one page path per line
+agent-hub kb delete notes.md
+```
+
+Every command takes `--project <id>`, or reads `HUB_PROJECT` from the same
+settings. `kb get` prints the page itself rather than JSON, so it pipes
+straight into context, and a missing page prints nothing at all and exits
+non-zero.
+
+This is what replaces a notes file kept under a tool's home directory: every
+agent on every machine reads and writes the same page. A session-start hook
+that puts it into the context window needs three settings and no paths:
 
 ```sh
 #!/bin/sh
 # Emits context on stdout; the harness injects it.
+# Needs HUB_URL, HUB_TOKEN and HUB_PROJECT.
 set -eu
-echo "## Since last time"
-agent-hub call feed_read "{\"project_id\":\"$PROJECT\",\"limit\":20}" \
-  | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
+echo "## Project knowledge"
+agent-hub kb get || case $? in
+  1) echo "(this project has no index page yet)" ;;
+  *) echo "(the hub could not be reached; project knowledge is missing)" ;;
+esac
 ```
 
-The project knowledge base is addressed by project alone, so a hook reads it
-with no session at all. This is what replaces a notes file kept under a tool's
-home directory: every agent on every machine gets the same page.
-
-```sh
-agent-hub call brain_get \
-  "{\"store\":\"project\",\"project_id\":\"$PROJECT\",\"path\":\"/fs/index.md\"}" \
-  | jq -r '.content'
-```
+Exit 1 is the hub answering that the page is not there. Anything else means
+the hub did not answer or refused the token, and saying "nothing yet" then
+would tell the agent something false.
 
 Each call is its own connection, so a session started in one call is not
 active in the next: the CLI is for stateless reads and writes that name their

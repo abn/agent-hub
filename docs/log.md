@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a one-line read of the project knowledge base
+
+* **Update**: `agent-hub kb get|put|list|delete` reads and writes the project
+  knowledge base without a quoted JSON object. `kb get` prints the page as
+  markdown, defaulting to `/fs/index.md`, so a session-start hook pipes shared
+  knowledge into a context window in one line; `--json` prints the tool's
+  result instead. A path outside `/fs` is taken as relative to it, and a failed
+  read prints nothing on stdout. Documented in the
+  [quickstart](usage/quickstart.md), the served skill contract, and
+  [the hub client](adr/0019-hub-client-proxy-and-cli.md).
+* **Note**: `HUB_PROJECT` joins the client settings, in the environment or in
+  the config file, and supplies the project when no `--project` flag does.
+
 ## 2026-09-18, reading another session's brain
 
 * **Update**: `brain_get` and `brain_list` take an optional `session`, either

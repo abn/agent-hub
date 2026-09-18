@@ -62,5 +62,10 @@ image, which only serves, builds without it.
   Implementing rmcp's client trait by hand would have been
   roughly six hundred lines of HTTP and SSE machinery to own instead. Never
   `native-tls`: an OpenSSL linkage would break the distroless image.
-- Hook shorthands over the project store are not part of this decision; they
-  follow the store.
+- `agent-hub kb get|put|list|delete` follows as a thin argument builder over
+  the same one-shot call, so a session-start hook pulls project knowledge in
+  one line. `kb get` prints the page and `kb list` prints one path per line,
+  rather than JSON. Those are the two places the CLI's output is not the
+  tool's result verbatim, because the caller pipes them into a context window
+  or a shell loop; `--json` restores the result. The project comes from `--project` or from a
+  `HUB_PROJECT` setting resolved like the rest.
