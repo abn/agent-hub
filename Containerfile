@@ -12,6 +12,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY vendor ./vendor
 COPY src ./src
 COPY web ./web
+# The served skill guide is embedded into the binary at build time.
+COPY assets ./assets
 
 # The image only serves, so it leaves out the client: the stdio proxy and the
 # one-shot calls run on the agents' machines, not here.
