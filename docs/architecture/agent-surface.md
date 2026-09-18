@@ -9,10 +9,26 @@ status: draft
 # Agent surface
 
 Agents reach the hub over the Model Context Protocol: streamable HTTP on the
-hub's own listener at `/mcp`, and stdio for a local process. One MCP server
-exposes the tools below, and every tool ships. The stdio transport is a process
-the operator launched on the node, so it acts as the human admin. The HTTP
-transport requires a bearer token that resolves to one agent identity.
+hub's own listener at `/mcp`, with a bearer token that resolves to one agent
+identity. One MCP server exposes the tools below, and every tool ships.
+
+A harness that speaks only stdio runs `agent-hub mcp` as a proxy to that
+endpoint: one connection for the life of the process, every request forwarded,
+so the tools and the errors are the hub's and a tool the hub gains needs no
+new client. Because the hub tracks the active session per connection, a
+session started through a proxy stays active for the rest of that process.
+With no hub configured the same command still serves the local data directory
+standalone, as the human admin, and says so on startup; that mode opens the
+data directory itself and so cannot run beside a hub on it. See
+[the hub client](../adr/0019-hub-client-proxy-and-cli.md).
+
+Hooks are shell commands with no MCP client, so the binary also makes one-shot
+calls: `agent-hub call <tool> [json]` prints the tool's JSON result on stdout
+and exits 0, or prints the hub's error object on stderr and exits non-zero
+(1 a tool error, 2 usage, 69 unreachable, 77 refused, 78 unconfigured).
+`agent-hub tools` lists the hub's tools. A call is its own connection, so it
+holds no session: it is for stateless reads and writes that name their target,
+and session-bound work goes through the proxy.
 
 ## Tools
 
@@ -88,8 +104,11 @@ so two callers holding the same version cannot both succeed.
 ## Trust
 
 Every HTTP call carries a bearer token bound to a stable agent identity, and
-the server sets the `actor`; a request cannot forge it. The stdio transport
-carries no token and is the human admin. A trusted agent reads every resource
+the server sets the `actor`; a request cannot forge it. A proxy and a one-shot
+call are HTTP calls, so they are the token's agent, and `HUB_AGENT_ID` is
+advisory there: only the embedded standalone stdio mode carries no token, acts
+as the human admin, and takes its actor label from `HUB_AGENT_ID`. A trusted
+agent reads every resource
 and writes shared projects and its own personal space, but not another agent's;
 an untrusted agent reaches only its own space and the projects explicitly
 granted to it, at the granted level. Global reads are confined to the caller's

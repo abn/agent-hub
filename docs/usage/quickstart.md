@@ -40,7 +40,7 @@ The binary reads its configuration from the environment.
 | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
 | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
-| `HUB_AGENT_ID` | `local` | Actor label recorded for the stdio admin process, effective only with `mcp` |
+| `HUB_AGENT_ID` | `local` | Actor label recorded for the embedded stdio admin process; advisory against a running hub, which takes the identity from the token |
 | `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
 | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
 | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
@@ -107,12 +107,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/agents/my-agent/token -H "$ADMIN"
 ```
 
 The token is shown once; reissuing replaces it and revokes the previous one.
-An agent reaches the hub over MCP, either stdio for a local process or
-streamable HTTP with its bearer token:
-
-```sh
-HUB_DATA_DIR=./data HUB_AGENT_ID=my-agent ./target/debug/agent-hub mcp
-```
+An agent reaches the hub over MCP with its bearer token:
 
 ```
 POST http://127.0.0.1:8080/mcp
@@ -125,6 +120,51 @@ own address filled in, so an agent that can already reach the hub can fetch
 the connection details and the tool list. Trust levels and grants are managed
 under Settings or through the agent routes; see the
 [agent surface](../architecture/agent-surface.md).
+
+## Reach the hub from a client machine
+
+The same binary is the client. It reads three keys, from the environment first
+and then from `~/.agent-hub/config`, an env-style file with the same names
+that a shell can source; `HUB_CONFIG` names another file, a missing file is
+not an error, and a file holding a token that others can read warns on stderr
+and still works.
+
+```
+HUB_URL=http://hub.lan:8080
+HUB_TOKEN=...
+HUB_AGENT_ID=my-agent
+```
+
+A harness that speaks only stdio MCP runs the proxy, which forwards every
+request to the hub over one connection held for the life of the process:
+
+```sh
+agent-hub mcp
+```
+
+With no `HUB_URL` configured that command instead serves the local data
+directory standalone, as the human admin, and says so on stderr. Standalone
+mode opens the data directory itself, so pointing it at a directory a hub is
+already serving fails at startup with `File is locked by another process`.
+
+A hook has no MCP client, so it calls one tool at a time. The result is JSON
+on stdout and nothing else; logs and errors go to stderr, and the exit code is
+0 for success, 1 for a tool error, 2 for usage, 69 when the hub is unreachable,
+77 when the token is refused, and 78 when nothing names a hub.
+
+```sh
+agent-hub tools
+agent-hub call whoami
+agent-hub call feed_read '{"project_id":"homelab","limit":20}'
+```
+
+Each call is its own connection and holds no session, so `session_start`
+in one call is not active in the next. Session-bound work belongs in the
+proxy; the CLI is for reads and writes that name their target.
+
+The client is a default-on `client` cargo feature. A build with
+`--no-default-features` serves only, which is what the container image needs,
+and then `agent-hub mcp` says it was built without the client.
 
 ## Run with compose
 

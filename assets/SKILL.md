@@ -66,32 +66,74 @@ token there.
 
 ## Connect an agent
 
-Agents speak the Model Context Protocol. There are two transports, and they
-are not interchangeable against a running hub.
-
-Local stdio opens the data directory itself, as a standalone process; it does
-not attach to a hub that already has that directory open. The engine holds an
-exclusive lock on the data directory, so pointing this at a directory a hub
-process is already serving fails at startup, exit 1, with `File is locked by
-another process`:
-
-```sh
-HUB_DATA_DIR=./data HUB_AGENT_ID=my-agent ./target/release/agent-hub mcp
-```
-
-Use it only when no hub is running against that data directory. An agent
-talking to a hub that is already running connects over streamable HTTP
-instead, presenting the agent's token:
+Agents speak the Model Context Protocol. The hub is reached over streamable
+HTTP at `/mcp`, presenting the agent's token:
 
 ```
 POST {{base_url}}/mcp
 Authorization: Bearer <agent token>
 ```
 
-Both transports expose the same tools. `whoami` reports the calling identity,
-its trust level, and its personal space, which is a good first call to prove
-the token resolves. Over HTTP a request body is capped just above 60 MiB, the
-artifact cap plus room for the call around it; stdio carries no such cap.
+A harness that speaks only stdio runs `agent-hub mcp`, which is a proxy: it
+holds one connection to the hub for the life of the process and forwards every
+request, so the tools, the errors, and the identity are the hub's. Point it at
+the hub with the environment or the config file:
+
+```sh
+HUB_URL={{base_url}} HUB_TOKEN=<agent token> agent-hub mcp
+```
+
+The settings are three keys, read from the environment first and then from
+`~/.agent-hub/config`, which is an env-style file a shell can also source.
+`HUB_CONFIG` names another file. A file holding a token that others can read
+warns and still works.
+
+```
+HUB_URL={{base_url}}
+HUB_TOKEN=...
+HUB_AGENT_ID=my-agent
+```
+
+With no `HUB_URL` configured, `agent-hub mcp` still serves the local data
+directory standalone, as the human admin, and says so on stderr. That mode
+opens the data directory itself, so it fails while a hub is running on the
+same directory.
+
+`whoami` reports the calling identity, its trust level, and its personal
+space, which is a good first call to prove the token resolves. Over HTTP a
+request body is capped just above 60 MiB, the artifact cap plus room for the
+call around it.
+
+## Call one tool from a hook
+
+A harness hook is a shell command with no MCP client, so the same binary makes
+one-shot calls with the same settings. The tool's JSON goes to stdout and
+nothing else does, logs and errors go to stderr, and the exit code says what
+happened: 0 success, 1 a tool error, 2 usage, 69 the hub is unreachable, 77
+the token was refused, 78 nothing names a hub.
+
+```sh
+agent-hub tools                                    # names and descriptions
+agent-hub call whoami                              # no arguments
+agent-hub call feed_read '{"project_id":"homelab","limit":20}'
+agent-hub call signal_append - < payload.json      # arguments from stdin
+```
+
+A session-start hook that puts recent project activity into the context window
+is three lines:
+
+```sh
+#!/bin/sh
+# Emits context on stdout; the harness injects it.
+set -eu
+echo "## Since last time"
+agent-hub call feed_read "{\"project_id\":\"$PROJECT\",\"limit\":20}" \
+  | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
+```
+
+Each call is its own connection, so a session started in one call is not
+active in the next: the CLI is for stateless reads and writes that name their
+target, and session-bound work goes through the proxy.
 
 ## Tools
 

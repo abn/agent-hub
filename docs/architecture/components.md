@@ -15,8 +15,10 @@ page describes those boundaries and the constraints that hold across them.
 
 One Rust process serves three client-facing endpoints over a shared core:
 
-- an **MCP server** for agents, over stdio for local agents and streamable
-  HTTP for remote agents on a LAN or tailnet;
+- an **MCP server** for agents over streamable HTTP, reached on a LAN or
+  tailnet, and over stdio for the standalone mode that serves a data directory
+  no hub is running on. A harness that speaks only stdio reaches a running hub
+  through the client proxy in the same binary;
 - an **HTTP API** for the human surface, with the PWA served as static assets
   from the same binary;
 - the **core**, which owns the event store, authentication and authorization,

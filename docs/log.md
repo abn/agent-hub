@@ -4,6 +4,27 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, reaching the hub from another machine
+
+* **Update**: `agent-hub mcp` is a proxy to a running hub whenever `HUB_URL`
+  names one: one connection for the life of the process, the hub's own tools,
+  errors, and identity. With nothing configured it still serves the local data
+  directory standalone and says so. Documented in the
+  [quickstart](usage/quickstart.md), the
+  [agent surface](architecture/agent-surface.md), the served skill contract,
+  and [the hub client](adr/0019-hub-client-proxy-and-cli.md).
+* **Update**: `agent-hub call <tool> [json]` and `agent-hub tools` make
+  one-shot calls for harness hooks: JSON on stdout, the hub's error object on
+  stderr, and exit codes that separate a down hub, a refused token, and a
+  missing setting.
+* **Note**: The three client settings, `HUB_URL`, `HUB_TOKEN`, and
+  `HUB_AGENT_ID`, are read from the environment first and then from
+  `~/.agent-hub/config`, an env-style file with the same key names.
+  `HUB_AGENT_ID` sets the actor only in the embedded standalone mode; against
+  a running hub the token decides.
+* **Note**: A subcommand the binary does not know now exits 2 instead of
+  starting a hub.
+
 ## 2026-09-18, a durable knowledge base per project
 
 * **Update**: The brain tools now reach two stores. `store: "session"` is the
