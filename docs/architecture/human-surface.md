@@ -84,7 +84,11 @@ reach the hub can fetch the connection details and the tool list before it has
 a token, and behind a reverse proxy it receives the public address rather than
 the internal bind.
 
-Errors are RFC 9457 problem details. The public artifact route serves a host
+Errors are RFC 9457 problem details, whatever part of the request is refused:
+a body over the limit is a 413 with `payload_too_large`, a body without the
+JSON content type a 415, a bad query string or path segment a 400, and a
+method the path does not serve a 405 that still names the methods it does.
+The public artifact route serves a host
 shell around a sandboxed frame: the shell owns the back button, title,
 version line, version picker, and theme toggle on the design tokens, and
 the frame runs authored content with scripts allowed but

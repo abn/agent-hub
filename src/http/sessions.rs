@@ -1,14 +1,14 @@
 //! Session REST routes: list a project's sessions, end one, and read a brain.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath, ProblemQuery};
 use crate::store::sessions as session_store;
 use crate::store::sessions::Session;
 
@@ -53,7 +53,7 @@ pub struct BrainList {
 pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(params): Query<ListParams>,
+    ProblemQuery(params): ProblemQuery<ListParams>,
 ) -> std::result::Result<Json<SessionList>, Problem> {
     state
         .auth
@@ -81,7 +81,7 @@ pub async fn list(
 /// A valid bearer token is required. An unknown session is a 404.
 pub async fn end(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<EndResult>, Problem> {
     let principal = state
@@ -103,9 +103,9 @@ pub async fn end(
 /// `path` is a `/kv` or `/fs` prefix; omitted, both namespaces are listed.
 pub async fn brain(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
-    Query(params): Query<BrainParams>,
+    ProblemQuery(params): ProblemQuery<BrainParams>,
 ) -> std::result::Result<Json<BrainList>, Problem> {
     state
         .auth

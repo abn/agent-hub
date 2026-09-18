@@ -1,15 +1,15 @@
 //! The home summary, the inbox listing, and answering a question.
 
 use axum::Json;
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::store::home::{self as home_store, Home};
 use crate::store::inbox::{self as inbox_store, InboxItem};
 use crate::store::questions as question_store;
@@ -79,7 +79,7 @@ pub async fn home(
 pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(params): Query<InboxParams>,
+    ProblemQuery(params): ProblemQuery<InboxParams>,
 ) -> std::result::Result<Json<InboxList>, Problem> {
     state
         .auth
@@ -106,7 +106,7 @@ pub async fn list(
 /// principal. An unknown id is a 404, a non-question id a 400.
 pub async fn answer(
     State(state): State<AppState>,
-    Path(question_id): Path<String>,
+    ProblemPath(question_id): ProblemPath<String>,
     headers: HeaderMap,
     body: std::result::Result<Json<AnswerBody>, JsonRejection>,
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
@@ -115,11 +115,7 @@ pub async fn answer(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let Json(payload) = body.map_err(|rejection| {
-        Problem::from_error(&Error::InvalidArgument(format!(
-            "the answer body must be JSON with a body field: {rejection}"
-        )))
-    })?;
+    let payload = json_body(body, "answer body must be JSON with a body field")?;
 
     let event_id = question_store::answer(
         &state.db,
@@ -154,7 +150,7 @@ pub struct DecisionBody {
 /// resolves the waiting item. An unknown id is a 404, a non-approval id a 400.
 pub async fn decide(
     State(state): State<AppState>,
-    Path(approval_id): Path<String>,
+    ProblemPath(approval_id): ProblemPath<String>,
     headers: HeaderMap,
     body: std::result::Result<Json<DecisionBody>, JsonRejection>,
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
@@ -163,11 +159,7 @@ pub async fn decide(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let Json(payload) = body.map_err(|rejection| {
-        Problem::from_error(&Error::InvalidArgument(format!(
-            "the decision body must be JSON with a decision field: {rejection}"
-        )))
-    })?;
+    let payload = json_body(body, "decision body must be JSON with a decision field")?;
 
     let approved = match payload.decision.as_str() {
         "approve" => true,

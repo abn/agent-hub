@@ -1,14 +1,14 @@
 //! The project feed REST route.
 
 use axum::Json;
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
 use serde::Serialize;
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath};
 use crate::limits::FEED_LIMIT_DEFAULT;
 use crate::store::events::{self, Event, FeedQuery, read_feed};
 
@@ -30,7 +30,7 @@ pub struct FeedPage {
 /// on a read.
 pub async fn read(
     State(state): State<AppState>,
-    Path(project_id): Path<String>,
+    ProblemPath(project_id): ProblemPath<String>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> std::result::Result<Json<FeedPage>, Problem> {

@@ -5,8 +5,8 @@
 //! stored in plaintext.
 
 use axum::Json;
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use crate::app::AppState;
 use crate::config::TrustDefault;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath, json_body};
 use crate::principal::Trust;
 use crate::store::identity::{self, Agent, Grant, IssuedToken};
 
@@ -64,17 +64,6 @@ fn admin(state: &AppState, headers: &HeaderMap) -> std::result::Result<(), Probl
         .map_err(|err| Problem::from_error(&err))
 }
 
-fn body<T>(
-    body: std::result::Result<Json<T>, JsonRejection>,
-    what: &str,
-) -> std::result::Result<T, Problem> {
-    body.map(|Json(payload)| payload).map_err(|rejection| {
-        Problem::from_error(&Error::InvalidArgument(format!(
-            "the {what} body must be valid JSON: {rejection}"
-        )))
-    })
-}
-
 /// The trust a new agent gets when the request does not name one.
 fn configured_trust(state: &AppState) -> Trust {
     match state.config.trust_default {
@@ -102,7 +91,7 @@ pub async fn create(
     payload: std::result::Result<Json<CreateAgent>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<Agent>), Problem> {
     admin(&state, &headers)?;
-    let request = body(payload, "agent")?;
+    let request = json_body(payload, "agent body must be valid JSON")?;
     let trust = match request.trust.as_deref() {
         Some(text) => identity::parse_trust(text).map_err(|err| Problem::from_error(&err))?,
         None => configured_trust(&state),
@@ -116,12 +105,12 @@ pub async fn create(
 /// `PATCH /api/v1/agents/{id}`
 pub async fn update(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
     payload: std::result::Result<Json<UpdateAgent>, JsonRejection>,
 ) -> std::result::Result<Json<Agent>, Problem> {
     admin(&state, &headers)?;
-    let request = body(payload, "agent")?;
+    let request = json_body(payload, "agent body must be valid JSON")?;
     let trust = identity::parse_trust(&request.trust).map_err(|err| Problem::from_error(&err))?;
     let agent = identity::set_trust(&state.db, &id, trust)
         .await
@@ -132,7 +121,7 @@ pub async fn update(
 /// `POST /api/v1/agents/{id}/token`: reissue, invalidating the previous token.
 pub async fn issue(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<(StatusCode, Json<IssuedToken>), Problem> {
     admin(&state, &headers)?;
@@ -145,7 +134,7 @@ pub async fn issue(
 /// `DELETE /api/v1/agents/{id}/token`: revoke the agent's live token.
 pub async fn revoke(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<StatusCode, Problem> {
     admin(&state, &headers)?;
@@ -158,7 +147,7 @@ pub async fn revoke(
 /// `GET /api/v1/agents/{id}/grants`
 pub async fn grants(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<GrantList>, Problem> {
     admin(&state, &headers)?;
@@ -180,12 +169,12 @@ pub async fn grants(
 /// `POST /api/v1/agents/{id}/grants`
 pub async fn grant(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
     payload: std::result::Result<Json<GrantBody>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<Grant>), Problem> {
     admin(&state, &headers)?;
-    let request = body(payload, "grant")?;
+    let request = json_body(payload, "grant body must be valid JSON")?;
     let grant = identity::add_grant(&state.db, &id, &request.project_id, &request.access)
         .await
         .map_err(|err| Problem::from_error(&err))?;
@@ -195,7 +184,7 @@ pub async fn grant(
 /// `DELETE /api/v1/agents/{id}/grants/{project_id}`
 pub async fn ungrant(
     State(state): State<AppState>,
-    Path((id, project_id)): Path<(String, String)>,
+    ProblemPath((id, project_id)): ProblemPath<(String, String)>,
     headers: HeaderMap,
 ) -> std::result::Result<StatusCode, Problem> {
     admin(&state, &headers)?;

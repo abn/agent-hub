@@ -97,6 +97,7 @@ pub fn router(state: AppState) -> Router {
         .route("/artifacts/{id}/frame", get(artifacts::frame))
         .route("/artifacts/{id}/og.svg", get(artifacts::og_svg))
         .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limits::REQUEST_BODY_BYTES_MAX))
         .with_state(state)
 }
@@ -114,4 +115,13 @@ async fn readyz(State(state): State<AppState>) -> Json<Value> {
 
 async fn not_found() -> Problem {
     Problem::from_error(&Error::NotFound("no route matches this path".to_string()))
+}
+
+/// The path exists but not for this method. The framework still attaches the
+/// `Allow` header, so the response keeps naming the methods that do work.
+async fn method_not_allowed() -> Problem {
+    Problem::with_status(
+        &Error::InvalidArgument("this path does not serve that method".to_string()),
+        axum::http::StatusCode::METHOD_NOT_ALLOWED,
+    )
 }

@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, every REST refusal is problem details
+
+* **Update**: The [human surface](architecture/human-surface.md) states the
+  status each refused request carries: an oversized body, a missing JSON
+  content type, a bad query or path, and an unserved method are all problem
+  details now, where the last four used to be plain text or an empty body.
+
 ## 2026-09-18, request body limits per surface
 
 * **Update**: The 4 MiB cap on a REST request body is stated on the

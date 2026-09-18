@@ -1,13 +1,13 @@
 //! Storage and prune REST routes: soft-delete a session, then undo it.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::Serialize;
 
 use crate::app::AppState;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath};
 use crate::store::prune::{self, PruneToken};
 use crate::store::storage::{self, StorageUsage};
 
@@ -24,7 +24,7 @@ pub struct UndoResult {
 /// carries the token that restores the session within the undo window.
 pub async fn prune(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<PruneToken>, Problem> {
     state
@@ -45,7 +45,7 @@ pub async fn prune(
 /// A valid bearer token is required. Undoing restores the session's row.
 pub async fn undo(
     State(state): State<AppState>,
-    Path(token): Path<String>,
+    ProblemPath(token): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<UndoResult>, Problem> {
     state

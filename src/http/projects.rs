@@ -1,13 +1,13 @@
 //! Project REST routes: list, create, and delete.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath, json_body};
 use crate::store::projects::{self, Project};
 
 /// The projects a caller can see.
@@ -53,11 +53,7 @@ pub async fn create(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let Json(payload) = body.map_err(|rejection| {
-        Problem::from_error(&crate::error::Error::InvalidArgument(format!(
-            "the project body must be JSON with id and display_name: {rejection}"
-        )))
-    })?;
+    let payload = json_body(body, "project body must be JSON with id and display_name")?;
 
     let project = projects::create(&state.db, &payload.id, &payload.display_name)
         .await
@@ -71,7 +67,7 @@ pub async fn create(
 /// agent's personal space is a 409.
 pub async fn delete(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<StatusCode, Problem> {
     state

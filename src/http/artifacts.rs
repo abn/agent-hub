@@ -13,8 +13,8 @@
 
 use axum::Json;
 use axum::body::Body;
+use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::Problem;
+use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
 use crate::store::comments::{self as comment_store, AnchorInput, Comment};
@@ -40,7 +40,7 @@ pub struct ArtifactList {
 /// A valid bearer token is required.
 pub async fn list(
     State(state): State<AppState>,
-    Path(project_id): Path<String>,
+    ProblemPath(project_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ArtifactList>, Problem> {
     state
@@ -119,8 +119,8 @@ pub struct DestroyResult {
 /// With `?version=N`, returns that version instead of the current one.
 pub async fn content(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
-    Query(query): Query<VersionQuery>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ArtifactContent>, Problem> {
     state
@@ -167,7 +167,7 @@ pub async fn content(
 /// Admin-only. Returns the version history, oldest first.
 pub async fn versions(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
+    ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<VersionList>, Problem> {
     state
@@ -210,7 +210,7 @@ pub struct CommentResolveBody {
 /// Admin-only. Returns the artifact's comments, oldest first.
 pub async fn comment_list(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
+    ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<Value>, Problem> {
     state
@@ -234,7 +234,7 @@ pub async fn comment_list(
 /// key returns the recorded comment.
 pub async fn comment_post(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
+    ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
     body: std::result::Result<Json<CommentPostBody>, JsonRejection>,
 ) -> std::result::Result<Json<Value>, Problem> {
@@ -243,11 +243,7 @@ pub async fn comment_post(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let Json(payload) = body.map_err(|rejection| {
-        Problem::from_error(&Error::InvalidArgument(format!(
-            "the comment body must be JSON with a body field: {rejection}"
-        )))
-    })?;
+    let payload = json_body(body, "comment body must be JSON with a body field")?;
     let anchor = parse_anchor(payload.anchor).map_err(|err| Problem::from_error(&err))?;
     let (comment, _replayed) = comment_store::add_comment(
         &state.db,
@@ -272,7 +268,7 @@ pub async fn comment_post(
 /// artifact, like an unknown id, is a 404.
 pub async fn comment_resolve(
     State(state): State<AppState>,
-    Path((artifact_id, comment_id)): Path<(String, String)>,
+    ProblemPath((artifact_id, comment_id)): ProblemPath<(String, String)>,
     headers: HeaderMap,
     body: std::result::Result<Json<CommentResolveBody>, JsonRejection>,
 ) -> std::result::Result<Json<Value>, Problem> {
@@ -281,11 +277,7 @@ pub async fn comment_resolve(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let Json(payload) = body.map_err(|rejection| {
-        Problem::from_error(&Error::InvalidArgument(format!(
-            "the resolve body must be JSON with a done field: {rejection}"
-        )))
-    })?;
+    let payload = json_body(body, "resolve body must be JSON with a done field")?;
     let comment = comment_store::get_comment(&state.db, &comment_id)
         .await
         .map_err(|err| Problem::from_error(&err))?;
@@ -308,7 +300,7 @@ pub async fn comment_resolve(
 /// unknown id, is a 404.
 pub async fn comment_remove(
     State(state): State<AppState>,
-    Path((artifact_id, comment_id)): Path<(String, String)>,
+    ProblemPath((artifact_id, comment_id)): ProblemPath<(String, String)>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<DestroyResult>, Problem> {
     state
@@ -389,7 +381,7 @@ fn parse_anchor(value: Option<Value>) -> Result<Option<AnchorInput>, Error> {
 /// Admin-only. Deletes the artifact and its history.
 pub async fn destroy(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
+    ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<DestroyResult>, Problem> {
     let principal = state
@@ -413,8 +405,8 @@ pub async fn destroy(
 /// decrypt.
 pub async fn raw(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
-    Query(query): Query<VersionQuery>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
     state
@@ -463,8 +455,8 @@ pub async fn raw(
 /// the shell itself has no inline scripts.
 pub async fn host(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
-    Query(query): Query<VersionQuery>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
     let (artifact, bytes) = match query.version {
@@ -514,8 +506,8 @@ pub async fn host(
 /// is light.
 pub async fn frame(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
-    Query(query): Query<FrameQuery>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<FrameQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
     let (artifact, bytes) = match query.version {
@@ -567,8 +559,8 @@ pub async fn frame(
 /// version instead of the current one.
 pub async fn og_svg(
     State(state): State<AppState>,
-    Path(artifact_id): Path<String>,
-    Query(query): Query<VersionQuery>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<VersionQuery>,
 ) -> std::result::Result<Response, Problem> {
     let (artifact, _bytes) = match query.version {
         Some(version) => {
