@@ -94,6 +94,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
+        .route("/api/v1/sessions/{id}/reassign", post(sessions::reassign))
         .route("/api/v1/sessions/{id}/brain", get(sessions::brain))
         .route("/api/v1/storage", get(storage::usage))
         .route("/api/v1/storage/sessions/{id}", delete(storage::prune))

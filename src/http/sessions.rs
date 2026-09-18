@@ -23,7 +23,37 @@ pub struct ListParams {
 #[derive(Debug, Serialize)]
 pub struct SessionList {
     /// The sessions, most recently active first.
-    pub sessions: Vec<Session>,
+    pub sessions: Vec<ListedSession>,
+}
+
+/// One session as the human's surface reads it.
+#[derive(Debug, Serialize)]
+pub struct ListedSession {
+    #[serde(flatten)]
+    pub session: Session,
+    /// Where the work came from, resolved so the screen can render it without
+    /// a second lookup.
+    pub lineage: Option<Lineage>,
+}
+
+/// The session this one was picked up from.
+#[derive(Debug, Serialize)]
+pub struct Lineage {
+    /// `adopted` or `forked`.
+    pub kind: &'static str,
+    /// The source session id, which is kept even once the source is gone.
+    pub session_id: String,
+    /// The source's current owner, absent once the source has been swept.
+    pub agent: Option<String>,
+    /// Whether the source is no longer there.
+    pub pruned: bool,
+}
+
+/// The new owner of a session.
+#[derive(Debug, Deserialize)]
+pub struct Reassignment {
+    /// The agent the session moves to.
+    pub agent: String,
 }
 
 /// The acknowledgement returned when a session is ended.
@@ -73,7 +103,64 @@ pub async fn list(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    Ok(Json(SessionList { sessions }))
+    let mut listed = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        let lineage = lineage(&state, &session)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        listed.push(ListedSession { session, lineage });
+    }
+
+    Ok(Json(SessionList { sessions: listed }))
+}
+
+/// Resolve where a session was picked up from.
+///
+/// A lineage id outlives the session it names, so a source that has been
+/// pruned reads as pruned rather than as a missing name.
+async fn lineage(state: &AppState, session: &Session) -> crate::error::Result<Option<Lineage>> {
+    let (kind, session_id) = match (&session.adopted_from, &session.forked_from) {
+        (Some(id), _) => ("adopted", id),
+        (None, Some(id)) => ("forked", id),
+        (None, None) => return Ok(None),
+    };
+    let source = session_store::get(&state.db, session_id).await?;
+    Ok(Some(Lineage {
+        kind,
+        session_id: session_id.clone(),
+        agent: source.as_ref().map(|source| source.agent.clone()),
+        pruned: source.is_none_or(|source| source.deleted_at.is_some()),
+    }))
+}
+
+/// `POST /api/v1/sessions/{id}/reassign`
+///
+/// A valid bearer token is required. The human moves a session to another
+/// agent when the one that holds it is not coming back; agents pick work up
+/// themselves and never need this.
+pub async fn reassign(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<Reassignment>, axum::extract::rejection::JsonRejection>,
+) -> std::result::Result<Json<Session>, Problem> {
+    let principal = state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let payload = body.map_err(|_| {
+        Problem::from_error(&Error::InvalidArgument(
+            "the body must be JSON naming the agent the session moves to".to_string(),
+        ))
+    })?;
+
+    let session = session_store::reassign(&state.db, &session_id, &payload.agent, &principal.actor)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(session))
 }
 
 /// `POST /api/v1/sessions/{id}/end`

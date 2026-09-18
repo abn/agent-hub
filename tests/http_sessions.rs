@@ -305,3 +305,197 @@ async fn brain_without_token_is_a_problem() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
 }
+
+#[tokio::test]
+async fn a_listing_carries_the_owner_and_where_the_work_came_from() {
+    let state = state().await;
+    let source = sessions::start(&state.db, "proj", "migration", "agent-one")
+        .await
+        .expect("start");
+    sessions::end(&state.db, &source.id, "agent-one", Some("half applied"))
+        .await
+        .expect("end");
+    sessions::start_from(&state.db, "proj", "pickup", "agent-two", &source.id)
+        .await
+        .expect("adopt");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions?project=proj",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let entry = body["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["id"] == source.id.as_str())
+        .expect("the adopted session is listed")
+        .clone();
+
+    assert_eq!(entry["agent"], "agent-two", "the owner is the current one");
+    assert_eq!(entry["handoff"], "half applied");
+    assert_eq!(entry["adopted_from"], source.id.as_str());
+    // The screen renders "picked up from agent-one" without a second lookup.
+    assert_eq!(entry["lineage"]["kind"], "adopted");
+    assert_eq!(entry["lineage"]["session_id"], source.id.as_str());
+    assert_eq!(entry["lineage"]["agent"], "agent-two");
+    assert_eq!(entry["lineage"]["pruned"], false);
+}
+
+#[tokio::test]
+async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
+    let state = state().await;
+    let source = sessions::start(&state.db, "proj", "live", "agent-one")
+        .await
+        .expect("start");
+    let fork = sessions::insert_fork(&state.db, &source, "branch", "agent-two", "01FORKED")
+        .await
+        .expect("fork");
+    sessions::end(&state.db, &source.id, "agent-one", None)
+        .await
+        .expect("end the source");
+    agent_hub::store::prune::prune_session(&state.db, &source.id)
+        .await
+        .expect("prune the source");
+
+    // Inside the undo window the source is still there, pruned.
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions?project=proj",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let pending = json_body(response).await;
+    let entry = pending["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["id"] == fork.id.as_str())
+        .expect("the fork is listed")
+        .clone();
+    assert_eq!(entry["lineage"]["pruned"], true);
+    assert_eq!(entry["lineage"]["agent"], "agent-one");
+
+    // Once the sweep has committed the prune the row is gone, and the lineage
+    // id is dangling by design.
+    state
+        .db
+        .connect()
+        .expect("connect")
+        .execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            vec![turso::Value::Text(source.id.clone())],
+        )
+        .await
+        .expect("commit the prune");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions?project=proj",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    let entry = body["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["id"] == fork.id.as_str())
+        .expect("the fork is listed")
+        .clone();
+    assert_eq!(entry["lineage"]["kind"], "forked");
+    assert_eq!(entry["lineage"]["pruned"], true);
+    assert_eq!(entry["lineage"]["agent"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_human_reassigns_a_session_over_the_control_surface() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "stuck", "agent-one")
+        .await
+        .expect("start");
+    agent_hub::store::identity::create_agent(
+        &state.db,
+        "agent-two",
+        "Agent two",
+        agent_hub::principal::Trust::Trusted,
+    )
+    .await
+    .expect("create the agent the session moves to");
+
+    // An owner no token resolves to could never resume, end or write the
+    // session again, so a name that is not an agent is refused.
+    let refused = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/sessions/{}/reassign", session.id))
+                .method("POST")
+                .header(header::AUTHORIZATION, "Bearer token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"agent":"no-such-agent"}"#))
+                .expect("build request"),
+        )
+        .await
+        .expect("request");
+    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
+    let unmoved = sessions::get(&state.db, &session.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        unmoved.agent, "agent-one",
+        "a refused reassign moves nothing"
+    );
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/sessions/{}/reassign", session.id))
+                .method("POST")
+                .header(header::AUTHORIZATION, "Bearer token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"agent":"agent-two"}"#))
+                .expect("build request"),
+        )
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["agent"], "agent-two");
+
+    let moved = sessions::get(&state.db, &session.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(moved.agent, "agent-two");
+}
+
+#[tokio::test]
+async fn reassign_without_token_is_a_problem() {
+    let app = router(state().await);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/sessions/unknown/reassign")
+                .method("POST")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"agent":"agent-two"}"#))
+                .expect("build request"),
+        )
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(problem_body(response).await["code"], "unauthenticated");
+}
