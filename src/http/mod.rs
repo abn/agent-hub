@@ -36,21 +36,16 @@ use problem::Problem;
 /// The request body limit is the hub's own, set here rather than left to the
 /// framework default, so the documented limit is the one callers meet.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    // The embedded assets are a table in `web`, so the shell, the worker's
+    // precache list and the routes cannot drift apart as modules are added.
+    let mut assets: Router<AppState> = Router::new();
+    for path in web::asset_paths() {
+        assets = assets.route(path, get(web::asset));
+    }
+    assets
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .route("/", get(web::index))
-        .route("/app.js", get(web::app_js))
-        .route("/app.css", get(web::app_css))
-        .route("/tokens.css", get(web::tokens_css))
-        .route("/manifest.webmanifest", get(web::manifest))
         .route("/sw.js", get(web::service_worker))
-        .route("/icon.svg", get(web::icon))
-        .route("/crypto.mjs", get(web::crypto_js))
-        .route("/vendor/marked.js", get(web::marked_js))
-        .route("/vendor/mermaid.runtime.js", get(web::mermaid_js))
-        .route("/frame-loader.js", get(web::frame_loader_js))
-        .route("/artifact-viewer.mjs", get(web::viewer_js))
         .route("/SKILL.md", get(skill::skill))
         .route("/api/v1/agents", get(agents::list).post(agents::create))
         .route("/api/v1/agents/{id}", patch(agents::update))

@@ -344,6 +344,14 @@ async fn service_worker_precaches_every_static_route() {
             "{path} is cached, so the offline shell is what the app loads"
         );
     }
+    // The on-demand list names paths by string, so a renamed asset would drop
+    // out of it silently and become required for the install again.
+    for path in &on_demand {
+        assert!(
+            SHELL_PATHS.contains(path),
+            "{path} is on demand but is not a path the hub serves"
+        );
+    }
     for path in ON_DEMAND_PATHS {
         assert!(
             on_demand.contains(&path) && !precached.contains(&path),
