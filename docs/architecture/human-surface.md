@@ -32,6 +32,7 @@ POST   /api/v1/projects
 DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
+POST   /api/v1/projects/:id/feed/seen
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/inbox?status=&project=&limit=&unread_only=
 POST   /api/v1/inbox/:id/read
@@ -124,7 +125,10 @@ than zero.
 
 | Route | Carries |
 |---|---|
-| `GET /api/v1/home` | `unread`, `waiting`, `agents_active`, `last_event_at`, `recent`, `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Home makes one request |
+| `GET /api/v1/home` | `unread`, `waiting`, `agents_active`, `last_event_at`, `recent`, `unseen` (per project, the feed events above its cursor), `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Home makes one request |
+| `GET /api/v1/projects` | each project with its `id`, `display_name`, `owner_agent`, `created_at` and `unseen_events` |
+| `GET /api/v1/projects/:id/feed` | `events`, `next_since`, `next_before`, and `last_seen`, the newest event the human has seen, so a client draws the unread dot on an event whose id is above it |
+| `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `prunable`, and a row per project with its artifact, session, knowledge and prunable bytes |
 | `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages` and `agents_active` for the project header and its tab labels |
 | `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
@@ -154,6 +158,19 @@ approval read never takes it out of what waits on you. They are idempotent,
 and an event with no inbox entry is a 404. The listing's `unread_only` is the
 Inbox header's filter and is refused when it contradicts an explicit `status`.
 The routes ship; the PWA does not call them yet.
+
+A feed is not read that way. Each project carries one cursor, the newest event
+the human has seen, and every event above it is unseen. Opening a project feed
+is what moves it: a client reads the page and posts the newest id it showed.
+The cursor only ever moves forward, and an id that is not an event of that
+project, or names nothing at all, leaves it where it was and says so. A client
+that reads a filtered page must post the newest id of the whole feed it has
+seen, not of the filtered view, since the cursor covers the feed and not the
+filter. The count above each cursor rides on the project listing and on Home,
+so a tab row and a Home row draw the same dot without a request of their own,
+and it counts only projects the listing returns. Upgrading an existing hub
+seeds every cursor at that project's newest event, so nothing is lit by the
+upgrade itself. The route ships; the PWA does not call it yet.
 
 A batch prune takes every ended session of one project, or of every project,
 with the same soft delete, undo window and sweep as pruning one. It never

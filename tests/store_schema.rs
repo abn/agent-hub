@@ -659,8 +659,8 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
     );
     drop(events);
 
-    // The cursor table starts empty: nothing has been seen until the human
-    // opens a feed.
+    // The project had been read before the upgrade, so its cursor starts at
+    // the newest event rather than at nothing seen.
     let mut cursors = conn
         .query(
             "SELECT project_id, last_seen_event_id, updated_at FROM project_feed_cursors",
@@ -668,7 +668,13 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
         )
         .await
         .expect("query cursors");
-    assert!(cursors.next().await.expect("row").is_none());
+    let row = cursors.next().await.expect("row").expect("a seeded cursor");
+    assert_eq!(row.get::<String>(0).expect("project"), "proj");
+    assert_eq!(row.get::<String>(1).expect("last seen"), "one");
+    assert!(
+        cursors.next().await.expect("row").is_none(),
+        "one cursor per project that has events"
+    );
 
     drop(cursors);
     drop(conn);
@@ -744,6 +750,107 @@ async fn migration_six_clears_indexed_audit_events() {
     );
 
     drop(rows);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&dir).expect("clean temp dir");
+}
+
+#[tokio::test]
+async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
+    let dir = temp_dir("store-schema-v9-cursors");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-8 database the human has been reading for a while.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 9) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+    for project in ["one", "two"] {
+        conn.execute(
+            "INSERT INTO projects(id, display_name, created_at) VALUES (?1, ?1, '2026-09-16T00:00:00Z')",
+            [project],
+        )
+        .await
+        .expect("insert project");
+        for index in 0..3 {
+            // Ids sort as text and the ones minted later are real ULIDs, so
+            // the fixture uses a prefix that sorts below them.
+            conn.execute(
+                "INSERT INTO events(id, project_id, kind, actor, summary, created_at) \
+                 VALUES (?1, ?2, 'signal', 'agent-one', 'an event', '2026-09-16T00:00:00Z')",
+                [format!("01A{project}{index}"), project.to_string()],
+            )
+            .await
+            .expect("insert event");
+        }
+    }
+    // A project that has never had an event, and so has nothing to seed.
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('fresh', 'Fresh', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 9);
+
+    // The human had already read the feed: that is what it was for. Nothing is
+    // unseen until something new arrives.
+    for project in ["one", "two", "fresh"] {
+        assert_eq!(
+            agent_hub::store::events::unseen_count(&db, project)
+                .await
+                .expect("count"),
+            0,
+            "{project} starts quiet after the upgrade"
+        );
+    }
+
+    agent_hub::store::events::append(
+        &db,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "one".to_string(),
+            kind: "signal".to_string(),
+            summary: "after the upgrade".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+    assert_eq!(
+        agent_hub::store::events::unseen_count(&db, "one")
+            .await
+            .expect("count"),
+        1,
+        "what arrives afterwards is new"
+    );
+    assert_eq!(
+        agent_hub::store::events::unseen_count(&db, "two")
+            .await
+            .expect("count"),
+        0
+    );
+
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&dir).expect("clean temp dir");

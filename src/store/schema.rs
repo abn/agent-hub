@@ -325,9 +325,17 @@ CREATE INDEX IF NOT EXISTS search_docs_project_type ON search_docs(project_id, t
 /// column existed, so no artifact becomes invalid on upgrade.
 ///
 /// The cursor is one row per project, since there is one human operator and the
-/// question it answers is per project. It starts absent, which reads as nothing
-/// seen, so an upgrade does not silently mark a backlog read. The feed index
-/// over `(project_id, id DESC)` already covers counting what lies above it.
+/// question it answers is per project. Each existing project is seeded at its
+/// newest event: the dot means "new since you last looked", and before the
+/// upgrade the human had been looking, so starting at nothing seen would light
+/// up every project with a backlog it cannot clear in one gesture. A fresh
+/// install has no events and seeds nothing, and a project created later starts
+/// without a row, so its first events are new. The feed index over
+/// `(project_id, id DESC)` is what counts events above a cursor.
+///
+/// The reference to `projects` documents the relation; foreign keys are not
+/// enforced in this schema, so the row is swept by the project delete rather
+/// than by the engine.
 const V9: &str = r#"
 ALTER TABLE projects ADD COLUMN artifact_password_policy TEXT NOT NULL DEFAULT 'optional';
 CREATE TABLE IF NOT EXISTS project_feed_cursors(
@@ -335,4 +343,7 @@ CREATE TABLE IF NOT EXISTS project_feed_cursors(
   last_seen_event_id TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+INSERT INTO project_feed_cursors(project_id, last_seen_event_id, updated_at)
+  SELECT project_id, MAX(id), MAX(created_at) FROM events
+   WHERE kind <> 'system' GROUP BY project_id;
 "#;

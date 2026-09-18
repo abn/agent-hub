@@ -243,6 +243,167 @@ async fn append_in_tx_capped(
     Ok(id)
 }
 
+/// How far the human has read one project's feed.
+///
+/// Read state on the feed is not the inbox's: nothing here is marked by hand.
+/// Every event above the cursor is unseen, which is what draws the dot, and
+/// opening the feed moves the cursor to the newest event on the page.
+#[derive(Debug, Clone, Serialize)]
+pub struct Seen {
+    pub project_id: String,
+    /// The newest event the human has seen, absent until the feed is opened.
+    pub last_seen: Option<String>,
+    /// Whether this call moved the cursor.
+    pub advanced: bool,
+}
+
+/// What one project holds above its cursor.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectUnseen {
+    pub project_id: String,
+    /// Feed events newer than the cursor, the hub's own audit trail excluded.
+    pub events: i64,
+}
+
+/// The last event id the human has seen in one project.
+pub async fn last_seen(db: &Database, project_id: &str) -> Result<Option<String>> {
+    let conn = super::connect(db)?;
+    last_seen_on(&conn, project_id).await
+}
+
+async fn last_seen_on(conn: &Connection, project_id: &str) -> Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT last_seen_event_id FROM project_feed_cursors WHERE project_id = ?1",
+            vec![Value::Text(project_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => text_at(&row, 0),
+        None => Ok(None),
+    }
+}
+
+/// Move a project's cursor up to an event the human has seen.
+///
+/// The cursor never moves backwards, and an id that is not an event of this
+/// project is ignored rather than trusted: it says nothing about this feed.
+/// The read and the write share an immediate transaction, so a cursor cannot
+/// step over an event committed between them.
+pub async fn mark_seen(db: &Database, project_id: &str, event_id: &str) -> Result<Seen> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let current = last_seen_on(&tx, project_id).await?;
+    let belongs = get_on(&tx, event_id)
+        .await?
+        .is_some_and(|event| event.project_id == project_id);
+    let forward = belongs && current.as_deref().is_none_or(|seen| event_id > seen);
+    if !forward {
+        return Ok(Seen {
+            project_id: project_id.to_string(),
+            last_seen: current,
+            advanced: false,
+        });
+    }
+
+    tx.execute(
+        "INSERT OR REPLACE INTO project_feed_cursors(project_id, last_seen_event_id, updated_at)
+         VALUES (?1, ?2, ?3)",
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(event_id.to_string()),
+            Value::Text(crate::store::now_rfc3339()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+
+    Ok(Seen {
+        project_id: project_id.to_string(),
+        last_seen: Some(event_id.to_string()),
+        advanced: true,
+    })
+}
+
+/// Forget a project's cursor inside a caller's transaction, so a deleted
+/// project takes it along with everything else scoped to it.
+pub(crate) async fn forget_cursor_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    project_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM project_feed_cursors WHERE project_id = ?1",
+        vec![Value::Text(project_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
+/// How many events one project holds above its cursor.
+///
+/// Both bounds are parameters, so the engine seeks into the feed index by
+/// project and by id and touches only the events above the cursor. A project
+/// with no cursor passes the empty string, which sorts below every id.
+pub const UNSEEN_COUNT_SQL: &str = "SELECT COUNT(*) FROM events e
+     WHERE e.project_id = ?1 AND e.id > ?2 AND e.kind <> 'system'";
+
+/// How many events one project holds above its cursor.
+pub async fn unseen_count(db: &Database, project_id: &str) -> Result<i64> {
+    let conn = super::connect(db)?;
+    let cursor = last_seen_on(&conn, project_id).await?;
+    count_unseen(&conn, project_id, cursor.as_deref()).await
+}
+
+async fn count_unseen(conn: &Connection, project_id: &str, cursor: Option<&str>) -> Result<i64> {
+    count_on(
+        conn,
+        UNSEEN_COUNT_SQL,
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(cursor.unwrap_or_default().to_string()),
+        ],
+    )
+    .await
+}
+
+/// The same count for every project that has anything unseen.
+///
+/// One small read of the projects and their cursors, then one seek per project
+/// into the feed index: the feed itself is never scanned, whatever it holds.
+/// The projects are the roll, so nothing is reported for an id the project
+/// listing does not carry, and a project with nothing above its cursor is
+/// absent rather than zero.
+pub async fn unseen_counts(db: &Database) -> Result<Vec<ProjectUnseen>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT p.id, c.last_seen_event_id FROM projects p
+             LEFT JOIN project_feed_cursors c ON c.project_id = p.id",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    let mut cursors = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        cursors.push((required_text(&row, 0)?, text_at(&row, 1)?));
+    }
+
+    let mut counts = Vec::new();
+    for (project_id, cursor) in cursors {
+        let events = count_unseen(&conn, &project_id, cursor.as_deref()).await?;
+        if events > 0 {
+            counts.push(ProjectUnseen { project_id, events });
+        }
+    }
+    Ok(counts)
+}
+
 /// How many events one session produced.
 ///
 /// One count over `events_session`, so a session detail screen shows a real

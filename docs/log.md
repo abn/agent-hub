@@ -4,6 +4,24 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a project feed remembers how far it was read
+
+* **Update**: Each project carries one cursor, the newest event the human has
+  seen. The feed read returns it, a route advances it when a feed is opened,
+  and the count above it rides on the project listing and on Home, so a tab row
+  and a Home row draw the same dot without a request of their own. The routes
+  are in the [human surface](architecture/human-surface.md); the screens do not
+  call them yet.
+* **Note**: The cursor only moves forward, and only to an event of that
+  project: an older id, an id from elsewhere, and an id that names nothing all
+  leave it where it was and say so in the answer. Deleting a project takes its
+  cursor with it. The [data model](architecture/data-model.md) sets this beside
+  the inbox's read state, which is the other thing entirely.
+* **Note**: Upgrading an existing hub seeds each project's cursor at its newest
+  event, so the first launch after the upgrade is quiet rather than lit by the
+  whole backlog. A project created afterwards starts with no cursor, so its
+  first events are new.
+
 ## 2026-09-18, the human can mark inbox items read
 
 * **Update**: The inbox carries explicit read state. One entry is marked read

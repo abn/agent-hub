@@ -26,6 +26,7 @@ inbox, which is global.
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
+| `project_feed_cursors` | One row per project: the newest feed event the human has seen there, and when it was recorded. There is one human operator, so the project is the key. |
 | `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
 | `agents` | Agent identity, display name, trust level (`trusted` or `untrusted`), and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
@@ -63,6 +64,23 @@ had before, and `read` is not a status an agent can filter on. An agent
 therefore cannot poll the inbox to learn which of its reports the human has
 opened, or when. The listing is ordered by event id, which is minted in commit
 order, so reading an item never moves it or shifts the page a limit cuts.
+
+A feed is not read the same way, and the two must not be confused. Nothing in
+a feed is marked by hand: a project carries one cursor, and every event above
+it is unseen. The cursor moves only forward, only when the human opens that
+feed, and only to an event of that project, so it cannot be dragged backwards
+or pointed at another project's event. Counting what lies above it seeks into
+the feed index on both the project and the cursor, so it touches only the
+events above the cursor and never reads the feed as a whole; across projects
+that is one small read of the cursors and one such seek each. Deleting a
+project takes its cursor with everything else scoped to that project. The hub's
+own audit events are not counted, since the human feed does not show them.
+
+Upgrading seeds each existing project's cursor at its newest event. The dot
+means "new since you last looked", and a hub that has been running was being
+looked at, so starting at nothing seen would light up every project with a
+backlog the human cannot clear in one gesture. A project created afterwards has
+no cursor, and its first events are new, which is the same rule read forward.
 
 Identity is a first-class table rather than a field on a token, so the server
 sets the `actor` on every event and a request cannot forge another agent. The

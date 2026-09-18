@@ -420,3 +420,56 @@ async fn delete_without_token_is_a_problem() {
     let problem = json_body(response).await;
     assert_eq!(problem["code"], "unauthenticated");
 }
+
+#[tokio::test]
+async fn delete_project_forgets_where_the_human_had_read_to() {
+    let state = state().await;
+    projects::create(&state.db, "homelab", "Homelab")
+        .await
+        .expect("create project");
+    let event = events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "homelab".to_string(),
+            kind: "signal".to_string(),
+            summary: "a signal".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append event");
+    events::mark_seen(&state.db, "homelab", &event)
+        .await
+        .expect("mark the feed seen");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "DELETE",
+            "/api/v1/projects/homelab",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let conn = state.db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM project_feed_cursors WHERE project_id = 'homelab'",
+            (),
+        )
+        .await
+        .expect("count cursors");
+    let row = rows.next().await.expect("row").expect("a count");
+    assert_eq!(
+        row.get::<i64>(0).expect("count"),
+        0,
+        "the project takes its feed cursor with it"
+    );
+}

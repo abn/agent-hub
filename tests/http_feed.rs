@@ -200,3 +200,131 @@ async fn unknown_route_is_not_found() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "not_found");
 }
+
+fn post(uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
+    let mut builder = Request::builder().uri(uri).method("POST");
+    if let Some(token) = auth {
+        builder = builder.header(header::AUTHORIZATION, token);
+    }
+    match body {
+        Some(value) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(value.to_string()))
+            .expect("build request"),
+        None => builder.body(Body::empty()).expect("build request"),
+    }
+}
+
+async fn json_body(response: axum::response::Response) -> Value {
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    serde_json::from_slice(&bytes).expect("body is JSON")
+}
+
+async fn read_feed_page(state: &AppState) -> Value {
+    json_body(
+        router(state.clone())
+            .oneshot(get("/api/v1/projects/proj/feed", Some("Bearer token")))
+            .await
+            .expect("request"),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn the_feed_says_how_far_the_human_has_read_it() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    let first = append(&state.db, "agent", None, event("first"))
+        .await
+        .expect("append first");
+    let second = append(&state.db, "agent", None, event("second"))
+        .await
+        .expect("append second");
+
+    let page = read_feed_page(&state).await;
+    assert!(
+        page["last_seen"].is_null(),
+        "nothing is seen until the feed is opened"
+    );
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/seen",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_id": second })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["last_seen"], second);
+    assert_eq!(body["advanced"], true);
+    assert_eq!(read_feed_page(&state).await["last_seen"], second);
+
+    // An older event, an event of another project, and an id that names
+    // nothing all leave the cursor where it is.
+    let elsewhere = append(
+        &state.db,
+        "agent",
+        None,
+        NewEvent {
+            project_id: "other".to_string(),
+            ..event("elsewhere")
+        },
+    )
+    .await
+    .expect("append elsewhere");
+    for event_id in [first, elsewhere, "no-such-event".to_string()] {
+        let response = router(state.clone())
+            .oneshot(post(
+                "/api/v1/projects/proj/feed/seen",
+                Some("Bearer token"),
+                Some(serde_json::json!({ "event_id": event_id })),
+            ))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["advanced"], false, "{event_id} does not move it");
+        assert_eq!(body["last_seen"], second);
+    }
+}
+
+#[tokio::test]
+async fn marking_a_feed_seen_needs_a_token_and_a_project_that_exists() {
+    let state = state().await;
+    let denied = router(state.clone())
+        .oneshot(post("/api/v1/projects/proj/feed/seen", None, None))
+        .await
+        .expect("request");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let missing = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/no-such-project/feed/seen",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_id": "any" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(problem_body(missing).await["code"], "not_found");
+
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    let nameless = router(state)
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/seen",
+            Some("Bearer token"),
+            Some(serde_json::json!({})),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(nameless.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(nameless).await["code"], "invalid_argument");
+}

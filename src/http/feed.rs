@@ -1,14 +1,15 @@
 //! The project feed REST route.
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
-use crate::http::problem::{Problem, ProblemPath};
+use crate::http::problem::{Problem, ProblemPath, json_body};
 use crate::limits::FEED_LIMIT_DEFAULT;
 use crate::store::events::{self, Event, FeedQuery, read_feed};
 
@@ -21,6 +22,16 @@ pub struct FeedPage {
     pub next_since: Option<String>,
     /// Oldest id on the page: pass as `before` to page further back.
     pub next_before: Option<String>,
+    /// The newest event the human has seen in this project, absent until the
+    /// feed has been opened. An event above it is unseen.
+    pub last_seen: Option<String>,
+}
+
+/// The event the human has read down to.
+#[derive(Debug, Deserialize)]
+pub struct SeenBody {
+    /// The newest event on the page the human just read.
+    pub event_id: String,
 }
 
 /// `GET /api/v1/projects/{id}/feed`
@@ -50,12 +61,55 @@ pub async fn read(
     let page = read_feed(&state.db, &project_id, &query)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    let last_seen = events::last_seen(&state.db, &project_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(FeedPage {
         events: page.events,
         next_since: page.next_since,
         next_before: page.next_before,
+        last_seen,
     }))
+}
+
+/// `POST /api/v1/projects/{id}/feed/seen`
+///
+/// A valid bearer token is required. The cursor moves up to the given event
+/// and never back: an older event, an event of another project, and an id that
+/// names nothing all leave it where it is, and the response says so. An
+/// unknown project is a 404.
+pub async fn seen(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<SeenBody>, JsonRejection>,
+) -> std::result::Result<Json<events::Seen>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let payload = json_body(body, "the body must be JSON with an event_id field")?;
+
+    if crate::store::projects::get(&state.db, &project_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .is_none()
+    {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "project {project_id} not found"
+        ))));
+    }
+
+    let seen = events::mark_seen(&state.db, &project_id, &payload.event_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    if seen.advanced {
+        state.notify();
+    }
+    Ok(Json(seen))
 }
 
 // Query parsing is manual because the axum query extractor cannot map a

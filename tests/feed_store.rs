@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::FEED_LIMIT_MAX;
-use agent_hub::store::events::{FeedQuery, NewEvent, append, read_feed};
+use agent_hub::store::events::{self, FeedQuery, NewEvent, append, read_feed};
 use agent_hub::store::{migrate, open_engine};
 
 static NEXT_DB: AtomicU64 = AtomicU64::new(0);
@@ -397,4 +397,167 @@ async fn a_sessions_events_are_counted_over_its_own_column() {
         .expect("one event");
     assert_eq!(latest.summary, "written while the session ran");
     assert_eq!(latest.actor, "agent-one");
+}
+
+fn event_in(project_id: &str, summary: &str) -> NewEvent {
+    NewEvent {
+        project_id: project_id.to_string(),
+        ..event(summary)
+    }
+}
+
+#[tokio::test]
+async fn the_feed_cursor_only_ever_moves_forward() {
+    let db = open().await;
+    let first = append(&db, "agent-one", None, event("first"))
+        .await
+        .expect("append");
+    let second = append(&db, "agent-one", None, event("second"))
+        .await
+        .expect("append");
+    let third = append(&db, "agent-one", None, event("third"))
+        .await
+        .expect("append");
+
+    assert_eq!(
+        events::last_seen(&db, "proj").await.expect("last seen"),
+        None,
+        "nothing is seen until the human opens the feed"
+    );
+
+    let seen = events::mark_seen(&db, "proj", &second)
+        .await
+        .expect("mark seen");
+    assert!(seen.advanced);
+    assert_eq!(seen.last_seen.as_deref(), Some(second.as_str()));
+
+    let back = events::mark_seen(&db, "proj", &first)
+        .await
+        .expect("mark seen");
+    assert!(!back.advanced, "an older event does not rewind the cursor");
+    assert_eq!(back.last_seen.as_deref(), Some(second.as_str()));
+
+    let forward = events::mark_seen(&db, "proj", &third)
+        .await
+        .expect("mark seen");
+    assert!(forward.advanced);
+    assert_eq!(
+        events::last_seen(&db, "proj").await.expect("last seen"),
+        Some(third)
+    );
+}
+
+#[tokio::test]
+async fn the_cursor_ignores_an_event_from_elsewhere_or_from_nowhere() {
+    let db = open().await;
+    let mine = append(&db, "agent-one", None, event("mine"))
+        .await
+        .expect("append");
+    let theirs = append(&db, "agent-one", None, event_in("other", "theirs"))
+        .await
+        .expect("append");
+    events::mark_seen(&db, "proj", &mine)
+        .await
+        .expect("mark seen");
+
+    let foreign = events::mark_seen(&db, "proj", &theirs)
+        .await
+        .expect("mark seen");
+    assert!(
+        !foreign.advanced,
+        "an event of another project says nothing about this feed"
+    );
+    assert_eq!(foreign.last_seen.as_deref(), Some(mine.as_str()));
+
+    let unknown = events::mark_seen(&db, "proj", "no-such-event")
+        .await
+        .expect("mark seen");
+    assert!(!unknown.advanced);
+    assert_eq!(unknown.last_seen.as_deref(), Some(mine.as_str()));
+}
+
+#[tokio::test]
+async fn the_unseen_count_follows_the_feed_and_the_cursor() {
+    let db = open().await;
+    // The counts are reported per project on the roll, so both exist.
+    for id in ["proj", "other"] {
+        agent_hub::store::projects::create(&db, id, id)
+            .await
+            .expect("create project");
+    }
+    append(&db, "agent-one", None, event("first"))
+        .await
+        .expect("append");
+    let second = append(&db, "agent-one", None, event("second"))
+        .await
+        .expect("append");
+    append(&db, "agent-one", None, event_in("other", "elsewhere"))
+        .await
+        .expect("append");
+
+    assert_eq!(events::unseen_count(&db, "proj").await.expect("count"), 2);
+
+    events::mark_seen(&db, "proj", &second)
+        .await
+        .expect("mark seen");
+    assert_eq!(events::unseen_count(&db, "proj").await.expect("count"), 0);
+
+    append(&db, "agent-one", None, event("third"))
+        .await
+        .expect("append");
+    assert_eq!(
+        events::unseen_count(&db, "proj").await.expect("count"),
+        1,
+        "an event written after the cursor is unseen again"
+    );
+
+    let counts = events::unseen_counts(&db).await.expect("counts");
+    let looked_up = |project: &str| {
+        counts
+            .iter()
+            .find(|row| row.project_id == project)
+            .map(|row| row.events)
+            .unwrap_or_default()
+    };
+    assert_eq!(looked_up("proj"), 1);
+    assert_eq!(looked_up("other"), 1, "a feed never opened is all unseen");
+}
+
+#[tokio::test]
+async fn the_unseen_count_seeks_and_does_not_scan_the_feed() {
+    let db = open().await;
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            &format!("EXPLAIN QUERY PLAN {}", events::UNSEEN_COUNT_SQL),
+            vec![
+                turso::Value::Text("proj".to_string()),
+                turso::Value::Text("cursor".to_string()),
+            ],
+        )
+        .await
+        .expect("explain the count");
+    let mut plan = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        if let turso::Value::Text(detail) = row.get_value(3).expect("plan detail") {
+            plan.push(detail);
+        }
+    }
+
+    let over_events = plan
+        .iter()
+        .find(|step| step.contains("events"))
+        .unwrap_or_else(|| panic!("the plan reads the feed: {plan:?}"));
+    assert!(
+        over_events.starts_with("SEARCH") && over_events.contains("events_feed"),
+        "the count seeks into the feed index rather than scanning: {plan:?}"
+    );
+    // Both bounds are in the seek, so only the events above the cursor are
+    // touched. The index is descending, which is how the engine words the
+    // upper bound here.
+    assert!(
+        over_events.contains("project_id=?")
+            && (over_events.contains("id<?") || over_events.contains("id>?")),
+        "the cursor is part of the seek, not a filter over the project: {plan:?}"
+    );
 }

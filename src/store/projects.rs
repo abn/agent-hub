@@ -16,6 +16,8 @@ pub struct Project {
     pub display_name: String,
     pub owner_agent: Option<String>,
     pub created_at: String,
+    /// Feed events newer than the human's last-seen cursor on this project.
+    pub unseen_events: i64,
 }
 
 /// List projects, oldest first.
@@ -31,6 +33,15 @@ pub async fn list(db: &Database) -> Result<Vec<Project>> {
     let mut projects = Vec::new();
     while let Some(row) = rows.next().await.map_err(engine)? {
         projects.push(project_from_row(&row)?);
+    }
+
+    // One grouped count for the whole listing rather than one per project.
+    let unseen = crate::store::events::unseen_counts(db).await?;
+    for project in &mut projects {
+        project.unseen_events = unseen
+            .iter()
+            .find(|row| row.project_id == project.id)
+            .map_or(0, |row| row.events);
     }
     Ok(projects)
 }
@@ -66,6 +77,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
         display_name: display_name.to_string(),
         owner_agent: None,
         created_at,
+        unseen_events: 0,
     })
 }
 
@@ -146,7 +158,11 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
         .await
         .map_err(engine)?;
     match rows.next().await.map_err(engine)? {
-        Some(row) => Ok(Some(project_from_row(&row)?)),
+        Some(row) => {
+            let mut project = project_from_row(&row)?;
+            project.unseen_events = crate::store::events::unseen_count(db, id).await?;
+            Ok(Some(project))
+        }
         None => Ok(None),
     }
 }
@@ -229,6 +245,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     )
     .await
     .map_err(engine)?;
+    crate::store::events::forget_cursor_in_tx(&tx, id).await?;
     tx.execute(
         "DELETE FROM projects WHERE id = ?1",
         vec![Value::Text(id.to_string())],
@@ -298,6 +315,9 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         display_name: text(1)?,
         owner_agent,
         created_at: text(3)?,
+        // Filled by the caller, which counts every project it returns in one
+        // query rather than one query per row.
+        unseen_events: 0,
     })
 }
 

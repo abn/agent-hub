@@ -31,6 +31,10 @@ pub struct Home {
     pub last_event_at: Option<String>,
     /// The newest events across every project.
     pub recent: Vec<Event>,
+    /// Per project, how many feed events sit above the human's last-seen
+    /// cursor, so the newest rows can be drawn as seen or not. A project with
+    /// nothing unseen is absent rather than zero.
+    pub unseen: Vec<events::ProjectUnseen>,
     pub storage: HomeStorage,
     /// Ended sessions and the bytes pruning them would free.
     pub prunable: crate::store::storage::Prunable,
@@ -48,6 +52,7 @@ pub async fn home(
 ) -> Result<Home> {
     let counts = inbox::counts(db).await?;
     let recent = events::recent(db, recent_limit).await?;
+    let unseen = events::unseen_counts(db).await?;
     let agents_active = crate::store::sessions::agents_active(db, active_since, None).await?;
     Ok(Home {
         unread: counts.unread,
@@ -55,6 +60,7 @@ pub async fn home(
         agents_active,
         last_event_at: recent.first().map(|event| event.created_at.clone()),
         recent,
+        unseen,
         storage: HomeStorage {
             used_bytes: usage.used_bytes,
             capacity_bytes: usage.capacity_bytes,
