@@ -163,6 +163,16 @@ fn structured(response: &Value) -> &Value {
         .unwrap_or_else(|| panic!("tool result carries structured content: {response}"))
 }
 
+fn error_message(response: &Value) -> &str {
+    response
+        .get("error")
+        .and_then(|error| error.get("data"))
+        .and_then(|data| data.get("error"))
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("tool error carries a message: {response}"))
+}
+
 fn error_code(response: &Value) -> &str {
     response
         .get("error")
@@ -196,26 +206,33 @@ fn session_and_brain_tools_round_trip_over_stdio() {
 
     let put_kv = server.call_tool(
         "brain_put",
-        json!({"path": "/kv/note", "content": "kv recovery note"}),
+        json!({"path": "/kv/note", "content": "kv recovery note", "store": "session"}),
     );
     assert_eq!(structured(&put_kv)["ok"], true, "brain_put /kv/note");
 
     let put_fs = server.call_tool(
         "brain_put",
-        json!({"path": "/fs/RECOVERY.md", "content": "terminal recovery marker"}),
+        json!({
+            "path": "/fs/RECOVERY.md",
+            "content": "terminal recovery marker",
+            "store": "session",
+        }),
     );
     assert_eq!(structured(&put_fs)["ok"], true, "brain_put /fs/RECOVERY.md");
 
     let put_scratch = server.call_tool(
         "brain_put",
-        json!({"path": "/kv/scratch", "content": "scratch recovery line"}),
+        json!({"path": "/kv/scratch", "content": "scratch recovery line", "store": "session"}),
     );
     assert_eq!(
         structured(&put_scratch)["ok"],
         true,
         "brain_put /kv/scratch"
     );
-    let deleted = server.call_tool("brain_delete", json!({"path": "/kv/scratch"}));
+    let deleted = server.call_tool(
+        "brain_delete",
+        json!({"path": "/kv/scratch", "store": "session"}),
+    );
     assert_eq!(structured(&deleted)["ok"], true, "brain_delete /kv/scratch");
     let gone = server.call_tool("brain_get", json!({"path": "/kv/scratch"}));
     assert_eq!(
@@ -347,7 +364,10 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
             .as_str()
             .expect("session id")
             .to_string();
-        let put = server.call_tool("brain_put", json!({"path": "/kv/note", "content": "one"}));
+        let put = server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/note", "content": "one", "store": "session"}),
+        );
         assert_eq!(structured(&put)["ok"], true, "the first write lands");
         id
     };
@@ -406,7 +426,10 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
         .expect("session id")
         .to_string();
     assert_ne!(resumed_id, session_id, "the pruned session is not resumed");
-    let response = server.call_tool("brain_put", json!({"path": "/kv/note", "content": "two"}));
+    let response = server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/note", "content": "two", "store": "session"}),
+    );
     assert_eq!(structured(&response)["ok"], true, "{response}");
     assert!(
         !data_dir.0.join(&brain_path).exists(),
@@ -430,11 +453,18 @@ fn a_non_canonical_path_indexes_and_deletes_one_row() {
     // only entry there is to index and the only one to delete.
     let put = server.call_tool(
         "brain_put",
-        json!({"path": "/fs/notes/../secret.md", "content": "aliased recovery body"}),
+        json!({
+            "path": "/fs/notes/../secret.md",
+            "content": "aliased recovery body",
+            "store": "session",
+        }),
     );
     assert_eq!(structured(&put)["ok"], true, "the aliased write lands");
 
-    let deleted = server.call_tool("brain_delete", json!({"path": "/fs/secret.md"}));
+    let deleted = server.call_tool(
+        "brain_delete",
+        json!({"path": "/fs/secret.md", "store": "session"}),
+    );
     assert_eq!(
         structured(&deleted)["ok"],
         true,
@@ -532,7 +562,7 @@ fn an_oversized_brain_put_is_refused() {
     let oversized = "x".repeat(agent_hub::limits::BRAIN_VALUE_BYTES_MAX + 1);
     let response = server.call_tool(
         "brain_put",
-        json!({"path": "/kv/big", "content": oversized}),
+        json!({"path": "/kv/big", "content": oversized, "store": "session"}),
     );
     assert_eq!(
         error_code(&response),
@@ -578,7 +608,10 @@ fn session_survives_a_process_restart() {
             .as_str()
             .expect("session id")
             .to_string();
-        let put = server.call_tool("brain_put", json!({"path": "/kv/counter", "content": "1"}));
+        let put = server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/counter", "content": "1", "store": "session"}),
+        );
         assert_eq!(structured(&put)["ok"], true, "brain_put before the restart");
         id
     };
@@ -619,5 +652,359 @@ fn session_survives_a_process_restart() {
     assert_eq!(
         starts, 1,
         "a resume after a restart does not duplicate the start event"
+    );
+}
+
+#[test]
+fn a_project_page_outlives_the_session_that_wrote_it() {
+    let data_dir = TempDir::new("project-store");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "first"}),
+    );
+    let put = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/deploy/rollout.md",
+            "content": "the rollout runs from the node",
+            "store": "project",
+        }),
+    );
+    let written = structured(&put);
+    assert_eq!(written["ok"], true, "a project page is written: {put}");
+    assert_eq!(written["store"], "project");
+    assert!(
+        written["version"]
+            .as_str()
+            .is_some_and(|version| version.starts_with("sha256:")),
+        "a write returns the version of the bytes it stored, got {written}"
+    );
+
+    // The session brain is a different store: the page is not there.
+    let session_read = server.call_tool("brain_get", json!({"path": "/fs/deploy/rollout.md"}));
+    assert_eq!(
+        error_code(&session_read),
+        "not_found",
+        "a read defaults to the session store, got {session_read}"
+    );
+
+    // A second session of the same project reads what the first one wrote.
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "second"}),
+    );
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/deploy/rollout.md", "store": "project"}),
+    );
+    let page = structured(&read);
+    assert_eq!(page["content"], "the rollout runs from the node");
+    assert_eq!(page["version"], written["version"]);
+    assert_eq!(page["size_bytes"], 30);
+
+    let listed = server.call_tool("brain_list", json!({"store": "project"}));
+    let entries = structured(&listed)["entries"]
+        .as_array()
+        .expect("brain_list returns entries");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["path"] == "/fs/deploy" && entry["type"] == "dir"),
+        "the project listing shows the page's directory, got {entries:?}"
+    );
+
+    let deleted = server.call_tool(
+        "brain_delete",
+        json!({"path": "/fs/deploy/rollout.md", "store": "project"}),
+    );
+    assert_eq!(structured(&deleted)["ok"], true, "the page is deleted");
+    let gone = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/deploy/rollout.md", "store": "project"}),
+    );
+    assert_eq!(error_code(&gone), "not_found", "the page is gone");
+}
+
+#[test]
+fn the_project_store_refuses_a_key_path() {
+    let data_dir = TempDir::new("project-kv");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    for call in [
+        server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/note", "content": "x", "store": "project"}),
+        ),
+        server.call_tool("brain_get", json!({"path": "/kv/note", "store": "project"})),
+        server.call_tool("brain_list", json!({"path": "/kv", "store": "project"})),
+        server.call_tool(
+            "brain_delete",
+            json!({"path": "/kv/note", "store": "project"}),
+        ),
+    ] {
+        assert_eq!(
+            error_code(&call),
+            "invalid_argument",
+            "the project knowledge base holds files only, got {call}"
+        );
+    }
+}
+
+#[test]
+fn a_project_that_does_not_exist_gets_no_knowledge_base() {
+    let data_dir = TempDir::new("project-missing");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    // The local process is the admin, which the policy layer lets through
+    // without looking the project up. Nothing else stands between a mistyped
+    // project id and a knowledge base nobody owns and no report ever counts.
+    let written = server.call_tool(
+        "brain_put",
+        json!({"path": "/fs/note.md", "content": "x", "store": "project", "project_id": "ghost"}),
+    );
+    assert_eq!(error_code(&written), "not_found", "got {written}");
+
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/note.md", "store": "project", "project_id": "ghost"}),
+    );
+    assert_eq!(error_code(&read), "not_found", "got {read}");
+
+    assert!(
+        !data_dir.0.join("kb").join("ghost").exists(),
+        "a refused write leaves nothing on disk"
+    );
+}
+
+#[test]
+fn a_write_has_to_name_its_store() {
+    let data_dir = TempDir::new("store-required");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    for call in [
+        server.call_tool("brain_put", json!({"path": "/fs/page.md", "content": "x"})),
+        server.call_tool("brain_delete", json!({"path": "/fs/page.md"})),
+    ] {
+        assert_eq!(
+            error_code(&call),
+            "invalid_argument",
+            "a write without a store is refused, got {call}"
+        );
+        let message = error_message(&call);
+        assert!(
+            message.contains("session") && message.contains("project"),
+            "the refusal names both stores, got {message}"
+        );
+    }
+}
+
+#[test]
+fn a_conditional_project_write_reports_the_current_version() {
+    let data_dir = TempDir::new("project-cas");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    let created = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/page.md",
+            "content": "one",
+            "store": "project",
+            "if_version": "absent",
+        }),
+    );
+    let version = structured(&created)["version"]
+        .as_str()
+        .expect("a version")
+        .to_string();
+
+    let again = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/page.md",
+            "content": "two",
+            "store": "project",
+            "if_version": "absent",
+        }),
+    );
+    assert_eq!(
+        error_code(&again),
+        "conflict",
+        "a second create is refused, got {again}"
+    );
+    assert!(
+        error_message(&again).ends_with(&format!("current_version={version}")),
+        "the conflict carries the current version, got {}",
+        error_message(&again)
+    );
+
+    let updated = server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/page.md",
+            "content": "two",
+            "store": "project",
+            "if_version": version,
+        }),
+    );
+    assert_eq!(
+        structured(&updated)["ok"],
+        true,
+        "a write on the current version lands, got {updated}"
+    );
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/page.md", "store": "project"}),
+    );
+    assert_eq!(structured(&read)["content"], "two");
+}
+
+#[test]
+fn an_oversized_project_page_is_refused() {
+    let data_dir = TempDir::new("project-oversized");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    let oversized = "x".repeat(agent_hub::limits::BRAIN_VALUE_BYTES_MAX + 1);
+    let response = server.call_tool(
+        "brain_put",
+        json!({"path": "/fs/big.md", "content": oversized, "store": "project"}),
+    );
+    assert_eq!(
+        error_code(&response),
+        "payload_too_large",
+        "a page over the cap is refused"
+    );
+    let stored = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/big.md", "store": "project"}),
+    );
+    assert_eq!(
+        error_code(&stored),
+        "not_found",
+        "a refused write stores nothing"
+    );
+}
+
+#[test]
+fn pruning_a_session_leaves_the_project_knowledge_base() {
+    let data_dir = TempDir::new("project-prune");
+    common::seed_project(&data_dir.0, "proj");
+
+    let session_id = {
+        let mut server = McpServer::spawn(&data_dir.0);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "named"}),
+        );
+        let id = structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/note", "content": "working state", "store": "session"}),
+        );
+        let page = server.call_tool(
+            "brain_put",
+            json!({
+                "path": "/fs/runbook.md",
+                "content": "durable knowledge",
+                "store": "project",
+            }),
+        );
+        assert_eq!(structured(&page)["ok"], true, "the page is written");
+        id
+    };
+
+    // Prune the session the way the sweeper does, with the tombstone aged past
+    // the undo window so the file is really removed.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open engine");
+        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent")
+            .await
+            .expect("end");
+        agent_hub::store::prune::prune_session(&db, &session_id)
+            .await
+            .expect("prune");
+        let old = (time::OffsetDateTime::now_utc() - time::Duration::seconds(120))
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("format");
+        db.connect()
+            .expect("connect")
+            .execute(
+                "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+                vec![
+                    turso::Value::Text(old),
+                    turso::Value::Text(session_id.clone()),
+                ],
+            )
+            .await
+            .expect("age the tombstone");
+        agent_hub::store::prune::sweep(&db, &data_dir.0)
+            .await
+            .expect("sweep");
+    });
+
+    assert!(
+        data_dir.0.join("kb").join("proj").join("kb.db").exists(),
+        "a session prune does not reach the knowledge base file"
+    );
+
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "later"}),
+    );
+    let read = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/runbook.md", "store": "project"}),
+    );
+    assert_eq!(
+        structured(&read)["content"],
+        "durable knowledge",
+        "the page survives the prune of the session that wrote it"
+    );
+    let gone = server.call_tool("brain_get", json!({"path": "/kv/note"}));
+    assert_eq!(
+        error_code(&gone),
+        "not_found",
+        "the pruned session's working state is gone"
     );
 }

@@ -777,3 +777,221 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
     drop(_child);
     drop(data_dir);
 }
+
+#[tokio::test]
+async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others() {
+    let data_dir = TempDir::new("knowledge");
+
+    let db = open_engine(&data_dir.0.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    identity::create_agent(&db, "one", "One", Trust::Trusted)
+        .await
+        .expect("create one");
+    identity::create_agent(&db, "two", "Two", Trust::Trusted)
+        .await
+        .expect("create two");
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    projects::create(&db, "shared", "Shared")
+        .await
+        .expect("shared project");
+    let one_token = identity::issue_token(&db, "one")
+        .await
+        .expect("token")
+        .token;
+    let two_token = identity::issue_token(&db, "two")
+        .await
+        .expect("token")
+        .token;
+    let strict_token = identity::issue_token(&db, "strict")
+        .await
+        .expect("token")
+        .token;
+    drop(db);
+
+    let port = free_port();
+    let _child = spawn(&data_dir.0, port);
+    wait_for_port(port);
+
+    // One agent writes a page; another agent, in its own session, reads and
+    // then rewrites the same page. The knowledge base is shared by
+    // construction, so no grant and no ownership check stands between them.
+    let one = initialize(port, &one_token);
+    call(
+        port,
+        &one_token,
+        &one,
+        "session_start",
+        json!({"project_id": "shared", "session_name": "first"}),
+    );
+    let written = call(
+        port,
+        &one_token,
+        &one,
+        "brain_put",
+        json!({
+            "path": "/fs/runbook.md",
+            "content": "restart the node from the console",
+            "store": "project",
+        }),
+    );
+    assert_eq!(
+        written.status, 200,
+        "the first agent writes: {}",
+        written.raw
+    );
+
+    let two = initialize(port, &two_token);
+    call(
+        port,
+        &two_token,
+        &two,
+        "session_start",
+        json!({"project_id": "shared", "session_name": "second"}),
+    );
+    let read = call(
+        port,
+        &two_token,
+        &two,
+        "brain_get",
+        json!({"path": "/fs/runbook.md", "store": "project"}),
+    );
+    assert!(
+        read.raw.contains("restart the node from the console"),
+        "the second agent reads the first agent's page: {}",
+        read.raw
+    );
+    let rewritten = call(
+        port,
+        &two_token,
+        &two,
+        "brain_put",
+        json!({
+            "path": "/fs/runbook.md",
+            "content": "restart the node from the console, then check the feed",
+            "store": "project",
+        }),
+    );
+    assert_eq!(
+        rewritten.status, 200,
+        "the second agent writes the same page: {}",
+        rewritten.raw
+    );
+
+    // An untrusted agent with no grant reaches neither, and the refusal is the
+    // one that does not say whether the project is there.
+    let strict_session = initialize(port, &strict_token);
+    for call_result in [
+        call(
+            port,
+            &strict_token,
+            &strict_session,
+            "brain_get",
+            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "shared"}),
+        ),
+        call(
+            port,
+            &strict_token,
+            &strict_session,
+            "brain_put",
+            json!({
+                "path": "/fs/runbook.md",
+                "content": "mine now",
+                "store": "project",
+                "project_id": "shared",
+            }),
+        ),
+        call(
+            port,
+            &strict_token,
+            &strict_session,
+            "brain_list",
+            json!({"store": "project", "project_id": "shared"}),
+        ),
+        call(
+            port,
+            &strict_token,
+            &strict_session,
+            "brain_delete",
+            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "shared"}),
+        ),
+        call(
+            port,
+            &strict_token,
+            &strict_session,
+            "brain_get",
+            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "ghost"}),
+        ),
+    ] {
+        assert!(
+            call_result.raw.contains("forbidden")
+                && call_result.raw.contains("not found or not permitted"),
+            "an agent without a grant is refused the same way for a project that exists and one that does not: {}",
+            call_result.raw
+        );
+        assert!(
+            !call_result.raw.contains("restart the node"),
+            "the refusal carries none of the content: {}",
+            call_result.raw
+        );
+    }
+
+    // Its own space is its own knowledge base, with no extra mechanism.
+    let own = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "brain_put",
+        json!({
+            "path": "/fs/notes.md",
+            "content": "what I learned",
+            "store": "project",
+            "project_id": strict.personal_project_id.clone(),
+        }),
+    );
+    assert_eq!(
+        own.status, 200,
+        "an agent writes its own space: {}",
+        own.raw
+    );
+    assert!(!own.raw.contains("forbidden"), "{}", own.raw);
+
+    // A trusted agent reads that space but may not write it, which is the
+    // existing policy rule and not a knowledge base rule.
+    let trusted_read = call(
+        port,
+        &one_token,
+        &one,
+        "brain_get",
+        json!({
+            "path": "/fs/notes.md",
+            "store": "project",
+            "project_id": strict.personal_project_id.clone(),
+        }),
+    );
+    assert!(
+        trusted_read.raw.contains("what I learned"),
+        "a trusted agent reads another agent's space: {}",
+        trusted_read.raw
+    );
+    let trusted_write = call(
+        port,
+        &one_token,
+        &one,
+        "brain_put",
+        json!({
+            "path": "/fs/notes.md",
+            "content": "not yours",
+            "store": "project",
+            "project_id": strict.personal_project_id.clone(),
+        }),
+    );
+    assert!(
+        trusted_write.raw.contains("forbidden"),
+        "a trusted agent does not write another agent's space: {}",
+        trusted_write.raw
+    );
+}

@@ -1,8 +1,11 @@
 //! Session lifecycle and brain tools.
 //!
-//! These act on the active session, the one `session_start` recorded. A brain
-//! is one AgentFS file per session, so every value lives under `/kv/` or
-//! `/fs/` and every write is mirrored into the search corpus.
+//! The brain tools reach two stores through one family of tools. The session
+//! store is the active session's own AgentFS file, the working state that is
+//! pruned with the session. The project store is one AgentFS file per project,
+//! the durable knowledge base every agent with project write shares. Every
+//! value lives under `/kv/` or `/fs/`, except in the knowledge base which
+//! holds pages only, and every write is mirrored into the search corpus.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -18,7 +21,7 @@ use crate::error::{Error, Result};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
 use crate::store::search::{SearchDoc, index_doc};
-use crate::store::sessions;
+use crate::store::{projects, sessions};
 
 use super::{HubServer, to_error_data};
 
@@ -99,29 +102,36 @@ impl HubServer {
         Ok(CallToolResult::structured(json!({ "ok": true })))
     }
 
-    #[tool(description = "Read a value from the active session brain.")]
+    #[tool(
+        description = "Read one value. store is \"session\" (the default), this session's own working state, or \"project\", the durable knowledge base shared by every agent on the project. Returns the content and its version token."
+    )]
     async fn brain_get(
         &self,
         context: RequestContext<RoleServer>,
-        Parameters(params): Parameters<BrainPathParams>,
+        Parameters(params): Parameters<BrainGetParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
+        store.check_path(&params.path).map_err(to_error_data)?;
         let absent = || {
             to_error_data(Error::NotFound(format!(
                 "no brain value at '{}'",
                 params.path
             )))
         };
-        let brain = self
-            .brain_for_read(&principal)
+        let target = self
+            .target_for_read(&principal, store, params.project_id.as_deref())
             .await
             .map_err(to_error_data)?
             .ok_or_else(absent)?;
-        let bytes = brain
+        let bytes = target
+            .brain
             .get(&params.path)
             .await
             .map_err(to_error_data)?
             .ok_or_else(absent)?;
+        let size_bytes = bytes.len();
+        let version = brain::version(&bytes);
         let content = String::from_utf8(bytes).map_err(|_| {
             to_error_data(Error::InvalidArgument(format!(
                 "brain value at '{}' is not UTF-8 text",
@@ -131,79 +141,216 @@ impl HubServer {
 
         Ok(CallToolResult::structured(json!({
             "path": params.path,
+            "store": store.as_str(),
             "content": content,
+            "version": version,
+            "size_bytes": size_bytes,
         })))
     }
 
-    #[tool(description = "Write a value to the active session brain and index it.")]
+    #[tool(
+        description = "Write one value and index it for search. store is required: \"session\" keeps working state that is pruned with the session, \"project\" writes a page of the durable project knowledge base every agent on the project reads and writes. Pass if_version with the version you read to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+    )]
     async fn brain_put(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainPutParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
+        store.check_path(&params.path).map_err(to_error_data)?;
         // The store and the corpus have to agree on the entry, so both take the
         // canonical path and an alias never becomes a second search row.
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
-        let (project_id, session_id, brain) = self
-            .brain_for(&principal, Access::Write)
+        let target = self
+            .target_for_write(&principal, store, params.project_id.as_deref())
             .await
             .map_err(to_error_data)?;
-        brain
-            .put(&path, params.content.as_bytes())
+        let version = target
+            .brain
+            .put_if(
+                &path,
+                params.content.as_bytes(),
+                params.if_version.as_deref(),
+            )
             .await
             .map_err(to_error_data)?;
-        self.index_brain_put(&project_id, &session_id, &path, &params.content)
+        self.index_write(&target, &path, &params.content)
             .await
             .map_err(to_error_data)?;
 
-        Ok(CallToolResult::structured(json!({ "ok": true })))
+        Ok(CallToolResult::structured(json!({
+            "ok": true,
+            "path": path,
+            "store": store.as_str(),
+            "version": version,
+            "size_bytes": params.content.len(),
+        })))
     }
 
-    #[tool(description = "List brain entries under a path, or all entries when omitted.")]
+    #[tool(
+        description = "List entries under a path, or every entry when the path is omitted. store is \"session\" (the default) or \"project\" for the project knowledge base. Each entry carries its path, its type, and its size."
+    )]
     async fn brain_list(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<BrainListParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
+        if let Some(path) = params.path.as_deref() {
+            store.check_path(path).map_err(to_error_data)?;
+        }
         let entries = match self
-            .brain_for_read(&principal)
+            .target_for_read(&principal, store, params.project_id.as_deref())
             .await
             .map_err(to_error_data)?
         {
-            Some(brain) => match params.path.as_deref() {
-                Some(path) => brain.list(path).await.map_err(to_error_data)?,
+            Some(target) => match params.path.as_deref() {
+                Some(path) => target.brain.list(path).await.map_err(to_error_data)?,
+                // The knowledge base holds pages only, so there is no second
+                // namespace to walk.
+                None if store == Store::Project => {
+                    target.brain.list("/fs").await.map_err(to_error_data)?
+                }
                 None => {
-                    let mut entries = brain.list("/kv").await.map_err(to_error_data)?;
-                    entries.extend(brain.list("/fs").await.map_err(to_error_data)?);
+                    let mut entries = target.brain.list("/kv").await.map_err(to_error_data)?;
+                    entries.extend(target.brain.list("/fs").await.map_err(to_error_data)?);
                     entries
                 }
             },
             None => Vec::new(),
         };
 
-        Ok(CallToolResult::structured(json!({ "entries": entries })))
+        Ok(CallToolResult::structured(json!({
+            "store": store.as_str(),
+            "entries": entries,
+        })))
     }
 
-    #[tool(description = "Delete a value from the active session brain and its index row.")]
+    #[tool(
+        description = "Delete one value and its index row. store is required: \"session\" for this session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent."
+    )]
     async fn brain_delete(
         &self,
         context: RequestContext<RoleServer>,
-        Parameters(params): Parameters<BrainPathParams>,
+        Parameters(params): Parameters<BrainDeleteParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
+        store.check_path(&params.path).map_err(to_error_data)?;
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
-        let (_, session_id, brain) = self
-            .brain_for(&principal, Access::Write)
+        let target = self
+            .target_for_write(&principal, store, params.project_id.as_deref())
             .await
             .map_err(to_error_data)?;
-        brain.delete(&path).await.map_err(to_error_data)?;
-        self.delete_brain_doc(&session_id, &path)
+        target.brain.delete(&path).await.map_err(to_error_data)?;
+        self.delete_doc(&target, &path)
             .await
             .map_err(to_error_data)?;
 
-        Ok(CallToolResult::structured(json!({ "ok": true })))
+        Ok(CallToolResult::structured(json!({
+            "ok": true,
+            "path": path,
+            "store": store.as_str(),
+        })))
+    }
+}
+
+/// Which store a brain tool acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Store {
+    /// The active session's brain.
+    Session,
+    /// The target project's knowledge base.
+    Project,
+}
+
+/// What the two stores are, named in every refusal so a caller that got the
+/// argument wrong can fix the call from the message alone.
+const STORES: &str = "\"session\" for the active session brain, \
+                      \"project\" for the durable project knowledge base";
+
+impl Store {
+    /// The store a read acts on. A read that forgets the argument gets
+    /// `not_found` and recovers, so the session brain is the default.
+    fn for_read(store: Option<&str>) -> Result<Self> {
+        match store {
+            Some(store) => Self::parse(store),
+            None => Ok(Self::Session),
+        }
+    }
+
+    /// The store a write acts on, which the caller always names.
+    ///
+    /// A write that lands in the wrong store is silent and costly either way:
+    /// durable knowledge in a brain that is pruned, or working state in the
+    /// shared knowledge base. Neither surfaces, so there is no default.
+    fn for_write(store: Option<&str>) -> Result<Self> {
+        match store {
+            Some(store) => Self::parse(store),
+            None => Err(Error::InvalidArgument(format!(
+                "store is required: {STORES}"
+            ))),
+        }
+    }
+
+    fn parse(store: &str) -> Result<Self> {
+        match store {
+            "session" => Ok(Self::Session),
+            "project" => Ok(Self::Project),
+            other => Err(Error::InvalidArgument(format!(
+                "unknown store '{other}': {STORES}"
+            ))),
+        }
+    }
+
+    /// Refuse a key-value path at the project store.
+    ///
+    /// The knowledge base is a bundle of pages with a rendering surface. A
+    /// key-value side channel in the same file would be a second store that
+    /// nothing lists and nothing renders.
+    fn check_path(self, path: &str) -> Result<()> {
+        if self == Self::Project && (path == "/kv" || path.starts_with("/kv/")) {
+            return Err(Error::InvalidArgument(format!(
+                "the project knowledge base holds pages only, so '{path}' has no meaning there; use an /fs/ path"
+            )));
+        }
+        Ok(())
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Project => "project",
+        }
+    }
+}
+
+/// An opened store, with what the search corpus needs to name its documents.
+struct Target {
+    /// The project the store belongs to.
+    project_id: String,
+    /// The session, at the session store only.
+    session_id: Option<String>,
+    brain: Brain,
+}
+
+impl Target {
+    /// The corpus family a write into this store belongs to.
+    fn kind(&self) -> &'static str {
+        match self.session_id {
+            Some(_) => "brain",
+            None => "kb",
+        }
+    }
+
+    /// The search document id for one entry.
+    fn doc_id(&self, path: &str) -> String {
+        match &self.session_id {
+            Some(session_id) => format!("brain:{session_id}:{path}"),
+            None => format!("kb:{}:{path}", self.project_id),
+        }
     }
 }
 
@@ -245,57 +392,181 @@ impl HubServer {
         Ok(session)
     }
 
-    /// Authorize and open the active session's brain for a write.
-    async fn brain_for(
+    /// Authorize and open the store a write acts on.
+    async fn target_for_write(
         &self,
         principal: &Principal,
-        access: Access,
-    ) -> Result<(String, String, Brain)> {
-        let session = self.session_for(principal, access).await?;
-        let session_id = session.id.clone();
-        // A sweep takes the same lock to remove the file, so the liveness
-        // check above is only ordered against it when it is made again here.
-        let brain = self
-            .state
-            .brain
-            .open_live(&session.project_id, &session.id, async || {
-                self.live_session(&session_id).await.map(|_| ())
-            })
-            .await?;
-        Ok((session.project_id, session.id, brain))
+        store: Store,
+        project_id: Option<&str>,
+    ) -> Result<Target> {
+        match store {
+            Store::Session => {
+                let session = self
+                    .session_target(principal, project_id, Access::Write)
+                    .await?;
+                let session_id = session.id.clone();
+                // A sweep takes the same lock to remove the file, so the
+                // liveness check above is only ordered against it when it is
+                // made again here.
+                let brain = self
+                    .state
+                    .brain
+                    .open_live(&session.project_id, &session.id, async || {
+                        self.live_session(&session_id).await.map(|_| ())
+                    })
+                    .await?;
+                Ok(Target {
+                    project_id: session.project_id,
+                    session_id: Some(session.id),
+                    brain,
+                })
+            }
+            Store::Project => {
+                let project_id = self
+                    .knowledge_project(principal, project_id, Access::Write)
+                    .await?;
+                // The file is created on the first write, so a project nobody
+                // has written to costs nothing. Deleting a project removes the
+                // file under the same lock this open takes, so the project is
+                // looked up again once the lock is held: a write that lost the
+                // race must not bring the file back for a project with no row,
+                // where no report counts it and nothing ever removes it.
+                let db = self.state.db.clone();
+                let looked_up = project_id.clone();
+                let brain = self
+                    .state
+                    .knowledge
+                    .open_live(&project_id, brain::KNOWLEDGE_FILE, async move || {
+                        match projects::get(&db, &looked_up).await? {
+                            Some(_) => Ok(()),
+                            None => Err(Error::NotFound(format!("project {looked_up} not found"))),
+                        }
+                    })
+                    .await?;
+                Ok(Target {
+                    project_id,
+                    session_id: None,
+                    brain,
+                })
+            }
+        }
     }
 
-    /// Authorize and open the active session's brain for a read.
+    /// Authorize and open the store a read acts on.
     ///
-    /// A read never creates the file, so a session nothing was written to has
-    /// no brain and `None` stands for an empty one.
-    async fn brain_for_read(&self, principal: &Principal) -> Result<Option<Brain>> {
-        let session = self.session_for(principal, Access::Read).await?;
-        self.state
-            .brain
-            .open_existing(&session.project_id, &session.id)
-            .await
+    /// A read never creates the file, so a store nothing was written to has no
+    /// brain and `None` stands for an empty one.
+    async fn target_for_read(
+        &self,
+        principal: &Principal,
+        store: Store,
+        project_id: Option<&str>,
+    ) -> Result<Option<Target>> {
+        match store {
+            Store::Session => {
+                let session = self
+                    .session_target(principal, project_id, Access::Read)
+                    .await?;
+                Ok(self
+                    .state
+                    .brain
+                    .open_existing(&session.project_id, &session.id)
+                    .await?
+                    .map(|brain| Target {
+                        project_id: session.project_id,
+                        session_id: Some(session.id),
+                        brain,
+                    }))
+            }
+            Store::Project => {
+                let project_id = self
+                    .knowledge_project(principal, project_id, Access::Read)
+                    .await?;
+                Ok(self
+                    .state
+                    .knowledge
+                    .open_existing(&project_id, brain::KNOWLEDGE_FILE)
+                    .await?
+                    .map(|brain| Target {
+                        project_id,
+                        session_id: None,
+                        brain,
+                    }))
+            }
+        }
     }
 
-    /// Index a brain value: path as title, content as body.
-    async fn index_brain_put(
+    /// The active session a session-store call acts on.
+    ///
+    /// The session store follows the active session, so a project id there
+    /// would name a target the tool cannot honour; saying so is better than
+    /// ignoring the argument and writing somewhere else.
+    async fn session_target(
         &self,
-        project_id: &str,
-        session_id: &str,
-        path: &str,
-        body: &str,
-    ) -> Result<()> {
+        principal: &Principal,
+        project_id: Option<&str>,
+        access: Access,
+    ) -> Result<sessions::Session> {
+        if project_id.is_some() {
+            return Err(Error::InvalidArgument(
+                "project_id selects a project knowledge base; the session store acts on the active session".to_string(),
+            ));
+        }
+        self.session_for(principal, access).await
+    }
+
+    /// The project whose knowledge base a call acts on, once the caller is
+    /// authorized for it.
+    async fn knowledge_project(
+        &self,
+        principal: &Principal,
+        project_id: Option<&str>,
+        access: Access,
+    ) -> Result<String> {
+        let project_id = match project_id {
+            Some(project_id) => project_id.to_string(),
+            // The active session's project is the default, so an agent at work
+            // in one project reaches that project's knowledge base without
+            // repeating itself.
+            None => {
+                self.active_session()
+                    .await
+                    .map_err(|_| {
+                        Error::InvalidArgument(
+                    "the project store needs a project_id, or an active session to take one from"
+                        .to_string(),
+                )
+                    })?
+                    .0
+            }
+        };
+        // The policy layer lets the admin through without looking the project
+        // up, so a missing project is caught here rather than creating a
+        // knowledge base for a project that does not exist. Every other caller
+        // sees the one refusal that does not say which of the two it was.
+        if projects::get(&self.state.db, &project_id).await?.is_none() {
+            return Err(policy::conceal(
+                principal,
+                Error::NotFound(format!("project {project_id} not found")),
+            ));
+        }
+        policy::authorize(&self.state.db, principal, &project_id, access).await?;
+        Ok(project_id)
+    }
+
+    /// Index a written value: path as title, content as body.
+    async fn index_write(&self, target: &Target, path: &str, body: &str) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
-        let doc_id = brain_doc_id(session_id, path);
+        let doc_id = target.doc_id(path);
         index_doc(
             &conn,
             SearchDoc {
                 doc_id: &doc_id,
-                project_id,
-                kind: "brain",
+                project_id: &target.project_id,
+                kind: target.kind(),
                 ref_id: path,
-                session_id: Some(session_id),
+                session_id: target.session_id.as_deref(),
                 title: Some(path),
                 body,
                 updated_at: &updated_at,
@@ -304,22 +575,17 @@ impl HubServer {
         .await
     }
 
-    /// Remove a brain value's search row.
-    async fn delete_brain_doc(&self, session_id: &str, path: &str) -> Result<()> {
+    /// Remove a value's search row.
+    async fn delete_doc(&self, target: &Target, path: &str) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
         conn.execute(
             "DELETE FROM search_docs WHERE doc_id = ?1",
-            vec![Value::Text(brain_doc_id(session_id, path))],
+            vec![Value::Text(target.doc_id(path))],
         )
         .await
         .map_err(crate::store::engine)?;
         Ok(())
     }
-}
-
-/// The search document id for a brain value.
-fn brain_doc_id(session_id: &str, path: &str) -> String {
-    format!("brain:{session_id}:{path}")
 }
 
 /// Arguments for `session_start`.
@@ -335,10 +601,14 @@ struct SessionEndParams {
     session_id: String,
 }
 
-/// Arguments for `brain_get` and `brain_delete`.
+/// Arguments for `brain_get`.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct BrainPathParams {
+struct BrainGetParams {
     path: String,
+    #[serde(default)]
+    store: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
 }
 
 /// Arguments for `brain_put`.
@@ -346,6 +616,12 @@ struct BrainPathParams {
 struct BrainPutParams {
     path: String,
     content: String,
+    #[serde(default)]
+    store: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    if_version: Option<String>,
 }
 
 /// Arguments for `brain_list`.
@@ -353,4 +629,18 @@ struct BrainPutParams {
 struct BrainListParams {
     #[serde(default)]
     path: Option<String>,
+    #[serde(default)]
+    store: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+/// Arguments for `brain_delete`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct BrainDeleteParams {
+    path: String,
+    #[serde(default)]
+    store: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
 }

@@ -22,6 +22,8 @@ pub struct AppState {
     pub db: turso::Database,
     /// Per-session brain files.
     pub brain: BrainStore,
+    /// Per-project knowledge base files.
+    pub knowledge: BrainStore,
     /// Token resolver.
     pub auth: Arc<Auth>,
     /// Freshness ticks for the human stream. A write that changes the inbox or
@@ -34,6 +36,7 @@ impl AppState {
     pub async fn open(config: Config) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;
         std::fs::create_dir_all(config.sessions_dir())?;
+        std::fs::create_dir_all(config.knowledge_dir())?;
         std::fs::create_dir_all(config.artifacts_dir())?;
 
         let db = store::open_engine(&config.hub_db_path()).await?;
@@ -58,6 +61,7 @@ impl AppState {
 
         let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
+        let knowledge = BrainStore::new(config.knowledge_dir());
         let auth = Arc::new(Auth::from_config(&config));
         let (ticker, _) = tokio::sync::broadcast::channel(16);
         Ok(Self {
@@ -66,6 +70,7 @@ impl AppState {
             schema_version,
             db,
             brain,
+            knowledge,
             auth,
             ticker,
         })

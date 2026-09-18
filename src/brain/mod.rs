@@ -11,9 +11,14 @@
 //! - `/fs/<path>` addresses the AgentFS POSIX-like filesystem.
 //!
 //! [`BrainStore`] is the process-wide factory: it maps a session id to its
-//! file and hands out a per-session write lock, so concurrent writers to one
-//! session serialise while writers to distinct sessions never block.
+//! file and hands out a per-file write lock, so concurrent writers to one
+//! file serialise while writers to distinct files never block. A project
+//! knowledge base is one more file behind the same wrapper and the same lock,
+//! opened under [`KNOWLEDGE_FILE`] in place of a session id.
 
 mod session;
 
-pub use session::{Brain, BrainStore, Entry, EntryKind, VERSION_ABSENT, canonical_path, version};
+pub use session::{
+    Brain, BrainStore, Entry, EntryKind, KNOWLEDGE_FILE, VERSION_ABSENT, canonical_path,
+    knowledge_dir, version,
+};

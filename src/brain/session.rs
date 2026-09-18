@@ -102,6 +102,15 @@ impl BrainStore {
         Self::new(data_dir.join("sessions"))
     }
 
+    /// A store for the knowledge directory under a data directory.
+    ///
+    /// One file per project, opened under the same wrapper and the same
+    /// per-file write lock as a session brain, so the knowledge base needs no
+    /// type, locking or removal code of its own.
+    pub fn for_knowledge(data_dir: &Path) -> Self {
+        Self::new(knowledge_dir(data_dir))
+    }
+
     /// The directory holding one brain file per session, under its project.
     pub fn root(&self) -> &Path {
         &self.root
@@ -278,10 +287,11 @@ impl Brain {
         if self.path.exists() {
             return Ok(());
         }
-        Err(Error::Conflict(format!(
-            "session {} is no longer available; start a session",
-            self.session_id
-        )))
+        // The wrapper serves session brains and project knowledge bases alike,
+        // so it says what happened and leaves what to do next to the caller.
+        Err(Error::Conflict(
+            "the store was removed while this write was waiting; nothing was written".to_string(),
+        ))
     }
 
     /// The session this brain belongs to.
@@ -598,6 +608,15 @@ fn require_key(key: &str) -> Result<&str> {
 /// The expected version of a path nothing is stored at, so a caller can create
 /// an entry without racing another creator.
 pub const VERSION_ABSENT: &str = "absent";
+
+/// The name a project's knowledge base file is opened under, in place of a
+/// session id, so one project has exactly one knowledge base.
+pub const KNOWLEDGE_FILE: &str = "kb";
+
+/// The directory holding one knowledge base file per project.
+pub fn knowledge_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("kb")
+}
 
 /// The version token for stored bytes.
 ///

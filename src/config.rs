@@ -217,6 +217,14 @@ impl Config {
         self.data_dir.join("sessions")
     }
 
+    /// Directory holding one knowledge base file per project.
+    ///
+    /// A sibling of the sessions directory, not a file inside it, so a session
+    /// prune cannot reach a knowledge base by construction.
+    pub fn knowledge_dir(&self) -> PathBuf {
+        crate::brain::knowledge_dir(&self.data_dir)
+    }
+
     /// Directory holding artifact blobs.
     pub fn artifacts_dir(&self) -> PathBuf {
         self.data_dir.join("artifacts")
