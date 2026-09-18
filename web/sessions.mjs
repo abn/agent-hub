@@ -2,15 +2,15 @@
 // that close or reclaim a session.
 
 import { api } from "./api.mjs";
-import { esc, glyph, main, when } from "./dom.mjs";
+import { esc, glyph, paint, stale, when } from "./dom.mjs";
 import { projectToolbar } from "./projects.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
 
-export async function sessionsScreen(selected) {
+export async function sessionsScreen(selected, gen) {
   const { projects } = await api("/api/v1/projects");
   if (!projects.length) {
-    main.innerHTML = `<h1>Sessions</h1><p class="empty">No projects yet.</p>`;
+    paint(gen, `<h1>Sessions</h1><p class="empty">No projects yet.</p>`);
     return;
   }
   const current = selected || projects[0].id;
@@ -32,21 +32,26 @@ export async function sessionsScreen(selected) {
       </div>`,
     )
     .join("");
-  main.innerHTML = `
+  paint(
+    gen,
+    `
     <h1>Sessions</h1>
     ${projectToolbar(projects, current)}
-    <div class="card">${rows || '<p class="empty">No sessions yet.</p>'}</div>`;
+    <div class="card">${rows || '<p class="empty">No sessions yet.</p>'}</div>`,
+  );
 }
 
-export async function sessionDetail(project, id) {
+export async function sessionDetail(project, id, gen) {
   const { projects } = await api("/api/v1/projects");
   const current = project || (projects[0] && projects[0].id);
+  if (stale(gen)) return;
   if (!current || !id) {
     location.hash = "#/sessions";
     return;
   }
   const { sessions } = await api(`/api/v1/sessions?project=${encodeURIComponent(current)}`);
   const session = sessions.find((item) => item.id === id);
+  if (stale(gen)) return;
   if (!session) {
     location.hash = "#/sessions";
     return;
@@ -58,7 +63,9 @@ export async function sessionDetail(project, id) {
     session.status === "ended"
       ? `<button type="button" class="danger" data-action="prune" data-id="${esc(session.id)}">Prune</button>`
       : `<button type="button" data-action="end" data-id="${esc(session.id)}">End</button>`;
-  main.innerHTML = `
+  paint(
+    gen,
+    `
     <p class="meta"><a href="#/sessions?project=${encodeURIComponent(current)}">Back to sessions</a></p>
     <h1>${esc(session.session_name)}</h1>
     <div class="card">
@@ -71,7 +78,8 @@ export async function sessionDetail(project, id) {
       <div class="row"><div class="grow"><div class="meta">Session id</div><div class="title mono">${esc(session.id)}</div></div>${action}</div>
     </div>
     ${brainTree("Keys", kv.entries)}
-    ${brainTree("Files", fs.entries)}`;
+    ${brainTree("Files", fs.entries)}`,
+  );
 }
 
 function brainTree(label, entries) {

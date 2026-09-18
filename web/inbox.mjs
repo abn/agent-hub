@@ -1,7 +1,7 @@
 // Inbox: the queue the human acts on, and the two actions that clear it.
 
 import { api } from "./api.mjs";
-import { actionFor, esc, glyph, main } from "./dom.mjs";
+import { actionFor, esc, glyph, paint } from "./dom.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
 
@@ -40,7 +40,7 @@ function actorGroups(items) {
     .join("");
 }
 
-export async function inbox() {
+export async function inbox(gen) {
   // Read the queue the human acts on apart from unread finished work. Unread
   // items accumulate without expiry, so a single shared page could crowd the
   // waiting items off the end; the three sets are fetched independently. Each
@@ -60,10 +60,13 @@ export async function inbox() {
   const unreadSection = unread.items.length
     ? `<h2>Unread</h2><div class="card">${unread.items.map(inboxRow).join("")}</div>`
     : "";
-  main.innerHTML = `<h1>Inbox</h1>${
-    waitingSection + unreadSection ||
-    '<p class="empty">Inbox is clear. Finished work, questions, and approvals will land here.</p>'
-  }`;
+  paint(
+    gen,
+    `<h1>Inbox</h1>${
+      waitingSection + unreadSection ||
+      '<p class="empty">Inbox is clear. Finished work, questions, and approvals will land here.</p>'
+    }`,
+  );
 }
 
 export async function answer(id) {

@@ -1,7 +1,7 @@
 // The hash router. It owns which screen is current, the nav marking, and the
 // one place a screen's failure becomes an error card.
 
-import { esc, main } from "./dom.mjs";
+import { beginRender, esc, main, paint } from "./dom.mjs";
 import { refreshBadge } from "./events.mjs";
 import { applyPrefs } from "./prefs.mjs";
 
@@ -31,16 +31,17 @@ function setCurrent(screen) {
 
 export async function render() {
   applyPrefs();
+  const gen = beginRender();
   const hash = location.hash.replace(/^#/, "") || "/home";
   const [path, query = ""] = hash.split("?");
   const params = new URLSearchParams(query);
   const screen = path.split("/")[1] || "home";
   setCurrent(screen);
   try {
-    await (screens[screen] || screens.home)(params);
+    await (screens[screen] || screens.home)(params, gen);
     refreshBadge();
   } catch (error) {
-    main.innerHTML = `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`;
+    paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
   }
   const focus = pendingFocus;
   pendingFocus = null;

@@ -4,6 +4,24 @@ import { byDay, stamp } from "./time.mjs";
 
 export const main = document.getElementById("main");
 
+// A screen's fetches outlive the screen: tap Projects then Inbox on a loaded
+// hub and the feed can still be in flight when the inbox has painted. Every
+// render takes the next number, and a paint from an older one is dropped, so
+// what is on screen always matches the tab that is marked current.
+let generation = 0;
+
+export function beginRender() {
+  return ++generation;
+}
+
+export function stale(gen) {
+  return gen !== generation;
+}
+
+export function paint(gen, html) {
+  if (gen === generation) main.innerHTML = html;
+}
+
 // Everything an agent wrote goes through here before it reaches innerHTML.
 // The numeric fields the API types as integers (waiting, unread, a version, a
 // byte count) are the only interpolations left unescaped; they cannot carry

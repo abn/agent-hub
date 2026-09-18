@@ -3,13 +3,13 @@
 
 import { api } from "./api.mjs";
 import { commentsPanel, commentsToggle, startComments } from "./comments.mjs";
-import { esc, glyph, main } from "./dom.mjs";
+import { beginRender, esc, glyph, main, paint } from "./dom.mjs";
 import { projectToolbar } from "./projects.mjs";
 
-export async function artifactsScreen(selected) {
+export async function artifactsScreen(selected, gen) {
   const { projects } = await api("/api/v1/projects");
   if (!projects.length) {
-    main.innerHTML = `<h1>Artifacts</h1><p class="empty">No projects yet. Create one in Settings.</p>`;
+    paint(gen, `<h1>Artifacts</h1><p class="empty">No projects yet. Create one in Settings.</p>`);
     return;
   }
   const current = selected || projects[0].id;
@@ -26,10 +26,13 @@ export async function artifactsScreen(selected) {
       </div>`,
     )
     .join("");
-  main.innerHTML = `
+  paint(
+    gen,
+    `
     <h1>Artifacts</h1>
     ${projectToolbar(projects, current)}
-    <div class="card">${rows || '<p class="empty">This project has no artifacts yet. An agent publishing one will show it here.</p>'}</div>`;
+    <div class="card">${rows || '<p class="empty">This project has no artifacts yet. An agent publishing one will show it here.</p>'}</div>`,
+  );
 }
 
 export function openArtifact(id) {
@@ -37,6 +40,9 @@ export function openArtifact(id) {
 }
 
 function showArtifact(id) {
+  // The viewer replaces whatever screen is open, so it claims the render
+  // number too and a screen still fetching cannot paint over it.
+  beginRender();
   startComments(id);
   main.innerHTML = "";
   const top = document.createElement("div");

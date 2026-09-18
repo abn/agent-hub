@@ -20,15 +20,15 @@ import { deleteProject, enableNotifications, settingsScreen } from "./settings.m
 import { storageScreen } from "./storage.mjs";
 
 setScreens({
-  home: () => home(),
-  inbox: () => inbox(),
-  feed: (params) => projectsScreen(params.get("project")),
-  search: (params) => searchScreen(params.get("q")),
-  artifacts: (params) => artifactsScreen(params.get("project")),
-  sessions: (params) => sessionsScreen(params.get("project")),
-  session: (params) => sessionDetail(params.get("project"), params.get("id")),
-  storage: () => storageScreen(),
-  settings: () => settingsScreen(),
+  home: (params, gen) => home(gen),
+  inbox: (params, gen) => inbox(gen),
+  feed: (params, gen) => projectsScreen(params.get("project"), gen),
+  search: (params, gen) => searchScreen(params.get("q"), gen),
+  artifacts: (params, gen) => artifactsScreen(params.get("project"), gen),
+  sessions: (params, gen) => sessionsScreen(params.get("project"), gen),
+  session: (params, gen) => sessionDetail(params.get("project"), params.get("id"), gen),
+  storage: (params, gen) => storageScreen(gen),
+  settings: (params, gen) => settingsScreen(gen),
 });
 
 main.addEventListener("click", (event) => {

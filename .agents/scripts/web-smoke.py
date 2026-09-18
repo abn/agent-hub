@@ -12,7 +12,9 @@ toolchain is absent.
 
 from __future__ import annotations
 
+import re
 import sys
+import time
 from urllib.parse import quote
 
 import hub_harness as harness
@@ -25,6 +27,10 @@ except ImportError:
     harness.skip(NAME, "playwright is not installed")
 
 ANSWER_BODY = "Yes, ship it."
+# The session listing the stale-render check holds back. Long enough that the
+# screen the reader moved on to has painted first.
+SESSION_LIST = re.compile(r"/api/v1/sessions\?")
+HELD_SECONDS = 0.8
 
 
 class Watch:
@@ -189,6 +195,35 @@ def check_answer(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_stale_render(page, watch: Watch, project: str) -> None:
+    """The screen you left must not paint over the screen you are on.
+
+    Sessions is held back at its listing request while the reader moves to
+    Storage. Both navigations are scheduled inside the page, so the browser
+    keeps running while the held response waits here.
+    """
+    watch.enter("router: a stale screen")
+
+    def hold(route):
+        time.sleep(HELD_SECONDS)
+        route.continue_()
+
+    page.route(SESSION_LIST, hold)
+    try:
+        page.evaluate(
+            "(hash) => { setTimeout(() => { location.hash = hash; }, 0);"
+            " setTimeout(() => { location.hash = '#/storage'; }, 200); }",
+            f"#/sessions?project={quote(project)}",
+        )
+        page.wait_for_timeout(int(HELD_SECONDS * 1000) + 1200)
+        found = heading(page)
+        if found != "Storage":
+            watch.fail(f"the screen left behind painted over the current one, showing {found!r}")
+    finally:
+        page.unroute(SESSION_LIST, hold)
+    watch.drain_rejections()
+
+
 def check_artifact(page, watch: Watch, project: str) -> None:
     watch.enter("artifacts: open")
     page.evaluate(f"location.hash = '#/artifacts?project={quote(project)}'")
@@ -267,6 +302,7 @@ def run() -> int:
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
 
+            check_stale_render(page, watch, project)
             check_artifact(page, watch, project)
             check_theme(page, watch)
             check_search(page, watch)

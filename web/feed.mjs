@@ -1,7 +1,7 @@
 // The project feed: one project's events, day-grouped and filterable by kind.
 
 import { api } from "./api.mjs";
-import { eventRow, groupedEvents, main } from "./dom.mjs";
+import { eventRow, groupedEvents, paint } from "./dom.mjs";
 import { projectToolbar } from "./projects.mjs";
 import { focusAfterRender, render } from "./router.mjs";
 
@@ -28,10 +28,10 @@ function kindChips(active) {
   return `<div class="toolbar" role="group" aria-label="Filter by kind">${chips}</div>`;
 }
 
-export async function projectsScreen(selected) {
+export async function projectsScreen(selected, gen) {
   const { projects } = await api("/api/v1/projects");
   if (!projects.length) {
-    main.innerHTML = `<h1>Projects</h1><p class="empty">No projects yet. Create one in Settings.</p>`;
+    paint(gen, `<h1>Projects</h1><p class="empty">No projects yet. Create one in Settings.</p>`);
     return;
   }
   const current = selected || projects[0].id;
@@ -41,11 +41,14 @@ export async function projectsScreen(selected) {
   const kinds = [...active].map((kind) => `&kinds=${encodeURIComponent(kind)}`).join("");
   const page = await api(`/api/v1/projects/${encodeURIComponent(current)}/feed?limit=100${kinds}`);
   const empty = active.size ? "No events match this filter." : "No events yet.";
-  main.innerHTML = `
+  paint(
+    gen,
+    `
     <h1>Project feed</h1>
     ${projectToolbar(projects, current)}
     ${kindChips(active)}
-    ${groupedEvents(page.events, eventRow) || `<p class="empty">${empty}</p>`}`;
+    ${groupedEvents(page.events, eventRow) || `<p class="empty">${empty}</p>`}`,
+  );
 }
 
 // The kind chips are per project. The toggle keeps focus on the chip it

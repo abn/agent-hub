@@ -3,7 +3,7 @@
 
 import { agentsSection } from "./agents.mjs";
 import { api } from "./api.mjs";
-import { esc, main } from "./dom.mjs";
+import { esc, paint } from "./dom.mjs";
 import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
@@ -54,10 +54,12 @@ async function projectsSection() {
   </div>`;
 }
 
-export async function settingsScreen() {
+export async function settingsScreen(gen) {
   const agents = await agentsSection();
   const projects = await projectsSection();
-  main.innerHTML = `
+  paint(
+    gen,
+    `
     <h1>Settings</h1>
     <form class="card" data-action="prefs">
       <label for="token">Control-surface token</label>
@@ -85,7 +87,8 @@ export async function settingsScreen() {
     </form>
     ${notificationsSection()}
     ${projects}
-    ${agents}`;
+    ${agents}`,
+  );
 }
 
 export async function deleteProject(id) {
