@@ -336,6 +336,111 @@ def check_kind_glyphs(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_type_scale(page, watch: Watch, project: str) -> None:
+    """The top and the bottom of the scale, measured as the browser renders it."""
+    watch.enter("feed: type scale")
+    goto(page, f"#/feed?project={quote(project)}", "Project feed")
+    title = page.evaluate(
+        "(() => { const el = document.querySelector('main h1'); if (!el) return null;"
+        " const s = getComputedStyle(el);"
+        " return {size: s.fontSize, weight: s.fontWeight}; })()"
+    )
+    if title != {"size": "28px", "weight": "600"}:
+        watch.fail(f"the page title renders {title}, expected 28px at 600")
+    label = page.evaluate(
+        "(() => { const el = document.querySelector('main h2.day'); if (!el) return null;"
+        " const s = getComputedStyle(el);"
+        " return {size: s.fontSize, weight: s.fontWeight, transform: s.textTransform}; })()"
+    )
+    if label != {"size": "12px", "weight": "600", "transform": "uppercase"}:
+        watch.fail(f"the section header renders {label}, expected 12px at 600 uppercase")
+    watch.drain_rejections()
+
+
+def check_text_floor(page, watch: Watch, routes: list) -> None:
+    """Nothing renders below the 12px floor, on any screen the router reaches.
+
+    The static check reads the stylesheets; this reads what the browser
+    resolved, so a relative size or an inherited one cannot slip under.
+    """
+    for _route, hash_value, title, _data in routes:
+        watch.enter(f"{hash_value}: text floor")
+        goto(page, hash_value, title)
+        for found in page.evaluate(
+            "(() => [...document.querySelectorAll('body *')].filter((el) =>"
+            "  [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())"
+            "  && el.getClientRects().length"
+            " ).map((el) => ({"
+            "   tag: el.tagName.toLowerCase(),"
+            "   cls: el.getAttribute('class') || '',"
+            "   size: parseFloat(getComputedStyle(el).fontSize),"
+            " })).filter((el) => el.size < 12))()"
+        ):
+            watch.fail(f"{found['tag']} {found['cls']!r} renders text at {found['size']}px")
+
+
+# Everything a pointer can press, not only the things drawn as buttons: a
+# control that answers to a click is a target whatever element it is made of.
+# A link laid out inline is part of a sentence and is exempt from the target
+# size rule, so it is left out rather than measured.
+TARGETS = (
+    "(() => {"
+    " const wanted = 'button, .button, [role=\"button\"], a[href], time.ts';"
+    " const targets = [...document.querySelectorAll(wanted)].filter((el) =>"
+    "  el.getClientRects().length &&"
+    "  (el.tagName !== 'A' || getComputedStyle(el).display !== 'inline'));"
+    # The drawn box is the target unless the element grows one with a
+    # pseudo-element, which has no box of its own to measure. Where the box is
+    # already big enough there is nothing to probe; where it is not, the reach
+    # is how far from its centre a click still lands on it.
+    " const reach = (el) => {"
+    "  el.scrollIntoView({ block: 'center' });"
+    "  const box = el.getBoundingClientRect();"
+    "  const x = box.left + box.width / 2;"
+    "  const middle = box.top + box.height / 2;"
+    "  const hits = (y) => { const at = document.elementFromPoint(x, y);"
+    "   return !!at && (at === el || el.contains(at)); };"
+    "  if (!hits(middle)) return box.height;"
+    "  let top = middle; let bottom = middle;"
+    "  while (top > 1 && hits(top - 1)) top -= 1;"
+    "  while (bottom < innerHeight - 1 && hits(bottom + 1)) bottom += 1;"
+    "  return bottom - top + 1;"
+    " };"
+    " return targets.map((el) => {"
+    "  const box = el.getBoundingClientRect();"
+    "  const inRow = !!el.closest('.row');"
+    "  const floor = inRow ? 32 : 44;"
+    "  return {"
+    "   label: (el.textContent || '').trim().slice(0, 30),"
+    "   tag: el.tagName.toLowerCase(),"
+    "   height: box.height >= floor ? box.height : reach(el),"
+    "   floor,"
+    "   button: el.tagName === 'BUTTON' || el.classList.contains('button'),"
+    "   wrap: getComputedStyle(el).whiteSpace,"
+    "  };"
+    " });"
+    "})()"
+)
+
+
+def check_controls(page, watch: Watch, routes: list) -> None:
+    """Every control is reachable by thumb, and its label stays on one line."""
+    for _route, hash_value, title, _data in routes:
+        watch.enter(f"{hash_value}: controls")
+        goto(page, hash_value, title)
+        for control in page.evaluate(TARGETS):
+            # A target drawn inline in a row may keep the design's smaller box;
+            # anything else is a standalone control and carries the full one.
+            if control["height"] + 0.5 < control["floor"]:
+                watch.fail(
+                    f"{control['tag']} {control['label']!r} answers to a"
+                    f" {control['height']:.0f}px target, below {control['floor']}px"
+                )
+            if control["button"] and control["wrap"] != "nowrap":
+                watch.fail(f"{control['label']!r} can wrap its label ({control['wrap']})")
+        page.evaluate("window.scrollTo(0, 0)")
+
+
 def check_artifact(page, watch: Watch, project: str) -> None:
     watch.enter("artifacts: open")
     page.evaluate(f"location.hash = '#/artifacts?project={quote(project)}'")
@@ -415,6 +520,9 @@ def run() -> int:
                 visit(page, watch, route, hash_value, title, data)
 
             check_kind_glyphs(page, watch, project)
+            check_type_scale(page, watch, project)
+            check_text_floor(page, watch, routes)
+            check_controls(page, watch, routes)
             check_agent_markup_is_text(page, watch)
             check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)

@@ -11,7 +11,7 @@ export async function searchScreen(term, gen) {
       ? data.groups
           .map(
             (group) =>
-              `<h2>${esc(group.kind)}</h2><div class="card">${group.hits
+              `<h2 class="section-label">${esc(group.kind)}</h2><div class="card">${group.hits
                 .map(
                   (hit) =>
                     `<div class="row"><div class="grow"><div class="title">${esc(hit.title || hit.ref_id)}</div><div class="meta">${esc(hit.snippet)}</div><div class="meta mono">${esc(hit.project_id)}</div></div></div>`,

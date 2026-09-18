@@ -20,21 +20,40 @@
   color: var(--ink-3); font-size: 12px; font-weight: 500;
 }
 .tabbar a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+/* component: badges */
 .badge {
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--r-pill);
   background: var(--accent); color: var(--ink-inverse);
   font-size: 12px; font-weight: 600; line-height: 16px; text-align: center;
 }
+/* A count of what waits on the reader is one step louder than a count of what
+   is merely unread, and never alarm. */
+.badge.waiting { background: var(--action); }
+/* The unread mark. A dot is a colour and a shape with no name of its own, so
+   whatever places it places a hidden label beside it. */
+.dot-unread {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--accent);
+}
+/* end component: badges */
 
 main { flex: 1; width: 100%; max-width: 720px; margin: 0 auto; padding: var(--s-4) var(--s-4) 80px; }
-h1 { font-size: var(--t-22); font-weight: 600; margin: 0 0 var(--s-3); }
-h2 { font-size: var(--t-17); font-weight: 600; margin: var(--s-5) 0 var(--s-2); }
-/* A day bucket label: quieter than a section heading, above its own card. */
-h2.day {
+/* component: typography */
+/* The foundation's scale, top to bottom: 28 page title, 22 section, 17 item
+   title, 15 row title and body, 13 meta, 12 uppercase section label and mono
+   data. Titles hold a 1.3 line height; body keeps the 1.45 set on the root. */
+h1 { font-size: var(--t-28); font-weight: 600; line-height: 1.3; margin: 0 0 var(--s-3); }
+h2 { font-size: var(--t-22); font-weight: 600; line-height: 1.3; margin: var(--s-5) 0 var(--s-2); }
+/* The title of a single item, in a detail view or a medium event card. */
+.item-title { font-size: var(--t-17); font-weight: 600; line-height: 1.3; margin: 0; }
+/* A day bucket label, and the same treatment wherever a group wants a quiet
+   header rather than a section heading. */
+h2.day, .section-label {
   font-size: var(--t-12); font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--ink-3);
+  letter-spacing: 0.02em; color: var(--ink-3);
   margin: var(--s-4) 0 var(--s-1);
 }
+/* end component: typography */
 /* An actor group inside the waiting queue: a quiet label carrying its open
    count, so a flood from one agent is one block rather than many rows. */
 h3.group {
@@ -59,7 +78,7 @@ h3.group {
 }
 .row:last-child { border-bottom: 0; }
 .row .grow { flex: 1; min-width: 0; }
-.row .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .title { font-size: var(--t-15); font-weight: 500; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.unread .title { font-weight: 600; color: var(--ink); }
 /* component: kind glyph */
 /* One pair of locals per kind, so the badge and the kind chip pick up a kind
@@ -88,30 +107,64 @@ h3.group {
   font-family: var(--font-mono); font-size: var(--t-13); font-weight: 600;
   line-height: 1; background: var(--kind-bg); color: var(--kind);
 }
+/* The kind as a word rather than a badge. A kind colour reads as low as 4.32:1
+   on its own tint, under the 4.5:1 a label needs, so the label is ink-2 and the
+   kind keeps the 2px accent it is allowed outside the badge. */
+.kind-chip {
+  display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
+  font-size: var(--t-12); font-weight: 600;
+  background: var(--kind-bg); color: var(--ink-2);
+  box-shadow: inset 2px 0 0 var(--kind);
+}
 /* end component: kind glyph */
 
 .pill {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
   font-size: 12px; font-weight: 600; background: var(--action-bg); color: var(--action);
 }
+/* component: chips */
+/* The design draws a chip at 6px 10px, which is under the tap target, so the
+   drawn padding stays and the box grows to 44px. */
 .chip {
   display: inline-block; min-height: 44px; padding: 6px 10px; border-radius: var(--r-pill);
   border: 1px solid var(--line-strong); color: var(--ink-2);
-  background: transparent; font-size: var(--t-12); font-weight: 500; cursor: pointer;
+  background: transparent; font-size: var(--t-12); font-weight: 500;
+  white-space: nowrap; cursor: pointer;
 }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
+/* end component: chips */
 
+/* component: buttons */
 button, .button {
   min-height: 44px; padding: 0 var(--s-4); border-radius: var(--r-1);
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
-  font: inherit; font-weight: 500; cursor: pointer;
+  font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer;
 }
 a.button, a.chip { display: inline-flex; align-items: center; text-decoration: none; }
 button.primary { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
 button.action { background: var(--action); color: var(--ink-inverse); border-color: var(--action); }
+/* Prune is the one destructive verb. It stays an outline wherever it sits on a
+   screen, and is filled only inside the dialog that confirms it. */
 button.danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+dialog button.danger { background: var(--danger); color: var(--ink-inverse); }
 button[disabled] { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
-.row button { min-height: 44px; padding: 0 var(--s-3); }
+/* A filled button already carries its own surface, so only the ones drawn on
+   the page surface lift on hover. */
+button:not([disabled]):not(.primary):not(.action):hover, .chip:not([aria-pressed="true"]):hover {
+  background: var(--surface-2);
+}
+button:not([disabled]):active, .chip:active { transform: translateY(1px); }
+/* Inline in a row the drawn box is the design's 32px. Under a coarse pointer
+   the box stays 32px and the target it answers to grows to 44px. */
+.row button { min-height: 32px; padding: 0 var(--s-3); }
+@media (pointer: coarse) {
+  .row button { position: relative; }
+  .row button::after {
+    content: ""; position: absolute; left: 0; right: 0;
+    top: 50%; height: 44px; transform: translateY(-50%);
+  }
+}
+/* end component: buttons */
 .topbar nav a { display: inline-flex; align-items: center; min-height: 44px; }
 .topbar > a { display: inline-flex; align-items: center; min-height: 44px; }
 

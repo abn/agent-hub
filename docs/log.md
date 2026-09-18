@@ -4,6 +4,22 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a kind is a shape, and the type scale stands up
+
+* **Update**: Each event kind now draws its own mark inside the badge, and the
+  row carries a hidden word for the kind, so nothing in a feed row is told
+  apart by colour alone. Described in the
+  [human interface](design/human-interface.md).
+* **Update**: Headings sit where the foundation puts them: 28 for a page title,
+  22 for a section, 12 uppercase for a group label, with the item title,
+  row title, meta and mono steps available to the screens that want them.
+  Buttons keep their labels on one line, respond to hover and press, and drop
+  to the inline size inside a row while keeping a full target under a thumb.
+* **Note**: The action tone and the approval kind are one value again, and the
+  palette exists once: the manifest, the shell, the icon and the artifact frame
+  are checked against the token file, and a colour that is not a token fails
+  the check.
+
 ## 2026-09-18, a project decides what it asks of a protected artifact
 
 * **Update**: The artifact password policy is enforced where artifacts are

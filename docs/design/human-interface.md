@@ -32,13 +32,35 @@ verbatim, not reinterpreted.
   danger tone reserved for prune confirmation.
 - **Event kinds.** Each of the six families has a colour and a background
   partner, used only inside the glyph badge or as a two pixel accent, never as
-  body text.
+  body text. An answer borrows the question tone: it is the reply on that
+  thread, not a family of its own.
 - **Foundations.** A focus ring, two shadows, three radii, a four step spacing
   scale, and a type scale from 12 to 28.
 
 Fonts are system stacks: one humanist sans for interface text and monospace
 only for literal data such as identifiers and sizes. Nothing is fetched from a
 CDN.
+
+The action tone is one step darker than the foundation draws it, because the
+foundation's value falls below the AA threshold on the inset surface and on its
+own background. The approval kind is that same value, so the button that asks
+for a decision and the badge that marks one are a single colour. No colour is
+written twice: the manifest, the shell, the icon, and the artifact frame all
+use values the token file declares, and the check fails on any that does not.
+
+## Type and glyphs
+
+The scale runs 28 for a page title, 22 for a section, 17 for an item title, 15
+for a row title and for body, 13 for meta, and 12 for an uppercase section
+label and for mono data. Titles hold a line height of at least 1.3 and body
+sits at 1.45. Where the foundation specifies 11px, the 12px floor wins.
+
+Every event kind draws its own mark inside the badge: a dot for an update, a
+check for finished work, a question mark, an exclamation mark for an approval,
+a document for an artifact, a half disc for a session, and a reply arrow for an
+answer. The badge itself is hidden from assistive technology and the row
+carries a visually hidden word for the kind instead, once, so the kind survives
+both a reader who cannot separate the tints and a reader who hears the page.
 
 ## Screens
 
@@ -76,13 +98,17 @@ This is a build gate, not a guideline: WCAG AA in both themes, a 12px UI text
 floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
 meaning carried by colour alone. Reduced motion is honoured.
 
-The gate runs in two layers. A hermetic contract check computes WCAG contrast
-for the token pairs, enforces the 12px floor, and asserts the focus ring, the
-reduced-motion block, and the 44px interactive minimum, so it runs on every
-machine. An optional headless axe audit renders the eight screens in both
-themes and reports DOM, ARIA, label, heading, and computed-contrast problems
-when Playwright, a browser, and axe are present; it skips cleanly when they are
-not.
+The gate runs in three layers. A hermetic contract check computes WCAG contrast
+for every token pair on every surface it is painted on, enforces the 12px
+floor, holds the two typographic badge marks to the text threshold rather than
+the glyph one, and asserts the focus ring, the reduced-motion block, and the
+44px interactive minimum, so it runs on every machine. A browser pass then
+measures what the page actually resolved: no text under 12px on any screen,
+every control at 44px or at the 32px inline size inside a row, a distinct mark
+per kind, and one kind word per row. An optional headless axe audit renders the
+eight screens in both themes and reports DOM, ARIA, label, heading, and
+computed-contrast problems. The last two need Playwright, a browser, and an axe
+build, and skip cleanly when they are absent.
 
 ## Copy
 
