@@ -72,6 +72,13 @@ export function eventRow(event) {
   </div>`;
 }
 
+// A section that could not load says so where it sits, rather than taking the
+// whole screen down with it. The title is the screen's own copy today, and is
+// escaped anyway so a later caller cannot make it data by accident.
+export function errorCard(title, error) {
+  return `<div class="card"><h2>${esc(title)}</h2><p class="meta">${esc(error.message)}</p></div>`;
+}
+
 export function groupedEvents(events, row) {
   return byDay(events)
     .map(

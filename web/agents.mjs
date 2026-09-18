@@ -2,7 +2,7 @@
 // tokens, and their grants.
 
 import { api } from "./api.mjs";
-import { esc, main } from "./dom.mjs";
+import { errorCard, esc, main } from "./dom.mjs";
 import { render } from "./router.mjs";
 
 export async function agentsSection() {
@@ -10,7 +10,7 @@ export async function agentsSection() {
   try {
     agents = (await api("/api/v1/agents")).agents;
   } catch (error) {
-    return `<div class="card"><h2>Agents and access</h2><p class="meta">${esc(error.message)}</p></div>`;
+    return errorCard("Agents and access", error);
   }
 
   const grantsByAgent = {};

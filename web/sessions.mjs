@@ -3,21 +3,17 @@
 
 import { api } from "./api.mjs";
 import { esc, glyph, paint, stale, when } from "./dom.mjs";
-import { projectToolbar } from "./projects.mjs";
+import { pickProject, withProject } from "./projects.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
 
 export async function sessionsScreen(selected, gen) {
-  const { projects } = await api("/api/v1/projects");
-  if (!projects.length) {
-    paint(gen, `<h1>Sessions</h1><p class="empty">No projects yet.</p>`);
-    return;
-  }
-  const current = selected || projects[0].id;
-  const { sessions } = await api(`/api/v1/sessions?project=${encodeURIComponent(current)}`);
-  const rows = sessions
-    .map(
-      (s) => `<div class="row">
+  const empty = `<h1>Sessions</h1><p class="empty">No projects yet.</p>`;
+  await withProject({ selected, gen, empty }, async (current, picker) => {
+    const { sessions } = await api(`/api/v1/sessions?project=${encodeURIComponent(current)}`);
+    const rows = sessions
+      .map(
+        (s) => `<div class="row">
         ${glyph("session")}
         <div class="grow">
           <div class="title">${esc(s.session_name)}</div>
@@ -30,20 +26,20 @@ export async function sessionsScreen(selected, gen) {
             : `<button type="button" data-action="end" data-id="${esc(s.id)}">End</button>`
         }
       </div>`,
-    )
-    .join("");
-  paint(
-    gen,
-    `
+      )
+      .join("");
+    paint(
+      gen,
+      `
     <h1>Sessions</h1>
-    ${projectToolbar(projects, current)}
+    ${picker}
     <div class="card">${rows || '<p class="empty">No sessions yet.</p>'}</div>`,
-  );
+    );
+  });
 }
 
 export async function sessionDetail(project, id, gen) {
-  const { projects } = await api("/api/v1/projects");
-  const current = project || (projects[0] && projects[0].id);
+  const { current } = await pickProject(project);
   if (stale(gen)) return;
   if (!current || !id) {
     location.hash = "#/sessions";

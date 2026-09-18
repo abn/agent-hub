@@ -2,7 +2,7 @@
 
 import { api } from "./api.mjs";
 import { eventRow, groupedEvents, paint } from "./dom.mjs";
-import { projectToolbar } from "./projects.mjs";
+import { withProject } from "./projects.mjs";
 import { focusAfterRender, render } from "./router.mjs";
 
 const KINDS = ["signal", "finished", "question", "answer", "approval", "artifact", "session"];
@@ -29,26 +29,24 @@ function kindChips(active) {
 }
 
 export async function projectsScreen(selected, gen) {
-  const { projects } = await api("/api/v1/projects");
-  if (!projects.length) {
-    paint(gen, `<h1>Projects</h1><p class="empty">No projects yet. Create one in Settings.</p>`);
-    return;
-  }
-  const current = selected || projects[0].id;
-  const active = new Set(projectFilters.get(current) || []);
-  // The kind filter runs in the query, before the limit, so a chip finds the
-  // newest events of its kind rather than only those inside a fetched window.
-  const kinds = [...active].map((kind) => `&kinds=${encodeURIComponent(kind)}`).join("");
-  const page = await api(`/api/v1/projects/${encodeURIComponent(current)}/feed?limit=100${kinds}`);
-  const empty = active.size ? "No events match this filter." : "No events yet.";
-  paint(
-    gen,
-    `
+  const empty = `<h1>Projects</h1><p class="empty">No projects yet. Create one in Settings.</p>`;
+  await withProject({ selected, gen, empty }, async (current, picker) => {
+    const active = new Set(projectFilters.get(current) || []);
+    // The kind filter runs in the query, before the limit, so a chip finds
+    // the newest events of its kind rather than only those inside a fetched
+    // window.
+    const kinds = [...active].map((kind) => `&kinds=${encodeURIComponent(kind)}`).join("");
+    const page = await api(`/api/v1/projects/${encodeURIComponent(current)}/feed?limit=100${kinds}`);
+    const none = active.size ? "No events match this filter." : "No events yet.";
+    paint(
+      gen,
+      `
     <h1>Project feed</h1>
-    ${projectToolbar(projects, current)}
+    ${picker}
     ${kindChips(active)}
-    ${groupedEvents(page.events, eventRow) || `<p class="empty">${empty}</p>`}`,
-  );
+    ${groupedEvents(page.events, eventRow) || `<p class="empty">${none}</p>`}`,
+    );
+  });
 }
 
 // The kind chips are per project. The toggle keeps focus on the chip it

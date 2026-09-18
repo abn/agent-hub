@@ -4,19 +4,15 @@
 import { api } from "./api.mjs";
 import { commentsPanel, commentsToggle, startComments } from "./comments.mjs";
 import { beginRender, esc, glyph, main, paint } from "./dom.mjs";
-import { projectToolbar } from "./projects.mjs";
+import { withProject } from "./projects.mjs";
 
 export async function artifactsScreen(selected, gen) {
-  const { projects } = await api("/api/v1/projects");
-  if (!projects.length) {
-    paint(gen, `<h1>Artifacts</h1><p class="empty">No projects yet. Create one in Settings.</p>`);
-    return;
-  }
-  const current = selected || projects[0].id;
-  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(current)}/artifacts`);
-  const rows = artifacts
-    .map(
-      (a) => `<div class="row">
+  const empty = `<h1>Artifacts</h1><p class="empty">No projects yet. Create one in Settings.</p>`;
+  await withProject({ selected, gen, empty }, async (current, picker) => {
+    const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(current)}/artifacts`);
+    const rows = artifacts
+      .map(
+        (a) => `<div class="row">
         ${glyph("artifact")}
         <div class="grow">
           <div class="title">${esc(a.title)}</div>
@@ -24,15 +20,16 @@ export async function artifactsScreen(selected, gen) {
         </div>
         <button type="button" data-action="artifact-open" data-id="${esc(a.id)}" aria-label="Open ${esc(a.title)}">Open</button>
       </div>`,
-    )
-    .join("");
-  paint(
-    gen,
-    `
+      )
+      .join("");
+    paint(
+      gen,
+      `
     <h1>Artifacts</h1>
-    ${projectToolbar(projects, current)}
+    ${picker}
     <div class="card">${rows || '<p class="empty">This project has no artifacts yet. An agent publishing one will show it here.</p>'}</div>`,
-  );
+    );
+  });
 }
 
 export function openArtifact(id) {

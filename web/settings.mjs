@@ -3,7 +3,7 @@
 
 import { agentsSection } from "./agents.mjs";
 import { api } from "./api.mjs";
-import { esc, paint } from "./dom.mjs";
+import { errorCard, esc, paint } from "./dom.mjs";
 import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
@@ -34,7 +34,7 @@ async function projectsSection() {
   try {
     projects = (await api("/api/v1/projects")).projects.filter((project) => !project.owner_agent);
   } catch (error) {
-    return `<div class="card"><h2>Delete a project</h2><p class="meta">${esc(error.message)}</p></div>`;
+    return errorCard("Delete a project", error);
   }
   const rows = projects
     .map(
