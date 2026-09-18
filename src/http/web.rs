@@ -30,6 +30,96 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/api.mjs",
+        body: include_str!("../../web/api.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/router.mjs",
+        body: include_str!("../../web/router.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/dom.mjs",
+        body: include_str!("../../web/dom.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/time.mjs",
+        body: include_str!("../../web/time.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/prefs.mjs",
+        body: include_str!("../../web/prefs.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/toast.mjs",
+        body: include_str!("../../web/toast.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/events.mjs",
+        body: include_str!("../../web/events.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/projects.mjs",
+        body: include_str!("../../web/projects.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/home.mjs",
+        body: include_str!("../../web/home.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/inbox.mjs",
+        body: include_str!("../../web/inbox.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/feed.mjs",
+        body: include_str!("../../web/feed.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/sessions.mjs",
+        body: include_str!("../../web/sessions.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/storage.mjs",
+        body: include_str!("../../web/storage.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/search.mjs",
+        body: include_str!("../../web/search.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/settings.mjs",
+        body: include_str!("../../web/settings.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/agents.mjs",
+        body: include_str!("../../web/agents.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/artifacts.mjs",
+        body: include_str!("../../web/artifacts.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/comments.mjs",
+        body: include_str!("../../web/comments.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/app.css",
         body: include_str!("../../web/app.css"),
         content_type: "text/css; charset=utf-8",

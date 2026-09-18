@@ -16,6 +16,10 @@ import sys
 from pathlib import Path
 
 WEB = Path("web")
+# The table the hub serves the shell from. Every first-party script has to be
+# in it, or the browser asks for a module the binary does not carry.
+ASSET_TABLE = Path("src/http/web.rs")
+EMBEDDED = re.compile(r'include_str!\("\.\./\.\./web/([^"]+)"\)')
 REQUIRED = [
     "index.html",
     "app.js",
@@ -224,6 +228,7 @@ def main() -> int:
 
     check_design_contract(errors, css, app_css)
     check_first_party_syntax(errors)
+    check_every_script_is_served(errors)
 
     for error in dict.fromkeys(errors):
         print(f"web: {error}", file=sys.stderr)
@@ -233,13 +238,24 @@ def main() -> int:
     return 0
 
 
+def first_party_scripts() -> list[Path]:
+    """Every script under web/ that this project wrote.
+
+    Discovered rather than listed, so a module added tomorrow is checked
+    without anyone remembering to name it here. Vendored bundles are pinned
+    bytes reviewed at vendoring time and stay out.
+    """
+    found = [path for path in WEB.rglob("*.js") if VENDOR not in path.parents]
+    found += [path for path in WEB.rglob("*.mjs") if VENDOR not in path.parents]
+    return sorted(found)
+
+
 def check_first_party_syntax(errors: list[str]) -> None:
     """Parse every first-party script with node when it exists.
 
-    The text scans above cannot catch a broken module, and a viewer that
-    fails to parse renders nothing. Vendored bundles are exempt: they are
-    pinned bytes reviewed at vendoring time. Absent node, this skips
-    cleanly like the crypto round trip does.
+    The text scans above cannot catch a broken module, and a screen that
+    fails to parse renders nothing. Absent node, this skips cleanly like the
+    crypto round trip does.
     """
     import shutil
     import subprocess
@@ -247,12 +263,24 @@ def check_first_party_syntax(errors: list[str]) -> None:
     node = shutil.which("node")
     if node is None:
         return
-    for path in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.mjs")):
+    for path in first_party_scripts():
         result = subprocess.run(
             [node, "--check", str(path)], capture_output=True, text=True
         )
         if result.returncode != 0:
             errors.append(f"{path}: node cannot parse it ({result.stderr.strip()})")
+
+
+def check_every_script_is_served(errors: list[str]) -> None:
+    """A first-party script the asset table does not carry is a 404 waiting."""
+    if not ASSET_TABLE.is_file():
+        errors.append(f"{ASSET_TABLE} is missing, so nothing serves web/")
+        return
+    embedded = set(EMBEDDED.findall(ASSET_TABLE.read_text(encoding="utf-8")))
+    for path in first_party_scripts():
+        name = path.relative_to(WEB).as_posix()
+        if name not in embedded:
+            errors.append(f"{path}: {ASSET_TABLE} does not serve it")
 
 
 if __name__ == "__main__":

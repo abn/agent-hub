@@ -15,6 +15,9 @@ use tower::ServiceExt;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const APP_JS: &str = include_str!("../web/app.js");
+const ARTIFACTS_JS: &str = include_str!("../web/artifacts.mjs");
+const INBOX_JS: &str = include_str!("../web/inbox.mjs");
+const COMMENTS_JS: &str = include_str!("../web/comments.mjs");
 const APP_CSS: &str = include_str!("../web/app.css");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
@@ -254,7 +257,10 @@ async fn storage_usage_counts_a_project_knowledge_base() {
 async fn serves_every_shell_asset_with_a_policy() {
     let state = state().await;
     for (path, needle) in [
-        ("/app.js", "/artifacts/"),
+        ("/app.js", "setScreens("),
+        ("/artifacts.mjs", "/artifacts/"),
+        ("/comments.mjs", "comments-drawer"),
+        ("/router.mjs", "location.hash"),
         ("/app.css", "var(--"),
         ("/crypto.mjs", "export"),
         ("/artifact-viewer.mjs", "hub-frame"),
@@ -290,9 +296,27 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 11] = [
+const SHELL_PATHS: [&str; 29] = [
     "/",
     "/app.js",
+    "/api.mjs",
+    "/router.mjs",
+    "/dom.mjs",
+    "/time.mjs",
+    "/prefs.mjs",
+    "/toast.mjs",
+    "/events.mjs",
+    "/projects.mjs",
+    "/home.mjs",
+    "/inbox.mjs",
+    "/feed.mjs",
+    "/sessions.mjs",
+    "/storage.mjs",
+    "/search.mjs",
+    "/settings.mjs",
+    "/agents.mjs",
+    "/artifacts.mjs",
+    "/comments.mjs",
     "/app.css",
     "/tokens.css",
     "/manifest.webmanifest",
@@ -810,34 +834,56 @@ fn viewer_module_renders_unlocks_and_themes() {
 }
 
 #[test]
+fn app_is_only_the_entry_point() {
+    // Each screen owns its own module. The entry names them, wires the
+    // delegated events, and paints nothing itself; markup creeping back in
+    // here is what the split exists to prevent.
+    assert!(
+        APP_JS.contains("setScreens("),
+        "the entry registers the screens"
+    );
+    assert!(
+        !APP_JS.contains("innerHTML"),
+        "the entry paints no screen of its own"
+    );
+    assert!(
+        APP_JS.contains("serviceWorker"),
+        "the entry registers the worker"
+    );
+}
+
+#[test]
 fn app_embeds_the_public_host_page() {
     assert!(
-        APP_JS.contains("/artifacts/") && APP_JS.contains("encodeURIComponent(id)"),
+        ARTIFACTS_JS.contains("/artifacts/") && ARTIFACTS_JS.contains("encodeURIComponent(id)"),
         "the viewer embeds the public host page"
     );
     assert!(
-        APP_JS.contains("allow-scripts"),
+        ARTIFACTS_JS.contains("allow-scripts"),
         "the embed pins sandbox allow-scripts"
     );
     assert!(
-        APP_JS.contains("Back to artifacts"),
+        ARTIFACTS_JS.contains("Back to artifacts"),
         "the app keeps its back link"
     );
     assert!(
-        !APP_JS.contains("./crypto.mjs"),
+        !ARTIFACTS_JS.contains("./crypto.mjs"),
         "in-app decrypt is gone; the host page owns unlock"
     );
     assert!(
-        !APP_JS.contains("Password for this artifact"),
+        !ARTIFACTS_JS.contains("Password for this artifact"),
         "the prompt password flow is gone"
     );
     assert!(
-        !APP_JS.contains("could not decrypt"),
+        !ARTIFACTS_JS.contains("could not decrypt"),
         "no in-app decrypt error remains"
     );
-    assert!(!APP_JS.contains("srcdoc"), "no srcdoc fallback remains");
     assert!(
-        APP_JS.contains("Your answer"),
+        !ARTIFACTS_JS.contains("srcdoc"),
+        "no srcdoc fallback remains"
+    );
+    assert!(
+        INBOX_JS.contains("Your answer"),
         "the unrelated answer prompt is untouched"
     );
 }
@@ -984,18 +1030,14 @@ fn app_drawer_wiring_for_comments() {
         "aria-expanded",
         "aria-modal",
     ] {
-        assert!(APP_JS.contains(needle), "the drawer wires {needle}");
+        assert!(COMMENTS_JS.contains(needle), "the drawer wires {needle}");
     }
     assert!(
-        APP_JS.contains("drawerError(error.message)"),
+        COMMENTS_JS.contains("drawerError(error.message)"),
         "drawer failures surface inline"
     );
-    let start = APP_JS.find("const commentsDrawer").expect("drawer state");
-    let end = APP_JS
-        .find("function setCurrent")
-        .expect("drawer block end");
     assert!(
-        !APP_JS[start..end].contains("alert("),
+        !COMMENTS_JS.contains("alert("),
         "the drawer never uses alert"
     );
 }
