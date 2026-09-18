@@ -114,22 +114,60 @@ fn free_port() -> u16 {
     listener.local_addr().expect("local addr").port()
 }
 
+/// How many ports to try before calling a hub start a failure.
+///
+/// `free_port` hands back a port it has already released, so another process
+/// can take it in the gap before the child binds. The child then exits at
+/// once, and a fresh port is a retry rather than a lost test run.
+const START_ATTEMPTS: usize = 3;
+
+/// Start a hub on a port of its own, retrying if the port was taken under it.
+fn serve(data_dir: &Path) -> (ChildGuard, u16) {
+    let mut lost = Vec::new();
+    for _ in 0..START_ATTEMPTS {
+        let port = free_port();
+        let mut guard = spawn(data_dir, port);
+        match wait_for_port(&mut guard, port) {
+            Ok(()) => return (guard, port),
+            Err(status) => lost.push(format!("port {port}: {status}")),
+        }
+    }
+    panic!(
+        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
+        lost.join("; ")
+    );
+}
+
 fn spawn(data_dir: &Path, port: u16) -> ChildGuard {
-    let child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .env("RUST_LOG", "error")
-        .env("HUB_DATA_DIR", data_dir)
-        .env("HUB_BIND", format!("127.0.0.1:{port}"))
-        .env("HUB_ADMIN_TOKEN", ADMIN_TOKEN)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn the hub");
-    let guard = ChildGuard(child);
+    ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+            .env("RUST_LOG", "error")
+            .env("HUB_DATA_DIR", data_dir)
+            .env("HUB_BIND", format!("127.0.0.1:{port}"))
+            .env("HUB_ADMIN_TOKEN", ADMIN_TOKEN)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the hub"),
+    )
+}
+
+/// Wait until the hub answers, or say how it exited before it could.
+///
+/// Watching the child is what turns "address already in use" from a twenty
+/// second wait and a panic naming the wrong cause into an answer the caller
+/// can act on.
+fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
+        // The child first: a port that answers is not this hub when this hub
+        // is already gone, and whatever did answer is another test's.
+        if let Ok(Some(status)) = child.0.try_wait() {
+            return Err(status.to_string());
+        }
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return guard;
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -263,8 +301,7 @@ impl Fleet {
         }
         drop(db);
 
-        let port = free_port();
-        let child = spawn(&dir.0, port);
+        let (child, port) = serve(&dir.0);
         let agents = tokens.iter().map(|token| connect(port, token)).collect();
         let data_dir = dir.0.clone();
         Self {

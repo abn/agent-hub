@@ -87,11 +87,45 @@ fn spawn(data_dir: &Path, port: u16) -> ChildGuard {
     ChildGuard(child)
 }
 
-fn wait_for_port(port: u16) {
+/// How many ports to try before calling a hub start a failure.
+///
+/// `free_port` hands back a port it has already released, so another process
+/// can take it in the gap before the child binds. The child then exits at
+/// once, and a fresh port is a retry rather than a lost test run.
+const START_ATTEMPTS: usize = 3;
+
+/// Start a hub on a port of its own, retrying if the port was taken under it.
+fn serve(data_dir: &Path) -> (ChildGuard, u16) {
+    let mut lost = Vec::new();
+    for _ in 0..START_ATTEMPTS {
+        let port = free_port();
+        let mut guard = spawn(data_dir, port);
+        match wait_for_port(&mut guard, port) {
+            Ok(()) => return (guard, port),
+            Err(status) => lost.push(format!("port {port}: {status}")),
+        }
+    }
+    panic!(
+        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
+        lost.join("; ")
+    );
+}
+
+/// Wait until the hub answers, or say how it exited before it could.
+///
+/// Watching the child is what turns "address already in use" from a twenty
+/// second wait and a panic naming the wrong cause into an answer the caller
+/// can act on.
+fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
+        // The child first: a port that answers is not this hub when this hub
+        // is already gone, and whatever did answer is another test's.
+        if let Ok(Some(status)) = child.0.try_wait() {
+            return Err(status.to_string());
+        }
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return;
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -238,9 +272,7 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
     .expect("personal event");
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
 
     let strict_session = initialize(port, &strict_token);
 
@@ -490,9 +522,7 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
     .expect("own artifact");
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
 
     let strict_session = initialize(port, &strict_token);
 
@@ -627,9 +657,7 @@ async fn comment_mutations_are_concealed_from_strangers() {
     .expect("seed comment");
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
 
     let strict_session = initialize(port, &strict_token);
 
@@ -713,9 +741,7 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
     .expect("ordinary event");
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
     let session = initialize(port, &watcher_token);
 
     let page = call(
@@ -813,9 +839,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         .token;
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
 
     // One agent writes a page; another agent, in its own session, reads and
     // then rewrites the same page. The knowledge base is shared by
@@ -1061,9 +1085,7 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         .token;
     drop(db);
 
-    let port = free_port();
-    let _child = spawn(&data_dir.0, port);
-    wait_for_port(port);
+    let (_child, port) = serve(&data_dir.0);
 
     let one = initialize(port, &one_token);
     let started = call(

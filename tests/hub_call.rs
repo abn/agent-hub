@@ -318,3 +318,41 @@ fn tools_lists_what_the_hub_offers() {
         "each tool carries its description: {whoami}"
     );
 }
+
+/// A port no unprivileged hub can bind and nothing is listening on.
+///
+/// This is the race in `free_port` made deterministic. Holding a port with a
+/// listener of our own would not reproduce it: the start probe is a connect,
+/// and that listener would answer it. A port the bind is refused on fails the
+/// way a port another process took in the gap fails.
+const UNBINDABLE_PORT: u16 = 1;
+
+#[test]
+fn a_hub_whose_port_was_taken_under_it_starts_on_another() {
+    let mut handed = 0;
+    let mut ports = || {
+        handed += 1;
+        if handed == 1 {
+            UNBINDABLE_PORT
+        } else {
+            hub::free_port()
+        }
+    };
+
+    let hub = Hub::start_on("port-taken", &mut ports);
+    assert_eq!(handed, 2, "the first port was tried and given up on");
+    assert_ne!(
+        hub.port, UNBINDABLE_PORT,
+        "the hub moved off the port it could not bind"
+    );
+    // And it is a working hub, not just a process that survived.
+    let listed = run(
+        &hub,
+        &[
+            "call",
+            "feed_read",
+            &format!(r#"{{"project_id":"{PROJECT}"}}"#),
+        ],
+    );
+    assert_eq!(listed.status.code(), Some(0), "{listed:?}");
+}

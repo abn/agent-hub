@@ -51,9 +51,44 @@ impl Drop for TempDir {
 
 struct ChildGuard(Child);
 
+/// How many ports to try before calling a hub start a failure.
+///
+/// `free_port` hands back a port it has already released, so another process
+/// can take it in the gap before the child binds. The child then exits at
+/// once, and a fresh port is a retry rather than a lost test run.
+const START_ATTEMPTS: usize = 3;
+
 /// Start a hub process over a data directory and wait until it listens.
 fn serve(dir: &TempDir, port: u16) -> ChildGuard {
-    let child = ChildGuard(
+    let mut child = spawn(dir, port);
+    match wait_for_port(&mut child, port) {
+        Ok(()) => child,
+        Err(status) => panic!("the hub exited before it listened on port {port}: {status}"),
+    }
+}
+
+/// Start a hub on a port of its own, retrying if the port was taken under it.
+///
+/// `ports` is the supply so a test can make the race deterministic; in the
+/// ordinary case it is [`free_port`].
+fn serve_on(dir: &TempDir, ports: &mut dyn FnMut() -> u16) -> (ChildGuard, u16) {
+    let mut lost = Vec::new();
+    for _ in 0..START_ATTEMPTS {
+        let port = ports();
+        let mut child = spawn(dir, port);
+        match wait_for_port(&mut child, port) {
+            Ok(()) => return (child, port),
+            Err(status) => lost.push(format!("port {port}: {status}")),
+        }
+    }
+    panic!(
+        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
+        lost.join("; ")
+    );
+}
+
+fn spawn(dir: &TempDir, port: u16) -> ChildGuard {
+    ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_agent-hub"))
             .env("RUST_LOG", "error")
             .env("HUB_DATA_DIR", &dir.0)
@@ -64,9 +99,7 @@ fn serve(dir: &TempDir, port: u16) -> ChildGuard {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn the hub"),
-    );
-    wait_for_port(port);
-    child
+    )
 }
 
 impl Drop for ChildGuard {
@@ -87,10 +120,14 @@ pub struct Hub {
 impl Hub {
     /// Seed a data directory and start the hub over it.
     pub fn start(tag: &str) -> Self {
+        Self::start_on(tag, &mut free_port)
+    }
+
+    /// Seed a data directory and start the hub on a port from `ports`.
+    pub fn start_on(tag: &str, ports: &mut dyn FnMut() -> u16) -> Self {
         let dir = TempDir::new(tag);
         let agent_token = seed(&dir);
-        let port = free_port();
-        let child = serve(&dir, port);
+        let (child, port) = serve_on(&dir, ports);
         Self {
             port,
             agent_token,
@@ -181,16 +218,26 @@ fn seed(dir: &TempDir) -> String {
     })
 }
 
-fn free_port() -> u16 {
+pub fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
     listener.local_addr().expect("local addr").port()
 }
 
-fn wait_for_port(port: u16) {
+/// Wait until the hub answers, or say how it exited before it could.
+///
+/// Watching the child is what turns "address already in use" from a twenty
+/// second wait and a panic naming the wrong cause into an answer the caller
+/// can act on.
+fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
+        // The child first: a port that answers is not this hub when this hub
+        // is already gone, and whatever did answer is another test's.
+        if let Ok(Some(status)) = child.0.try_wait() {
+            return Err(status.to_string());
+        }
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return;
+            return Ok(());
         }
         thread::sleep(Duration::from_millis(50));
     }
