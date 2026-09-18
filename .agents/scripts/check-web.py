@@ -22,9 +22,17 @@ REQUIRED = [
     "app.css",
     "tokens.css",
     "crypto.mjs",
+    "artifact-viewer.mjs",
+    "vendor/marked.js",
+    "vendor/mermaid.runtime.js",
     "manifest.webmanifest",
     "sw.js",
     "icon.svg",
+]
+VENDOR = WEB / "vendor"
+LICENSE_MARKERS = [
+    ("vendor/marked.js", "MIT Licensed"),
+    ("vendor/mermaid.runtime.js", "Bundled license information"),
 ]
 # A URL in an XML namespace declaration is not a fetched asset.
 EXTERNAL = re.compile(r"https?://(?!www\.w3\.org)")
@@ -164,8 +172,16 @@ def main() -> int:
         if not (WEB / name).is_file():
             errors.append(f"web/{name} is missing")
 
+    for name, marker in LICENSE_MARKERS:
+        path = WEB / name
+        if path.is_file() and marker not in path.read_text(encoding="utf-8", errors="replace"):
+            errors.append(f"web/{name} is missing its license marker ({marker})")
+
     for path in sorted(WEB.rglob("*")):
         if not path.is_file():
+            continue
+        # Vendored bytes are reviewed at vendoring time, not on every check.
+        if VENDOR in path.parents:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), start=1):

@@ -4,8 +4,9 @@ default_install_hook_types: [pre-commit, commit-msg]
 # Without this, every file hook would also run against the commit message.
 default_stages: [pre-commit]
 # Vendored third-party source is not ours to restyle or police for the
-# project's editorial patterns.
-exclude: '^vendor/'
+# project's editorial patterns. That covers the crate vendor dir and the
+# pinned browser bundles served to artifact pages.
+exclude: '(^vendor/|^web/vendor/)'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -14,6 +14,12 @@ use tower::ServiceExt;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+const APP_JS: &str = include_str!("../web/app.js");
+const APP_CSS: &str = include_str!("../web/app.css");
+const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
+const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
+const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
+
 async fn state() -> AppState {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -130,7 +136,7 @@ async fn projects_create_list_and_storage() {
 async fn serves_every_shell_asset_with_a_policy() {
     let state = state().await;
     for (path, needle) in [
-        ("/app.js", "crypto.mjs"),
+        ("/app.js", "/artifacts/"),
         ("/app.css", "var(--"),
         ("/crypto.mjs", "export"),
         ("/manifest.webmanifest", "Agent Hub"),
@@ -379,4 +385,245 @@ async fn serves_artifact_content_for_the_viewer() {
         "the server holds no plaintext to render for a protected artifact"
     );
     assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
+}
+
+#[test]
+fn vendored_marked_pins_the_licensed_umd_build() {
+    assert!(
+        MARKED_JS.contains("marked v15.0.12"),
+        "the pinned marked version is vendored"
+    );
+    assert!(
+        MARKED_JS.contains("MIT Licensed"),
+        "the marked license header is intact"
+    );
+    assert!(
+        MARKED_JS.contains("g[\"marked\"]=f()"),
+        "the bundle defines the global marked entry point"
+    );
+    assert!(
+        MARKED_JS.contains("parseInline"),
+        "the bundle is the full build, not a subset"
+    );
+}
+
+#[test]
+fn vendored_mermaid_exposes_initialize_and_run() {
+    assert!(
+        MERMAID_JS.contains("window.mermaid"),
+        "the bundle assigns window.mermaid"
+    );
+    assert!(
+        MERMAID_JS.contains("initialize"),
+        "the loader's mermaid.initialize call resolves"
+    );
+    assert!(
+        MERMAID_JS.contains("run"),
+        "the loader's mermaid.run call resolves"
+    );
+    assert!(
+        MERMAID_JS.contains("Bundled license information"),
+        "the mermaid license block is intact"
+    );
+}
+
+#[test]
+fn viewer_module_binds_the_frozen_shell_ids() {
+    // hub-versions is picker data the server renders into the select; the
+    // viewer drives it through hub-version-select.
+    for id in [
+        "hub-frame",
+        "hub-theme-toggle",
+        "hub-picker-wrap",
+        "hub-version-select",
+        "hub-unlock-form",
+        "hub-password",
+        "hub-unlock-error",
+        "hub-meta",
+        "hub-markdown-body",
+        "hub-envelope",
+        "hub-ciphertext",
+    ] {
+        assert!(VIEWER_JS.contains(id), "the viewer binds #{id}");
+    }
+}
+
+#[test]
+fn viewer_module_renders_unlocks_and_themes() {
+    assert!(
+        VIEWER_JS.contains("from \"./crypto.mjs\"") && VIEWER_JS.contains("decrypt("),
+        "unlock reuses web/crypto.mjs instead of a second copy"
+    );
+    assert!(
+        VIEWER_JS.contains("hub-artifact-theme") && VIEWER_JS.contains("prefers-color-scheme"),
+        "the theme persists with a system default"
+    );
+    assert!(
+        VIEWER_JS.contains("data-theme"),
+        "the theme stamps the document element"
+    );
+    assert!(
+        VIEWER_JS.contains(".parse") && VIEWER_JS.contains("hub-callout"),
+        "markdown renders with callout post-processing"
+    );
+    for kind in ["note", "tip", "warning", "caution"] {
+        assert!(
+            VIEWER_JS.contains(kind),
+            "the {kind} callout maps to a style"
+        );
+    }
+    assert!(
+        VIEWER_JS.contains("language-mermaid") && VIEWER_JS.contains("pre class=\"mermaid\""),
+        "mermaid fences become placeholders"
+    );
+    assert!(
+        VIEWER_JS.contains("mermaid.initialize")
+            && VIEWER_JS.contains("mermaid.run")
+            && VIEWER_JS.contains("startOnLoad")
+            && VIEWER_JS.contains("querySelector"),
+        "the frame loader matches the frozen loader contract"
+    );
+    assert!(
+        VIEWER_JS.contains("src/http/artifacts.rs"),
+        "the loader names its mirrored copy"
+    );
+    assert!(
+        VIEWER_JS.contains("?version="),
+        "the picker navigates with ?version=N"
+    );
+    assert!(
+        VIEWER_JS.contains("Could not decrypt"),
+        "a wrong password renders the error line"
+    );
+    assert!(
+        VIEWER_JS.contains("addEventListener"),
+        "the module binds behavior without inline scripts"
+    );
+}
+
+#[test]
+fn app_embeds_the_public_host_page() {
+    assert!(
+        APP_JS.contains("/artifacts/") && APP_JS.contains("encodeURIComponent(id)"),
+        "the viewer embeds the public host page"
+    );
+    assert!(
+        APP_JS.contains("allow-scripts"),
+        "the embed pins sandbox allow-scripts"
+    );
+    assert!(
+        APP_JS.contains("Back to artifacts"),
+        "the app keeps its back link"
+    );
+    assert!(
+        !APP_JS.contains("./crypto.mjs"),
+        "in-app decrypt is gone; the host page owns unlock"
+    );
+    assert!(
+        !APP_JS.contains("Password for this artifact"),
+        "the prompt password flow is gone"
+    );
+    assert!(
+        !APP_JS.contains("could not decrypt"),
+        "no in-app decrypt error remains"
+    );
+    assert!(!APP_JS.contains("srcdoc"), "no srcdoc fallback remains");
+    assert!(
+        APP_JS.contains("Your answer"),
+        "the unrelated answer prompt is untouched"
+    );
+}
+
+#[test]
+fn app_css_carries_viewer_and_callout_styles() {
+    assert!(
+        APP_CSS.contains("hub-callout"),
+        "callout styles ship with the host chrome"
+    );
+    assert!(
+        APP_CSS.contains("hub-frame") || APP_CSS.contains("hub-viewer"),
+        "viewer styles ship with the host chrome"
+    );
+    assert!(
+        APP_CSS.contains("var(--"),
+        "viewer styles reuse the hub tokens"
+    );
+}
+
+#[tokio::test]
+async fn public_artifact_page_loads_for_the_embed() {
+    let state = state().await;
+    let published = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "human",
+            project_id: "proj",
+            title: "Page",
+            kind: "html",
+            content: b"<p>hello</p>",
+            envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+
+    let app = router(state);
+    let response = app
+        .oneshot(get(&format!("/artifacts/{}", published.id), None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .contains("text/html"),
+        "the embed target is a document"
+    );
+}
+
+#[tokio::test]
+async fn protected_artifact_serves_the_locked_host_shell() {
+    let state = state().await;
+    let published = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "human",
+            project_id: "proj",
+            title: "Secret",
+            kind: "markdown",
+            content: b"Y2lwaGVy",
+            envelope: Some(serde_json::json!({"alg": "AES-256-GCM"})),
+            description: "",
+            favicon: "",
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish protected");
+
+    let app = router(state);
+    let response = app
+        .oneshot(get(&format!("/artifacts/{}", published.id), None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = text(response).await;
+    assert!(
+        body.contains("artifact-envelope") && body.contains("artifact-ciphertext"),
+        "the locked shell carries the unlock data"
+    );
+    assert!(
+        body.contains("encrypted"),
+        "the locked shell names its state"
+    );
 }

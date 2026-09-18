@@ -1,5 +1,4 @@
 // Agent Hub PWA. A small vanilla single-page app over the REST API.
-import { decrypt } from "./crypto.mjs";
 
 const main = document.getElementById("main");
 const badge = document.getElementById("tab-badge");
@@ -623,61 +622,34 @@ async function deleteProject(id) {
   render();
 }
 
-async function openArtifact(id) {
-  const meta = await api(`/api/v1/artifacts/${encodeURIComponent(id)}`);
-  let content = meta.content;
-  let decrypted = false;
-  if (meta.protected) {
-    const password = prompt("Password for this artifact");
-    if (!password) return;
-    try {
-      content = await decrypt(password, meta.envelope, meta.content);
-    } catch {
-      throw new Error("could not decrypt: check the password");
-    }
-    decrypted = true;
-  }
-  showArtifact(meta, content, decrypted);
+function openArtifact(id) {
+  showArtifact(id);
 }
 
-function showArtifact(meta, content, decrypted) {
+function showArtifact(id) {
   main.innerHTML = "";
   const back = document.createElement("p");
   const link = document.createElement("a");
   link.href = "#/artifacts";
   link.textContent = "Back to artifacts";
   back.appendChild(link);
-  const heading = document.createElement("h1");
-  heading.textContent = meta.title;
   const note = document.createElement("p");
   note.className = "meta";
-  note.textContent = meta.protected
-    ? decrypted
-      ? "Decrypted in your browser. The server never held the plaintext."
-      : "Protected."
-    : "Public artifact.";
-  main.append(back, heading, note);
+  note.textContent =
+    "The artifact opens on its public page. A protected artifact unlocks there; the server never holds its plaintext.";
+  main.append(back, note);
 
-  // Agent-authored HTML is sandboxed; markdown is rendered by the hub and the
-  // result is sandboxed the same way. A protected markdown artifact has no
-  // server-rendered HTML, so its decrypted source stays plain text.
-  const framed =
-    meta.kind === "html" ? content : meta.kind === "markdown" ? meta.rendered : null;
-  if (typeof framed === "string" && framed.length) {
-    const frame = document.createElement("iframe");
-    frame.setAttribute("sandbox", "");
-    frame.setAttribute("title", meta.title);
-    frame.style.width = "100%";
-    frame.style.height = "60vh";
-    frame.style.border = "1px solid var(--line)";
-    frame.srcdoc = framed;
-    main.appendChild(frame);
-  } else {
-    const pre = document.createElement("pre");
-    pre.className = "card";
-    pre.textContent = content;
-    main.appendChild(pre);
-  }
+  // The host page owns the title, picker, theme toggle, and unlock form, so
+  // nothing renders twice. Scripts run, the origin stays opaque, and the
+  // viewer module treats localStorage as unavailable.
+  const frame = document.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.setAttribute("title", "Artifact");
+  frame.style.width = "100%";
+  frame.style.height = "60vh";
+  frame.style.border = "1px solid var(--line)";
+  frame.src = `/artifacts/${encodeURIComponent(id)}`;
+  main.appendChild(frame);
 }
 
 function setCurrent(screen) {
@@ -886,7 +858,7 @@ main.addEventListener("click", (event) => {
   if (action === "agent-revoke") revokeToken(id).catch((error) => alert(error.message));
   if (action === "agent-ungrant")
     ungrant(id, button.dataset.project).catch((error) => alert(error.message));
-  if (action === "artifact-open") openArtifact(id).catch((error) => alert(error.message));
+  if (action === "artifact-open") openArtifact(id);
   if (action === "project-delete") deleteProject(id).catch((error) => alert(error.message));
   if (action === "notification-enable")
     enableNotifications().catch((error) => alert(error.message));

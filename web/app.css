@@ -128,3 +128,47 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   .tabbar { display: none; }
   main { padding-bottom: var(--s-6); }
 }
+
+/* Artifact host chrome. The frame document carries its own copy of the
+   callout rules inside the srcdoc; these style the host shell around it. */
+.hub-viewer { display: flex; flex-direction: column; gap: var(--s-3); }
+.hub-viewer-bar {
+  display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
+}
+.hub-viewer-bar .grow { flex: 1; }
+#hub-frame {
+  width: 100%; min-height: 60vh;
+  border: 1px solid var(--line); border-radius: var(--r-1);
+  background: var(--surface);
+}
+#hub-frame:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+#hub-theme-toggle { min-height: 44px; }
+#hub-version-select { min-height: 44px; }
+#hub-unlock-form button { min-height: 44px; }
+#hub-theme-toggle:focus-visible,
+#hub-version-select:focus-visible,
+#hub-password:focus-visible,
+.hub-viewer-bar a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+#hub-unlock-error { color: var(--danger); font-size: var(--t-13); }
+.hub-callout {
+  border-left: 4px solid var(--line-strong);
+  background: var(--surface-2);
+  padding: var(--s-2) var(--s-3); margin: 0 0 var(--s-3);
+  border-radius: var(--r-1);
+  font-size: var(--t-13);
+}
+.hub-callout.note { border-color: var(--accent); }
+.hub-callout.tip { border-color: var(--ok); }
+.hub-callout.warning { border-color: var(--action); }
+.hub-callout.caution { border-color: var(--danger); }
+@media (pointer: coarse) {
+  #hub-theme-toggle, #hub-version-select, #hub-unlock-form button {
+    min-height: 44px;
+  }
+}
