@@ -17,4 +17,6 @@ export async function home(gen) {
     </nav>
     <h2>Recent</h2>
     ${groupedEvents(data.recent, eventRow) || '<p class="empty">Nothing has happened yet.</p>'}`);
+  // The router passes this to the badge, which counts the same payload.
+  return data;
 }

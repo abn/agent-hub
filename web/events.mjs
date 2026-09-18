@@ -6,9 +6,11 @@ import { prefs } from "./prefs.mjs";
 
 const badge = document.getElementById("tab-badge");
 
-export async function refreshBadge() {
+// The badge counts what Home already reads, so a screen that holds that
+// payload hands it over rather than asking for the same thing again.
+export async function refreshBadge(known) {
   try {
-    const data = await api("/api/v1/home");
+    const data = known || (await api("/api/v1/home"));
     const count = data.waiting || 0;
     badge.hidden = count === 0;
     badge.textContent = String(count);

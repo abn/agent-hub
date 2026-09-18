@@ -195,6 +195,19 @@ def check_answer(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_home_fetches_once(page, watch: Watch) -> None:
+    """Home holds the payload the badge wants, so it is one request, not two."""
+    watch.enter("home: one fetch")
+    page.evaluate("location.hash = '#/storage'")
+    page.wait_for_timeout(500)
+    watch.home_requests = 0
+    page.evaluate("location.hash = '#/home'")
+    page.wait_for_timeout(800)
+    if watch.home_requests != 1:
+        watch.fail(f"painting Home asked for it {watch.home_requests} times")
+    watch.drain_rejections()
+
+
 def check_stale_render(page, watch: Watch, project: str) -> None:
     """The screen you left must not paint over the screen you are on.
 
@@ -302,6 +315,7 @@ def run() -> int:
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
 
+            check_home_fetches_once(page, watch)
             check_stale_render(page, watch, project)
             check_artifact(page, watch, project)
             check_theme(page, watch)

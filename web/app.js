@@ -119,7 +119,7 @@ if ("serviceWorker" in navigator) {
 
 // The freshness stream nudges a refetch when a write lands; the slow poll is
 // the fallback if the stream drops or the browser cannot stream a fetch.
-setInterval(refreshBadge, 60000);
+setInterval(() => refreshBadge(), 60000);
 startStream();
 
 render();

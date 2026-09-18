@@ -38,8 +38,7 @@ export async function render() {
   const screen = path.split("/")[1] || "home";
   setCurrent(screen);
   try {
-    await (screens[screen] || screens.home)(params, gen);
-    refreshBadge();
+    refreshBadge(await (screens[screen] || screens.home)(params, gen));
   } catch (error) {
     paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
   }
