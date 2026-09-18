@@ -7,7 +7,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_hub::brain::BrainStore;
+use agent_hub::brain::{BrainStore, version};
 use agent_hub::error::Error;
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -323,5 +323,140 @@ async fn same_session_writes_serialise_on_a_worker_pool() {
     assert_eq!(
         reopened.get("/kv/b").await.expect("b"),
         Some(b"two".to_vec())
+    );
+}
+
+#[tokio::test]
+async fn a_conditional_write_applies_only_on_a_matching_version() {
+    let store = BrainStore::new(temp_dir("cas-match"));
+    let brain = store.open("proj", "session").await.expect("open brain");
+
+    let first = brain
+        .put_if("/fs/page.md", b"one", None)
+        .await
+        .expect("unconditional write");
+    assert_eq!(
+        first,
+        version(b"one"),
+        "a write hands back the version of the bytes it stored"
+    );
+
+    let second = brain
+        .put_if("/fs/page.md", b"two", Some(&first))
+        .await
+        .expect("write on the current version");
+    assert_eq!(second, version(b"two"));
+    assert_eq!(
+        brain.get("/fs/page.md").await.expect("read back"),
+        Some(b"two".to_vec())
+    );
+
+    let stale = brain
+        .put_if("/fs/page.md", b"three", Some(&first))
+        .await
+        .expect_err("a stale version is refused");
+    assert!(
+        matches!(&stale, Error::Conflict(message) if message.ends_with(&format!("current_version={second}"))),
+        "the conflict names the current version, got {stale:?}"
+    );
+    assert_eq!(
+        brain.get("/fs/page.md").await.expect("read back"),
+        Some(b"two".to_vec()),
+        "a refused write stores nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_create_only_write_succeeds_once() {
+    let store = BrainStore::new(temp_dir("cas-absent"));
+    let brain = store.open("proj", "session").await.expect("open brain");
+
+    let created = brain
+        .put_if(
+            "/fs/page.md",
+            b"one",
+            Some(agent_hub::brain::VERSION_ABSENT),
+        )
+        .await
+        .expect("a create on an empty path");
+
+    let again = brain
+        .put_if(
+            "/fs/page.md",
+            b"two",
+            Some(agent_hub::brain::VERSION_ABSENT),
+        )
+        .await
+        .expect_err("a second create is refused");
+    assert!(
+        matches!(&again, Error::Conflict(message) if message.ends_with(&format!("current_version={created}"))),
+        "the conflict names the current version, got {again:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn only_one_of_a_racing_set_of_conditional_writes_wins() {
+    let store = BrainStore::new(temp_dir("cas-race"));
+    let brain = std::sync::Arc::new(store.open("proj", "shared").await.expect("open"));
+    let base = brain
+        .put_if("/fs/page.md", b"base", None)
+        .await
+        .expect("seed");
+
+    // Real tasks on a worker pool, not one task polling both futures: a
+    // compare that does not hold the write lock across its write lets two of
+    // these read the same version and both store their own bytes.
+    let mut writers = tokio::task::JoinSet::new();
+    for writer in 0..8u8 {
+        let brain = brain.clone();
+        let base = base.clone();
+        writers.spawn(async move {
+            brain
+                .put_if("/fs/page.md", &[b'a' + writer], Some(&base))
+                .await
+        });
+    }
+
+    let mut winners = Vec::new();
+    while let Some(joined) = writers.join_next().await {
+        match joined.expect("writer task") {
+            Ok(version) => winners.push(version),
+            Err(Error::Conflict(_)) => {}
+            Err(err) => panic!("a loser is refused with a conflict, got {err:?}"),
+        }
+    }
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one writer holding the version wins, got {winners:?}"
+    );
+    assert_eq!(
+        brain
+            .get("/fs/page.md")
+            .await
+            .expect("read back")
+            .map(|bytes| version(&bytes)),
+        Some(winners[0].clone()),
+        "the stored bytes are the winner's"
+    );
+}
+
+#[tokio::test]
+async fn a_conditional_write_over_the_cap_is_refused() {
+    let store = BrainStore::new(temp_dir("cas-oversized"));
+    let brain = store.open("proj", "session").await.expect("open brain");
+
+    let oversized = vec![b'x'; agent_hub::limits::BRAIN_VALUE_BYTES_MAX + 1];
+    let refused = brain
+        .put_if("/fs/page.md", &oversized, None)
+        .await
+        .expect_err("a value over the cap is refused");
+    assert!(
+        matches!(refused, Error::PayloadTooLarge(_)),
+        "an oversized conditional write is refused by the same cap, got {refused:?}"
+    );
+    assert!(
+        brain.get("/fs/page.md").await.expect("read back").is_none(),
+        "a refused write stores nothing"
     );
 }

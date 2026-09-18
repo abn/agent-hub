@@ -270,7 +270,49 @@ impl Brain {
     /// A directory under `/fs/` reads as `None`; only regular files have
     /// content.
     pub async fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
-        match parse_path(path)? {
+        self.read(&parse_path(path)?).await
+    }
+
+    /// Store bytes, creating the entry and any missing parent directories.
+    ///
+    /// Takes the session write lock. A value over the cap is refused before
+    /// anything is written.
+    pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        self.put_if(path, bytes, None).await.map(|_| ())
+    }
+
+    /// Store bytes only when what is there matches `expected`, and report the
+    /// version of the bytes written.
+    ///
+    /// `expected` is a token from `version`, or `VERSION_ABSENT` to create an
+    /// entry only while nothing is stored at the path; `None` is an
+    /// unconditional write. The read, the comparison and the write all happen
+    /// under the write lock, so two callers holding the same token cannot both
+    /// win: doing this as a get followed by a put would let their writes
+    /// interleave between the two calls.
+    pub async fn put_if(&self, path: &str, bytes: &[u8], expected: Option<&str>) -> Result<String> {
+        crate::limits::check_brain_value(bytes.len())?;
+        let namespace = parse_path(path)?;
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        if let Some(expected) = expected {
+            let current = self
+                .read(&namespace)
+                .await?
+                .map_or_else(|| VERSION_ABSENT.to_string(), |bytes| version(&bytes));
+            if current != expected {
+                return Err(Error::Conflict(format!(
+                    "the entry at '{path}' changed since it was read current_version={current}"
+                )));
+            }
+        }
+        self.write(&namespace, bytes).await?;
+        Ok(version(bytes))
+    }
+
+    /// Read whatever is stored in one namespace.
+    async fn read(&self, namespace: &Namespace<'_>) -> Result<Option<Vec<u8>>> {
+        match namespace {
             Namespace::Kv(key) => {
                 let key = require_key(key)?;
                 let value = self
@@ -293,15 +335,8 @@ impl Brain {
         }
     }
 
-    /// Store bytes, creating the entry and any missing parent directories.
-    ///
-    /// Takes the session write lock. A value over the cap is refused before
-    /// anything is written.
-    pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<()> {
-        crate::limits::check_brain_value(bytes.len())?;
-        let namespace = parse_path(path)?;
-        let _guard = self.lock.lock().await;
-        self.ensure_present()?;
+    /// Write bytes into one namespace. The caller holds the write lock.
+    async fn write(&self, namespace: &Namespace<'_>, bytes: &[u8]) -> Result<()> {
         match namespace {
             Namespace::Kv(key) => {
                 let key = require_key(key)?;
@@ -488,6 +523,26 @@ fn require_key(key: &str) -> Result<&str> {
     } else {
         Ok(key)
     }
+}
+
+/// The expected version of a path nothing is stored at, so a caller can create
+/// an entry without racing another creator.
+pub const VERSION_ABSENT: &str = "absent";
+
+/// The version token for stored bytes.
+///
+/// The token is over the bytes a read hands back, never the stored form, so a
+/// caller can reproduce it from what it read and it survives any later change
+/// to how the store encodes a value.
+pub fn version(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+
+    let mut token = String::from("sha256:");
+    for byte in Sha256::digest(bytes) {
+        let _ = write!(token, "{byte:02x}");
+    }
+    token
 }
 
 /// The canonical brain path for an entry, as the store addresses it.
