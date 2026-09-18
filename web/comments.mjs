@@ -5,6 +5,7 @@
 // body ever reaches innerHTML.
 
 import { api } from "./api.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { stamp } from "./time.mjs";
 
 const commentsDrawer = {
@@ -158,7 +159,14 @@ async function toggleCommentDone(comment) {
 }
 
 async function deleteComment(comment) {
-  if (!window.confirm("Delete this comment? This cannot be undone.")) return;
+  const confirmed = await confirmAction({
+    title: "Delete this comment?",
+    body: `It is removed for everyone who can read the artifact. Written by ${comment.author}.`,
+    note: "Deleting a comment cannot be undone.",
+    safe: "Keep",
+    danger: "Delete comment",
+  });
+  if (!confirmed) return;
   try {
     await api(`${commentsBase(commentsDrawer.artifactId)}/${encodeURIComponent(comment.id)}`, {
       method: "DELETE",
@@ -166,6 +174,11 @@ async function deleteComment(comment) {
     commentsDrawer.comments = commentsDrawer.comments.filter((item) => item.id !== comment.id);
     clearDrawerError();
     renderComments();
+    // The row that held focus has gone with the comment. The next comment's
+    // first action is where the reader was; the compose box is the fallback.
+    const els = commentsDrawer.elements;
+    const next = els.list.querySelector(".comment-actions button");
+    (next || els.compose).focus();
   } catch (error) {
     drawerError(error.message);
   }
@@ -333,7 +346,7 @@ export function commentsPanel({ toggle, badge }) {
       first.focus();
     }
   });
-  commentsDrawer.elements = { backdrop, drawer, toggle, badge, close, list, error };
+  commentsDrawer.elements = { backdrop, drawer, toggle, badge, close, list, error, compose: box };
   // The first list arrives a tick later, by which time the caller has put the
   // drawer in the document.
   loadComments();

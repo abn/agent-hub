@@ -2,6 +2,7 @@
 // that close or reclaim a session.
 
 import { api } from "./api.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { esc, glyph, paint, stale, when } from "./dom.mjs";
 import { pickProject, withProject } from "./projects.mjs";
 import { render } from "./router.mjs";
@@ -22,7 +23,7 @@ export async function sessionsScreen(selected, gen) {
         <a class="button" href="#/session?project=${encodeURIComponent(current)}&id=${esc(s.id)}" aria-label="Open ${esc(s.session_name)}">Open</a>
         ${
           s.status === "ended"
-            ? `<button type="button" class="danger" data-action="prune" data-id="${esc(s.id)}">Prune</button>`
+            ? `<button type="button" class="danger" data-action="prune" data-id="${esc(s.id)}" data-agent="${esc(s.agent)}">Prune</button>`
             : `<button type="button" data-action="end" data-id="${esc(s.id)}">End</button>`
         }
       </div>`,
@@ -57,7 +58,7 @@ export async function sessionDetail(project, id, gen) {
   const fs = await api(`/api/v1/sessions/${query}/brain?path=${encodeURIComponent("/fs")}`);
   const action =
     session.status === "ended"
-      ? `<button type="button" class="danger" data-action="prune" data-id="${esc(session.id)}">Prune</button>`
+      ? `<button type="button" class="danger" data-action="prune" data-id="${esc(session.id)}" data-agent="${esc(session.agent)}">Prune</button>`
       : `<button type="button" data-action="end" data-id="${esc(session.id)}">End</button>`;
   paint(
     gen,
@@ -92,13 +93,26 @@ export async function endSession(id) {
   render();
 }
 
-export async function pruneSession(id) {
+// Prune deletes a session's brain and audit log, so it is asked first and
+// stays reversible for the length of the toast. The listing carries no size
+// for the session, so the dialog names what goes rather than what is freed;
+// no number is shown that the hub has not reported.
+export async function pruneSession(id, agent) {
+  const confirmed = await confirmAction({
+    title: "Prune 1 ended session?",
+    body: "The brain file and audit log for this session are deleted. Events in the feed stay.",
+    list: [agent ? `${id} · ${agent}` : id],
+    note: "You can undo for 30 s after pruning.",
+    safe: "Keep",
+    danger: "Prune 1 session",
+  });
+  if (!confirmed) return;
   const token = await api(`/api/v1/storage/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  render();
-  toast("Session pruned.", async () => {
+  await render();
+  toast("Pruned 1 session.", async () => {
     await api(`/api/v1/prune/undo/${encodeURIComponent(token.undo_token)}`, { method: "POST" });
-    render();
+    await render();
   });
 }

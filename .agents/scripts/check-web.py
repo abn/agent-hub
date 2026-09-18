@@ -386,6 +386,7 @@ def main() -> int:
     check_design_contract(errors, css, app_css)
     check_palette_copies(errors, css)
     check_first_party_syntax(errors)
+    check_no_native_modals(errors)
     check_every_script_is_served(errors)
 
     for error in dict.fromkeys(errors):
@@ -427,6 +428,67 @@ def check_first_party_syntax(errors: list[str]) -> None:
         )
         if result.returncode != 0:
             errors.append(f"{path}: node cannot parse it ({result.stderr.strip()})")
+
+
+# The three modals the browser owns. The app asks and reports in its own
+# components, so none of them may come back: `confirm(`, `window.confirm(` and
+# their two siblings. A name that merely ends in one of the words, such as
+# `confirmAction(`, is this project's own and is left alone.
+NATIVE_MODAL = re.compile(r"(?<![.\w$])(?:window\s*\.\s*)?(alert|confirm|prompt)\s*\(")
+BLOCK_OPEN = re.compile(r"/\*")
+BLOCK_CLOSE = re.compile(r"\*/")
+
+
+def without_comments(text: str) -> list[tuple[int, str]]:
+    """Every line with its comments cut out, numbered from one.
+
+    A word inside a comment is prose about the code, not a call. This is a
+    reader's pass rather than a parser: it is only ever asked whether a call
+    is there, and it errs towards leaving code in.
+    """
+    lines: list[tuple[int, str]] = []
+    in_block = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        kept = ""
+        rest = line
+        while rest:
+            if in_block:
+                close = BLOCK_CLOSE.search(rest)
+                if not close:
+                    break
+                rest = rest[close.end() :]
+                in_block = False
+                continue
+            opening = BLOCK_OPEN.search(rest)
+            slashes = rest.find("//")
+            if slashes >= 0 and (opening is None or slashes < opening.start()):
+                kept += rest[:slashes]
+                break
+            if opening is None:
+                kept += rest
+                break
+            kept += rest[: opening.start()]
+            rest = rest[opening.end() :]
+            in_block = True
+        lines.append((number, kept))
+    return lines
+
+
+def check_no_native_modals(errors: list[str]) -> None:
+    """No screen may ask or report through a browser modal.
+
+    The browser run fails wherever one of these fires, but it can only fire on
+    a path the run walks, and several confirmations sit outside it. This reads
+    every first-party script instead, so a `confirm` on any path is caught.
+    """
+    for path in first_party_scripts():
+        for number, line in without_comments(path.read_text(encoding="utf-8", errors="replace")):
+            found = NATIVE_MODAL.search(line)
+            if found:
+                errors.append(
+                    f"{path}:{number}: {found.group(1)}() is the browser's own modal;"
+                    " the app asks and reports in its own components"
+                )
 
 
 def check_every_script_is_served(errors: list[str]) -> None:

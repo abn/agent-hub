@@ -60,6 +60,16 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/dialog.mjs",
+        body: include_str!("../../web/dialog.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/composer.mjs",
+        body: include_str!("../../web/composer.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/events.mjs",
         body: include_str!("../../web/events.mjs"),
         content_type: "text/javascript; charset=utf-8",

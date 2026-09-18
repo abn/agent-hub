@@ -301,7 +301,7 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 29] = [
+const SHELL_PATHS: [&str; 31] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -310,6 +310,8 @@ const SHELL_PATHS: [&str; 29] = [
     "/time.mjs",
     "/prefs.mjs",
     "/toast.mjs",
+    "/dialog.mjs",
+    "/composer.mjs",
     "/events.mjs",
     "/projects.mjs",
     "/home.mjs",
@@ -1030,7 +1032,7 @@ fn app_drawer_wiring_for_comments() {
         "/comments",
         "PATCH",
         "DELETE",
-        "confirm(",
+        "confirmAction(",
         "Escape",
         "aria-expanded",
         "aria-modal",
@@ -1041,10 +1043,12 @@ fn app_drawer_wiring_for_comments() {
         COMMENTS_JS.contains("drawerError(error.message)"),
         "drawer failures surface inline"
     );
-    assert!(
-        !COMMENTS_JS.contains("alert("),
-        "the drawer never uses alert"
-    );
+    for banned in ["alert(", "window.confirm", "prompt("] {
+        assert!(
+            !COMMENTS_JS.contains(banned),
+            "the drawer asks and reports in the page, never through {banned}"
+        );
+    }
 }
 
 #[test]

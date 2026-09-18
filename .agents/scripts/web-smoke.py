@@ -45,6 +45,24 @@ KIND_LABELS = {
 # screen the reader moved on to has painted first.
 SESSION_LIST = re.compile(r"/api/v1/sessions\?")
 HELD_SECONDS = 0.8
+# The write the composer check refuses once, to see the error land in place.
+ANSWER_POST = re.compile(r"/api/v1/questions/[^/]+/answer$")
+PRUNE_CALL = "DELETE /api/v1/storage/sessions/"
+UNDO_CALL = "POST /api/v1/prune/undo/"
+# The undo countdown has to be seen to move, so the check waits out a tick.
+COUNTDOWN_WAIT = 2200
+# Long enough for a click that writes straight through to have written.
+WRITE_WINDOW = 500
+
+FOCUS_CLASS = (
+    "(() => { const el = document.activeElement;"
+    " return el ? (el.className || el.tagName) : ''; })()"
+)
+FOCUS_IN_DIALOG = (
+    "(() => { const el = document.activeElement;"
+    " const box = document.querySelector('dialog.dialog');"
+    " return !!(el && box && box.contains(el)); })()"
+)
 
 
 class Watch:
@@ -61,10 +79,22 @@ class Watch:
         self.armed = False
         self.failures: list[str] = []
         self.home_requests = 0
+        self.calls: list[str] = []
         page.on("console", self._console)
         page.on("pageerror", self._page_error)
         page.on("response", self._response)
         page.on("request", self._request)
+        page.on("dialog", self._dialog)
+
+    def _dialog(self, dialog) -> None:
+        """No screen may open a browser modal.
+
+        The app asks and reports in its own components, so a `prompt`,
+        `alert` or `confirm` reappearing anywhere is a failure wherever it
+        fires, not only where a check was looking.
+        """
+        self.failures.append(f"{self.phase}: a native {dialog.type} opened: {dialog.message!r}")
+        dialog.dismiss()
 
     def _console(self, message) -> None:
         if message.type == "error" and self.armed:
@@ -84,6 +114,13 @@ class Watch:
     def _request(self, request) -> None:
         if request.url.endswith("/api/v1/home"):
             self.home_requests += 1
+        if "/api/v1/" in request.url:
+            path = request.url.split(f"127.0.0.1:{self.port}", 1)[-1]
+            self.calls.append(f"{request.method} {path}")
+
+    def count(self, prefix: str) -> int:
+        """How many API calls so far start with this method and path."""
+        return sum(1 for call in self.calls if call.startswith(prefix))
 
     def enter(self, phase: str) -> None:
         self.phase = phase
@@ -206,31 +243,140 @@ def check_search(page, watch: Watch) -> None:
 
 
 def check_answer(page, watch: Watch, project: str) -> None:
+    """Answering happens in the composer, and a refused send keeps the words."""
     watch.enter("inbox: answer")
-    goto(page, "#/inbox", "Inbox")
+    page.evaluate("location.hash = '#/inbox'")
+    page.wait_for_selector('[data-action="answer"]')
     before = page.evaluate("document.querySelectorAll('[data-action=\"answer\"]').length")
-    if before == 0:
-        watch.fail("no question is waiting to be answered")
-        return
-    page.once("dialog", lambda dialog: dialog.accept(ANSWER_BODY))
     page.click('[data-action="answer"]')
+    page.wait_for_selector(".composer-field")
+    if "composer-field" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the composer did not take focus, it is on {page.evaluate(FOCUS_CLASS)!r}")
+
+    # A hub that refuses the write must not cost the reader what they typed,
+    # and must say so where they are looking.
+    def refuse(route):
+        route.fulfill(status=503, content_type="application/json", body="{}")
+
+    page.route(ANSWER_POST, refuse)
+    armed, watch.armed = watch.armed, False
     try:
-        page.wait_for_function(
-            "(was) => document.querySelectorAll('[data-action=\"answer\"]').length < was",
-            arg=before,
-            timeout=5000,
-        )
-    except PlaywrightTimeoutError:
-        pass
-    after = page.evaluate("document.querySelectorAll('[data-action=\"answer\"]').length")
-    if after >= before:
-        watch.fail(f"the answered question still waits ({before} then {after})")
+        page.fill(".composer-field", ANSWER_BODY)
+        page.click(".composer-send")
+        page.wait_for_selector(".composer-error:not([hidden])")
+        if page.input_value(".composer-field") != ANSWER_BODY:
+            watch.fail("the refused send lost what was typed")
+    finally:
+        page.unroute(ANSWER_POST, refuse)
+        watch.armed = armed
+
+    page.click(".composer-send")
+    page.wait_for_function(
+        "(n) => document.querySelectorAll('[data-action=\"answer\"]').length < n", arg=before
+    )
     feed = harness.request(
         watch.port, "GET", f"/api/v1/projects/{quote(project)}/feed?limit=100"
     )
     if f"re: {harness.QUESTION_SUBJECT}".encode() not in feed:
         watch.fail("the answer never reached the feed")
     watch.drain_rejections()
+
+
+def check_approve(page, watch: Watch) -> None:
+    """A decision is asked for in the app's own dialog, not the browser's."""
+    watch.enter("inbox: approve")
+    page.evaluate("location.hash = '#/inbox'")
+    page.wait_for_selector('[data-action="approve"]')
+    page.click('[data-action="approve"]')
+    page.wait_for_selector("dialog.dialog[open]")
+    asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
+    if harness.APPROVAL_SUMMARY not in asked:
+        watch.fail("the dialog does not name what is being approved")
+    page.click(".dialog-commit")
+    page.wait_for_function("() => !document.querySelector('[data-action=\"approve\"]')")
+    watch.drain_rejections()
+
+
+def check_prune(page, watch: Watch, project: str, session_id: str) -> None:
+    """Prune asks first, keeps on Esc, and stays reversible while the toast is up."""
+    watch.enter("sessions: prune")
+    page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
+    # Only an ended session can be pruned, so the seeded one is ended here.
+    page.wait_for_selector('[data-action="end"]')
+    page.click('[data-action="end"]')
+    page.wait_for_selector('[data-action="prune"]')
+
+    pruned = watch.count(PRUNE_CALL)
+    page.click('[data-action="prune"]')
+    # Waiting on the absence of a request is the one thing no selector says.
+    page.wait_for_timeout(WRITE_WINDOW)
+    if watch.count(PRUNE_CALL) != pruned:
+        watch.fail("the session was pruned before the dialog was answered")
+    page.wait_for_selector("dialog.dialog[open]")
+    if "dialog-safe" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the dialog opened with focus on {page.evaluate(FOCUS_CLASS)!r}, not on Keep")
+    asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
+    for needle in ("Prune 1 ended session?", "Keep", "Prune 1 session", "30 s", session_id):
+        if needle not in asked:
+            watch.fail(f"the dialog does not say {needle!r}")
+
+    # Tab and Shift+Tab stay inside a modal, both ways round its ring.
+    for key in ("Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"):
+        page.keyboard.press(key)
+        if not page.evaluate(FOCUS_IN_DIALOG):
+            watch.fail(f"{key} left the dialog, focus went to {page.evaluate(FOCUS_CLASS)!r}")
+            break
+
+    page.keyboard.press("Escape")
+    page.wait_for_selector("dialog.dialog", state="detached")
+    if watch.count(PRUNE_CALL) != pruned:
+        watch.fail("Esc pruned the session instead of keeping it")
+    if "danger" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"closing the dialog left focus on {page.evaluate(FOCUS_CLASS)!r}, not the opener")
+
+    page.click('[data-action="prune"]')
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click(".dialog-commit")
+    # The undo control is what marks the new toast: the one before it carried
+    # none, so waiting on the toast itself would match what is already up.
+    page.wait_for_selector(".toast-undo")
+    if watch.count(PRUNE_CALL) != pruned + 1:
+        watch.fail(f"confirming sent {watch.count(PRUNE_CALL) - pruned} prune requests")
+    if harness.SESSION_NAME in page.evaluate("document.querySelector('main').textContent"):
+        watch.fail("the pruned session is still listed")
+
+    region = page.evaluate(
+        "(() => { const r = document.querySelector('.toast-region');"
+        " return r && {role: r.getAttribute('role'), live: r.getAttribute('aria-live'),"
+        " text: r.textContent}; })()"
+    )
+    if not region or region["role"] != "status" or region["live"] != "polite":
+        watch.fail(f"the toast is not announced, its region reads {region}")
+    elif "Pruned 1 session." not in region["text"]:
+        watch.fail(f"the live region does not carry the message, it reads {region['text']!r}")
+    if "toast-undo" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the undo is not where focus went, it is on {page.evaluate(FOCUS_CLASS)!r}")
+
+    counting = page.text_content(".toast-undo")
+    page.wait_for_timeout(COUNTDOWN_WAIT)
+    later = page.text_content(".toast-undo")
+    if seconds_left(later) >= seconds_left(counting):
+        watch.fail(f"the undo countdown went from {counting!r} to {later!r}")
+
+    undone = watch.count(UNDO_CALL)
+    page.click(".toast-undo")
+    page.wait_for_function(
+        "(name) => document.querySelector('main').textContent.includes(name)",
+        arg=harness.SESSION_NAME,
+    )
+    if watch.count(UNDO_CALL) != undone + 1:
+        watch.fail("undo did not reach the hub")
+    watch.drain_rejections()
+
+
+def seconds_left(label: str) -> int:
+    found = re.search(r"(\d+)s", label or "")
+    return int(found.group(1)) if found else -1
 
 
 def check_agent_markup_is_text(page, watch: Watch) -> None:
@@ -530,6 +676,8 @@ def run() -> int:
             check_theme(page, watch)
             check_search(page, watch)
             check_answer(page, watch, project)
+            check_approve(page, watch)
+            check_prune(page, watch, project, seeded["session_id"])
 
             context.close()
             browser.close()

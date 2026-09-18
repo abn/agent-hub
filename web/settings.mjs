@@ -3,6 +3,7 @@
 
 import { agentsSection } from "./agents.mjs";
 import { api } from "./api.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { errorCard, esc, paint } from "./dom.mjs";
 import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
@@ -92,13 +93,15 @@ export async function settingsScreen(gen) {
 }
 
 export async function deleteProject(id) {
-  if (
-    !confirm(
-      `Delete project ${id}? Its events, artifacts, and session brains are removed for good.`,
-    )
-  )
-    return;
+  const confirmed = await confirmAction({
+    title: `Delete project ${id}?`,
+    body: "Its events, artifacts, and session brains are removed for good.",
+    note: "Deleting a project cannot be undone.",
+    safe: "Keep",
+    danger: "Delete project",
+  });
+  if (!confirmed) return;
   await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await render();
   toast("Project deleted.");
-  render();
 }

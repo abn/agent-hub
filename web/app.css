@@ -310,3 +310,100 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   outline: none;
   box-shadow: var(--focus);
 }
+
+/* component: dialog. The confirm in front of a decision that cannot be taken
+   back. It appears outright, with no motion to reduce. */
+.dialog {
+  width: min(420px, calc(100vw - 2 * var(--s-4)));
+  padding: 20px var(--s-4);
+  border: 1px solid var(--line-strong); border-radius: var(--r-2);
+  background: var(--surface); color: var(--ink);
+  box-shadow: var(--shadow-2);
+}
+/* The same scrim the comments drawer uses, so the two modals read alike. */
+.dialog::backdrop { background: rgba(20, 19, 17, 0.4); }
+/* The top layer keeps pointer and focus off the page behind; the wheel still
+   reaches it, so the scroll is stopped here. */
+html.has-dialog { overflow: hidden; }
+.dialog-form { display: flex; flex-direction: column; gap: var(--s-3); margin: 0; }
+.dialog-title { margin: 0; font-size: var(--t-17); font-weight: 600; line-height: 1.3; }
+.dialog-body { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.dialog-list {
+  margin: 0; padding: var(--s-2) 10px; list-style: none;
+  background: var(--surface-2); border-radius: var(--r-1);
+  font-family: var(--font-mono); font-size: var(--t-12); line-height: 1.8;
+  color: var(--ink-3); overflow-wrap: anywhere;
+}
+.dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
+.dialog-note { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
+/* Danger fills only here: on the screens it stays an outline. */
+.dialog-commit.danger {
+  background: var(--danger); border-color: var(--danger);
+  color: var(--ink-inverse); font-weight: 600;
+}
+
+/* component: toast. One at a time, above the tab bar, carrying the way back
+   from what just happened. */
+.toast-region {
+  position: fixed; z-index: 40; left: var(--s-4); right: var(--s-4);
+  bottom: calc(56px + var(--s-2) + env(safe-area-inset-bottom, 0px));
+  display: flex; justify-content: center; pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: var(--s-3);
+  width: 100%; max-width: 420px;
+  padding: var(--s-3) 14px; border-radius: var(--r-2);
+  background: var(--ink); color: var(--ink-inverse);
+  box-shadow: var(--shadow-2); font-size: 14px;
+  touch-action: pan-x;
+}
+.toast-text { flex: 1; }
+.toast-undo, .toast-close {
+  position: relative; flex: none; min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-1);
+  background: transparent; color: inherit;
+  font-size: var(--t-13); font-weight: 600;
+}
+.toast-close { display: inline-flex; align-items: center; justify-content: center; }
+.toast-undo:focus-visible, .toast-close:focus-visible {
+  outline: none; box-shadow: var(--focus);
+}
+@media (pointer: coarse) {
+  /* The drawn box stays 32px, as the design has it; the finger gets 44. */
+  .toast-undo::after, .toast-close::after { content: ""; position: absolute; inset: -6px; }
+}
+@media (min-width: 720px) {
+  .toast-region { bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* component: thread composer. The reply box, in place of a prompt window. */
+.composer { margin: var(--s-3) 0 0; }
+/* Opened under the row it answers, it takes the row's own gutters. */
+.row + .composer { margin: 0; padding: 0 var(--s-4) var(--s-3); }
+.composer-row {
+  display: flex; align-items: flex-end; gap: var(--s-2);
+  padding: 0 var(--s-1) 0 14px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-2);
+  background: var(--surface);
+}
+.composer-row:focus-within { box-shadow: var(--focus); }
+.composer-field {
+  flex: 1; min-height: 28px; max-height: 40vh;
+  padding: var(--s-2) 0; border: 0; border-radius: 0; background: transparent;
+  font-size: var(--t-15); line-height: 28px; resize: none; overflow-y: auto;
+}
+.composer-field::placeholder { color: var(--ink-3); }
+.composer-field:focus-visible { outline: none; box-shadow: none; }
+.composer-send {
+  align-self: center; flex: none; position: relative;
+  width: 36px; height: 36px; min-height: 36px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 8px;
+  background: var(--ink); color: var(--ink-inverse);
+}
+@media (pointer: coarse) {
+  .composer-send::after { content: ""; position: absolute; inset: -4px; }
+}
+.composer-error { margin: var(--s-2) 0 0; color: var(--danger); font-size: var(--t-13); }
+.composer-error[hidden] { display: none; }

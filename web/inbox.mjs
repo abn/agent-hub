@@ -1,6 +1,8 @@
 // Inbox: the queue the human acts on, and the two actions that clear it.
 
 import { api } from "./api.mjs";
+import { composer } from "./composer.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { actionFor, esc, glyph, paint } from "./dom.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
@@ -69,26 +71,55 @@ export async function inbox(gen) {
   );
 }
 
-export async function answer(id) {
-  const body = prompt("Your answer");
-  if (!body) return;
-  await api(`/api/v1/questions/${encodeURIComponent(id)}/answer`, {
-    method: "POST",
-    body: JSON.stringify({ body }),
+// Reply opens a composer under the row it belongs to, so the question stays
+// readable while the answer is written and a failed send keeps the words.
+// Pressing Reply again on an open composer moves back into it rather than
+// stacking a second one.
+export async function answer(id, button) {
+  const row = button.closest(".row") || button;
+  const open = row.nextElementSibling;
+  if (open && open.classList.contains("composer")) {
+    open.querySelector(".composer-field").focus();
+    return;
+  }
+  const reply = composer({
+    label: "Your answer",
+    send: async (body) => {
+      await api(`/api/v1/questions/${encodeURIComponent(id)}/answer`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+      await render();
+      toast("Answer sent, recorded on the feed.");
+    },
   });
-  render();
+  row.after(reply.element);
+  button.setAttribute("aria-expanded", "true");
+  reply.focus();
 }
 
 // An approval is a decision. It is recorded on the feed and leaves the waiting
-// queue, so the confirm names what is approved and the toast states the result.
+// queue, so the dialog names what is approved and the toast states the result.
 export async function approve(id, summary) {
-  const named = summary ? `"${summary}"` : "this action";
-  const message = `Approve ${named}? Your decision is recorded on the feed and resolves the waiting item.`;
-  if (!confirm(message)) return;
-  await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
-    method: "POST",
-    body: JSON.stringify({ decision: "approve" }),
+  const confirmed = await confirmAction({
+    title: summary ? `Approve "${summary}"?` : "Approve this action?",
+    body: "Your decision is recorded on the feed and resolves the waiting item.",
+    safe: "Not now",
+    danger: "Approve",
+    tone: "action",
   });
+  if (!confirmed) return;
+  try {
+    await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision: "approve" }),
+    });
+  } catch (error) {
+    // The item may have been decided elsewhere, so the queue is reread before
+    // the failure is reported.
+    await render();
+    throw error;
+  }
+  await render();
   toast("Approved, recorded on the feed.");
-  render();
 }

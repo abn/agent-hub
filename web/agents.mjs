@@ -2,6 +2,7 @@
 // tokens, and their grants.
 
 import { api } from "./api.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { errorCard, esc, main } from "./dom.mjs";
 import { render } from "./router.mjs";
 
@@ -119,7 +120,14 @@ export async function reissueToken(id) {
 }
 
 export async function revokeToken(id) {
-  if (!confirm(`Revoke the token for ${id}? The agent loses access immediately.`)) return;
+  const confirmed = await confirmAction({
+    title: `Revoke the token for ${id}?`,
+    body: "The agent loses access immediately. A new token can be issued, but this one is gone.",
+    note: "Revoking cannot be undone.",
+    safe: "Keep",
+    danger: "Revoke token",
+  });
+  if (!confirmed) return;
   await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
   await render();
 }
