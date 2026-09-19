@@ -51,9 +51,7 @@ EMPTY_COPY_INBOX = {
     "body": "Finished work and questions from your agents will land here.",
     "link": "Show read items",
 }
-# The session listing the stale-render check holds back. Long enough that the
-# screen the reader moved on to has painted first.
-SESSION_LIST = re.compile(r"/api/v1/sessions\?")
+# How long the search race holds the older query's answer back.
 HELD_SECONDS = 0.8
 # The write the composer check refuses once, to see the error land in place.
 ANSWER_POST = re.compile(r"/api/v1/questions/[^/]+/answer$")
@@ -1319,32 +1317,86 @@ def check_home_fetches_once(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
-def check_stale_render(page, watch: Watch, project: str) -> None:
+# Hold every request whose address carries the needle until the check lets it
+# go. The wait is inside the page, so the browser and this script both keep
+# running while the answer is held, and the race is met on every run.
+HOLD_FETCH = (
+    "(needle) => { const send = window.fetch; let go;"
+    " const gate = new Promise((open) => { go = open; });"
+    " const held = { asked: 0, answered: 0, release: go,"
+    "  restore: () => { window.fetch = send; } };"
+    " window.__held = held;"
+    " window.fetch = (url, options) => { if (!String(url).includes(needle)) return send(url, options);"
+    "  held.asked += 1;"
+    "  return gate.then(() => send(url, options)).finally(() => { held.answered += 1; }); }; }"
+)
+
+
+def check_render_generation_guard(page, watch: Watch, project: str, session_id: str) -> None:
     """The screen you left must not paint over the screen you are on.
 
-    Sessions is held back at its listing request while the reader moves to
-    Storage. Both navigations are scheduled inside the page, so the browser
-    keeps running while the held response waits here.
+    One request of each screen is held in the page, the reader moves on, the
+    next screen paints, and only then is the held answer let go. Whatever the
+    screen left behind does with it, the region must still be the next
+    screen's. The screens guard in different ways (some ask whether they are
+    stale, some only paint through the guarded write, some do both), so each
+    kind is held here: a screen that is guarded once is what decides.
     """
-    watch.enter("router: a stale screen")
-
-    def hold(route):
-        time.sleep(HELD_SECONDS)
-        route.continue_()
-
-    page.route(SESSION_LIST, hold)
-    try:
-        page.evaluate(
-            "(hash) => { setTimeout(() => { location.hash = hash; }, 0);"
-            " setTimeout(() => { location.hash = '#/storage'; }, 200); }",
-            f"#/sessions?project={quote(project)}",
-        )
-        page.wait_for_timeout(int(HELD_SECONDS * 1000) + 1200)
-        found = heading(page)
-        if found != "Storage":
-            watch.fail(f"the screen left behind painted over the current one, showing {found!r}")
-    finally:
-        page.unroute(SESSION_LIST, hold)
+    left = [
+        (
+            "search",
+            f"#/search?q={quote(harness.SEARCH_TERM)}",
+            "/api/v1/search?",
+            "main .search-results, main #q",
+            ("#/storage", "Storage"),
+        ),
+        ("storage", "#/storage", "/api/v1/storage", "main .storage", ("#/settings", "Settings")),
+        ("inbox", "#/inbox", "/api/v1/inbox?status=action", "main .inbox-screen", ("#/settings", "Settings")),
+        (
+            "project feed",
+            f"#/projects/{quote(project)}/feed",
+            f"/api/v1/projects/{quote(project)}/feed?",
+            "main .feed-chips, main .feed-row",
+            ("#/settings", "Settings"),
+        ),
+        (
+            "session detail",
+            f"#/session?project={quote(project)}&id={quote(session_id)}",
+            f"/api/v1/sessions/{quote(session_id)}/brain?path=%2Ffs",
+            "main .stat-row",
+            ("#/settings", "Settings"),
+        ),
+    ]
+    for name, hash_value, needle, marks, (next_hash, next_title) in left:
+        watch.enter(f"router: render guard, leaving {name}")
+        goto(page, "#/home", home_title())
+        page.evaluate(HOLD_FETCH, needle)
+        try:
+            page.evaluate(f"location.hash = {hash_value!r}")
+            if not settle(page, "window.__held.asked > 0"):
+                watch.fail(f"the screen never asked for {needle!r}, so nothing was held")
+                continue
+            goto(page, next_hash, next_title)
+            if heading(page) != next_title:
+                watch.fail(f"the next screen never painted: the heading is {heading(page)!r}")
+                continue
+            page.evaluate("window.__held.release()")
+            if not settle(page, "window.__held.answered >= window.__held.asked"):
+                watch.fail("the held request was never answered")
+            # The answer is read and the screen left behind runs on in the
+            # turns after it arrives.
+            page.wait_for_timeout(400)
+            found = heading(page)
+            stray = page.evaluate(f"!!document.querySelector({json.dumps(marks)})")
+            if found != next_title or stray:
+                watch.fail(
+                    f"the screen left behind painted over {next_hash}: the heading is {found!r}"
+                    + (f" and {marks!r} is in the region" if stray else "")
+                )
+            if page.evaluate("location.hash") != next_hash:
+                watch.fail(f"the screen left behind took the route back to {page.evaluate('location.hash')!r}")
+        finally:
+            page.evaluate("window.__held && window.__held.release(); window.__held && window.__held.restore()")
     watch.drain_rejections()
 
 
@@ -4842,7 +4894,7 @@ def run() -> int:
                 run_step(watch, check_approve_key, page, watch)
                 run_step(watch, check_agent_markup_is_text, page, watch)
                 run_step(watch, check_home_fetches_once, page, watch)
-                run_step(watch, check_stale_render, page, watch, project)
+                run_step(watch, check_render_generation_guard, page, watch, project, seeded["session_id"])
                 run_step(watch, check_artifact, page, watch, project)
                 run_step(watch, check_theme, page, watch)
                 run_step(watch, check_system_theme, page, watch)
