@@ -14,7 +14,7 @@ use serde_json::json;
 use super::{Brain, KNOWLEDGE_FILE, Stamp, canonical_path};
 use crate::app::AppState;
 use crate::error::{Error, Result};
-use crate::okf::frontmatter::{PromoteParams, promote_frontmatter};
+use crate::okf::frontmatter::{PromoteParams, promote_frontmatter, review_frontmatter};
 use crate::okf::{LintFinding, extract_links, lint_page_write, parse_frontmatter};
 use crate::store::events::{self, NewEvent};
 use crate::store::projects;
@@ -165,6 +165,82 @@ pub async fn delete(
     )
     .await;
     Ok(path)
+}
+
+/// Record the human's review of one page.
+///
+/// Only the `verified` block changes. `if_version` is the version the human
+/// read: when the page moved on since, the review is refused, because what
+/// was read is not what would be stamped. Without it the review applies to
+/// whatever is stored when it lands.
+pub async fn review(
+    state: &AppState,
+    project_id: &str,
+    path: &str,
+    if_version: Option<&str>,
+) -> Result<Written> {
+    let path = page_path(path)?;
+    let Some(brain) = state
+        .knowledge
+        .open_existing(project_id, KNOWLEDGE_FILE)
+        .await?
+    else {
+        return Err(no_page(&path));
+    };
+    let bytes = brain.get(&path).await?.ok_or_else(|| no_page(&path))?;
+    stamp_review(state, &brain, project_id, path, bytes, if_version).await
+}
+
+/// Stamp the human's review onto the bytes that were read.
+///
+/// Apart from the read, this is the whole review. It is its own function
+/// because the promise it keeps is about the gap between that read and the
+/// write: a test hands it bytes that have since been replaced, which is the
+/// one way to stand in that gap without waiting for a race to open it.
+pub async fn stamp_review(
+    state: &AppState,
+    brain: &super::Brain,
+    project_id: &str,
+    path: String,
+    bytes: Vec<u8>,
+    if_version: Option<&str>,
+) -> Result<Written> {
+    let read_version = super::version(&bytes);
+    let text = String::from_utf8(bytes)
+        .map_err(|_| Error::InvalidArgument(format!("the page at '{path}' is not UTF-8 text")))?;
+    // A page whose frontmatter cannot be patched safely is refused, not guessed at.
+    let reviewed = review_frontmatter(&text, HUMAN, &crate::store::now_rfc3339())?;
+
+    // One comparison, made under the write lock: against the version the
+    // human read when there is one, and otherwise against the version this
+    // call patched, so a write that lands in between is never overwritten.
+    let expected = if_version.unwrap_or(&read_version);
+    let written = store(
+        state,
+        brain,
+        project_id,
+        "kb.review",
+        HUMAN,
+        path,
+        &reviewed,
+        Some(expected),
+    )
+    .await?;
+    signal(
+        state,
+        project_id,
+        HUMAN,
+        None,
+        format!("Reviewed knowledge base page {}", written.path),
+        json!({
+            "action": "kb_reviewed",
+            "store": "project",
+            "path": written.path,
+            "verified_by": HUMAN,
+        }),
+    )
+    .await;
+    Ok(written)
 }
 
 /// What a promotion copies, and what it adds to the page on the way.

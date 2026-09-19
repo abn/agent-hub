@@ -19,6 +19,7 @@ pub mod artifacts;
 pub mod auth;
 pub mod feed;
 pub mod inbox;
+pub mod kb;
 pub mod origin;
 pub mod problem;
 pub mod projects;
@@ -97,6 +98,19 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/projects/{id}/feed/seen", post(feed::seen))
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
+        .route("/api/v1/projects/{id}/kb/pages", get(kb::pages))
+        .route(
+            "/api/v1/projects/{id}/kb/pages/{*path}",
+            get(kb::page_get)
+                .put(kb::page_put)
+                .delete(kb::page_delete)
+                .post(kb::page_post),
+        )
+        .route("/api/v1/projects/{id}/kb/promote", post(kb::promote))
+        .route("/api/v1/projects/{id}/kb/history", get(kb::history))
+        .route("/api/v1/projects/{id}/kb/backlinks", get(kb::backlinks))
+        .route("/api/v1/projects/{id}/kb/lint", get(kb::lint))
+        .route("/api/v1/projects/{id}/kb/stats", get(kb::stats))
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}", get(sessions::detail))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))

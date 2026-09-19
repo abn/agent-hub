@@ -257,6 +257,25 @@ fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
 
+/// What one walk of a project's knowledge base derives.
+///
+/// Held per project, and served only for the generation it was computed at:
+/// every write to a knowledge base, from either surface, bumps the generation.
+#[derive(Debug, Clone)]
+pub struct KbCacheEntry {
+    pub generation: u64,
+    pub at: std::time::Instant,
+    /// When the walk ran, which is what a served entry reports, never the
+    /// time of the request that was handed it.
+    pub checked_at: String,
+    pub backlink_graph: crate::okf::BacklinkGraph,
+    /// Findings, each with the row of the page it names.
+    pub lint_findings: Vec<serde_json::Value>,
+    pub stats: serde_json::Value,
+    /// Every page and directory, by path.
+    pub meta_pages: Vec<serde_json::Value>,
+}
+
 /// The memo over the numbers that cost a syscall or a walk.
 ///
 /// SQL counts are not cached: they are indexed, they are cheap, and a cached
@@ -270,6 +289,7 @@ fn engine(err: turso::Error) -> Error {
 #[derive(Debug, Default)]
 pub struct StatsCache {
     entry: std::sync::Mutex<Option<Cached>>,
+    kb_cache: std::sync::Mutex<std::collections::HashMap<String, KbCacheEntry>>,
 }
 
 #[derive(Debug)]
@@ -286,6 +306,25 @@ impl StatsCache {
     /// A memo with nothing in it.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Retrieve fresh cached knowledge base derived data if generation matches.
+    pub fn get_kb(&self, project_id: &str, generation: u64) -> Option<KbCacheEntry> {
+        let cache = self.kb_cache.lock().ok()?;
+        let entry = cache.get(project_id)?;
+        if entry.generation == generation && entry.at.elapsed() < STATS_TTL {
+            Some(entry.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Update cached knowledge base derived data.
+    pub fn set_kb(&self, project_id: &str, mut entry: KbCacheEntry) {
+        entry.at = std::time::Instant::now();
+        if let Ok(mut cache) = self.kb_cache.lock() {
+            cache.insert(project_id.to_string(), entry);
+        }
     }
 
     /// The usage report, computed unless a fresh one for this generation is
