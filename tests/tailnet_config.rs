@@ -151,16 +151,105 @@ fn a_key_without_the_feature_is_refused() {
 #[cfg(feature = "tailnet")]
 #[tokio::test]
 async fn a_tailnet_without_a_key_is_refused() {
+    let temp = std::env::temp_dir().join(format!("agent-hub-tailnet-nokey-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
     let tailnet = Tailnet {
         auth_key: None,
         port: 8080,
-        state_dir: PathBuf::from("/tmp/agent-hub-tailnet-none"),
+        state_dir: temp.clone(),
         control_url: None,
     };
     let err = agent_hub::net::serve(&tailnet, axum::Router::new())
         .await
         .expect_err("no auth key");
-    assert!(matches!(err, agent_hub::error::Error::Config(_)));
+    assert!(
+        err.to_string()
+            .contains("the tailnet endpoint needs an auth key"),
+        "error message explains missing auth key: {err}"
+    );
+    assert!(
+        !temp.exists(),
+        "directory must not be created when key is missing"
+    );
+}
+
+#[cfg(feature = "tailnet")]
+#[test]
+fn acknowledge_unstable_sets_experiment_env() {
+    unsafe {
+        agent_hub::net::acknowledge_unstable();
+    }
+    assert_eq!(
+        std::env::var("TS_RS_EXPERIMENT").ok(),
+        Some("this_is_unstable_software".to_string())
+    );
+}
+
+#[cfg(feature = "tailnet")]
+#[tokio::test]
+async fn state_dir_permissions_and_keys_file() {
+    let temp = std::env::temp_dir().join(format!("agent-hub-tailnet-state-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let state_dir = temp.join("tailnet");
+    let tailnet = Tailnet {
+        auth_key: Some("tskey-auth-test".to_string()),
+        port: 8080,
+        state_dir: state_dir.clone(),
+        // A closed loopback port: the join is refused at once and nothing leaves
+        // the machine. A public host here would be dialled on every gate run.
+        control_url: Some(url::Url::parse("http://127.0.0.1:9").expect("url")),
+    };
+
+    // Serve will create the state_dir with 0o700 permissions and keys.json before
+    // attempting Device::new (which requires network and will block/fail).
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        agent_hub::net::serve(&tailnet, axum::Router::new()),
+    )
+    .await;
+
+    assert!(state_dir.exists(), "state directory created");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(&state_dir).expect("metadata");
+        assert_eq!(
+            meta.permissions().mode() & 0o777,
+            0o700,
+            "state directory is 0o700"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&temp);
+}
+
+// The one test that needs a real tailnet, so it is ignored by default. Run it
+// by hand with a reusable auth key:
+//   HUB_TAILNET=tskey-auth-... cargo test --features tailnet \
+//     --test tailnet_config -- --ignored live_tailnet_join
+// Serving does not return while it works, so still serving after the wait is
+// the pass; an error before then is the failure.
+#[cfg(feature = "tailnet")]
+#[ignore = "needs a live tailnet and an auth key in HUB_TAILNET"]
+#[tokio::test]
+async fn live_tailnet_join() {
+    let auth_key = std::env::var("HUB_TAILNET").expect("HUB_TAILNET must be set for the live join");
+    let state_dir =
+        std::env::temp_dir().join(format!("agent-hub-live-tailnet-{}", std::process::id()));
+    let tailnet = Tailnet {
+        auth_key: Some(auth_key),
+        port: 8080,
+        state_dir: state_dir.clone(),
+        control_url: None,
+    };
+    let served = tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        agent_hub::net::serve(&tailnet, axum::Router::new()),
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&state_dir);
+    if let Ok(ended) = served {
+        panic!("the tailnet endpoint stopped serving: {ended:?}");
+    }
 }
 
 #[test]
