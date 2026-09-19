@@ -244,7 +244,7 @@ function mountReply(state) {
 // address is replaced rather than pushed, so Back does not return to a card
 // for something that is gone.
 async function leave(state) {
-  history.replaceState(null, "", address({ ...state, open: "" }));
+  history.replaceState(history.state, "", address({ ...state, open: "" }));
   await render();
 }
 
@@ -284,7 +284,7 @@ export async function inbox(gen) {
   if (stale(gen)) return;
   if (state.open && !opened) {
     // Decided or answered elsewhere, or a link to something pruned.
-    history.replaceState(null, "", address({ ...state, open: "" }));
+    history.replaceState(history.state, "", address({ ...state, open: "" }));
     state.open = "";
   }
 
