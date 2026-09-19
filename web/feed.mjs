@@ -202,11 +202,31 @@ export function toggleKind(kind, projectId) {
 function repaintFold(projectId, visit, action) {
   const fold = main.querySelector(".feed-fold");
   if (!fold || fold.dataset.project !== projectId) return;
+  // A later page can hold more of today and yesterday, when those days are
+  // longer than one page. Those rows belong above the fold, so the recent days
+  // are redrawn from the held visit along with it.
+  const chips = main.querySelector(".feed-chips");
+  if (chips) {
+    let node = chips.nextElementSibling;
+    while (node && node !== fold) {
+      const gone = node;
+      node = node.nextElementSibling;
+      gone.remove();
+    }
+    const recent = byDay(visit.events).filter((group) => RECENT.includes(group.label));
+    chips.insertAdjacentHTML("afterend", dayGroups(recent, visit.baseline));
+  }
   fold.insertAdjacentHTML("afterend", foldHTML(projectId, visit));
   const next = fold.nextElementSibling;
   fold.remove();
+  // The fold is gone once everything was recent and nothing older is left, so
+  // focus goes to the last row that was just drawn rather than nowhere.
   const control =
-    next.querySelector(`[data-action="${action}"]`) || next.querySelector(".feed-earlier");
+    next?.querySelector(`[data-action="${action}"]`) ||
+    next?.querySelector(".feed-earlier") ||
+    [...main.querySelectorAll(".feed-row")].pop() ||
+    main;
+  if (!control.hasAttribute("tabindex")) control.setAttribute("tabindex", "-1");
   control.focus({ preventScroll: true });
 }
 
