@@ -510,6 +510,41 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
 }
 
 #[tokio::test]
+async fn public_artifact_page_snapshot_matches_modulo_whitespace() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let app = router(state);
+    let response = app
+        .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+        .await
+        .expect("request");
+    let body = text_body(response).await;
+
+    fn normalize_ws(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    let normalized = normalize_ws(&body);
+    let css = include_str!("../web/artifact-shell.css");
+    let normalized_css = normalize_ws(css);
+
+    assert!(
+        normalized.contains(&format!("<style> {normalized_css} </style>"))
+            || normalized.contains(&format!("<style>{normalized_css}</style>")),
+        "the rendered page includes the exact stylesheet modulo whitespace"
+    );
+    assert!(
+        normalized.starts_with("<!doctype html> <html lang=\"en\" data-theme=\"light\"> <head>")
+    );
+    assert!(normalized.contains("<link rel=\"stylesheet\" href=\"/tokens.css\">"));
+    assert!(normalized.contains("<script src=\"/vendor/marked.js\"></script> <script type=\"module\" src=\"/artifact-viewer.mjs\"></script> </head>"));
+    assert!(
+        normalized.contains("<iframe id=\"hub-frame\" title=\"Report\" sandbox=\"allow-scripts\"")
+    );
+}
+
+#[tokio::test]
 async fn host_escapes_an_authored_title_everywhere() {
     let state = state().await;
     let id = publish_public(

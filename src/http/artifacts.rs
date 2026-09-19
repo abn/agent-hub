@@ -790,6 +790,8 @@ fn locked_shell(
     )
 }
 
+const VIEWER_CSS: &str = include_str!("../../web/artifact-shell.css");
+
 /// The head shared by both shell variants: preview meta tags, the design
 /// tokens reused verbatim, a small chrome layer on those tokens, plus the
 /// vendor and viewer scripts. No inline scripts.
@@ -810,49 +812,7 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
          <link rel=\"stylesheet\" href=\"/tokens.css\">\n\
-         <style>\n\
-         body>header{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap;padding:var(--s-2) var(--s-4);background:var(--surface);border-bottom:1px solid var(--line)}}\n\
-         #hub-back{{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;border-radius:var(--r-1);color:var(--ink);cursor:pointer}}\n\
-         #hub-back[hidden]{{display:none}}\n\
-         #hub-back svg{{width:20px;height:20px}}\n\
-         .hub-titleblock{{flex:1;min-width:0}}\n\
-         body>header h1{{font-size:var(--t-15);font-weight:600;line-height:1.3;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
-         #hub-meta-line{{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}\n\
-         #hub-theme-toggle{{flex:none;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:0;border-radius:var(--r-1);color:var(--ink-2);cursor:pointer}}\n\
-         #hub-theme-toggle svg{{width:18px;height:18px}}\n\
-         #hub-forget{{flex:none;min-height:32px;padding:0 var(--s-2);font:inherit;font-size:var(--t-13);white-space:nowrap;background:transparent;border:1px solid var(--line-strong);border-radius:var(--r-1);color:var(--ink-2);cursor:pointer}}\n\
-         #hub-forget[hidden]{{display:none}}\n\
-         #hub-forget-note{{margin:0;padding:var(--s-3) var(--s-4) 0;font-size:12px;color:var(--ink-3)}}\n\
-         #hub-forget-note:empty{{display:none}}\n\
-         #hub-version-select{{font:inherit;min-height:36px;padding:.25rem .5rem;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink)}}\n\
-         #hub-picker-wrap{{display:flex;align-items:center;gap:var(--s-2);font-size:var(--t-13);color:var(--ink-2)}}\n\
-         main{{padding:0}}\n\
-         iframe#hub-frame{{width:100%;min-height:60vh;border:0;display:block}}\n\
-         .hub-gate{{margin:0 auto;max-width:40rem;padding:var(--s-6) var(--s-4)}}\n\
-         .hub-lock-tile{{width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--surface-2);border-radius:var(--r-2)}}\n\
-         .hub-lock-tile svg{{width:24px;height:24px}}\n\
-         .hub-gate h2{{font-size:var(--t-22);font-weight:600;margin:var(--s-4) 0 var(--s-2)}}\n\
-         .hub-gate p{{font-size:var(--t-15);line-height:1.45;color:var(--ink-2);margin:0 0 var(--s-3)}}\n\
-         #hub-unlock-form label{{display:block;font-size:var(--t-13);margin:0 0 var(--s-2)}}\n\
-         #hub-password{{width:100%;min-height:48px;font-size:17px;padding:0 var(--s-3);border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);box-sizing:border-box}}\n\
-         .hub-remember{{display:flex;align-items:center;gap:var(--s-2);margin:var(--s-3) 0;font-size:var(--t-13);color:var(--ink-2)}}\n\
-         .hub-remember input{{width:20px;height:20px;accent-color:var(--accent)}}\n\
-         #hub-unlock-form button[type=\"submit\"]{{width:100%;min-height:48px;font-size:17px;font-weight:600;border:0;border-radius:var(--r-1);background:var(--ink);color:var(--ink-inverse);cursor:pointer}}\n\
-         #hub-unlock-error{{font-size:12px;color:var(--danger)}}\n\
-         #hub-fingerprint{{font-family:var(--font-mono);font-size:12px;color:var(--ink-3)}}\n\
-         section#hub-comments{{margin:var(--s-4) auto;max-width:40rem;padding:0 var(--s-4)}}\n\
-         section#hub-comments h2{{font-size:var(--t-17);font-weight:600}}\n\
-         section#hub-comments ol{{list-style:none;margin:0;padding:0}}\n\
-         section#hub-comments li{{border-top:1px solid var(--line);padding:var(--s-3) 0}}\n\
-         .hub-comment-meta{{font-size:var(--t-13);color:var(--ink-3);margin:0 0 var(--s-2)}}\n\
-         .hub-comment-body{{margin:0 0 var(--s-2);overflow-wrap:anywhere}}\n\
-         .hub-comment-anchor{{font-size:var(--t-13);color:var(--ink-3);margin:0}}\n\
-         @media (pointer:coarse){{\n\
-         #hub-back,#hub-theme-toggle{{width:44px;height:44px}}\n\
-         #hub-forget{{min-height:44px}}\n\
-         #hub-version-select{{min-height:44px}}\n\
-         }}\n\
-         </style>\n\
+         <style>\n{VIEWER_CSS}</style>\n\
          <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
         id = artifact.id,
