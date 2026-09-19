@@ -2905,6 +2905,194 @@ def check_keys_between_projects(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def one_off_event(port: int, project: str, kind: str, summary: str) -> str:
+    """Land one event as the checks' agent and return its id."""
+    session = harness.feed_days_session(port)
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "signal_append",
+                "arguments": {"project_id": project, "kind": kind, "summary": summary},
+            },
+        },
+    )
+    feed = json.loads(harness.request(port, "GET", f"/api/v1/projects/{quote(project)}/feed?limit=5"))
+    return next(event["id"] for event in feed["events"] if event["summary"] == summary)
+
+
+def check_inbox_one_decision(page, watch: Watch, port: int, project: str) -> None:
+    """A second press while a decision is on its way decides nothing twice."""
+    watch.enter("inbox: one decision")
+    summary = "double decision check"
+    event_id = one_off_event(port, project, "approval", summary)
+    # Away and back, so the inbox is read again and holds the new item even
+    # when the check before this one left the inbox on screen.
+    page.evaluate("location.hash = '#/settings'")
+    settle(page, "location.hash === '#/settings' && !!document.querySelector('main h1')")
+    goto(page, "#/inbox", "Inbox")
+    row = f'main .inbox-item[data-id="{event_id}"]'
+    if not settle(page, f"!!document.querySelector({json.dumps(row)})"):
+        watch.fail("the seeded approval is not in the inbox")
+        try:
+            harness.request(port, "POST", f"/api/v1/approvals/{event_id}/decision", {"decision": "approve"})
+        except Exception:
+            pass
+        return
+    call = f"POST /api/v1/approvals/{event_id}/decision"
+    before = watch.count(call)
+
+    # The decision is held in the page for a moment, so the second press lands
+    # while the first request is still on its way.
+    page.evaluate(
+        "(() => { const send = window.fetch; window.__sendNow = () => { window.fetch = send; };"
+        " window.fetch = (url, options) => String(url).includes('/decision')"
+        " ? new Promise((go) => setTimeout(go, 700)).then(() => send(url, options)) : send(url, options); })()"
+    )
+    try:
+        page.click(f'{row} [data-action="approve"]')
+        page.wait_for_selector("dialog.dialog[open]")
+        page.click(".dialog-commit")
+        page.wait_for_selector("dialog.dialog", state="detached")
+        # The first request is still held. The row is still drawn, so press again.
+        if page.evaluate(f"!!document.querySelector({json.dumps(row + ' [data-action=\"approve\"]')})"):
+            page.click(f'{row} [data-action="approve"]')
+            page.wait_for_timeout(150)
+            if page.evaluate("!!document.querySelector('dialog.dialog[open]')"):
+                page.click(".dialog-commit")
+        settle(page, f"!document.querySelector({json.dumps(row + ' [data-action=\"approve\"]')})")
+        page.wait_for_timeout(900)
+    finally:
+        page.evaluate("window.__sendNow && window.__sendNow()")
+        # Whatever the screen did, the item does not outlive this check: later
+        # checks count the approvals that are left.
+        try:
+            harness.request(port, "POST", f"/api/v1/approvals/{event_id}/decision", {"decision": "approve"})
+        except Exception:
+            pass
+        goto(page, "#/inbox", "Inbox")
+    sent = watch.count(call) - before
+    if sent != 1:
+        watch.fail(f"two presses sent {sent} decisions, expected one")
+    said = page.evaluate("[...document.querySelectorAll('.toast-text')].map((n) => n.textContent).join(' | ')")
+    if "Nothing changed" in said or "already" in said:
+        watch.fail(f"an approval that went through was reported as {said!r}")
+    watch.drain_rejections()
+
+
+def check_inbox_row_opens(page, watch: Watch) -> None:
+    """The whole row opens its item, not only the words of its title."""
+    watch.enter("inbox: the row is the target")
+    goto(page, "#/inbox", "Inbox")
+    if not settle(page, "!!document.querySelector('main .inbox-row .title a')"):
+        watch.fail("the inbox has no row to open")
+        return
+    hit = page.evaluate(
+        "(() => { const row = document.querySelector('main .inbox-row');"
+        " const link = row.querySelector('.title a'); const box = row.getBoundingClientRect();"
+        " const glyph = row.querySelector('svg, .glyph'); const g = (glyph || row).getBoundingClientRect();"
+        " const at = (x, y) => { const el = document.elementFromPoint(x, y); return !!el && (el === link || link.contains(el)); };"
+        " const foot = row.querySelector('.inbox-project').getBoundingClientRect();"
+        " return { glyph: at(g.left + g.width / 2, g.top + g.height / 2),"
+        "  foot: at(foot.left + 2, foot.top + foot.height / 2),"
+        "  low: at(box.left + box.width / 2, box.bottom - 3) }; })()"
+    )
+    if not (hit["glyph"] and hit["foot"] and hit["low"]):
+        watch.fail(f"a press on the row misses its link: {hit}")
+    buttons = page.evaluate(
+        "(() => { const b = document.querySelector('main .inbox-row .inbox-acts button');"
+        " if (!b) return true; const r = b.getBoundingClientRect();"
+        " const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
+        " return el === b || b.contains(el); })()"
+    )
+    if not buttons:
+        watch.fail("the row's link covers the row's own buttons")
+    watch.drain_rejections()
+
+
+def check_settings_guard_history(page, watch: Watch, project: str) -> None:
+    """Refusing to leave does not rewrite the history the reader came through."""
+    watch.enter("project settings: the guard and Back")
+    sessions = f"#/projects/{quote(project)}/sessions"
+    feed = f"#/projects/{quote(project)}/feed"
+    settings = f"#/projects/{quote(project)}/settings"
+    for stop in (sessions, feed, settings):
+        page.evaluate(f"location.hash = {stop!r}")
+        page.wait_for_timeout(250)
+    if not settle(page, "!!document.querySelector('main form input')"):
+        watch.fail("the settings form did not paint")
+        return
+    page.fill("main form input", "guard history edit")
+    for _ in range(2):
+        page.evaluate("history.back()")
+        page.wait_for_selector("dialog.dialog[open]")
+        page.click(".dialog-safe")
+        page.wait_for_selector("dialog.dialog", state="detached")
+        page.wait_for_timeout(150)
+    kept = page.evaluate("[location.hash, (document.querySelector('main form input') || {}).value]")
+    if kept != [settings, "guard history edit"]:
+        watch.fail(f"keeping the edits left {kept}")
+    page.evaluate("history.back()")
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click(".dialog-commit")
+    if not settle(page, f"location.hash === {feed!r}"):
+        watch.fail(f"discarding went to {page.evaluate('location.hash')!r}, expected the feed")
+        return
+    page.evaluate("history.back()")
+    if not settle(page, f"location.hash === {sessions!r}"):
+        watch.fail(f"Back from the feed went to {page.evaluate('location.hash')!r}, expected the sessions")
+    watch.drain_rejections()
+
+
+def check_feed_long_today(browser, watch: Watch, port: int) -> None:
+    """More recent events than one page holds are all reachable."""
+    watch.enter("feed: a long today")
+    project = "feed-long"
+    harness.request(port, "POST", "/api/v1/projects", {"id": project, "display_name": "Feed long"})
+    session = harness.feed_days_session(port)
+    for index in range(130):
+        harness.mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "signal_append",
+                    "arguments": {"project_id": project, "kind": "signal", "summary": f"long today {index}"},
+                },
+            },
+        )
+    page = watch.page
+    page.evaluate(f"location.hash = '#/projects/{project}/feed'")
+    if not settle(page, "document.querySelectorAll('main .feed-row').length >= 100"):
+        watch.fail("the long feed did not paint its first page")
+        return
+    for _ in range(3):
+        control = page.evaluate(
+            "(() => { const b = document.querySelector('main .feed-earlier[aria-expanded=\"false\"], main .feed-older');"
+            " if (!b) return false; b.focus(); b.click(); return true; })()"
+        )
+        if not control:
+            break
+        page.wait_for_timeout(600)
+    rows = page.evaluate("document.querySelectorAll('main .feed-row').length")
+    if rows != 130:
+        watch.fail(f"{rows} of 130 events are on the screen after opening everything")
+    focus = page.evaluate("document.activeElement.tagName")
+    if focus == "BODY":
+        watch.fail("opening the older events dropped focus onto the page")
+    said = page.evaluate("[...document.querySelectorAll('.toast-text')].map((n) => n.textContent).join(' | ')")
+    if "Could not" in said or "null" in said:
+        watch.fail(f"opening the older events reported {said!r}")
+    watch.drain_rejections()
+
+
 def check_lineage_handoff(page, watch: Watch, project: str) -> None:
     """The picked-up session shows its owner, lineage and handoff note."""
     watch.enter("session: owner, lineage, handoff")
@@ -4585,6 +4773,8 @@ def run() -> int:
             check_inbox_swipe(page, watch)
             check_inbox_detail(page, watch)
             check_inbox_decline(page, watch)
+            check_inbox_row_opens(page, watch)
+            check_inbox_one_decision(page, watch, port, project)
             check_inbox_refresh(page, watch)
             check_inbox_mark_all(page, watch)
             check_inbox_empty(page, watch)
@@ -4631,7 +4821,9 @@ def run() -> int:
             check_home_fields(page, watch)
             check_home_quiet(page, watch)
             check_project_settings(page, watch, port)
+            check_settings_guard_history(page, watch, project)
             check_feed_screen(browser, watch, port)
+            check_feed_long_today(browser, watch, port)
             # Last: it seeds sixty more events, which every check above would
             # have to look past.
             check_tab_budget(page, watch, port)

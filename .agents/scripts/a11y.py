@@ -137,6 +137,10 @@ def run() -> int:
                     else:
                         page.evaluate(f"location.hash = '#/{route}'")
                     page.wait_for_timeout(300)
+                    # A state that did not come up would be audited as whatever
+                    # screen is there instead, and pass.
+                    if route == INBOX_DETAIL and not page.query_selector("main .inbox-detail"):
+                        failures.append(f"{theme} #{route}: the item's card did not open")
                     if route == HOME_QUIET:
                         page.unroute(HOME_REQUEST)
                     rendered = page.evaluate(
