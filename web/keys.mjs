@@ -271,8 +271,11 @@ function repainted() {
   }
   const at = list.findIndex((row, index) => identify(row, index) === selected);
   if (at < 0) {
+    // The remembered row is not in this list (another project's, or pruned),
+    // so the list gets its way in back rather than none at all.
     selected = "";
     following = false;
+    place(list, 0, false);
     return;
   }
   const take = following;

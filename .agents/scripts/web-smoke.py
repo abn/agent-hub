@@ -630,14 +630,22 @@ def check_search_rows_take_keys(page, watch: Watch) -> None:
     targets = page.evaluate(
         "[...document.querySelectorAll('main .search-row a[href]')].map((a) => a.getAttribute('href'))"
     )
-    for key in ("j", "j"):
+    # A painted list parks its selection on the first result, so two presses
+    # down from there are the third.
+    parked = page.evaluate(
+        "[...document.querySelectorAll('main .search-row')].findIndex((row) => row.tabIndex === 0)"
+    )
+    if parked != 0:
+        watch.fail(f"the results park their selection on row {parked}, expected the first")
+        return
+    for key in ("j", "k", "j"):
         page.keyboard.press(key)
         page.wait_for_timeout(120)
     at = page.evaluate(
         "[...document.querySelectorAll('main .search-row')].indexOf(document.activeElement)"
     )
     if at != 1:
-        watch.fail(f"down, down put focus on result {at}, expected 1")
+        watch.fail(f"down, up, down put focus on result {at}, expected 1")
         return
     page.keyboard.press("Enter")
     if not settle(page, f"location.hash === {json.dumps(targets[1])}", timeout=3000):
@@ -3806,9 +3814,16 @@ def check_feed_row_keys(page, watch: Watch) -> None:
         return
     settle(page, f"{FEED_ROWS} > 6")
     page.evaluate("document.activeElement.blur()")
-    # The painted list parks its selection on the first row, so six presses
-    # cross the six recent rows and land on the first of the older days.
-    for _ in range(6):
+    # The list keeps one row in the tab ring: the first, or the one the reader
+    # last chose on this screen. From there the presses cross what is left of
+    # the six recent rows and land on the first of the older days.
+    parked = page.evaluate(
+        "[...document.querySelectorAll('main .row')].findIndex((row) => row.tabIndex === 0)"
+    )
+    if parked < 0 or parked > 5:
+        watch.fail(f"the feed parks its selection on row {parked}, expected one of the recent rows")
+        return
+    for _ in range(6 - parked):
         page.keyboard.press("j")
         page.wait_for_timeout(80)
     row = page.evaluate(SELECTED_TAB)
