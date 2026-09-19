@@ -38,6 +38,7 @@ ROUTES = [
     # A project with no events, so the feed's empty state and its action are
     # audited as well as the feed that has rows.
     f"projects/{harness.FEED_EMPTY_PROJECT}/feed",
+    "storage-dialog",
 ]
 # The session detail needs a project and a session id from the seeded hub;
 # every other route is addressed by its bare hash.
@@ -48,6 +49,9 @@ HOME_QUIET = "home-quiet"
 HOME_REQUEST = "**/api/v1/home"
 # The project settings screen lives under the seeded project's own address.
 PROJECT_SETTINGS = "project-settings"
+# The review dialog open over Storage, so the dialog's own text is audited:
+# a closed dialog is not in the page for axe to read.
+STORAGE_DIALOG = "storage-dialog"
 # The inbox's medium card is addressed by the item it opens.
 INBOX_DETAIL = "inbox-detail"
 
@@ -121,6 +125,11 @@ def run() -> int:
                         page.evaluate(
                             "location.hash = '#/projects/%s/settings'" % seeded["project_id"]
                         )
+                    elif route == STORAGE_DIALOG:
+                        page.evaluate("location.hash = '#/storage'")
+                        page.wait_for_selector("main .storage-review")
+                        page.click("main .storage-review")
+                        page.wait_for_selector("dialog.dialog[open]")
                     elif route == INBOX_DETAIL:
                         page.evaluate(
                             "location.hash = '#/inbox?open=%s'" % seeded["question_id"]
@@ -143,6 +152,8 @@ def run() -> int:
                         + json.dumps(TAGS)
                         + "}}).then(r => r.violations.map(v => ({id: v.id, impact: v.impact, nodes: v.nodes.length})))"
                     )
+                    if route == STORAGE_DIALOG:
+                        page.keyboard.press("Escape")
                     for violation in violations:
                         failures.append(
                             f"{theme} #{route}: {violation['id']} "

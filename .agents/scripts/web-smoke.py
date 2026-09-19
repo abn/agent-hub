@@ -2820,6 +2820,83 @@ def check_audit_row(page, watch: Watch, project: str, session_id: str) -> None:
     watch.drain_rejections()
 
 
+def check_session_times(page, watch: Watch, project: str, session_id: str) -> None:
+    """A session's times read as the app's compact relative form, not a date.
+
+    The list row and the Started card are given the server's ISO strings; the
+    compact form of a session seeded seconds ago is what `relative()` makes of
+    that instant, and a short date there means the string was never parsed.
+    """
+    watch.enter("sessions: times are relative")
+    detail = json.loads(harness.request(watch.port, "GET", f"/api/v1/sessions/{quote(session_id)}"))
+    goto(page, f"#/projects/{quote(project)}/sessions", "Checks")
+    if not settle(page, "!!document.querySelector('main .session-row .meta')"):
+        watch.fail("the sessions list has no row meta to read")
+        return
+    expected = page.evaluate(
+        "(iso) => import('/time.mjs').then((m) => m.relative(Date.parse(iso)))",
+        detail["last_activity"],
+    )
+    meta = page.evaluate(
+        "(id) => { const link = document.querySelector(`main .session-row a[href*=\"${id}\"]`);"
+        " return link ? link.querySelector('.meta').textContent.trim() : ''; }",
+        session_id,
+    )
+    if not meta.endswith(expected):
+        watch.fail(f"the row's time reads {meta.rsplit('·', 1)[-1].strip()!r}, expected {expected!r}")
+    goto(page, f"#/session?project={quote(project)}&id={quote(session_id)}", harness.SESSION_NAME)
+    started = page.evaluate(
+        "(() => { const card = [...document.querySelectorAll('main .stat-card')]"
+        ".find((c) => c.textContent.includes('Started'));"
+        " return card ? card.querySelector('.stat-value').textContent.trim() : ''; })()"
+    )
+    wanted = page.evaluate(
+        "(iso) => import('/time.mjs').then((m) => m.relative(Date.parse(iso)))",
+        detail["created_at"],
+    )
+    if started != wanted:
+        watch.fail(f"the Started card reads {started!r}, expected {wanted!r}")
+    watch.drain_rejections()
+
+
+def check_problem_fields(page, watch: Watch) -> None:
+    """A refused request keeps the problem's status and code, not only its words."""
+    watch.enter("api: a problem keeps its status and code")
+    # The 404 is what the check asks for, so it is not a fault of the screen.
+    armed, watch.armed = watch.armed, False
+    try:
+        seen = page.evaluate(
+            "() => import('/api.mjs').then((m) => m.api('/api/v1/sessions/no-such-session'))"
+            ".then(() => null, (e) => ({ status: e.status, code: e.code, message: e.message }))"
+        )
+    finally:
+        watch.armed = armed
+    if not seen:
+        watch.fail("an unknown session did not refuse")
+    elif seen.get("status") != 404 or not seen.get("code"):
+        watch.fail(f"the refusal carries status {seen.get('status')!r} and code {seen.get('code')!r}")
+    watch.drain_rejections()
+
+
+def check_keys_between_projects(page, watch: Watch, project: str) -> None:
+    """Moving from one project's list to another's keeps one way into the list."""
+    watch.enter("keys: from one project to another")
+    goto(page, f"#/projects/{quote(project)}/sessions", "Checks")
+    if not settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')"):
+        watch.fail("the first project's list has no stop to start from")
+        return
+    page.keyboard.press("j")
+    page.evaluate(f"location.hash = '#/projects/{quote(harness.LINEAGE_PROJECT)}/sessions'")
+    if not settle(page, "location.hash.includes('lineage') && !!document.querySelector('main .session-row')"):
+        watch.fail("the second project's sessions did not paint")
+        return
+    page.wait_for_timeout(150)
+    stops = page.evaluate("document.querySelectorAll('main .row[tabindex=\"0\"]').length")
+    if stops != 1:
+        watch.fail(f"the second project's list has {stops} rows in the tab ring, expected 1")
+    watch.drain_rejections()
+
+
 def check_lineage_handoff(page, watch: Watch, project: str) -> None:
     """The picked-up session shows its owner, lineage and handoff note."""
     watch.enter("session: owner, lineage, handoff")
@@ -4506,6 +4583,9 @@ def run() -> int:
             check_stat_cards(page, watch, project, seeded["session_id"])
             check_action_bar(page, watch, project, seeded["session_id"])
             check_audit_row(page, watch, project, seeded["session_id"])
+            check_session_times(page, watch, project, seeded["session_id"])
+            check_problem_fields(page, watch)
+            check_keys_between_projects(page, watch, project)
             check_lineage_handoff(page, watch, project)
             check_session_end_flips_row(page, watch, project)
             check_prune(page, watch, project, seeded["session_id"])
