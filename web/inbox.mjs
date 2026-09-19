@@ -349,7 +349,21 @@ export async function answer(id, button) {
   reply.focus();
 }
 
+// The ids a decision is on its way for. The row stays drawn until the hub
+// answers, so a second press in that moment would ask and send again, and
+// the refusal of the second would be the last thing the reader is told.
+const deciding = new Set();
+
 async function decide(id, decision) {
+  deciding.add(id);
+  try {
+    await send(id, decision);
+  } finally {
+    deciding.delete(id);
+  }
+}
+
+async function send(id, decision) {
   try {
     await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
       method: "POST",
@@ -367,6 +381,7 @@ async function decide(id, decision) {
 // An approval is a decision. It is recorded on the feed and leaves the waiting
 // queue, so the dialog names what is approved and the toast states the result.
 export async function approve(id, summary) {
+  if (deciding.has(id)) return;
   const confirmed = await confirmAction({
     title: summary ? `Approve "${summary}"?` : "Approve this action?",
     body: "Your decision is recorded on the feed and resolves the waiting item.",
@@ -381,6 +396,7 @@ export async function approve(id, summary) {
 
 // The other answer to the same question, asked the same way.
 async function declineApproval(id, summary) {
+  if (deciding.has(id)) return;
   const confirmed = await confirmAction({
     title: summary ? `Decline "${summary}"?` : "Decline this action?",
     body: "Your decision is recorded on the feed and resolves the waiting item.",
