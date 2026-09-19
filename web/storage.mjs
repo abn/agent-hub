@@ -88,6 +88,11 @@ function head(usage) {
   return box;
 }
 
+// The share of the volume under which the summary bar stops being drawn
+// against the volume, and what the card says when it does.
+const SLIVER = 0.01;
+const SLIVER_NOTE = "Under 1% of the volume is used. The bar is drawn against what is used.";
+
 function summary(usage) {
   const card = el("section", "card storage-summary");
   card.setAttribute("aria-label", "Used");
@@ -104,14 +109,19 @@ function summary(usage) {
   const parts = KINDS.map((kind) => [kind, usage.by_kind?.[kind] ?? 0]);
   const said = parts.map(([kind, bytes]) => `${kind} ${formatBytes(bytes)}`);
   // Against the volume when it can be measured, so the empty track is the
-  // room that is left; against what is used when it cannot.
-  const bar = stackedBar(parts, measured ? usage.capacity_bytes : usage.used_bytes);
+  // room that is left; against what is used when it cannot. A small hub on a
+  // large volume would draw no segment at all at that scale, so under one
+  // part in a hundred the bar is drawn against what is used, and says so. No
+  // segment is ever widened: every bar is to the scale it names.
+  const sliver = measured && usage.used_bytes > 0 && usage.used_bytes < usage.capacity_bytes * SLIVER;
+  const bar = stackedBar(parts, measured && !sliver ? usage.capacity_bytes : usage.used_bytes);
   bar.setAttribute("role", "img");
   bar.setAttribute(
     "aria-label",
     `${formatBytes(usage.used_bytes)} used` +
       (measured ? ` of ${formatBytes(usage.capacity_bytes)}` : "") +
-      `: ${said.join(", ")}`,
+      `: ${said.join(", ")}` +
+      (sliver ? `. ${SLIVER_NOTE}` : ""),
   );
 
   const legend = el("ul", "storage-legend");
@@ -124,7 +134,9 @@ function summary(usage) {
     item.append(swatch, said[at]);
     legend.appendChild(item);
   });
-  card.append(figures, bar, legend);
+  card.append(figures, bar);
+  if (sliver) card.appendChild(el("p", "storage-scale", SLIVER_NOTE));
+  card.appendChild(legend);
   return card;
 }
 

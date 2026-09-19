@@ -989,6 +989,7 @@ STORAGE_DRAWN = (
     "  empty: text(root.querySelector('.empty-state .empty-title')),"
     "  summary: summary && { used: text(summary.querySelector('.storage-used')),"
     "   capacity: text(summary.querySelector('.storage-capacity')),"
+    "   scale: text(summary.querySelector('.storage-scale')),"
     "   bar: bar(summary.querySelector('.storage-bar')),"
     "   legend: [...summary.querySelectorAll('.storage-legend li')].map((li) => ({"
     "    kind: li.dataset.kind, text: text(li) })) },"
@@ -1163,6 +1164,42 @@ def check_storage_bar(page, watch: Watch) -> None:
         watch.fail(f"the project id reads {drawn['rows'] and drawn['rows'][0]['name']!r}")
     if drawn["review"] or any(row["prune"] for row in drawn["rows"]):
         watch.fail("a prune is offered with nothing to prune")
+
+    if drawn["summary"]["scale"]:
+        watch.fail(f"a bar drawn against the volume says {drawn['summary']['scale']!r}")
+
+    # Three megabytes on a six terabyte volume: to the volume's scale no
+    # segment is a pixel wide. The bar is then drawn against what is used, to
+    # that scale, and says which scale it is in words and in its own name.
+    watch.enter("storage: a small hub on a large volume")
+    small = dict(
+        STORAGE_FIXTURE,
+        used_bytes=3_340_000,
+        capacity_bytes=6_640_000_000_000,
+        free_bytes=6_000_000_000_000,
+        by_kind={"events": 2_090_000, "sessions": 1_250_000, "artifacts": 0, "knowledge": 0},
+    )
+    usage, drawn = open_storage(page, small)
+    if not drawn or not drawn["summary"]:
+        watch.fail("the storage screen draws no summary card")
+    else:
+        bar = drawn["summary"]["bar"]
+        if not bar or not bar["segments"] or max(seg["width"] for seg in bar["segments"]) < 1:
+            watch.fail(f"a small hub draws a bar with nothing in it: {bar and bar['segments']}")
+        storage_shares(
+            watch,
+            "the small hub's summary",
+            bar,
+            [(kind, usage["by_kind"][kind]) for kind in STORAGE_KINDS],
+            usage["used_bytes"],
+        )
+        if drawn["summary"]["capacity"] != f"of {storage_bytes(usage['capacity_bytes'])}":
+            watch.fail(f"the small hub's capacity reads {drawn['summary']['capacity']!r}")
+        said = drawn["summary"]["scale"] or ""
+        if "Under 1% of the volume" not in said or "against what is used" not in said:
+            watch.fail(f"the bar changed its scale and the card says {said!r}")
+        if bar and "against what is used" not in (bar["label"] or ""):
+            watch.fail(f"the bar changed its scale and its text alternative says {bar['label']!r}")
 
     watch.enter("storage: a volume that cannot be measured")
     unmeasured = dict(STORAGE_FIXTURE, capacity_bytes=None, free_bytes=None)

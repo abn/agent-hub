@@ -16,6 +16,8 @@ software release notes and the repository changelog.
 * **Update**: The Search screen sends the query as typed and the hub makes it
   safe for the index. This replaces the earlier note that the screen sends only
   the words of a query.
+* **Update**: The storage summary bar is drawn against what is used when under
+  1% of the volume is used, and says so; it stays to scale either way.
 * **Update**: The [contributor guide](contribution/guide.md) describes the
   Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
   accessibility walk covers at its two widths.
