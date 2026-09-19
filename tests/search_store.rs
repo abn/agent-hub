@@ -1,35 +1,14 @@
 //! Search tests: the query path over the corpus written by the other stores.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::error::ErrorCode;
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{NewEvent, append};
 use agent_hub::store::search::{self, SearchDoc, SearchQuery};
-use agent_hub::store::{migrate, open_engine};
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn open(dir: &std::path::Path) -> turso::Database {
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::open;
+use common::temp::TempDir;
 
 async fn seed(db: &turso::Database, dir: &std::path::Path) {
     let event = NewEvent {
@@ -75,7 +54,7 @@ fn q(text: &str) -> SearchQuery {
 
 #[tokio::test]
 async fn finds_feed_and_artifact_content() {
-    let dir = temp_dir("search");
+    let dir = TempDir::new("search");
     let db = open(&dir).await;
     seed(&db, &dir).await;
 
@@ -91,7 +70,7 @@ async fn finds_feed_and_artifact_content() {
 
 #[tokio::test]
 async fn filters_by_type_and_project() {
-    let dir = temp_dir("search-filter");
+    let dir = TempDir::new("search-filter");
     let db = open(&dir).await;
     seed(&db, &dir).await;
 
@@ -127,7 +106,7 @@ async fn filters_by_type_and_project() {
 
 #[tokio::test]
 async fn empty_query_is_rejected() {
-    let dir = temp_dir("search-empty");
+    let dir = TempDir::new("search-empty");
     let db = open(&dir).await;
     let err = search::query(&db, &q("   ")).await.expect_err("reject");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
@@ -135,7 +114,7 @@ async fn empty_query_is_rejected() {
 
 #[tokio::test]
 async fn unknown_type_is_rejected() {
-    let dir = temp_dir("search-type");
+    let dir = TempDir::new("search-type");
     let db = open(&dir).await;
     let err = search::query(
         &db,
@@ -154,7 +133,7 @@ async fn unknown_type_is_rejected() {
 
 #[tokio::test]
 async fn ranking_prefers_the_higher_term_frequency() {
-    let dir = temp_dir("search-rank");
+    let dir = TempDir::new("search-rank");
     let db = open(&dir).await;
 
     // Older, but mentions the term three times.
@@ -247,7 +226,7 @@ async fn plant(db: &turso::Database, doc_id: &str, project_id: &str, kind: &str,
 
 #[tokio::test]
 async fn a_project_scope_reaches_below_the_ranked_prefix() {
-    let dir = temp_dir("search-scope-deep");
+    let dir = TempDir::new("search-scope-deep");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 600).await;
     plant(&db, "wanted", "quiet", "feed", "needle").await;
@@ -270,7 +249,7 @@ async fn a_project_scope_reaches_below_the_ranked_prefix() {
 
 #[tokio::test]
 async fn a_type_scope_reaches_below_the_ranked_prefix() {
-    let dir = temp_dir("search-type-deep");
+    let dir = TempDir::new("search-type-deep");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 600).await;
     plant(&db, "wanted", "noisy", "brain", "needle").await;
@@ -308,7 +287,7 @@ fn order(hits: &[search::SearchHit]) -> Vec<&str> {
 
 #[tokio::test]
 async fn a_project_scope_keeps_relevance_order() {
-    let dir = temp_dir("search-scope-rank");
+    let dir = TempDir::new("search-scope-rank");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 20).await;
     plant_rising(&db, "quiet", "feed").await;
@@ -330,7 +309,7 @@ async fn a_project_scope_keeps_relevance_order() {
 
 #[tokio::test]
 async fn a_type_scope_keeps_relevance_order() {
-    let dir = temp_dir("search-type-rank");
+    let dir = TempDir::new("search-type-rank");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 20).await;
     plant_rising(&db, "noisy", "brain").await;
@@ -352,7 +331,7 @@ async fn a_type_scope_keeps_relevance_order() {
 
 #[tokio::test]
 async fn a_confined_search_keeps_relevance_order() {
-    let dir = temp_dir("search-confined-rank");
+    let dir = TempDir::new("search-confined-rank");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 20).await;
     plant_rising(&db, "quiet", "feed").await;
@@ -376,7 +355,7 @@ async fn a_confined_search_keeps_relevance_order() {
 
 #[tokio::test]
 async fn the_page_is_capped_at_the_search_limit() {
-    let dir = temp_dir("search-cap");
+    let dir = TempDir::new("search-cap");
     let db = open(&dir).await;
     bury(&db, "noisy", "feed", 150).await;
 
@@ -397,7 +376,7 @@ async fn the_page_is_capped_at_the_search_limit() {
 
 #[tokio::test]
 async fn the_knowledge_base_is_a_corpus_family_of_its_own() {
-    let dir = temp_dir("search-kb");
+    let dir = TempDir::new("search-kb");
     let db = open(&dir).await;
     plant(&db, "kb:quiet:/fs/runbook.md", "quiet", "kb", "needle").await;
     plant(&db, "brain:one:/fs/note.md", "quiet", "brain", "needle").await;
@@ -454,7 +433,7 @@ async fn plant_in_session(
 
 #[tokio::test]
 async fn a_session_scope_returns_only_that_session_in_relevance_order() {
-    let dir = temp_dir("search-session-scope");
+    let dir = TempDir::new("search-session-scope");
     let db = open(&dir).await;
     bury(&db, "proj", "feed", 20).await;
     plant_in_session(
@@ -497,7 +476,7 @@ async fn a_session_scope_returns_only_that_session_in_relevance_order() {
 
 #[tokio::test]
 async fn a_session_scope_is_confined_like_every_other() {
-    let dir = temp_dir("search-session-confined");
+    let dir = TempDir::new("search-session-confined");
     let db = open(&dir).await;
     // One session name, two projects: the reachable one answers and the other
     // does not, so the scope never widens what a caller may see.
@@ -527,7 +506,7 @@ async fn a_session_scope_is_confined_like_every_other() {
 
 #[tokio::test]
 async fn hostile_search_queries_do_not_error() {
-    let dir = temp_dir("search-hostile");
+    let dir = TempDir::new("search-hostile");
     let db = open(&dir).await;
     seed(&db, &dir).await;
 

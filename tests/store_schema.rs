@@ -1,10 +1,11 @@
 //! Store schema tests: migration version, tables, and the full-text index.
 
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::store::schema::MIGRATIONS;
 use agent_hub::store::{migrate, open_engine};
+
+mod common;
+
+use common::temp::TempDir;
 
 const TABLES: &[&str] = &[
     "projects",
@@ -22,19 +23,9 @@ const TABLES: &[&str] = &[
     "project_feed_cursors",
 ];
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
 #[tokio::test]
 async fn migrate_creates_schema_and_search_index() {
-    let dir = temp_dir("store-schema");
+    let dir = TempDir::new("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
     assert_eq!(version, 9);
@@ -188,7 +179,7 @@ async fn migrate_creates_schema_and_search_index() {
 
 #[tokio::test]
 async fn migration_four_backfills_version_history() {
-    let dir = temp_dir("store-schema-v4");
+    let dir = TempDir::new("store-schema-v4");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 
@@ -278,7 +269,7 @@ async fn migration_four_backfills_version_history() {
 
 #[tokio::test]
 async fn migration_seven_rekeys_sessions_without_losing_rows() {
-    let dir = temp_dir("store-schema-v7");
+    let dir = TempDir::new("store-schema-v7");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 
@@ -408,7 +399,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
 
 #[tokio::test]
 async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
-    let dir = temp_dir("store-schema-owner-key");
+    let dir = TempDir::new("store-schema-owner-key");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
     let conn = db.connect().expect("connect");
@@ -458,7 +449,7 @@ async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
 
 #[tokio::test]
 async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
-    let dir = temp_dir("store-schema-v8");
+    let dir = TempDir::new("store-schema-v8");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 
@@ -578,7 +569,7 @@ async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
 
 #[tokio::test]
 async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
-    let dir = temp_dir("store-schema-v9");
+    let dir = TempDir::new("store-schema-v9");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 
@@ -684,7 +675,7 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
 
 #[tokio::test]
 async fn migration_six_clears_indexed_audit_events() {
-    let dir = temp_dir("store-schema-v6");
+    let dir = TempDir::new("store-schema-v6");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 
@@ -757,7 +748,7 @@ async fn migration_six_clears_indexed_audit_events() {
 
 #[tokio::test]
 async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
-    let dir = temp_dir("store-schema-v9-cursors");
+    let dir = TempDir::new("store-schema-v9-cursors");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let conn = db.connect().expect("connect");
 

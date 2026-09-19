@@ -1,36 +1,13 @@
 //! The identity store: agents and their personal spaces, token lifecycle, and
 //! grants.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::error::ErrorCode;
 use agent_hub::principal::Trust;
-use agent_hub::store::{identity, migrate, open_engine, projects};
+use agent_hub::store::{identity, projects};
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn db(tag: &str) -> turso::Database {
-    let dir = temp_dir(tag);
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::fresh;
 
 async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
     let conn = db.connect().expect("connect");
@@ -51,7 +28,7 @@ async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
 
 #[tokio::test]
 async fn create_agent_creates_its_personal_space() {
-    let db = db("identity-create").await;
+    let db = fresh("identity-create").await;
     let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop", Trust::Trusted)
         .await
         .expect("create");
@@ -72,7 +49,7 @@ async fn create_agent_creates_its_personal_space() {
 
 #[tokio::test]
 async fn create_agent_keeps_the_given_trust_and_rejects_a_duplicate() {
-    let db = db("identity-trust").await;
+    let db = fresh("identity-trust").await;
     let agent = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
         .await
         .expect("create");
@@ -86,7 +63,7 @@ async fn create_agent_keeps_the_given_trust_and_rejects_a_duplicate() {
 
 #[tokio::test]
 async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
-    let db = db("identity-tokens").await;
+    let db = fresh("identity-tokens").await;
     let agent = identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
         .await
         .expect("create");
@@ -156,7 +133,7 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
 
 #[tokio::test]
 async fn grants_are_upserted_and_removed() {
-    let db = db("identity-grants").await;
+    let db = fresh("identity-grants").await;
     identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
         .await
         .expect("create");
@@ -204,7 +181,7 @@ async fn grants_are_upserted_and_removed() {
 
 #[tokio::test]
 async fn set_trust_changes_the_level() {
-    let db = db("identity-set-trust").await;
+    let db = fresh("identity-set-trust").await;
     identity::create_agent(&db, "worker", "Worker", Trust::Trusted)
         .await
         .expect("create");
@@ -230,7 +207,7 @@ async fn set_trust_changes_the_level() {
 
 #[tokio::test]
 async fn agent_ids_and_names_are_validated() {
-    let db = db("identity-validate").await;
+    let db = fresh("identity-validate").await;
 
     let empty_id = identity::create_agent(&db, "  ", "Worker", Trust::Trusted)
         .await
@@ -245,7 +222,7 @@ async fn agent_ids_and_names_are_validated() {
 
 #[tokio::test]
 async fn two_agents_get_distinct_spaces() {
-    let db = db("identity-spaces").await;
+    let db = fresh("identity-spaces").await;
     let first = identity::create_agent(&db, "a", "A", Trust::Trusted)
         .await
         .expect("create a");
@@ -257,7 +234,7 @@ async fn two_agents_get_distinct_spaces() {
 
 #[tokio::test]
 async fn a_grant_needs_a_real_project_and_agent() {
-    let db = db("identity-grant-missing").await;
+    let db = fresh("identity-grant-missing").await;
     identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
         .await
         .expect("create");

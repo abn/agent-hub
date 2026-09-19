@@ -4,31 +4,14 @@
 //! full-text search and concurrent writes, and that an AgentFS brain file
 //! works on the same engine.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agentfs_sdk::{AgentFS, AgentFSOptions};
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    // A process-wide counter, not just the clock: parallel tests in one binary
-    // can otherwise land on the same path and collide on the engine lock.
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
+use common::temp::TempDir;
 
-async fn engine() -> turso::Database {
-    let path = temp_dir("engine").join("hub.db");
+async fn engine(dir: &TempDir) -> turso::Database {
+    let path = dir.join("hub.db");
     turso::Builder::new_local(path.to_str().expect("utf-8 path"))
         .experimental_index_method(true)
         .build()
@@ -38,7 +21,8 @@ async fn engine() -> turso::Database {
 
 #[tokio::test]
 async fn native_full_text_search() {
-    let db = engine().await;
+    let dir = TempDir::new("engine");
+    let db = engine(&dir).await;
     let conn = db.connect().expect("connect");
     conn.execute(
         "CREATE TABLE docs(id INTEGER PRIMARY KEY, title TEXT, body TEXT)",
@@ -78,7 +62,8 @@ async fn native_full_text_search() {
 
 #[tokio::test]
 async fn concurrent_writes_on_distinct_rows() {
-    let db = engine().await;
+    let dir = TempDir::new("engine");
+    let db = engine(&dir).await;
     let conn = db.connect().expect("connect");
     let mut mode = conn
         .query("PRAGMA journal_mode = mvcc", ())
@@ -127,7 +112,8 @@ async fn concurrent_writes_on_distinct_rows() {
 
 #[tokio::test]
 async fn agentfs_brain_file_round_trip() {
-    let brain = temp_dir("brain").join("session.db");
+    let dir = TempDir::new("brain");
+    let brain = dir.join("session.db");
     let agent = AgentFS::open(AgentFSOptions {
         path: Some(brain.to_str().expect("utf-8 path").to_string()),
         ..Default::default()

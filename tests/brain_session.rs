@@ -5,28 +5,21 @@
 //! session file back through a fresh store, which is what a restart looks like
 //! from the storage layer.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::brain::{BrainStore, Entry, EntryKind, version};
 use agent_hub::error::Error;
+
+mod common;
+
+use common::temp::TempDir;
 
 fn paths(entries: &[Entry]) -> Vec<String> {
     entries.iter().map(|entry| entry.path.clone()).collect()
 }
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
 #[tokio::test]
 async fn kv_and_file_round_trip() {
-    let store = BrainStore::new(temp_dir("round-trip"));
+    let root = TempDir::new("round-trip");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session").await.expect("open brain");
 
     brain
@@ -71,10 +64,10 @@ async fn kv_and_file_round_trip() {
 
 #[tokio::test]
 async fn state_survives_reopen() {
-    let root = temp_dir("resume");
+    let root = TempDir::new("resume");
 
     {
-        let store = BrainStore::new(&root);
+        let store = BrainStore::new(root.to_path_buf());
         let brain = store.open("proj", "named").await.expect("open brain");
         brain.put("/kv/counter", b"1").await.expect("put key");
         brain
@@ -83,7 +76,7 @@ async fn state_survives_reopen() {
             .expect("put file");
     }
 
-    let store = BrainStore::new(&root);
+    let store = BrainStore::new(root.to_path_buf());
     let resumed = store.open("proj", "named").await.expect("reopen brain");
     assert_eq!(
         resumed.get("/kv/counter").await.expect("get key"),
@@ -97,7 +90,8 @@ async fn state_survives_reopen() {
 
 #[tokio::test]
 async fn distinct_sessions_write_concurrently() {
-    let store = BrainStore::new(temp_dir("concurrent"));
+    let root = TempDir::new("concurrent");
+    let store = BrainStore::new(root.to_path_buf());
     let first = store.open("proj", "first").await.expect("open first");
     let second = store.open("proj", "second").await.expect("open second");
 
@@ -120,7 +114,8 @@ async fn distinct_sessions_write_concurrently() {
 
 #[tokio::test]
 async fn same_session_writes_serialise_and_persist() {
-    let store = BrainStore::new(temp_dir("same-session"));
+    let root = TempDir::new("same-session");
+    let store = BrainStore::new(root.to_path_buf());
     let first = store.open("proj", "shared").await.expect("open first");
     let second = store.open("proj", "shared").await.expect("open second");
 
@@ -141,7 +136,8 @@ async fn same_session_writes_serialise_and_persist() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_first_opens_of_one_session_all_succeed() {
-    let store = BrainStore::new(temp_dir("concurrent-open"));
+    let root = TempDir::new("concurrent-open");
+    let store = BrainStore::new(root.to_path_buf());
 
     let mut opens = tokio::task::JoinSet::new();
     for _ in 0..16 {
@@ -156,8 +152,8 @@ async fn concurrent_first_opens_of_one_session_all_succeed() {
 
 #[tokio::test]
 async fn an_open_refused_under_the_lock_creates_no_file() {
-    let root = temp_dir("swept-open");
-    let store = BrainStore::new(&root);
+    let root = TempDir::new("swept-open");
+    let store = BrainStore::new(root.to_path_buf());
     let path = store.brain_path("proj", "swept").expect("brain path");
 
     // The check stands in for a sweep landing between a caller's own liveness
@@ -185,8 +181,8 @@ async fn an_open_refused_under_the_lock_creates_no_file() {
 
 #[tokio::test]
 async fn a_write_through_a_handle_whose_brain_was_pruned_is_refused() {
-    let root = temp_dir("pruned-handle");
-    let store = BrainStore::new(&root);
+    let root = TempDir::new("pruned-handle");
+    let store = BrainStore::new(root.to_path_buf());
     let path = store.brain_path("proj", "gone").expect("brain path");
 
     let brain = store.open("proj", "gone").await.expect("open");
@@ -214,8 +210,8 @@ async fn a_write_through_a_handle_whose_brain_was_pruned_is_refused() {
 
 #[tokio::test]
 async fn removing_a_brain_leaves_nothing_of_the_session_on_disk() {
-    let root = temp_dir("removal-leftovers");
-    let store = BrainStore::new(&root);
+    let root = TempDir::new("removal-leftovers");
+    let store = BrainStore::new(root.to_path_buf());
 
     let brain = store.open("proj", "leftover").await.expect("open");
     brain.put("/kv/seed", b"1").await.expect("write");
@@ -245,8 +241,8 @@ async fn removing_a_brain_leaves_nothing_of_the_session_on_disk() {
 
 #[tokio::test]
 async fn a_read_racing_a_prune_does_not_bring_the_brain_back() {
-    let root = temp_dir("read-vs-prune");
-    let store = std::sync::Arc::new(BrainStore::new(&root));
+    let root = TempDir::new("read-vs-prune");
+    let store = std::sync::Arc::new(BrainStore::new(root.to_path_buf()));
     let path = store.brain_path("proj", "racing").expect("brain path");
     store
         .open("proj", "racing")
@@ -290,8 +286,8 @@ async fn a_read_racing_a_prune_does_not_bring_the_brain_back() {
 
 #[tokio::test]
 async fn a_read_of_an_unwritten_session_creates_no_file() {
-    let root = temp_dir("read-only");
-    let store = BrainStore::new(&root);
+    let root = TempDir::new("read-only");
+    let store = BrainStore::new(root.to_path_buf());
 
     assert!(
         store
@@ -311,7 +307,8 @@ async fn a_read_of_an_unwritten_session_creates_no_file() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn same_session_writes_serialise_on_a_worker_pool() {
-    let store = BrainStore::new(temp_dir("mt-same-session"));
+    let root = TempDir::new("mt-same-session");
+    let store = BrainStore::new(root.to_path_buf());
     let first = store.open("proj", "shared").await.expect("open first");
     let second = store.open("proj", "shared").await.expect("open second");
 
@@ -332,7 +329,8 @@ async fn same_session_writes_serialise_on_a_worker_pool() {
 
 #[tokio::test]
 async fn a_conditional_write_applies_only_on_a_matching_version() {
-    let store = BrainStore::new(temp_dir("cas-match"));
+    let root = TempDir::new("cas-match");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session").await.expect("open brain");
 
     let first = brain
@@ -372,7 +370,8 @@ async fn a_conditional_write_applies_only_on_a_matching_version() {
 
 #[tokio::test]
 async fn a_create_only_write_succeeds_once() {
-    let store = BrainStore::new(temp_dir("cas-absent"));
+    let root = TempDir::new("cas-absent");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session").await.expect("open brain");
 
     let created = brain
@@ -400,7 +399,8 @@ async fn a_create_only_write_succeeds_once() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn only_one_of_a_racing_set_of_conditional_writes_wins() {
-    let store = BrainStore::new(temp_dir("cas-race"));
+    let root = TempDir::new("cas-race");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = std::sync::Arc::new(store.open("proj", "shared").await.expect("open"));
     let base = brain
         .put_if("/fs/page.md", b"base", None)
@@ -447,7 +447,8 @@ async fn only_one_of_a_racing_set_of_conditional_writes_wins() {
 
 #[tokio::test]
 async fn a_conditional_write_over_the_cap_is_refused() {
-    let store = BrainStore::new(temp_dir("cas-oversized"));
+    let root = TempDir::new("cas-oversized");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session").await.expect("open brain");
 
     let oversized = vec![b'x'; agent_hub::limits::BRAIN_VALUE_BYTES_MAX + 1];
@@ -467,7 +468,8 @@ async fn a_conditional_write_over_the_cap_is_refused() {
 
 #[tokio::test]
 async fn a_listing_reports_each_entry_type_and_size() {
-    let store = BrainStore::new(temp_dir("list-entries"));
+    let root = TempDir::new("list-entries");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session").await.expect("open brain");
 
     brain.put("/kv/note", b"four").await.expect("put key");
@@ -519,7 +521,8 @@ async fn a_listing_reports_each_entry_type_and_size() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_reader_handle_sees_a_live_writer_handle_on_one_file() {
-    let store = BrainStore::new(temp_dir("reader-beside-writer"));
+    let root = TempDir::new("reader-beside-writer");
+    let store = BrainStore::new(root.to_path_buf());
     let writer = store.open("proj", "shared").await.expect("open writer");
     writer.put("/kv/plan", b"first").await.expect("first write");
 
@@ -556,7 +559,8 @@ async fn a_reader_handle_sees_a_live_writer_handle_on_one_file() {
 
 #[tokio::test]
 async fn a_copy_through_the_engine_carries_state_and_its_audit_log() {
-    let store = BrainStore::new(temp_dir("engine-copy"));
+    let root = TempDir::new("engine-copy");
+    let store = BrainStore::new(root.to_path_buf());
     let source = store.open("proj", "source").await.expect("open source");
     source.put("/kv/plan", b"first").await.expect("write key");
     source
@@ -634,7 +638,8 @@ async fn a_copy_through_the_engine_carries_state_and_its_audit_log() {
 
 #[tokio::test]
 async fn a_copy_refused_under_the_lock_leaves_no_file() {
-    let store = BrainStore::new(temp_dir("engine-copy-refused"));
+    let root = TempDir::new("engine-copy-refused");
+    let store = BrainStore::new(root.to_path_buf());
     let source = store.open("proj", "source").await.expect("open source");
     source.put("/kv/plan", b"first").await.expect("write key");
 
@@ -657,7 +662,8 @@ async fn a_copy_refused_under_the_lock_leaves_no_file() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_copy_taken_mid_write_opens_cleanly() {
-    let store = BrainStore::new(temp_dir("engine-copy-mid-write"));
+    let root = TempDir::new("engine-copy-mid-write");
+    let store = BrainStore::new(root.to_path_buf());
     let source = store.open("proj", "source").await.expect("open source");
     source
         .put("/kv/plan", b"before")
@@ -691,7 +697,8 @@ async fn a_copy_taken_mid_write_opens_cleanly() {
 
 #[tokio::test]
 async fn audit_record_write_and_recent() {
-    let store = BrainStore::new(temp_dir("audit-log"));
+    let root = TempDir::new("audit-log");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session-1").await.expect("open brain");
 
     let id = brain
@@ -737,7 +744,8 @@ async fn audit_record_write_and_recent() {
 
 #[tokio::test]
 async fn delete_if_compare_and_set() {
-    let store = BrainStore::new(temp_dir("delete-if"));
+    let root = TempDir::new("delete-if");
+    let store = BrainStore::new(root.to_path_buf());
     let brain = store.open("proj", "session-del").await.expect("open brain");
 
     let version = brain

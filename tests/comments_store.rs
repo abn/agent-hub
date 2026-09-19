@@ -1,35 +1,14 @@
 //! Comment tests: posting, anchors, resolution, deletion, and cleanup.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::error::ErrorCode;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments::{self, AnchorInput};
 use agent_hub::store::projects;
-use agent_hub::store::{migrate, open_engine};
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn open(dir: &std::path::Path) -> turso::Database {
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::open;
+use common::temp::TempDir;
 
 async fn publish(db: &turso::Database, dir: &std::path::Path) -> String {
     artifacts::publish(
@@ -71,7 +50,7 @@ async fn post(db: &turso::Database, artifact_id: &str) -> agent_hub::store::comm
 
 #[tokio::test]
 async fn post_list_resolve_and_delete_round_trip() {
-    let dir = temp_dir("comment-round-trip");
+    let dir = TempDir::new("comment-round-trip");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -129,7 +108,7 @@ async fn post_list_resolve_and_delete_round_trip() {
 
 #[tokio::test]
 async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
-    let dir = temp_dir("comment-idem");
+    let dir = TempDir::new("comment-idem");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -191,7 +170,7 @@ async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
 
 #[tokio::test]
 async fn missing_artifacts_and_comments_are_not_found() {
-    let dir = temp_dir("comment-missing");
+    let dir = TempDir::new("comment-missing");
     let db = open(&dir).await;
 
     let err = comments::add_comment(&db, "ghost", "agent-one", "Hi.", None, None, None, None)
@@ -225,7 +204,7 @@ async fn missing_artifacts_and_comments_are_not_found() {
 
 #[tokio::test]
 async fn validation_rejects_bad_comments() {
-    let dir = temp_dir("comment-validation");
+    let dir = TempDir::new("comment-validation");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -342,7 +321,7 @@ async fn validation_rejects_bad_comments() {
 
 #[tokio::test]
 async fn a_text_anchor_is_refused_on_a_protected_version() {
-    let dir = temp_dir("comment-encryption");
+    let dir = TempDir::new("comment-encryption");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -415,7 +394,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
 
 #[tokio::test]
 async fn a_forged_anchor_version_clamps_to_current() {
-    let dir = temp_dir("comment-clamp");
+    let dir = TempDir::new("comment-clamp");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -440,7 +419,7 @@ async fn a_forged_anchor_version_clamps_to_current() {
 
 #[tokio::test]
 async fn a_key_replays_fresh_after_its_artifact_is_deleted() {
-    let dir = temp_dir("comment-key-orphan");
+    let dir = TempDir::new("comment-key-orphan");
     let db = open(&dir).await;
     let artifact_id = publish(&db, &dir).await;
 
@@ -480,7 +459,7 @@ async fn a_key_replays_fresh_after_its_artifact_is_deleted() {
 
 #[tokio::test]
 async fn deleting_an_artifact_or_project_drops_its_comments() {
-    let dir = temp_dir("comment-cascade");
+    let dir = TempDir::new("comment-cascade");
     let db = open(&dir).await;
 
     let first = publish(&db, &dir).await;

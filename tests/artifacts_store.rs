@@ -1,38 +1,16 @@
 //! Artifact tests: publish, version, protected envelope, indexing, and limits.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::ARTIFACT_BYTES_MAX;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::events::{FeedQuery, read_feed};
 use agent_hub::store::projects;
-use agent_hub::store::{migrate, open_engine};
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn open(dir: &std::path::Path) -> turso::Database {
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::open;
+use common::temp::TempDir;
 
 fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
     NewArtifact {
@@ -50,7 +28,7 @@ fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
 
 #[tokio::test]
 async fn publish_reads_back_and_lands_on_the_feed() {
-    let dir = temp_dir("artifact");
+    let dir = TempDir::new("artifact");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"<h1>hits</h1>"), None)
         .await
@@ -81,7 +59,7 @@ async fn publish_reads_back_and_lands_on_the_feed() {
 
 #[tokio::test]
 async fn concurrent_updates_get_distinct_versions() {
-    let dir = temp_dir("artifact-concurrent");
+    let dir = TempDir::new("artifact-concurrent");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
         .await
@@ -147,7 +125,7 @@ async fn concurrent_updates_get_distinct_versions() {
 
 #[tokio::test]
 async fn update_adds_a_version_and_refreshes_search() {
-    let dir = temp_dir("artifact-update");
+    let dir = TempDir::new("artifact-update");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
         .await
@@ -191,7 +169,7 @@ async fn update_adds_a_version_and_refreshes_search() {
 
 #[tokio::test]
 async fn a_protected_artifact_is_not_searchable_by_body() {
-    let dir = temp_dir("artifact-protected");
+    let dir = TempDir::new("artifact-protected");
     let db = open(&dir).await;
     let envelope = serde_json::json!({"alg": "AES-GCM", "kdf": "PBKDF2-SHA256", "iterations": 600000, "salt": "c2FsdA==", "iv": "aXY="});
     let artifact = artifacts::publish(
@@ -229,7 +207,7 @@ async fn a_protected_artifact_is_not_searchable_by_body() {
 
 #[tokio::test]
 async fn an_over_cap_artifact_is_rejected() {
-    let dir = temp_dir("artifact-cap");
+    let dir = TempDir::new("artifact-cap");
     let db = open(&dir).await;
     let big = vec![0u8; ARTIFACT_BYTES_MAX + 1];
     let err = artifacts::publish(&db, &dir, public("Big", &big), None)
@@ -240,7 +218,7 @@ async fn an_over_cap_artifact_is_rejected() {
 
 #[tokio::test]
 async fn a_publish_replays_on_its_idempotency_key() {
-    let dir = temp_dir("artifact-idem");
+    let dir = TempDir::new("artifact-idem");
     let db = open(&dir).await;
     let first = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
         .await
@@ -268,7 +246,7 @@ async fn a_publish_replays_on_its_idempotency_key() {
 
 #[tokio::test]
 async fn an_update_replays_on_its_idempotency_key() {
-    let dir = temp_dir("artifact-idem-update");
+    let dir = TempDir::new("artifact-idem-update");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"draft"), None)
         .await
@@ -338,7 +316,7 @@ async fn search_hits(db: &turso::Database, term: &str) -> usize {
 
 #[tokio::test]
 async fn publish_round_trips_display_metadata() {
-    let dir = temp_dir("artifact-meta");
+    let dir = TempDir::new("artifact-meta");
     let db = open(&dir).await;
     let artifact = artifacts::publish(
         &db,
@@ -372,7 +350,7 @@ async fn publish_round_trips_display_metadata() {
 
 #[tokio::test]
 async fn a_stale_base_version_conflicts_and_force_overwrites() {
-    let dir = temp_dir("artifact-occ");
+    let dir = TempDir::new("artifact-occ");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"v1"), None)
         .await
@@ -445,7 +423,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
 
 #[tokio::test]
 async fn a_version_read_returns_the_version_bytes_and_metadata() {
-    let dir = temp_dir("artifact-version-read");
+    let dir = TempDir::new("artifact-version-read");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
         .await
@@ -495,7 +473,7 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
 
 #[tokio::test]
 async fn versions_carry_their_own_envelopes() {
-    let dir = temp_dir("artifact-envelopes");
+    let dir = TempDir::new("artifact-envelopes");
     let db = open(&dir).await;
     let first_envelope = serde_json::json!({"alg": "AES-256-GCM", "kdf": "PBKDF2-HMAC-SHA256", "iterations": 600000, "salt": "c2FsdA==", "iv": "aXY="});
     let artifact = artifacts::publish(
@@ -537,7 +515,7 @@ async fn versions_carry_their_own_envelopes() {
 
 #[tokio::test]
 async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
-    let dir = temp_dir("artifact-delete");
+    let dir = TempDir::new("artifact-delete");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("del-key"))
         .await
@@ -625,7 +603,7 @@ async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
 
 #[tokio::test]
 async fn validation_rejects_bad_metadata() {
-    let dir = temp_dir("artifact-validation");
+    let dir = TempDir::new("artifact-validation");
     let db = open(&dir).await;
 
     let empty = artifacts::publish(&db, &dir, public("   ", b"body"), None).await;
@@ -697,7 +675,7 @@ async fn validation_rejects_bad_metadata() {
 
 #[tokio::test]
 async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
-    let dir = temp_dir("artifact-title-fallback");
+    let dir = TempDir::new("artifact-title-fallback");
     let db = open(&dir).await;
     let artifact = artifacts::publish(
         &db,
@@ -722,7 +700,7 @@ async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
 
 #[tokio::test]
 async fn a_conflicting_update_leaves_no_blob_behind() {
-    let dir = temp_dir("artifact-conflict-blob");
+    let dir = TempDir::new("artifact-conflict-blob");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"v1"), None)
         .await
@@ -755,7 +733,7 @@ async fn a_conflicting_update_leaves_no_blob_behind() {
 
 #[tokio::test]
 async fn a_replayed_write_leaves_no_extra_blob() {
-    let dir = temp_dir("artifact-replay-blob");
+    let dir = TempDir::new("artifact-replay-blob");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"draft"), Some("pub-key"))
         .await
@@ -805,7 +783,7 @@ async fn a_replayed_write_leaves_no_extra_blob() {
 
 #[tokio::test]
 async fn sequential_updates_keep_every_version_blob() {
-    let dir = temp_dir("artifact-version-blobs");
+    let dir = TempDir::new("artifact-version-blobs");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
         .await
@@ -857,7 +835,7 @@ async fn sequential_updates_keep_every_version_blob() {
 
 #[tokio::test]
 async fn publish_and_update_return_the_metadata_they_committed() {
-    let dir = temp_dir("artifact-committed-metadata");
+    let dir = TempDir::new("artifact-committed-metadata");
     let db = open(&dir).await;
     let published = artifacts::publish(
         &db,
@@ -913,7 +891,7 @@ async fn publish_and_update_return_the_metadata_they_committed() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_update_writes_its_blob_before_taking_the_write_lock() {
-    let dir = temp_dir("artifact-lock-free-write");
+    let dir = TempDir::new("artifact-lock-free-write");
     let db = open(&dir).await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
         .await
@@ -927,7 +905,7 @@ async fn an_update_writes_its_blob_before_taking_the_write_lock() {
 
     let updating = tokio::spawn({
         let db = db.clone();
-        let dir = dir.clone();
+        let dir = dir.to_path_buf();
         let id = artifact.id.clone();
         async move {
             artifacts::update(
@@ -999,7 +977,7 @@ fn collect_files(root: &std::path::Path, at: &std::path::Path, found: &mut Vec<S
 
 #[tokio::test]
 async fn project_delete_drops_version_rows() {
-    let dir = temp_dir("artifact-project-delete");
+    let dir = TempDir::new("artifact-project-delete");
     let db = open(&dir).await;
     projects::create(&db, "doomed", "Doomed")
         .await
@@ -1046,7 +1024,7 @@ async fn project_delete_drops_version_rows() {
 
 #[tokio::test]
 async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
-    let dir = temp_dir("artifact-pending");
+    let dir = TempDir::new("artifact-pending");
     let db = open(&dir).await;
     let report = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
         .await
@@ -1079,18 +1057,9 @@ async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
     }
     drop(db);
 
-    let state = AppState::open(Config {
-        data_dir: dir.clone(),
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state");
+    let state = AppState::open(common::state::config(&dir))
+        .await
+        .expect("open state");
 
     assert!(!stale.exists(), "content with no version left on disk");
     assert!(
@@ -1166,7 +1135,7 @@ async fn set_policy(db: &turso::Database, policy: &str) {
 
 #[tokio::test]
 async fn a_project_that_requires_protection_refuses_plain_content() {
-    let dir = temp_dir("artifact-required");
+    let dir = TempDir::new("artifact-required");
     let db = open(&dir).await;
     project_at(&db, "required").await;
 
@@ -1190,7 +1159,7 @@ async fn a_project_that_requires_protection_refuses_plain_content() {
 
 #[tokio::test]
 async fn a_project_with_protection_off_refuses_an_envelope() {
-    let dir = temp_dir("artifact-off");
+    let dir = TempDir::new("artifact-off");
     let db = open(&dir).await;
     project_at(&db, "off").await;
 
@@ -1210,7 +1179,7 @@ async fn a_project_with_protection_off_refuses_an_envelope() {
 
 #[tokio::test]
 async fn an_optional_policy_takes_either_kind() {
-    let dir = temp_dir("artifact-optional");
+    let dir = TempDir::new("artifact-optional");
     let db = open(&dir).await;
     project_at(&db, "optional").await;
 
@@ -1224,7 +1193,7 @@ async fn an_optional_policy_takes_either_kind() {
 
 #[tokio::test]
 async fn a_policy_change_applies_to_the_next_version_only() {
-    let dir = temp_dir("artifact-policy-change");
+    let dir = TempDir::new("artifact-policy-change");
     let db = open(&dir).await;
     project_at(&db, "optional").await;
     let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
@@ -1277,7 +1246,7 @@ async fn a_policy_change_applies_to_the_next_version_only() {
 
 #[tokio::test]
 async fn turning_protection_off_holds_for_a_new_version_of_a_protected_artifact() {
-    let dir = temp_dir("artifact-policy-off-change");
+    let dir = TempDir::new("artifact-policy-off-change");
     let db = open(&dir).await;
     project_at(&db, "optional").await;
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
@@ -1311,7 +1280,7 @@ async fn turning_protection_off_holds_for_a_new_version_of_a_protected_artifact(
 
 #[tokio::test]
 async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
-    let dir = temp_dir("artifact-clear");
+    let dir = TempDir::new("artifact-clear");
     let db = open(&dir).await;
     project_at(&db, "optional").await;
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
@@ -1374,7 +1343,7 @@ async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
 
 #[tokio::test]
 async fn protection_off_names_the_way_to_publish_in_the_clear() {
-    let dir = temp_dir("artifact-off-remedy");
+    let dir = TempDir::new("artifact-off-remedy");
     let db = open(&dir).await;
     project_at(&db, "optional").await;
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
@@ -1418,7 +1387,7 @@ async fn protection_off_names_the_way_to_publish_in_the_clear() {
 
 #[tokio::test]
 async fn required_protection_refuses_an_update_that_clears_it() {
-    let dir = temp_dir("artifact-required-clear");
+    let dir = TempDir::new("artifact-required-clear");
     let db = open(&dir).await;
     project_at(&db, "required").await;
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
@@ -1457,7 +1426,7 @@ async fn required_protection_refuses_an_update_that_clears_it() {
 
 #[tokio::test]
 async fn update_can_clear_label_with_explicit_none_or_empty_string() {
-    let dir = temp_dir("label-clear");
+    let dir = TempDir::new("label-clear");
     let db = open(&dir).await;
     projects::create(&db, "proj", "Project")
         .await

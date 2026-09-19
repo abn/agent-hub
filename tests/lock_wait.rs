@@ -5,39 +5,19 @@
 //! result and none reports "database is locked".
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::Error;
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{self, FeedQuery};
 use agent_hub::store::questions::{self, NewQuestion};
-use agent_hub::store::{migrate, open_engine};
+
+mod common;
+
+use common::store::open;
+use common::temp::TempDir;
 
 /// More writers than worker threads, so the lock is contended for real.
 const WRITERS: usize = 8;
-
-static NEXT: AtomicU64 = AtomicU64::new(0);
-
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn open(dir: &std::path::Path) -> turso::Database {
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
 
 /// A writer that lost the lock must wait, not fail. Any other error is a real
 /// failure and is left to the caller.
@@ -52,13 +32,13 @@ fn assert_not_locked<T>(result: &Result<T, Error>) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_same_key_publishes_serialize() {
-    let dir = temp_dir("lock-artifact");
+    let dir = TempDir::new("lock-artifact");
     let db = Arc::new(open(&dir).await);
 
     let mut handles = Vec::new();
     for _ in 0..WRITERS {
         let db = db.clone();
-        let dir = dir.clone();
+        let dir = dir.to_path_buf();
         handles.push(tokio::spawn(async move {
             artifacts::publish(
                 &db,
@@ -107,7 +87,7 @@ async fn concurrent_same_key_publishes_serialize() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_same_key_questions_serialize() {
-    let dir = temp_dir("lock-question");
+    let dir = TempDir::new("lock-question");
     let db = Arc::new(open(&dir).await);
 
     let mut handles = Vec::new();
@@ -156,7 +136,7 @@ async fn concurrent_same_key_questions_serialize() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_same_key_answers_serialize() {
-    let dir = temp_dir("lock-answer");
+    let dir = TempDir::new("lock-answer");
     let db = Arc::new(open(&dir).await);
     let question_id = questions::post(
         &db,

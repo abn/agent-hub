@@ -1,15 +1,15 @@
 //! The authorization policy: admin, trusted, untrusted, and grants.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::error::ErrorCode;
 use agent_hub::policy::{Access, Visibility, authorize, visibility};
 use agent_hub::principal::{Principal, Trust};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::search::{self, SearchQuery};
-use agent_hub::store::{identity, inbox, migrate, open_engine, projects};
+use agent_hub::store::{identity, inbox, projects};
+
+mod common;
+
+use common::store::fresh;
 
 fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
     NewEvent {
@@ -21,29 +21,6 @@ fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
         thread_id: None,
         session_id: None,
     }
-}
-
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
-
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn db(tag: &str) -> turso::Database {
-    let dir = temp_dir(tag);
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
 }
 
 fn principal(actor: &str, agent_id: &str, trust: Trust) -> Principal {
@@ -79,7 +56,7 @@ async fn forbidden(
 
 #[tokio::test]
 async fn the_admin_reaches_everything() {
-    let db = db("policy-admin").await;
+    let db = fresh("policy-admin").await;
     let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
         .await
         .expect("create");
@@ -102,7 +79,7 @@ async fn the_admin_reaches_everything() {
 
 #[tokio::test]
 async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
-    let db = db("policy-trusted").await;
+    let db = fresh("policy-trusted").await;
     let trust = identity::create_agent(&db, "trust", "Trust", Trust::Trusted)
         .await
         .expect("create trust");
@@ -143,7 +120,7 @@ async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
 
 #[tokio::test]
 async fn an_untrusted_agent_is_confined_to_its_space_and_grants() {
-    let db = db("policy-untrusted").await;
+    let db = fresh("policy-untrusted").await;
     let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
         .await
         .expect("create strict");
@@ -186,7 +163,7 @@ async fn an_untrusted_agent_is_confined_to_its_space_and_grants() {
 
 #[tokio::test]
 async fn search_and_inbox_respect_the_confined_set() {
-    let db = db("policy-scoping").await;
+    let db = fresh("policy-scoping").await;
     projects::create(&db, "p1", "One").await.expect("p1");
     projects::create(&db, "p2", "Two").await.expect("p2");
     events::append(&db, "agent", None, event("p1", "signal", "alpha one"))
@@ -240,7 +217,7 @@ async fn search_and_inbox_respect_the_confined_set() {
 
 #[tokio::test]
 async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
-    let db = db("policy-starvation").await;
+    let db = fresh("policy-starvation").await;
     projects::create(&db, "mine", "Mine").await.expect("mine");
     projects::create(&db, "other", "Other")
         .await
@@ -288,7 +265,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
 
 #[tokio::test]
 async fn a_confined_search_keeps_relevance_order() {
-    let db = db("policy-relevance").await;
+    let db = fresh("policy-relevance").await;
     projects::create(&db, "mine", "Mine").await.expect("mine");
     events::append(
         &db,
@@ -333,7 +310,7 @@ async fn visibility_lists_the_reachable_projects() {
         None => panic!("a confined set must yield a filter"),
     }
 
-    let db = db("policy-visibility").await;
+    let db = fresh("policy-visibility").await;
     let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
         .await
         .expect("create");

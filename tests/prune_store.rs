@@ -1,38 +1,19 @@
 //! Prune tests: soft delete, undo within the window, and commit after it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::brain::BrainStore;
 use agent_hub::store::events::{self, FeedQuery, NewEvent, read_feed};
-use agent_hub::store::{migrate, open_engine, prune, sessions};
+use agent_hub::store::{prune, sessions};
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn open(dir: &std::path::Path) -> turso::Database {
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::open;
+use common::temp::TempDir;
 
 #[tokio::test]
 async fn prune_hides_a_session_and_undo_restores_it() {
-    let dir = temp_dir("prune");
+    let dir = TempDir::new("prune");
     let db = open(&dir).await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
@@ -59,7 +40,7 @@ async fn prune_hides_a_session_and_undo_restores_it() {
 
 #[tokio::test]
 async fn sweep_commits_an_expired_prune() {
-    let dir = temp_dir("prune-sweep");
+    let dir = TempDir::new("prune-sweep");
     let db = open(&dir).await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
@@ -117,7 +98,7 @@ async fn sweep_commits_an_expired_prune() {
 
 #[tokio::test]
 async fn sweep_skips_a_session_it_cannot_commit() {
-    let dir = temp_dir("prune-sweep-skip");
+    let dir = TempDir::new("prune-sweep-skip");
     let db = open(&dir).await;
 
     let blocked = sessions::start(&db, "proj", "blocked", "agent-one")
@@ -217,7 +198,7 @@ async fn ids_matching_payload_scan(db: &turso::Database, session_id: &str) -> Ve
 
 #[tokio::test]
 async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
-    let dir = temp_dir("prune-set");
+    let dir = TempDir::new("prune-set");
     let db = open(&dir).await;
 
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
@@ -280,7 +261,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
 
 #[tokio::test]
 async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
-    let dir = temp_dir("prune-fork");
+    let dir = TempDir::new("prune-fork");
     let db = open(&dir).await;
 
     let source = sessions::start(&db, "proj", "nightly", "agent-one")
@@ -321,7 +302,7 @@ async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
 
 #[tokio::test]
 async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
-    let dir = temp_dir("prune-keys");
+    let dir = TempDir::new("prune-keys");
     let db = open(&dir).await;
 
     let event = || NewEvent {
@@ -381,7 +362,7 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
 
 #[tokio::test]
 async fn a_fresh_prune_is_not_committed() {
-    let dir = temp_dir("prune-fresh");
+    let dir = TempDir::new("prune-fresh");
     let db = open(&dir).await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
@@ -403,7 +384,7 @@ async fn a_fresh_prune_is_not_committed() {
 
 #[tokio::test]
 async fn pruning_an_active_session_is_rejected() {
-    let dir = temp_dir("prune-active");
+    let dir = TempDir::new("prune-active");
     let db = open(&dir).await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
@@ -416,7 +397,7 @@ async fn pruning_an_active_session_is_rejected() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
-    let dir = temp_dir("prune-resume-race");
+    let dir = TempDir::new("prune-resume-race");
     let db = Arc::new(open(&dir).await);
 
     // The window between the prune's status check and its write is narrow, so
@@ -454,7 +435,7 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_prune_that_loses_to_another_prune_says_the_session_is_pruned() {
-    let dir = temp_dir("prune-twice");
+    let dir = TempDir::new("prune-twice");
     let db = Arc::new(open(&dir).await);
 
     // Two humans, or two tabs, prune the same ended session. The loser's write
@@ -496,7 +477,7 @@ async fn a_prune_that_loses_to_another_prune_says_the_session_is_pruned() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
-    let dir = temp_dir("prune-undo-commit-race");
+    let dir = TempDir::new("prune-undo-commit-race");
     let db = Arc::new(open(&dir).await);
 
     // The gap between the undo's window check and its write is narrow, so the
@@ -543,7 +524,7 @@ async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
 
 #[tokio::test]
 async fn undo_after_the_window_is_rejected() {
-    let dir = temp_dir("prune-late-undo");
+    let dir = TempDir::new("prune-late-undo");
     let db = open(&dir).await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await

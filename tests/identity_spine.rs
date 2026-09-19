@@ -3,13 +3,16 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::ErrorCode;
 use agent_hub::principal::{Auth, Trust};
 use agent_hub::store::migrate;
 use agent_hub::store::open_engine;
+
+mod common;
+
+use common::temp::TempDir;
 
 const ADMIN_TOKEN: &str = "admin-secret";
 
@@ -24,16 +27,6 @@ fn config(trust_default: TrustDefault) -> Config {
         active_window: std::time::Duration::from_secs(900),
         node_name: None,
     }
-}
-
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
 }
 
 #[test]
@@ -68,7 +61,7 @@ fn local_stdio_is_the_human_admin() {
 
 #[tokio::test]
 async fn resolve_agent_accepts_admin_and_rejects_unknown_tokens() {
-    let dir = temp_dir("identity-spine");
+    let dir = TempDir::new("identity-spine");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
     let auth = Auth::from_config(&config(TrustDefault::Trusted));

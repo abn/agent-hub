@@ -1,35 +1,17 @@
 //! Feed store tests: append, read, idempotency, paging, limits, indexing.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::FEED_LIMIT_MAX;
 use agent_hub::store::events::{self, FeedQuery, NewEvent, append, read_feed};
-use agent_hub::store::{migrate, open_engine};
 
-static NEXT_DB: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_db(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DB.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir.join("hub.db")
-}
+use common::store::TestDb;
 
-async fn open() -> turso::Database {
-    let path = temp_db("feed");
-    let db = open_engine(&path).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
+async fn open() -> TestDb {
+    common::store::fresh("feed").await
 }
 
 fn event(summary: &str) -> NewEvent {

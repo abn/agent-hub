@@ -1,35 +1,19 @@
 //! Inbox and question tests: projection, threads, resolution, and counts.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::InboxCaps;
 use agent_hub::store::events::{self, FeedQuery, NewEvent, append, append_action, read_feed};
 use agent_hub::store::questions::NewQuestion;
-use agent_hub::store::{home, inbox, migrate, open_engine, questions};
+use agent_hub::store::{home, inbox, questions};
 
-static NEXT_DB: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_db(tag: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DB.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir.join("hub.db")
-}
+use common::store::TestDb;
 
-async fn open() -> turso::Database {
-    let db = open_engine(&temp_db("inbox")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
+async fn open() -> TestDb {
+    common::store::fresh("inbox").await
 }
 
 fn question(subject: &str) -> NewQuestion<'_> {

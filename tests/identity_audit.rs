@@ -1,36 +1,13 @@
 //! Identity changes are audited as system events in the affected project.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::error::ErrorCode;
 use agent_hub::principal::Trust;
 use agent_hub::store::events::{self, Event, FeedQuery};
-use agent_hub::store::{identity, inbox, migrate, open_engine, projects};
+use agent_hub::store::{identity, inbox, projects};
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-{tag}-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-async fn db(tag: &str) -> turso::Database {
-    let dir = temp_dir(tag);
-    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
-    migrate(&db).await.expect("migrate");
-    db
-}
+use common::store::fresh;
 
 async fn system_events(db: &turso::Database, project_id: &str) -> Vec<Event> {
     let query = FeedQuery {
@@ -60,7 +37,7 @@ fn actions(events: &[Event]) -> Vec<String> {
 
 #[tokio::test]
 async fn identity_changes_emit_system_events() {
-    let db = db("identity-audit").await;
+    let db = fresh("identity-audit").await;
     projects::create(&db, "proj", "Project")
         .await
         .expect("project");
@@ -116,7 +93,7 @@ async fn identity_changes_emit_system_events() {
 
 #[tokio::test]
 async fn reserved_agent_ids_are_rejected() {
-    let db = db("identity-reserved").await;
+    let db = fresh("identity-reserved").await;
     for id in ["human", "local"] {
         let err = identity::create_agent(&db, id, "Name", Trust::Trusted)
             .await
