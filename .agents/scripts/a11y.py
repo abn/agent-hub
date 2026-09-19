@@ -20,7 +20,21 @@ from pathlib import Path
 import hub_harness as harness
 
 NAME = "a11y"
-ROUTES = ["home", "inbox", "feed", "sessions", "storage", "search", "settings", "artifacts"]
+ROUTES = [
+    "home",
+    "inbox",
+    "feed",
+    "session-detail",
+    "sessions",
+    "storage",
+    "search",
+    "settings",
+    "artifacts",
+]
+# The session detail needs a project and a session id from the seeded hub;
+# every other route is addressed by its bare hash.
+SESSION_DETAIL = "session-detail"
+
 TAGS = ["wcag2a", "wcag2aa"]
 
 try:
@@ -48,7 +62,7 @@ def axe_source() -> str:
 def run() -> int:
     source = axe_source()
     failures: list[str] = []
-    with harness.running_hub(NAME) as (port, _seeded):
+    with harness.running_hub(NAME) as (port, seeded):
         with sync_playwright() as playwright:
             browser = harness.launch_browser(playwright, NAME)
             for theme, color_scheme in (("light", "light"), ("dark", "dark")):
@@ -63,7 +77,13 @@ def run() -> int:
                 # Not networkidle: the freshness stream holds a connection open.
                 page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
                 for route in ROUTES:
-                    page.evaluate(f"location.hash = '#/{route}'")
+                    if route == SESSION_DETAIL:
+                        page.evaluate(
+                            "location.hash = '#/session?project=%s&id=%s'"
+                            % (seeded["project_id"], seeded["session_id"])
+                        )
+                    else:
+                        page.evaluate(f"location.hash = '#/{route}'")
                     page.wait_for_timeout(300)
                     rendered = page.evaluate(
                         "(() => { const main = document.querySelector('main');"

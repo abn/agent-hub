@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, a session, its brain as a tree
+
+* **Update**: The sessions screen and its detail view now match the design.
+  A session row carries the state dot, the owner, a mono id and size, and a
+  chevron into the detail, which shows three stat cards (started, events,
+  brain size), the lineage and handoff note, the session's newest feed event
+  as one line, and the brain as a drill-down tree: ARIA roles per the
+  design, expand and collapse with lazy-loaded children, arrow-key
+  navigation, and a real focus trail. The pinned action bar names End session
+  and Prune (ends first), which asks first and stays reversible.
+
 ## 2026-09-18, reaching the app without a mouse
 
 * **Update**: A timestamp is no longer a stop of its own in the tab order. A

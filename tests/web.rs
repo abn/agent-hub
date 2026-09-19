@@ -301,7 +301,7 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 35] = [
+const SHELL_PATHS: [&str; 36] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -319,6 +319,7 @@ const SHELL_PATHS: [&str; 35] = [
     "/home.mjs",
     "/inbox.mjs",
     "/feed.mjs",
+    "/brain-tree.mjs",
     "/sessions.mjs",
     "/project.mjs",
     "/shell.mjs",

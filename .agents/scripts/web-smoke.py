@@ -2068,8 +2068,10 @@ def check_action_bar(page, watch: Watch, project: str, session_id: str) -> None:
         watch.fail("the End button is missing")
     if not bar["prune"] or not bar["pruneDisabled"]:
         watch.fail("Prune is enabled on a live session")
-    if "fixed" not in ("fixed",) and not bar["fixed"]:
-        watch.fail("the action bar is not pinned")
+    if not bar["fixed"]:
+        # The 390px viewport is the mobile shape: the design pins the bar above
+        # the tab bar, so it must measure as fixed here.
+        watch.fail("the action bar is not pinned on a phone")
     watch.drain_rejections()
 
 

@@ -14,9 +14,8 @@ session, inbox, home, artifact, prune, search, and identity routes ship, along
 with the installable PWA shell and its screens: Home, Inbox, Project feed,
 Artifacts and viewer, Sessions, Storage, Search, and Settings with the Agents
 and access section, a session detail view, and project deletion under
-Settings. The session detail view lists brain keys and files as a flat list
-today; a tree with expand, collapse, and keyboard navigation is intended
-design, not yet shipped. The binary serves the REST API, the PWA, and the MCP
+Settings. The session detail view shows a drill-down brain tree with expand,
+collapse, keyboard navigation and lazy-loaded children. The binary serves the REST API, the PWA, and the MCP
 endpoint on one listener in one process, so the per-session write lock covers
 every writer and the prune sweeper always runs.
 
@@ -212,7 +211,7 @@ it, and the project tabs sit in the same shell.
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. Explicit read state ships on the routes; the "Mark all read" and "Unread only" controls are intended design, not yet shipped. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
-| Sessions | Sessions per project, with End and a Prune that is confirmed in a dialog and undoable for 30 seconds. Session detail lists brain keys and files as a flat list today; a drill-down brain tree and an audit log over the brain file's own tool calls are intended design, not yet shipped. The detail route carries the session's newest feed event, which is not that log. |
+| Sessions | Sessions per project, with End and a Prune that is confirmed in a dialog and undoable for 30 seconds. Session rows carry the state dot, owner, mono size and a chevron; the detail shows three stat cards, the lineage and handoff note, a Latest event line, a drill-down brain tree with lazy-loaded children, and a pinned End / Prune action bar. An audit log over the brain file's own tool calls is intended design, not yet shipped; the Latest event line is the session's newest feed event, not that log. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | Usage by project and kind against the volume's own capacity, with the reversible prune actions for one session, one project, or every project. |
 | Project settings | Deletion ships, under the global Settings screen, and the routes behind the screen ship: renaming a project and setting its artifact password policy. The dedicated Project settings screen, with the read-only slug and the reserved retention hint, is intended design, not yet shipped. |

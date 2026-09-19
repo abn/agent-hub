@@ -105,6 +105,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/brain-tree.mjs",
+        body: include_str!("../../web/brain-tree.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/sessions.mjs",
         body: include_str!("../../web/sessions.mjs"),
         content_type: "text/javascript; charset=utf-8",

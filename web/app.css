@@ -672,3 +672,63 @@ a.empty-link { text-decoration: none; }
 button.empty-link {
   background: none; border: 0; padding: 0; cursor: pointer; text-align: left;
 }
+
+/* component: session rows and detail. The design's session row is a 44px
+   minimum with a 10px state dot, a mono id and size, and a chevron; the
+   detail carries three stat cards, the audit line, the brain tree and a
+   pinned action bar. */
+.session-row { min-height: 44px; display: flex; align-items: center; gap: var(--s-2); }
+.session-row .session-link { flex: 1; display: flex; align-items: center; gap: var(--s-3); text-decoration: none; color: inherit; }
+.session-link .grow { flex: 1; min-width: 0; }
+.session-link .title { display: flex; align-items: baseline; gap: var(--s-1); }
+.session-link .id { color: var(--ink-3); }
+.session-size { color: var(--ink-3); white-space: nowrap; }
+.session-chev { color: var(--ink-3); }
+.session-chev::after { content: "›"; font-size: var(--t-17); }
+
+/* The state dot: 10px, ok filled for active, a 1.5px ring for ended, a
+   line-strong fill for pruned. Meaning is never carried by colour alone; the
+   status word is in the row meta. */
+.state-dot { flex: none; width: 10px; height: 10px; border-radius: 999px; }
+.state-dot.ring { border: 1.5px solid var(--ink-3); background: transparent; }
+.state-dot.pruned { background: var(--line-strong); }
+
+.stat-row { display: flex; gap: var(--s-3); flex-wrap: wrap; }
+.stat-card { flex: 1; min-width: 92px; background: var(--surface-2); border-radius: var(--r-2); padding: var(--s-3); }
+.stat-label { font: 500 var(--t-12)/1.3 var(--font-sans); color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.02em; }
+.stat-value { font: 600 var(--t-17)/1.3 var(--font-sans); color: var(--ink); }
+
+/* The audit line: the session's newest feed event, linking to the feed. */
+.audit-row { display: flex; align-items: center; gap: var(--s-2); text-decoration: none; color: inherit; min-height: 44px; padding: var(--s-2) 0; }
+
+/* The pinned action bar: fixed above the tab bar on mobile, inline on the
+   two-pane detail on desktop. */
+/* The action bar is pinned on a phone, above the tab bar and the safe area,
+   so End and Prune stay reachable however far the detail has scrolled. The
+   two-pane layout keeps it in flow, under the detail it belongs to. */
+.session-actions { display: flex; gap: var(--s-2); margin-top: var(--s-4); }
+.session-actions button { flex: 1; min-height: 44px; }
+@media (max-width: 719px) {
+  .session-actions {
+    position: fixed; left: var(--s-4); right: var(--s-4); z-index: 30;
+    bottom: calc(56px + var(--s-2) + env(safe-area-inset-bottom, 0px));
+    margin-top: 0;
+  }
+}
+
+/* The brain tree: a real ARIA tree with a 2px ink active rail, 20px indents,
+   44px rows, and a guide that is hidden on the selected row. */
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree .tree, .tree ul[role="group"] { margin-left: 20px; }
+.tree-item { display: flex; align-items: center; gap: var(--s-1); min-height: 44px; padding: 0 8px; border-radius: var(--r-1); position: relative; }
+.tree-item::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: transparent; }
+.tree-item[aria-selected="true"] { background: var(--accent-bg); }
+.tree-item[aria-selected="true"]::before { background: var(--accent); }
+.tree-item:focus-visible { outline: none; box-shadow: var(--focus); }
+.tree-chev { flex: none; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-3); }
+.tree-chev::before { content: "›"; font-size: 14px; }
+.tree-chev.open { transform: rotate(90deg); }
+.tree-glyph { flex: none; color: var(--ink-2); }
+.tree-name { margin-left: var(--s-1); color: var(--ink); }
+.tree-size { margin-left: auto; color: var(--ink-3); }
+.tree-item[aria-selected="true"] .tree-size { color: var(--ink-2); }
