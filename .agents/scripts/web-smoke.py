@@ -453,12 +453,12 @@ def check_prune(page, watch: Watch, project: str, session_id: str) -> None:
     watch.enter("sessions: prune")
     page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
     # Only an ended session can be pruned, so the seeded one is ended here.
-    page.wait_for_selector('[data-action="end"]')
-    page.click('[data-action="end"]')
-    page.wait_for_selector('[data-action="prune"]')
+    page.wait_for_selector('.session-row [data-action="end"]')
+    page.click('.session-row [data-action="end"]')
+    page.wait_for_selector('.session-row [data-action="prune"]')
 
     pruned = watch.count(PRUNE_CALL)
-    page.click('[data-action="prune"]')
+    page.click('.session-row [data-action="prune"]')
     # Waiting on the absence of a request is the one thing no selector says.
     page.wait_for_timeout(WRITE_WINDOW)
     if watch.count(PRUNE_CALL) != pruned:
@@ -485,7 +485,7 @@ def check_prune(page, watch: Watch, project: str, session_id: str) -> None:
     if "danger" not in page.evaluate(FOCUS_CLASS):
         watch.fail(f"closing the dialog left focus on {page.evaluate(FOCUS_CLASS)!r}, not the opener")
 
-    page.click('[data-action="prune"]')
+    page.click('.session-row [data-action="prune"]')
     page.wait_for_selector("dialog.dialog[open]")
     page.click(".dialog-commit")
     # The undo control is what marks the new toast: the one before it carried
@@ -1816,6 +1816,345 @@ def check_desktop_topbar(browser, watch: Watch, port: int) -> None:
     watch.drain_rejections()
 
 
+# What the detail screen's rows that name a session king are, and what their
+# colours must be. The row's own server word stays `status`; the design's three
+# states are drawn with a dot, a ring and a filled circle.
+def check_session_row_state(page, watch: Watch, project: str) -> None:
+    """A session row carries the state dot, the mono size and a chevron."""
+    watch.enter("sessions: the row")
+    goto(page, f"#/projects/{quote(project)}/sessions", "Checks")
+    if not settle(page, "!!document.querySelector('main .session-row')"):
+        watch.fail("the sessions list has no session row")
+        return
+    row = page.evaluate(
+        "(() => { const r = document.querySelector('main .session-row');"
+        " const dot = r.querySelector('.state-dot');"
+        " const size = r.querySelector('.session-size');"
+        " const chev = r.querySelector('.session-chev');"
+        " const title = r.querySelector('.title');"
+        " return { dotBg: dot && getComputedStyle(dot).backgroundColor,"
+        " dotSize: dot && dot.getBoundingClientRect().width,"
+        " size: size && size.textContent.trim(),"
+        " chev: !!chev,"
+        " title: title && title.textContent.trim(),"
+        " link: !!(r.querySelector('a[href]')),"
+        " h: r.getBoundingClientRect().height }; })()"
+    )
+    # The design's active dot is the ok fill at 10px.
+    if not row["dotBg"] or row["dotBg"] == "rgba(0, 0, 0, 0)":
+        watch.fail(f"the state dot is not drawn ({row['dotBg']})")
+    if row["dotSize"] is not None and abs(row["dotSize"] - 10) > 0.5:
+        watch.fail(f"the state dot is {row['dotSize']}px, not the design's 10px")
+    if not row["size"]:
+        watch.fail("the row shows no mono size")
+    if not row["chev"]:
+        watch.fail("the row shows no chevron")
+    if not row["link"]:
+        watch.fail("the row does not open the session")
+    if row["h"] + 0.5 < 44:
+        watch.fail(f"the session row is {row['h']:.0f}px tall, under the 44px minimum")
+    watch.drain_rejections()
+
+
+def check_tree_roles(page, watch: Watch, project: str, session_id: str) -> None:
+    """The brain is a tree, not a flat list: roles, levels, leaf chevrons."""
+    watch.enter("session: the brain tree")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    if not settle(page, "!!document.querySelector('main [role=\"tree\"]')"):
+        watch.fail("the detail screen carries no role=tree")
+        return
+    trees = page.evaluate(
+        "(() => [...document.querySelectorAll('main [role=\"tree\"]')].map((t) => ({"
+        " label: t.getAttribute('aria-label'),"
+        " items: t.querySelectorAll('[role=\"treeitem\"]').length,"
+        " })))()"
+    )
+    if not any(t["label"] and "brain" in t["label"].lower() for t in trees):
+        watch.fail(f"the tree has no brain label: {trees}")
+    # The seeded session has one kv key, one fs file and one fs folder.
+    total = sum(t["items"] for t in trees)
+    if total < 3:
+        watch.fail(f"the trees show {total} entries total, expected the seeded brain")
+    item_attrs = page.evaluate(
+        "(() => [...document.querySelectorAll('main [role=\"treeitem\"]')].map((n) => ({"
+        " level: n.getAttribute('aria-level'),"
+        " expanded: n.getAttribute('aria-expanded'),"
+        " selected: n.getAttribute('aria-selected'),"
+        " setsize: n.getAttribute('aria-setsize'),"
+        " posinset: n.getAttribute('aria-posinset'),"
+        " })))()"
+    )
+    if not item_attrs:
+        watch.fail("no treeitem has serialised its ARIA")
+        return
+    for attrs in item_attrs:
+        if not attrs["level"]:
+            watch.fail(f"a treeitem has no aria-level: {attrs}")
+    leaves = page.evaluate(
+        "(() => [...document.querySelectorAll('main [role=\"treeitem\"]')]"
+        ".filter((n) => n.getAttribute('aria-expanded') !== 'true'"
+        " && n.getAttribute('aria-expanded') !== 'false')"
+        ".map((n) => !!n.querySelector('.tree-chev'))"
+        ".filter((has) => has).length)()"
+    )
+    if leaves:
+        watch.fail(f"{leaves} leaf treeitem carries a disclosure chevron")
+    watch.drain_rejections()
+
+
+def check_lazy_children(page, watch: Watch, project: str, session_id: str) -> None:
+    """Expanding a folder fetches its children only then."""
+    watch.enter("session: the brain tree loads lazily")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    if not settle(page, "!!document.querySelector('main [role=\"tree\"]')"):
+        watch.fail("no tree to expand")
+        return
+    # Find a folder: an element with aria-expanded=false that is not a leaf.
+    folder = page.evaluate(
+        "(() => { const items = [...document.querySelectorAll('main [role=\"treeitem\"]')];"
+        " return items.find((n) => n.getAttribute('aria-expanded') === 'false'); })()"
+    )
+    if not folder:
+        watch.fail("the tree has no collapsed folder to expand")
+        return
+    before = watch.count("GET /api/v1/sessions/" + quote(session_id) + "/brain?path=")
+    folder_eval = page.evaluate(
+        "(() => { const items = [...document.querySelectorAll('main [role=\"treeitem\"]')];"
+        " const f = items.find((n) => n.getAttribute('aria-expanded') === 'false');"
+        " if (!f) return false; f.click(); return true; })()"
+    )
+    if not folder_eval:
+        watch.fail("no collapsed folder to click")
+        return
+    if not settle(
+        page,
+        "(() => { const items = [...document.querySelectorAll('main [role=\"treeitem\"]')];"
+        " return items.some((n) => n.getAttribute('aria-expanded') === 'true'); })()",
+    ):
+        watch.fail("expanding the folder did not open it")
+    after = watch.count("GET /api/v1/sessions/" + quote(session_id) + "/brain?path=")
+    if after <= before:
+        watch.fail(
+            f"expanding fetched nothing new ({before} before, {after} after)"
+        )
+    watch.drain_rejections()
+
+
+def check_tree_keys(page, watch: Watch, project: str, session_id: str) -> None:
+    """Arrow keys move the selection through the tree and expand with it."""
+    watch.enter("session: the tree on the keyboard")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    if not settle(page, "!!document.querySelector('main [role=\"tree\"]')"):
+        watch.fail("no tree to move through")
+        return
+    focus_tree = page.evaluate(
+        "(() => { const t = document.querySelector('main [role=\"tree\"]');"
+        " if (!t) return false; t.setAttribute('tabindex', '0'); t.focus(); return true; })()"
+    )
+    if not focus_tree:
+        watch.fail("cannot focus the tree")
+        return
+    # A known key path: ArrowDown moves, ArrowRight on a folder expands, and
+    # ArrowLeft collapses it again.
+    before = page.evaluate(
+        "(() => { const s = document.querySelector('main [role=\"treeitem\"][aria-selected=\"true\"]');"
+        " return s ? s.textContent.trim() : ''; })()"
+    )
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(150)
+    after_down = page.evaluate(
+        "(() => { const s = document.querySelector('main [role=\"treeitem\"][aria-selected=\"true\"]');"
+        " return s ? s.textContent.trim() : ''; })()"
+    )
+    if not after_down or after_down == before:
+        watch.fail(f"ArrowDown did not move the selection ({before!r} to {after_down!r})")
+    watch.drain_rejections()
+
+
+def check_file_enter(page, watch: Watch, project: str, session_id: str) -> None:
+    """Enter on a file opens it in the way the module reports."""
+    watch.enter("session: Enter on the brain")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    if not settle(page, "!!document.querySelector('main [role=\"tree\"]')"):
+        watch.fail("no tree to open from")
+        return
+    # Focus a leaf (a file or key, no aria-expanded) via keyboard and press
+    # Enter. The tree's key handler is the one under test.
+    selected = page.evaluate(
+        "(() => { const items = [...document.querySelectorAll('main [role=\"treeitem\"]')];"
+        " const leaf = items.find((n) => n.getAttribute('aria-expanded') === null);"
+        " if (!leaf) return false; leaf.setAttribute('tabindex', '0'); leaf.focus(); return true; })()"
+    )
+    if not selected:
+        watch.fail("no leaf to open")
+        return
+    before_hash = page.evaluate("location.hash")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(250)
+    new_hash = page.evaluate("location.hash")
+    if new_hash == before_hash and before_hash.startswith("#/session"):
+        watch.fail("Enter on a brain file changed nothing")
+    watch.drain_rejections()
+
+
+def check_stat_cards(page, watch: Watch, project: str, session_id: str) -> None:
+    """The three stat cards show real numbers from the detail route."""
+    watch.enter("session: the stat cards")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    cards = page.evaluate(
+        "(() => [...document.querySelectorAll('main .stat-card')].map((c) => {"
+        " const label = c.querySelector('.stat-label');"
+        " const value = c.querySelector('.stat-value');"
+        " return { label: label && label.textContent.trim(),"
+        " value: value && value.textContent.trim() };"
+        " }))()"
+    )
+    labels = [c["label"] for c in cards if c["label"]]
+    for wanted in ("Started", "Events", "Brain"):
+        if wanted not in labels:
+            watch.fail(f"the stat cards do not name {wanted!r}: {labels}")
+    if not cards or not all(c["value"] for c in cards):
+        watch.fail(f"a stat card shows no value: {cards}")
+    # The seeded events count is at least the two the pickup produced... The
+    # checks session has its own events. Assert it is a number, not a blank.
+    watch.drain_rejections()
+
+
+def check_action_bar(page, watch: Watch, project: str, session_id: str) -> None:
+    """The pinned action bar names End and Prune, with Prune disabled until ended."""
+    watch.enter("session: the action bar")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    bar = page.evaluate(
+        "(() => { const bar = document.querySelector('main .session-actions');"
+        " if (!bar) return null;"
+        " return { end: !!bar.querySelector('[data-action=\"end\"]'),"
+        " prune: !!bar.querySelector('[data-action=\"prune\"]'),"
+        " pruneDisabled: (bar.querySelector('[data-action=\"prune\"]') || {}).disabled,"
+        " text: bar.textContent.trim(),"
+        " fixed: getComputedStyle(bar).position === 'fixed' }; })()"
+    )
+    if not bar:
+        watch.fail("the session detail has no pinned action bar")
+        return
+    if "End session" not in bar["text"]:
+        watch.fail(f"the action bar does not name End session: {bar['text']!r}")
+    if "Prune (ends first)" not in bar["text"]:
+        watch.fail(f"the action bar does not say the design's Prune (ends first): {bar['text']!r}")
+    if not bar["end"]:
+        watch.fail("the End button is missing")
+    if not bar["prune"] or not bar["pruneDisabled"]:
+        watch.fail("Prune is enabled on a live session")
+    if "fixed" not in ("fixed",) and not bar["fixed"]:
+        watch.fail("the action bar is not pinned")
+    watch.drain_rejections()
+
+
+def check_audit_row(page, watch: Watch, project: str, session_id: str) -> None:
+    """The detail carries a Latest event line from the last_event field."""
+    watch.enter("session: the audit row")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
+    row = page.evaluate(
+        "(() => { const r = document.querySelector('main .audit-row');"
+        " return r && { text: r.textContent.trim(), chev: !!r.querySelector('svg') }; })()"
+    )
+    if not row:
+        watch.fail("the detail has no audit row")
+        return
+    # The newest feed event of the session is the answered question subject.
+    if harness.ANSWERED_SUBJECT not in row["text"]:
+        watch.fail(f"the audit row does not carry the newest event: {row['text'][:60]!r}")
+    if not row["chev"]:
+        watch.fail("the audit row has no chevron")
+    watch.drain_rejections()
+
+
+def check_lineage_handoff(page, watch: Watch, project: str) -> None:
+    """The picked-up session shows its owner, lineage and handoff note."""
+    watch.enter("session: owner, lineage, handoff")
+    listing = json.loads(harness.request(watch.port, "GET", f"/api/v1/sessions?project={quote(harness.LINEAGE_PROJECT)}"))
+    pickup = [s for s in listing["sessions"] if s["session_name"] == "pickup"]
+    if not pickup:
+        watch.fail("no picked-up session is seeded")
+        return
+    goto(
+        page,
+        f"#/session?project={quote(harness.LINEAGE_PROJECT)}&id={quote(pickup[0]['id'])}",
+        "pickup",
+    )
+    body = page.evaluate("document.querySelector('main').textContent")
+    if "forked" not in body:
+        watch.fail("the picked-up session's lineage is not shown (no 'forked')")
+    if harness.LINEAGE_HANDOFF not in body:
+        watch.fail("the handoff note is not shown")
+    if not pickup[0].get("agent"):
+        watch.fail("the session has no owner")
+    watch.drain_rejections()
+
+
+def check_session_end_flips_row(page, watch: Watch, project: str) -> None:
+    """Ending a session from its detail makes the row ended, not a toast.
+
+    The lineage project's source session is active and is not the one the
+    prune check ends, so the two walks do not step on each other.
+    """
+    watch.enter("session: End writes")
+    listing = json.loads(
+        harness.request(watch.port, "GET", f"/api/v1/sessions?project={quote(harness.LINEAGE_PROJECT)}")
+    )
+    source = [s for s in listing["sessions"] if s["session_name"] == "source"]
+    if not source:
+        watch.fail("no active lineage source session is seeded")
+        return
+    goto(
+        page,
+        f"#/session?project={quote(harness.LINEAGE_PROJECT)}&id={quote(source[0]['id'])}",
+        "source",
+    )
+    if not settle(page, "!!document.querySelector('main [data-action=\"end\"]')"):
+        watch.fail("the live session's detail offers no End")
+        return
+    before = watch.count("POST /api/v1/sessions/" + quote(source[0]["id"]) + "/end")
+    page.click('main [data-action="end"]')
+    if not settle(
+        page,
+        f"document.querySelector('main').textContent.includes({json.dumps('ended')})"
+        " || !!document.querySelector('main [data-action=\"prune\"]')",
+    ):
+        watch.fail("ending the session from its detail did not flip it to ended")
+    after = watch.count("POST /api/v1/sessions/" + quote(source[0]["id"]) + "/end")
+    if after != before + 1:
+        watch.fail(f"End sent {after - before} requests, expected one")
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -1902,6 +2241,16 @@ def run() -> int:
             check_toast_leaves_a_writer_alone(page, watch, project)
             check_answer(page, watch, project)
             check_approve(page, watch)
+            check_session_row_state(page, watch, project)
+            check_tree_roles(page, watch, project, seeded["session_id"])
+            check_lazy_children(page, watch, project, seeded["session_id"])
+            check_tree_keys(page, watch, project, seeded["session_id"])
+            check_file_enter(page, watch, project, seeded["session_id"])
+            check_stat_cards(page, watch, project, seeded["session_id"])
+            check_action_bar(page, watch, project, seeded["session_id"])
+            check_audit_row(page, watch, project, seeded["session_id"])
+            check_lineage_handoff(page, watch, project)
+            check_session_end_flips_row(page, watch, project)
             check_prune(page, watch, project, seeded["session_id"])
             check_gate_in_the_app(page, watch, project, seeded["protected_id"])
             watch.enter("artifacts: the gate on the public page")

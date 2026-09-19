@@ -31,7 +31,21 @@ AGENT_ID = "checks/agent"
 AGENT_NAME = "Check agent"
 SESSION_NAME = "nightly"
 BRAIN_PATH = "/kv/last-run"
+# A second kv key, so the kv tree has two leaves and the arrow-key check
+# can move the selection within it.
+BRAIN_PATH_2 = "/kv/count"
 BRAIN_VALUE = "green"
+# The session brain the tree checks walk: a key, an FS file, and a folder
+# with children, so a listing shows both leaves and a directory that expands.
+BRAIN_FS_PATH = "/fs/notes/context.md"
+# A file directly under /fs, so a top-level listing shows both a file and
+# the notes folder the lazy-expand check opens.
+BRAIN_FS_TOP = "/fs/context.md"
+BRAIN_FS_VALUE = "# notes\n"
+BRAIN_FS_CHILD = "/fs/notes"
+# A folder with a child gives the tree a lazy expand to assert.
+BRAIN_FOLDER = "/fs/notes/ideas"
+BRAIN_FOLDER_VALUE = "seed\n"
 FINISHED_SUMMARY = "nightly report done"
 # An agent writes this. It must reach the screen as text, never as an element:
 # the escaping helper every screen shares is what stands between the two.
@@ -47,6 +61,11 @@ QUESTION_SUBJECT = "Ship the release?"
 ANSWERED_SUBJECT = "Roll the log files?"
 SEEDED_ANSWER = "Yes, roll them."
 ARTIFACT_TITLE = "Check note"
+# The project the lineage and handoff surface is seeded in, kept apart from
+# the checks project so the main feed and session listing stay stable.
+LINEAGE_PROJECT = "lineage"
+# The handoff note the seeded pickup leaves, asserted on the detail screen.
+LINEAGE_HANDOFF = "handoff note here"
 # A term the seeded feed event, session and brain entry all carry, so a search
 # for it returns grouped hits rather than an empty state.
 SEARCH_TERM = "nightly"
@@ -208,6 +227,93 @@ def seed(port: int) -> dict[str, str]:
         "/api/v1/agents",
         {"id": AGENT_ID, "display_name": AGENT_NAME, "trust": "trusted"},
     )
+    # A second project whose session was picked up from another, so the
+    # surface can render a forked lineage and a handoff note. Seeded first so
+    # its feed events are the oldest on the hub and never crowd the latest
+    # ten out of Home, which the checks assert against.
+    request(port, "POST", "/api/v1/projects", {"id": LINEAGE_PROJECT, "display_name": "Lineage"})
+    lineage_session: list[str] = []
+    mcp_call(
+        port,
+        lineage_session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, lineage_session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    lineage_source = mcp_call(
+        port,
+        lineage_session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "session_start",
+                "arguments": {
+                    "project_id": LINEAGE_PROJECT,
+                    "session_name": "source",
+                },
+            },
+        },
+    )
+    lineage_source_id = (lineage_source.get("result", {}).get("structuredContent", {}) or {}).get(
+        "session_id", ""
+    )
+    if lineage_source_id:
+        mcp_call(
+            port,
+            lineage_session,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "brain_put",
+                    "arguments": {"store": "session", "path": "/kv/source-key", "content": "x"},
+                },
+            },
+        )
+    pickup = mcp_call(
+        port,
+        lineage_session,
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "session_start",
+                "arguments": {
+                    "project_id": LINEAGE_PROJECT,
+                    "session_name": "pickup",
+                    "from": {"session_id": lineage_source_id},
+                },
+            },
+        },
+    )
+    pickup_result = pickup.get("result", {}).get("structuredContent", {}) or {}
+    lineage_pickup_id = pickup_result.get("session_id", "")
+    if lineage_pickup_id:
+        mcp_call(
+            port,
+            lineage_session,
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "session_end",
+                    "arguments": {"session_id": lineage_pickup_id, "handoff": "handoff note here"},
+                },
+            },
+        )
     session: list[str] = []
     mcp_call(
         port,
@@ -259,6 +365,21 @@ def seed(port: int) -> dict[str, str]:
             "brain",
             "brain_put",
             {"store": "session", "path": BRAIN_PATH, "content": BRAIN_VALUE},
+        ),
+        (
+            "brain-2",
+            "brain_put",
+            {"store": "session", "path": BRAIN_PATH_2, "content": "0"},
+        ),
+        (
+            "brain-fs",
+            "brain_put",
+            {"store": "session", "path": BRAIN_FS_TOP, "content": BRAIN_FS_VALUE},
+        ),
+        (
+            "brain-folder",
+            "brain_put",
+            {"store": "session", "path": BRAIN_FOLDER, "content": BRAIN_FOLDER_VALUE},
         ),
     ]
     results: dict[str, dict] = {}
