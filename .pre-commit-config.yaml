@@ -66,13 +66,25 @@ repos:
         language: pygrep
         stages: [commit-msg]
 
+      - id: no-emoji
+        name: reject emoji
+        entry: ./.agents/scripts/check-emoji.py
+        language: script
+        types: [text]
+
+      - id: no-emoji-msg
+        name: reject emoji in the commit message
+        entry: ./.agents/scripts/check-emoji.py
+        language: script
+        stages: [commit-msg]
+
       # Agent-work tracking (numbered waves, lettered lanes, milestone codes)
       # stays in the scratch area. The concept words alone are fine in prose;
       # what is rejected is an identifier. Cargo.lock is generated and exempt.
       - id: no-process-leaks
         name: reject agent-work and milestone identifiers
-        entry: '\b([Ww]ave\s*-?\s*[0-9]+|[Ll]ane\s+[A-Z0-9]|[Mm]ilestone\s+[0-9]+|M[0-9]{1,2})\b'
-        language: pygrep
+        entry: ./.agents/scripts/check-process-leaks.py
+        language: script
         types: [text]
         exclude: '^Cargo\.lock$'
 
@@ -90,9 +102,16 @@ repos:
 
       - id: no-process-leaks-msg
         name: reject process leaks in the commit message
-        entry: '(?i)\b(wave[- ]?[0-9]+|lane|remediation|F[0-9]+)\b'
-        language: pygrep
+        entry: ./.agents/scripts/check-process-leaks.py
+        language: script
         stages: [commit-msg]
+
+      - id: test-hooks
+        name: test hook fixtures
+        entry: ./.agents/scripts/test-hooks.py
+        language: script
+        pass_filenames: false
+        files: '^\.agents/scripts/(check-emoji\.py|check-process-leaks\.py|test-hooks\.py)$'
 
       - id: okf-bundle
         name: validate the OKF v0.2 docs bundle
