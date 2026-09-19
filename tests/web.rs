@@ -1,18 +1,15 @@
 //! The PWA shell and the projects and storage routes it depends on.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use serde_json::Value;
 use tower::ServiceExt;
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
+
+use common::http::{get, json_body as json, request, text_body as text};
+use common::state::TestState;
 
 const APP_JS: &str = include_str!("../web/app.js");
 const ARTIFACTS_JS: &str = include_str!("../web/artifacts.mjs");
@@ -27,67 +24,21 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// lists filled in, so the digest can only be recomputed from the source.
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 
-async fn state() -> AppState {
+async fn state() -> TestState {
     state_with_public_url(None).await
 }
 
-async fn state_with_public_url(public_url: Option<&str>) -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-web-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("addr"),
-        public_url: public_url.map(str::to_string),
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
+async fn state_with_public_url(public_url: Option<&str>) -> TestState {
+    common::state::open_with("web", |config| {
+        config.public_url = public_url.map(str::to_string);
     })
     .await
-    .expect("open state")
-}
-
-fn get(uri: &str, auth: Option<&str>) -> Request<Body> {
-    request("GET", uri, auth, None)
-}
-
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    let body = match body {
-        Some(value) => {
-            builder = builder.header(header::CONTENT_TYPE, "application/json");
-            Body::from(value.to_string())
-        }
-        None => Body::empty(),
-    };
-    builder.body(body).expect("request")
-}
-
-async fn text(response: axum::response::Response) -> String {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    String::from_utf8_lossy(&bytes).into_owned()
-}
-
-async fn json(response: axum::response::Response) -> Value {
-    serde_json::from_str(&text(response).await).expect("json")
 }
 
 #[tokio::test]
 async fn serves_the_pwa_shell() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app.oneshot(get("/", None)).await.expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     let body = text(response).await;
@@ -97,7 +48,8 @@ async fn serves_the_pwa_shell() {
 
 #[tokio::test]
 async fn serves_the_tokens() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/tokens.css", None))
         .await
@@ -138,7 +90,7 @@ async fn projects_create_list_and_storage() {
     assert_eq!(usage.status(), StatusCode::OK);
     assert!(json(usage).await["total_bytes"].is_number());
 
-    let app = router(state);
+    let app = router(state.clone());
     let denied = app
         .oneshot(get("/api/v1/projects", None))
         .await
@@ -197,7 +149,7 @@ async fn storage_usage_sums_every_stored_version() {
 
     // The three versions on disk are 5, 10, and 3 bytes: a report that only
     // counted the current pointer would show 3, not the 18 actually stored.
-    let app = router(state);
+    let app = router(state.clone());
     let usage = app
         .oneshot(get("/api/v1/storage", Some("Bearer token")))
         .await
@@ -290,7 +242,7 @@ async fn serves_every_shell_asset_with_a_policy() {
         assert!(text(response).await.contains(needle), "{path} content");
     }
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app.oneshot(get("/", None)).await.expect("request");
     assert!(
         response.headers().contains_key("content-security-policy"),
@@ -363,7 +315,8 @@ fn stamped_paths<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
 
 #[tokio::test]
 async fn service_worker_precaches_every_static_route() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app.oneshot(get("/sw.js", None)).await.expect("request");
     assert_eq!(
         response
@@ -427,7 +380,7 @@ async fn service_worker_cache_name_follows_the_assets() {
         .map(|byte| format!("{byte:02x}"))
         .collect();
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app.oneshot(get("/sw.js", None)).await.expect("request");
     let body = text(response).await;
     assert!(
@@ -438,7 +391,8 @@ async fn service_worker_cache_name_follows_the_assets() {
 
 #[tokio::test]
 async fn service_worker_handles_notifications() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app.oneshot(get("/sw.js", None)).await.expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     let body = text(response).await;
@@ -451,7 +405,8 @@ async fn service_worker_handles_notifications() {
 
 #[tokio::test]
 async fn serves_the_skill_with_the_request_host() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -480,7 +435,8 @@ async fn serves_the_skill_with_the_request_host() {
 
 #[tokio::test]
 async fn the_skill_prefers_forwarded_headers() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -503,7 +459,8 @@ async fn the_skill_prefers_forwarded_headers() {
 
 #[tokio::test]
 async fn the_skill_prefers_the_configured_public_url() {
-    let app = router(state_with_public_url(Some("https://hub.example")).await);
+    let state = state_with_public_url(Some("https://hub.example")).await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -525,7 +482,8 @@ async fn the_skill_prefers_the_configured_public_url() {
 
 #[tokio::test]
 async fn the_skill_falls_back_to_the_configured_bind() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app.oneshot(get("/SKILL.md", None)).await.expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
@@ -536,7 +494,8 @@ async fn the_skill_falls_back_to_the_configured_bind() {
 
 #[tokio::test]
 async fn an_unsafe_forwarded_host_falls_through_to_the_request_host() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -555,7 +514,8 @@ async fn an_unsafe_forwarded_host_falls_through_to_the_request_host() {
 
 #[tokio::test]
 async fn a_forwarded_scheme_applies_to_the_request_host() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -572,7 +532,8 @@ async fn a_forwarded_scheme_applies_to_the_request_host() {
 
 #[tokio::test]
 async fn an_invalid_forwarded_scheme_is_not_echoed() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -589,7 +550,8 @@ async fn an_invalid_forwarded_scheme_is_not_echoed() {
 
 #[tokio::test]
 async fn an_unsafe_host_falls_back_to_the_bind() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let request = Request::builder()
         .uri("/SKILL.md")
         .method("GET")
@@ -670,7 +632,7 @@ async fn serves_artifact_content_for_the_viewer() {
     .await
     .expect("publish protected");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get(
             &format!("/api/v1/artifacts/{}", protected.id),
@@ -968,7 +930,7 @@ async fn public_artifact_page_loads_for_the_embed() {
     .await
     .expect("publish");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get(&format!("/artifacts/{}", published.id), None))
         .await
@@ -1139,7 +1101,7 @@ async fn protected_artifact_serves_the_locked_host_shell() {
     .await
     .expect("publish protected");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get(&format!("/artifacts/{}", published.id), None))
         .await
