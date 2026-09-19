@@ -200,9 +200,14 @@ def visit(page, watch: Watch, route: str, hash_value: str, title: str, data: lis
     found = heading(page)
     if found != title:
         watch.fail(f"the heading is {found!r}, expected {title!r}")
-    body = page.evaluate("document.querySelector('main').textContent")
+    # A project view paints its header and then its segment, so the heading can
+    # be up before the list under it. The data is waited for, not read once.
     for needle in data:
-        if needle not in body:
+        if not settle(
+            page,
+            f"document.querySelector('main').textContent.includes({json.dumps(needle)})",
+            timeout=5000,
+        ):
             watch.fail(f"the screen does not show {needle!r}")
     if page.evaluate("!!document.querySelector('main .error')"):
         watch.fail("the screen rendered an error card")
