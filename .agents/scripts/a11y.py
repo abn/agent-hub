@@ -34,6 +34,9 @@ ROUTES = [
     "artifacts",
     "home-quiet",
     "project-settings",
+    # A project with no events, so the feed's empty state and its action are
+    # audited as well as the feed that has rows.
+    f"projects/{harness.FEED_EMPTY_PROJECT}/feed",
 ]
 # The session detail needs a project and a session id from the seeded hub;
 # every other route is addressed by its bare hash.
@@ -73,6 +76,12 @@ def run() -> int:
     source = axe_source()
     failures: list[str] = []
     with harness.running_hub(NAME) as (port, seeded):
+        harness.request(
+            port,
+            "POST",
+            "/api/v1/projects",
+            {"id": harness.FEED_EMPTY_PROJECT, "display_name": "Feed empty"},
+        )
         with sync_playwright() as playwright:
             browser = harness.launch_browser(playwright, NAME)
             for theme, color_scheme in (("light", "light"), ("dark", "dark")):

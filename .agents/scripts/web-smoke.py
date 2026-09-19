@@ -3504,6 +3504,332 @@ def name_problem(page) -> dict:
         "   .filter((e) => e && !e.hidden).map((e) => e.textContent.trim()).join(' ');"
         " return { invalid: i.getAttribute('aria-invalid') === 'true', text }; })()"
     )
+# The project feed. One context of its own: it moves event times on the way to
+# the browser, stands in for the clipboard, and advances a read cursor, none of
+# which the rest of the run should see.
+FEED_DAYS_HASH = f"#/projects/{harness.FEED_DAYS_PROJECT}/feed"
+FEED_DAYS_API = f"/api/v1/projects/{harness.FEED_DAYS_PROJECT}/feed"
+FEED_PAGE = 100
+FEED_ROWS = "document.querySelectorAll('main .feed-row').length"
+FEED_FOLD = "document.querySelector('main .feed-fold button[aria-expanded]')"
+FEED_ROW_STATE = (
+    "[...document.querySelectorAll('main .feed-row')].map((row) => ({"
+    " title: row.querySelector('.title').textContent.trim(),"
+    " weight: getComputedStyle(row.querySelector('.title')).fontWeight,"
+    " dot: !!row.querySelector('.dot-unread'),"
+    " said: [...row.querySelectorAll('.sr-only')].some((s) => s.textContent.trim() === 'Unread')"
+    " }))"
+)
+
+
+def feed_backdate(route) -> None:
+    """Hand the browser the hub's own page with the seeded ages applied."""
+    from datetime import datetime, timedelta
+
+    response = route.fetch()
+    page = response.json()
+    for event in page.get("events", []):
+        for prefix, days, _ in harness.FEED_DAYS_AGES:
+            if event["summary"].startswith(prefix):
+                stamp = datetime.fromisoformat(event["created_at"].replace("Z", "+00:00"))
+                event["created_at"] = (stamp - timedelta(days=days)).isoformat()
+    route.fulfill(response=response, json=page)
+
+
+def feed_newest(port: int) -> str:
+    page = json.loads(harness.request(port, "GET", f"{FEED_DAYS_API}?limit=1"))
+    return page["events"][0]["id"]
+
+
+def feed_wait(page, held: list, want: int) -> bool:
+    deadline = time.monotonic() + 8
+    while len(held) < want and time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+    return len(held) >= want
+
+
+def feed_press(page, watch: Watch, selector: str, what: str) -> bool:
+    """Press a control, or say it is missing rather than wait out a timeout."""
+    if not page.evaluate(f"!!document.querySelector({json.dumps(selector)})"):
+        watch.fail(f"there is no {what} to press")
+        return False
+    page.click(selector)
+    return True
+
+
+def check_feed_days(page, watch: Watch) -> None:
+    """Today and Yesterday are on screen under the design's day header."""
+    watch.enter("feed: day groups")
+    goto(page, FEED_DAYS_HASH, harness.FEED_DAYS_NAME)
+    if not settle(page, f"{FEED_ROWS} > 0"):
+        watch.fail("the feed painted no feed rows")
+        return
+    days = page.evaluate(
+        "[...document.querySelectorAll('main > h2.day')].map((h) => { const s ="
+        " getComputedStyle(h); return { text: h.textContent.trim(), size: s.fontSize,"
+        " weight: s.fontWeight, caps: s.textTransform,"
+        " rows: h.nextElementSibling.querySelectorAll('.feed-row').length }; })"
+    )
+    if [(day["text"], day["rows"]) for day in days] != [("Today", 3), ("Yesterday", 2)]:
+        watch.fail(f"the open day groups are {[(d['text'], d['rows']) for d in days]}")
+    for day in days:
+        if (day["size"], day["weight"], day["caps"]) != ("12px", "600", "uppercase"):
+            watch.fail(f"the {day['text']} header is {day['size']}/{day['weight']} {day['caps']}")
+    if page.evaluate("!!document.getElementById('feed-pwned')"):
+        watch.fail("an agent's markup became an element in the feed")
+    if harness.FEED_DAYS_MARKUP not in page.evaluate("document.querySelector('main').textContent"):
+        watch.fail("the agent's markup does not render as text in the feed")
+    watch.drain_rejections()
+
+
+def check_feed_chips(page, watch: Watch) -> None:
+    """One scrolling line of toggles, All first, the filter served by the query."""
+    watch.enter("feed: kind chips")
+    chips = page.evaluate(
+        "(() => { const row = document.querySelector('main .feed-chips');"
+        " if (!row) return null; const all = [...row.querySelectorAll('button.chip')];"
+        " return { role: row.getAttribute('role'), name: row.getAttribute('aria-label'),"
+        " labels: all.map((c) => c.textContent.trim()),"
+        " pressed: all.map((c) => c.getAttribute('aria-pressed')),"
+        " tops: [...new Set(all.map((c) => Math.round(c.getBoundingClientRect().top)))].length,"
+        " scrolls: getComputedStyle(row).overflowX, wide: row.scrollWidth > row.clientWidth,"
+        " page: document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        " }; })()"
+    )
+    if not chips:
+        watch.fail("the feed has no kind chip row of its own")
+        return
+    if chips["role"] != "group" or not chips["name"]:
+        watch.fail(f"the chip row is a {chips['role']!r} named {chips['name']!r}")
+    want = ["All", "signal", "finished", "question", "answer", "approval", "artifact", "session"]
+    if chips["labels"] != want:
+        watch.fail(f"the chips read {chips['labels']}")
+    if chips["pressed"] != ["true"] + ["false"] * 7:
+        watch.fail(f"with no filter the pressed states are {chips['pressed']}")
+    if chips["tops"] != 1 or chips["scrolls"] != "auto" or not chips["wide"] or chips["page"]:
+        watch.fail(
+            f"the chips sit on {chips['tops']} line(s), overflow-x {chips['scrolls']},"
+            f" row scrolls {chips['wide']}, page scrolls {chips['page']}"
+        )
+    seen_before = watch.count(f"POST {FEED_DAYS_API}/seen")
+    if not feed_press(page, watch, 'main .feed-chips [data-kind="finished"]', "finished chip"):
+        return
+    if not settle(page, f"{FEED_ROWS} === 1"):
+        watch.fail("the finished chip did not narrow the feed to the one finished event")
+    if not watch.count(f"GET {FEED_DAYS_API}?limit={FEED_PAGE}&kinds=finished"):
+        watch.fail("the filter was not served by the query")
+    state = page.evaluate(
+        "(() => { const at = (k) => document.querySelector(`main .feed-chips [data-kind=\"${k}\"]`);"
+        " return { all: at('all').getAttribute('aria-pressed'),"
+        " kind: at('finished').getAttribute('aria-pressed'),"
+        " focus: document.activeElement === at('finished') }; })()"
+    )
+    if state != {"all": "false", "kind": "true", "focus": True}:
+        watch.fail(f"after pressing a kind the chips are {state}")
+    if not feed_press(page, watch, 'main .feed-chips [data-kind="all"]', "All chip"):
+        return
+    if not settle(page, f"{FEED_ROWS} > 1"):
+        watch.fail("All did not clear the filter")
+    # The visit is the unit: a repaint inside it keeps what was new on arrival.
+    kept = [row["title"] for row in page.evaluate(FEED_ROW_STATE) if row["dot"]]
+    if kept != [harness.FEED_DAYS_FRESH]:
+        watch.fail(f"a repaint inside one visit left the unread mark on {kept}")
+    if watch.count(f"POST {FEED_DAYS_API}/seen") != seen_before:
+        watch.fail("a filtered page, which skips events, moved the read cursor")
+    watch.drain_rejections()
+
+
+def check_feed_unread(page, watch: Watch, port: int, session: list, seen: list) -> None:
+    """What is above the read cursor is marked, and viewing the feed moves it."""
+    watch.enter("feed: the unread mark")
+    rows = page.evaluate(FEED_ROW_STATE)
+    if not rows or not all(row["dot"] and row["said"] and row["weight"] == "600" for row in rows):
+        watch.fail(f"a feed never opened before marks {rows}")
+    newest = feed_newest(port)
+    if not feed_wait(page, seen, 1):
+        watch.fail("viewing the feed did not advance the read cursor")
+        return
+    if seen[0] != {"event_id": newest}:
+        watch.fail(f"the cursor was advanced with {seen[0]}, expected the newest event {newest}")
+    harness.feed_days_append(
+        port, session, "signal_append", {"kind": "signal", "summary": harness.FEED_DAYS_FRESH}
+    )
+    goto(page, "#/home", "Home")
+    goto(page, FEED_DAYS_HASH, harness.FEED_DAYS_NAME)
+    settle(page, f"{FEED_ROWS} > 0")
+    rows = page.evaluate(FEED_ROW_STATE)
+    marked = [row["title"] for row in rows if row["dot"] or row["said"] or row["weight"] == "600"]
+    if marked != [harness.FEED_DAYS_FRESH]:
+        watch.fail(f"with one event above the cursor the marked rows are {marked}")
+    fresh = next((row for row in rows if row["title"] == harness.FEED_DAYS_FRESH), None)
+    if not fresh or not (fresh["dot"] and fresh["said"] and fresh["weight"] == "600"):
+        watch.fail(f"the unseen row is {fresh}: it wants the dot, the word and the weight")
+    if not feed_wait(page, seen, 2) or seen[1] != {"event_id": feed_newest(port)}:
+        watch.fail(f"the second visit advanced the cursor with {seen[1:]}")
+    watch.drain_rejections()
+
+
+def check_feed_fold(page, watch: Watch) -> None:
+    """Older days sit behind a disclosure that pages back on the hub's cursor."""
+    watch.enter("feed: the Earlier fold")
+    fold = page.evaluate(
+        f"(() => {{ const b = {FEED_FOLD}; return b && {{ tag: b.tagName,"
+        " text: b.textContent.trim().replace(/\\s+/g, ' '), open: b.getAttribute('aria-expanded'),"
+        " height: b.getBoundingClientRect().height, size: getComputedStyle(b).fontSize }; })()"
+    )
+    if not fold:
+        watch.fail("older days are not behind a disclosure")
+        return
+    if fold["tag"] != "BUTTON" or fold["open"] != "false":
+        watch.fail(f"the disclosure is a {fold['tag']} with aria-expanded {fold['open']!r}")
+    if fold["text"] != "Earlier · 105 events":
+        watch.fail(f"the disclosure reads {fold['text']!r}")
+    if fold["height"] < 44 or fold["size"] != "13px":
+        watch.fail(f"the disclosure is {fold['height']:.0f}px tall at {fold['size']}")
+    if page.evaluate(FEED_ROWS) != 6:
+        watch.fail(f"collapsed, the feed holds {page.evaluate(FEED_ROWS)} rows, not the 6 recent")
+    page.click("main .feed-fold button[aria-expanded]")
+    if not settle(page, f"{FEED_ROWS} === {FEED_PAGE}"):
+        watch.fail(f"expanded, the feed holds {page.evaluate(FEED_ROWS)} rows of the first page")
+    opened = page.evaluate(
+        f"(() => {{ const b = {FEED_FOLD}; const region ="
+        " document.getElementById(b.getAttribute('aria-controls'));"
+        " return { open: b.getAttribute('aria-expanded'), focus: document.activeElement === b,"
+        " days: region ? region.querySelectorAll('h2.day').length : -1 }; })()"
+    )
+    if opened != {"open": "true", "focus": True, "days": 2}:
+        watch.fail(f"after opening, the disclosure is {opened}")
+    before = watch.count(f"GET {FEED_DAYS_API}?limit={FEED_PAGE}&before=")
+    if not feed_press(page, watch, 'main .feed-fold button[data-action="feed-older"]', "Show older"):
+        return
+    if not settle(page, f"{FEED_ROWS} === 111"):
+        watch.fail(f"paging back left {page.evaluate(FEED_ROWS)} rows, not all 111")
+    if watch.count(f"GET {FEED_DAYS_API}?limit={FEED_PAGE}&before=") != before + 1:
+        watch.fail("paging back did not use the before cursor")
+    if page.evaluate("!!document.querySelector('main .feed-fold [data-action=\"feed-older\"]')"):
+        watch.fail("a feed with nothing older still offers to page back")
+    page.evaluate(f"{FEED_FOLD}.focus()")
+    page.keyboard.press("Enter")
+    if not settle(page, f"{FEED_ROWS} === 6"):
+        watch.fail("Enter on the disclosure did not fold the older days away")
+    closed = page.evaluate(
+        f"(() => {{ const b = {FEED_FOLD};"
+        " return { open: b.getAttribute('aria-expanded'), focus: document.activeElement === b }; })()"
+    )
+    if closed != {"open": "false", "focus": True}:
+        watch.fail(f"after closing, the disclosure is {closed}")
+    watch.drain_rejections()
+
+
+def check_feed_row_keys(page, watch: Watch) -> None:
+    """The map walks the feed, and on into the older days once they are open."""
+    watch.enter("feed: row keys")
+    if not feed_press(page, watch, "main .feed-fold button[aria-expanded]", "Earlier disclosure"):
+        return
+    settle(page, f"{FEED_ROWS} > 6")
+    page.evaluate("document.activeElement.blur()")
+    # The painted list parks its selection on the first row, so six presses
+    # cross the six recent rows and land on the first of the older days.
+    for _ in range(6):
+        page.keyboard.press("j")
+        page.wait_for_timeout(80)
+    row = page.evaluate(SELECTED_TAB)
+    if not row or "earlier note 2" not in row["text"] or not row["focused"]:
+        watch.fail(f"six rows down the selection is {row and row['text'][:40]!r}")
+    watch.drain_rejections()
+
+
+def check_feed_copy_setup(page, watch: Watch, port: int) -> None:
+    """The empty feed hands over a setup for this hub, and says so if it cannot."""
+    watch.enter("feed: copy MCP setup")
+    goto(page, f"#/projects/{harness.FEED_EMPTY_PROJECT}/feed", "Feed empty")
+    button = "main .empty-state button.empty-link"
+    if not settle(page, f"!!document.querySelector('{button}')"):
+        watch.fail("the empty feed offers no Copy MCP setup button")
+        return
+    if page.evaluate(f"document.querySelector('{button}').textContent.trim()") != "Copy MCP setup":
+        watch.fail("the empty feed's action is not the design's Copy MCP setup")
+    page.evaluate(
+        "(() => { navigator.clipboard.writeText = (text) => { window.__feedCopied = text;"
+        " return Promise.resolve(); }; })()"
+    )
+    page.click(button)
+    if not settle(page, "typeof window.__feedCopied === 'string'"):
+        watch.fail("pressing Copy MCP setup wrote nothing to the clipboard")
+        return
+    copied = page.evaluate("window.__feedCopied")
+    origin = f"http://127.0.0.1:{port}"
+    for needle in (
+        f"POST {origin}/mcp",
+        "Authorization: Bearer <agent token>",
+        f"HUB_URL={origin} HUB_TOKEN=<agent token> agent-hub mcp",
+        harness.FEED_EMPTY_PROJECT,
+        f"{origin}/SKILL.md",
+    ):
+        if needle not in copied:
+            watch.fail(f"the copied setup does not carry {needle!r}: {copied!r}")
+    if harness.ADMIN_TOKEN in copied:
+        watch.fail("the copied setup carries the reader's own token")
+    if not settle(page, "/copied/i.test((document.querySelector('.toast') || {}).textContent || '')"):
+        watch.fail("a copy that worked says nothing")
+    if page.evaluate("!!document.querySelector('main .feed-setup')"):
+        watch.fail("a copy that worked still shows the fallback")
+    page.evaluate(
+        "(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); })()"
+    )
+    page.click(button)
+    if not settle(page, "!!document.querySelector('main .feed-setup textarea')"):
+        watch.fail("a refused clipboard leaves the reader with nothing to copy")
+        return
+    shown = page.evaluate(
+        "(() => { const box = document.querySelector('main .feed-setup');"
+        " const field = box.querySelector('textarea'); const s = field.selectionEnd - field.selectionStart;"
+        " return { text: field.value, name: field.getAttribute('aria-label') ||"
+        " (field.labels[0] || {}).textContent || '', focus: document.activeElement === field,"
+        " selected: s === field.value.length, readonly: field.readOnly,"
+        " said: box.querySelector('[role=\"status\"]').textContent.trim() }; })()"
+    )
+    if shown["text"] != copied:
+        watch.fail("the fallback shows something other than what a copy carries")
+    if not (shown["name"] and shown["focus"] and shown["selected"] and shown["readonly"]):
+        watch.fail(f"the fallback field is {shown}")
+    if not shown["said"]:
+        watch.fail("the fallback does not say why it is there")
+    watch.drain_rejections()
+
+
+def check_feed_screen(browser, watch: Watch, port: int) -> None:
+    session = harness.seed_feed_days(port)
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844}, color_scheme="light", service_workers="block"
+    )
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        "window.__smokeRejections = [];"
+        "window.addEventListener('unhandledrejection', (event) => {"
+        " window.__smokeRejections.push(String(event.reason)); });"
+    )
+    page = context.new_page()
+    mine = Watch(page, port)
+    mine.armed = True
+    seen: list = []
+    page.on(
+        "request",
+        lambda request: seen.append(request.post_data_json)
+        if request.method == "POST" and request.url.endswith(f"{FEED_DAYS_API}/seen")
+        else None,
+    )
+    page.route(re.compile(re.escape(FEED_DAYS_API) + r"\?"), feed_backdate)
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+    check_feed_days(page, mine)
+    check_feed_unread(page, mine, port, session, seen)
+    check_feed_chips(page, mine)
+    check_feed_fold(page, mine)
+    check_feed_row_keys(page, mine)
+    check_feed_copy_setup(page, mine, port)
+    watch.failures.extend(mine.failures)
+    context.close()
+    watch.page.bring_to_front()
 
 
 def run() -> int:
@@ -3640,6 +3966,7 @@ def run() -> int:
             check_home_fields(page, watch)
             check_home_quiet(page, watch)
             check_project_settings(page, watch, port)
+            check_feed_screen(browser, watch, port)
             # Last: it seeds sixty more events, which every check above would
             # have to look past.
             check_tab_budget(page, watch, port)

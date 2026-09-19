@@ -234,6 +234,81 @@ def home_payload(**fields) -> dict:
     return quiet
 
 
+# A project whose feed spans days. The hub stamps every event with the moment
+# it lands, so the prefix of a summary is what says how old the event is meant
+# to be, and the check that reads the feed moves `created_at` back by that many
+# days on the way to the browser. The order the events are seeded in is the
+# order of their ids, oldest first, so the ages and the ids agree.
+FEED_DAYS_PROJECT = "feed-days"
+FEED_DAYS_NAME = "Feed days"
+FEED_DAYS_AGES = (("older note", 5, 102), ("earlier note", 3, 3), ("yesterday note", 1, 2))
+FEED_DAYS_MARKUP = 'feed <i id="feed-pwned">markup</i> note'
+# A finished event, so the kind filter has something to narrow to without the
+# project adding anything that waits on the reader.
+FEED_DAYS_FINISHED = "feed days report done"
+FEED_DAYS_TODAY = "today note"
+FEED_DAYS_FRESH = "fresh note"
+FEED_EMPTY_PROJECT = "feed-empty"
+
+
+def feed_days_session(port: int) -> list[str]:
+    session: list[str] = []
+    mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    return session
+
+
+def feed_days_append(port: int, session: list[str], tool: str, arguments: dict) -> None:
+    mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": dict(arguments, project_id=FEED_DAYS_PROJECT)},
+        },
+    )
+
+
+def seed_feed_days(port: int) -> list[str]:
+    """A hundred and ten events over four days, and a project with none.
+
+    Its own projects, so the screens the rest of a run asserts against keep the
+    events they were seeded with. Returns the session, so a check can land one
+    more event after the feed has been read.
+    """
+    request(
+        port, "POST", "/api/v1/projects", {"id": FEED_DAYS_PROJECT, "display_name": FEED_DAYS_NAME}
+    )
+    request(port, "POST", "/api/v1/projects", {"id": FEED_EMPTY_PROJECT, "display_name": "Feed empty"})
+    session = feed_days_session(port)
+    for prefix, _, count in FEED_DAYS_AGES:
+        for index in range(count):
+            feed_days_append(
+                port, session, "signal_append", {"kind": "signal", "summary": f"{prefix} {index}"}
+            )
+    feed_days_append(port, session, "signal_append", {"kind": "signal", "summary": FEED_DAYS_MARKUP})
+    feed_days_append(
+        port, session, "signal_append", {"kind": "finished", "summary": FEED_DAYS_FINISHED}
+    )
+    feed_days_append(port, session, "signal_append", {"kind": "signal", "summary": FEED_DAYS_TODAY})
+    return session
+
+
 def skip(name: str, message: str) -> None:
     """Report a missing part of the toolchain and leave the gate green."""
     print(f"{name}: {message}; skipping")
