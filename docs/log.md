@@ -64,6 +64,22 @@ software release notes and the repository changelog.
   typed nor what an agent wrote is read as markup or as index syntax. A project
   scope, a date scope and landing on the hit inside its destination remain
   intended design.
+## 2026-09-18, the project feed
+
+* **Update**: The project feed now matches the design. The kind filters are
+  one scrolling line of chips led by All. Today and Yesterday are open, and
+  older days sit behind an "Earlier" disclosure that carries the hub's count
+  of what it holds and pages further back on the feed's own cursor. Rows are
+  part of the keyboard map, older days included once they are open.
+* **Update**: The feed reads and moves the per-project read cursor. An event
+  above it carries a dot, a heavier title and the word "Unread"; viewing an
+  unfiltered feed in a visible tab posts the newest id, and a filtered page
+  posts nothing. The human surface page no longer says the PWA leaves the
+  route uncalled.
+* **Update**: An empty feed offers "Copy MCP setup": the connection details
+  the hub's skill document gives, filled with this hub's origin and never
+  with the reader's own token. Where the browser has no clipboard, as on a
+  plain LAN address, the text is shown selected to be copied by hand.
 
 ## 2026-09-18, a session, its brain as a tree
 

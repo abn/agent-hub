@@ -91,7 +91,10 @@ a 420px list beside a detail pane.
   grouped by actor within that group.
 - Read is explicit, by opening an item or a swipe; never scroll-past. This is
   intended design, not yet shipped: nothing marks an item read today.
-- Feeds are grouped by day, with kind filters as chips.
+- Feeds are grouped by day, with kind filters as chips. A project feed keeps
+  Today and Yesterday open and folds older days behind "Earlier", a disclosure
+  with the count of what it holds. An event the reader has not seen carries a
+  dot, a heavier title and the word for it, never the colour alone.
 - Time is short on a row and whole on request. A row carries a compact relative
   form in the reader's own locale, counting itself up while the app is open;
   the full local timestamp is the element's accessible name and its hover

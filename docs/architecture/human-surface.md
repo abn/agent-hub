@@ -171,7 +171,15 @@ filter. The count above each cursor rides on the project listing and on Home,
 so a tab row and a Home row draw the same dot without a request of their own,
 and it counts only projects the listing returns. Upgrading an existing hub
 seeds every cursor at that project's newest event, so nothing is lit by the
-upgrade itself. The route ships; the PWA does not call it yet.
+upgrade itself.
+
+The project feed is the client of that cursor. A row whose id is above the
+cursor carries an accent dot, a heavier title and the word "Unread" for a
+reader who gets neither. The marks are held for the length of one stay on the
+feed, against the cursor as it stood on arrival, so a repaint after a filter
+does not wipe them. The PWA posts the newest id once an unfiltered page has
+been painted in a visible tab, and posts nothing for a filtered page, which
+skips events it cannot speak for.
 
 A project is settable after it is created. `PATCH` changes its display name
 and its artifact password policy (`off`, `optional` or `required`, and
@@ -210,7 +218,7 @@ it, and the project tabs sit in the same shell.
 |---|---|
 | Home | Today at a glance, from the one Home response: a title that is the reader's own day and part of day over a summary line (waiting, unread, agents active); a "Waiting on you" card with the queue's count, the waiting items among the newest events and a way into the Inbox for the rest; "Newest across projects", each row naming its project and linking to that project's feed, with the unseen dot drawn from the per-project cursor counts; and a storage card linking to Storage, with used against capacity, a bar, the same share in words, and what a prune would free. A volume that cannot be measured shows the used bytes alone, with no bar. When nothing waits, nothing is unread and nothing sits above a cursor, the two cards give way to the quiet empty state. The response carries project slugs rather than display names, and no list of the waiting queue itself, so rows name the slug and the card lists only waiting items that are among the newest events. |
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. Explicit read state ships on the routes; the "Mark all read" and "Unread only" controls are intended design, not yet shipped. |
-| Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
+| Project feed | What happened in one project, filterable by kind on one scrolling line of chips. Today and Yesterday are open; older days sit behind an "Earlier" disclosure that carries the hub's own count and pages back on the `next_before` cursor. Unseen events are marked from the project's read cursor, and viewing the feed moves it. An empty feed offers "Copy MCP setup", which copies the connection details for this hub's origin and shows them to be copied by hand where the browser has no clipboard. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |
 | Sessions | Sessions per project, with End and a Prune that is confirmed in a dialog and undoable for 30 seconds. Session rows carry the state dot, owner, mono size and a chevron; the detail shows three stat cards, the lineage and handoff note, a Latest event line, a drill-down brain tree with lazy-loaded children, and a pinned End / Prune action bar. An audit log over the brain file's own tool calls is intended design, not yet shipped; the Latest event line is the session's newest feed event, not that log. |
 | Search | One field over feed, artifacts, and session brains, answering as it is typed. The query and the scope live in the route (`#/search?q=&type=`), so a reload or the browser's Back lands on the same results, and an answer that arrives after a newer query is dropped. Scope chips filter by the route's `type` (All, Feed, Artifacts, Sessions). A results line gives the hub's own `count` and `took_ms` and is announced politely; a page the limit cut is called the first of more, never a total. Results are grouped by family with their counts, and each row carries the title, the snippet with the matched words marked, the project, and when it changed. The screen sends the words of the query, not its punctuation, and builds the marked snippet from text nodes, so neither a query nor a snippet is read as markup or as index syntax. A project scope, a date scope, and landing on the hit inside its destination are intended design, not yet shipped. |
