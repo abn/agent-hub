@@ -31,6 +31,18 @@ pub const AGENT_BODY_BYTES_MAX: usize =
 /// its own budget for any sane number of entries.
 pub const BRAIN_VALUE_BYTES_MAX: usize = REQUEST_BODY_BYTES_MAX;
 
+/// Soft file size limit for one session brain or knowledge base file (256 MiB).
+pub const BRAIN_FILE_BYTES_SOFT: i64 = 256 * 1024 * 1024;
+
+/// Hard file size limit for one session brain or knowledge base file (1 GiB).
+pub const BRAIN_FILE_BYTES_HARD: i64 = 1024 * 1024 * 1024;
+
+/// Maximum bytes of one knowledge base page path.
+pub const KB_PATH_BYTES_MAX: usize = 512;
+
+/// Maximum bytes of the indexed body of one search document.
+pub const SEARCH_BODY_BYTES_MAX: usize = 64 * 1024;
+
 /// Maximum characters of the note a session leaves when it ends.
 ///
 /// A handoff is a pointer to the work, not the work: the state itself is in the
@@ -156,6 +168,26 @@ pub fn check_brain_value(bytes: usize) -> Result<()> {
     if bytes > BRAIN_VALUE_BYTES_MAX {
         return Err(Error::PayloadTooLarge(format!(
             "brain value exceeds {BRAIN_VALUE_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a knowledge base path that exceeds the cap.
+pub fn check_kb_path(path: &str) -> Result<()> {
+    if path.len() > KB_PATH_BYTES_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "path exceeds {KB_PATH_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a write when the brain file has reached or exceeded the hard ceiling.
+pub fn check_brain_file(file_bytes: i64) -> Result<()> {
+    if file_bytes >= BRAIN_FILE_BYTES_HARD {
+        return Err(Error::PayloadTooLarge(format!(
+            "brain file exceeds {BRAIN_FILE_BYTES_HARD} bytes"
         )));
     }
     Ok(())

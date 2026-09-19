@@ -688,3 +688,74 @@ async fn a_copy_taken_mid_write_opens_cleanly() {
         "the copy holds one committed value, got {value:?}"
     );
 }
+
+#[tokio::test]
+async fn audit_record_write_and_recent() {
+    let store = BrainStore::new(temp_dir("audit-log"));
+    let brain = store.open("proj", "session-1").await.expect("open brain");
+
+    let id = brain
+        .record_write(
+            "brain.put",
+            "/fs/note.md",
+            "agent-alpha",
+            Some(42),
+            Some("sha256:abc"),
+        )
+        .await
+        .expect("record write");
+    assert!(id > 0);
+
+    let recent = brain.audit_recent(Some(10)).await.expect("audit recent");
+    assert_eq!(recent.len(), 1);
+    let call = &recent[0];
+    assert_eq!(call.name, "brain.put");
+    assert_eq!(call.id, id);
+
+    let params = call.parameters.as_ref().expect("parameters");
+    assert_eq!(params["path"], "/fs/note.md");
+    assert_eq!(params["actor"], "agent-alpha");
+    assert_eq!(params["store"], "session");
+    assert_eq!(params["bytes"], 42);
+    assert_eq!(params["version"], "sha256:abc");
+
+    let result = call.result.as_ref().expect("result");
+    assert_eq!(result["version"], "sha256:abc");
+
+    // Project knowledge base file records store = "project"
+    let kb = store.open("proj", "kb").await.expect("open kb");
+    kb.record_write("kb.put", "/fs/index.md", "human", Some(100), None)
+        .await
+        .expect("record kb write");
+    let kb_recent = kb.audit_recent(None).await.expect("kb recent");
+    assert_eq!(kb_recent.len(), 1);
+    assert_eq!(kb_recent[0].name, "kb.put");
+    let kb_params = kb_recent[0].parameters.as_ref().expect("kb parameters");
+    assert_eq!(kb_params["store"], "project");
+    assert_eq!(kb_params["actor"], "human");
+}
+
+#[tokio::test]
+async fn delete_if_compare_and_set() {
+    let store = BrainStore::new(temp_dir("delete-if"));
+    let brain = store.open("proj", "session-del").await.expect("open brain");
+
+    let version = brain
+        .put_if("/fs/test.txt", b"hello", None)
+        .await
+        .expect("put file");
+
+    // Mismatched version fails with conflict
+    let err = brain
+        .delete_if("/fs/test.txt", Some("sha256:wrong"))
+        .await
+        .expect_err("should fail conflict");
+    assert!(matches!(err, Error::Conflict(_)));
+
+    // Correct version succeeds
+    brain
+        .delete_if("/fs/test.txt", Some(&version))
+        .await
+        .expect("should delete");
+    assert!(brain.get("/fs/test.txt").await.expect("get").is_none());
+}

@@ -1519,3 +1519,109 @@ fn a_session_is_named_one_way_or_the_other() {
         "an agent without a name is refused, got {half}"
     );
 }
+
+#[test]
+fn mcp_writes_record_audit_rows_and_emit_signal() {
+    let data_dir = TempDir::new("audit-test");
+    common::seed_project(&data_dir.0, "proj");
+
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "worker"}),
+    );
+    let session_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    // 1. Session put
+    let put_res = server.call_tool(
+        "brain_put",
+        json!({"path": "/fs/notes.md", "content": "hello world", "store": "session"}),
+    );
+    assert_eq!(structured(&put_res)["ok"], true);
+
+    // 2. Project put
+    let kb_put = server.call_tool(
+        "brain_put",
+        json!({"path": "/fs/guide.md", "content": "---\ntype: concept\ntitle: Guide\n---\nBody text\n", "store": "project"}),
+    );
+    let kb_struct = structured(&kb_put);
+    assert_eq!(kb_struct["ok"], true);
+    assert!(kb_struct["lint"].is_array());
+    assert!(kb_struct["warnings"].is_array());
+
+    // 3. Project delete
+    let kb_del = server.call_tool(
+        "brain_delete",
+        json!({"path": "/fs/guide.md", "store": "project"}),
+    );
+    assert_eq!(structured(&kb_del)["ok"], true);
+
+    drop(server);
+
+    // Verify database contents
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build runtime");
+    runtime.block_on(async {
+        // Verify session brain tool_calls table
+        let session_brain = agent_hub::brain::BrainStore::for_data_dir(&data_dir.0)
+            .open("proj", &session_id)
+            .await
+            .expect("open session brain");
+        let audit = session_brain
+            .audit_recent(None)
+            .await
+            .expect("audit recent");
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].name, "brain.put");
+        let p = audit[0].parameters.as_ref().expect("parameters");
+        assert_eq!(p["path"], "/fs/notes.md");
+        assert_eq!(p["actor"], "local");
+        assert_eq!(p["store"], "session");
+
+        // Verify KB brain tool_calls table
+        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(&data_dir.0)
+            .open("proj", agent_hub::brain::KNOWLEDGE_FILE)
+            .await
+            .expect("open kb brain");
+        let kb_audit = kb_brain.audit_recent(None).await.expect("kb audit recent");
+        assert_eq!(kb_audit.len(), 2);
+        // Order is descending by started_at
+        let names: Vec<&str> = kb_audit.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"kb.put"));
+        assert!(names.contains(&"kb.delete"));
+
+        // Verify kb_deleted event was written to the feed
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open hub db");
+        let query = agent_hub::store::events::FeedQuery {
+            since: None,
+            before: None,
+            limit: 50,
+            kinds: Some(vec!["signal".to_string()]),
+            include_audit: true,
+        };
+        let page = agent_hub::store::events::read_feed(&db, "proj", &query)
+            .await
+            .expect("read feed");
+        assert!(
+            page.events.iter().any(|e| {
+                e.kind == "signal"
+                    && e.payload.as_ref().is_some_and(|p| {
+                        p["action"] == "kb_deleted"
+                            && p["store"] == "project"
+                            && p["path"] == "/fs/guide.md"
+                    })
+            }),
+            "feed has kb_deleted signal, got {:?}",
+            page.events
+        );
+    });
+}

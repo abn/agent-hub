@@ -62,6 +62,68 @@ pub enum EntryKind {
     Dir,
 }
 
+/// Who made a write and what it was, as the write log records it.
+#[derive(Debug, Clone, Copy)]
+pub struct Stamp<'a> {
+    /// The operation, such as `kb.put`.
+    pub op: &'a str,
+    /// The authenticated actor, never a value the caller supplied.
+    pub actor: &'a str,
+}
+
+/// One row of the write log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteRecord {
+    /// The row id, which is also the log's order and its paging cursor.
+    pub id: i64,
+    pub op: String,
+    pub path: String,
+    pub actor: String,
+    /// Unix seconds.
+    pub at: i64,
+    /// The version the write stored. A delete stores none.
+    pub version: Option<String>,
+}
+
+/// Which rows of the write log a reader wants. Every field narrows.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WriteFilter<'a> {
+    pub path: Option<&'a str>,
+    /// A directory: the rows for entries under it.
+    pub prefix: Option<&'a str>,
+    pub actor: Option<&'a str>,
+    pub op: Option<&'a str>,
+}
+
+impl WriteFilter<'_> {
+    fn matches(&self, record: &WriteRecord) -> bool {
+        self.path.is_none_or(|path| record.path == path)
+            && self
+                .prefix
+                .is_none_or(|prefix| is_under(prefix, &record.path))
+            && self.actor.is_none_or(|actor| record.actor == actor)
+            && self.op.is_none_or(|op| record.op == op)
+    }
+}
+
+/// Whether a path is a directory or something inside it.
+pub fn is_under(directory: &str, path: &str) -> bool {
+    path.strip_prefix(directory.trim_end_matches('/'))
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// One page of the write log.
+#[derive(Debug, Clone, Default)]
+pub struct WriteLogPage {
+    pub rows: Vec<WriteRecord>,
+    /// Rows the filter matches in the whole log, not on this page.
+    pub total: usize,
+    /// The cursor for the next page, when there is one.
+    pub next_before: Option<i64>,
+    /// Whether the filter matches rows this page does not carry.
+    pub truncated: bool,
+}
+
 /// The two path namespaces a brain exposes.
 enum Namespace<'a> {
     Kv(&'a str),
@@ -299,6 +361,211 @@ impl Brain {
         &self.session_id
     }
 
+    /// The path to the underlying brain file.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The total bytes of this brain file and its sidecars on disk.
+    pub fn file_bytes(&self) -> i64 {
+        file_bytes(&self.path)
+    }
+
+    /// Record an audit row for a write operation into the tool_calls table.
+    ///
+    /// Takes the session write lock so concurrent writes to one file serialise
+    /// their audit logging. A write that must be logged in the order it
+    /// landed uses [`Brain::put_if_recorded`] instead, which holds one guard
+    /// across both.
+    pub async fn record_write(
+        &self,
+        name: &str,
+        path: &str,
+        actor: &str,
+        bytes: Option<usize>,
+        version: Option<&str>,
+    ) -> Result<i64> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.record_locked(name, path, actor, bytes, version).await
+    }
+
+    /// Append one row to the write log. The caller holds the write lock.
+    async fn record_locked(
+        &self,
+        name: &str,
+        path: &str,
+        actor: &str,
+        bytes: Option<usize>,
+        version: Option<&str>,
+    ) -> Result<i64> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| Error::Engine(e.to_string()))?
+            .as_secs() as i64;
+        let store = if self.session_id == KNOWLEDGE_FILE {
+            "project"
+        } else {
+            "session"
+        };
+        let mut params = serde_json::json!({
+            "path": path,
+            "actor": actor,
+            "store": store,
+        });
+        if let Some(b) = bytes {
+            params["bytes"] = serde_json::json!(b);
+        }
+        if let Some(v) = version {
+            params["version"] = serde_json::json!(v);
+        }
+        let result = version.map(|v| serde_json::json!({ "version": v }));
+
+        self.agent
+            .tools
+            .record(name, now, now, Some(params), result, None)
+            .await
+            .map_err(engine_error)
+    }
+
+    /// Read recent tool_calls audit records.
+    pub async fn audit_recent(&self, limit: Option<i64>) -> Result<Vec<agentfs_sdk::ToolCall>> {
+        self.agent.tools.recent(limit).await.map_err(engine_error)
+    }
+
+    /// Visit every row of the write log, newest first, until `visit` breaks.
+    ///
+    /// The log has no index on the path it records, so every reader of it is
+    /// a scan. The rows stream, so a scan holds one row at a time however long
+    /// the log has grown.
+    async fn scan_log(
+        &self,
+        mut visit: impl FnMut(WriteRecord) -> std::ops::ControlFlow<()>,
+    ) -> Result<()> {
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let mut rows = conn
+            .query(
+                "SELECT id, name, parameters, result, started_at, completed_at \
+                 FROM tool_calls ORDER BY id DESC",
+                (),
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            let integer = |index: usize| match row.get_value(index) {
+                Ok(turso::Value::Integer(value)) => Some(value),
+                _ => None,
+            };
+            let json = |index: usize| match row.get_value(index) {
+                Ok(turso::Value::Text(text)) => {
+                    serde_json::from_str::<serde_json::Value>(&text).ok()
+                }
+                _ => None,
+            };
+            let field = |value: &Option<serde_json::Value>, key: &str| {
+                value
+                    .as_ref()
+                    .and_then(|value| value.get(key))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            };
+            let Some(id) = integer(0) else { continue };
+            let op = match row.get_value(1) {
+                Ok(turso::Value::Text(name)) => name,
+                _ => continue,
+            };
+            let parameters = json(2);
+            // A row that names no path is not a write to an entry, so it is
+            // no part of any history.
+            let Some(path) = field(&parameters, "path") else {
+                continue;
+            };
+            let record = WriteRecord {
+                id,
+                op,
+                path,
+                actor: field(&parameters, "actor").unwrap_or_default(),
+                at: integer(5).or_else(|| integer(4)).unwrap_or_default(),
+                version: field(&json(3), "version"),
+            };
+            if visit(record).is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// One page of the write log, newest first, with the count the filter
+    /// matches across the whole log.
+    ///
+    /// `before` is a row id from an earlier page's `next_before`. The count
+    /// ignores it, so every page of one walk reports the same total. The scan
+    /// is the whole log and the only bound on the log is the file's own size
+    /// cap, so nothing falls out of a history by being old.
+    pub async fn write_log(
+        &self,
+        filter: &WriteFilter<'_>,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<WriteLogPage> {
+        let mut page = WriteLogPage::default();
+        let mut more = false;
+        self.scan_log(|record| {
+            if filter.matches(&record) {
+                page.total += 1;
+                if before.is_none_or(|before| record.id < before) {
+                    if page.rows.len() < limit {
+                        page.rows.push(record);
+                    } else {
+                        more = true;
+                    }
+                }
+            }
+            std::ops::ControlFlow::Continue(())
+        })
+        .await?;
+        if more {
+            // With no rows asked for there is no row to continue from, and
+            // the caller wanted the count.
+            page.next_before = page.rows.last().map(|record| record.id);
+            page.truncated = true;
+        }
+        Ok(page)
+    }
+
+    /// The newest write to one path, if the log holds one.
+    pub async fn last_write(&self, path: &str) -> Result<Option<WriteRecord>> {
+        let mut found = None;
+        self.scan_log(|record| {
+            if record.path == path {
+                found = Some(record);
+                return std::ops::ControlFlow::Break(());
+            }
+            std::ops::ControlFlow::Continue(())
+        })
+        .await?;
+        Ok(found)
+    }
+
+    /// The newest write to every path the log names, and the newest of all.
+    pub async fn last_writes(&self) -> Result<(HashMap<String, WriteRecord>, Option<WriteRecord>)> {
+        let mut by_path: HashMap<String, WriteRecord> = HashMap::new();
+        let mut newest = None;
+        self.scan_log(|record| {
+            if newest.is_none() {
+                newest = Some(record.clone());
+            }
+            by_path.entry(record.path.clone()).or_insert(record);
+            std::ops::ControlFlow::Continue(())
+        })
+        .await?;
+        Ok((by_path, newest))
+    }
+
     /// Copy this brain into a new file through the engine.
     ///
     /// The engine's own copy, never a filesystem one: it snapshots every table,
@@ -365,19 +632,66 @@ impl Brain {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
-        if let Some(expected) = expected {
-            let current = self
-                .read(&namespace)
-                .await?
-                .map_or_else(|| VERSION_ABSENT.to_string(), |bytes| version(&bytes));
-            if current != expected {
-                return Err(Error::Conflict(format!(
-                    "the entry at '{path}' changed since it was read current_version={current}"
-                )));
-            }
-        }
+        self.check_expected(&namespace, path, expected).await?;
         self.write(&namespace, bytes).await?;
         Ok(version(bytes))
+    }
+
+    /// Store bytes like [`Brain::put_if`], and log the write under the same
+    /// guard.
+    ///
+    /// The row and the write share one hold of the lock, so the log is in the
+    /// order the writes landed and a write is never stored without its row.
+    /// `indexed` runs under the guard too, after both: whatever mirrors the
+    /// entry elsewhere sees the writes in that same order.
+    pub async fn put_if_recorded(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        expected: Option<&str>,
+        stamp: Stamp<'_>,
+        indexed: impl AsyncFnOnce(),
+    ) -> Result<String> {
+        crate::limits::check_brain_value(bytes.len())?;
+        let namespace = parse_path(path)?;
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.check_expected(&namespace, path, expected).await?;
+        self.write(&namespace, bytes).await?;
+        let version = version(bytes);
+        self.record_locked(
+            stamp.op,
+            path,
+            stamp.actor,
+            Some(bytes.len()),
+            Some(&version),
+        )
+        .await?;
+        indexed().await;
+        Ok(version)
+    }
+
+    /// Refuse when what is stored is not what the caller expects to replace.
+    /// The caller holds the write lock.
+    async fn check_expected(
+        &self,
+        namespace: &Namespace<'_>,
+        path: &str,
+        expected: Option<&str>,
+    ) -> Result<()> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        let current = self
+            .read(namespace)
+            .await?
+            .map_or_else(|| VERSION_ABSENT.to_string(), |bytes| version(&bytes));
+        if current != expected {
+            return Err(Error::Conflict(format!(
+                "the entry at '{path}' changed since it was read current_version={current}"
+            )));
+        }
+        Ok(())
     }
 
     /// Read whatever is stored in one namespace.
@@ -510,27 +824,102 @@ impl Brain {
     ///
     /// Takes the session write lock. A non-empty directory is not removed.
     pub async fn delete(&self, path: &str) -> Result<()> {
+        self.delete_if(path, None).await
+    }
+
+    /// Delete an entry only when what is there matches `expected`.
+    ///
+    /// `expected` is a token from `version`, or `VERSION_ABSENT`; `None` is an
+    /// unconditional delete.
+    pub async fn delete_if(&self, path: &str, expected: Option<&str>) -> Result<()> {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        self.check_expected(&namespace, path, expected).await?;
+        self.remove(&namespace).await.map(|_| ())
+    }
+
+    /// Delete an entry and log the delete under the same guard, reporting
+    /// whether anything was there to delete.
+    ///
+    /// Nothing stored means nothing happened: no row is logged, `removed` does
+    /// not run and the answer is `false`, whatever `expected` says, so a
+    /// caller can report an absent entry the way a read does.
+    pub async fn delete_if_recorded(
+        &self,
+        path: &str,
+        expected: Option<&str>,
+        stamp: Stamp<'_>,
+        removed: impl AsyncFnOnce(),
+    ) -> Result<bool> {
+        let namespace = parse_path(path)?;
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        if !self.exists(&namespace).await? {
+            return Ok(false);
+        }
+        self.check_expected(&namespace, path, expected).await?;
+        if !self.remove(&namespace).await? {
+            return Ok(false);
+        }
+        self.record_locked(stamp.op, path, stamp.actor, None, None)
+            .await?;
+        removed().await;
+        Ok(true)
+    }
+
+    /// Whether a regular file is stored at a path.
+    pub async fn is_file(&self, path: &str) -> Result<bool> {
+        match parse_path(path)? {
+            Namespace::Kv(_) => Ok(false),
+            Namespace::Fs(rest) => Ok(self
+                .agent
+                .fs
+                .stat(&fs_path(rest))
+                .await
+                .map_err(engine_error)?
+                .is_some_and(|stats| stats.is_file())),
+        }
+    }
+
+    /// Whether anything, a directory included, is stored in a namespace.
+    async fn exists(&self, namespace: &Namespace<'_>) -> Result<bool> {
+        match namespace {
+            Namespace::Kv(_) => Ok(self.read(namespace).await?.is_some()),
+            Namespace::Fs(path) => Ok(self
+                .agent
+                .fs
+                .stat(&fs_path(path))
+                .await
+                .map_err(engine_error)?
+                .is_some()),
+        }
+    }
+
+    /// Remove what a namespace holds, reporting whether anything was there.
+    /// The caller holds the write lock.
+    async fn remove(&self, namespace: &Namespace<'_>) -> Result<bool> {
         match namespace {
             Namespace::Kv(key) => {
                 let key = require_key(key)?;
-                self.agent.kv.delete(key).await.map_err(engine_error)
+                let held = self.exists(namespace).await?;
+                self.agent.kv.delete(key).await.map_err(engine_error)?;
+                Ok(held)
             }
             Namespace::Fs(path) => {
                 let path = fs_path(path);
-                if self
-                    .agent
-                    .fs
-                    .stat(&path)
-                    .await
-                    .map_err(engine_error)?
-                    .is_none()
-                {
-                    return Ok(());
+                let Some(stats) = self.agent.fs.stat(&path).await.map_err(engine_error)? else {
+                    return Ok(false);
+                };
+                // The engine refuses this too, as a failure of its own. It is
+                // the caller's mistake, so it is reported as one.
+                if stats.is_directory() && !self.children(stats.ino).await?.is_empty() {
+                    return Err(Error::InvalidArgument(format!(
+                        "'/fs{path}' is a directory that still holds entries; delete those first"
+                    )));
                 }
-                self.agent.fs.remove(&path).await.map_err(engine_error)
+                self.agent.fs.remove(&path).await.map_err(engine_error)?;
+                Ok(true)
             }
         }
     }

@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::json;
 use turso::Value;
 
-use crate::brain::{self, Brain};
+use crate::brain::{self, Brain, Stamp, knowledge};
 use crate::error::{Error, Result};
 use crate::limits::{HANDOFF_SUMMARY_CHARS, SESSION_LIST_LIMIT_MAX};
 use crate::policy::{self, Access};
@@ -224,7 +224,7 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
         let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
-        store.check_path(&params.path).map_err(to_error_data)?;
+        let path = store.read_path(&params.path).map_err(to_error_data)?;
         let absent = || {
             to_error_data(Error::NotFound(format!(
                 "no brain value at '{}'",
@@ -243,7 +243,7 @@ impl HubServer {
             .ok_or_else(absent)?;
         let bytes = target
             .brain
-            .get(&params.path)
+            .get(&path)
             .await
             .map_err(to_error_data)?
             .ok_or_else(absent)?;
@@ -275,7 +275,33 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
-        store.check_path(&params.path).map_err(to_error_data)?;
+        if store == Store::Project {
+            check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
+            let project_id = self
+                .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+                .await
+                .map_err(to_error_data)?;
+            let written = knowledge::put(
+                &self.state,
+                &project_id,
+                &principal.actor,
+                &params.path,
+                &params.content,
+                params.if_version.as_deref(),
+            )
+            .await
+            .map_err(to_error_data)?;
+            return Ok(CallToolResult::structured(json!({
+                "ok": true,
+                "path": written.path,
+                "store": store.as_str(),
+                "version": written.version,
+                "size_bytes": written.size_bytes,
+                "lint": written.lint,
+                "warnings": written.warnings,
+            })));
+        }
+
         // The store and the corpus have to agree on the entry, so both take the
         // canonical path and an alias never becomes a second search row.
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
@@ -288,12 +314,19 @@ impl HubServer {
             )
             .await
             .map_err(to_error_data)?;
+        crate::limits::check_brain_file(target.brain.file_bytes()).map_err(to_error_data)?;
+        let stamp = Stamp {
+            op: "brain.put",
+            actor: &principal.actor,
+        };
         let version = target
             .brain
-            .put_if(
+            .put_if_recorded(
                 &path,
                 params.content.as_bytes(),
                 params.if_version.as_deref(),
+                stamp,
+                async || {},
             )
             .await
             .map_err(to_error_data)?;
@@ -301,12 +334,19 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
+        let mut warnings = Vec::new();
+        if target.brain.file_bytes() > crate::limits::BRAIN_FILE_BYTES_SOFT {
+            warnings.push("brain file is over the soft limit".to_string());
+        }
+
         Ok(CallToolResult::structured(json!({
             "ok": true,
             "path": path,
             "store": store.as_str(),
             "version": version,
             "size_bytes": params.content.len(),
+            "lint": [],
+            "warnings": warnings,
         })))
     }
 
@@ -320,9 +360,12 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
         let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
-        if let Some(path) = params.path.as_deref() {
-            store.check_path(path).map_err(to_error_data)?;
-        }
+        let path = params
+            .path
+            .as_deref()
+            .map(|path| store.read_path(path))
+            .transpose()
+            .map_err(to_error_data)?;
         let entries = match self
             .target_for_read(
                 &principal,
@@ -333,7 +376,7 @@ impl HubServer {
             .await
             .map_err(to_error_data)?
         {
-            Some(target) => match params.path.as_deref() {
+            Some(target) => match path.as_deref() {
                 Some(path) => target.brain.list(path).await.map_err(to_error_data)?,
                 // The knowledge base holds pages only, so there is no second
                 // namespace to walk.
@@ -365,7 +408,30 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
-        store.check_path(&params.path).map_err(to_error_data)?;
+        if store == Store::Project {
+            check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
+            let project_id = self
+                .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+                .await
+                .map_err(to_error_data)?;
+            let session_id = self.session_in(&project_id).await;
+            let path = knowledge::delete(
+                &self.state,
+                &project_id,
+                &principal.actor,
+                session_id.as_deref(),
+                &params.path,
+                params.if_version.as_deref(),
+            )
+            .await
+            .map_err(to_error_data)?;
+            return Ok(CallToolResult::structured(json!({
+                "ok": true,
+                "path": path,
+                "store": store.as_str(),
+            })));
+        }
+
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
         let target = self
             .target_for_write(
@@ -376,7 +442,17 @@ impl HubServer {
             )
             .await
             .map_err(to_error_data)?;
-        target.brain.delete(&path).await.map_err(to_error_data)?;
+        let stamp = Stamp {
+            op: "brain.delete",
+            actor: &principal.actor,
+        };
+        // Deleting what is already absent stays a success at the session
+        // store; it is only not logged, because nothing happened.
+        target
+            .brain
+            .delete_if_recorded(&path, params.if_version.as_deref(), stamp, async || {})
+            .await
+            .map_err(to_error_data)?;
         self.delete_doc(&target, &path)
             .await
             .map_err(to_error_data)?;
@@ -449,6 +525,19 @@ impl Store {
             )));
         }
         Ok(())
+    }
+
+    /// The path a read acts on.
+    ///
+    /// The knowledge base holds pages only and keys everything on a page's
+    /// canonical path, so a read of it resolves its path by the same rule a
+    /// write does. A session brain takes the path as given.
+    fn read_path(self, path: &str) -> Result<String> {
+        self.check_path(path)?;
+        match self {
+            Self::Project => knowledge::page_path(path),
+            Self::Session => Ok(path.to_string()),
+        }
     }
 
     fn as_str(self) -> &'static str {
@@ -1048,6 +1137,25 @@ impl HubServer {
         let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
         let doc_id = target.doc_id(path);
+        let parsed;
+        let (title, capped_body) = if target.kind() == "kb" {
+            parsed = crate::okf::frontmatter::parse_frontmatter(body)
+                .ok()
+                .flatten();
+            let title = parsed
+                .as_ref()
+                .and_then(|fm| fm.title.as_deref())
+                .unwrap_or(path);
+            let end = body
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= crate::limits::SEARCH_BODY_BYTES_MAX)
+                .last()
+                .unwrap_or(body.len().min(crate::limits::SEARCH_BODY_BYTES_MAX));
+            (title, &body[..end])
+        } else {
+            (path, body)
+        };
         index_doc(
             &conn,
             SearchDoc {
@@ -1056,8 +1164,8 @@ impl HubServer {
                 kind: target.kind(),
                 ref_id: path,
                 session_id: target.session_id.as_deref(),
-                title: Some(path),
-                body,
+                title: Some(title),
+                body: capped_body,
                 updated_at: &updated_at,
             },
         )
@@ -1186,6 +1294,8 @@ struct BrainDeleteParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
+    #[serde(default)]
+    if_version: Option<String>,
     /// The session written, which must be the caller's own active session.
     #[serde(default)]
     session: Option<SessionRef>,
