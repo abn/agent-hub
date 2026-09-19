@@ -44,7 +44,14 @@ are appended to the end of the block in the order given. A `null` value
 deletes the key. A value is a string, a boolean, an integer, a list of strings
 (written as a flow list), or a list of objects (written as a block sequence of
 mappings). Object fields are written in the order they appear in the JSON
-text, so read them with a parser that keeps that order.
+text, so read them with a parser that keeps that order. A field name is held
+to the same rule as a key, so an integer-like name such as `"1"`, the one kind
+a JavaScript object moves ahead of the fields written before it, is refused
+with `invalid_value` and never reordered.
+
+The corpus never repeats a field name inside one record and never puts a list
+or a mapping inside one. JSON readers disagree about both before a patcher
+sees the value; do not add such a case.
 
 `review` appends `{by, at}` to the `verified` sequence:
 
@@ -92,7 +99,11 @@ three.
 
 The order of the table is the order of the checks: the changes as given, then
 the page from its first line down, then each change in the order given. The
-first failure is the refusal. An empty `changes` list is never refused: it
+first failure is the refusal. One step comes before all of it: a value whose
+shape cannot be written (a fraction, a mapping outside a list, a mixed or
+nested list, a null inside a value) is refused wherever it sits in the list,
+before any key is looked at. An integer beyond 53 bits, an empty record and a
+bad field name are refused with their own change, after its key. An empty `changes` list is never refused: it
 returns the page unchanged whatever the page holds.
 
 ## Adding a case
@@ -105,12 +116,20 @@ manifest entry; JSON files end in a newline.
 
 The rule for a number is about its value, not how the JSON spelled it: an
 integer from -9007199254740991 to 9007199254740991 is written as it is, and
-anything else is refused. The corpus never writes an integer as `1.0` or
-`1e2`, because a JavaScript reader cannot tell those from `1` and `100` while
-other readers can; do not add such a case.
+anything else is refused. The corpus never writes an integer as `1.0`, `1e2`
+or `-0`, because a JavaScript reader cannot tell those from `1`, `100` and `0`
+while other readers can; do not add such a case. For the same reason it holds
+no integer from 2^63 - 512 up to 2^63 - 1 beside a change that is refused for
+another reason: a JavaScript reader rounds those to 2^63.
 
 A string is written plain when it is a real calendar date (`2024-02-29`) or a
 real instant (`2026-01-01T23:59:59Z`, with an optional fraction and a `Z` or
 `+hh:mm` offset). A string that only has that shape (`2026-13-45`,
 `2026-02-30`, an hour of 25) is quoted, so a loader is never asked to make a
 date out of it.
+
+## Whitespace
+
+Blank, and every trim the rules speak of, mean the Unicode White_Space set.
+That is not what every language's own trim removes: U+0085 is whitespace and
+U+FEFF is not. Indentation is only ever a space or a tab.

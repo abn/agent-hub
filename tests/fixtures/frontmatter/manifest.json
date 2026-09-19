@@ -532,6 +532,62 @@
       "input": "76_refuse_a_fraction.input.md",
       "patch": "76_refuse_a_fraction.patch.json",
       "error": "invalid_value"
+    },
+    {
+      "id": "77_refuse_integer_like_record_field",
+      "description": "A record field that is not a plain key is refused; an integer-like name is also the one a JavaScript object would move ahead of the fields written before it",
+      "input": "77_refuse_integer_like_record_field.input.md",
+      "patch": "77_refuse_integer_like_record_field.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "78_next_line_character_is_blank",
+      "description": "Whitespace is the Unicode White_Space set: a line holding only U+0085 is blank, so inside a literal scalar it goes with the value",
+      "input": "78_next_line_character_is_blank.input.md",
+      "patch": "78_next_line_character_is_blank.patch.json",
+      "expected": "78_next_line_character_is_blank.expected.md"
+    },
+    {
+      "id": "79_refuse_byte_order_mark_line",
+      "description": "U+FEFF is not whitespace: a line holding only it is a line the layout rules do not cover",
+      "input": "79_refuse_byte_order_mark_line.input.md",
+      "patch": "79_refuse_byte_order_mark_line.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "80_refuse_indented_first_line",
+      "description": "An indented line before the first key belongs to no key and is refused",
+      "input": "80_refuse_indented_first_line.input.md",
+      "patch": "80_refuse_indented_first_line.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "81_promote_sources_last_key",
+      "description": "When the citation and the appended keys land at the same place, the citation stays under sources and the new keys follow it",
+      "input": "81_promote_sources_last_key.input.md",
+      "patch": "81_promote_sources_last_key.patch.json",
+      "expected": "81_promote_sources_last_key.expected.md"
+    },
+    {
+      "id": "82_refuse_comment_marker_in_key",
+      "description": "A comment marker before the colon makes the line no plain key",
+      "input": "82_refuse_comment_marker_in_key.input.md",
+      "patch": "82_refuse_comment_marker_in_key.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "83_refuse_shape_before_key",
+      "description": "A value whose shape cannot be written is refused before any key is looked at, even a bad key in an earlier change",
+      "input": "83_refuse_shape_before_key.input.md",
+      "patch": "83_refuse_shape_before_key.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "84_refuse_key_before_range",
+      "description": "An integer past 53 bits is refused with its own change, so a bad key in an earlier change wins",
+      "input": "84_refuse_key_before_range.input.md",
+      "patch": "84_refuse_key_before_range.patch.json",
+      "error": "invalid_key"
     }
   ]
 }
