@@ -45,14 +45,51 @@ let asking = false;
 
 const pending = () => !!guard && guard.form.isConnected && guard.dirty();
 
+// Where this entry sits in the session's history. A hash change does not say
+// whether the reader went forward or back, so every entry is stamped with its
+// place as it is first seen: a new entry is one past the entry it was reached
+// from, and an entry that already carries a place was travelled back or
+// forward to. Undoing a move is then a step of the right size, which leaves
+// the history the reader came through as it was. Replacing the entry instead
+// would overwrite the one they went back to.
+const PLACE = "hubPlace";
+let here = history.state?.[PLACE] ?? 0;
+history.replaceState({ ...(history.state || {}), [PLACE]: here }, "");
+// Moves of our own making, whose hash change is not the reader's.
+let undoing = 0;
+
+function arrive() {
+  const place = history.state?.[PLACE];
+  if (place != null) {
+    here = place;
+    return;
+  }
+  here += 1;
+  history.replaceState({ ...(history.state || {}), [PLACE]: here }, "");
+}
+
 window.addEventListener("hashchange", async (event) => {
+  if (undoing) {
+    undoing -= 1;
+    arrive();
+    // The form is still on screen and still the reader's; a repaint would
+    // cost them the edits the question is about.
+    if (pending()) event.stopImmediatePropagation();
+    return;
+  }
   if (!pending()) {
     guard = null;
+    arrive();
     return;
   }
   event.stopImmediatePropagation();
   const target = location.hash;
-  history.replaceState(null, "", guard.hash);
+  const place = history.state?.[PLACE];
+  // A fresh entry is one step on; a stamped one is as far as its place says.
+  const moved = place != null ? place - guard.place : 1;
+  if (place == null) history.replaceState({ ...(history.state || {}), [PLACE]: guard.place + 1 }, "");
+  undoing += 1;
+  history.go(-moved);
   if (asking) return;
   asking = true;
   const leave = await confirmAction({
@@ -64,7 +101,9 @@ window.addEventListener("hashchange", async (event) => {
   asking = false;
   if (!leave) return;
   guard = null;
-  location.hash = target;
+  // Back or forward is taken again as the same step; a link is followed anew.
+  if (place != null) history.go(moved);
+  else location.hash = target;
 });
 
 // A reload or a closed tab is the one exit a hash change does not see.
@@ -197,7 +236,7 @@ export async function projectSettingsScreen(gen, path) {
   };
   guard = {
     form,
-    hash: location.hash,
+    place: here,
     dirty: () => Object.keys(changes()).length > 0,
   };
 
@@ -230,6 +269,9 @@ export async function projectSettingsScreen(gen, path) {
         body: JSON.stringify(body),
       });
       show();
+      // Save goes quiet once nothing is left to save, and a disabled button
+      // drops the focus it held, so the reader is put back on the form.
+      if (!form.contains(document.activeElement) || document.activeElement === save) name.focus();
       toast("Project saved.");
     } catch (error) {
       // The hub names the field it refused. Anything else, a dropped
