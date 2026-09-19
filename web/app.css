@@ -963,3 +963,55 @@ button.empty-link {
 }
 .search-where { margin-top: 3px; font-size: var(--t-12); color: var(--ink-3); }
 /* end component: search */
+/* component: feed */
+/* The kind filters are one line that scrolls sideways, never a wrapped block.
+   The 4px of padding is room for a chip's focus ring, which a scrolling box
+   would otherwise clip, and the negative margin gives the same 4px back. */
+.feed-chips {
+  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  padding: 4px; margin: var(--s-1) -4px 0;
+}
+.feed-chips .chip { flex: none; }
+.feed-chips + h2.day { margin-top: var(--s-1); }
+.feed-chips ~ h2.day, .feed-fold h2.day { margin-bottom: 6px; }
+/* A day's rows run to the edge of their surface. On a phone the surface runs
+   to the edge of the screen, as the design draws it; from the desktop width up
+   it keeps the card the other lists use. */
+.feed-day { padding: 0; }
+.feed-day .row:first-child { border-radius: var(--r-2) var(--r-2) 0 0; }
+.feed-day .row:last-child { border-radius: 0 0 var(--r-2) var(--r-2); }
+.feed-day .row:only-child { border-radius: var(--r-2); }
+@media (max-width: 719px) {
+  .feed-day {
+    margin-left: calc(-1 * var(--s-4)); margin-right: calc(-1 * var(--s-4));
+    border-left: 0; border-right: 0; border-radius: 0; box-shadow: none;
+  }
+  .feed-day .row:first-child, .feed-day .row:last-child, .feed-day .row:only-child { border-radius: 0; }
+}
+/* Seen is quiet and unseen is ink: the weight and the dot say it, and the word
+   beside the dot says it to a reader who has neither. */
+.feed-row .title { color: var(--ink-2); }
+.feed-row .meta { font-size: var(--t-12); font-weight: 400; margin-top: 2px; }
+.feed-row .dot-unread { margin-top: 6px; }
+/* The disclosure is drawn as the design's accent line. It is a button, so it
+   keeps the 44px target, and the side padding is what its hover fill covers. */
+.feed-earlier {
+  display: inline-flex; align-items: center; gap: var(--s-1);
+  min-height: 44px; padding: 0 var(--s-2); margin-left: calc(-1 * var(--s-2));
+  border: 0; background: none; color: var(--accent);
+  font-size: var(--t-13); font-weight: 500;
+}
+.feed-earlier svg { flex: none; }
+.feed-earlier[aria-expanded="true"] svg { transform: rotate(90deg); }
+.feed-older { margin-top: var(--s-1); }
+/* The setup a browser would not copy, shown to be copied by hand. */
+.feed-setup { margin-top: var(--s-2); }
+.feed-setup p { margin: 0 0 var(--s-2); font-size: var(--t-13); color: var(--ink-2); }
+.feed-setup textarea {
+  display: block; width: 100%; resize: vertical; padding: var(--s-3);
+  white-space: pre; overflow-x: auto;
+  font-family: var(--font-mono); font-size: var(--t-12); line-height: 1.5;
+  color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--line-strong); border-radius: var(--r-1);
+}
+/* end component: feed */

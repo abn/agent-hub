@@ -136,7 +136,7 @@ export async function projectScreen(params, gen, path) {
     if (stale(gen)) return;
     paint(gen, `${shell}${sessionsTwoPane(id, card, sessions)}`);
   } else {
-    paint(gen, `${shell}${await feedSection(id)}`);
+    paint(gen, `${shell}${await feedSection(id, stats)}`);
   }
 }
 
