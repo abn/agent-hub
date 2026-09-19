@@ -92,7 +92,12 @@ function calendarGap(ms, nowMs) {
 // The compact form the rows carry: now, 4m, 2h, Yesterday, then a short date.
 // A timestamp in the future is a clock that disagrees rather than a thing that
 // happened, so it is spelled out rather than compacted.
-export function relative(ms, nowMs = Date.now()) {
+export function relative(ts, nowMs = Date.now()) {
+  // The same inputs as the element forms: an instant in milliseconds, or the
+  // server's ISO string. A value that is neither reads as unknown, never as a
+  // date made out of nothing.
+  const ms = parse(ts);
+  if (ms === null) return UNKNOWN;
   const gap = ms - nowMs;
   const away = Math.abs(gap);
   if (away < 45 * SECOND) return relativeWords(0, "second", "long") || "now";
