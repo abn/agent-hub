@@ -732,3 +732,68 @@ button.empty-link {
 .tree-name { margin-left: var(--s-1); color: var(--ink); }
 .tree-size { margin-left: auto; color: var(--ink-3); }
 .tree-item[aria-selected="true"] .tree-size { color: var(--ink-2); }
+
+/* component: storage */
+/* The design's storage screen: a 22px title over the mono data path, a
+   summary card with the 28px figure and an 8px stacked bar, project rows with
+   a 4px bar and a 32px prune, and the prune all card. */
+.storage { display: flex; flex-direction: column; gap: var(--s-4); }
+.storage .card { margin-bottom: 0; }
+.storage-head { padding-bottom: 0; }
+.storage-head .grow { flex: 1; min-width: 0; }
+.storage-path { margin: 0; color: var(--ink-3); overflow-wrap: anywhere; }
+
+.storage-summary { padding: var(--s-4); display: flex; flex-direction: column; gap: 10px; }
+.storage-figures { display: flex; align-items: baseline; gap: var(--s-3); }
+.storage-used { margin: 0; font-size: var(--t-28); font-weight: 600; line-height: 1; }
+.storage-unit { font-size: var(--t-15); font-weight: 500; color: var(--ink-2); }
+.storage-capacity { margin: 0 0 0 auto; color: var(--ink-3); white-space: nowrap; }
+
+.storage-bar {
+  display: flex; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--surface-2);
+}
+/* A segment ends in a hairline of the card's surface, so two neighbours are
+   told apart by the edge between them and not by their colours. The colours
+   are the data here, so a forced palette leaves them alone. */
+.storage-seg {
+  flex: none; height: 100%; forced-color-adjust: none;
+  box-shadow: inset -1px 0 0 var(--surface);
+}
+.storage-seg:last-child { box-shadow: none; }
+.storage-seg[data-kind="events"], .storage-swatch[data-kind="events"] { background: var(--k-signal); }
+.storage-seg[data-kind="sessions"], .storage-swatch[data-kind="sessions"] { background: var(--k-session); }
+.storage-seg[data-kind="artifacts"], .storage-swatch[data-kind="artifacts"] { background: var(--k-artifact); }
+.storage-seg[data-kind="knowledge"], .storage-swatch[data-kind="knowledge"] { background: var(--ink); }
+.storage-legend {
+  display: flex; flex-wrap: wrap; gap: var(--s-1) 14px; margin: 0; padding: 0;
+  list-style: none; font-size: var(--t-12); color: var(--ink-2);
+}
+.storage-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.storage-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; forced-color-adjust: none; }
+
+.storage-by .section-label { margin: 0 0 6px; }
+/* The rows carry the corners themselves: clipping the list would clip the
+   focus ring of the row the keyboard is on. */
+.storage-projects { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--surface); }
+.storage-row { flex-direction: column; align-items: stretch; gap: 6px; background: transparent; }
+.storage-row:focus-visible { position: relative; z-index: 1; }
+.storage-row-top { display: flex; align-items: baseline; gap: var(--s-3); }
+.storage-row .title { flex: 1; min-width: 0; font-weight: 600; }
+.storage-row .title a { color: inherit; text-decoration: none; }
+.storage-row .title a:hover { text-decoration: underline; }
+.storage-row .storage-total { flex: none; font-size: var(--t-13); }
+.storage-row .storage-bar { height: 4px; border-radius: 2px; }
+.storage-row-foot { display: flex; align-items: center; gap: var(--s-3); }
+.storage-detail { flex: 1; min-width: 0; color: var(--ink-3); }
+.storage-row .storage-prune { flex: none; padding: 0 10px; font-size: var(--t-13); }
+
+.storage-all {
+  padding: 14px var(--s-4); display: flex; flex-direction: column;
+  align-items: flex-start; gap: 6px;
+}
+.storage-all-title { margin: 0; font-size: var(--t-15); font-weight: 600; line-height: 1.3; }
+.storage-all-text { margin: 0; font-size: var(--t-13); line-height: 1.45; color: var(--ink-2); }
+.storage-frees { font-family: var(--font-mono); color: var(--ink); }
+.storage-review { margin-top: 6px; font-weight: 600; }
+/* end component: storage */
