@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-19, the inbox card, the selection, search as typed, and the checks
+
+* **Update**: The [contributor guide](contribution/guide.md) describes the
+  Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
+  accessibility walk covers at its two widths.
+
 ## 2026-09-19, knowledge base backend and promote
 
 * **Creation**: [Project knowledge base](usage/knowledge-base.md) documents the

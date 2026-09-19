@@ -29,8 +29,14 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
 - `make fmt`: applies formatting fixes
 - `make fmt/check`: fails if formatting differs
 - `make docs/check`: validates the docs bundle against OKF v0.2
-- `make web/check`: static checks over the PWA assets
-- `make web/a11y`: the headless accessibility audit over the rendered screens
+- `make web/check`: static checks over the PWA assets. The script syntax pass
+  needs Node; without it the pass is skipped and says so, and
+  `HUB_REQUIRE_BROWSER=1` turns that skip into a failure.
+- `make web/a11y`: the headless accessibility audit over the rendered screens,
+  at 390px and 1100px in both themes. It walks every screen the router
+  registers plus the states a route alone does not show (a dialog, the
+  comments drawer, a toast, the public artifact page and its password gate),
+  and measures the contrast axe leaves undecided.
 - `make web/smoke`: drives the PWA in a browser against a seeded hub
 - `make check`: the full gate: hooks, linter, formatting, and tests
 
