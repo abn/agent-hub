@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::artifacts;
-use crate::store::comments::{self, AnchorInput, Comment};
+use crate::store::comments::{self, comment_view, parse_anchor};
 use crate::store::identity;
 
 use super::{HubServer, to_error_data};
@@ -205,57 +205,6 @@ struct CommentDeleteParams {
     /// The delete token returned at post time, when the caller has no write access.
     #[serde(default)]
     delete_token: Option<String>,
-}
-
-/// The public shape of a comment. The delete token hash stays internal.
-fn comment_view(comment: &Comment) -> Value {
-    json!({
-        "id": comment.id,
-        "artifact_id": comment.artifact_id,
-        "author": comment.author,
-        "body": comment.body,
-        "anchor": comment.anchor.clone().unwrap_or(Value::Null),
-        "anchor_version": comment.anchor_version,
-        "done": comment.done,
-        "created_at": comment.created_at,
-    })
-}
-
-/// Parse the wire anchor into a validated store input. Unknown modes are
-/// rejected; the store checks coordinates, quotes, and sizes.
-fn parse_anchor(value: Option<serde_json::Value>) -> Result<Option<AnchorInput>, Error> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let obj = value.as_object().ok_or_else(|| {
-        Error::InvalidArgument("unknown anchor mode, expected point or text".to_string())
-    })?;
-    match obj.get("mode").and_then(Value::as_str) {
-        Some("point") => {
-            let x = obj.get("x").and_then(Value::as_f64).ok_or_else(|| {
-                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
-            })?;
-            let y = obj.get("y").and_then(Value::as_f64).ok_or_else(|| {
-                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
-            })?;
-            Ok(Some(AnchorInput::Point { x, y }))
-        }
-        Some("text") => {
-            let quote = obj
-                .get("quote")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::InvalidArgument("text anchor needs a quote".to_string()))?;
-            Ok(Some(AnchorInput::Text {
-                quote: quote.to_string(),
-            }))
-        }
-        _ => Err(Error::InvalidArgument(
-            "unknown anchor mode, expected point or text".to_string(),
-        )),
-    }
 }
 
 /// Whether the caller may mutate a comment: a matching delete token suffices,

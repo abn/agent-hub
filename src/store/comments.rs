@@ -32,9 +32,66 @@ pub struct Comment {
     pub anchor: Option<serde_json::Value>,
     pub anchor_version: Option<i64>,
     pub done: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub delete_token_hash: Option<String>,
     pub created_at: String,
+}
+
+/// The public shape of a comment. The delete token hash stays internal.
+pub fn comment_view(comment: &Comment) -> serde_json::Value {
+    serde_json::json!({
+        "id": comment.id,
+        "artifact_id": comment.artifact_id,
+        "author": comment.author,
+        "body": comment.body,
+        "anchor": comment.anchor.clone().unwrap_or(serde_json::Value::Null),
+        "anchor_version": comment.anchor_version,
+        "done": comment.done,
+        "created_at": comment.created_at,
+    })
+}
+
+/// Parse the wire anchor into a validated store input. Unknown modes are
+/// rejected; the store checks coordinates, quotes, and sizes.
+pub fn parse_anchor(value: Option<serde_json::Value>) -> Result<Option<AnchorInput>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let obj = value.as_object().ok_or_else(|| {
+        Error::InvalidArgument("unknown anchor mode, expected point or text".to_string())
+    })?;
+    match obj.get("mode").and_then(serde_json::Value::as_str) {
+        Some("point") => {
+            let x = obj
+                .get("x")
+                .and_then(serde_json::Value::as_f64)
+                .ok_or_else(|| {
+                    Error::InvalidArgument("point anchor needs numeric x and y".to_string())
+                })?;
+            let y = obj
+                .get("y")
+                .and_then(serde_json::Value::as_f64)
+                .ok_or_else(|| {
+                    Error::InvalidArgument("point anchor needs numeric x and y".to_string())
+                })?;
+            Ok(Some(AnchorInput::Point { x, y }))
+        }
+        Some("text") => {
+            let quote = obj
+                .get("quote")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| Error::InvalidArgument("text anchor needs a quote".to_string()))?;
+            Ok(Some(AnchorInput::Text {
+                quote: quote.to_string(),
+            }))
+        }
+        _ => Err(Error::InvalidArgument(
+            "unknown anchor mode, expected point or text".to_string(),
+        )),
+    }
 }
 
 /// A validated anchor: a canvas point or a verbatim quote.
@@ -435,4 +492,34 @@ fn optional_text(value: Option<&str>) -> Value {
 
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializing_a_comment_never_leaks_the_delete_token_hash() {
+        let comment = Comment {
+            id: "c-1".to_string(),
+            artifact_id: "art-1".to_string(),
+            author: "alice".to_string(),
+            body: "looks good".to_string(),
+            anchor: None,
+            anchor_version: None,
+            done: false,
+            delete_token_hash: Some("secret_hash_value".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let json_val = serde_json::to_value(&comment).expect("serialize");
+        assert!(json_val.get("delete_token_hash").is_none());
+
+        let json_str = serde_json::to_string(&comment).expect("serialize");
+        assert!(!json_str.contains("secret_hash_value"));
+        assert!(!json_str.contains("delete_token_hash"));
+
+        let view = comment_view(&comment);
+        assert!(view.get("delete_token_hash").is_none());
+    }
 }

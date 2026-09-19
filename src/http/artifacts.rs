@@ -27,7 +27,7 @@ use crate::http::origin::request_origin;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
-use crate::store::comments::{self as comment_store, AnchorInput, Comment};
+use crate::store::comments::{self as comment_store, Comment, comment_view, parse_anchor};
 
 /// The artifacts of one project.
 #[derive(Debug, Serialize)]
@@ -323,58 +323,6 @@ pub async fn comment_remove(
 
     state.notify();
     Ok(Json(DestroyResult { ok: true }))
-}
-
-/// The public shape of a comment. The delete token hash stays internal, so
-/// rows posted over MCP never leak it through the admin listing.
-fn comment_view(comment: &Comment) -> Value {
-    json!({
-        "id": comment.id,
-        "artifact_id": comment.artifact_id,
-        "author": comment.author,
-        "body": comment.body,
-        "anchor": comment.anchor.clone().unwrap_or(Value::Null),
-        "anchor_version": comment.anchor_version,
-        "done": comment.done,
-        "created_at": comment.created_at,
-    })
-}
-
-/// Parse the wire anchor into a validated store input. Unknown modes are
-/// rejected; the store checks coordinates, quotes, and sizes.
-fn parse_anchor(value: Option<Value>) -> Result<Option<AnchorInput>, Error> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    if value.is_null() {
-        return Ok(None);
-    }
-    let obj = value.as_object().ok_or_else(|| {
-        Error::InvalidArgument("unknown anchor mode, expected point or text".to_string())
-    })?;
-    match obj.get("mode").and_then(Value::as_str) {
-        Some("point") => {
-            let x = obj.get("x").and_then(Value::as_f64).ok_or_else(|| {
-                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
-            })?;
-            let y = obj.get("y").and_then(Value::as_f64).ok_or_else(|| {
-                Error::InvalidArgument("point anchor needs numeric x and y".to_string())
-            })?;
-            Ok(Some(AnchorInput::Point { x, y }))
-        }
-        Some("text") => {
-            let quote = obj
-                .get("quote")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::InvalidArgument("text anchor needs a quote".to_string()))?;
-            Ok(Some(AnchorInput::Text {
-                quote: quote.to_string(),
-            }))
-        }
-        _ => Err(Error::InvalidArgument(
-            "unknown anchor mode, expected point or text".to_string(),
-        )),
-    }
 }
 
 /// `DELETE /api/v1/artifacts/{id}`
