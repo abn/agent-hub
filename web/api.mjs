@@ -11,11 +11,18 @@ export async function api(path, options = {}) {
   if (response.status === 401) throw new Error("unauthorized: set a token in Settings");
   if (!response.ok) {
     let detail = response.statusText;
+    let code = "";
     try {
       const problem = await response.json();
       detail = problem.detail || problem.title || detail;
+      code = problem.code || "";
     } catch {}
-    throw new Error(detail);
+    // The words are for the reader; the status and the hub's own code are for
+    // the screen, so no caller has to recognise a refusal by its wording.
+    const refused = new Error(detail);
+    refused.status = response.status;
+    refused.code = code;
+    throw refused;
   }
   return response.status === 204 ? null : response.json();
 }

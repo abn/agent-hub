@@ -145,7 +145,7 @@ export async function projectSettingsScreen(gen, path) {
   try {
     saved = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
   } catch (error) {
-    if (!/not found/.test(error.message)) throw error;
+    if (error.status !== 404) throw error;
     paint(
       gen,
       `<h1>Project settings</h1>${emptyStateHTML(NOT_FOUND, { project: projectId }, { href: "#/projects" })}`,
