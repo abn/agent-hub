@@ -3948,7 +3948,7 @@ def check_feed_days(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
-def check_feed_chips(page, watch: Watch) -> None:
+def check_feed_chips(page, watch: Watch, seen: list | None = None) -> None:
     """One scrolling line of toggles, All first, the filter served by the query."""
     watch.enter("feed: kind chips")
     chips = page.evaluate(
@@ -3977,7 +3977,8 @@ def check_feed_chips(page, watch: Watch) -> None:
             f"the chips sit on {chips['tops']} line(s), overflow-x {chips['scrolls']},"
             f" row scrolls {chips['wide']}, page scrolls {chips['page']}"
         )
-    seen_before = watch.count(f"POST {FEED_DAYS_API}/seen")
+    seen_before = len(seen) if seen is not None else watch.count(f"POST {FEED_DAYS_API}/seen")
+    api_seen_before = watch.count(f"POST {FEED_DAYS_API}/seen")
     if not feed_press(page, watch, 'main .feed-chips [data-kind="finished"]', "finished chip"):
         return
     if not settle(page, f"{FEED_ROWS} === 1"):
@@ -3992,6 +3993,12 @@ def check_feed_chips(page, watch: Watch) -> None:
     )
     if state != {"all": "false", "kind": "true", "focus": True}:
         watch.fail(f"after pressing a kind the chips are {state}")
+    page.wait_for_timeout(200)
+    seen_after = len(seen) if seen is not None else watch.count(f"POST {FEED_DAYS_API}/seen")
+    api_after = watch.count(f"POST {FEED_DAYS_API}/seen")
+    if seen_after != seen_before or api_after != api_seen_before:
+        watch.fail("a filtered page, which skips events, moved the read cursor")
+
     if not feed_press(page, watch, 'main .feed-chips [data-kind="all"]', "All chip"):
         return
     if not settle(page, f"{FEED_ROWS} > 1"):
@@ -4000,7 +4007,23 @@ def check_feed_chips(page, watch: Watch) -> None:
     kept = [row["title"] for row in page.evaluate(FEED_ROW_STATE) if row["dot"]]
     if kept != [harness.FEED_DAYS_FRESH]:
         watch.fail(f"a repaint inside one visit left the unread mark on {kept}")
-    if watch.count(f"POST {FEED_DAYS_API}/seen") != seen_before:
+    # Arriving on a filtered page is a new visit, and it must not move the
+    # cursor either. It comes last: leaving the feed ends the visit whose
+    # unread marks the lines above are about.
+    if not feed_press(page, watch, 'main .feed-chips [data-kind="finished"]', "finished chip"):
+        return
+    goto(page, "#/home", "Home")
+    goto(page, FEED_DAYS_HASH, harness.FEED_DAYS_NAME)
+    if not settle(page, f"{FEED_ROWS} === 1"):
+        watch.fail("the filtered page never painted, so its visit decided nothing")
+    page.wait_for_timeout(200)
+    seen_after_visit = len(seen) if seen is not None else watch.count(f"POST {FEED_DAYS_API}/seen")
+    if seen_after_visit != seen_before:
+        watch.fail("a visit to a filtered page moved the read cursor")
+    feed_press(page, watch, 'main .feed-chips [data-kind="all"]', "All chip")
+    # The checks after this one read the whole feed, so wait for it to be back.
+    settle(page, f"{FEED_ROWS} > 1 && !!document.querySelector('main .feed-earlier')")
+    if (len(seen) if seen is not None else watch.count(f"POST {FEED_DAYS_API}/seen")) != seen_before:
         watch.fail("a filtered page, which skips events, moved the read cursor")
     watch.drain_rejections()
 
@@ -4015,6 +4038,9 @@ def check_feed_unread(page, watch: Watch, port: int, session: list, seen: list) 
     if not feed_wait(page, seen, 1):
         watch.fail("viewing the feed did not advance the read cursor")
         return
+    page.wait_for_timeout(200)
+    if len(seen) != 1:
+        watch.fail(f"first unfiltered visible visit sent seen {len(seen)} times, expected exactly 1")
     if seen[0] != {"event_id": newest}:
         watch.fail(f"the cursor was advanced with {seen[0]}, expected the newest event {newest}")
     harness.feed_days_append(
@@ -4032,6 +4058,9 @@ def check_feed_unread(page, watch: Watch, port: int, session: list, seen: list) 
         watch.fail(f"the unseen row is {fresh}: it wants the dot, the word and the weight")
     if not feed_wait(page, seen, 2) or seen[1] != {"event_id": feed_newest(port)}:
         watch.fail(f"the second visit advanced the cursor with {seen[1:]}")
+    page.wait_for_timeout(200)
+    if len(seen) != 2:
+        watch.fail(f"second unfiltered visible visit sent seen {len(seen)} times, expected exactly 2")
     watch.drain_rejections()
 
 
@@ -4109,6 +4138,54 @@ def check_feed_row_keys(page, watch: Watch) -> None:
     row = page.evaluate(SELECTED_TAB)
     if not row or "earlier note 2" not in row["text"] or not row["focused"]:
         watch.fail(f"six rows down the selection is {row and row['text'][:40]!r}")
+    watch.drain_rejections()
+
+
+FEED_LATE_FINISHED = "late report done"
+
+
+def check_feed_filtered_visit(page, watch: Watch, port: int, session: list, seen: list) -> None:
+    """A filtered page leaves the read cursor alone even with a new event on it.
+
+    The event lands while the reader is away, so on arrival the filtered page
+    holds something above the cursor and the filter is the only reason not to
+    move it. Clearing the filter then moves it once, to that event.
+    """
+    watch.enter("feed: a filtered visit")
+    goto(page, FEED_DAYS_HASH, harness.FEED_DAYS_NAME)
+    if not feed_press(page, watch, 'main .feed-chips [data-kind="finished"]', "finished chip"):
+        return
+    if not settle(page, f"{FEED_ROWS} === 1"):
+        watch.fail("the finished chip did not narrow the feed")
+    goto(page, "#/home", home_title())
+    harness.feed_days_append(
+        port, session, "signal_append", {"kind": "finished", "summary": FEED_LATE_FINISHED}
+    )
+    newest = feed_newest(port)
+    before = len(seen)
+    try:
+        goto(page, FEED_DAYS_HASH, harness.FEED_DAYS_NAME)
+        if not settle(page, f"{FEED_ROWS} === 2"):
+            watch.fail(
+                f"the filtered page shows {page.evaluate(FEED_ROWS)} rows, not the two finished"
+                " events, so its visit decided nothing"
+            )
+            return
+        page.wait_for_timeout(400)
+        if len(seen) != before:
+            watch.fail(
+                f"a filtered page with a new event on it moved the read cursor: {seen[before:]}"
+            )
+            return
+    finally:
+        feed_press(page, watch, 'main .feed-chips [data-kind="all"]', "All chip")
+    settle(page, f"{FEED_ROWS} > 2")
+    if not feed_wait(page, seen, before + 1):
+        watch.fail("clearing the filter did not move the read cursor to the new event")
+        return
+    page.wait_for_timeout(300)
+    if len(seen) != before + 1 or seen[-1] != {"event_id": newest}:
+        watch.fail(f"clearing the filter sent {seen[before:]}, expected one post for {newest}")
     watch.drain_rejections()
 
 
@@ -4193,16 +4270,19 @@ def check_feed_screen(browser, watch: Watch, port: int) -> None:
         else None,
     )
     page.route(re.compile(re.escape(FEED_DAYS_API) + r"\?"), feed_backdate)
-    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-    check_feed_days(page, mine)
-    check_feed_unread(page, mine, port, session, seen)
-    check_feed_chips(page, mine)
-    check_feed_fold(page, mine)
-    check_feed_row_keys(page, mine)
-    check_feed_copy_setup(page, mine, port)
-    watch.failures.extend(mine.failures)
-    context.close()
-    watch.page.bring_to_front()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        check_feed_days(page, mine)
+        check_feed_unread(page, mine, port, session, seen)
+        check_feed_chips(page, mine, seen)
+        check_feed_fold(page, mine)
+        check_feed_row_keys(page, mine)
+        check_feed_filtered_visit(page, mine, port, session, seen)
+        check_feed_copy_setup(page, mine, port)
+    finally:
+        watch.failures.extend(mine.failures)
+        context.close()
+        watch.page.bring_to_front()
 # The inbox checks find an item by what it says and then hold it by its id, so
 # a repaint or a regroup cannot hand them a different row.
 INBOX_ITEM_ID = (
