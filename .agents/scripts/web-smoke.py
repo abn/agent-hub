@@ -530,6 +530,420 @@ def seconds_left(label: str) -> int:
     return int(found.group(1)) if found else -1
 
 
+# What the storage screen is checked against. The kinds are in the order the
+# bar stacks them and the legend lists them.
+STORAGE_KINDS = ("events", "sessions", "artifacts", "knowledge")
+STORAGE_CALL = "/api/v1/storage"
+BATCH_PRUNE_CALL = "DELETE /api/v1/storage/"
+GIB = 1024**3
+# A volume the bar can be measured on: the seeded hub holds a few megabytes of
+# a disk of many gigabytes, which draws every segment narrower than a pixel.
+# One kind is empty, and the project id is markup an agent could have chosen.
+STORAGE_FIXTURE = {
+    "total_bytes": 5 * GIB,
+    "used_bytes": int(5.6 * GIB),
+    "capacity_bytes": 32 * GIB,
+    "free_bytes": 26 * GIB,
+    "data_path": "/srv/hub-data",
+    "node": {"host": "fixture-node", "mode": "local"},
+    "by_kind": {
+        "events": int(0.6 * GIB),
+        "sessions": int(2.1 * GIB),
+        "artifacts": int(2.9 * GIB),
+        "knowledge": 0,
+    },
+    "prunable": {"sessions": 0, "bytes": 0},
+    "projects": [
+        {
+            "project_id": '<b id="pwned-storage">attic</b>',
+            "artifact_bytes": int(2.9 * GIB),
+            "session_bytes": int(2.1 * GIB),
+            "kb_bytes": 0,
+            "prunable_sessions": 0,
+            "prunable_bytes": 0,
+        }
+    ],
+}
+STORAGE_DRAWN = (
+    "(() => { const root = document.querySelector('main .storage'); if (!root) return null;"
+    " const text = (el) => (el ? el.textContent.replace(/\\s+/g, ' ').trim() : null);"
+    " const width = (el) => el.getBoundingClientRect().width;"
+    " const bar = (el) => el && { role: el.getAttribute('role'),"
+    "  label: el.getAttribute('aria-label'), hidden: el.getAttribute('aria-hidden'),"
+    "  width: width(el),"
+    "  segments: [...el.querySelectorAll('.storage-seg')].map((seg, at, all) => ({"
+    "   kind: seg.dataset.kind, width: width(seg),"
+    "   edged: at === all.length - 1 || getComputedStyle(seg).boxShadow !== 'none' })) };"
+    " const summary = root.querySelector('.storage-summary');"
+    " return { path: text(root.querySelector('.storage-path')),"
+    "  empty: text(root.querySelector('.empty-state .empty-title')),"
+    "  summary: summary && { used: text(summary.querySelector('.storage-used')),"
+    "   capacity: text(summary.querySelector('.storage-capacity')),"
+    "   bar: bar(summary.querySelector('.storage-bar')),"
+    "   legend: [...summary.querySelectorAll('.storage-legend li')].map((li) => ({"
+    "    kind: li.dataset.kind, text: text(li) })) },"
+    "  rows: [...root.querySelectorAll('.storage-row')].map((row) => ({"
+    "   project: row.dataset.project, name: text(row.querySelector('.title')),"
+    "   total: text(row.querySelector('.storage-total')),"
+    "   detail: text(row.querySelector('.storage-detail')),"
+    "   bar: bar(row.querySelector('.storage-bar')),"
+    "   prune: text(row.querySelector('button.storage-prune')) })),"
+    "  all: text(root.querySelector('.storage-all')),"
+    "  review: text(root.querySelector('.storage-all button.storage-review')) }; })()"
+)
+
+
+def storage_bytes(count: int) -> str:
+    """A byte count as the screen prints it: three figures, no trailing zero.
+
+    Halves round up, as the browser's own number formatting does.
+    """
+    from decimal import ROUND_HALF_UP, Decimal, getcontext
+
+    getcontext().prec = 80
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = Decimal(max(0, count))
+    unit = 0
+    while value >= 1024 and unit < len(units) - 1:
+        value /= 1024
+        unit += 1
+    digits = 0 if unit == 0 or value >= 100 else 1 if value >= 10 else 2
+    shown = value.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+    figure = format(shown, "f")
+    if "." in figure:
+        figure = figure.rstrip("0").rstrip(".")
+    return f"{figure} {units[unit]}"
+
+
+def sessions_of(count: int) -> str:
+    return f"{count} session" if count == 1 else f"{count} sessions"
+
+
+def open_storage(page, fulfil=None):
+    """Paint the storage screen and return it with the response it was given."""
+    goto(page, "#/home", "Home")
+    if fulfil is not None:
+        page.route(
+            f"**{STORAGE_CALL}",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=json.dumps(fulfil)
+            ),
+        )
+    try:
+        with page.expect_response(
+            lambda r: r.url.endswith(STORAGE_CALL) and r.request.method == "GET", timeout=8000
+        ) as answered:
+            page.evaluate("location.hash = '#/storage'")
+        usage = fulfil if fulfil is not None else answered.value.json()
+        settle(page, "document.querySelector('main h1')?.textContent.trim() === 'Storage'")
+        page.wait_for_timeout(100)
+    except PlaywrightTimeoutError:
+        usage = None
+    finally:
+        if fulfil is not None:
+            page.unroute(f"**{STORAGE_CALL}")
+    return usage, page.evaluate(STORAGE_DRAWN)
+
+
+def storage_shares(watch: Watch, where: str, bar: dict, wanted: list, whole: int) -> None:
+    """Each drawn segment is its share of the bar, and an empty kind draws none."""
+    if not bar:
+        watch.fail(f"{where} draws no bar")
+        return
+    drawn = [(kind, count) for kind, count in wanted if count > 0]
+    if [seg["kind"] for seg in bar["segments"]] != [kind for kind, _count in drawn]:
+        watch.fail(
+            f"{where} stacks {[seg['kind'] for seg in bar['segments']]},"
+            f" expected {[kind for kind, _count in drawn]}"
+        )
+        return
+    for seg, (kind, count) in zip(bar["segments"], drawn):
+        expected = bar["width"] * count / whole
+        if abs(seg["width"] - expected) > 0.75:
+            watch.fail(
+                f"{where} draws {kind} {seg['width']:.2f}px wide,"
+                f" its share of {bar['width']:.0f}px is {expected:.2f}px"
+            )
+        if not seg["edged"]:
+            watch.fail(f"{where} separates {kind} from the next segment by colour alone")
+
+
+def check_storage_numbers(page, watch: Watch) -> None:
+    """Every figure on the storage screen is the one the hub reported."""
+    watch.enter("storage: the numbers")
+    usage, drawn = open_storage(page)
+    if not usage or not drawn or not drawn["summary"]:
+        watch.fail("the storage screen draws no summary card")
+        return
+    summary = drawn["summary"]
+    if drawn["path"] != f"{usage['data_path']} · {usage['node']['host']}":
+        watch.fail(f"the path line reads {drawn['path']!r}")
+    if summary["used"] != f"{storage_bytes(usage['used_bytes'])} used":
+        watch.fail(f"used reads {summary['used']!r}, the hub says {usage['used_bytes']} bytes")
+    if summary["capacity"] != f"of {storage_bytes(usage['capacity_bytes'])}":
+        watch.fail(
+            f"capacity reads {summary['capacity']!r}, the hub says {usage['capacity_bytes']} bytes"
+        )
+    legend = [(entry["kind"], entry["text"]) for entry in summary["legend"]]
+    wanted = [(kind, f"{kind} {storage_bytes(usage['by_kind'][kind])}") for kind in STORAGE_KINDS]
+    if legend != wanted:
+        watch.fail(f"the legend reads {legend}, expected {wanted}")
+    bar = summary["bar"]
+    if not bar or bar["role"] != "img" or not bar["label"]:
+        watch.fail(f"the summary bar has no text alternative: {bar}")
+    else:
+        for _kind, said in wanted:
+            if said not in bar["label"]:
+                watch.fail(f"the bar's text alternative leaves out {said!r}: {bar['label']!r}")
+
+    rows = {row["project"]: row for row in drawn["rows"]}
+    for project in usage["projects"]:
+        row = rows.get(project["project_id"])
+        if not row:
+            watch.fail(f"no row for {project['project_id']}")
+            continue
+        parts = [
+            ("sessions", project["session_bytes"]),
+            ("artifacts", project["artifact_bytes"]),
+            ("knowledge", project["kb_bytes"]),
+        ]
+        total = sum(count for _kind, count in parts)
+        if row["total"] != storage_bytes(total):
+            watch.fail(f"{project['project_id']} totals {row['total']!r}, not {storage_bytes(total)}")
+        detail = " · ".join(f"{kind} {storage_bytes(count)}" for kind, count in parts)
+        if row["detail"] != detail:
+            watch.fail(f"{project['project_id']} details {row['detail']!r}, expected {detail!r}")
+        if total:
+            storage_shares(watch, f"the {project['project_id']} row", row["bar"], parts, total)
+        button = (
+            f"Prune {storage_bytes(project['prunable_bytes'])} in {project['project_id']}"
+            if project["prunable_sessions"]
+            else None
+        )
+        if row["prune"] != button:
+            watch.fail(f"{project['project_id']} offers {row['prune']!r}, expected {button!r}")
+
+    holding = [p for p in usage["projects"] if p["prunable_sessions"]]
+    line = (
+        f"{sessions_of(usage['prunable']['sessions'])} across"
+        f" {len(holding)} project{'' if len(holding) == 1 else 's'}"
+        f" · frees {storage_bytes(usage['prunable']['bytes'])}."
+    )
+    if line not in (drawn["all"] or ""):
+        watch.fail(f"the prune all card reads {drawn['all']!r}, expected {line!r}")
+    watch.drain_rejections()
+
+
+def check_storage_bar(page, watch: Watch) -> None:
+    """The bar is drawn to scale, says what it shows, and copes with gaps."""
+    watch.enter("storage: the bar")
+    usage, drawn = open_storage(page, STORAGE_FIXTURE)
+    if not drawn or not drawn["summary"]:
+        watch.fail("the storage screen draws no summary card")
+        return
+    kinds = [(kind, usage["by_kind"][kind]) for kind in STORAGE_KINDS]
+    storage_shares(watch, "the summary", drawn["summary"]["bar"], kinds, usage["capacity_bytes"])
+    if ("knowledge", "knowledge 0 B") not in [
+        (entry["kind"], entry["text"]) for entry in drawn["summary"]["legend"]
+    ]:
+        watch.fail("a kind that holds nothing is missing from the legend")
+    if page.evaluate("!!document.getElementById('pwned-storage')"):
+        watch.fail("a project id became an element")
+    elif not drawn["rows"] or drawn["rows"][0]["name"] != usage["projects"][0]["project_id"]:
+        watch.fail(f"the project id reads {drawn['rows'] and drawn['rows'][0]['name']!r}")
+    if drawn["review"] or any(row["prune"] for row in drawn["rows"]):
+        watch.fail("a prune is offered with nothing to prune")
+
+    watch.enter("storage: a volume that cannot be measured")
+    unmeasured = dict(STORAGE_FIXTURE, capacity_bytes=None, free_bytes=None)
+    usage, drawn = open_storage(page, unmeasured)
+    if not drawn or not drawn["summary"]:
+        watch.fail("the storage screen draws no summary card")
+    else:
+        if drawn["summary"]["capacity"]:
+            watch.fail(f"a capacity is shown that the hub did not report: {drawn['summary']['capacity']!r}")
+        storage_shares(watch, "the summary", drawn["summary"]["bar"], kinds, usage["used_bytes"])
+
+    watch.enter("storage: nothing stored")
+    nothing = dict(
+        STORAGE_FIXTURE,
+        total_bytes=0,
+        projects=[],
+        by_kind={"events": 4096, "sessions": 0, "artifacts": 0, "knowledge": 0},
+    )
+    _usage, drawn = open_storage(page, nothing)
+    if not drawn or drawn["empty"] != "Nothing is stored yet.":
+        watch.fail(f"an empty hub reads {drawn and drawn['empty']!r}")
+    elif drawn["summary"] or drawn["rows"]:
+        watch.fail("an empty hub still draws the summary or a row")
+    watch.drain_rejections()
+
+
+def storage_usage(watch: Watch) -> dict:
+    return json.loads(harness.request(watch.port, "GET", STORAGE_CALL))
+
+
+def check_storage_prune(page, watch: Watch) -> None:
+    """A project prune asks first, sends one request, and can be taken back."""
+    watch.enter("storage: prune a project")
+    project = harness.ATTIC_PROJECT
+    before = next(p for p in storage_usage(watch)["projects"] if p["project_id"] == project)
+    ended = [
+        s
+        for s in json.loads(
+            harness.request(watch.port, "GET", f"/api/v1/sessions?project={quote(project)}")
+        )["sessions"]
+        if s["status"] == "ended" and not s["deleted_at"]
+    ]
+    open_storage(page)
+    button = f'.storage-row[data-project="{project}"] button.storage-prune'
+    if not page.query_selector(button):
+        watch.fail("the project with ended sessions offers no prune")
+        return
+    sent = watch.count(BATCH_PRUNE_CALL)
+    page.click(button)
+    page.wait_for_selector("dialog.dialog[open]")
+    page.wait_for_timeout(WRITE_WINDOW)
+    if watch.count(BATCH_PRUNE_CALL) != sent:
+        watch.fail("the project was pruned before the dialog was answered")
+    if "dialog-safe" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the dialog opened with focus on {page.evaluate(FOCUS_CLASS)!r}, not on Keep")
+    asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
+    count = before["prunable_sessions"]
+    for needle in (
+        f"Prune {sessions_of(count)}",
+        storage_bytes(before["prunable_bytes"]),
+        "Keep",
+        "30 s",
+        *[s["id"] for s in ended],
+        *[storage_bytes(s["brain_bytes"]) for s in ended],
+    ):
+        if needle not in asked:
+            watch.fail(f"the dialog does not say {needle!r}")
+    page.click(".dialog-safe")
+    page.wait_for_selector("dialog.dialog", state="detached")
+    page.wait_for_timeout(WRITE_WINDOW)
+    if watch.count(BATCH_PRUNE_CALL) != sent:
+        watch.fail("Keep sent a prune")
+    if "storage-prune" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"Keep left focus on {page.evaluate(FOCUS_CLASS)!r}, not the opener")
+
+    page.click(button)
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click(".dialog-commit")
+    page.wait_for_selector(".toast-undo")
+    calls = [call for call in watch.calls if call.startswith(BATCH_PRUNE_CALL)][sent:]
+    if calls != [f"DELETE /api/v1/storage/projects/{project}/sessions"]:
+        watch.fail(f"confirming sent {calls}")
+    said = page.text_content(".toast-text")
+    for needle in (sessions_of(count), storage_bytes(before["prunable_bytes"]), "30 s"):
+        if needle not in said:
+            watch.fail(f"the toast reads {said!r}, without {needle!r}")
+    settle(page, f"!document.querySelector({button!r})")
+    if page.query_selector(button):
+        watch.fail("the pruned project still offers a prune")
+    # A project left holding nothing drops out of the response altogether.
+    after = [p for p in storage_usage(watch)["projects"] if p["project_id"] == project]
+    if after and after[0]["prunable_sessions"]:
+        watch.fail("the hub still holds the project's ended sessions")
+
+    undone = watch.count(UNDO_CALL)
+    page.click(".toast-undo")
+    if not settle(page, f"!!document.querySelector({button!r})"):
+        watch.fail("undo did not bring the prune back to the row")
+    if watch.count(UNDO_CALL) != undone + count:
+        watch.fail(f"undo sent {watch.count(UNDO_CALL) - undone} requests for {count} sessions")
+    restored = [p for p in storage_usage(watch)["projects"] if p["project_id"] == project]
+    if restored != [before]:
+        watch.fail(f"undo left the project at {restored}, it was {before}")
+    watch.drain_rejections()
+
+
+def check_storage_prune_all(page, watch: Watch) -> None:
+    """Prune all is reviewed project by project before one request commits it."""
+    watch.enter("storage: prune all")
+    before = storage_usage(watch)
+    open_storage(page)
+    review = "main .storage-all button.storage-review"
+    if not page.query_selector(review):
+        watch.fail("the prune all card offers no review")
+        return
+    sent = watch.count(BATCH_PRUNE_CALL)
+    page.click(review)
+    page.wait_for_selector("dialog.dialog[open]")
+    if "dialog-safe" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the review opened with focus on {page.evaluate(FOCUS_CLASS)!r}, not on Keep")
+    lines = page.evaluate(
+        "[...document.querySelectorAll('dialog.dialog .dialog-list li')].map((li) => li.textContent)"
+    )
+    wanted = [
+        f"{p['project_id']} · {sessions_of(p['prunable_sessions'])}"
+        f" · {storage_bytes(p['prunable_bytes'])}"
+        for p in before["projects"]
+        if p["prunable_sessions"]
+    ]
+    if lines != wanted:
+        watch.fail(f"the review lists {lines}, expected {wanted}")
+    asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
+    for needle in (
+        f"Prune {sessions_of(before['prunable']['sessions'])}",
+        storage_bytes(before["prunable"]["bytes"]),
+        "30 s",
+    ):
+        if needle not in asked:
+            watch.fail(f"the review does not say {needle!r}")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("dialog.dialog", state="detached")
+    page.wait_for_timeout(WRITE_WINDOW)
+    if watch.count(BATCH_PRUNE_CALL) != sent:
+        watch.fail("Esc pruned instead of keeping")
+    if "storage-review" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"Esc left focus on {page.evaluate(FOCUS_CLASS)!r}, not the opener")
+
+    page.click(review)
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click(".dialog-commit")
+    page.wait_for_selector(".toast-undo")
+    calls = [call for call in watch.calls if call.startswith(BATCH_PRUNE_CALL)][sent:]
+    if calls != ["DELETE /api/v1/storage/sessions"]:
+        watch.fail(f"confirming sent {calls}")
+    said = page.text_content(".toast-text")
+    if "30 s" not in said or sessions_of(before["prunable"]["sessions"]) not in said:
+        watch.fail(f"the toast reads {said!r}")
+    if storage_usage(watch)["prunable"]["sessions"]:
+        watch.fail("the hub still holds ended sessions")
+    page.click(".toast-undo")
+    if not settle(page, f"!!document.querySelector({review!r})"):
+        watch.fail("undo did not bring the review back")
+    restored = storage_usage(watch)
+    if restored["prunable"] != before["prunable"] or restored["projects"] != before["projects"]:
+        watch.fail(f"undo left {restored['prunable']}, it was {before['prunable']}")
+    watch.drain_rejections()
+
+
+def check_storage_keys(page, watch: Watch) -> None:
+    """The project rows are in the keyboard map, and Enter opens the project."""
+    watch.enter("storage: keys")
+    usage, _drawn = open_storage(page)
+    page.keyboard.press("j")
+    page.wait_for_timeout(150)
+    on = page.evaluate(
+        "(() => { const row = document.activeElement.closest('.storage-row');"
+        " return row && document.activeElement === row ? row.dataset.project : null; })()"
+    )
+    # A painted list parks its selection on the first row, so the first press
+    # moves to the second.
+    ids = [p["project_id"] for p in usage["projects"]] if usage else []
+    target = ids[min(1, len(ids) - 1)] if ids else None
+    if on != target:
+        watch.fail(f"j put focus on the row for {on!r}, expected {target!r}")
+        return
+    page.keyboard.press("Enter")
+    if not settle(page, f"location.hash.startsWith('#/projects/{target}/')"):
+        watch.fail(f"Enter on the row went to {page.evaluate('location.hash')!r}")
+    watch.drain_rejections()
+
+
 def check_agent_markup_is_text(page, watch: Watch) -> None:
     """One shared helper escapes every screen, so its loss must not pass quietly."""
     watch.enter("home: agent markup")
@@ -2254,6 +2668,11 @@ def run() -> int:
             check_lineage_handoff(page, watch, project)
             check_session_end_flips_row(page, watch, project)
             check_prune(page, watch, project, seeded["session_id"])
+            check_storage_numbers(page, watch)
+            check_storage_bar(page, watch)
+            check_storage_keys(page, watch)
+            check_storage_prune(page, watch)
+            check_storage_prune_all(page, watch)
             check_gate_in_the_app(page, watch, project, seeded["protected_id"])
             watch.enter("artifacts: the gate on the public page")
             for failure in check_public_gate_remembers_and_forgets(

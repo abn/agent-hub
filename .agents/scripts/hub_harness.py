@@ -66,6 +66,11 @@ ARTIFACT_TITLE = "Check note"
 LINEAGE_PROJECT = "lineage"
 # The handoff note the seeded pickup leaves, asserted on the detail screen.
 LINEAGE_HANDOFF = "handoff note here"
+# The project the storage screen prunes: two ended sessions, each holding a
+# brain, so a project prune has a count, a byte figure and two undo tokens.
+# Nothing else reads it, so pruning it moves no other check's data.
+ATTIC_PROJECT = "attic"
+ATTIC_SESSIONS = ("old-one", "old-two")
 # A term the seeded feed event, session and brain entry all carry, so a search
 # for it returns grouped hits rather than an empty state.
 SEARCH_TERM = "nightly"
@@ -314,6 +319,55 @@ def seed(port: int) -> dict[str, str]:
                 },
             },
         )
+    # Seeded ahead of the checks project for the same reason as the lineage
+    # one: its session events stay the oldest on the hub.
+    request(port, "POST", "/api/v1/projects", {"id": ATTIC_PROJECT, "display_name": "Attic"})
+    attic: list[str] = []
+    mcp_call(
+        port,
+        attic,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, attic, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    for offset, name in enumerate(ATTIC_SESSIONS):
+        steps = [
+            ("session_start", {"project_id": ATTIC_PROJECT, "session_name": name}),
+            ("brain_put", {"store": "session", "path": "/kv/left-behind", "content": name}),
+        ]
+        started = ""
+        for step, (tool, arguments) in enumerate(steps):
+            answer = mcp_call(
+                port,
+                attic,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2 + offset * 3 + step,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": arguments},
+                },
+            )
+            found = (answer.get("result", {}).get("structuredContent", {}) or {}).get("session_id")
+            started = started or found or ""
+        if started:
+            mcp_call(
+                port,
+                attic,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4 + offset * 3,
+                    "method": "tools/call",
+                    "params": {"name": "session_end", "arguments": {"session_id": started}},
+                },
+            )
     session: list[str] = []
     mcp_call(
         port,
