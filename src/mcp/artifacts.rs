@@ -93,7 +93,7 @@ impl HubServer {
             UpdateOptions {
                 base_version: params.base_version,
                 force: params.force,
-                label: params.label.as_deref(),
+                label: params.label.as_ref().map(|opt| opt.as_deref()),
             },
             params.idempotency_key.as_deref(),
         )
@@ -273,8 +273,11 @@ struct ArtifactUpdateParams {
     base_version: Option<i64>,
     #[serde(default)]
     force: bool,
-    #[serde(default)]
-    label: Option<String>,
+    /// Absent keeps the current label, an explicit null or empty string clears
+    /// it, and a string sets a new label.
+    #[serde(default, deserialize_with = "present_or_absent")]
+    #[schemars(with = "Option<String>")]
+    label: Option<Option<String>>,
     /// Optional idempotency key, so a retried update returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
@@ -282,13 +285,12 @@ struct ArtifactUpdateParams {
 
 /// Read a field that may be absent or explicitly null into a nested option, so
 /// the two can be told apart. Serde's own default handles the absent case.
-fn present_or_absent<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Option<serde_json::Value>>, D::Error>
+fn present_or_absent<'de, T, D>(deserializer: D) -> std::result::Result<Option<Option<T>>, D::Error>
 where
+    T: serde::Deserialize<'de>,
     D: serde::Deserializer<'de>,
 {
-    Option::<serde_json::Value>::deserialize(deserializer).map(Some)
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Arguments for `artifact_get`.

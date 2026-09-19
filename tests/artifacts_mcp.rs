@@ -666,3 +666,85 @@ fn protection_off_tells_an_agent_how_to_publish_in_the_clear() {
     let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
     assert_eq!(structured(&got)["protected"], false);
 }
+
+#[test]
+fn artifact_update_label_semantics() {
+    let data_dir = TempDir::new("label-semantics");
+    common::seed_project(&data_dir.0, "proj");
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let published = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Doc",
+            "kind": "markdown",
+            "content": "# v1",
+            "label": "v1",
+        }),
+    );
+    let artifact_id = structured(&published)["artifact_id"]
+        .as_str()
+        .expect("an id")
+        .to_string();
+
+    // 1. Update without label keeps existing label
+    let v2 = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# v2",
+        }),
+    );
+    assert_eq!(structured(&v2)["version"], 2);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["label"], "v1");
+
+    // 2. Update with string sets new label
+    let v3 = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# v3",
+            "label": "v3",
+        }),
+    );
+    assert_eq!(structured(&v3)["version"], 3);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["label"], "v3");
+
+    // 3. Update with null clears label
+    let v4 = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# v4",
+            "label": Value::Null,
+        }),
+    );
+    assert_eq!(structured(&v4)["version"], 4);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["label"], Value::Null);
+
+    // 4. Update with empty string clears label
+    server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# v5",
+            "label": "v5",
+        }),
+    );
+    let v6 = server.call_tool(
+        "artifact_update",
+        json!({
+            "artifact_id": artifact_id,
+            "content": "# v6",
+            "label": "",
+        }),
+    );
+    assert_eq!(structured(&v6)["version"], 6);
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    assert_eq!(structured(&got)["label"], Value::Null);
+}

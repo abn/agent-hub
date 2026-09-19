@@ -410,7 +410,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
         UpdateOptions {
             base_version: Some(999),
             force: true,
-            label: Some("forced"),
+            label: Some(Some("forced")),
         },
         None,
     )
@@ -460,7 +460,7 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
         UpdateOptions {
             base_version: None,
             force: false,
-            label: Some("v2"),
+            label: Some(Some("v2")),
         },
         None,
     )
@@ -1453,4 +1453,114 @@ async fn required_protection_refuses_an_update_that_clears_it() {
     .await
     .expect("carrying the envelope forward is accepted");
     assert!(kept.protected);
+}
+
+#[tokio::test]
+async fn update_can_clear_label_with_explicit_none_or_empty_string() {
+    let dir = temp_dir("label-clear");
+    let db = open(&dir).await;
+    projects::create(&db, "proj", "Project")
+        .await
+        .expect("proj");
+
+    let mut art = public("Doc", b"v1");
+    art.label = Some("v1");
+    let published = artifacts::publish(&db, &dir, art, None)
+        .await
+        .expect("publish");
+    assert_eq!(published.label.as_deref(), Some("v1"));
+
+    // 1. Updating with None keeps the current label ("v1").
+    let v2 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"v2",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect("update with None keeps label");
+    assert_eq!(v2.label.as_deref(), Some("v1"));
+
+    // 2. Updating with Some(Some("v2")) sets the new label.
+    let v3 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"v3",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(Some("v2")),
+        },
+        None,
+    )
+    .await
+    .expect("update with Some(Some(\"v2\")) sets label");
+    assert_eq!(v3.label.as_deref(), Some("v2"));
+
+    // 3. Updating with Some(None) clears the label.
+    let v4 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"v4",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(None),
+        },
+        None,
+    )
+    .await
+    .expect("update with Some(None) clears label");
+    assert_eq!(v4.label, None);
+
+    // 4. Updating again to set a label, then clearing with Some(Some("")).
+    let v5 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"v5",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(Some("v5")),
+        },
+        None,
+    )
+    .await
+    .expect("update sets label");
+    assert_eq!(v5.label.as_deref(), Some("v5"));
+
+    let v6 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &published.id,
+        b"v6",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(Some("")),
+        },
+        None,
+    )
+    .await
+    .expect("update with empty string clears label");
+    assert_eq!(v6.label, None);
 }

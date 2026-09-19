@@ -124,8 +124,9 @@ pub struct UpdateOptions<'a> {
     pub base_version: Option<i64>,
     /// Overwrite a version mismatch instead of conflicting.
     pub force: bool,
-    /// When set, replaces the current label; otherwise the label is kept.
-    pub label: Option<&'a str>,
+    /// Absent keeps the current label; an explicit null or empty string clears
+    /// it; a string sets a new label.
+    pub label: Option<Option<&'a str>>,
 }
 
 /// What the metadata transaction did with the blob written before it opened.
@@ -324,7 +325,9 @@ pub async fn update(
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
     limits::check_artifact(content.len())?;
-    let label = check_label(opts.label)?;
+    if let Some(Some(l)) = opts.label {
+        check_label(Some(l))?;
+    }
 
     let mut conn = super::connect(db)?;
     // Only the project and the kind are taken from this read, and neither ever
@@ -407,7 +410,11 @@ pub async fn update(
         let envelope = envelope.resolve(existing.envelope.as_ref());
         let envelope_json = envelope.as_ref().map(|value| value.to_string());
         let protected = envelope_json.is_some();
-        let label = label.or(existing.label.clone());
+        let label = match opts.label {
+            None => existing.label.clone(),
+            Some(None) | Some(Some("")) => None,
+            Some(Some(l)) => check_label(Some(l))?,
+        };
 
         tx.execute(
             "UPDATE artifacts SET current_ver = ?1, label = ?2, envelope = ?3, path = ?4, size_bytes = ?5, updated_at = ?6 WHERE id = ?7",

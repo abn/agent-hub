@@ -420,10 +420,11 @@ comment_resolve(artifact_id, comment_id, done, delete_token?)
 comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
-A publish carries a description, a favicon mark, and a version label. Pass
-the version the edit is based on as `base_version`: a stale base is refused
-with a conflict naming the current version unless `force` is set. Read one
-snapshot with `artifact_get` plus `version`, list history with
+A publish carries a description, a favicon mark, and a version label. An
+update keeps the existing label when omitted; an explicit null or empty string
+clears it. Pass the version the edit is based on as `base_version`: a stale base
+is refused with a conflict naming the current version unless `force` is set.
+Read one snapshot with `artifact_get` plus `version`, list history with
 `artifact_versions`, and remove an artifact with `artifact_delete`.
 Comment with `comment_post` (a point or quote anchor is optional), read
 with `comment_list`, and resolve or delete with the returned delete token

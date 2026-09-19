@@ -56,7 +56,8 @@ edit is based on as `base_version`: if the artifact has moved on, the update
 is refused with a conflict naming the current version, and nothing is written.
 Pass `force` to overwrite anyway. An update without `base_version` applies on
 top of the current version, as before. A `label` on an update renames the new
-version; without one the label is kept.
+version; without one the label is kept. An explicit null or empty string clears
+the label.
 
 ## Reading
 

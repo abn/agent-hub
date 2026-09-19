@@ -910,7 +910,7 @@ async fn publish_versioned(state: &AppState) -> String {
         UpdateOptions {
             base_version: None,
             force: false,
-            label: Some("v2"),
+            label: Some(Some("v2")),
         },
         None,
     )
@@ -1714,4 +1714,59 @@ async fn the_page_follows_each_version_of_a_mixed_history() {
         sealed.contains("Encrypted artifact"),
         "the version that was published protected still asks for its password"
     );
+}
+
+#[tokio::test]
+async fn cleared_label_serves_null_over_rest() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Doc", b"<p>v1</p>").await;
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>v2</p>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(Some("labeled")),
+        },
+        None,
+    )
+    .await
+    .expect("update with label");
+
+    // Clear label on v3
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>v3</p>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(None),
+        },
+        None,
+    )
+    .await
+    .expect("update clearing label");
+
+    let app = router(state);
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["version"], 3);
+    assert_eq!(body["label"], serde_json::Value::Null);
 }
