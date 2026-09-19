@@ -168,7 +168,7 @@ fn structured(response: &Value) -> &Value {
 #[test]
 fn signal_append_round_trips_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed_project(&data_dir.0, "p1");
+    common::seed::seed_project(&data_dir.0, "p1");
     let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
     server.initialize();
 
@@ -205,7 +205,7 @@ fn signal_append_round_trips_over_stdio() {
 #[test]
 fn signal_append_refuses_hub_owned_kinds() {
     let data_dir = TempDir::new("hub-kinds");
-    common::seed_project(&data_dir.0, "p1");
+    common::seed::seed_project(&data_dir.0, "p1");
     let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
     server.initialize();
 
@@ -235,8 +235,8 @@ fn signal_append_refuses_hub_owned_kinds() {
 #[test]
 fn signal_append_validates_thread_id() {
     let data_dir = TempDir::new("thread-validate");
-    common::seed_project(&data_dir.0, "p1");
-    common::seed_project(&data_dir.0, "p2");
+    common::seed::seed_project(&data_dir.0, "p1");
+    common::seed::seed_project(&data_dir.0, "p2");
     let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
     server.initialize();
 
@@ -283,7 +283,7 @@ fn signal_append_validates_thread_id() {
 #[test]
 fn idempotency_key_yields_one_event() {
     let data_dir = TempDir::new("idempotency");
-    common::seed_project(&data_dir.0, "p1");
+    common::seed::seed_project(&data_dir.0, "p1");
     let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
     server.initialize();
 
@@ -312,7 +312,7 @@ fn idempotency_key_yields_one_event() {
 #[test]
 fn payload_over_cap_returns_payload_too_large() {
     let data_dir = TempDir::new("overcap");
-    common::seed_project(&data_dir.0, "p1");
+    common::seed::seed_project(&data_dir.0, "p1");
     let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
     server.initialize();
 

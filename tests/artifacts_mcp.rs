@@ -166,7 +166,7 @@ fn structured(response: &Value) -> &Value {
 #[test]
 fn artifact_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -294,7 +294,7 @@ fn tool_error_code(response: &Value) -> String {
 #[test]
 fn artifact_versioning_round_trip_over_stdio() {
     let data_dir = TempDir::new("versioned");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -414,7 +414,7 @@ fn artifact_versioning_round_trip_over_stdio() {
 #[test]
 fn artifact_get_of_an_absent_id_is_not_found() {
     let data_dir = TempDir::new("absent");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -456,7 +456,7 @@ fn set_policy(data_dir: &Path, project_id: &str, policy: &str) {
 #[test]
 fn a_project_that_requires_protection_refuses_a_plain_publish() {
     let data_dir = TempDir::new("policy-required");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     set_policy(&data_dir.0, "proj", "required");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
@@ -499,7 +499,7 @@ fn a_project_that_requires_protection_refuses_a_plain_publish() {
 #[test]
 fn a_project_with_protection_off_refuses_an_envelope() {
     let data_dir = TempDir::new("policy-off");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     set_policy(&data_dir.0, "proj", "off");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
@@ -537,7 +537,7 @@ fn a_project_with_protection_off_refuses_an_envelope() {
 #[test]
 fn an_agent_publishes_a_version_in_the_clear_by_saying_so() {
     let data_dir = TempDir::new("envelope-null");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -612,7 +612,7 @@ fn an_agent_publishes_a_version_in_the_clear_by_saying_so() {
 #[test]
 fn protection_off_tells_an_agent_how_to_publish_in_the_clear() {
     let data_dir = TempDir::new("policy-off-remedy");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -670,7 +670,7 @@ fn protection_off_tells_an_agent_how_to_publish_in_the_clear() {
 #[test]
 fn artifact_update_label_semantics() {
     let data_dir = TempDir::new("label-semantics");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 

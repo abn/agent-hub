@@ -186,7 +186,7 @@ fn error_code(response: &Value) -> &str {
 #[test]
 fn session_and_brain_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -351,7 +351,7 @@ fn session_and_brain_tools_round_trip_over_stdio() {
 #[test]
 fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
     let data_dir = TempDir::new("pruned");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let session_id = {
         let mut server = McpServer::spawn(&data_dir.0);
@@ -440,7 +440,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
 #[test]
 fn a_non_canonical_path_indexes_and_deletes_one_row() {
     let data_dir = TempDir::new("aliased");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -507,7 +507,7 @@ fn a_non_canonical_path_indexes_and_deletes_one_row() {
 #[test]
 fn a_brain_read_does_not_create_the_session_file() {
     let data_dir = TempDir::new("read-only");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -550,7 +550,7 @@ fn a_brain_read_does_not_create_the_session_file() {
 #[test]
 fn an_oversized_brain_put_is_refused() {
     let data_dir = TempDir::new("oversized");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -595,7 +595,7 @@ fn brain_tools_require_an_active_session() {
 #[test]
 fn session_survives_a_process_restart() {
     let data_dir = TempDir::new("restart");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let session_id = {
         let mut server = McpServer::spawn(&data_dir.0);
@@ -658,7 +658,7 @@ fn session_survives_a_process_restart() {
 #[test]
 fn a_project_page_outlives_the_session_that_wrote_it() {
     let data_dir = TempDir::new("project-store");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -732,7 +732,7 @@ fn a_project_page_outlives_the_session_that_wrote_it() {
 #[test]
 fn the_project_store_refuses_a_key_path() {
     let data_dir = TempDir::new("project-kv");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     server.call_tool(
@@ -763,7 +763,7 @@ fn the_project_store_refuses_a_key_path() {
 #[test]
 fn a_project_that_does_not_exist_gets_no_knowledge_base() {
     let data_dir = TempDir::new("project-missing");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -791,7 +791,7 @@ fn a_project_that_does_not_exist_gets_no_knowledge_base() {
 #[test]
 fn a_write_has_to_name_its_store() {
     let data_dir = TempDir::new("store-required");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     server.call_tool(
@@ -819,7 +819,7 @@ fn a_write_has_to_name_its_store() {
 #[test]
 fn a_conditional_project_write_reports_the_current_version() {
     let data_dir = TempDir::new("project-cas");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     server.call_tool(
@@ -885,7 +885,7 @@ fn a_conditional_project_write_reports_the_current_version() {
 #[test]
 fn an_oversized_project_page_is_refused() {
     let data_dir = TempDir::new("project-oversized");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     server.call_tool(
@@ -917,7 +917,7 @@ fn an_oversized_project_page_is_refused() {
 #[test]
 fn pruning_a_session_leaves_the_project_knowledge_base() {
     let data_dir = TempDir::new("project-prune");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let session_id = {
         let mut server = McpServer::spawn(&data_dir.0);
@@ -1012,8 +1012,8 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
 #[test]
 fn a_project_page_is_searchable_under_its_own_kind() {
     let data_dir = TempDir::new("project-search");
-    common::seed_project(&data_dir.0, "proj");
-    common::seed_project(&data_dir.0, "other");
+    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "other");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     server.call_tool(
@@ -1078,7 +1078,7 @@ fn a_project_page_is_searchable_under_its_own_kind() {
 #[test]
 fn another_session_in_the_project_is_readable() {
     let data_dir = TempDir::new("cross-session");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -1142,7 +1142,7 @@ fn another_session_in_the_project_is_readable() {
 #[test]
 fn reading_another_session_needs_no_active_session() {
     let data_dir = TempDir::new("no-active-read");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let writer_id = {
         let mut server = McpServer::spawn(&data_dir.0);
@@ -1181,7 +1181,7 @@ fn reading_another_session_needs_no_active_session() {
 #[test]
 fn reading_a_session_that_wrote_nothing_creates_no_file() {
     let data_dir = TempDir::new("cross-no-create");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -1235,7 +1235,7 @@ fn reading_a_session_that_wrote_nothing_creates_no_file() {
 #[test]
 fn a_pruned_session_is_not_readable() {
     let data_dir = TempDir::new("cross-pruned");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let writer_id = {
         let mut server = McpServer::spawn(&data_dir.0);
@@ -1338,7 +1338,7 @@ fn a_pruned_session_is_not_readable() {
 #[test]
 fn a_write_cannot_name_another_session() {
     let data_dir = TempDir::new("cross-write");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -1434,7 +1434,7 @@ fn a_write_cannot_name_another_session() {
 #[test]
 fn a_session_argument_has_no_meaning_for_the_project_store() {
     let data_dir = TempDir::new("cross-store");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -1480,7 +1480,7 @@ fn a_session_argument_has_no_meaning_for_the_project_store() {
 #[test]
 fn a_session_is_named_one_way_or_the_other() {
     let data_dir = TempDir::new("cross-ref");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
 
@@ -1523,7 +1523,7 @@ fn a_session_is_named_one_way_or_the_other() {
 #[test]
 fn mcp_writes_record_audit_rows_and_emit_signal() {
     let data_dir = TempDir::new("audit-test");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
@@ -1629,7 +1629,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
 #[test]
 fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
     let data_dir = TempDir::new("promote-test");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
 
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();

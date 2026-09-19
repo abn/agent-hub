@@ -118,7 +118,7 @@ fn search_finds_appended_content() {
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("agent-hub-search-mcp-{nanos}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    common::seed_project(&dir, "proj");
+    common::seed::seed_project(&dir, "proj");
 
     let mut server = McpServer::spawn(&dir);
     server.initialize();

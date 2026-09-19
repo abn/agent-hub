@@ -191,7 +191,7 @@ fn publish(server: &mut McpServer) -> String {
 #[test]
 fn comment_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     let artifact_id = publish(&mut server);
@@ -252,7 +252,7 @@ fn comment_tools_round_trip_over_stdio() {
 #[test]
 fn comment_post_rejects_an_unknown_anchor_mode() {
     let data_dir = TempDir::new("anchor");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     let artifact_id = publish(&mut server);
@@ -276,7 +276,7 @@ fn comment_post_rejects_an_unknown_anchor_mode() {
 #[test]
 fn comment_post_replays_an_idempotency_key_without_a_second_token() {
     let data_dir = TempDir::new("idem");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     let artifact_id = publish(&mut server);
@@ -320,7 +320,7 @@ fn comment_post_replays_an_idempotency_key_without_a_second_token() {
 #[test]
 fn comment_resolve_across_artifacts_is_not_found() {
     let data_dir = TempDir::new("cross");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0);
     server.initialize();
     let first = publish(&mut server);

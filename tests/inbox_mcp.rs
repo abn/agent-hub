@@ -195,7 +195,7 @@ fn item_with_id<'a>(items: &'a [Value], event_id: &str) -> &'a Value {
 #[test]
 fn inbox_and_question_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0, &[]);
     server.initialize();
 
@@ -321,7 +321,7 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
 #[test]
 fn question_post_is_refused_at_the_inbox_cap() {
     let data_dir = TempDir::new("cap");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0, &[("HUB_INBOX_ACTION_PER_AGENT", "2")]);
     server.initialize();
 
@@ -353,7 +353,7 @@ fn question_post_is_refused_at_the_inbox_cap() {
 #[test]
 fn approval_signal_is_refused_at_the_inbox_cap() {
     let data_dir = TempDir::new("approval-cap");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let mut server = McpServer::spawn(&data_dir.0, &[("HUB_INBOX_ACTION_PER_AGENT", "1")]);
     server.initialize();
 
@@ -416,7 +416,7 @@ fn seed_read_report(data_dir: &Path, summary: &str) -> String {
 #[test]
 fn an_agent_is_not_told_what_the_human_has_read() {
     let data_dir = TempDir::new("read-state");
-    common::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(&data_dir.0, "proj");
     let event_id = seed_read_report(&data_dir.0, "nightly report done");
     let mut server = McpServer::spawn(&data_dir.0, &[]);
     server.initialize();
