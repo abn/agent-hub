@@ -113,6 +113,7 @@ pub async fn put(
     if_version: Option<&str>,
 ) -> Result<Written> {
     let path = page_path(path)?;
+    crate::limits::check_kb_page(content.len())?;
     let brain = open_for_write(state, project_id).await?;
     store(
         state, &brain, project_id, "kb.put", actor, path, content, if_version,
@@ -210,6 +211,7 @@ pub async fn stamp_review(
         .map_err(|_| Error::InvalidArgument(format!("the page at '{path}' is not UTF-8 text")))?;
     // A page whose frontmatter cannot be patched safely is refused, not guessed at.
     let reviewed = review_frontmatter(&text, HUMAN, &crate::store::now_rfc3339())?;
+    crate::limits::check_kb_page(reviewed.len())?;
 
     // One comparison, made under the write lock: against the version the
     // human read when there is one, and otherwise against the version this
@@ -318,6 +320,7 @@ pub async fn promote(
             from_path: &from_path,
         },
     )?;
+    crate::limits::check_kb_page(page.len())?;
 
     let brain = open_for_write(state, project_id).await?;
     let written = store(

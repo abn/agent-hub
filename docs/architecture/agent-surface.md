@@ -114,8 +114,8 @@ entries. A knowledge base holds pages only, so a `/kv/` path there is an
 `invalid_argument`. No tool exposes a raw file handle or the server path of a
 file: `session_start` returns the session id, its owner and status, the two
 namespaces to address the brain with, and the conventional recovery path. One value is
-capped at 4 MiB, and a larger write is refused with `payload_too_large` before
-anything is stored.
+capped at 4 MiB and one knowledge base page at 1 MiB, and a larger write is
+refused with `payload_too_large` before anything is stored.
 
 A read returns a `version`, the content hash of the bytes it returns, and a
 write returns the version of the bytes it stored. Passing one back as

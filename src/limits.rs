@@ -31,6 +31,13 @@ pub const AGENT_BODY_BYTES_MAX: usize =
 /// its own budget for any sane number of entries.
 pub const BRAIN_VALUE_BYTES_MAX: usize = REQUEST_BODY_BYTES_MAX;
 
+/// Maximum bytes of one knowledge base page (1 MiB).
+///
+/// A page is a document a human reads and edits, and it reaches the hub as a
+/// JSON string over REST: a mebibyte of text, escaped, still fits the request
+/// body ceiling with the rest of the call around it.
+pub const KB_PAGE_BYTES_MAX: usize = 1024 * 1024;
+
 /// Soft file size limit for one session brain or knowledge base file (256 MiB).
 pub const BRAIN_FILE_BYTES_SOFT: i64 = 256 * 1024 * 1024;
 
@@ -168,6 +175,16 @@ pub fn check_brain_value(bytes: usize) -> Result<()> {
     if bytes > BRAIN_VALUE_BYTES_MAX {
         return Err(Error::PayloadTooLarge(format!(
             "brain value exceeds {BRAIN_VALUE_BYTES_MAX} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a knowledge base page over the cap.
+pub fn check_kb_page(bytes: usize) -> Result<()> {
+    if bytes > KB_PAGE_BYTES_MAX {
+        return Err(Error::PayloadTooLarge(format!(
+            "knowledge base page exceeds {KB_PAGE_BYTES_MAX} bytes"
         )));
     }
     Ok(())

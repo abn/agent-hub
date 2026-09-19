@@ -244,8 +244,9 @@ brain is the session's server-side working state, one AgentFS file per
 session, reached only through the brain tools; there is no file path to hold.
 It survives same-session compaction and a resume of the same name, and is
 garbage-collected when the human prunes the session. Keys live under `/kv/`,
-files under `/fs/`. One brain value is capped at 4 MiB; a larger write is
-refused with `payload_too_large` and stores nothing.
+files under `/fs/`. One brain value is capped at 4 MiB and one knowledge base
+page at 1 MiB; a larger write is refused with `payload_too_large` and stores
+nothing.
 
 A session belongs to the agent that started it. A session name is yours: the
 same name under another agent is a different session with its own brain, so

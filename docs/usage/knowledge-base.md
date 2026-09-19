@@ -38,12 +38,15 @@ included), a backslash, and a canonical path over 512 bytes.
 
 | Limit | Value |
 |---|---|
-| One page | 4 MiB, the limit of any brain value |
+| One page | 1 MiB |
 | One page path | 512 bytes |
 | One JSON request body | 4 MiB |
 | One knowledge base file | 1 GiB; a write past 256 MiB carries a warning |
 | One history page | 200 rows |
 | One listing | 500 entries |
+
+A session brain value keeps its own 4 MiB limit. The page limit applies only
+to the knowledge base.
 
 ## Refusals
 
@@ -59,7 +62,7 @@ is not the admin token.
 | 401 | `unauthenticated` | no admin token, on every route |
 | 404 | `not_found` | the project, the page, the session or the session brain entry does not exist |
 | 409 | `conflict` | `if_version` does not match; the detail ends `current_version=sha256:...`, or `current_version=absent` |
-| 413 | `payload_too_large` | a page or a body over its limit, refused before it is buffered whole; nothing is written |
+| 413 | `payload_too_large` | a page over 1 MiB or a body over its limit, refused before it is buffered whole; nothing is written |
 | 415 | `invalid_argument` | a page sent as anything but JSON, `text/markdown` or `text/plain` |
 
 ## Routes

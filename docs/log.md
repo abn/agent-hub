@@ -23,6 +23,8 @@ software release notes and the repository changelog.
   count and a page keeps its last writer however many writes came after. The
   bound is the knowledge base file's own size limit, and a cut page says
   `truncated`.
+* **Update**: A knowledge base page is capped at 1 MiB. A session brain value
+  keeps its 4 MiB cap.
 * **Note**: There is no move or rename, and wiki links are not followed.
 
 ## 2026-09-19, a search query is words, and a thread is in its project

@@ -1710,22 +1710,47 @@ async fn an_oversize_body_is_a_problem_document_and_nothing_is_written() {
     let hub = Hub::start().await;
     let project = hub.project("big").await;
     let uri = format!("/api/v1/projects/{project}/kb/pages/fs/huge.md");
+    let page_max = agent_hub::limits::KB_PAGE_BYTES_MAX;
 
-    for content_type in ["application/json", "text/markdown"] {
-        hub.send(request_raw(
+    let one_over = "x".repeat(page_max + 1);
+    let bodies = [
+        request("PUT", &uri, Some(ADMIN), Some(json!({"content": one_over}))),
+        request_raw(
+            "PUT",
+            &uri,
+            Some(ADMIN),
+            one_over.clone().into_bytes(),
+            Some("text/markdown"),
+        ),
+        request_raw(
             "PUT",
             &uri,
             Some(ADMIN),
             vec![b'x'; agent_hub::limits::REQUEST_BODY_BYTES_MAX + 1],
-            Some(content_type),
-        ))
-        .await
-        .problem(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large");
+            Some("application/json"),
+        ),
+        request_raw(
+            "PUT",
+            &uri,
+            Some(ADMIN),
+            vec![b'x'; agent_hub::limits::REQUEST_BODY_BYTES_MAX + 1],
+            Some("text/markdown"),
+        ),
+    ];
+    for body in bodies {
+        hub.send(body)
+            .await
+            .problem(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large");
         hub.page(&project, "fs/huge.md")
             .await
             .problem(StatusCode::NOT_FOUND, "not_found");
     }
     assert!(hub.kb_search_rows(&project).await.is_empty());
+
+    // A page at the limit is a page.
+    hub.put_page(&project, "fs/huge.md", &"x".repeat(page_max))
+        .await
+        .ok();
 }
 
 #[tokio::test]

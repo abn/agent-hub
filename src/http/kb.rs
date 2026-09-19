@@ -365,7 +365,7 @@ pub async fn page_put(
             (parsed.content, parsed.if_version.or(query.if_version))
         }
         Some("text/markdown" | "text/plain") => {
-            let bytes = read_body(&headers, body, crate::limits::BRAIN_VALUE_BYTES_MAX).await?;
+            let bytes = read_body(&headers, body, crate::limits::KB_PAGE_BYTES_MAX).await?;
             let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
                 problem(Error::InvalidArgument(
                     "the page body is not valid UTF-8".to_string(),
