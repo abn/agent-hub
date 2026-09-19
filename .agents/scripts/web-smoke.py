@@ -18,7 +18,7 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import hub_harness as harness
 
@@ -551,6 +551,69 @@ def check_search_as_you_type(page, watch: Watch) -> None:
         watch.fail(f"the no-results state says {state['empty']!r}")
     if not state["focused"]:
         watch.fail("the no-results state took focus out of the field")
+    watch.drain_rejections()
+
+
+# What a reader may type that the index reads as syntax. The hub makes each
+# safe, so the screen sends every one of them as it was typed.
+SEARCH_TYPED = [
+    '"check notes"',
+    'Check AND (notes OR "nightly")',
+    "NOT check*",
+    '"unbalanced (rewrite* NEAR:',
+    "AND",
+    "rewrite " + "x" * 5000,
+]
+
+
+def check_search_as_typed(page, watch: Watch) -> None:
+    """The hub is asked for what the reader typed: its case, quotes and operators.
+
+    Asserted on the request the browser made. Every one of them has to come
+    back as results or as the no-results state, never as an error: the watch
+    fails the run on a refused request, and the screen is read as well.
+    """
+    watch.enter("search: the query as typed")
+    goto(page, "#/search", "Search")
+    settle(page, "!!document.getElementById('q')")
+    counts = {}
+    for query in [harness.SEARCH_GROUPS_TERM, *SEARCH_TYPED]:
+        shown = query if len(query) < 60 else f"{query[:24]}... ({len(query)} characters)"
+        watch.enter(f"search: as typed, {shown!r}")
+        page.fill("#q", "")
+        settle(page, "!(document.querySelector('main .search-line') || {}).textContent")
+        try:
+            with page.expect_request(
+                lambda r: bool(SEARCH_CALL.search(r.url)), timeout=5000
+            ) as asked:
+                page.fill("#q", query)
+        except PlaywrightTimeoutError:
+            watch.fail("the hub was asked nothing")
+            continue
+        sent = parse_qs(urlsplit(asked.value.url).query).get("q", [""])[0]
+        if sent != query:
+            watch.fail(f"the hub was asked for {sent[:80]!r}, not what was typed")
+        if not settle(
+            page,
+            "!!(document.querySelector('main .search-line') || {}).textContent"
+            " || !!document.querySelector('main .error')",
+        ):
+            watch.fail("the query never settled on a results line")
+        state = page.evaluate(SEARCH_STATE)
+        if state["error"]:
+            watch.fail("the query reached the reader as an error")
+        elif not state["rows"] and not state["empty"]:
+            watch.fail("the query reached the reader as neither results nor the no-results state")
+        if state["value"] != query:
+            watch.fail("the field does not show the query as typed")
+        if search_params(page).get("q") != query:
+            watch.fail("the route does not carry the query as typed")
+        counts[query] = state["rows"]
+    # A phrase is honoured as one, so it finds other rows than its two words do.
+    watch.enter("search: the query as typed")
+    words, phrase = counts.get(harness.SEARCH_GROUPS_TERM), counts.get(SEARCH_TYPED[0])
+    if words is not None and words == phrase:
+        watch.fail(f"the phrase and its bare words both found {words} rows")
     watch.drain_rejections()
 
 
@@ -5232,6 +5295,7 @@ def run() -> int:
                 run_step(watch, check_empty_state, page, watch)
                 run_step(watch, check_search, page, watch)
                 run_step(watch, check_search_as_you_type, page, watch)
+                run_step(watch, check_search_as_typed, page, watch)
                 run_step(watch, check_search_race, page, watch)
                 run_step(watch, check_search_is_text, page, watch)
                 run_step(watch, check_search_rows_take_keys, page, watch)

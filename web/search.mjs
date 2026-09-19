@@ -71,10 +71,9 @@ function icon(size, d) {
   return svg;
 }
 
-// The words of a query. The index reads quotes, brackets and the upper-case
-// operators as syntax and refuses a query that is only half of one, which is
-// what a reader typing `"caddy` has written. The index splits text on the same
-// boundaries, so the words are what it would have matched anyway.
+// The words of a query, for marking them in a snippet. The index splits text
+// on the same boundaries, so these are the words it matched. They are not what
+// is sent: the hub reads the query as typed.
 export function terms(query) {
   return String(query ?? "")
     .toLowerCase()
@@ -200,19 +199,17 @@ function resultsNode(state) {
   return box;
 }
 
-// What a query found, or why it found nothing. A query with no word in it is
-// not sent: there is nothing the index could match, and no time to report.
+// What a query found, or why it found nothing. The query goes to the hub as it
+// was typed: the hub keeps a balanced phrase as a phrase and drops whatever
+// else the index would read as syntax, so nothing typed here is refused. Only
+// an empty field is not sent.
 async function find(term, type) {
-  const state = { term, data: { count: 0, truncated: false, groups: [] }, line: "", error: "" };
-  if (!term) return state;
-  const words = terms(term);
-  if (!words.length) {
-    state.line = "0 results";
-    return state;
-  }
+  const trimmed = (term ?? "").trim();
+  const state = { term: trimmed, data: { count: 0, truncated: false, groups: [] }, line: "", error: "" };
+  if (!trimmed) return state;
   const scope = type ? `&type=${encodeURIComponent(type)}` : "";
   try {
-    state.data = await api(`/api/v1/search?q=${encodeURIComponent(words.join(" "))}${scope}`);
+    state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}`);
     state.line = resultsLine(state.data);
   } catch (error) {
     state.error = error.message;

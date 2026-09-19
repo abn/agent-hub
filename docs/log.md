@@ -13,6 +13,9 @@ software release notes and the repository changelog.
   only on the Inbox, and focus returning to the row the card was opened from.
 * **Update**: The keyboard selection follows focus into a row, and `/` on the
   Search screen focuses that screen's own field.
+* **Update**: The Search screen sends the query as typed and the hub makes it
+  safe for the index. This replaces the earlier note that the screen sends only
+  the words of a query.
 * **Update**: The [contributor guide](contribution/guide.md) describes the
   Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
   accessibility walk covers at its two widths.
