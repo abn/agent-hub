@@ -1625,3 +1625,113 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
         );
     });
 }
+
+#[test]
+fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
+    let data_dir = TempDir::new("promote-test");
+    common::seed_project(&data_dir.0, "proj");
+
+    let mut server = McpServer::spawn(&data_dir.0);
+    server.initialize();
+
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "researcher"}),
+    );
+    let session_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let draft_content = "# Research Draft\n\nDiscovered important things.\n";
+    server.call_tool(
+        "brain_put",
+        json!({
+            "path": "/fs/draft.md",
+            "content": draft_content,
+            "store": "session"
+        }),
+    );
+
+    // Call brain_promote
+    let promote_res = server.call_tool(
+        "brain_promote",
+        json!({
+            "from_path": "/fs/draft.md",
+            "to_path": "/fs/research.md",
+            "type": "concept",
+            "title": "Research",
+            "description": "Discovered things",
+            "tags": ["discovery"]
+        }),
+    );
+    let p_struct = structured(&promote_res);
+    assert_eq!(p_struct["ok"], true);
+    assert_eq!(p_struct["path"], "/fs/research.md");
+    assert!(p_struct["version"].as_str().unwrap().starts_with("sha256:"));
+
+    // Source in session is unchanged
+    let get_session = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/draft.md", "store": "session"}),
+    );
+    assert_eq!(structured(&get_session)["content"], draft_content);
+
+    // Target in project has frontmatter with sources citation
+    let get_kb = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/research.md", "store": "project"}),
+    );
+    let kb_content = structured(&get_kb)["content"].as_str().unwrap().to_string();
+    assert!(kb_content.contains("type: concept"));
+    assert!(kb_content.contains("title: Research"));
+    assert!(kb_content.contains("sources:"));
+    assert!(kb_content.contains(&format!(
+        "agenthub://session/{session_id}/brain/fs/draft.md"
+    )));
+    assert!(kb_content.contains("researcher brain /fs/draft.md"));
+    assert!(kb_content.ends_with("Discovered important things.\n"));
+
+    drop(server);
+
+    // Verify DB events and KB tool_calls
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build runtime");
+    runtime.block_on(async {
+        let db = open_engine(&data_dir.0.join("hub.db"))
+            .await
+            .expect("open db");
+        let query = agent_hub::store::events::FeedQuery {
+            since: None,
+            before: None,
+            limit: 50,
+            kinds: Some(vec!["signal".to_string()]),
+            include_audit: true,
+        };
+        let page = agent_hub::store::events::read_feed(&db, "proj", &query)
+            .await
+            .expect("read feed");
+        assert!(
+            page.events.iter().any(|e| {
+                e.kind == "signal"
+                    && e.payload.as_ref().is_some_and(|p| {
+                        p["action"] == "kb_promoted"
+                            && p["store"] == "project"
+                            && p["from_path"] == "/fs/draft.md"
+                            && p["to_path"] == "/fs/research.md"
+                    })
+            }),
+            "feed has kb_promoted event: {:?}",
+            page.events
+        );
+
+        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(&data_dir.0)
+            .open("proj", agent_hub::brain::KNOWLEDGE_FILE)
+            .await
+            .expect("open kb brain");
+        let kb_audit = kb_brain.audit_recent(None).await.expect("kb audit recent");
+        assert_eq!(kb_audit[0].name, "kb.promote");
+    });
+}

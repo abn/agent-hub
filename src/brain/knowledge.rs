@@ -14,10 +14,12 @@ use serde_json::json;
 use super::{Brain, KNOWLEDGE_FILE, Stamp, canonical_path};
 use crate::app::AppState;
 use crate::error::{Error, Result};
+use crate::okf::frontmatter::{PromoteParams, promote_frontmatter};
 use crate::okf::{LintFinding, extract_links, lint_page_write, parse_frontmatter};
 use crate::store::events::{self, NewEvent};
 use crate::store::projects;
 use crate::store::search::{SearchDoc, index_doc};
+use crate::store::sessions::Session;
 
 /// The actor every write through the admin gate is recorded under, and the
 /// `verified.by` a review stamps. The hub has one human and no user table, so
@@ -57,6 +59,21 @@ pub fn page_path(path: &str) -> Result<String> {
     let canonical = canonical_path(path)?;
     crate::limits::check_kb_path(&canonical)?;
     Ok(canonical)
+}
+
+/// Refuse a frontmatter value that could end its own line.
+///
+/// The frontmatter patcher is line oriented, so a value carrying a line break
+/// would write keys of its own choosing into the page. The patcher escapes
+/// what it emits; this is the same refusal one layer earlier, so neither has
+/// to be right alone.
+pub fn check_field(name: &str, value: &str) -> Result<()> {
+    match value.chars().find(|c| c.is_control()) {
+        Some(found) => Err(Error::InvalidArgument(format!(
+            "{name} may not contain {found:?}"
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// Open a project's knowledge base to write to it, creating it on first use.
@@ -148,6 +165,112 @@ pub async fn delete(
     )
     .await;
     Ok(path)
+}
+
+/// What a promotion copies, and what it adds to the page on the way.
+#[derive(Debug, Clone, Copy)]
+pub struct Promotion<'a> {
+    /// The session whose brain holds the source entry.
+    pub session: &'a Session,
+    pub from_path: &'a str,
+    pub to_path: &'a str,
+    pub page_type: Option<&'a str>,
+    pub title: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub tags: Option<&'a [String]>,
+    pub if_version: Option<&'a str>,
+}
+
+/// Copy a session brain entry into the knowledge base as a page that cites
+/// where it came from. The source is left as it was.
+pub async fn promote(
+    state: &AppState,
+    project_id: &str,
+    actor: &str,
+    promotion: &Promotion<'_>,
+) -> Result<Written> {
+    let to_path = page_path(promotion.to_path)?;
+    let from_path = canonical_path(promotion.from_path)?;
+    // The source path and the session name both land in the citation.
+    check_field("from_path", &from_path)?;
+    for (name, value) in [
+        ("type", promotion.page_type),
+        ("title", promotion.title),
+        ("description", promotion.description),
+    ] {
+        if let Some(value) = value {
+            check_field(name, value)?;
+        }
+    }
+    for tag in promotion.tags.unwrap_or_default() {
+        check_field("a tag", tag)?;
+    }
+    let session = promotion.session;
+    let session_name: String = session
+        .session_name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+
+    let absent = || {
+        Error::NotFound(format!(
+            "no brain value at '{from_path}' in session {}",
+            session.id
+        ))
+    };
+    let source = state
+        .brain
+        .open_existing(&session.project_id, &session.id)
+        .await?
+        .ok_or_else(absent)?
+        .get(&from_path)
+        .await?
+        .ok_or_else(absent)?;
+    let source = String::from_utf8(source).map_err(|_| {
+        Error::InvalidArgument(format!("the value at '{from_path}' is not UTF-8 text"))
+    })?;
+
+    let page = promote_frontmatter(
+        &source,
+        &PromoteParams {
+            page_type: promotion.page_type,
+            title: promotion.title,
+            description: promotion.description,
+            tags: promotion.tags,
+            session_name: &session_name,
+            session_id: &session.id,
+            from_path: &from_path,
+        },
+    )?;
+
+    let brain = open_for_write(state, project_id).await?;
+    let written = store(
+        state,
+        &brain,
+        project_id,
+        "kb.promote",
+        actor,
+        to_path,
+        &page,
+        promotion.if_version,
+    )
+    .await?;
+    signal(
+        state,
+        project_id,
+        actor,
+        Some(&session.id),
+        format!("Promoted {from_path} to {}", written.path),
+        json!({
+            "action": "kb_promoted",
+            "store": "project",
+            "from_session_id": session.id,
+            "from_path": from_path,
+            "to_path": written.path,
+        }),
+    )
+    .await;
+    Ok(written)
 }
 
 /// Store a page under a canonical path, with its log row and its search row,
@@ -335,6 +458,14 @@ mod tests {
                 matches!(page_path(hostile), Err(Error::InvalidArgument(_))),
                 "{hostile:?} is refused"
             );
+        }
+    }
+
+    #[test]
+    fn a_field_with_a_control_character_is_refused() {
+        assert!(check_field("title", "He said \"x\": y # fine").is_ok());
+        for hostile in ["a\nb", "a\rb", "a\u{0}b", "a\u{85}b"] {
+            assert!(check_field("title", hostile).is_err(), "{hostile:?}");
         }
     }
 }

@@ -308,7 +308,6 @@ impl HubServer {
         let target = self
             .target_for_write(
                 &principal,
-                store,
                 params.project_id.as_deref(),
                 params.session.as_ref(),
             )
@@ -436,7 +435,6 @@ impl HubServer {
         let target = self
             .target_for_write(
                 &principal,
-                store,
                 params.project_id.as_deref(),
                 params.session.as_ref(),
             )
@@ -461,6 +459,56 @@ impl HubServer {
             "ok": true,
             "path": path,
             "store": store.as_str(),
+        })))
+    }
+
+    #[tool(
+        description = "Promote an entry from the active session brain into the project knowledge base, adding a sources citation and frontmatter. Leaves the session brain entry untouched. Pass if_version to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+    )]
+    async fn brain_promote(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<BrainPromoteParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        // The source is read from the caller's own active session, under the
+        // ordinary read rule, and the target is a project it may write.
+        let session = self
+            .session_for(&principal, Access::Read)
+            .await
+            .map_err(to_error_data)?;
+        let project_id = self
+            .knowledge_project(
+                &principal,
+                Some(params.project_id.as_deref().unwrap_or(&session.project_id)),
+                Access::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+
+        let written = knowledge::promote(
+            &self.state,
+            &project_id,
+            &principal.actor,
+            &knowledge::Promotion {
+                session: &session,
+                from_path: &params.from_path,
+                to_path: &params.to_path,
+                page_type: params.page_type.as_deref(),
+                title: params.title.as_deref(),
+                description: params.description.as_deref(),
+                tags: params.tags.as_deref(),
+                if_version: params.if_version.as_deref(),
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+
+        Ok(CallToolResult::structured(json!({
+            "ok": true,
+            "path": written.path,
+            "version": written.version,
+            "lint": written.lint,
         })))
     }
 }
@@ -513,27 +561,12 @@ impl Store {
         }
     }
 
-    /// Refuse a key-value path at the project store.
-    ///
-    /// The knowledge base is a bundle of pages with a rendering surface. A
-    /// key-value side channel in the same file would be a second store that
-    /// nothing lists and nothing renders.
-    fn check_path(self, path: &str) -> Result<()> {
-        if self == Self::Project && (path == "/kv" || path.starts_with("/kv/")) {
-            return Err(Error::InvalidArgument(format!(
-                "the project knowledge base holds pages only, so '{path}' has no meaning there; use an /fs/ path"
-            )));
-        }
-        Ok(())
-    }
-
     /// The path a read acts on.
     ///
     /// The knowledge base holds pages only and keys everything on a page's
     /// canonical path, so a read of it resolves its path by the same rule a
     /// write does. A session brain takes the path as given.
     fn read_path(self, path: &str) -> Result<String> {
-        self.check_path(path)?;
         match self {
             Self::Project => knowledge::page_path(path),
             Self::Session => Ok(path.to_string()),
@@ -953,78 +986,46 @@ impl HubServer {
         Ok(session)
     }
 
-    /// Authorize and open the store a write acts on.
+    /// Authorize and open the session brain a write acts on.
+    ///
+    /// A write to the project store does not come through here: the knowledge
+    /// base has one write path of its own, shared with the human surface.
     async fn target_for_write(
         &self,
         principal: &Principal,
-        store: Store,
         project_id: Option<&str>,
         session_ref: Option<&SessionRef>,
     ) -> Result<Target> {
-        check_write_session(store, session_ref)?;
-        match store {
-            Store::Session => {
-                let session = self
-                    .session_target(principal, project_id, Access::Write)
-                    .await?;
-                // A named session is honoured only when it is the one the
-                // caller is already writing, so one client can pass the same
-                // argument to a read and a write without branching.
-                if let Some(reference) = session_ref {
-                    let named = self.resolve_session(principal, reference, None).await?;
-                    if named.id != session.id {
-                        return Err(Error::Forbidden(format!(
-                            "{SESSION_READ_ONLY} owner={}",
-                            named.agent
-                        )));
-                    }
-                }
-                let session_id = session.id.clone();
-                // A sweep takes the same lock to remove the file, so the
-                // liveness check above is only ordered against it when it is
-                // made again here.
-                let brain = self
-                    .state
-                    .brain
-                    .open_live(&session.project_id, &session.id, async || {
-                        self.live_session(&session_id).await.map(|_| ())
-                    })
-                    .await?;
-                Ok(Target {
-                    project_id: session.project_id,
-                    session_id: Some(session.id),
-                    brain,
-                })
-            }
-            Store::Project => {
-                let project_id = self
-                    .knowledge_project(principal, project_id, Access::Write)
-                    .await?;
-                // The file is created on the first write, so a project nobody
-                // has written to costs nothing. Deleting a project removes the
-                // file under the same lock this open takes, so the project is
-                // looked up again once the lock is held: a write that lost the
-                // race must not bring the file back for a project with no row,
-                // where no report counts it and nothing ever removes it.
-                let db = self.state.db.clone();
-                let looked_up = project_id.clone();
-                let brain = self
-                    .state
-                    .knowledge
-                    .open_live(&project_id, brain::KNOWLEDGE_FILE, async move || {
-                        match projects::get(&db, &looked_up).await? {
-                            Some(_) => Ok(()),
-                            None => Err(Error::NotFound(format!("project {looked_up} not found"))),
-                        }
-                    })
-                    .await?;
-                Ok(Target {
-                    project_id,
-                    session_id: None,
-                    brain,
-                })
+        let session = self
+            .session_target(principal, project_id, Access::Write)
+            .await?;
+        // A named session is honoured only when it is the one the caller is
+        // already writing, so one client can pass the same argument to a read
+        // and a write without branching.
+        if let Some(reference) = session_ref {
+            let named = self.resolve_session(principal, reference, None).await?;
+            if named.id != session.id {
+                return Err(Error::Forbidden(format!(
+                    "{SESSION_READ_ONLY} owner={}",
+                    named.agent
+                )));
             }
         }
+        let session_id = session.id.clone();
+        // A sweep takes the same lock to remove the file, so the liveness
+        // check above is only ordered against it when it is made again here.
+        let brain = self
+            .state
+            .brain
+            .open_live(&session.project_id, &session.id, async || {
+                self.live_session(&session_id).await.map(|_| ())
+            })
+            .await?;
+        Ok(Target {
+            project_id: session.project_id,
+            session_id: Some(session.id),
+            brain,
+        })
     }
 
     /// Authorize and open the store a read acts on.
@@ -1299,6 +1300,25 @@ struct BrainDeleteParams {
     /// The session written, which must be the caller's own active session.
     #[serde(default)]
     session: Option<SessionRef>,
+}
+
+/// Arguments for `brain_promote`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct BrainPromoteParams {
+    from_path: String,
+    to_path: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default, rename = "type")]
+    page_type: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+    #[serde(default)]
+    if_version: Option<String>,
 }
 #[cfg(test)]
 mod tests {
