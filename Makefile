@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/a11y web/smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -55,6 +55,13 @@ web/check: ## Static checks for the PWA assets
 # The artifact encryption round-trip. The module is reachable only through the
 # PWA, but a regression in it would break every protected artifact, so the gate
 # runs it when a Node runtime is present and says so when it is not.
+# The browser's frontmatter module against the corpus the Rust patcher is held
+# to, then both implementations against each other on generated input: the two
+# must write the same bytes or refuse with the same code.
+web/frontmatter: ## Run the frontmatter module's corpus, property and differential tests
+	@command -v node >/dev/null || { printf 'web/frontmatter: node is not installed, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) exit 1;; esac; exit 0; }
+	node .agents/scripts/test-frontmatter.mjs --differential
+
 web/crypto: ## Run the artifact encryption round-trip self-test
 	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
@@ -97,7 +104,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/a11y web/smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
