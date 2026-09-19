@@ -96,7 +96,7 @@ a 420px list beside a detail pane.
   dot, a heavier title and the word for it, never the colour alone.
 - Read is explicit, by opening an item, a swipe right, or the row's own Mark
   read control; never scroll-past. The Inbox header carries Mark all read and
-  an Unread only filter, and a change of read state offers an undo.
+  an Unread only filter, and marking one item read or unread offers an undo.
 - Time is short on a row and whole on request. A row carries a compact relative
   form in the reader's own locale, counting itself up while the app is open;
   the full local timestamp is the element's accessible name and its hover

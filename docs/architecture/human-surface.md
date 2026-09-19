@@ -158,7 +158,7 @@ is answered with its unchanged status and `changed` false, so marking an
 approval read never takes it out of what waits on you. They are idempotent,
 and an event with no inbox entry is a 404. The listing's `unread_only` is the
 Inbox header's filter and is refused when it contradicts an explicit `status`.
-The routes ship; the PWA does not call them yet.
+The Inbox calls them: opening an item, a swipe right, the row's own control and Mark all read.
 
 A feed is not read that way. Each project carries one cursor, the newest event
 the human has seen, and every event above it is unseen. Opening a project feed
