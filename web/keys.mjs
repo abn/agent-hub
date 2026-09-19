@@ -288,7 +288,18 @@ function repainted() {
 function onFocusIn(event) {
   if (event.target === main) return;
   const set = config();
-  following = !!(set && event.target.closest?.(set.rows));
+  if (!set) return;
+  const row = event.target.closest?.(set.rows);
+  if (!row) {
+    following = false;
+    return;
+  }
+  following = true;
+  const list = rows();
+  const index = list.indexOf(row);
+  if (index >= 0) {
+    place(list, index, false);
+  }
 }
 
 export function installKeys() {

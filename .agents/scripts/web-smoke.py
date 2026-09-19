@@ -2073,6 +2073,89 @@ def check_row_keys(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+# Where the roving stop is, and where the reader's focus is, by row.
+ROVING = (
+    "(() => { const rows = [...document.querySelectorAll('main .row')];"
+    " const stops = rows.filter((row) => row.tabIndex === 0);"
+    " return { rows: rows.length, stops: stops.length, at: rows.indexOf(stops[0]),"
+    "  focus: rows.findIndex((row) => row.contains(document.activeElement)),"
+    "  onRow: rows.includes(document.activeElement) }; })()"
+)
+
+
+def check_selection_follows_focus(page, watch: Watch) -> None:
+    """Focus that enters a row by Tab or by a control takes the selection with it."""
+    watch.enter("keys: the selection follows focus")
+    goto(page, "#/storage", "Storage")
+    goto(page, "#/inbox", "Inbox")
+    if not settle(page, f"{ON_INBOX} && document.querySelectorAll('main .row').length > 3"):
+        watch.fail("the inbox has too few rows to move through")
+        return
+    parked = page.evaluate(ROVING)
+    if parked["stops"] != 1 or parked["at"] != 0 or parked["focus"] != -1:
+        watch.fail(f"a painted list is {parked}: one stop on the first row and no focus is expected")
+
+    # Into a control of the third row, as a pointer or a screen reader lands.
+    page.evaluate(
+        "document.querySelectorAll('main .row')[2].querySelector('a[href], button').focus()"
+    )
+    state = page.evaluate(ROVING)
+    if state["stops"] != 1 or state["at"] != 2:
+        watch.fail(f"focus went into the third row and the selection is {state}")
+    if state["focus"] != 2 or state["onRow"]:
+        watch.fail(f"the selection took focus from the control the reader chose: {state}")
+    page.keyboard.press("j")
+    page.wait_for_timeout(120)
+    state = page.evaluate(ROVING)
+    if state["at"] != 3 or state["focus"] != 3 or not state["onRow"] or state["stops"] != 1:
+        watch.fail(f"j from a control in the third row landed on {state}, expected the fourth row")
+
+    # By Tab, out of the selected row and into the controls of the next one.
+    before = state["focus"]
+    for _ in range(8):
+        page.keyboard.press("Tab")
+        state = page.evaluate(ROVING)
+        if state["focus"] != before:
+            break
+    if state["focus"] <= before:
+        watch.fail(f"Tab never left the selected row: {state}")
+    elif state["at"] != state["focus"] or state["stops"] != 1:
+        watch.fail(f"Tab moved focus to row {state['focus']} and the selection is {state}")
+    else:
+        page.keyboard.press("k")
+        page.wait_for_timeout(120)
+        after = page.evaluate(ROVING)
+        if after["at"] != state["focus"] - 1 or after["focus"] != after["at"]:
+            watch.fail(f"k after Tab into row {state['focus']} landed on {after}")
+
+    # A remembered row that a repaint no longer holds: the list gets its way in
+    # back on the first row, and takes no focus doing it.
+    gone = page.evaluate(
+        "(() => { const rows = [...document.querySelectorAll('main .row')];"
+        " const row = document.querySelector('main [data-group=\"earlier\"] .row');"
+        " if (!row) return -1; row.querySelector('a[href], button').focus();"
+        " return rows.indexOf(row); })()"
+    )
+    if gone < 0:
+        watch.fail("the inbox holds no read row to remember")
+        return
+    if page.evaluate(ROVING)["at"] != gone:
+        watch.fail(f"focus in a read row left the selection on {page.evaluate(ROVING)}")
+    page.click('main [data-action="inbox-unread-only"]')
+    try:
+        if not settle(page, "!document.querySelector('main [data-group=\"earlier\"]')"):
+            watch.fail("Unread only left the Earlier group on screen")
+        state = page.evaluate(ROVING)
+        if state["stops"] != 1 or state["at"] != 0:
+            watch.fail(f"with the remembered row gone the selection is {state}, expected the first row")
+        if state["focus"] != -1:
+            watch.fail(f"the repaint took focus into the list: {state}")
+    finally:
+        page.click('main [data-action="inbox-unread-only"]')
+        settle(page, "!!document.querySelector('main [data-group=\"earlier\"]')")
+    watch.drain_rejections()
+
+
 def check_enter_opens(page, watch: Watch, project: str) -> None:
     watch.enter("keys: enter")
     page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
@@ -4598,9 +4681,14 @@ def check_inbox_detail(page, watch: Watch) -> None:
     item = inbox_item(page, watch, harness.INBOX_QUESTION_SUBJECT)
     if not item:
         return
-    # Enter on the selected row is the keyboard's way in.
+    # Enter on the selected row is the keyboard's way in. The selection now
+    # follows focus, so it may sit anywhere an earlier check left it: go to the
+    # top first, then walk down.
+    for _ in range(40):
+        page.keyboard.press("k")
+    page.wait_for_timeout(120)
     reached = False
-    for _ in range(12):
+    for _ in range(40):
         selected = page.evaluate(SELECTED_TAB)
         if selected and harness.INBOX_QUESTION_SUBJECT in selected["text"]:
             reached = True
@@ -4990,6 +5078,7 @@ def run() -> int:
                 run_step(watch, check_answer, page, watch, project)
                 run_step(watch, check_inbox_groups, page, watch, project)
                 run_step(watch, check_inbox_read_state, page, watch)
+                run_step(watch, check_selection_follows_focus, page, watch)
                 run_step(watch, check_inbox_swipe, page, watch)
                 run_step(watch, check_inbox_detail, page, watch)
                 run_step(watch, check_inbox_decline, page, watch)
