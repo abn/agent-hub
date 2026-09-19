@@ -914,3 +914,52 @@ button.empty-link {
 .pset-actions .primary { flex: 1; font-weight: 600; }
 .pset-delete { background: transparent; color: var(--danger); }
 /* end component: project-settings */
+/* component: search. The design's 48px field with its glyph and clear, the
+   scope chips, the mono results line, and result rows whose snippet carries
+   the hit in an action-tinted mark. */
+.search-form { margin: 0; }
+.search-field {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 48px; padding: 0 2px 0 14px; border-radius: var(--r-2);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-3);
+}
+.search-field svg { flex: none; }
+/* The ring is the field's, as the design draws it. The input keeps the
+   transparent outline under it, which is what forced colours fills in. */
+.search-field:has(input:focus-visible) { box-shadow: var(--focus); }
+.search-field input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0;
+  border: 0; border-radius: 0; background: transparent; font-size: var(--t-17);
+}
+.search-field input:focus-visible { box-shadow: none; }
+/* The design draws a bare 16px mark. The button around it is the 44px target. */
+.search-clear {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; min-height: 44px; padding: 0;
+  border: 0; border-radius: var(--r-2); background: transparent; color: var(--ink-3);
+}
+.search-clear[hidden] { display: none; }
+.search-scopes { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 var(--s-1); }
+/* Holds its line while empty, so the first count does not push the results. */
+.search-line { margin: 0; padding: 0 2px; min-height: 18px; color: var(--ink-3); }
+.search-results .section-label, .search-results > .empty-state, .search-results > .error { margin-top: var(--s-3); }
+/* Rows run to the group's edge at their own 16px, as the design draws them. */
+.search-group { padding: 0; }
+.search-group .row { background: transparent; }
+.search-link {
+  display: flex; flex-direction: column; min-width: 0;
+  color: inherit; text-decoration: none;
+}
+.search-head { display: flex; align-items: baseline; gap: var(--s-2); }
+.search-row .title { min-width: 0; font-weight: 600; }
+.search-time { margin-left: auto; flex: none; color: var(--ink-3); }
+.search-snippet {
+  margin-top: 2px; font-size: var(--t-13); line-height: 1.4; color: var(--ink-2);
+  overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.search-snippet mark {
+  padding: 0 2px; border-radius: 3px; background: var(--action-bg); color: var(--ink);
+}
+.search-where { margin-top: 3px; font-size: var(--t-12); color: var(--ink-3); }
+/* end component: search */
