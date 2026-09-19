@@ -27,6 +27,7 @@ REQUIRED = [
     "app.js",
     "app.css",
     "tokens.css",
+    "artifact-shell.css",
     "crypto.mjs",
     "artifact-viewer.mjs",
     "frame-loader.js",
@@ -297,10 +298,95 @@ def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> N
         elif "min-height: 44px" not in rule.group(1):
             errors.append(f"web/app.css: {selector} has no 44px minimum")
 
-    for number, line in enumerate(app_css.splitlines(), start=1):
-        size = re.search(r"font-size:\s*(\d+(?:\.\d+)?)px", line)
-        if size and float(size.group(1)) < 12:
-            errors.append(f"web/app.css:{number}: font-size is below the 12px floor")
+    check_text_floor(errors)
+
+
+# A size a stylesheet or a template may set. Anything else is refused rather
+# than skipped, so a form this check cannot read never passes unread.
+FLOOR_PX = 12.0
+FONT_SIZE = re.compile(r"(?<![\w-])font-size\s*:\s*([^;}\"'`<]+)", re.IGNORECASE)
+FONT_SHORTHAND = re.compile(r"(?<![\w-])font\s*:\s*([^;}\"'`<]+)", re.IGNORECASE)
+SCRIPT_FONT_SIZE = re.compile(r"\.fontSize\s*=\s*[\"'`]([^\"'`]+)")
+LENGTH = re.compile(r"(?<![\w.#-])(\d*\.?\d+)(px|rem|em|pt|%)(?![\w%])", re.IGNORECASE)
+CUSTOM_PROPERTY = re.compile(r"(--[\w-]+)\s*:\s*([^;}]+)")
+VAR_USE = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,[^)]*)?\)")
+INHERITED = {"inherit", "initial", "unset", "revert"}
+# A relative size whose base this check cannot see, with the size it comes to.
+FLOOR_ALLOWED = {
+    ("artifact-viewer.mjs", ".9em"): "inline code in the 15px reading column is 13.5px",
+}
+
+
+def floor_problem(value: str, properties: dict[str, list[str]], relative_ok: bool) -> str:
+    """Why a font size is refused, or an empty string when it holds the floor."""
+    text = value.strip()
+    if text.lower() in INHERITED:
+        return ""
+    candidates = [text]
+    for name in VAR_USE.findall(text):
+        if name not in properties:
+            return f"{name} is declared in no stylesheet"
+        candidates += properties[name]
+    lengths = [found for candidate in candidates for found in LENGTH.findall(candidate)]
+    if not lengths:
+        return f"{text!r} is not a size this check can read: write px or a --t token"
+    for number, unit in lengths:
+        size, unit = float(number), unit.lower()
+        if unit == "px" and size < FLOOR_PX:
+            return f"{number}{unit} is below the 12px floor"
+        if unit == "rem" and size * 16 < FLOOR_PX:
+            return f"{number}{unit} is below the 12px floor at a 16px root"
+        if unit == "pt" and size * 4 / 3 < FLOOR_PX:
+            return f"{number}{unit} is below the 12px floor"
+        if unit in ("em", "%"):
+            whole = 1.0 if unit == "em" else 100.0
+            if not relative_ok:
+                return f"{number}{unit} is relative to a size this check cannot see: write px or a --t token"
+            if size < whole:
+                return f"{number}{unit} shrinks a size this check cannot see"
+    return ""
+
+
+def check_text_floor(errors: list[str]) -> None:
+    """No first-party stylesheet or template sets text under 12px.
+
+    Read statically: every `font-size` and `font` declaration on a line, in
+    any letter case, in px, rem and pt, inside `clamp()` and `calc()`, through
+    a custom property declared in any stylesheet, in a `style` attribute or a
+    style block a module writes, and in a script's `.fontSize`. A relative
+    size in a stylesheet and any value with no length in it are refused.
+
+    Left to the rendered check in the smoke run, which reads computed sizes:
+    `em` and `%` in a module's template where the base is known to be large
+    enough, a size a script computes, and the browser's own size for an element
+    that sets none.
+    """
+    sheets = [
+        path for path in sorted(WEB.rglob("*.css")) if VENDOR not in path.parents
+    ]
+    properties: dict[str, list[str]] = {}
+    for path in sheets:
+        for name, value in CUSTOM_PROPERTY.findall(path.read_text(encoding="utf-8", errors="replace")):
+            properties.setdefault(name, []).append(value.strip())
+    templates = [*first_party_scripts(), *sorted(WEB.glob("*.html"))]
+    for path in [*sheets, *templates]:
+        # The type scale itself is held to the floor with the other tokens.
+        if path.name == "tokens.css":
+            continue
+        is_sheet = path.suffix == ".css"
+        content = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(content.splitlines(), start=1):
+            values = FONT_SIZE.findall(line) + SCRIPT_FONT_SIZE.findall(line)
+            # The shorthand carries the size before the line height.
+            values += [value.split("/")[0] for value in FONT_SHORTHAND.findall(line)]
+            for value in values:
+                if (path.name, value.strip()) in FLOOR_ALLOWED:
+                    continue
+                problem = floor_problem(value, properties, relative_ok=not is_sheet)
+                if problem:
+                    errors.append(f"{path}:{number}: font size: {problem}")
+
+
 
 
 def check_palette_copies(errors: list[str], tokens_css: str) -> None:
