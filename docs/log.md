@@ -51,6 +51,19 @@ software release notes and the repository changelog.
   confirmation; the list under the global Settings screen stays.
 * **Note**: The architecture and design pages no longer list Project settings
   as intended design.
+## 2026-09-18, search that answers as you type
+
+* **Update**: The Search screen now matches the design. A 48px field with a
+  clear button answers as it is typed in, scope chips narrow it to the feed,
+  artifacts or session brains, and a results line gives the count and the time
+  the hub measured for the query. Results are grouped by family with the
+  matched words marked in each snippet, and the rows join the keyboard map.
+  The query and the scope live in the route, so reload and Back keep them.
+* **Note**: The screen sends the words of a query rather than its punctuation,
+  and builds each marked snippet from text nodes, so neither what a reader
+  typed nor what an agent wrote is read as markup or as index syntax. A project
+  scope, a date scope and landing on the hit inside its destination remain
+  intended design.
 
 ## 2026-09-18, a session, its brain as a tree
 

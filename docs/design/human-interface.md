@@ -99,6 +99,10 @@ a 420px list beside a detail pane.
   not a stop of its own: a screen holds one per row, and a list of them would
   be the whole tab ring. The row is the stop, and the full stamp is read with
   it.
+- Search answers as you type, inside 50 ms of the last key, and keeps the
+  query in the address so Back and reload return to it. The field never
+  loses focus to its own results; the count is announced instead. Matched
+  words are marked in the snippet, and a result opens where it lives.
 - Keyboard: `/` focuses search, `j` and `k` move a selection through the rows
   of the current screen, Enter opens the selected row, `a` approves and `r`
   replies on it, and Esc closes what is on top. `?` lists them and says where
