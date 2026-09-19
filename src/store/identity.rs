@@ -120,8 +120,8 @@ pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(St
     };
     let agent_id = text(&row, 0)?;
     let trust = trust_from_db(&text(&row, 1)?)?;
-    let agent_seen = optional_text(&row, 2)?;
-    let token_used = optional_text(&row, 3)?;
+    let agent_seen = text_at(&row, 2)?;
+    let token_used = text_at(&row, 3)?;
     drop(rows);
 
     touch(&conn, token_hash, &agent_id, token_used, agent_seen).await?;
@@ -629,7 +629,7 @@ fn agent_from_row(row: &Row) -> Result<Agent> {
         trust: trust_from_db(&text(row, 2)?)?,
         personal_project_id: text(row, 3)?,
         created_at: text(row, 4)?,
-        last_seen_at: optional_text(row, 5)?,
+        last_seen_at: text_at(row, 5)?,
     })
 }
 
@@ -672,11 +672,10 @@ async fn row_exists(conn: &turso::Connection, table: Table, id: &str) -> Result<
 }
 
 fn text(row: &Row, index: usize) -> Result<String> {
-    optional_text(row, index)?
-        .ok_or_else(|| Error::Engine(format!("expected text in column {index}")))
+    text_at(row, index)?.ok_or_else(|| Error::Engine(format!("expected text in column {index}")))
 }
 
-fn optional_text(row: &Row, index: usize) -> Result<Option<String>> {
+fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
     match row.get_value(index).map_err(engine)? {
         Value::Text(value) => Ok(Some(value)),
         Value::Null => Ok(None),
