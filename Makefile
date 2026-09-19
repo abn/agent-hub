@@ -69,7 +69,11 @@ define browser_check
 	  [ -n "$$python" ] || continue; \
 	  if "$$python" -c 'import playwright' >/dev/null 2>&1; then found="$$python"; break; fi; \
 	done; \
-	if [ -z "$$found" ]; then printf '$(1): playwright is not installed, skipped\n'; exit 0; fi; \
+	if [ -z "$$found" ]; then \
+	  printf '$(1): playwright is not installed, skipped\n'; \
+	  case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) printf '$(1): HUB_REQUIRE_BROWSER is set, so a skip is a failure\n'; exit 1;; esac; \
+	  exit 0; \
+	fi; \
 	"$$found" $(2)
 endef
 

@@ -322,6 +322,8 @@ def seed_feed_days(port: int) -> list[str]:
 def skip(name: str, message: str) -> None:
     """Report a missing part of the toolchain and leave the gate green."""
     print(f"{name}: {message}; skipping")
+    if os.environ.get("HUB_REQUIRE_BROWSER", "").lower() in ("1", "true", "yes"):
+        sys.exit(1)
     sys.exit(0)
 
 

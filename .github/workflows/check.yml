@@ -1,0 +1,76 @@
+name: check
+
+"on":
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      HUB_REQUIRE_BROWSER: "1"
+      AXE_PATH: "/tmp/axe/node_modules/axe-core/axe.min.js"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+
+      - name: Setup Node
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: 22
+
+      - name: Setup Python
+        uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Cache Cargo dependencies and build artifacts
+        uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Python dependencies and Playwright browser
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'playwright==1.63.0' 'pre-commit==4.6.2'
+          playwright install --with-deps chromium
+
+      - name: Install axe-core
+        run: |
+          mkdir -p /tmp/axe
+          npm install --prefix /tmp/axe axe-core@4.11.4
+
+      - name: Run full quality gate
+        run: make check
+
+      # The compose file refuses to render without a token. This one is a
+      # placeholder for rendering only; nothing is started and it opens nothing.
+      - name: Validate container configuration
+        env:
+          HUB_ADMIN_TOKEN: placeholder-for-config-rendering
+        run: make container/config
