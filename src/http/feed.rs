@@ -112,36 +112,29 @@ pub async fn seen(
     Ok(Json(seen))
 }
 
-// Query parsing is manual because the axum query extractor cannot map a
-// repeated key into a `Vec`.
+// Query parsing uses form_urlencoded to handle repeated keys and standard decoding.
 fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
     let mut since = None;
     let mut before = None;
     let mut limit = None;
     let mut kinds: Vec<String> = Vec::new();
 
-    for pair in raw.unwrap_or_default().split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        let key = decode(key);
-        let value = decode(value);
-        match key.as_str() {
-            "since" => since = Some(value),
-            "before" => before = Some(value),
+    for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
+        match key.as_ref() {
+            "since" => since = Some(value.into_owned()),
+            "before" => before = Some(value.into_owned()),
             "limit" => {
                 limit = Some(value.parse::<i64>().map_err(|_| {
                     Error::InvalidArgument(format!("limit must be an integer, got '{value}'"))
                 })?);
             }
             "kinds" => {
-                if !events::KINDS.contains(&value.as_str()) {
+                if !events::KINDS.contains(&value.as_ref()) {
                     return Err(Error::InvalidArgument(format!(
                         "unknown event kind '{value}'"
                     )));
                 }
-                kinds.push(value);
+                kinds.push(value.into_owned());
             }
             other => {
                 return Err(Error::InvalidArgument(format!(
@@ -159,44 +152,4 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         // The route is admin-only, and the audit screen reads the trail here.
         include_audit: true,
     })
-}
-
-fn decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => {
-                out.push(b' ');
-                index += 1;
-            }
-            b'%' if index + 2 < bytes.len() => {
-                match hex(bytes[index + 1]).zip(hex(bytes[index + 2])) {
-                    Some((high, low)) => {
-                        out.push((high << 4) | low);
-                        index += 3;
-                    }
-                    None => {
-                        out.push(b'%');
-                        index += 1;
-                    }
-                }
-            }
-            byte => {
-                out.push(byte);
-                index += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }

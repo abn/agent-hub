@@ -323,3 +323,23 @@ async fn search_tolerates_hostile_syntax() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_percent_that_is_no_escape_is_read_as_typed() {
+    let state = state().await;
+    seed(&state).await;
+
+    // `%+e` is not an escape: `+` is a space, so this is "% engine". A decoder
+    // that reads `+e` as a signed hex number turns it into one control byte
+    // and the rest of a word, and the search finds nothing.
+    let res = router(state)
+        .oneshot(get("/api/v1/search?q=%+engine", Some("Bearer token")))
+        .await
+        .expect("request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(
+        body["count"], 1,
+        "the word after the stray percent is searched: {body}"
+    );
+}

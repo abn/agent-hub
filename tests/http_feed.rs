@@ -328,3 +328,26 @@ async fn marking_a_feed_seen_needs_a_token_and_a_project_that_exists() {
     assert_eq!(nameless.status(), StatusCode::BAD_REQUEST);
     assert_eq!(problem_body(nameless).await["code"], "invalid_argument");
 }
+
+#[tokio::test]
+async fn feed_query_decoding_handles_repeated_kinds_and_percent_decoding() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    append(&state.db, "agent", None, event("sig"))
+        .await
+        .expect("append");
+
+    let app = router(state);
+    let res = app
+        .oneshot(get(
+            "/api/v1/projects/proj/feed?kinds=signal&limit=10",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["events"].as_array().expect("events").len(), 1);
+}

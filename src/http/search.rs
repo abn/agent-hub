@@ -90,35 +90,7 @@ fn pairs(raw: Option<&str>) -> Vec<(String, String)> {
     let Some(raw) = raw else {
         return Vec::new();
     };
-    raw.split('&')
-        .filter(|pair| !pair.is_empty())
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (decode(key), decode(value))
-        })
+    url::form_urlencoded::parse(raw.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect()
-}
-
-fn decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'+' => out.push(b' '),
-            b'%' if index + 2 < bytes.len() => {
-                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
-                match u8::from_str_radix(hex, 16) {
-                    Ok(byte) => {
-                        out.push(byte);
-                        index += 2;
-                    }
-                    Err(_) => out.push(b'%'),
-                }
-            }
-            other => out.push(other),
-        }
-        index += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
