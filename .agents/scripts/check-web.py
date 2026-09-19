@@ -387,13 +387,103 @@ def check_text_floor(errors: list[str]) -> None:
                     errors.append(f"{path}:{number}: font size: {problem}")
 
 
+def check_viewer_palette(
+    errors: list[str], viewer_text: str, light: dict[str, str], dark: dict[str, str]
+) -> None:
+    match = re.search(r"function frameStyle\(\)\s*\{([\s\S]+?)\n\}", viewer_text)
+    if not match:
+        errors.append("web/artifact-viewer.mjs: frameStyle() definition not found")
+        return
+    css = match.group(1)
+
+    rules = [
+        (r'html\[data-theme="light"\]\{[^}]*background:(#[0-9A-Fa-f]{6})', light, "--bg", "light background"),
+        (r'html\[data-theme="light"\]\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink", "light text"),
+        (r'html\[data-theme="dark"\]\{[^}]*background:(#[0-9A-Fa-f]{6})', dark, "--bg", "dark background"),
+        (r'html\[data-theme="dark"\]\{[^}]*color:(#[0-9A-Fa-f]{6})', dark, "--ink", "dark text"),
+        (r'body\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink-2", "light body text"),
+        (r'html\[data-theme="dark"\] body\{color:(#[0-9A-Fa-f]{6})\}', dark, "--ink-2", "dark body text"),
+        (r'h1,h2,h3\{color:(#[0-9A-Fa-f]{6})', light, "--ink", "light headings"),
+        (r'html\[data-theme="dark"\] h1[^}]*\{color:(#[0-9A-Fa-f]{6})\}', dark, "--ink", "dark headings"),
+        (r'a\{color:(#[0-9A-Fa-f]{6})\}', light, "--accent", "light link"),
+        (r'html\[data-theme="dark"\] a\{color:(#[0-9A-Fa-f]{6})\}', dark, "--accent", "dark link"),
+        (r'pre\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light pre background"),
+        (r'pre\{[^}]*border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light pre border"),
+        (r'html\[data-theme="dark"\] pre\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark pre background"),
+        (r'html\[data-theme="dark"\] pre\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark pre border"),
+        (r':not\(pre\)>code\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light inline code background"),
+        (r':not\(pre\)>code\{[^}]*border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light inline code border"),
+        (r'html\[data-theme="dark"\] :not\(pre\)>code\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark inline code background"),
+        (r'html\[data-theme="dark"\] :not\(pre\)>code\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark inline code border"),
+        (r'th,td\{border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light table border"),
+        (r'html\[data-theme="dark"\] td\{border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark table border"),
+        (r'blockquote\{[^}]*border-left:3px solid (#[0-9A-Fa-f]{6})', light, "--line", "light blockquote border"),
+        (r'html\[data-theme="dark"\] blockquote\{border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark blockquote border"),
+        (r'blockquote\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink-3", "light blockquote text"),
+        (r'html\[data-theme="dark"\] blockquote\{[^}]*color:(#[0-9A-Fa-f]{6})', dark, "--ink-3", "dark blockquote text"),
+        (r'\.hub-callout\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light callout background"),
+        (r'\.hub-callout\{[^}]*border-left:\.25rem solid (#[0-9A-Fa-f]{6})', light, "--line-strong", "light callout border"),
+        (r'html\[data-theme="dark"\] \.hub-callout\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark callout background"),
+        (r'html\[data-theme="dark"\] \.hub-callout\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line-strong", "dark callout border"),
+        (r'\.hub-callout\.note\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--accent", "light note callout"),
+        (r'html\[data-theme="dark"\] \.hub-callout\.note\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--accent", "dark note callout"),
+        (r'\.hub-callout\.tip\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--ok", "light tip callout"),
+        (r'html\[data-theme="dark"\] \.hub-callout\.tip\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--ok", "dark tip callout"),
+        (r'\.hub-callout\.warning\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--action", "light warning callout"),
+        (r'html\[data-theme="dark"\] \.hub-callout\.warning\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--action", "dark warning callout"),
+        (r'\.hub-callout\.caution\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--danger", "light caution callout"),
+        (r'html\[data-theme="dark"\] \.hub-callout\.caution\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--danger", "dark caution callout"),
+    ]
+
+    found_colors: dict[str, str] = {}
+    for pattern, tokens, token_name, desc in rules:
+        m = re.search(pattern, css)
+        if not m:
+            errors.append(f"web/artifact-viewer.mjs: could not find {desc} color in frameStyle")
+            continue
+        hex_val = m.group(1).upper()
+        found_colors[desc] = hex_val
+        expected = tokens.get(token_name, "").upper()
+        if hex_val != expected:
+            errors.append(
+                f"web/artifact-viewer.mjs: {desc} is {hex_val}, but web/tokens.css declares {expected} for {token_name}"
+            )
+
+    contrast_pairs = [
+        ("light body text", "light inline code background", 4.5),
+        ("dark body text", "dark inline code background", 4.5),
+        ("light body text", "light background", 4.5),
+        ("light headings", "light background", 4.5),
+        ("light link", "light background", 4.5),
+        ("light blockquote text", "light background", 4.5),
+        ("dark body text", "dark background", 4.5),
+        ("dark headings", "dark background", 4.5),
+        ("dark link", "dark background", 4.5),
+        ("dark blockquote text", "dark background", 4.5),
+    ]
+    for fg_desc, bg_desc, minimum in contrast_pairs:
+        fg = found_colors.get(fg_desc)
+        bg = found_colors.get(bg_desc)
+        if fg and bg:
+            fg_rgb = hex_rgb(fg)
+            bg_rgb = hex_rgb(bg)
+            if fg_rgb and bg_rgb:
+                ratio = contrast(fg_rgb, bg_rgb)
+                if ratio < minimum:
+                    errors.append(
+                        f"web/artifact-viewer.mjs: {fg_desc} ({fg}) on {bg_desc} ({bg}) "
+                        f"is {ratio:.2f}:1, below {minimum}:1"
+                    )
 
 
 def check_palette_copies(errors: list[str], tokens_css: str) -> None:
     """No second palette. Every hand-copied colour is a token value."""
+    blocks = token_blocks(tokens_css)
+    light_tokens = blocks.get("light", {})
+    dark_tokens = {**light_tokens, **blocks.get("dark", {})}
     declared = {
         value.upper()
-        for block in token_blocks(tokens_css).values()
+        for block in blocks.values()
         for value in block.values()
         if hex_rgb(value)
     }
@@ -410,6 +500,88 @@ def check_palette_copies(errors: list[str], tokens_css: str) -> None:
                     errors.append(
                         f"{path}:{number}: {found} is not a colour web/tokens.css declares"
                     )
+
+    viewer_path = WEB / "artifact-viewer.mjs"
+    if viewer_path.is_file():
+        viewer_text = viewer_path.read_text(encoding="utf-8", errors="replace")
+        check_viewer_palette(errors, viewer_text, light_tokens, dark_tokens)
+    check_shell_colours(errors, light_tokens)
+    check_served_palettes(errors)
+
+
+def check_shell_colours(errors: list[str], light: dict[str, str]) -> None:
+    """The colours the browser paints before any stylesheet loads are the page's own.
+
+    The install splash and the browser's bars take them from the manifest and
+    from the `theme-color` meta, so each has to be the light background, not
+    merely some colour the tokens declare.
+    """
+    want = light.get("--bg", "").upper()
+    manifest_path = WEB / "manifest.webmanifest"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except ValueError:
+            manifest = {}
+            errors.append("web/manifest.webmanifest: is not valid JSON")
+        for key in ("background_color", "theme_color"):
+            found = str(manifest.get(key, "")).upper()
+            if found != want:
+                errors.append(
+                    f"web/manifest.webmanifest: {key} is {found or 'missing'}, but web/tokens.css"
+                    f" declares {want} for --bg"
+                )
+    index_path = WEB / "index.html"
+    if index_path.is_file():
+        meta = re.search(
+            r'<meta\s+name="theme-color"\s+content="([^"]*)"', index_path.read_text(encoding="utf-8")
+        )
+        found = meta.group(1).upper() if meta else ""
+        if found != want:
+            errors.append(
+                f"web/index.html: theme-color is {found or 'missing'}, but web/tokens.css declares"
+                f" {want} for --bg"
+            )
+
+
+# The hub writes two palettes of its own in src/http/artifacts.rs, outside
+# web/. The frame around an agent's raw HTML is deliberately plain black on
+# white, because the page inside is the agent's and not the hub's, and the
+# link preview card is an image with no stylesheet. Neither is a token copy, so
+# neither is held to the tokens: they are held to being readable.
+SERVED = Path("src/http/artifacts.rs")
+SERVED_PAIRS = [
+    (r'html\[data-theme=\\"light\\"\]\{\{color-scheme:light;background:(#[0-9A-Fa-f]{6});color:(#[0-9A-Fa-f]{6})', "the light raw frame"),
+    (r'html\[data-theme=\\"dark\\"\]\{\{color-scheme:dark;background:(#[0-9A-Fa-f]{6});color:(#[0-9A-Fa-f]{6})', "the dark raw frame"),
+]
+CARD_FILL = r'<rect width=\\"1200\\" height=\\"630\\" fill=\\"(#[0-9A-Fa-f]{6})\\"'
+CARD_TEXT = r'<text [^>]*fill=\\"(#[0-9A-Fa-f]{6})\\"'
+
+
+def check_served_palettes(errors: list[str]) -> None:
+    """The text the hub draws outside the PWA reads at 4.5:1 on its own ground."""
+    if not SERVED.is_file():
+        return
+    source = SERVED.read_text(encoding="utf-8")
+    pairs = []
+    for pattern, what in SERVED_PAIRS:
+        found = re.search(pattern, source)
+        if not found:
+            errors.append(f"{SERVED}: could not find the colours of {what}")
+            continue
+        pairs.append((what, found.group(2), found.group(1)))
+    ground = re.search(CARD_FILL, source)
+    inks = re.findall(CARD_TEXT, source)
+    if not ground or not inks:
+        errors.append(f"{SERVED}: could not find the colours of the link preview card")
+    else:
+        pairs += [("the link preview card", ink, ground.group(1)) for ink in dict.fromkeys(inks)]
+    for what, ink, ground_colour in pairs:
+        ratio = contrast(hex_rgb(ink), hex_rgb(ground_colour))
+        if ratio < 4.5:
+            errors.append(
+                f"{SERVED}: {what} draws {ink} on {ground_colour}, {ratio:.2f}:1, below 4.5:1"
+            )
 
 
 def main() -> int:
