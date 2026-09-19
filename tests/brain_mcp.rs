@@ -5,163 +5,13 @@
 //! opening the same hub store directly. Any non-JSON stdout line fails the test
 //! because it would corrupt the protocol.
 
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use agent_hub::store::open_engine;
 use serde_json::{Value, json};
 
 mod common;
 
-const READ_TIMEOUT: Duration = Duration::from_secs(20);
-const PROTOCOL_VERSION: &str = "2025-06-18";
-
-/// A temp data directory removed when the test ends.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "agent-hub-brain-mcp-{}-{nanos}-{tag}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("create temp data dir");
-        Self(path)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// A stdio MCP client: spawn, send, and wait for one response id.
-struct McpServer {
-    child: Child,
-    stdin: ChildStdin,
-    lines: Receiver<String>,
-    next_id: u64,
-}
-
-impl McpServer {
-    fn spawn(data_dir: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-            .arg("mcp")
-            .env("RUST_LOG", "error")
-            .env("HUB_DATA_DIR", data_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("failed to spawn the agent-hub binary");
-
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = child.stdout.take().expect("child stdout");
-
-        let (sender, lines) = mpsc::channel();
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                match line {
-                    Ok(line) => {
-                        if sender.send(line).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        Self {
-            child,
-            stdin,
-            lines,
-            next_id: 0,
-        }
-    }
-
-    fn send(&mut self, message: &Value) {
-        let mut line = serde_json::to_string(message).expect("serialise message");
-        line.push('\n');
-        self.stdin
-            .write_all(line.as_bytes())
-            .expect("write to child stdin");
-        self.stdin.flush().expect("flush child stdin");
-    }
-
-    fn call(&mut self, method: &str, params: Value) -> Value {
-        self.next_id += 1;
-        let id = self.next_id;
-        self.send(&json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        }));
-        self.wait_for(id)
-    }
-
-    fn notify(&mut self, method: &str) {
-        self.send(&json!({"jsonrpc": "2.0", "method": method}));
-    }
-
-    fn wait_for(&mut self, id: u64) -> Value {
-        loop {
-            let line = self
-                .lines
-                .recv_timeout(READ_TIMEOUT)
-                .unwrap_or_else(|_| panic!("timed out waiting for a response to request {id}"));
-            let value: Value = serde_json::from_str(&line).unwrap_or_else(|err| {
-                panic!(
-                    "stdout carried a non-JSON line, which corrupts the protocol: {err}: {line:?}"
-                )
-            });
-            if value.get("id").and_then(Value::as_u64) == Some(id) {
-                return value;
-            }
-        }
-    }
-
-    fn initialize(&mut self) {
-        let init = self.call(
-            "initialize",
-            json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "mcp-brain", "version": "0.0.0"},
-            }),
-        );
-        assert!(init.get("result").is_some(), "initialize returns a result");
-        self.notify("notifications/initialized");
-    }
-
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Value {
-        self.call("tools/call", json!({"name": name, "arguments": arguments}))
-    }
-}
-
-impl Drop for McpServer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-fn structured(response: &Value) -> &Value {
-    response
-        .get("result")
-        .and_then(|result| result.get("structuredContent"))
-        .unwrap_or_else(|| panic!("tool result carries structured content: {response}"))
-}
+use common::stdio::{StdioClient as McpServer, structured};
+use common::temp::TempDir;
 
 fn error_message(response: &Value) -> &str {
     response
@@ -186,8 +36,8 @@ fn error_code(response: &Value) -> &str {
 #[test]
 fn session_and_brain_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -317,7 +167,7 @@ fn session_and_brain_tools_round_trip_over_stdio() {
         .build()
         .expect("build a runtime");
     let hits = runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open the hub store");
         let conn = db.connect().expect("connect");
@@ -351,10 +201,10 @@ fn session_and_brain_tools_round_trip_over_stdio() {
 #[test]
 fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
     let data_dir = TempDir::new("pruned");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
     let session_id = {
-        let mut server = McpServer::spawn(&data_dir.0);
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
         server.initialize();
         let started = server.call_tool(
             "session_start",
@@ -379,7 +229,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
         .build()
         .expect("runtime");
     let brain_path = runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
         let session = agent_hub::store::sessions::get(&db, &session_id)
@@ -406,7 +256,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
             )
             .await
             .expect("age the tombstone");
-        agent_hub::store::prune::sweep(&db, &data_dir.0)
+        agent_hub::store::prune::sweep(&db, data_dir.path())
             .await
             .expect("sweep");
         session.brain_path
@@ -415,7 +265,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
     // A fresh server starts the session by name, then writes to it. The pruned
     // row is gone, so this is a new session, not the pruned one; the removed
     // file belongs to the pruned session and must stay gone.
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let started = server.call_tool(
         "session_start",
@@ -432,7 +282,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
     );
     assert_eq!(structured(&response)["ok"], true, "{response}");
     assert!(
-        !data_dir.0.join(&brain_path).exists(),
+        !data_dir.path().join(&brain_path).exists(),
         "a pruned brain file is not recreated"
     );
 }
@@ -440,8 +290,8 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
 #[test]
 fn a_non_canonical_path_indexes_and_deletes_one_row() {
     let data_dir = TempDir::new("aliased");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     server.call_tool(
@@ -481,7 +331,7 @@ fn a_non_canonical_path_indexes_and_deletes_one_row() {
         .build()
         .expect("build a runtime");
     let hits = runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open the hub store");
         let conn = db.connect().expect("connect");
@@ -507,8 +357,8 @@ fn a_non_canonical_path_indexes_and_deletes_one_row() {
 #[test]
 fn a_brain_read_does_not_create_the_session_file() {
     let data_dir = TempDir::new("read-only");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -538,7 +388,7 @@ fn a_brain_read_does_not_create_the_session_file() {
 
     assert!(
         !data_dir
-            .0
+            .path()
             .join("sessions")
             .join("proj")
             .join(format!("{session_id}.db"))
@@ -550,8 +400,8 @@ fn a_brain_read_does_not_create_the_session_file() {
 #[test]
 fn an_oversized_brain_put_is_refused() {
     let data_dir = TempDir::new("oversized");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     server.call_tool(
@@ -581,7 +431,7 @@ fn an_oversized_brain_put_is_refused() {
 #[test]
 fn brain_tools_require_an_active_session() {
     let data_dir = TempDir::new("no-session");
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let response = server.call_tool("brain_get", json!({"path": "/kv/note"}));
@@ -595,10 +445,10 @@ fn brain_tools_require_an_active_session() {
 #[test]
 fn session_survives_a_process_restart() {
     let data_dir = TempDir::new("restart");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
     let session_id = {
-        let mut server = McpServer::spawn(&data_dir.0);
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
         server.initialize();
         let started = server.call_tool(
             "session_start",
@@ -616,7 +466,7 @@ fn session_survives_a_process_restart() {
         id
     };
 
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let resumed = server.call_tool(
         "session_start",
@@ -658,8 +508,8 @@ fn session_survives_a_process_restart() {
 #[test]
 fn a_project_page_outlives_the_session_that_wrote_it() {
     let data_dir = TempDir::new("project-store");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     server.call_tool(
@@ -732,8 +582,8 @@ fn a_project_page_outlives_the_session_that_wrote_it() {
 #[test]
 fn the_project_store_refuses_a_key_path() {
     let data_dir = TempDir::new("project-kv");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -763,8 +613,8 @@ fn the_project_store_refuses_a_key_path() {
 #[test]
 fn a_project_that_does_not_exist_gets_no_knowledge_base() {
     let data_dir = TempDir::new("project-missing");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     // The local process is the admin, which the policy layer lets through
@@ -783,7 +633,7 @@ fn a_project_that_does_not_exist_gets_no_knowledge_base() {
     assert_eq!(error_code(&read), "not_found", "got {read}");
 
     assert!(
-        !data_dir.0.join("kb").join("ghost").exists(),
+        !data_dir.path().join("kb").join("ghost").exists(),
         "a refused write leaves nothing on disk"
     );
 }
@@ -791,8 +641,8 @@ fn a_project_that_does_not_exist_gets_no_knowledge_base() {
 #[test]
 fn a_write_has_to_name_its_store() {
     let data_dir = TempDir::new("store-required");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -819,8 +669,8 @@ fn a_write_has_to_name_its_store() {
 #[test]
 fn a_conditional_project_write_reports_the_current_version() {
     let data_dir = TempDir::new("project-cas");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -885,8 +735,8 @@ fn a_conditional_project_write_reports_the_current_version() {
 #[test]
 fn an_oversized_project_page_is_refused() {
     let data_dir = TempDir::new("project-oversized");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -917,10 +767,10 @@ fn an_oversized_project_page_is_refused() {
 #[test]
 fn pruning_a_session_leaves_the_project_knowledge_base() {
     let data_dir = TempDir::new("project-prune");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
     let session_id = {
-        let mut server = McpServer::spawn(&data_dir.0);
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
         server.initialize();
         let started = server.call_tool(
             "session_start",
@@ -953,7 +803,7 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
         agent_hub::store::sessions::end(&db, &session_id, "stdio-agent", None)
@@ -976,17 +826,22 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
             )
             .await
             .expect("age the tombstone");
-        agent_hub::store::prune::sweep(&db, &data_dir.0)
+        agent_hub::store::prune::sweep(&db, data_dir.path())
             .await
             .expect("sweep");
     });
 
     assert!(
-        data_dir.0.join("kb").join("proj").join("kb.db").exists(),
+        data_dir
+            .path()
+            .join("kb")
+            .join("proj")
+            .join("kb.db")
+            .exists(),
         "a session prune does not reach the knowledge base file"
     );
 
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -1012,9 +867,9 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
 #[test]
 fn a_project_page_is_searchable_under_its_own_kind() {
     let data_dir = TempDir::new("project-search");
-    common::seed::seed_project(&data_dir.0, "proj");
-    common::seed::seed_project(&data_dir.0, "other");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    common::seed::seed_project(data_dir.path(), "other");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     server.call_tool(
         "session_start",
@@ -1078,8 +933,8 @@ fn a_project_page_is_searchable_under_its_own_kind() {
 #[test]
 fn another_session_in_the_project_is_readable() {
     let data_dir = TempDir::new("cross-session");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1142,10 +997,10 @@ fn another_session_in_the_project_is_readable() {
 #[test]
 fn reading_another_session_needs_no_active_session() {
     let data_dir = TempDir::new("no-active-read");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
     let writer_id = {
-        let mut server = McpServer::spawn(&data_dir.0);
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
         server.initialize();
         let started = server.call_tool(
             "session_start",
@@ -1165,7 +1020,7 @@ fn reading_another_session_needs_no_active_session() {
 
     // A fresh server has no active session, and reading another one must not
     // need one: the caller may never start a session of its own.
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let read = server.call_tool(
         "brain_get",
@@ -1181,8 +1036,8 @@ fn reading_another_session_needs_no_active_session() {
 #[test]
 fn reading_a_session_that_wrote_nothing_creates_no_file() {
     let data_dir = TempDir::new("cross-no-create");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1223,7 +1078,7 @@ fn reading_a_session_that_wrote_nothing_creates_no_file() {
     );
     assert!(
         !data_dir
-            .0
+            .path()
             .join("sessions")
             .join("proj")
             .join(format!("{silent_id}.db"))
@@ -1235,10 +1090,10 @@ fn reading_a_session_that_wrote_nothing_creates_no_file() {
 #[test]
 fn a_pruned_session_is_not_readable() {
     let data_dir = TempDir::new("cross-pruned");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
     let writer_id = {
-        let mut server = McpServer::spawn(&data_dir.0);
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
         server.initialize();
         let started = server.call_tool(
             "session_start",
@@ -1261,7 +1116,7 @@ fn a_pruned_session_is_not_readable() {
         .build()
         .expect("build a runtime");
     runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
         agent_hub::store::sessions::end(&db, &writer_id, "local", None)
@@ -1274,7 +1129,7 @@ fn a_pruned_session_is_not_readable() {
 
     // The tombstone is fresh, so the undo window is still open and the bytes
     // are still on disk. A reader is not a party to that: the session is gone.
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let inside = server.call_tool(
         "brain_get",
@@ -1300,7 +1155,7 @@ fn a_pruned_session_is_not_readable() {
     drop(server);
 
     runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
         let old = (time::OffsetDateTime::now_utc() - time::Duration::seconds(120))
@@ -1317,12 +1172,12 @@ fn a_pruned_session_is_not_readable() {
             )
             .await
             .expect("age the tombstone");
-        agent_hub::store::prune::sweep(&db, &data_dir.0)
+        agent_hub::store::prune::sweep(&db, data_dir.path())
             .await
             .expect("sweep");
     });
 
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let swept = server.call_tool(
         "brain_get",
@@ -1338,8 +1193,8 @@ fn a_pruned_session_is_not_readable() {
 #[test]
 fn a_write_cannot_name_another_session() {
     let data_dir = TempDir::new("cross-write");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1404,7 +1259,7 @@ fn a_write_cannot_name_another_session() {
     );
     assert!(
         !data_dir
-            .0
+            .path()
             .join("sessions")
             .join("proj")
             .join(format!("{reader_id}.db"))
@@ -1434,8 +1289,8 @@ fn a_write_cannot_name_another_session() {
 #[test]
 fn a_session_argument_has_no_meaning_for_the_project_store() {
     let data_dir = TempDir::new("cross-store");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1480,8 +1335,8 @@ fn a_session_argument_has_no_meaning_for_the_project_store() {
 #[test]
 fn a_session_is_named_one_way_or_the_other() {
     let data_dir = TempDir::new("cross-ref");
-    common::seed::seed_project(&data_dir.0, "proj");
-    let mut server = McpServer::spawn(&data_dir.0);
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     server.call_tool(
@@ -1523,9 +1378,9 @@ fn a_session_is_named_one_way_or_the_other() {
 #[test]
 fn mcp_writes_record_audit_rows_and_emit_signal() {
     let data_dir = TempDir::new("audit-test");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1570,7 +1425,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
         .expect("build runtime");
     runtime.block_on(async {
         // Verify session brain tool_calls table
-        let session_brain = agent_hub::brain::BrainStore::for_data_dir(&data_dir.0)
+        let session_brain = agent_hub::brain::BrainStore::for_data_dir(data_dir.path())
             .open("proj", &session_id)
             .await
             .expect("open session brain");
@@ -1586,7 +1441,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
         assert_eq!(p["store"], "session");
 
         // Verify KB brain tool_calls table
-        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(&data_dir.0)
+        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(data_dir.path())
             .open("proj", agent_hub::brain::KNOWLEDGE_FILE)
             .await
             .expect("open kb brain");
@@ -1598,7 +1453,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
         assert!(names.contains(&"kb.delete"));
 
         // Verify kb_deleted event was written to the feed
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open hub db");
         let query = agent_hub::store::events::FeedQuery {
@@ -1629,9 +1484,9 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
 #[test]
 fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
     let data_dir = TempDir::new("promote-test");
-    common::seed::seed_project(&data_dir.0, "proj");
+    common::seed::seed_project(data_dir.path(), "proj");
 
-    let mut server = McpServer::spawn(&data_dir.0);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let started = server.call_tool(
@@ -1700,7 +1555,7 @@ fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
         .build()
         .expect("build runtime");
     runtime.block_on(async {
-        let db = open_engine(&data_dir.0.join("hub.db"))
+        let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open db");
         let query = agent_hub::store::events::FeedQuery {
@@ -1727,7 +1582,7 @@ fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
             page.events
         );
 
-        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(&data_dir.0)
+        let kb_brain = agent_hub::brain::BrainStore::for_knowledge(data_dir.path())
             .open("proj", agent_hub::brain::KNOWLEDGE_FILE)
             .await
             .expect("open kb brain");
