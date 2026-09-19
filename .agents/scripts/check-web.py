@@ -420,11 +420,15 @@ def check_first_party_syntax(errors: list[str]) -> None:
     fails to parse renders nothing. Absent node, this skips cleanly like the
     crypto round trip does.
     """
+    import os
     import shutil
     import subprocess
 
     node = shutil.which("node")
     if node is None:
+        print("web/check: node is not installed, syntax check skipped")
+        if os.environ.get("HUB_REQUIRE_BROWSER", "").lower() in ("1", "true", "yes"):
+            errors.append("node is not installed and HUB_REQUIRE_BROWSER is set")
         return
     for path in first_party_scripts():
         result = subprocess.run(
