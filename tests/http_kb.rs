@@ -2039,18 +2039,13 @@ async fn the_usage_page_documents_every_route_and_its_refusals() {
     assert!(page.contains("brain_promote"));
     assert!(page.contains("truncated"));
 
+    // The log records the change. Where it sits is not asserted: the log is
+    // newest first, so this entry moves down every time another is written.
     let log = std::fs::read_to_string(format!("{root}/log.md")).expect("read the log");
-    let first_entry = log
-        .lines()
-        .find(|line| line.starts_with("## "))
-        .expect("the log has entries");
-    let kb_entry = log
-        .lines()
-        .filter(|line| line.starts_with("## "))
-        .position(|line| line.to_lowercase().contains("knowledge base backend"))
-        .expect("the log records the knowledge base backend");
-    assert_eq!(
-        kb_entry, 0,
-        "the newest entry is at the top, found {first_entry}"
+    assert!(
+        log.lines()
+            .filter(|line| line.starts_with("## "))
+            .any(|line| line.to_lowercase().contains("knowledge base backend")),
+        "the log records the knowledge base backend"
     );
 }
