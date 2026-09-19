@@ -336,13 +336,312 @@ def check_search(page, watch: Watch) -> None:
     page.evaluate("location.hash = '#/search'")
     page.wait_for_timeout(400)
     page.fill("#q", harness.SEARCH_TERM)
-    page.click('form[data-action="search"] button[type="submit"]')
+    page.press("#q", "Enter")
     page.wait_for_timeout(600)
     if harness.SEARCH_TERM not in page.evaluate("location.hash"):
         watch.fail("the submitted term did not reach the hash")
     body = page.evaluate("document.querySelector('main').textContent")
     if harness.FINISHED_SUMMARY not in body:
         watch.fail("the search results do not carry the seeded event")
+    watch.drain_rejections()
+
+
+# What the Search screen shows, read from its own component alone: other
+# screens draw rows and chips into the same region.
+SEARCH_STATE = (
+    "(() => { const q = document.getElementById('q');"
+    " const box = document.querySelector('main .search-field');"
+    " const clear = document.querySelector('main .search-clear');"
+    " const line = document.querySelector('main .search-line');"
+    " const label = q && document.querySelector('main label[for=\"q\"]');"
+    " const size = (el) => { const b = el.getBoundingClientRect();"
+    "  return { width: b.width, height: b.height }; };"
+    " return {"
+    "  value: q ? q.value : null,"
+    "  focused: !!q && document.activeElement === q,"
+    "  label: label ? label.textContent.trim() : '',"
+    "  field: box ? size(box).height : 0,"
+    "  clear: clear && { tag: clear.tagName, hidden: !clear.getClientRects().length,"
+    "   name: clear.getAttribute('aria-label') || '', ...size(clear) },"
+    "  chips: [...document.querySelectorAll('main .search-scopes button')].map((chip) =>"
+    "   ({ text: chip.textContent.trim(), pressed: chip.getAttribute('aria-pressed'),"
+    "    focused: chip === document.activeElement })),"
+    "  line: line ? line.textContent.trim() : '',"
+    "  live: line ? line.getAttribute('aria-live') : null,"
+    "  groups: [...document.querySelectorAll('main .search-results .section-label')]"
+    "   .map((h) => h.textContent.trim()),"
+    "  rows: document.querySelectorAll('main .search-row').length,"
+    "  marks: [...document.querySelectorAll('main .search-snippet mark')]"
+    "   .map((m) => m.textContent),"
+    "  empty: (document.querySelector('main .empty-title') || {}).textContent || '',"
+    "  error: !!document.querySelector('main .error'),"
+    "  hash: location.hash,"
+    " }; })()"
+)
+SEARCH_LINE = re.compile(r"^(\d+) results? · (under 1|\d+) ms · local index$")
+SEARCH_CALL = re.compile(r"/api/v1/search\?")
+
+
+def search_params(page) -> dict:
+    """The query the route carries, decoded the way the screen reads it."""
+    return page.evaluate(
+        "Object.fromEntries(new URLSearchParams(location.hash.split('?')[1] || ''))"
+    )
+
+
+def check_search_as_you_type(page, watch: Watch) -> None:
+    """The field, the chips and the results line, driven without a submit."""
+    watch.enter("search: the empty screen")
+    goto(page, "#/search", "Search")
+    settle(page, "!!document.querySelector('main .empty-title')")
+    state = page.evaluate(SEARCH_STATE)
+    if not 48 <= state["field"] < 50:
+        watch.fail(f"the search field is {state['field']:.0f}px tall, expected 48px")
+    if not state["label"]:
+        watch.fail("the search field has no label")
+    if state["empty"] != "Search your own machine.":
+        watch.fail(f"with no query the screen says {state['empty']!r}")
+    if state["clear"] and not state["clear"]["hidden"]:
+        watch.fail("an empty field offers a clear button")
+    if state["line"]:
+        watch.fail(f"with no query the results line says {state['line']!r}")
+    pressed = [chip["text"] for chip in state["chips"] if chip["pressed"] == "true"]
+    if [chip["text"] for chip in state["chips"]] != ["All", "Feed", "Artifacts", "Sessions"]:
+        watch.fail(f"the scope chips are {[chip['text'] for chip in state['chips']]}")
+    elif pressed != ["All"] or any(chip["pressed"] is None for chip in state["chips"]):
+        watch.fail(f"the pressed scope is {pressed}, expected All alone")
+
+    watch.enter("search: as you type")
+    try:
+        with page.expect_response(
+            lambda r: bool(SEARCH_CALL.search(r.url)), timeout=5000
+        ) as answered:
+            page.fill("#q", harness.SEARCH_GROUPS_TERM)
+    except PlaywrightTimeoutError:
+        watch.fail("typing a query asked the hub nothing")
+        return
+    served = answered.value.json()
+    if not settle(page, "document.querySelectorAll('main .search-row').length > 0"):
+        watch.fail("typing a query painted no results")
+        return
+    state = page.evaluate(SEARCH_STATE)
+    if not state["focused"]:
+        watch.fail("painting the results took focus out of the field")
+    if search_params(page).get("q") != harness.SEARCH_GROUPS_TERM:
+        watch.fail(f"the typed query is not in the route: {state['hash']!r}")
+    line = SEARCH_LINE.match(state["line"])
+    if not line:
+        watch.fail(f"the results line reads {state['line']!r}")
+    else:
+        if int(line.group(1)) != state["rows"] or state["rows"] != served["count"]:
+            watch.fail(
+                f"the line counts {line.group(1)}, the screen draws {state['rows']}"
+                f" and the hub served {served['count']}"
+            )
+        shown = 0 if line.group(2) == "under 1" else int(line.group(2))
+        if shown != served["took_ms"]:
+            watch.fail(f"the line says {shown} ms, the hub measured {served['took_ms']}")
+    if state["live"] != "polite":
+        watch.fail(f"the results line is announced as {state['live']!r}")
+    kinds = [re.sub(r" · \d+$", "", group) for group in state["groups"]]
+    if sorted(kinds) != ["Artifacts", "Feed", "Sessions"]:
+        watch.fail(f"the result groups are {state['groups']}")
+    if any(not re.search(r" · \d+$", group) for group in state["groups"]):
+        watch.fail(f"a group header carries no count: {state['groups']}")
+    wanted = set(harness.SEARCH_GROUPS_TERM.split())
+    if not state["marks"] or any(mark.lower() not in wanted for mark in state["marks"]):
+        watch.fail(f"the highlighted hits are {state['marks']}")
+    clear = state["clear"]
+    if not clear or clear["tag"] != "BUTTON" or clear["hidden"]:
+        watch.fail(f"a filled field has no clear button: {clear}")
+    elif not clear["name"] or min(clear["width"], clear["height"]) + 0.5 < 44:
+        watch.fail(f"the clear button is {clear}")
+
+    watch.enter("search: a scope")
+    seen = len(watch.calls)
+    page.click('main .search-scopes button:has-text("Sessions")')
+    if not settle(
+        page,
+        "[...document.querySelectorAll('main .search-results .section-label')]"
+        ".every((h) => h.textContent.startsWith('Sessions'))"
+        " && document.querySelectorAll('main .search-row').length > 0",
+    ):
+        watch.fail("the Sessions scope left other groups on screen")
+    state = page.evaluate(SEARCH_STATE)
+    pressed = [chip for chip in state["chips"] if chip["pressed"] == "true"]
+    if [chip["text"] for chip in pressed] != ["Sessions"]:
+        watch.fail(f"the pressed scope is {[chip['text'] for chip in pressed]}")
+    elif not pressed[0]["focused"]:
+        watch.fail("pressing a scope chip lost its focus")
+    if not any("type=brain" in call for call in watch.calls[seen:]):
+        watch.fail(f"the scoped request carried {watch.calls[seen:]}")
+    if search_params(page).get("type") != "brain":
+        watch.fail(f"the scope is not in the route: {state['hash']!r}")
+
+    watch.enter("search: reload")
+    page.reload(wait_until="load")
+    if not settle(page, "document.querySelectorAll('main .search-row').length > 0"):
+        watch.fail("a reload lost the results")
+    state = page.evaluate(SEARCH_STATE)
+    if state["value"] != harness.SEARCH_GROUPS_TERM:
+        watch.fail(f"a reload left {state['value']!r} in the field")
+    if [chip["text"] for chip in state["chips"] if chip["pressed"] == "true"] != ["Sessions"]:
+        watch.fail("a reload lost the scope")
+
+    watch.enter("search: back from a result")
+    here = page.evaluate("location.hash")
+    page.click("main .search-row a[href]")
+    settle(page, "!location.hash.startsWith('#/search')")
+    page.go_back()
+    if not settle(page, "document.querySelectorAll('main .search-row').length > 0"):
+        watch.fail("Back from a result lost the results")
+    if page.evaluate("location.hash") != here:
+        watch.fail(f"Back landed on {page.evaluate('location.hash')!r}, expected {here!r}")
+
+    watch.enter("search: clear")
+    page.click("main .search-clear")
+    settle(page, "!!document.querySelector('main .empty-title')")
+    state = page.evaluate(SEARCH_STATE)
+    if state["value"] or state["rows"] or state["line"]:
+        watch.fail(f"clear left {state['value']!r}, {state['rows']} rows and {state['line']!r}")
+    if not state["focused"]:
+        watch.fail("clear did not hand focus back to the field")
+    if "q" in search_params(page):
+        watch.fail(f"clear left the query in the route: {state['hash']!r}")
+    if state["empty"] != "Search your own machine.":
+        watch.fail(f"a cleared screen says {state['empty']!r}")
+
+    watch.enter("search: no results")
+    page.click('main .search-scopes button:has-text("All")')
+    page.fill("#q", harness.SEARCH_MISS_TERM)
+    if not settle(page, "/^0 results/.test((document.querySelector('main .search-line') || {}).textContent || '')"):
+        watch.fail("a query that matches nothing does not say so on the results line")
+    state = page.evaluate(SEARCH_STATE)
+    if harness.SEARCH_MISS_TERM not in state["empty"]:
+        watch.fail(f"the no-results state says {state['empty']!r}")
+    if not state["focused"]:
+        watch.fail("the no-results state took focus out of the field")
+    watch.drain_rejections()
+
+
+def check_search_race(page, watch: Watch) -> None:
+    """An answer that arrives late must not paint over the newer query's.
+
+    The first query is held at the network while the second is typed and
+    answered. Both inputs are scheduled inside the page, so the browser keeps
+    running while the held response waits here.
+    """
+    watch.enter("search: a late answer")
+    goto(page, "#/search", "Search")
+    settle(page, "!!document.getElementById('q')")
+    slow = re.compile(r"/api/v1/search\?q=" + harness.SEARCH_TERM + r"\b")
+
+    def hold(route):
+        time.sleep(HELD_SECONDS)
+        route.continue_()
+
+    page.route(slow, hold)
+    try:
+        page.evaluate(
+            "([first, second]) => { const q = document.getElementById('q');"
+            " const type = (text) => { q.value = text;"
+            "  q.dispatchEvent(new Event('input', { bubbles: true })); };"
+            " setTimeout(() => type(first), 0); setTimeout(() => type(second), 250); }",
+            [harness.SEARCH_TERM, harness.SEARCH_MARKUP_TERM],
+        )
+        page.wait_for_timeout(int(HELD_SECONDS * 1000) + 1200)
+    finally:
+        page.unroute(slow, hold)
+    if watch.count(f"GET /api/v1/search?q={harness.SEARCH_TERM}") < 1:
+        watch.fail("the first query was never asked, so nothing raced")
+    body = page.evaluate("(document.querySelector('main .search-results') || {}).textContent || ''")
+    if harness.FINISHED_SUMMARY in body:
+        watch.fail("the older query's late answer painted over the newer one")
+    if harness.MARKUP_SUMMARY not in body:
+        watch.fail(f"the newer query's results are not on screen: {body[:80]!r}")
+    if search_params(page).get("q") != harness.SEARCH_MARKUP_TERM:
+        watch.fail(f"the route names {search_params(page).get('q')!r}")
+
+    # A letter typed on the way out: its timer fires after the screen has gone,
+    # and the route by then is the next screen's to hold.
+    watch.enter("search: a keystroke on the way out")
+    page.evaluate(
+        "(text) => { const q = document.getElementById('q'); q.value = text;"
+        " q.dispatchEvent(new Event('input', { bubbles: true }));"
+        " location.hash = '#/storage'; }",
+        harness.SEARCH_TERM,
+    )
+    page.wait_for_timeout(600)
+    if page.evaluate("location.hash") != "#/storage" or heading(page) != "Storage":
+        watch.fail(
+            f"the screen left behind took the route back: {page.evaluate('location.hash')!r}"
+            f" under {heading(page)!r}"
+        )
+    watch.drain_rejections()
+
+
+def check_search_is_text(page, watch: Watch) -> None:
+    """Neither what an agent wrote nor what the reader typed becomes markup.
+
+    The highlight is the one place a snippet is cut up and reassembled, so it
+    is the one place the two could meet as HTML. The watch fails the run on
+    any refused request or uncaught error, which covers the query reaching the
+    index as syntax or a pattern.
+    """
+    watch.enter("search: a hostile snippet")
+    goto(page, "#/search", "Search")
+    settle(page, "!!document.getElementById('q')")
+    probe = (
+        "({ made: !!document.getElementById('pwned') || !!window.__searchPwned"
+        " || !!document.querySelector('main .search-results img, main .search-results b'),"
+        " error: !!document.querySelector('main .error'),"
+        " field: !!document.getElementById('q'),"
+        " marks: [...document.querySelectorAll('main .search-snippet mark')].map((m) => m.textContent),"
+        " text: (document.querySelector('main .search-results') || {}).textContent || '' })"
+    )
+    for query in harness.SEARCH_HOSTILE_QUERIES:
+        watch.enter(f"search: the query {query!r}")
+        page.fill("#q", "")
+        settle(page, "!(document.querySelector('main .search-line') || {}).textContent")
+        page.fill("#q", query)
+        if not settle(page, "!!(document.querySelector('main .search-line') || {}).textContent"):
+            watch.fail("the query never settled on a results line")
+        found = page.evaluate(probe)
+        if found["made"]:
+            watch.fail("markup in a snippet or a query became an element")
+        if found["error"] or not found["field"]:
+            watch.fail("the query broke the screen")
+        if harness.MARKUP_SUMMARY not in found["text"]:
+            watch.fail(f"the agent's markup is not shown as text: {found['text'][:80]!r}")
+        if harness.SEARCH_MARKUP_TERM not in [mark.lower() for mark in found["marks"]]:
+            watch.fail(f"the hit is not highlighted inside the markup: {found['marks']}")
+        if page.evaluate("document.getElementById('q').value") != query:
+            watch.fail("the field does not show the query as typed")
+    watch.drain_rejections()
+
+
+def check_search_rows_take_keys(page, watch: Watch) -> None:
+    """The result rows are the keyboard map's: j and k move, Enter opens."""
+    watch.enter("search: row keys")
+    page.evaluate(f"location.hash = '#/search?q={quote(harness.SEARCH_GROUPS_TERM)}'")
+    if not settle(page, "document.querySelectorAll('main .search-row').length > 1"):
+        watch.fail("too few results to move through")
+        return
+    targets = page.evaluate(
+        "[...document.querySelectorAll('main .search-row a[href]')].map((a) => a.getAttribute('href'))"
+    )
+    for key in ("j", "j"):
+        page.keyboard.press(key)
+        page.wait_for_timeout(120)
+    at = page.evaluate(
+        "[...document.querySelectorAll('main .search-row')].indexOf(document.activeElement)"
+    )
+    if at != 1:
+        watch.fail(f"down, down put focus on result {at}, expected 1")
+        return
+    page.keyboard.press("Enter")
+    if not settle(page, f"location.hash === {json.dumps(targets[1])}", timeout=3000):
+        watch.fail(f"Enter opened {page.evaluate('location.hash')!r}, expected {targets[1]!r}")
     watch.drain_rejections()
 
 
@@ -1628,10 +1927,16 @@ def check_typing_is_not_a_shortcut(page, watch: Watch) -> None:
     page.keyboard.type("j")
     if not settle(page, "document.getElementById('q').value.endsWith('j')"):
         watch.fail("the letter did not reach the field")
-    if page.evaluate(SELECTED_TAB) != before:
-        watch.fail("typing in the field moved the selection")
     if page.evaluate("document.activeElement.id") != "q":
         watch.fail("typing in the field moved focus off it")
+    # The results follow the field, so the rows the selection sat in are gone
+    # until the letter is. With it taken back the same rows return, and the
+    # selection is where it was unless the letter moved it.
+    settle(page, "!document.querySelector('main .row')")
+    page.keyboard.press("Backspace")
+    settle(page, "!!document.querySelector('main .row[tabindex=\"0\"]')")
+    if page.evaluate(SELECTED_TAB) != before:
+        watch.fail("typing in the field moved the selection")
     watch.drain_rejections()
 
 
@@ -3290,6 +3595,10 @@ def run() -> int:
             check_shortcuts_can_be_turned_off(page, watch)
             check_empty_state(page, watch)
             check_search(page, watch)
+            check_search_as_you_type(page, watch)
+            check_search_race(page, watch)
+            check_search_is_text(page, watch)
+            check_search_rows_take_keys(page, watch)
             check_toast_leaves_a_writer_alone(page, watch, project)
             check_answer(page, watch, project)
             check_approve(page, watch)

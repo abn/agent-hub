@@ -28,6 +28,8 @@ ROUTES = [
     "sessions",
     "storage",
     "search",
+    "search?q=check%20notes",
+    "search?q=zeppelin",
     "settings",
     "artifacts",
     "home-quiet",

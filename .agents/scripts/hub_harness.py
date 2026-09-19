@@ -74,6 +74,20 @@ ATTIC_SESSIONS = ("old-one", "old-two")
 # A term the seeded feed event, session and brain entry all carry, so a search
 # for it returns grouped hits rather than an empty state.
 SEARCH_TERM = "nightly"
+# Two words that between them reach a feed event, an artifact and a brain
+# entry, so one query paints every result group.
+SEARCH_GROUPS_TERM = "check notes"
+# A word nothing seeded carries.
+SEARCH_MISS_TERM = "zeppelin"
+# The word inside MARKUP_SUMMARY's element, alone and then wrapped in what a
+# browser would read as markup and what an index or a pattern would read as
+# syntax. Each has to find the same event and show it as text.
+SEARCH_MARKUP_TERM = "rewrite"
+SEARCH_HOSTILE_QUERIES = [
+    SEARCH_MARKUP_TERM,
+    '<img src=x onerror="window.__searchPwned=1"> rewrite',
+    "(rewrite.*[ +\\ \"",
+]
 
 # A protected artifact, so the password gate can be driven for real. The
 # ciphertext was sealed once by web/crypto.mjs under PROTECTED_PASSWORD
