@@ -4904,6 +4904,139 @@ def check_inbox_empty(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+# The card's way out: whether it is drawn, how large a target it is, and the
+# words a sighted reader sees on it.
+CLOSE_CONTROL = (
+    "(() => { const a = document.querySelector('main .inbox-detail .inbox-back');"
+    " if (!a) return null; const box = a.getBoundingClientRect();"
+    " const label = [...a.querySelectorAll('span:not([aria-hidden])')]"
+    "  .filter((span) => span.getClientRects().length).map((span) => span.textContent.trim()).join(' ');"
+    " return { shown: a.getClientRects().length > 0, width: box.width, height: box.height, label }; })()"
+)
+CLOSE_SELECTOR = "main .pane-detail .inbox-back"
+FOCUSED_ITEM = (
+    "(() => { const el = document.activeElement;"
+    " const item = el && el.classList.contains('inbox-row') && el.closest('.inbox-item');"
+    " return item ? item.dataset.id : ''; })()"
+)
+
+
+def close_control(page, watch: Watch, want: str) -> None:
+    """The close control is drawn, is a full target, and is named by what it shows."""
+    found = page.evaluate(CLOSE_CONTROL)
+    if not found or not found["shown"]:
+        watch.fail("the open card shows no close control")
+        return
+    if min(found["width"], found["height"]) + 0.5 < 44:
+        watch.fail(
+            f"the close control is {found['width']:.0f}x{found['height']:.0f}px, under the 44px floor"
+        )
+    if found["label"] != want:
+        watch.fail(f"the close control reads {found['label']!r}, expected {want!r}")
+    named = page.locator("main .inbox-detail").get_by_role("link", name=want, exact=True).count()
+    if named != 1:
+        watch.fail(f"the close control's accessible name is not its visible label {want!r}")
+
+
+def one_off_question(port: int, project: str, subject: str) -> str:
+    """Post one question as the checks' agent and return its inbox id."""
+    session = harness.feed_days_session(port)
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "question_post", "arguments": {"project_id": project, "subject": subject}},
+        },
+    )
+    for status in ("action", "waiting"):
+        held = json.loads(harness.request(port, "GET", f"/api/v1/inbox?status={status}&limit=500"))
+        for item in held["items"]:
+            if item["summary"] == subject:
+                return item["event_id"]
+    return ""
+
+
+def check_inbox_card_escape(page, watch: Watch, port: int, project: str) -> None:
+    """Esc closes the card, never a half-written answer, and never another screen."""
+    watch.enter("inbox: Esc and the card")
+    subject = "escape check question"
+    item = one_off_question(port, project, subject)
+    if not item:
+        watch.fail("the seeded question never reached the inbox")
+        return
+    row = f'main .inbox-item[data-id="{item}"]'
+    field = "main .inbox-detail .composer-field"
+    draft = "half an answer"
+    try:
+        # Away and back, so the inbox is read again and holds the new item.
+        goto(page, "#/settings", "Settings")
+        goto(page, "#/inbox", "Inbox")
+        if not settle(page, f"!!document.querySelector({json.dumps(row)})"):
+            watch.fail("the seeded question is not in the inbox")
+            return
+        page.click(f"{row} .title a")
+        if not settle(page, f"!!document.querySelector({json.dumps(field)})"):
+            watch.fail("the question's card did not open with its composer")
+            return
+        close_control(page, watch, "Back to inbox")
+        page.fill(field, draft)
+        page.press(field, "Escape")
+        page.wait_for_timeout(400)
+        kept = page.evaluate(f"(document.querySelector({json.dumps(field)}) || {{}}).value")
+        if kept != draft:
+            watch.fail(f"Esc in a half-written answer left {kept!r} of it")
+            return
+        # The draft is the card's, not the field's: Esc from the Send button
+        # beside it, one Tab on, would throw the same words away.
+        page.press(field, "Tab")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(400)
+        kept = page.evaluate(f"(document.querySelector({json.dumps(field)}) || {{}}).value")
+        if kept != draft:
+            watch.fail(f"Esc beside a half-written answer left {kept!r} of it")
+            return
+        page.fill(field, "")
+        page.press(field, "Escape")
+        if not settle(page, "!document.querySelector('main .inbox-detail')"):
+            watch.fail("Esc in an empty composer did not close the card")
+            return
+        if not settle(page, f"{FOCUSED_ITEM} === {json.dumps(item)}", timeout=2000):
+            watch.fail(f"closing the card left focus on {page.evaluate(FOCUS_CLASS)!r}, not on its row")
+        page.go_back()
+        page.wait_for_timeout(400)
+        if page.evaluate("!!document.querySelector('main .inbox-detail')"):
+            watch.fail("Back after Esc reopened the card")
+        goto(page, "#/inbox", "Inbox")
+
+        # The pane belongs to the inbox. Left by the tab bar with a card open,
+        # Esc on the next screen is not the card's to answer.
+        settle(page, f"!!document.querySelector({json.dumps(row)})")
+        page.click(f"{row} .title a")
+        settle(page, "!!document.querySelector('main .inbox-detail')")
+        page.click('.tabbar a[href="#/search"]')
+        if not settle(page, "(document.querySelector('main h1') || {}).textContent === 'Search'"):
+            watch.fail("the tab bar did not reach Search")
+            return
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        if page.evaluate("location.hash") != "#/search" or heading(page) != "Search":
+            watch.fail(
+                f"Esc on Search went to {page.evaluate('location.hash')!r}: the card's pane"
+                " outlived the inbox"
+            )
+    finally:
+        # Whatever the screen did, the item does not outlive this check.
+        try:
+            harness.request(port, "POST", f"/api/v1/questions/{item}/answer", {"body": "closed by the check"})
+        except Exception:
+            pass
+        goto(page, "#/inbox", "Inbox")
+    watch.drain_rejections()
+
+
 def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
     """At desktop width the list keeps its pane, Earlier folds, the card sits beside."""
     watch.enter("desktop: the inbox")
@@ -4914,6 +5047,7 @@ def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
     page = context.new_page()
     page.on("pageerror", lambda error: watch.fail(f"desktop inbox: uncaught error: {error}"))
     page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
+    card = "main .pane-detail .inbox-detail"
     try:
         if not settle(page, "!!document.querySelector('main .panes .pane-list .inbox-item')"):
             watch.fail("the inbox does not use the two-pane container")
@@ -4921,12 +5055,35 @@ def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
         if page.evaluate("(document.querySelector('main details[data-group=\"earlier\"]') || { open: true }).open"):
             watch.fail("Earlier is not folded at desktop width")
         page.click("main .pane-list .inbox-item .title a")
-        if not settle(page, "!!document.querySelector('main .pane-detail .inbox-detail')"):
+        if not settle(page, f"!!document.querySelector('{card}')"):
             watch.fail("an opened item does not sit in the detail pane")
+            return
         if not page.evaluate("!!document.querySelector('main .pane-list .inbox-item')"):
             watch.fail("opening an item took the list away at desktop width")
-        if not page.evaluate("!!document.querySelector('main .inbox-item[aria-current=\"true\"]')"):
+        opened = page.evaluate(
+            "(document.querySelector('main .inbox-item[aria-current=\"true\"]') || { dataset: {} }).dataset.id || ''"
+        )
+        if not opened:
             watch.fail("the list does not mark which item is open")
+        close_control(page, watch, "Close")
+        page.keyboard.press("Escape")
+        if not settle(page, f"!document.querySelector('{card}')"):
+            watch.fail("Escape did not close the desktop inbox card")
+            return
+        if not settle(page, f"{FOCUSED_ITEM} === {json.dumps(opened)}", timeout=2000):
+            watch.fail(f"Escape left focus on {page.evaluate(FOCUS_CLASS)!r}, not on the row that opened the card")
+        page.click("main .pane-list .inbox-item .title a")
+        if not settle(page, f"!!document.querySelector('{card}')"):
+            watch.fail("reopening the desktop inbox card failed")
+            return
+        if not page.evaluate(f"(document.querySelector({json.dumps(CLOSE_SELECTOR)}) || {{ getClientRects: () => [] }}).getClientRects().length > 0"):
+            return
+        page.click(CLOSE_SELECTOR)
+        if not settle(page, f"!document.querySelector('{card}')"):
+            watch.fail("the close control did not close the desktop inbox card")
+            return
+        if not settle(page, f"{FOCUSED_ITEM} === {json.dumps(opened)}", timeout=2000):
+            watch.fail(f"the close control left focus on {page.evaluate(FOCUS_CLASS)!r}, not on the row that opened the card")
     finally:
         context.close()
         watch.page.bring_to_front()
@@ -5087,6 +5244,7 @@ def run() -> int:
                 run_step(watch, check_inbox_refresh, page, watch)
                 run_step(watch, check_inbox_mark_all, page, watch)
                 run_step(watch, check_inbox_empty, page, watch)
+                run_step(watch, check_inbox_card_escape, page, watch, port, project)
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_approve, page, watch)
                 run_step(watch, check_session_row_state, page, watch, project)

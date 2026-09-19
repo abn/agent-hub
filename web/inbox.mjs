@@ -44,6 +44,26 @@ function address({ open, unreadOnly }) {
   return query ? `#/inbox?${query}` : "#/inbox";
 }
 
+// The open card is what Esc closes, for as long as it is on screen. The pane
+// goes when the card does and when the route leaves the inbox, so Esc on
+// another screen is never this screen's to answer.
+let unregisterCard = null;
+// The item whose card was last open, so closing it hands focus back to the
+// row it was opened from.
+let lastOpen = "";
+
+function dropCard() {
+  if (!unregisterCard) return;
+  unregisterCard();
+  unregisterCard = null;
+}
+
+window.addEventListener("hashchange", () => {
+  if (location.hash.startsWith("#/inbox")) return;
+  dropCard();
+  lastOpen = "";
+});
+
 // A plain time rather than the pressable one: a row already carries a link
 // and its verbs, and a fourth target stacked over them would overlap theirs.
 // The whole stamp is the title, and it is what a reader hears.
@@ -213,7 +233,7 @@ function detail(item, state) {
     answers = `<div class="inbox-reply" data-id="${id}"></div>`;
   }
   return `<article class="inbox-detail" aria-labelledby="inbox-detail-title">
-    <a class="inbox-back" href="${back}">Back to inbox</a>
+    <a class="inbox-back" href="${back}"><span class="inbox-back-arrow" aria-hidden="true">&larr; </span><span class="inbox-back-label">Back to inbox</span><span class="inbox-close-label">Close</span></a>
     <div class="inbox-detail-head">
       ${glyph(item.kind)}
       ${waits(item) ? '<span class="pill">Waiting on you</span>' : ""}
@@ -244,6 +264,7 @@ function mountReply(state) {
 // address is replaced rather than pushed, so Back does not return to a card
 // for something that is gone.
 async function leave(state) {
+  dropCard();
   history.replaceState(history.state, "", address({ ...state, open: "" }));
   await render();
 }
@@ -282,11 +303,26 @@ export async function inbox(gen) {
     }
   }
   if (stale(gen)) return;
+  dropCard();
   if (state.open && !opened) {
     // Decided or answered elsewhere, or a link to something pruned.
     history.replaceState(history.state, "", address({ ...state, open: "" }));
     state.open = "";
   }
+  if (opened) {
+    // Replaced rather than pushed, as `leave` does it, so Back after Esc does
+    // not reopen the card.
+    // Esc closes the card unless an answer is half written in it. The words are
+    // the card's, so it does not matter whether focus is in the field or on the
+    // Send button beside it: closing would throw them away either way.
+    unregisterCard = registerPane(() => {
+      const draft = main.querySelector(".inbox-detail .composer-field");
+      if (draft && draft.value.trim()) return;
+      leave(state).catch(failed);
+    });
+  }
+  const closed = opened ? "" : lastOpen;
+  lastOpen = opened ? opened.event_id : "";
 
   const wide = window.matchMedia(DESKTOP).matches;
   const top = `<div class="inbox-top">
@@ -317,6 +353,21 @@ export async function inbox(gen) {
   drawSync();
   mountReply(state);
   atTop();
+  if (closed) returnFocus(closed);
+}
+
+// A card that has just closed hands focus back to the row it was opened from,
+// or to the Earlier disclosure when that row is folded away. The router parks
+// focus on the region after every paint, so this waits for the frame after.
+function returnFocus(id) {
+  const item = main.querySelector(`.inbox-item[data-id="${CSS.escape(id)}"]`);
+  if (!item) return;
+  const row = item.querySelector(".inbox-row");
+  const target = row.getClientRects().length ? row : item.closest("details")?.querySelector("summary");
+  if (!target) return;
+  requestAnimationFrame(() => {
+    if (target.isConnected) target.focus({ preventScroll: true });
+  });
 }
 
 const sendAnswer = (id, body) =>

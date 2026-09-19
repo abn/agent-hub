@@ -190,8 +190,11 @@ function help(event) {
   if (!panel.open) panel.showModal();
 }
 
+// Esc in a field that holds text is the field's: closing what is under a
+// half-written answer would throw the answer away.
 function closeTop(event) {
   if (document.querySelector("dialog[open]")) return;
+  if (event.target.matches?.("textarea, input:not([type=checkbox]):not([type=radio])") && event.target.value) return;
   const close = panes[panes.length - 1];
   if (!close) return;
   event.preventDefault();

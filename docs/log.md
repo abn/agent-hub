@@ -6,6 +6,11 @@ software release notes and the repository changelog.
 
 ## 2026-09-19, the inbox card, the selection, search as typed, and the checks
 
+* **Update**: [Human surface](architecture/human-surface.md) and
+  [human interface](design/human-interface.md) record the inbox card's close
+  control ("Back to inbox" on a phone, "Close" on the desktop, named by the
+  words it shows), Esc closing the card except from a field that holds text and
+  only on the Inbox, and focus returning to the row the card was opened from.
 * **Update**: The [contributor guide](contribution/guide.md) describes the
   Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
   accessibility walk covers at its two widths.
