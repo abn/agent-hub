@@ -1078,6 +1078,10 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
 .inbox-head .title { flex: 1; min-width: 0; }
 .inbox-time { flex: none; font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); white-space: nowrap; }
 .inbox-row .title a { color: inherit; text-decoration: none; }
+/* The title's link covers the row, so a press on the glyph, the body or the
+   foot opens the item; the row's own controls sit above it. */
+.inbox-row .title a::after { content: ""; position: absolute; inset: 0; }
+.inbox-row .inbox-acts, .inbox-row .ts { position: relative; z-index: 1; }
 .inbox-row .title a:hover { text-decoration: underline; }
 /* Unread is the dot, the weight and the word beside the dot. Read rows drop
    to the quieter ink throughout. */
