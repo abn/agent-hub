@@ -1,76 +1,24 @@
 //! HTTP home, inbox, and answer routes: counts, listing, auth, and problems.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use tokio_stream::StreamExt;
 
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::questions::{self, NewQuestion};
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{StatusCode, header};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-inbox-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
-}
+use common::http::{json_body, problem_body, request};
+use common::state::TestState;
 
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
-    }
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    json_body(response).await
+async fn state() -> TestState {
+    common::state::open("http-inbox").await
 }
 
 async fn seed_question(state: &AppState, subject: &str) -> String {
@@ -136,7 +84,7 @@ async fn home_returns_the_counts_and_recent_events() {
     seed_question(&state, "Deploy tonight?").await;
     seed_finished(&state, "nightly report done").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
         .await
@@ -155,7 +103,7 @@ async fn inbox_lists_the_items() {
     seed_question(&state, "Ship it?").await;
     seed_finished(&state, "nightly report done").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/inbox", Some("Bearer token"), None))
         .await
@@ -187,7 +135,7 @@ async fn inbox_filters_by_status_and_rejects_an_unknown_one() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["event_id"], question_id);
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -238,7 +186,7 @@ async fn answering_a_question_returns_an_event_and_resolves_the_item() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["event_id"], question_id);
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
         .await
@@ -252,7 +200,7 @@ async fn answering_a_non_question_is_a_problem() {
     let state = state().await;
     let finished_id = seed_finished(&state, "not a question").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -269,7 +217,8 @@ async fn answering_a_non_question_is_a_problem() {
 
 #[tokio::test]
 async fn answering_an_unknown_id_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -320,7 +269,7 @@ async fn deciding_an_approval_returns_an_event_and_resolves_the_item() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["event_id"], approval_id);
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
         .await
@@ -398,7 +347,7 @@ async fn deciding_a_non_approval_is_a_problem() {
     let state = state().await;
     let finished_id = seed_finished(&state, "not an approval").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -415,7 +364,8 @@ async fn deciding_a_non_approval_is_a_problem() {
 
 #[tokio::test]
 async fn deciding_an_unknown_id_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -435,7 +385,7 @@ async fn a_malformed_decision_is_a_problem() {
     let state = state().await;
     let approval_id = seed_approval(&state, "Deploy 0.4.2").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -452,7 +402,8 @@ async fn a_malformed_decision_is_a_problem() {
 
 #[tokio::test]
 async fn deciding_without_a_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -496,7 +447,7 @@ async fn the_stream_requires_a_token_and_pushes_a_tick() {
 
     // A write on the REST surface reaches the subscriber as a tick.
     let mut body = response.into_body().into_data_stream();
-    let app = router(state);
+    let app = router(state.clone());
     let answered = app
         .oneshot(request(
             "POST",
@@ -522,7 +473,8 @@ async fn the_stream_requires_a_token_and_pushes_a_tick() {
 
 #[tokio::test]
 async fn missing_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/home", None, None))
         .await
@@ -755,7 +707,7 @@ async fn the_read_routes_need_a_token() {
 #[tokio::test]
 async fn unread_only_cannot_contradict_the_status_filter() {
     let state = state().await;
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",

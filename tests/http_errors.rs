@@ -2,11 +2,6 @@
 //! framework refused: the body, its type, its size, a query, a path, or the
 //! method.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::problem::ProblemPath;
 use agent_hub::http::router;
 use agent_hub::limits::REQUEST_BODY_BYTES_MAX;
@@ -17,32 +12,14 @@ use axum::routing::get;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
+
+use common::state::TestState;
 
 const PROBLEM_JSON: &str = "application/problem+json";
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-errors-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
+async fn state() -> TestState {
+    common::state::open("http-errors").await
 }
 
 fn request(method: &str, uri: &str, content_type: Option<&str>, body: Body) -> Request<Body> {
@@ -76,7 +53,8 @@ async fn problem(response: axum::response::Response) -> (StatusCode, Value) {
 #[tokio::test]
 async fn a_body_over_the_limit_is_payload_too_large() {
     let body = json!({"id": "pad", "display_name": "x".repeat(REQUEST_BODY_BYTES_MAX)});
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request(
             "POST",
             "/api/v1/projects",
@@ -94,7 +72,8 @@ async fn a_body_over_the_limit_is_payload_too_large() {
 #[tokio::test]
 async fn a_body_without_the_json_type_is_unsupported_media_type() {
     let body = json!({"id": "homelab", "display_name": "Homelab"});
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request(
             "POST",
             "/api/v1/projects",
@@ -111,7 +90,8 @@ async fn a_body_without_the_json_type_is_unsupported_media_type() {
 
 #[tokio::test]
 async fn a_malformed_body_stays_an_invalid_argument() {
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request(
             "POST",
             "/api/v1/projects",
@@ -128,7 +108,8 @@ async fn a_malformed_body_stays_an_invalid_argument() {
 
 #[tokio::test]
 async fn an_unparsable_query_is_a_problem() {
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request(
             "GET",
             "/api/v1/artifacts/unknown/raw?version=abc",
@@ -152,7 +133,8 @@ async fn an_unparsable_query_is_a_problem() {
 
 #[tokio::test]
 async fn an_unparsable_path_is_a_problem() {
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request(
             "GET",
             "/api/v1/artifacts/%FF/versions",
@@ -194,7 +176,8 @@ async fn a_path_the_route_cannot_satisfy_stays_a_server_error() {
 
 #[tokio::test]
 async fn a_method_mismatch_is_a_problem_that_names_the_methods() {
-    let response = router(state().await)
+    let state = state().await;
+    let response = router(state.clone())
         .oneshot(request("POST", "/api/v1/home", None, Body::empty()))
         .await
         .expect("request");

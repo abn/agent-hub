@@ -1,78 +1,36 @@
 //! The agents control surface: admin-gated lifecycle over REST.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
+use agent_hub::config::TrustDefault;
 use agent_hub::http::router;
 use agent_hub::store::projects;
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
-use serde_json::Value;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state_with(trust_default: TrustDefault) -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-agents-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
+use common::http::{json_body, json_request};
+use common::state::TestState;
+
+async fn state_with(trust_default: TrustDefault) -> TestState {
+    common::state::open_with("agents", |config| {
+        config.trust_default = trust_default;
     })
     .await
-    .expect("open state")
 }
 
-async fn state() -> AppState {
+async fn state() -> TestState {
     state_with(TrustDefault::Trusted).await
 }
 
 fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder.body(Body::empty()).expect("build request")
-}
-
-fn json_request(method: &str, uri: &str, auth: Option<&str>, body: &str) -> Request<Body> {
-    let mut builder = Request::builder()
-        .uri(uri)
-        .method(method)
-        .header(header::CONTENT_TYPE, "application/json");
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder
-        .body(Body::from(body.to_string()))
-        .expect("build request")
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("json body")
+    common::http::request(method, uri, auth, None)
 }
 
 #[tokio::test]
 async fn the_agents_surface_rejects_a_missing_token() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     for (method, uri) in [
         ("GET", "/api/v1/agents"),
         ("POST", "/api/v1/agents/one/token"),
@@ -94,7 +52,8 @@ async fn the_agents_surface_rejects_a_missing_token() {
 
 #[tokio::test]
 async fn the_agents_surface_rejects_a_foreign_token() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -112,7 +71,7 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
     projects::create(&state.db, "proj", "Project")
         .await
         .expect("project");
-    let app = router(state);
+    let app = router(state.clone());
     let auth = Some("Bearer token");
 
     let response = app
@@ -222,7 +181,8 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
 
 #[tokio::test]
 async fn a_new_agent_follows_the_strict_default() {
-    let app = router(state_with(TrustDefault::Untrusted).await);
+    let state = state_with(TrustDefault::Untrusted).await;
+    let app = router(state.clone());
     let response = app
         .oneshot(json_request(
             "POST",
@@ -243,7 +203,7 @@ async fn the_agents_surface_maps_store_errors() {
     projects::create(&state.db, "proj", "Project")
         .await
         .expect("project");
-    let app = router(state);
+    let app = router(state.clone());
     let auth = Some("Bearer token");
     let create = r#"{"id":"worker","display_name":"Worker"}"#;
 

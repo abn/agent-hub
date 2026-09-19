@@ -7,11 +7,8 @@
 //! cap, and that a refused write leaves no partial row. The route it drives is
 //! its own, a handler of the same shape as the hub's, because the hub has none.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use axum::Json;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode, header};
 use axum::response::IntoResponse;
@@ -21,38 +18,22 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::{Error, ErrorCode};
 use agent_hub::http::problem::Problem;
 use agent_hub::limits::InboxCaps;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::projects;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state_with_caps(inbox_caps: InboxCaps) -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-inbox-cap-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
+use common::http::json_body;
+use common::state::TestState;
 
-    let state = AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps,
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
+async fn state_with_caps(inbox_caps: InboxCaps) -> TestState {
+    let state = common::state::open_with("http-inbox-cap", |config| {
+        config.inbox_caps = inbox_caps;
     })
-    .await
-    .expect("open state");
+    .await;
 
     projects::create(&state.db, "proj", "Test Project")
         .await
@@ -111,13 +92,6 @@ fn request(uri: &str, body: Value) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_string()))
         .expect("build request")
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
 }
 
 #[tokio::test]

@@ -1,59 +1,25 @@
 //! HTTP project deletion: cascade, admin gating, and the personal-space guard.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::principal::Trust;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, projects, sessions};
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
-use serde_json::Value;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-project-delete-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
+use common::http::json_body;
+use common::state::TestState;
+
+async fn state() -> TestState {
+    common::state::open("http-project-delete").await
 }
 
 fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder.body(Body::empty()).expect("build request")
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
+    common::http::request(method, uri, auth, None)
 }
 
 #[tokio::test]
@@ -393,7 +359,8 @@ async fn delete_refuses_a_personal_space() {
 
 #[tokio::test]
 async fn delete_unknown_project_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "DELETE",
@@ -410,7 +377,8 @@ async fn delete_unknown_project_is_not_found() {
 
 #[tokio::test]
 async fn delete_without_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request("DELETE", "/api/v1/projects/unknown-project", None))
         .await

@@ -6,11 +6,8 @@
 //! write through one surface and read the other straight away.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::principal::Trust;
 use agent_hub::store::{identity, projects, sessions};
 use axum::Router;
@@ -20,50 +17,26 @@ use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 use tower::ServiceExt;
 
+mod common;
+
+use common::http::request;
+use common::state::TestState;
+
 const ADMIN: &str = "Bearer token";
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
-
 /// A hub over a data directory of its own, removed when the test ends.
 struct Hub {
-    state: AppState,
+    state: TestState,
     app: Router,
-    dir: PathBuf,
-}
-
-impl Drop for Hub {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
 }
 
 impl Hub {
     async fn start() -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock before epoch")
-            .as_nanos();
-        let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "agent-hub-http-kb-{}-{nanos}-{unique}",
-            std::process::id()
-        ));
-        let state = AppState::open(Config {
-            data_dir: dir.clone(),
-            bind: "127.0.0.1:0".parse().expect("socket address"),
-            public_url: None,
-            admin_token: Some("token".to_string()),
-            trust_default: TrustDefault::Trusted,
-            inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-            active_window: Duration::from_secs(900),
-            node_name: None,
-        })
-        .await
-        .expect("open state");
+        let state = common::state::open("http-kb").await;
         let app = agent_hub::http::router(state.clone())
             .merge(agent_hub::mcp::http_router(state.clone()));
-        Self { state, app, dir }
+        Self { state, app }
     }
 
     async fn project(&self, id: &str) -> String {
@@ -173,7 +146,7 @@ impl Hub {
     }
 
     fn kb_file(&self, project: &str) -> PathBuf {
-        self.dir.join("kb").join(project).join("kb.db")
+        self.state.dir().join("kb").join(project).join("kb.db")
     }
 
     async fn mcp(&self, token: &str) -> Mcp<'_> {
@@ -339,20 +312,6 @@ impl Mcp<'_> {
                 .to_string(),
             error["message"].as_str().unwrap_or_default().to_string(),
         )
-    }
-}
-
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
     }
 }
 

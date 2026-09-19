@@ -1,74 +1,20 @@
 //! HTTP project routes: what the listing carries and what a project holds.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::projects;
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::http::StatusCode;
 use serde_json::Value;
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-projects-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
-}
+use common::http::{json_body, problem_body, request};
+use common::state::TestState;
 
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
-    }
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    json_body(response).await
+async fn state() -> TestState {
+    common::state::open("http-projects").await
 }
 
 async fn call(
@@ -185,7 +131,7 @@ async fn the_listing_counts_what_the_human_has_not_seen() {
 #[tokio::test]
 async fn the_listing_needs_a_token() {
     let state = state().await;
-    let response = router(state)
+    let response = router(state.clone())
         .oneshot(request("GET", "/api/v1/projects", None, None))
         .await
         .expect("request");
@@ -401,7 +347,7 @@ async fn patching_an_unknown_project_is_not_found_and_needs_a_token() {
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     assert_eq!(problem_body(missing).await["code"], "not_found");
 
-    let denied = router(state)
+    let denied = router(state.clone())
         .oneshot(request(
             "PATCH",
             "/api/v1/projects/homelab",

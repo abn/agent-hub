@@ -1,81 +1,20 @@
 //! HTTP comment routes and the host thread section.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments::{self, AnchorInput};
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
-use serde_json::{Value, json};
+use axum::http::StatusCode;
+use serde_json::json;
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-comments-http-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
-}
+use common::http::{json_body, problem_body, request, text_body};
+use common::state::TestState;
 
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
-    }
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
-}
-
-async fn text_body(response: axum::response::Response) -> String {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    String::from_utf8(bytes.to_vec()).expect("body is UTF-8")
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    json_body(response).await
+async fn state() -> TestState {
+    common::state::open("comments-http").await
 }
 
 async fn publish(state: &AppState, title: &str, content: &[u8]) -> String {
@@ -198,7 +137,7 @@ async fn comment_routes_round_trip() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(json_body(response).await["ok"], true);
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -318,7 +257,7 @@ async fn comment_routes_return_404_for_unknown_ids() {
         .expect("comment id")
         .to_string();
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "PATCH",
@@ -352,7 +291,7 @@ async fn comment_post_replays_on_its_idempotency_key() {
         "a retry returns the recorded comment"
     );
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -403,7 +342,7 @@ async fn comment_post_rejects_bad_bodies_and_anchors() {
     }
 
     let sealed = publish_protected(&state, "Sealed", b"ciphertext").await;
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -445,7 +384,7 @@ async fn host_shows_the_thread_only_when_non_empty() {
     .await
     .expect("seed comment");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -479,7 +418,7 @@ async fn host_escapes_comment_bodies_and_quotes() {
     .await
     .expect("seed hostile comment");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -515,7 +454,7 @@ async fn locked_shell_carries_no_thread() {
     .await
     .expect("seed comment");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -595,7 +534,7 @@ async fn host_filters_comments_by_shown_version() {
         "a newer comment hides on an older pin"
     );
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await

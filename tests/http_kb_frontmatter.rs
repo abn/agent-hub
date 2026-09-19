@@ -4,11 +4,7 @@
 //! the page cannot be patched safely, and that a hostile field cannot write
 //! frontmatter of its own.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::okf::parse_frontmatter;
 use agent_hub::store::{projects, sessions};
@@ -17,42 +13,17 @@ use axum::http::{Request, StatusCode, header};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
+
+use common::state::TestState;
 
 struct Hub {
-    state: AppState,
-    dir: std::path::PathBuf,
-}
-
-impl Drop for Hub {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
+    state: TestState,
 }
 
 async fn hub() -> Hub {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-kb-frontmatter-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    let state = AppState::open(Config {
-        data_dir: dir.clone(),
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state");
-    Hub { state, dir }
+    let state = common::state::open("kb-frontmatter").await;
+    Hub { state }
 }
 
 async fn call(

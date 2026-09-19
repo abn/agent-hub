@@ -1,72 +1,30 @@
 //! HTTP session routes: listing, ending, auth, and problem responses.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::sessions;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-sessions-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
+use common::http::{json_body, problem_body};
+use common::state::TestState;
+
+async fn state() -> TestState {
+    common::state::open("http-sessions").await
 }
 
 fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder.body(Body::empty()).expect("build request")
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    json_body(response).await
+    common::http::request(method, uri, auth, None)
 }
 
 #[tokio::test]
 async fn list_without_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/sessions?project=proj", None))
         .await
@@ -80,7 +38,8 @@ async fn list_without_token_is_a_problem() {
 
 #[tokio::test]
 async fn list_requires_a_project() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", "/api/v1/sessions", Some("Bearer token")))
         .await
@@ -98,7 +57,7 @@ async fn list_returns_the_project_sessions() {
         .await
         .expect("start");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -146,7 +105,8 @@ async fn end_marks_the_session_ended() {
 
 #[tokio::test]
 async fn end_unknown_session_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -163,7 +123,8 @@ async fn end_unknown_session_is_not_found() {
 
 #[tokio::test]
 async fn end_without_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "POST",
@@ -233,7 +194,7 @@ async fn brain_lists_entries() {
 
     // The tree opens one level at a time, so a directory lists its own
     // children rather than the whole brain.
-    let app = router(state);
+    let app = router(state.clone());
     let level = app
         .oneshot(request(
             "GET",
@@ -268,7 +229,7 @@ async fn a_brain_listing_reports_a_level_it_could_not_carry_whole() {
             .expect("put key");
     }
 
-    let app = router(state);
+    let app = router(state.clone());
     let body = json_body(
         app.oneshot(request(
             "GET",
@@ -325,7 +286,7 @@ async fn brain_hides_a_pruned_session() {
         .await
         .expect("prune");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -343,7 +304,8 @@ async fn brain_hides_a_pruned_session() {
 
 #[tokio::test]
 async fn brain_unknown_session_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -360,7 +322,8 @@ async fn brain_unknown_session_is_not_found() {
 
 #[tokio::test]
 async fn brain_without_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -553,7 +516,8 @@ async fn the_human_reassigns_a_session_over_the_control_surface() {
 
 #[tokio::test]
 async fn reassign_without_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(
             Request::builder()

@@ -1,41 +1,18 @@
 //! The search route: auth, results, and query validation.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::events::{NewEvent, append};
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
-use serde_json::Value;
+use axum::http::StatusCode;
 use tower::ServiceExt;
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let unique = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-search-http-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("addr"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
+use common::http::{get, json_body};
+use common::state::TestState;
+
+async fn state() -> TestState {
+    common::state::open("search-http").await
 }
 
 async fn seed(state: &AppState) {
@@ -57,26 +34,11 @@ async fn seed(state: &AppState) {
     .expect("append");
 }
 
-fn get(uri: &str, auth: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method("GET");
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder.body(Body::empty()).expect("request")
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    serde_json::from_slice(&bytes).expect("json")
-}
-
 #[tokio::test]
 async fn search_returns_hits_with_a_token() {
     let state = state().await;
     seed(&state).await;
-    let app = router(state);
+    let app = router(state.clone());
 
     let response = app
         .oneshot(get("/api/v1/search?q=engine", Some("Bearer token")))
@@ -93,7 +55,8 @@ async fn search_returns_hits_with_a_token() {
 
 #[tokio::test]
 async fn search_requires_a_token() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/api/v1/search?q=engine", None))
         .await
@@ -103,7 +66,8 @@ async fn search_requires_a_token() {
 
 #[tokio::test]
 async fn search_requires_a_query() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/api/v1/search", Some("Bearer token")))
         .await
@@ -113,7 +77,8 @@ async fn search_requires_a_query() {
 
 #[tokio::test]
 async fn search_rejects_an_unknown_type() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get(
             "/api/v1/search?q=engine&type=nonsense",
@@ -187,7 +152,7 @@ async fn results_carry_the_hit_count_and_how_long_the_query_took() {
     );
 
     // A warm query answers the same way, timing included.
-    let app = router(state);
+    let app = router(state.clone());
     let again = json_body(
         app.oneshot(get("/api/v1/search?q=needle", Some("Bearer token")))
             .await
@@ -201,7 +166,7 @@ async fn results_carry_the_hit_count_and_how_long_the_query_took() {
 #[tokio::test]
 async fn a_search_that_finds_nothing_counts_nothing() {
     let state = state().await;
-    let app = router(state);
+    let app = router(state.clone());
     let body = json_body(
         app.oneshot(get("/api/v1/search?q=nothing", Some("Bearer token")))
             .await
@@ -243,7 +208,7 @@ async fn a_capped_result_page_says_it_was_capped() {
 
     // At the boundary: six hits, five asked for. The count is what came back,
     // and the flag is what stops it reading as a total.
-    let app = router(state);
+    let app = router(state.clone());
     let capped = json_body(
         app.oneshot(get("/api/v1/search?q=needle&limit=5", Some("Bearer token")))
             .await
@@ -267,7 +232,7 @@ async fn search_query_decoding_handles_percent_encoding_consistently() {
     let state = state().await;
     seed(&state).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let res = app
         .oneshot(get(
             "/api/v1/search?q=engine%20groundwork",
@@ -332,7 +297,7 @@ async fn a_percent_that_is_no_escape_is_read_as_typed() {
     // `%+e` is not an escape: `+` is a space, so this is "% engine". A decoder
     // that reads `+e` as a signed hex number turns it into one control byte
     // and the rest of a word, and the search finds nothing.
-    let res = router(state)
+    let res = router(state.clone())
         .oneshot(get("/api/v1/search?q=%+engine", Some("Bearer token")))
         .await
         .expect("request");

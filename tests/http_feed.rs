@@ -1,41 +1,20 @@
 //! HTTP feed route: auth, ordering, and problem responses.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::events::{NewEvent, append};
-use axum::body::{Body, to_bytes};
-use axum::http::{Request, StatusCode, header};
+use axum::body::to_bytes;
+use axum::http::StatusCode;
 use serde_json::Value;
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
-    })
-    .await
-    .expect("open state")
+use common::http::{get, json_body, post, problem_body};
+use common::state::TestState;
+
+async fn state() -> TestState {
+    common::state::open("http").await
 }
 
 fn event(summary: &str) -> NewEvent {
@@ -48,28 +27,6 @@ fn event(summary: &str) -> NewEvent {
         thread_id: None,
         session_id: None,
     }
-}
-
-fn get(uri: &str, auth: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method("GET");
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    builder.body(Body::empty()).expect("build request")
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("problem is JSON")
 }
 
 #[tokio::test]
@@ -109,7 +66,7 @@ async fn the_human_feed_hides_system_events() {
     );
 
     // An explicit kind filter still reaches the audit trail.
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get(
             "/api/v1/projects/proj/feed?kinds=system",
@@ -130,7 +87,8 @@ async fn the_human_feed_hides_system_events() {
 
 #[tokio::test]
 async fn missing_token_is_a_problem() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/api/v1/projects/proj/feed", None))
         .await
@@ -153,7 +111,7 @@ async fn bearer_token_reads_events_newest_first() {
         .await
         .expect("append second");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/api/v1/projects/proj/feed", Some("Bearer token")))
         .await
@@ -174,7 +132,8 @@ async fn bearer_token_reads_events_newest_first() {
 
 #[tokio::test]
 async fn invalid_limit_is_rejected() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get(
             "/api/v1/projects/proj/feed?limit=soon",
@@ -190,7 +149,8 @@ async fn invalid_limit_is_rejected() {
 
 #[tokio::test]
 async fn unknown_route_is_not_found() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(get("/api/v1/no-such-route", None))
         .await
@@ -199,27 +159,6 @@ async fn unknown_route_is_not_found() {
 
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "not_found");
-}
-
-fn post(uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method("POST");
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
-    }
-}
-
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
 }
 
 async fn read_feed_page(state: &AppState) -> Value {
@@ -317,7 +256,7 @@ async fn marking_a_feed_seen_needs_a_token_and_a_project_that_exists() {
     agent_hub::store::projects::create(&state.db, "proj", "Proj")
         .await
         .expect("create project");
-    let nameless = router(state)
+    let nameless = router(state.clone())
         .oneshot(post(
             "/api/v1/projects/proj/feed/seen",
             Some("Bearer token"),
@@ -339,7 +278,7 @@ async fn feed_query_decoding_handles_repeated_kinds_and_percent_decoding() {
         .await
         .expect("append");
 
-    let app = router(state);
+    let app = router(state.clone());
     let res = app
         .oneshot(get(
             "/api/v1/projects/proj/feed?kinds=signal&limit=10",

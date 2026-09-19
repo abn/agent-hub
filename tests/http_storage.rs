@@ -1,11 +1,7 @@
 //! Storage route: what the volume holds, what a prune would reclaim, and the
 //! node the human is looking at.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::store::{prune, sessions};
 use axum::body::{Body, to_bytes};
@@ -13,34 +9,20 @@ use axum::http::{Request, StatusCode, header};
 use serde_json::Value;
 use tower::ServiceExt;
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+mod common;
 
-async fn state() -> AppState {
+use common::state::TestState;
+
+async fn state() -> TestState {
     state_with_window(std::time::Duration::from_secs(900)).await
 }
 
-async fn state_with_window(active_window: std::time::Duration) -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-storage-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window,
-        node_name: Some("node-under-test".to_string()),
+async fn state_with_window(active_window: std::time::Duration) -> TestState {
+    common::state::open_with("http-storage", |config| {
+        config.active_window = active_window;
+        config.node_name = Some("node-under-test".to_string());
     })
     .await
-    .expect("open state")
 }
 
 async fn usage(state: &AppState) -> Value {
@@ -193,7 +175,7 @@ async fn a_write_invalidates_the_memo_rather_than_waiting_it_out() {
 #[tokio::test]
 async fn usage_without_a_token_is_refused() {
     let state = state().await;
-    let response = router(state)
+    let response = router(state.clone())
         .oneshot(
             Request::builder()
                 .uri("/api/v1/storage")

@@ -1,19 +1,20 @@
 //! HTTP artifact and storage routes: listing, viewer, prune, and undo.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::error::Error;
 use agent_hub::http::problem::Problem;
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::sessions;
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use serde_json::{Value, json};
 use tower::ServiceExt;
+
+mod common;
+
+use common::http::{json_body, problem_body, request, text_body};
+use common::state::TestState;
 
 /// The ciphertext published for the protected render test.
 const CIPHERTEXT: &str = "Y2lwaGVyLW1hcmstN2YzYTlj";
@@ -21,48 +22,15 @@ const CIPHERTEXT: &str = "Y2lwaGVyLW1hcmstN2YzYTlj";
 /// A marker that never reaches the server for a protected artifact.
 const PLAINTEXT: &str = "plaintext-should-never-appear";
 
-static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
-
-async fn state() -> AppState {
+async fn state() -> TestState {
     state_with_public_url(None).await
 }
 
-async fn state_with_public_url(public_url: Option<&str>) -> AppState {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let unique = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "agent-hub-http-artifacts-{}-{nanos}-{unique}",
-        std::process::id()
-    ));
-    AppState::open(Config {
-        data_dir: dir,
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: public_url.map(str::to_string),
-        admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
+async fn state_with_public_url(public_url: Option<&str>) -> TestState {
+    common::state::open_with("http-artifacts", |config| {
+        config.public_url = public_url.map(str::to_string);
     })
     .await
-    .expect("open state")
-}
-
-fn request(method: &str, uri: &str, auth: Option<&str>, body: Option<Value>) -> Request<Body> {
-    let mut builder = Request::builder().uri(uri).method(method);
-    if let Some(token) = auth {
-        builder = builder.header(header::AUTHORIZATION, token);
-    }
-    match body {
-        Some(value) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(value.to_string()))
-            .expect("build request"),
-        None => builder.body(Body::empty()).expect("build request"),
-    }
 }
 
 /// A GET with an explicit Host, so origin-derived values are deterministic.
@@ -95,20 +63,6 @@ fn nosniff(response: &axum::response::Response) -> bool {
         == Some("nosniff")
 }
 
-async fn json_body(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    serde_json::from_slice(&bytes).expect("body is JSON")
-}
-
-async fn text_body(response: axum::response::Response) -> String {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read body");
-    String::from_utf8(bytes.to_vec()).expect("body is UTF-8")
-}
-
 fn content_type(response: &axum::response::Response) -> Option<String> {
     response
         .headers()
@@ -124,17 +78,6 @@ fn csp(response: &axum::response::Response) -> String {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string()
-}
-
-async fn problem_body(response: axum::response::Response) -> Value {
-    assert_eq!(
-        response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        Some("application/problem+json"),
-    );
-    json_body(response).await
 }
 
 async fn publish_public(state: &AppState, project_id: &str, title: &str, content: &[u8]) -> String {
@@ -212,7 +155,8 @@ async fn list_sessions(state: &AppState) -> Vec<Value> {
 
 #[tokio::test]
 async fn listing_artifacts_requires_a_token() {
-    let app = router(state().await);
+    let state = state().await;
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -235,7 +179,7 @@ async fn listing_artifacts_returns_the_project_artifacts() {
     let first = publish_public(&state, "proj", "Report", b"<p>one</p>").await;
     publish_public(&state, "other", "Elsewhere", b"<p>two</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -260,7 +204,7 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>public-artifact-body</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get_with_host(&format!("/artifacts/{id}"), "hub.test"))
         .await
@@ -370,7 +314,7 @@ async fn host_inlines_markdown_source_without_rendering_it() {
     .expect("publish markdown")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -427,7 +371,7 @@ async fn host_leaves_the_mermaid_runtime_to_the_frame() {
     .expect("publish markdown")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -462,7 +406,7 @@ async fn host_shows_the_title_for_markdown_without_a_heading() {
     .expect("publish markdown")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -483,7 +427,7 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -514,7 +458,7 @@ async fn public_artifact_page_snapshot_matches_modulo_whitespace() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -555,7 +499,7 @@ async fn host_escapes_an_authored_title_everywhere() {
     )
     .await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -646,7 +590,7 @@ async fn host_escapes_authored_metadata_and_envelopes() {
     .expect("publish hostile envelope")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{sealed}"), None, None))
         .await
@@ -684,7 +628,7 @@ async fn frame_names_a_safe_spoofed_origin_and_rejects_a_hostile_one() {
         "a safe spoofed host names the policy origin"
     );
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(
             Request::builder()
@@ -733,7 +677,7 @@ async fn a_configured_public_url_wins_over_the_request_origin() {
         "the configured origin names the frame policy, no header reaches it"
     );
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get_with_host(&format!("/artifacts/{id}"), "internal:8080"))
         .await
@@ -760,7 +704,7 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     let state = state().await;
     let id = publish_protected(&state, "proj", "Sealed report", CIPHERTEXT.as_bytes()).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
         .await
@@ -899,7 +843,7 @@ async fn pruning_requires_a_token() {
         .await
         .expect("start");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "DELETE",
@@ -977,7 +921,7 @@ async fn content_serves_a_version_and_defaults_to_latest() {
     assert_eq!(body["favicon"], "star");
     assert_eq!(body["label"], "v1");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -999,7 +943,7 @@ async fn raw_serves_a_version() {
     let state = state().await;
     let id = publish_versioned(&state).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1036,7 +980,7 @@ async fn content_rejects_unknown_versions() {
     let problem = problem_body(response).await;
     assert_eq!(problem["code"], "invalid_argument");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1056,7 +1000,7 @@ async fn versions_lists_history_oldest_first() {
     let state = state().await;
     let id = publish_versioned(&state).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1082,7 +1026,7 @@ async fn raw_serves_text_for_a_public_artifact() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>raw-body</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1115,7 +1059,7 @@ async fn raw_serves_envelope_and_ciphertext_for_a_protected_artifact() {
     let state = state().await;
     let id = publish_protected(&state, "proj", "Sealed report", CIPHERTEXT.as_bytes()).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1170,7 +1114,7 @@ async fn raw_rejects_bad_versions() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(problem_body(response).await["code"], "not_found");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1215,7 +1159,7 @@ async fn delete_removes_the_artifact_and_its_history() {
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {uri}");
     }
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "DELETE",
@@ -1299,7 +1243,7 @@ async fn host_and_frame_agree_on_versions() {
     assert!(body.contains("<p>v1</p>"), "the frame serves v1 verbatim");
     assert!(!body.contains("v2"));
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1337,7 +1281,7 @@ async fn host_shows_the_picker_only_with_history() {
     let meta_old = body.find("\"version\":1").expect("v1 in blob");
     assert!(meta_new < meta_old, "the version blob runs newest first");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1380,7 +1324,7 @@ async fn frame_serves_html_verbatim_under_the_origin_policy() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>framed-body</p>").await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(get_with_host(&format!("/artifacts/{id}/frame"), "hub.test"))
         .await
@@ -1475,7 +1419,7 @@ async fn frame_loads_mermaid_only_when_the_bytes_name_it() {
         "the sizing loader rides along unconditionally"
     );
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1517,7 +1461,7 @@ async fn frame_refuses_markdown_with_invalid_argument() {
     .expect("publish markdown")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1545,7 +1489,7 @@ async fn frame_refuses_a_protected_artifact() {
     let state = state().await;
     let id = publish_protected(&state, "proj", "Sealed", CIPHERTEXT.as_bytes()).await;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1613,7 +1557,7 @@ async fn og_card_is_a_static_svg_with_escaped_values() {
     .expect("publish artifact")
     .id;
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1659,7 +1603,7 @@ async fn og_card_follows_versions() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(text_body(response).await.starts_with("<svg"));
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
@@ -1790,7 +1734,7 @@ async fn cleared_label_serves_null_over_rest() {
     .await
     .expect("update clearing label");
 
-    let app = router(state);
+    let app = router(state.clone());
     let response = app
         .oneshot(request(
             "GET",
