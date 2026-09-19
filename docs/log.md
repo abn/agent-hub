@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-18, storage you can read and prune from
+
+* **Update**: The Storage screen now matches the design. It names the data
+  path and the node, shows what is used against the volume's capacity, and
+  stacks a bar by kind over a legend that gives every kind its byte figure,
+  including a kind that holds nothing. Each project row carries its total, its
+  own bar, the split in words, and a Prune button showing what its ended
+  sessions would free. Prune all lists the projects, session counts and bytes
+  in a review dialog before anything is sent. Both prunes open on Keep, send
+  one request, and can be undone from the toast for 30 seconds. The project
+  rows are in the keyboard map, and a hub whose projects hold nothing shows
+  the empty state.
+* **Note**: The hub reports no per-project share of the event store, so a
+  project row splits sessions, artifacts and knowledge only. When the volume
+  cannot be measured the capacity is left out and the bar is drawn against
+  what is used.
+
 ## 2026-09-18, a session, its brain as a tree
 
 * **Update**: The sessions screen and its detail view now match the design.
