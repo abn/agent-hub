@@ -3305,7 +3305,7 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
     first = rows["waiting"][0] if rows["waiting"] else None
     if not first or first["title"] != harness.HOME_WAITING_SUMMARY:
         watch.fail(f"the waiting card leads with {first and first['title']!r}")
-    elif first["href"] != "#/inbox" or not first["whole"]:
+    elif not first["href"].startswith("#/inbox?open=") or not first["whole"]:
         watch.fail(f"the waiting row links to {first['href']!r} (whole row: {first['whole']})")
     elif first["kind"] != "Approval":
         watch.fail(f"the waiting row names its kind {first['kind']!r}")
@@ -3355,7 +3355,8 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
         watch.fail("`j` and `k` do not move a selection through Home's rows")
     else:
         page.keyboard.press("Enter")
-        if not settle(page, "location.hash === '#/inbox'", 3000):
+        # The row opens the item it names, not only the queue it is in.
+        if not settle(page, "location.hash.startsWith('#/inbox?open=')", 3000):
             watch.fail(f"Enter on the waiting row went to {page.evaluate('location.hash')!r}")
     watch.drain_rejections()
 

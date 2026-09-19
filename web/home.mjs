@@ -138,7 +138,7 @@ function waitingCard(waiting, open) {
       <h2 id="home-waiting-title">Waiting on you · ${waiting}</h2>
       <a class="home-more" href="#/inbox">Inbox${CHEVRON(12)}</a>
     </div>
-    ${shown.map((event) => homeRow(event, "#/inbox", { chevron: true })).join("")}
+    ${shown.map((event) => homeRow(event, `#/inbox?open=${encodeURIComponent(event.id)}`, { chevron: true })).join("")}
     ${more}
   </section>`;
 }
