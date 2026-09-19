@@ -1,0 +1,13 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "status",
+      null
+    ],
+    [
+      "title",
+      null
+    ]
+  ]
+}

@@ -12,10 +12,15 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # The frontmatter corpus is compared byte for byte: its trailing spaces,
+      # its CRLF endings and its missing final newlines are the cases.
       - id: trailing-whitespace
+        exclude: '^tests/fixtures/frontmatter/.*\.md$'
       - id: end-of-file-fixer
+        exclude: '^tests/fixtures/frontmatter/.*\.md$'
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: '^tests/fixtures/frontmatter/.*\.md$'
       - id: check-merge-conflict
       - id: check-added-large-files
       - id: check-executables-have-shebangs

@@ -1,0 +1,8 @@
+{
+  "operation": "promote",
+  "session_name": "session-alpha",
+  "session_id": "sess_01j5a",
+  "from_path": "/fs/notes.md",
+  "type": "concept",
+  "title": "Final"
+}

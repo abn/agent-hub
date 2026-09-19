@@ -1,0 +1,9 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "odd",
+      "a\u007fb\u0085c\u009fd\ufeffe\u2028f\u2029g\u0001h"
+    ]
+  ]
+}

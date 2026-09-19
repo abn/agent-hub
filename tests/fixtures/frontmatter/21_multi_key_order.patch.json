@@ -1,0 +1,33 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "zeta",
+      "z"
+    ],
+    [
+      "status",
+      "stable"
+    ],
+    [
+      "alpha",
+      "a"
+    ],
+    [
+      "title",
+      null
+    ],
+    [
+      "mid",
+      true
+    ],
+    [
+      "count",
+      3
+    ],
+    [
+      "tags",
+      []
+    ]
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "type",
+      "concept"
+    ],
+    [
+      "title",
+      "Simple Page"
+    ]
+  ]
+}

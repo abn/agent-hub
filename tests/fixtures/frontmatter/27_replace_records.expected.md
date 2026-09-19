@@ -1,0 +1,9 @@
+---
+sources:
+  - title: "New: one"
+    resource: https://example.org/new
+  - title: two
+    resource: https://example.org/2
+    pinned: true
+status: draft
+---

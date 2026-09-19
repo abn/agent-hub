@@ -1,0 +1,9 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "deprecated_key",
+      null
+    ]
+  ]
+}

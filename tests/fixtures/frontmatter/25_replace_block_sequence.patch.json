@@ -1,0 +1,13 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "tags",
+      [
+        "alpha",
+        "be\"ta",
+        "c, d"
+      ]
+    ]
+  ]
+}

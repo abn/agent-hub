@@ -1,0 +1,537 @@
+{
+  "version": 2,
+  "cases": [
+    {
+      "id": "01_no_frontmatter",
+      "description": "A page with no block gets one; keys in the order given",
+      "input": "01_no_frontmatter.input.md",
+      "patch": "01_no_frontmatter.patch.json",
+      "expected": "01_no_frontmatter.expected.md"
+    },
+    {
+      "id": "02_only_type",
+      "description": "A block with only type gains a title at its end",
+      "input": "02_only_type.input.md",
+      "patch": "02_only_type.patch.json",
+      "expected": "02_only_type.expected.md"
+    },
+    {
+      "id": "03_comments_inside_frontmatter",
+      "description": "Comment lines around a replaced key are untouched",
+      "input": "03_comments_inside_frontmatter.input.md",
+      "patch": "03_comments_inside_frontmatter.patch.json",
+      "expected": "03_comments_inside_frontmatter.expected.md"
+    },
+    {
+      "id": "04_unknown_keys",
+      "description": "Unknown keys and nested mappings are untouched",
+      "input": "04_unknown_keys.input.md",
+      "patch": "04_unknown_keys.patch.json",
+      "expected": "04_unknown_keys.expected.md"
+    },
+    {
+      "id": "05_non_alphabetical_key_order",
+      "description": "A key is replaced in place; key order is kept",
+      "input": "05_non_alphabetical_key_order.input.md",
+      "patch": "05_non_alphabetical_key_order.patch.json",
+      "expected": "05_non_alphabetical_key_order.expected.md"
+    },
+    {
+      "id": "06_crlf_line_endings",
+      "description": "A CRLF page gets CRLF on the new line",
+      "input": "06_crlf_line_endings.input.md",
+      "patch": "06_crlf_line_endings.patch.json",
+      "expected": "06_crlf_line_endings.expected.md"
+    },
+    {
+      "id": "07_verified_block_absent",
+      "description": "Review adds the verified key when absent",
+      "input": "07_verified_block_absent.input.md",
+      "patch": "07_verified_block_absent.patch.json",
+      "expected": "07_verified_block_absent.expected.md"
+    },
+    {
+      "id": "08_verified_block_present",
+      "description": "Review appends to an existing verified sequence",
+      "input": "08_verified_block_present.input.md",
+      "patch": "08_verified_block_present.patch.json",
+      "expected": "08_verified_block_present.expected.md"
+    },
+    {
+      "id": "09_multiline_and_quoted_values",
+      "description": "Folded and quoted neighbours are untouched when a key is appended",
+      "input": "09_multiline_and_quoted_values.input.md",
+      "patch": "09_multiline_and_quoted_values.patch.json",
+      "expected": "09_multiline_and_quoted_values.expected.md"
+    },
+    {
+      "id": "10_dashes_inside_body",
+      "description": "A rule or a fenced --- in the body is never the closing delimiter",
+      "input": "10_dashes_inside_body.input.md",
+      "patch": "10_dashes_inside_body.patch.json",
+      "expected": "10_dashes_inside_body.expected.md"
+    },
+    {
+      "id": "11_empty_file",
+      "description": "An empty page gets a block and nothing else",
+      "input": "11_empty_file.input.md",
+      "patch": "11_empty_file.patch.json",
+      "expected": "11_empty_file.expected.md"
+    },
+    {
+      "id": "12_trailing_whitespace",
+      "description": "Trailing whitespace on untouched lines is kept",
+      "input": "12_trailing_whitespace.input.md",
+      "patch": "12_trailing_whitespace.patch.json",
+      "expected": "12_trailing_whitespace.expected.md"
+    },
+    {
+      "id": "13_non_ascii",
+      "description": "Non-ASCII bytes are untouched by a review",
+      "input": "13_non_ascii.input.md",
+      "patch": "13_non_ascii.patch.json",
+      "expected": "13_non_ascii.expected.md"
+    },
+    {
+      "id": "14_delete_key",
+      "description": "Deleting a key removes its line",
+      "input": "14_delete_key.input.md",
+      "patch": "14_delete_key.patch.json",
+      "expected": "14_delete_key.expected.md"
+    },
+    {
+      "id": "15_empty_patch_no_frontmatter",
+      "description": "An empty patch is the identity on a page with no block and leading newlines",
+      "input": "15_empty_patch_no_frontmatter.input.md",
+      "patch": "15_empty_patch_no_frontmatter.patch.json",
+      "expected": "15_empty_patch_no_frontmatter.expected.md"
+    },
+    {
+      "id": "16_empty_patch_with_frontmatter",
+      "description": "An empty patch is the identity on a block with comments, trailing spaces and mixed endings",
+      "input": "16_empty_patch_with_frontmatter.input.md",
+      "patch": "16_empty_patch_with_frontmatter.patch.json",
+      "expected": "16_empty_patch_with_frontmatter.expected.md"
+    },
+    {
+      "id": "17_empty_patch_unparseable",
+      "description": "An empty patch is the identity even on a page a real patch would refuse",
+      "input": "17_empty_patch_unparseable.input.md",
+      "patch": "17_empty_patch_unparseable.patch.json",
+      "expected": "17_empty_patch_unparseable.expected.md"
+    },
+    {
+      "id": "18_delete_only_no_frontmatter",
+      "description": "Only deletions on a page with no block write nothing: identity",
+      "input": "18_delete_only_no_frontmatter.input.md",
+      "patch": "18_delete_only_no_frontmatter.patch.json",
+      "expected": "18_delete_only_no_frontmatter.expected.md"
+    },
+    {
+      "id": "19_leading_newlines_no_frontmatter",
+      "description": "A body that starts with a line ending is kept verbatim, with no separator added",
+      "input": "19_leading_newlines_no_frontmatter.input.md",
+      "patch": "19_leading_newlines_no_frontmatter.patch.json",
+      "expected": "19_leading_newlines_no_frontmatter.expected.md"
+    },
+    {
+      "id": "20_delete_absent_key",
+      "description": "Deleting a key the block does not hold changes nothing",
+      "input": "20_delete_absent_key.input.md",
+      "patch": "20_delete_absent_key.patch.json",
+      "expected": "20_delete_absent_key.expected.md"
+    },
+    {
+      "id": "21_multi_key_order",
+      "description": "Existing keys change in place; absent keys are appended in the order given, not sorted",
+      "input": "21_multi_key_order.input.md",
+      "patch": "21_multi_key_order.patch.json",
+      "expected": "21_multi_key_order.expected.md"
+    },
+    {
+      "id": "22_replace_block_scalar_blank_line",
+      "description": "Replacing a literal scalar that holds a blank line removes all of it",
+      "input": "22_replace_block_scalar_blank_line.input.md",
+      "patch": "22_replace_block_scalar_blank_line.patch.json",
+      "expected": "22_replace_block_scalar_blank_line.expected.md"
+    },
+    {
+      "id": "23_delete_block_scalar_blank_line",
+      "description": "Deleting a literal scalar that holds a blank line removes all of it",
+      "input": "23_delete_block_scalar_blank_line.input.md",
+      "patch": "23_delete_block_scalar_blank_line.patch.json",
+      "expected": "23_delete_block_scalar_blank_line.expected.md"
+    },
+    {
+      "id": "24_replace_folded_scalar",
+      "description": "Replacing a folded scalar; the blank line after it is not part of it",
+      "input": "24_replace_folded_scalar.input.md",
+      "patch": "24_replace_folded_scalar.patch.json",
+      "expected": "24_replace_folded_scalar.expected.md"
+    },
+    {
+      "id": "25_replace_block_sequence",
+      "description": "Replacing an indented block sequence with a list writes one flow line",
+      "input": "25_replace_block_sequence.input.md",
+      "patch": "25_replace_block_sequence.patch.json",
+      "expected": "25_replace_block_sequence.expected.md"
+    },
+    {
+      "id": "26_delete_indentless_sequence",
+      "description": "Column-zero sequence items belong to the key above them",
+      "input": "26_delete_indentless_sequence.input.md",
+      "patch": "26_delete_indentless_sequence.patch.json",
+      "expected": "26_delete_indentless_sequence.expected.md"
+    },
+    {
+      "id": "27_replace_records",
+      "description": "Replacing a block sequence of mappings; fields in the order given; an inner comment goes with the value",
+      "input": "27_replace_records.input.md",
+      "patch": "27_replace_records.patch.json",
+      "expected": "27_replace_records.expected.md"
+    },
+    {
+      "id": "28_replace_quoted_value",
+      "description": "Replacing a quoted value drops its trailing comment, which is part of the key's line",
+      "input": "28_replace_quoted_value.input.md",
+      "patch": "28_replace_quoted_value.patch.json",
+      "expected": "28_replace_quoted_value.expected.md"
+    },
+    {
+      "id": "29_trailing_comment_stays",
+      "description": "Blank and comment lines after a value stay when no indented line follows them",
+      "input": "29_trailing_comment_stays.input.md",
+      "patch": "29_trailing_comment_stays.patch.json",
+      "expected": "29_trailing_comment_stays.expected.md"
+    },
+    {
+      "id": "30_values_needing_escape",
+      "description": "Every value that could end its line or its quoting is double quoted and escaped",
+      "input": "30_values_needing_escape.input.md",
+      "patch": "30_values_needing_escape.patch.json",
+      "expected": "30_values_needing_escape.expected.md"
+    },
+    {
+      "id": "31_mixed_line_endings",
+      "description": "New lines take the opening delimiter's ending; untouched lines keep their own",
+      "input": "31_mixed_line_endings.input.md",
+      "patch": "31_mixed_line_endings.patch.json",
+      "expected": "31_mixed_line_endings.expected.md"
+    },
+    {
+      "id": "32_no_final_newline",
+      "description": "A closing delimiter at the end of the page with no newline stays that way",
+      "input": "32_no_final_newline.input.md",
+      "patch": "32_no_final_newline.patch.json",
+      "expected": "32_no_final_newline.expected.md"
+    },
+    {
+      "id": "33_crlf_no_frontmatter",
+      "description": "A page with no block takes its first line's ending for the new block",
+      "input": "33_crlf_no_frontmatter.input.md",
+      "patch": "33_crlf_no_frontmatter.patch.json",
+      "expected": "33_crlf_no_frontmatter.expected.md"
+    },
+    {
+      "id": "34_duplicate_of_another_key",
+      "description": "A duplicated key the patch does not name is left alone",
+      "input": "34_duplicate_of_another_key.input.md",
+      "patch": "34_duplicate_of_another_key.patch.json",
+      "expected": "34_duplicate_of_another_key.expected.md"
+    },
+    {
+      "id": "35_review_preserves_everything_else",
+      "description": "Review leaves comments, unknown keys, trailing whitespace and key order alone",
+      "input": "35_review_preserves_everything_else.input.md",
+      "patch": "35_review_preserves_everything_else.patch.json",
+      "expected": "35_review_preserves_everything_else.expected.md"
+    },
+    {
+      "id": "36_review_indentless_sequence",
+      "description": "Review appends at the indentation the sequence already uses: none",
+      "input": "36_review_indentless_sequence.input.md",
+      "patch": "36_review_indentless_sequence.patch.json",
+      "expected": "36_review_indentless_sequence.expected.md"
+    },
+    {
+      "id": "37_review_four_space_sequence",
+      "description": "Review appends at the indentation the sequence already uses: four spaces",
+      "input": "37_review_four_space_sequence.input.md",
+      "patch": "37_review_four_space_sequence.patch.json",
+      "expected": "37_review_four_space_sequence.expected.md"
+    },
+    {
+      "id": "38_review_no_frontmatter",
+      "description": "Review of a page with no block creates one",
+      "input": "38_review_no_frontmatter.input.md",
+      "patch": "38_review_no_frontmatter.patch.json",
+      "expected": "38_review_no_frontmatter.expected.md"
+    },
+    {
+      "id": "39_review_empty_verified_key",
+      "description": "A verified key with no value takes the two-space default",
+      "input": "39_review_empty_verified_key.input.md",
+      "patch": "39_review_empty_verified_key.patch.json",
+      "expected": "39_review_empty_verified_key.expected.md"
+    },
+    {
+      "id": "40_review_crlf",
+      "description": "Review of a CRLF page writes CRLF",
+      "input": "40_review_crlf.input.md",
+      "patch": "40_review_crlf.patch.json",
+      "expected": "40_review_crlf.expected.md"
+    },
+    {
+      "id": "41_review_hostile_actor",
+      "description": "An actor that carries newlines and keys stays one escaped scalar",
+      "input": "41_review_hostile_actor.input.md",
+      "patch": "41_review_hostile_actor.patch.json",
+      "expected": "41_review_hostile_actor.expected.md"
+    },
+    {
+      "id": "42_promote_no_frontmatter",
+      "description": "Promote creates the block: type, title, description, tags, then the citation",
+      "input": "42_promote_no_frontmatter.input.md",
+      "patch": "42_promote_no_frontmatter.patch.json",
+      "expected": "42_promote_no_frontmatter.expected.md"
+    },
+    {
+      "id": "43_promote_existing_frontmatter",
+      "description": "Promote replaces in place, appends what is absent, and extends sources",
+      "input": "43_promote_existing_frontmatter.input.md",
+      "patch": "43_promote_existing_frontmatter.patch.json",
+      "expected": "43_promote_existing_frontmatter.expected.md"
+    },
+    {
+      "id": "44_promote_hostile_fields",
+      "description": "Promote fields and a session name that carry quotes, newlines and # stay inside their scalars",
+      "input": "44_promote_hostile_fields.input.md",
+      "patch": "44_promote_hostile_fields.patch.json",
+      "expected": "44_promote_hostile_fields.expected.md"
+    },
+    {
+      "id": "45_refuse_byte_order_mark",
+      "description": "A byte order mark is refused, not treated as a page with no block",
+      "input": "45_refuse_byte_order_mark.input.md",
+      "patch": "45_refuse_byte_order_mark.patch.json",
+      "error": "byte_order_mark"
+    },
+    {
+      "id": "46_refuse_cr_only_endings",
+      "description": "Carriage-return-only endings are refused",
+      "input": "46_refuse_cr_only_endings.input.md",
+      "patch": "46_refuse_cr_only_endings.patch.json",
+      "error": "carriage_return"
+    },
+    {
+      "id": "47_refuse_lone_cr_in_block",
+      "description": "A lone carriage return inside the block is refused",
+      "input": "47_refuse_lone_cr_in_block.input.md",
+      "patch": "47_refuse_lone_cr_in_block.patch.json",
+      "error": "carriage_return"
+    },
+    {
+      "id": "48_refuse_unclosed",
+      "description": "A block that never closes is refused",
+      "input": "48_refuse_unclosed.input.md",
+      "patch": "48_refuse_unclosed.patch.json",
+      "error": "unclosed"
+    },
+    {
+      "id": "49_refuse_closer_trailing_space",
+      "description": "A closing line with trailing whitespace is refused, not scanned past to a rule in the body",
+      "input": "49_refuse_closer_trailing_space.input.md",
+      "patch": "49_refuse_closer_trailing_space.patch.json",
+      "error": "delimiter"
+    },
+    {
+      "id": "50_refuse_closer_dots",
+      "description": "A document end marker is refused as a closer",
+      "input": "50_refuse_closer_dots.input.md",
+      "patch": "50_refuse_closer_dots.patch.json",
+      "error": "delimiter"
+    },
+    {
+      "id": "51_refuse_opener_trailing_space",
+      "description": "An opening line with trailing whitespace is refused",
+      "input": "51_refuse_opener_trailing_space.input.md",
+      "patch": "51_refuse_opener_trailing_space.patch.json",
+      "error": "delimiter"
+    },
+    {
+      "id": "52_refuse_duplicate_key",
+      "description": "A key the patch names appears twice",
+      "input": "52_refuse_duplicate_key.input.md",
+      "patch": "52_refuse_duplicate_key.patch.json",
+      "error": "duplicate_key"
+    },
+    {
+      "id": "53_refuse_anchor",
+      "description": "A key the patch names carries an anchor",
+      "input": "53_refuse_anchor.input.md",
+      "patch": "53_refuse_anchor.patch.json",
+      "error": "anchor"
+    },
+    {
+      "id": "54_refuse_alias",
+      "description": "A key the patch deletes carries an alias",
+      "input": "54_refuse_alias.input.md",
+      "patch": "54_refuse_alias.patch.json",
+      "error": "anchor"
+    },
+    {
+      "id": "55_refuse_review_flow_verified",
+      "description": "Review will not append under a flow list",
+      "input": "55_refuse_review_flow_verified.input.md",
+      "patch": "55_refuse_review_flow_verified.patch.json",
+      "error": "not_block_sequence"
+    },
+    {
+      "id": "56_refuse_review_scalar_verified",
+      "description": "Review will not append under a scalar",
+      "input": "56_refuse_review_scalar_verified.input.md",
+      "patch": "56_refuse_review_scalar_verified.patch.json",
+      "error": "not_block_sequence"
+    },
+    {
+      "id": "57_refuse_review_mapping_verified",
+      "description": "Review will not append under a mapping",
+      "input": "57_refuse_review_mapping_verified.input.md",
+      "patch": "57_refuse_review_mapping_verified.patch.json",
+      "error": "not_block_sequence"
+    },
+    {
+      "id": "58_refuse_review_tab_indented",
+      "description": "Review will not append under a tab-indented sequence",
+      "input": "58_refuse_review_tab_indented.input.md",
+      "patch": "58_refuse_review_tab_indented.patch.json",
+      "error": "indentation"
+    },
+    {
+      "id": "59_refuse_review_duplicate_verified",
+      "description": "Review refuses a duplicated verified key",
+      "input": "59_refuse_review_duplicate_verified.input.md",
+      "patch": "59_refuse_review_duplicate_verified.patch.json",
+      "error": "duplicate_key"
+    },
+    {
+      "id": "60_refuse_review_alias_verified",
+      "description": "Review refuses a verified key that is an alias",
+      "input": "60_refuse_review_alias_verified.input.md",
+      "patch": "60_refuse_review_alias_verified.patch.json",
+      "error": "anchor"
+    },
+    {
+      "id": "61_refuse_promote_flow_sources",
+      "description": "Promote will not append under a flow list",
+      "input": "61_refuse_promote_flow_sources.input.md",
+      "patch": "61_refuse_promote_flow_sources.patch.json",
+      "error": "not_block_sequence"
+    },
+    {
+      "id": "62_refuse_quoted_key",
+      "description": "A quoted key is a line the layout rules do not cover",
+      "input": "62_refuse_quoted_key.input.md",
+      "patch": "62_refuse_quoted_key.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "63_refuse_stray_line",
+      "description": "A column-zero continuation of a scalar is a line the layout rules do not cover",
+      "input": "63_refuse_stray_line.input.md",
+      "patch": "63_refuse_stray_line.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "64_refuse_invalid_key",
+      "description": "A patch key that is not a plain identifier",
+      "input": "64_refuse_invalid_key.input.md",
+      "patch": "64_refuse_invalid_key.patch.json",
+      "error": "invalid_key"
+    },
+    {
+      "id": "65_refuse_duplicate_change",
+      "description": "A patch that names one key twice",
+      "input": "65_refuse_duplicate_change.input.md",
+      "patch": "65_refuse_duplicate_change.patch.json",
+      "error": "duplicate_change"
+    },
+    {
+      "id": "66_refuse_float",
+      "description": "A float has no single decimal form shared by both implementations",
+      "input": "66_refuse_float.input.md",
+      "patch": "66_refuse_float.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "67_refuse_nested_mapping",
+      "description": "A mapping outside a list cannot be written",
+      "input": "67_refuse_nested_mapping.input.md",
+      "patch": "67_refuse_nested_mapping.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "68_refuse_mixed_list",
+      "description": "A list mixing strings and records cannot be written",
+      "input": "68_refuse_mixed_list.input.md",
+      "patch": "68_refuse_mixed_list.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "69_refuse_before_layout",
+      "description": "The changes are checked before the page: a bad key wins over a byte order mark",
+      "input": "69_refuse_before_layout.input.md",
+      "patch": "69_refuse_before_layout.patch.json",
+      "error": "invalid_key"
+    },
+    {
+      "id": "70_refuse_rule_as_first_line",
+      "description": "A page that opens with a rule and prose is refused, never given a second block",
+      "input": "70_refuse_rule_as_first_line.input.md",
+      "patch": "70_refuse_rule_as_first_line.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "71_date_shaped_but_no_date",
+      "description": "A value shaped like a date is written plain only when it is one: an impossible month, day or hour is quoted, so no loader is asked to make a date of it",
+      "input": "71_date_shaped_but_no_date.input.md",
+      "patch": "71_date_shaped_but_no_date.patch.json",
+      "expected": "71_date_shaped_but_no_date.expected.md"
+    },
+    {
+      "id": "72_reserved_words_and_leading_symbols",
+      "description": "A string that a loader would read as a boolean, a null or an indicator is quoted so it stays a string",
+      "input": "72_reserved_words_and_leading_symbols.input.md",
+      "patch": "72_reserved_words_and_leading_symbols.patch.json",
+      "expected": "72_reserved_words_and_leading_symbols.expected.md"
+    },
+    {
+      "id": "73_control_characters_are_escaped",
+      "description": "DEL, the C1 controls, the byte order mark and the Unicode line and paragraph separators are written as escapes inside one quoted line",
+      "input": "73_control_characters_are_escaped.input.md",
+      "patch": "73_control_characters_are_escaped.patch.json",
+      "expected": "73_control_characters_are_escaped.expected.md"
+    },
+    {
+      "id": "74_integers_up_to_53_bits",
+      "description": "An integer is written as it is up to the largest both languages hold exactly",
+      "input": "74_integers_up_to_53_bits.input.md",
+      "patch": "74_integers_up_to_53_bits.patch.json",
+      "expected": "74_integers_up_to_53_bits.expected.md"
+    },
+    {
+      "id": "75_refuse_integer_past_53_bits",
+      "description": "An integer past what both languages hold exactly is refused, not rounded",
+      "input": "75_refuse_integer_past_53_bits.input.md",
+      "patch": "75_refuse_integer_past_53_bits.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "76_refuse_a_fraction",
+      "description": "A number with a fractional part is refused: the two languages print it differently",
+      "input": "76_refuse_a_fraction.input.md",
+      "patch": "76_refuse_a_fraction.patch.json",
+      "error": "invalid_value"
+    }
+  ]
+}

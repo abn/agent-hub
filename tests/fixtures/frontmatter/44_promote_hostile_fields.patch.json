@@ -1,0 +1,8 @@
+{
+  "operation": "promote",
+  "session_name": "s \"q\" #1",
+  "session_id": "sess_01j5a",
+  "from_path": "/fs/notes.md",
+  "title": "he said \"x\": y",
+  "description": "line1\nstatus: deprecated"
+}
