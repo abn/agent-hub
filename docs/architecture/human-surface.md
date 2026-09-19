@@ -181,7 +181,8 @@ create route. The id is the slug every MCP call and every other table names,
 so it is read-only after creation and a body that carries one is refused. An
 agent's personal space is settable like any other project; only deleting it is
 refused, because that is the agent's lifecycle rather than a setting. The
-routes ship; the Project settings screen does not.
+Project settings screen is the client of both routes: it reads the project,
+and a save is one `PATCH` that names only the fields the reader changed.
 
 A batch prune takes every ended session of one project, or of every project,
 with the same soft delete, undo window and sweep as pruning one. It never
@@ -214,7 +215,7 @@ it, and the project tabs sit in the same shell.
 | Sessions | Sessions per project, with End and a Prune that is confirmed in a dialog and undoable for 30 seconds. Session rows carry the state dot, owner, mono size and a chevron; the detail shows three stat cards, the lineage and handoff note, a Latest event line, a drill-down brain tree with lazy-loaded children, and a pinned End / Prune action bar. An audit log over the brain file's own tool calls is intended design, not yet shipped; the Latest event line is the session's newest feed event, not that log. |
 | Search | One box over feed, artifacts, and sessions, with grouped results and filters. |
 | Storage | The data path and node, what is used against the volume's own capacity, and a stacked bar by kind (events, sessions, artifacts, knowledge) whose legend carries each kind's byte figure, so the bar is never the only place a number lives. A row per project shows its total, its own bar and the same split in words, and a Prune button with the bytes its ended sessions would free. A Prune all card reviews the affected projects, session counts and bytes in a dialog first. Either prune is one request, confirmed with Keep focused first, and undoable from the toast for 30 seconds. A hub whose projects hold nothing shows the empty state instead. Pruning a single session stays on the Sessions screen. |
-| Project settings | Deletion ships, under the global Settings screen, and the routes behind the screen ship: renaming a project and setting its artifact password policy. The dedicated Project settings screen, with the read-only slug and the reserved retention hint, is intended design, not yet shipped. |
+| Project settings | Reached from the gear in a project's header, at `#/projects/<id>/settings`. The name is an editable field; the slug is shown in mono as text, not as a field, because it is read-only after creation; the artifact password policy is a radio group over `off`, `optional` and `required`. Save stays disabled until something differs from the hub's copy and sends only what differs. A blank name is caught on the screen, and a name or policy the hub refuses is reported beside that control with the hub's own reason while the form keeps what was typed. Leaving with edits pending asks first, in the confirmation dialog. Retention is a reserved card that says automatic pruning is not in v1 and links to Storage; it carries no control. Delete project opens the same confirmation the global Settings list uses, and is not offered for an agent's personal space. |
 
 Agent and access management lives under Settings, not a tab. It lists agents
 with their trust level, creates an agent and its personal space, promotes or
@@ -233,7 +234,7 @@ A session opens into a detail view that lists its brain keys and files
 and offers End and Prune. Reassigning a session to another agent is the
 human's move for an agent that is not coming back, over the reassign route; the
 PWA has no control for it yet. Agents pick work up themselves and ask nobody. Project deletion is a destructive action under Settings
-behind a confirmation; an agent's personal space cannot be deleted. Inbox
+and on the project's own settings screen, behind a confirmation; an agent's personal space cannot be deleted. Inbox
 notifications are opt-in from Settings, request permission only on that
 action, and carry only waiting-on-you items; without permission or support
 they degrade silently. True background push is deferred, by

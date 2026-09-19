@@ -37,6 +37,20 @@ software release notes and the repository changelog.
   Home response has no node name, no project display names and no list of the
   waiting queue, so Home omits the node line, names projects by slug, and
   lists only the waiting items that are among the newest events.
+## 2026-09-18, a project's own settings screen
+
+* **Update**: Project settings ships as its own screen, behind a gear in the
+  project header. It edits the name, shows the slug in mono as text because
+  the slug is read-only after creation, and sets the artifact password policy
+  from a radio group over the hub's three values. Save is disabled until
+  something differs, sends one request naming only what changed, and a
+  refusal from the hub lands beside the control it is about without costing
+  the reader what they typed. Leaving with edits pending asks first. The
+  retention card is present and marked reserved, with a link to Storage and
+  no control. Delete project sits on the screen behind the existing
+  confirmation; the list under the global Settings screen stays.
+* **Note**: The architecture and design pages no longer list Project settings
+  as intended design.
 
 ## 2026-09-18, a session, its brain as a tree
 

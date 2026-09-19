@@ -13,8 +13,8 @@ default, one step louder when something waits, never alarming. This page
 records the design system behind it. The installable PWA shell, its screens,
 the Agents and access section under Settings, session detail, project
 deletion, opt-in inbox notifications, the confirmation dialog in front of a
-destructive action, the undo toast, and the reply composer ship. Project
-settings as its own screen, an explicit read state, the rest of the swipe
+destructive action, the undo toast, the reply composer, and Project settings
+as its own screen ship. An explicit read state, the rest of the swipe
 gestures, and a desktop list plus detail layout are intended design, not yet
 shipped.
 
@@ -69,9 +69,10 @@ both a reader who cannot separate the tints and a reader who hears the page.
 ## Screens
 
 Eight screens: Home, Inbox, Project feed, Artifacts and viewer, Sessions and
-session, Search, Storage and prune, Project settings. Project settings is
-intended design, not yet shipped; agent and access management ships today as a
-section of the global Settings screen rather than under Project settings.
+session, Search, Storage and prune, Project settings. Project settings holds
+the name, the read-only slug, the artifact password policy, the reserved
+retention card, Save and Delete project; agent and access management ships as
+a section of the global Settings screen rather than under Project settings.
 Mobile is primary with a four-tab bar of labelled icons (Home, Inbox,
 Projects, Search); desktop swaps in a 52px top bar with the wordmark, the
 three nav links (Inbox carrying the same badge), an inline search field with
