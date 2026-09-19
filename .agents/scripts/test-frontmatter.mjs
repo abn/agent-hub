@@ -1014,18 +1014,6 @@ const PINNED = [
     js: { ok: "---\nk:\n  - by: b\n---\n" },
   },
   {
-    why: "a list inside a record is a load error in the reference's JSON reader, not a refusal",
-    op: '{"operation":"patch","changes":[["k",[{"by":["a"]}]]]}',
-    rust: "load_error",
-    js: { error: "invalid_value" },
-  },
-  {
-    why: "a mapping inside a record is a load error in the reference's JSON reader, not a refusal",
-    op: '{"operation":"patch","changes":[["k",[{"by":{"a":"b"}}]]]}',
-    rust: "load_error",
-    js: { error: "invalid_value" },
-  },
-  {
     why: "2^63 - 1 fits the reference's integer and rounds to 2^63 here, which moves it across the order of checks",
     op: '{"operation":"patch","changes":[["bad key","x"],["k",9223372036854775807]]}',
     rust: { error: "invalid_key" },

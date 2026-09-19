@@ -589,7 +589,7 @@ fn value_error<E: de::Error>(reason: &str) -> E {
 
 struct ScalarVisitor;
 
-impl Visitor<'_> for ScalarVisitor {
+impl<'de> Visitor<'de> for ScalarVisitor {
     type Value = Scalar;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -620,6 +620,17 @@ impl Visitor<'_> for ScalarVisitor {
 
     fn visit_unit<E: de::Error>(self) -> Result<Scalar, E> {
         Err(value_error("a null inside a value"))
+    }
+
+    // A record field holds one scalar. A list or a mapping there is a value
+    // that cannot be written, so it is refused as one rather than failing to
+    // load, which a caller could not tell from a malformed request.
+    fn visit_seq<A: de::SeqAccess<'de>>(self, _: A) -> Result<Scalar, A::Error> {
+        Err(value_error("a list inside a record"))
+    }
+
+    fn visit_map<A: de::MapAccess<'de>>(self, _: A) -> Result<Scalar, A::Error> {
+        Err(value_error("a mapping inside a record"))
     }
 }
 

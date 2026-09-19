@@ -49,9 +49,10 @@ to the same rule as a key, so an integer-like name such as `"1"`, the one kind
 a JavaScript object moves ahead of the fields written before it, is refused
 with `invalid_value` and never reordered.
 
-The corpus never repeats a field name inside one record and never puts a list
-or a mapping inside one. JSON readers disagree about both before a patcher
-sees the value; do not add such a case.
+A record field holds one scalar: a list or a mapping there is refused with
+`invalid_value`. The corpus never repeats a field name inside one record: a
+JavaScript reader keeps the last and cannot see the repeat, so do not add
+such a case.
 
 `review` appends `{by, at}` to the `verified` sequence:
 

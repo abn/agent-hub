@@ -588,6 +588,20 @@
       "input": "84_refuse_key_before_range.input.md",
       "patch": "84_refuse_key_before_range.patch.json",
       "error": "invalid_key"
+    },
+    {
+      "id": "85_refuse_list_inside_record",
+      "description": "A record field holds one scalar: a list there is refused, not a load failure",
+      "input": "85_refuse_list_inside_record.input.md",
+      "patch": "85_refuse_list_inside_record.patch.json",
+      "error": "invalid_value"
+    },
+    {
+      "id": "86_refuse_mapping_inside_record",
+      "description": "A record field holds one scalar: a mapping there is refused, not a load failure",
+      "input": "86_refuse_mapping_inside_record.input.md",
+      "patch": "86_refuse_mapping_inside_record.patch.json",
+      "error": "invalid_value"
     }
   ]
 }

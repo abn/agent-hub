@@ -1,0 +1,15 @@
+{
+  "operation": "patch",
+  "changes": [
+    [
+      "k",
+      [
+        {
+          "by": [
+            "a"
+          ]
+        }
+      ]
+    ]
+  ]
+}
