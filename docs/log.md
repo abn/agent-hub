@@ -80,6 +80,26 @@ software release notes and the repository changelog.
   the hub's skill document gives, filled with this hub's origin and never
   with the reader's own token. Where the browser has no clipboard, as on a
   plain LAN address, the text is shown selected to be copied by hand.
+## 2026-09-18, an inbox that can be read
+
+* **Update**: The Inbox now matches the design. It reads in three groups,
+  Waiting on you and Unread with their counts and Earlier for what has been
+  read, folded on the desktop. A row carries a one-line body on a waiting
+  item and a footer of project and agent; an approval offers Decline beside
+  Approve, each asked for in a dialog. Opening a row shows the item as a card
+  with its answers at full size, and the open item lives in the address.
+* **Update**: Read state reaches the screen. An unread row carries a dot, its
+  weight and the word Unread for a reader who cannot see either. Opening a
+  row, a swipe right, or the row's Mark read control marks it read, with an
+  undo; the header carries Mark all read and an Unread only filter that
+  survives a reload.
+* **Update**: The Inbox row swipes and the pull to refresh ship, each with a
+  control that does the same thing: a swipe left uncovers a waiting row's
+  actions and decides nothing, and a last-synced line with a Refresh control
+  stands in for a spinner. With reduced motion asked for, nothing slides
+  under the finger.
+* **Note**: Quick answers on a question, a snooze under a swipe, and a note
+  sent with a decision stay intended design.
 
 ## 2026-09-18, a session, its brain as a tree
 

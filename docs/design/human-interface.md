@@ -14,9 +14,10 @@ records the design system behind it. The installable PWA shell, its screens,
 the Agents and access section under Settings, session detail, project
 deletion, opt-in inbox notifications, the confirmation dialog in front of a
 destructive action, the undo toast, the reply composer, and Project settings
-as its own screen ship. An explicit read state, the rest of the swipe
-gestures, and a desktop list plus detail layout are intended design, not yet
-shipped.
+as its own screen ship. The Inbox ships its read state, its row swipes and its
+pull to refresh, and the desktop list plus detail layout ships for Sessions
+and the Inbox. The swipe gestures outside the Inbox and the toast are intended
+design, not yet shipped.
 
 ## Tokens
 
@@ -89,12 +90,13 @@ a 420px list beside a detail pane.
 - Every verb is reachable in two taps from Home: read, answer, approve, prune.
 - Action items are inline in the Inbox as the first group, above unread, and
   grouped by actor within that group.
-- Read is explicit, by opening an item or a swipe; never scroll-past. This is
-  intended design, not yet shipped: nothing marks an item read today.
 - Feeds are grouped by day, with kind filters as chips. A project feed keeps
   Today and Yesterday open and folds older days behind "Earlier", a disclosure
   with the count of what it holds. An event the reader has not seen carries a
   dot, a heavier title and the word for it, never the colour alone.
+- Read is explicit, by opening an item, a swipe right, or the row's own Mark
+  read control; never scroll-past. The Inbox header carries Mark all read and
+  an Unread only filter, and a change of read state offers an undo.
 - Time is short on a row and whole on request. A row carries a compact relative
   form in the reader's own locale, counting itself up while the app is open;
   the full local timestamp is the element's accessible name and its hover
@@ -128,9 +130,14 @@ a 420px list beside a detail pane.
   only way back and the control that started the action has gone. One toast is
   on screen at a time and a new one replaces it.
 - Swipes are first-class on mobile, never destructive, and always have a tap
-  equivalent. Only the toast's swipe-down dismiss ships, with a dismiss control
-  and Esc beside it; the row and screen gestures are intended design, not yet
-  shipped.
+  equivalent. The toast's swipe-down dismiss ships, with a dismiss control and
+  Esc beside it. On an Inbox row a swipe right marks it read or unread and a
+  swipe left uncovers the row's actions without deciding anything; both are
+  also controls drawn on the row. A pull down at the top of the Inbox
+  refreshes it, as does the Refresh control beside the last-synced line. The
+  row follows the finger, and with reduced motion asked for it stays put and
+  the release reveals. The edge swipe back, the tab swipe and swipes on feed
+  rows are intended design, not yet shipped.
 
 ## Alert hierarchy
 
