@@ -215,6 +215,38 @@ def visit(page, watch: Watch, route: str, hash_value: str, title: str, data: lis
     watch.drain_rejections()
 
 
+def check_router(page, watch: Watch, routes: list) -> None:
+    """The router dispatches known routes, handles unknown routes, and tracks history."""
+    for route, hash_value, title, data in routes:
+        visit(page, watch, route, hash_value, title, data)
+
+    watch.enter("router: unknown route fallback")
+    page.evaluate("location.hash = '#/nonexistent-route-xyz'")
+    if not settle(
+        page,
+        f"document.title.includes('Home') || document.querySelector('main h1')?.textContent === {json.dumps(home_title())}",
+    ):
+        watch.fail("unknown route did not fall back to Home screen")
+    watch.drain_rejections()
+
+    watch.enter("router: history navigation")
+    goto(page, "#/inbox", "Inbox")
+    goto(page, "#/storage", "Storage")
+    page.go_back()
+    if not settle(
+        page,
+        "location.hash.startsWith('#/inbox') && document.querySelector('main h1')?.textContent === 'Inbox'",
+    ):
+        watch.fail("router history Back did not return to Inbox")
+    page.go_forward()
+    if not settle(
+        page,
+        "location.hash.startsWith('#/storage') && document.querySelector('main h1')?.textContent === 'Storage'",
+    ):
+        watch.fail("router history Forward did not return to Storage")
+    watch.drain_rejections()
+
+
 def set_token(page, watch: Watch) -> None:
     """Enter the token the way the Settings screen does, then arm the watch."""
     watch.enter("settings: token")
@@ -2471,31 +2503,30 @@ def check_desktop_two_pane(browser, watch: Watch, port: int, project: str) -> No
     )
     page = context.new_page()
     page.on("pageerror", lambda error: watch.fail(f"desktop: uncaught error: {error}"))
-    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-    page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
-    if not settle(page, "!!document.querySelector('main .panes')"):
-        watch.fail("the sessions screen does not use the two-pane container")
+    try:
+        page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
+        if not settle(page, "!!document.querySelector('main .panes')"):
+            watch.fail("the sessions screen does not use the two-pane container")
+            return
+        width = page.evaluate(
+            "(() => { const pane = document.querySelector('main .pane-list');"
+            " return pane ? pane.getBoundingClientRect().width : 0; })()"
+        )
+        if abs(width - 420) > 1:
+            watch.fail(f"the list pane is {width:.0f}px wide, not the design's 420px")
+        if not page.evaluate("(() => { const p = document.querySelector('main .pane-detail'); return !!p && getComputedStyle(p).display !== 'none'; })()"):
+            watch.fail("the detail pane is hidden at desktop width")
+        if harness.SESSION_NAME not in page.evaluate(
+            "(() => { const p = document.querySelector('main .pane-detail'); return p ? p.textContent : ''; })()"
+        ):
+            watch.fail("the detail pane does not carry the session")
+        if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
+            watch.fail("the top bar is not visible at desktop width")
+    finally:
         context.close()
         watch.page.bring_to_front()
         watch.drain_rejections()
-        return
-    width = page.evaluate(
-        "(() => { const pane = document.querySelector('main .pane-list');"
-        " return pane ? pane.getBoundingClientRect().width : 0; })()"
-    )
-    if abs(width - 420) > 1:
-        watch.fail(f"the list pane is {width:.0f}px wide, not the design's 420px")
-    if not page.evaluate("(() => { const p = document.querySelector('main .pane-detail'); return !!p && getComputedStyle(p).display !== 'none'; })()"):
-        watch.fail("the detail pane is hidden at desktop width")
-    if harness.SESSION_NAME not in page.evaluate(
-        "(() => { const p = document.querySelector('main .pane-detail'); return p ? p.textContent : ''; })()"
-    ):
-        watch.fail("the detail pane does not carry the session")
-    if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
-        watch.fail("the top bar is not visible at desktop width")
-    context.close()
-    watch.page.bring_to_front()
-    watch.drain_rejections()
 
 
 def check_desktop_topbar(browser, watch: Watch, port: int) -> None:
@@ -4682,6 +4713,53 @@ def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
         watch.drain_rejections()
 
 
+class SetupDied(Exception):
+    """The token never reached the app, so no check could tell anything."""
+
+
+def reset_page(watch: Watch) -> None:
+    """Put the page back where a check expects to find it after one has died.
+
+    A check that dies can leave a held request, an open dialog or its own
+    screen behind, and every check after it would fail for that reason alone.
+    """
+    page = watch.page
+    for step in (
+        lambda: page.unroute_all(behavior="ignoreErrors"),
+        lambda: page.evaluate(
+            "(() => { if (window.__held) { window.__held.release(); window.__held.restore(); }"
+            " if (window.__sendNow) window.__sendNow();"
+            " document.querySelectorAll('dialog[open]').forEach((d) => d.close()); })()"
+        ),
+        lambda: goto(page, "#/home", home_title()),
+    ):
+        try:
+            step()
+        except Exception:
+            pass
+
+
+def run_step(watch: Watch, fn, *args, **kwargs) -> bool:
+    """Run one check, and name it when it dies rather than finishes.
+
+    The phase is the check's own name until the check enters one, so a death
+    on its first line is not reported under the check before it.
+    """
+    watch.enter(fn.__name__)
+    try:
+        fn(*args, **kwargs)
+        return True
+    except PlaywrightTimeoutError as err:
+        what = f"timed out: {str(err).splitlines()[0] if str(err) else 'timeout exceeded'}"
+    except Exception as err:
+        what = f"died with {type(err).__name__}: {str(err).splitlines()[0] if str(err) else ''}"
+    watch.fail(
+        f"{fn.__name__} {what.rstrip('. ')}. The page was reset; failures reported after this one may follow from it"
+    )
+    reset_page(watch)
+    return False
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -4698,147 +4776,154 @@ def run() -> int:
             )
             page = context.new_page()
             watch = Watch(page, port)
-            # Not networkidle: the freshness stream holds a connection open.
-            page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-            page.wait_for_timeout(300)
+            try:
+                # Not networkidle: the freshness stream holds a connection open.
+                page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+                page.wait_for_timeout(300)
 
-            set_token(page, watch)
+                if not run_step(watch, set_token, page, watch):
+                    raise SetupDied
 
-            routes = [
-                ("home", "#/home", home_title(), [harness.FINISHED_SUMMARY, "waiting on you"]),
-                ("inbox", "#/inbox", "Inbox", [harness.QUESTION_SUBJECT]),
-                (
-                    "projects",
-                    f"#/projects/{quote(project)}/feed",
-                    "Checks",
-                    [harness.FINISHED_SUMMARY],
-                ),
-                (
-                    "projects",
-                    f"#/projects/{quote(project)}/artifacts",
-                    "Checks",
-                    [harness.ARTIFACT_TITLE],
-                ),
-                (
-                    "projects",
-                    f"#/projects/{quote(project)}/sessions",
-                    "Checks",
-                    [harness.SESSION_NAME],
-                ),
-                (
-                    "session",
-                    f"#/session?project={quote(project)}&id={quote(seeded['session_id'])}",
-                    harness.SESSION_NAME,
-                    [harness.BRAIN_PATH],
-                ),
-                ("storage", "#/storage", "Storage", [project]),
-                (
-                    "search",
-                    f"#/search?q={quote(harness.SEARCH_TERM)}",
-                    "Search",
-                    [harness.FINISHED_SUMMARY],
-                ),
-                ("settings", "#/settings", "Settings", [harness.AGENT_NAME]),
-                (
-                    "projects",
-                    f"#/projects/{quote(project)}/settings",
-                    "Project settings",
-                    [project, "Automatic pruning"],
-                ),
-            ]
-            for route, hash_value, title, data in routes:
-                visit(page, watch, route, hash_value, title, data)
+                routes = [
+                    ("home", "#/home", home_title(), [harness.FINISHED_SUMMARY, "waiting on you"]),
+                    ("inbox", "#/inbox", "Inbox", [harness.QUESTION_SUBJECT]),
+                    (
+                        "projects",
+                        f"#/projects/{quote(project)}/feed",
+                        "Checks",
+                        [harness.FINISHED_SUMMARY],
+                    ),
+                    (
+                        "projects",
+                        f"#/projects/{quote(project)}/artifacts",
+                        "Checks",
+                        [harness.ARTIFACT_TITLE],
+                    ),
+                    (
+                        "projects",
+                        f"#/projects/{quote(project)}/sessions",
+                        "Checks",
+                        [harness.SESSION_NAME],
+                    ),
+                    (
+                        "session",
+                        f"#/session?project={quote(project)}&id={quote(seeded['session_id'])}",
+                        harness.SESSION_NAME,
+                        [harness.BRAIN_PATH],
+                    ),
+                    ("storage", "#/storage", "Storage", [project]),
+                    (
+                        "search",
+                        f"#/search?q={quote(harness.SEARCH_TERM)}",
+                        "Search",
+                        [harness.FINISHED_SUMMARY],
+                    ),
+                    ("settings", "#/settings", "Settings", [harness.AGENT_NAME]),
+                    (
+                        "projects",
+                        f"#/projects/{quote(project)}/settings",
+                        "Project settings",
+                        [project, "Automatic pruning"],
+                    ),
+                ]
+                run_step(watch, check_router, page, watch, routes)
 
-            check_kind_glyphs(page, watch, project)
-            check_type_scale(page, watch, project)
-            check_text_floor(page, watch, routes)
-            check_controls(page, watch, routes)
-            check_relative_time(page, watch)
-            check_time_counts_up(browser, watch, port)
-            check_search_key(page, watch)
-            check_typing_is_not_a_shortcut(page, watch)
-            check_row_keys(page, watch)
-            check_enter_opens(page, watch, project)
-            check_shortcut_help(page, watch)
-            check_approve_key(page, watch)
-            check_agent_markup_is_text(page, watch)
-            check_home_fetches_once(page, watch)
-            check_stale_render(page, watch, project)
-            check_artifact(page, watch, project)
-            check_theme(page, watch)
-            check_system_theme(page, watch)
-            check_forced_colours_ring(page, watch)
-            check_shortcuts_can_be_turned_off(page, watch)
-            check_empty_state(page, watch)
-            check_search(page, watch)
-            check_search_as_you_type(page, watch)
-            check_search_race(page, watch)
-            check_search_is_text(page, watch)
-            check_search_rows_take_keys(page, watch)
-            check_toast_leaves_a_writer_alone(page, watch, project)
-            check_answer(page, watch, project)
-            check_inbox_groups(page, watch, project)
-            check_inbox_read_state(page, watch)
-            check_inbox_swipe(page, watch)
-            check_inbox_detail(page, watch)
-            check_inbox_decline(page, watch)
-            check_inbox_row_opens(page, watch)
-            check_inbox_one_decision(page, watch, port, project)
-            check_inbox_refresh(page, watch)
-            check_inbox_mark_all(page, watch)
-            check_inbox_empty(page, watch)
-            check_inbox_desktop(browser, watch, port)
-            check_approve(page, watch)
-            check_session_row_state(page, watch, project)
-            check_tree_roles(page, watch, project, seeded["session_id"])
-            check_lazy_children(page, watch, project, seeded["session_id"])
-            check_tree_keys(page, watch, project, seeded["session_id"])
-            check_file_enter(page, watch, project, seeded["session_id"])
-            check_stat_cards(page, watch, project, seeded["session_id"])
-            check_action_bar(page, watch, project, seeded["session_id"])
-            check_audit_row(page, watch, project, seeded["session_id"])
-            check_session_times(page, watch, project, seeded["session_id"])
-            check_problem_fields(page, watch)
-            check_keys_between_projects(page, watch, project)
-            check_lineage_handoff(page, watch, project)
-            check_session_end_flips_row(page, watch, project)
-            check_prune(page, watch, project, seeded["session_id"])
-            check_storage_numbers(page, watch)
-            check_storage_bar(page, watch)
-            check_storage_keys(page, watch)
-            check_storage_prune(page, watch)
-            check_storage_prune_all(page, watch)
-            check_gate_in_the_app(page, watch, project, seeded["protected_id"])
-            watch.enter("artifacts: the gate on the public page")
-            for failure in check_public_gate_remembers_and_forgets(
-                port, context, project, seeded["protected_id"]
-            ):
-                watch.fail(failure)
-            check_shell_tabs(page, watch)
-            check_mobile_tabbar(page, watch)
-            check_artifact_link(page, watch, project)
-            check_segmented_tabs(page, watch, project)
-            check_artifact_gallery(page, watch, project)
-            check_viewer_route(page, watch, project, seeded["artifact_id"])
-            check_viewer_back_button(page, watch, project, seeded["artifact_id"])
-            check_version_list(page, watch, port, project)
-            check_empty_project(page, watch, port)
-            check_desktop_two_pane(browser, watch, port, project)
-            check_desktop_topbar(browser, watch, port)
-            # Late: Home carries the newest ten events, and these seed two more.
-            check_home_dashboard(page, watch, port)
-            check_home_fields(page, watch)
-            check_home_quiet(page, watch)
-            check_project_settings(page, watch, port)
-            check_settings_guard_history(page, watch, project)
-            check_feed_screen(browser, watch, port)
-            check_feed_long_today(browser, watch, port)
-            # Last: it seeds sixty more events, which every check above would
-            # have to look past.
-            check_tab_budget(page, watch, port)
+                run_step(watch, check_kind_glyphs, page, watch, project)
+                run_step(watch, check_type_scale, page, watch, project)
+                run_step(watch, check_text_floor, page, watch, routes)
+                run_step(watch, check_controls, page, watch, routes)
+                run_step(watch, check_relative_time, page, watch)
+                run_step(watch, check_time_counts_up, browser, watch, port)
+                run_step(watch, check_search_key, page, watch)
+                run_step(watch, check_typing_is_not_a_shortcut, page, watch)
+                run_step(watch, check_row_keys, page, watch)
+                run_step(watch, check_enter_opens, page, watch, project)
+                run_step(watch, check_shortcut_help, page, watch)
+                run_step(watch, check_approve_key, page, watch)
+                run_step(watch, check_agent_markup_is_text, page, watch)
+                run_step(watch, check_home_fetches_once, page, watch)
+                run_step(watch, check_stale_render, page, watch, project)
+                run_step(watch, check_artifact, page, watch, project)
+                run_step(watch, check_theme, page, watch)
+                run_step(watch, check_system_theme, page, watch)
+                run_step(watch, check_forced_colours_ring, page, watch)
+                run_step(watch, check_shortcuts_can_be_turned_off, page, watch)
+                run_step(watch, check_empty_state, page, watch)
+                run_step(watch, check_search, page, watch)
+                run_step(watch, check_search_as_you_type, page, watch)
+                run_step(watch, check_search_race, page, watch)
+                run_step(watch, check_search_is_text, page, watch)
+                run_step(watch, check_search_rows_take_keys, page, watch)
+                run_step(watch, check_toast_leaves_a_writer_alone, page, watch, project)
+                run_step(watch, check_answer, page, watch, project)
+                run_step(watch, check_inbox_groups, page, watch, project)
+                run_step(watch, check_inbox_read_state, page, watch)
+                run_step(watch, check_inbox_swipe, page, watch)
+                run_step(watch, check_inbox_detail, page, watch)
+                run_step(watch, check_inbox_decline, page, watch)
+                run_step(watch, check_inbox_row_opens, page, watch)
+                run_step(watch, check_inbox_one_decision, page, watch, port, project)
+                run_step(watch, check_inbox_refresh, page, watch)
+                run_step(watch, check_inbox_mark_all, page, watch)
+                run_step(watch, check_inbox_empty, page, watch)
+                run_step(watch, check_inbox_desktop, browser, watch, port)
+                run_step(watch, check_approve, page, watch)
+                run_step(watch, check_session_row_state, page, watch, project)
+                run_step(watch, check_tree_roles, page, watch, project, seeded["session_id"])
+                run_step(watch, check_lazy_children, page, watch, project, seeded["session_id"])
+                run_step(watch, check_tree_keys, page, watch, project, seeded["session_id"])
+                run_step(watch, check_file_enter, page, watch, project, seeded["session_id"])
+                run_step(watch, check_stat_cards, page, watch, project, seeded["session_id"])
+                run_step(watch, check_action_bar, page, watch, project, seeded["session_id"])
+                run_step(watch, check_audit_row, page, watch, project, seeded["session_id"])
+                run_step(watch, check_session_times, page, watch, project, seeded["session_id"])
+                run_step(watch, check_problem_fields, page, watch)
+                run_step(watch, check_keys_between_projects, page, watch, project)
+                run_step(watch, check_lineage_handoff, page, watch, project)
+                run_step(watch, check_session_end_flips_row, page, watch, project)
+                run_step(watch, check_prune, page, watch, project, seeded["session_id"])
+                run_step(watch, check_storage_numbers, page, watch)
+                run_step(watch, check_storage_bar, page, watch)
+                run_step(watch, check_storage_keys, page, watch)
+                run_step(watch, check_storage_prune, page, watch)
+                run_step(watch, check_storage_prune_all, page, watch)
+                run_step(watch, check_gate_in_the_app, page, watch, project, seeded["protected_id"])
 
-            context.close()
-            browser.close()
+                def check_public_gate(port, context, project, protected_id):
+                    watch.enter("artifacts: the gate on the public page")
+                    for failure in check_public_gate_remembers_and_forgets(
+                        port, context, project, protected_id
+                    ):
+                        watch.fail(failure)
+
+                run_step(watch, check_public_gate, port, context, project, seeded["protected_id"])
+                run_step(watch, check_shell_tabs, page, watch)
+                run_step(watch, check_mobile_tabbar, page, watch)
+                run_step(watch, check_artifact_link, page, watch, project)
+                run_step(watch, check_segmented_tabs, page, watch, project)
+                run_step(watch, check_artifact_gallery, page, watch, project)
+                run_step(watch, check_viewer_route, page, watch, project, seeded["artifact_id"])
+                run_step(watch, check_viewer_back_button, page, watch, project, seeded["artifact_id"])
+                run_step(watch, check_version_list, page, watch, port, project)
+                run_step(watch, check_empty_project, page, watch, port)
+                run_step(watch, check_desktop_two_pane, browser, watch, port, project)
+                run_step(watch, check_desktop_topbar, browser, watch, port)
+                # Late: Home carries the newest ten events, and these seed two more.
+                run_step(watch, check_home_dashboard, page, watch, port)
+                run_step(watch, check_home_fields, page, watch)
+                run_step(watch, check_home_quiet, page, watch)
+                run_step(watch, check_project_settings, page, watch, port)
+                run_step(watch, check_settings_guard_history, page, watch, project)
+                run_step(watch, check_feed_screen, browser, watch, port)
+                run_step(watch, check_feed_long_today, browser, watch, port)
+                # Last: it seeds sixty more events, which every check above would
+                # have to look past.
+                run_step(watch, check_tab_budget, page, watch, port)
+            except SetupDied:
+                watch.fail("the token was never set, so no check was run")
+            finally:
+                context.close()
+                browser.close()
 
     if watch.failures:
         for failure in dict.fromkeys(watch.failures):
