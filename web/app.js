@@ -23,6 +23,7 @@ import { answer, approve, inbox } from "./inbox.mjs";
 import { installKeys } from "./keys.mjs";
 import { savePrefs } from "./prefs.mjs";
 import { projectFromHash, projectScreen } from "./project.mjs";
+import { projectSettingsScreen } from "./project-settings.mjs";
 import { render, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
 import { endSession, pruneSession, sessionDetail } from "./sessions.mjs";
@@ -45,7 +46,8 @@ const toFirstProject = (segment) => async () => {
 setScreens({
   home: (params, gen) => home(gen),
   inbox: (params, gen) => inbox(gen),
-  projects: (params, gen, path) => projectScreen(params, gen, path),
+  projects: (params, gen, path) =>
+    path.split("/")[3] === "settings" ? projectSettingsScreen(gen, path) : projectScreen(params, gen, path),
   feed: (params, gen) => {
     if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/feed`;
     else toFirstProject("feed")();

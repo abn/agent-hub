@@ -97,7 +97,9 @@ export async function settingsScreen(gen) {
   );
 }
 
-export async function deleteProject(id) {
+// `leave` is for a screen that is about the project itself: once the project is
+// gone there is nothing there to repaint, so it says where to go instead.
+export async function deleteProject(id, leave) {
   const confirmed = await confirmAction({
     title: `Delete project ${id}?`,
     body: "Its events, artifacts, and session brains are removed for good.",
@@ -107,6 +109,7 @@ export async function deleteProject(id) {
   });
   if (!confirmed) return;
   await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
-  await render();
+  if (leave) leave();
+  else await render();
   toast("Project deleted.");
 }

@@ -858,3 +858,59 @@ button.empty-link {
 .home-storage-hint { font-size: var(--t-12); color: var(--ink-3); }
 .home .empty-state { margin-bottom: 0; }
 /* end component: home */
+/* component: project-settings */
+/* The gear in the project header, and the settings form it opens. The gear's
+   drawn glyph is the design's 18px; its box is the 44px a finger needs. */
+.proj-gear {
+  flex: none; width: 44px; height: 44px; margin: 0 calc(-1 * var(--s-2)) 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-2); border-radius: var(--r-1);
+}
+.proj-gear svg { display: block; }
+.pset-sub { margin: 2px 0 0; color: var(--ink-3); }
+.pset { display: flex; flex-direction: column; }
+.pset-field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--s-3); }
+.pset-field label, .pset-label { margin: 0; font-size: var(--t-13); color: var(--ink-2); }
+.pset-hint { color: var(--ink-3); }
+/* The slug is text in a well, not a field: there is nothing to focus and
+   nothing to type into. --ink-2 because --ink-3 on --surface-2 is under AA. */
+.pset-slug {
+  margin: 0; min-height: 44px; display: flex; align-items: center;
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-1);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
+  font-family: var(--font-mono); font-size: var(--t-15); overflow-wrap: anywhere;
+}
+.pset-policy { border: 0; padding: 0; margin: 20px 0 0; min-width: 0; }
+.pset-policy legend { padding: 0 0 6px; margin: 0; }
+.pset-options {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2);
+}
+.pset-option {
+  display: flex; gap: var(--s-3); align-items: center; margin: 0;
+  padding: var(--s-3) var(--s-4); min-height: 56px;
+  border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.pset-option:last-child { border-bottom: 0; }
+.pset-option input {
+  flex: none; width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0;
+  accent-color: var(--accent); border-radius: 50%;
+}
+/* The platform draws an unchecked radio for the page's colour scheme, which
+   the theme switch does not change, so the dark theme says so here. */
+[data-theme="dark"] .pset-option input { color-scheme: dark; }
+.pset-field input[aria-invalid="true"] { border-color: var(--danger); }
+.pset-option-name { display: block; font-size: var(--t-15); font-weight: 600; color: var(--ink); }
+.pset-option-note { display: block; font-size: var(--t-12); color: var(--ink-3); }
+.pset h2.section-label { margin: 20px 0 6px; }
+.pset-reserved { font-weight: 500; text-transform: none; letter-spacing: 0; }
+.pset-retention {
+  margin: 0; padding: 14px var(--s-4); border-radius: var(--r-2);
+  background: var(--surface-2); border: 1px dashed var(--line-strong);
+  font-size: var(--t-13); line-height: 1.5; color: var(--ink-2);
+}
+.pset-error { margin: 0; color: var(--danger); font-size: var(--t-13); }
+.pset-policy .pset-error, .pset-problem { margin-top: var(--s-2); }
+.pset-actions { display: flex; gap: var(--s-2); margin-top: var(--s-5); }
+.pset-actions .primary { flex: 1; font-weight: 600; }
+.pset-delete { background: transparent; color: var(--danger); }
+/* end component: project-settings */

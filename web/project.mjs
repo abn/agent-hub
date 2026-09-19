@@ -11,6 +11,7 @@ import { emptyStateHTML } from "./empty.mjs";
 import { feedSection } from "./feed.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
+import { settingsLink } from "./project-settings.mjs";
 import { sessionRows } from "./sessions.mjs";
 
 const SEGMENTS = ["feed", "artifacts", "sessions"];
@@ -66,6 +67,7 @@ function header(project, stats, footprint) {
         <h1>${esc(project.display_name)}</h1>
         ${detail}
       </div>
+      ${settingsLink(project.id)}
     </div>`;
 }
 
