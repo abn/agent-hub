@@ -53,7 +53,6 @@ version = "0.0.0"
 dependencies = [
  "agentfs-sdk",
  "axum",
- "http-body-util",
  "rand 0.9.5",
  "rmcp",
  "rustix 1.1.4",

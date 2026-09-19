@@ -11,7 +11,7 @@ publish = false
 turso = "=0.8.0-pre.11"
 agentfs-sdk = { path = "vendor/agentfs-sdk" }
 axum = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
@@ -50,4 +50,3 @@ tailnet = ["dep:tailscale"]
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
