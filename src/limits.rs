@@ -180,3 +180,11 @@ pub fn check_artifact(bytes: usize) -> Result<()> {
     }
     Ok(())
 }
+
+/// The most terms one search query contributes. A query longer than this is a
+/// paste, not a search, and the terms past it are left out.
+pub const SEARCH_TERMS_MAX: usize = 64;
+
+/// The most bytes of a made-safe search query handed to the engine, well under
+/// the engine's own 16 KiB refusal so quoting can never push a query past it.
+pub const SEARCH_QUERY_BYTES_MAX: usize = 8 * 1024;

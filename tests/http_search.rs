@@ -261,3 +261,65 @@ async fn a_capped_result_page_says_it_was_capped() {
         "a capped page says so rather than reading as a total: {capped}"
     );
 }
+
+#[tokio::test]
+async fn search_query_decoding_handles_percent_encoding_consistently() {
+    let state = state().await;
+    seed(&state).await;
+
+    let app = router(state);
+    let res = app
+        .oneshot(get(
+            "/api/v1/search?q=engine%20groundwork",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["count"], 1);
+}
+
+#[tokio::test]
+async fn search_tolerates_hostile_syntax() {
+    let state = state().await;
+    seed(&state).await;
+
+    let hostile_queries = [
+        "engine AND (OR NOT",
+        "NEAR/3",
+        "\"",
+        "\"engine",
+        "\"*\"",
+        "foo:bar",
+        // Punctuation the term scanner keeps: a term of nothing but these is
+        // not a word the index can look up.
+        "- -",
+        "__ ___",
+        "-",
+        "_",
+    ];
+    // Quoting adds bytes to every term, so a query that was under the engine's
+    // own limit must still be under it once it has been made safe.
+    let long = "ab ".repeat(3400);
+    let hostile_queries: Vec<&str> = hostile_queries
+        .iter()
+        .copied()
+        .chain([long.as_str()])
+        .collect();
+
+    for query in hostile_queries {
+        let app = router(state.clone());
+        let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+        let uri = format!("/api/v1/search?q={encoded}");
+        let res = app
+            .oneshot(get(&uri, Some("Bearer token")))
+            .await
+            .expect("request");
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "hostile query {query:?} should return 200 OK"
+        );
+    }
+}

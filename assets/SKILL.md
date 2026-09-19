@@ -218,6 +218,12 @@ comment_resolve(artifact_id, comment_id, done, delete_token?)
 comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
+A `search` query is read as words: any text is accepted and never an error,
+a `"quoted phrase"` is matched as a phrase, and punctuation and the bare
+operators `AND`, `OR`, `NOT` and `NEAR` are left out. A query with no word in
+it finds nothing. A `thread_id` given to `signal_append` must be an event in
+the same project; any other id is refused as not found.
+
 `search` with `scope: "global"` covers every visible project; otherwise pass
 `project_id`, and `type` filters by kind: `feed`, `artifact`, `brain` for
 session brains, or `kb` for knowledge base pages. `session_id` narrows the

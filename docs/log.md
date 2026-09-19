@@ -4,6 +4,21 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-19, a search query is words, and a thread is in its project
+
+* **Update**: The served skill document (`GET /SKILL.md`) now says how a search
+  query is read: any text is accepted, a quoted phrase is a phrase, punctuation
+  and the bare operators are left out, and a query with no word in it finds
+  nothing rather than failing. It also says that a `thread_id` given to
+  `signal_append` must name an event in the same project.
+
+## 2026-09-19, clearing an artifact label on update
+
+* **Update**: `artifact_update` accepts an explicit null or empty string to clear
+  an existing label, matching how `envelope: null` unprotects an artifact.
+  Omitting the label keeps the current version's label. Described in
+  [artifacts](usage/artifacts.md).
+
 ## 2026-09-19, integrity verification for vendored scripts
 
 * **Update**: Documented the manifest and integrity check for third-party scripts
@@ -107,13 +122,6 @@ software release notes and the repository changelog.
   under the finger.
 * **Note**: Quick answers on a question, a snooze under a swipe, and a note
   sent with a decision stay intended design.
-## 2026-09-19, clearing an artifact label on update
-
-* **Update**: `artifact_update` accepts an explicit null or empty string to clear
-  an existing label, matching how `envelope: null` unprotects an artifact.
-  Omitting the label keeps the current version's label. Described in
-  [artifacts](usage/artifacts.md).
-
 ## 2026-09-18, a session, its brain as a tree
 
 * **Update**: The sessions screen and its detail view now match the design.

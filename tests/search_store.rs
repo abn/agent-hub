@@ -524,3 +524,78 @@ async fn a_session_scope_is_confined_like_every_other() {
         "a session in an unreachable project stays out of the results"
     );
 }
+
+#[tokio::test]
+async fn hostile_search_queries_do_not_error() {
+    let dir = temp_dir("search-hostile");
+    let db = open(&dir).await;
+    seed(&db, &dir).await;
+
+    for hostile in [
+        "\"",
+        "\"unclosed",
+        "foo (bar",
+        "<script>alert(1)</script>",
+        "()",
+        "AND OR NOT",
+        ":*",
+        "engine*",
+        "\"engine report\"",
+    ] {
+        let results = search::query(
+            &db,
+            &SearchQuery {
+                text: hostile.to_string(),
+                project_id: None,
+                kind: None,
+                session_id: None,
+                limit: 10,
+            },
+        )
+        .await
+        .expect("hostile search query should never return engine error");
+
+        if hostile == "()" || hostile == "\"" || hostile == ":*" {
+            assert!(
+                results.is_empty(),
+                "query with no terms returns empty for {hostile}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_made_safe_query_keeps_words_and_phrases_and_nothing_else() {
+    use agent_hub::store::search::sanitize_fts;
+
+    assert_eq!(sanitize_fts("engine state"), "\"engine\" \"state\"");
+    assert_eq!(
+        sanitize_fts("\"engine state\" notes"),
+        "\"engine state\" \"notes\""
+    );
+    // An unbalanced quote is no phrase; its words are still searched.
+    assert_eq!(sanitize_fts("\"engine state"), "\"engine\" \"state\"");
+    // The bare operators are not words the reader is looking for.
+    assert_eq!(
+        sanitize_fts("engine AND state OR NOT x"),
+        "\"engine\" \"state\" \"x\""
+    );
+    // Lower case they are ordinary words.
+    assert_eq!(
+        sanitize_fts("salt and pepper"),
+        "\"salt\" \"and\" \"pepper\""
+    );
+    // Punctuation alone is nothing to look up, inside a phrase or out of one.
+    for nothing in ["- -", "__ ___", "\"-\"", "()*:", "   ", ""] {
+        assert_eq!(sanitize_fts(nothing), "", "{nothing:?} is searchable");
+    }
+    // A word may carry them.
+    assert_eq!(
+        sanitize_fts("last-run snake_case"),
+        "\"last-run\" \"snake_case\""
+    );
+    // However long the input, what reaches the engine stays under its limit.
+    let long = sanitize_fts(&"ab ".repeat(10_000));
+    assert!(long.len() <= agent_hub::limits::SEARCH_QUERY_BYTES_MAX);
+    assert!(long.starts_with("\"ab\""));
+}

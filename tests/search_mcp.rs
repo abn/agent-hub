@@ -154,5 +154,11 @@ fn search_finds_appended_content() {
         "an empty query is a tool error"
     );
 
+    let hostile = server.call_tool("search", json!({"query": "engine AND (OR NOT"}));
+    assert!(
+        hostile.get("error").is_none(),
+        "a hostile query does not fail: {hostile}"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

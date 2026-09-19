@@ -143,7 +143,12 @@ async fn query_limited(
         return Ok(Vec::new());
     }
 
-    let mut params = vec![Value::Text(search.text.clone())];
+    let safe_query = sanitize_fts(&search.text);
+    if safe_query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut params = vec![Value::Text(safe_query)];
     let mut scopes = String::new();
     if let Some(project_id) = &search.project_id {
         params.push(Value::Text(project_id.clone()));
@@ -343,4 +348,96 @@ fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
             "expected text in a search column, found {other:?}"
         ))),
     }
+}
+
+/// Turn arbitrary user input into a safe FTS query.
+///
+/// Balanced double-quoted phrases are preserved as phrase queries. Unbalanced
+/// quotes and FTS syntax characters (parentheses, colons, asterisks, booleans)
+/// are stripped, and bare terms are quoted as string literals so no input can
+/// trigger an FTS parse error. If the input contains no searchable terms, an
+/// empty string is returned.
+pub fn sanitize_fts(input: &str) -> String {
+    // A word is kept only if it holds a letter or a digit: a run of nothing but
+    // `-` or `_` is not something the index can look up, and the engine refuses
+    // a query made only of those. The bare operators are dropped rather than
+    // searched for, since a reader who types `engine AND state` is not looking
+    // for the word "and".
+    fn is_word(ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_' || ch == '-'
+    }
+    fn searchable(term: &str) -> bool {
+        term.chars().any(char::is_alphanumeric)
+    }
+    fn operator(term: &str) -> bool {
+        matches!(term, "AND" | "OR" | "NOT" | "NEAR")
+    }
+
+    let mut terms: Vec<String> = Vec::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        if ch == '"' {
+            chars.next();
+            let mut words = Vec::new();
+            let mut word = String::new();
+            let mut closed = false;
+            for inner in chars.by_ref() {
+                if inner == '"' {
+                    closed = true;
+                    break;
+                }
+                if is_word(inner) {
+                    word.push(inner);
+                } else if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            if !word.is_empty() {
+                words.push(word);
+            }
+            words.retain(|w| searchable(w));
+            if words.is_empty() {
+                continue;
+            }
+            if closed {
+                // A balanced phrase is honoured as one.
+                terms.push(format!("\"{}\"", words.join(" ")));
+            } else {
+                terms.extend(words.into_iter().map(|w| format!("\"{w}\"")));
+            }
+        } else if is_word(ch) {
+            let mut word = String::new();
+            while let Some(&c) = chars.peek() {
+                if !is_word(c) {
+                    break;
+                }
+                word.push(c);
+                chars.next();
+            }
+            if searchable(&word) && !operator(&word) {
+                terms.push(format!("\"{word}\""));
+            }
+        } else {
+            chars.next();
+        }
+    }
+
+    // Quoting costs two bytes and a separator per term, so a long query grows
+    // on its way through here. The engine refuses a query past its own limit;
+    // the terms that fit are searched and the rest are left out, which a query
+    // of that length will not miss.
+    let mut safe = String::new();
+    for (count, term) in terms.iter().enumerate() {
+        if count == crate::limits::SEARCH_TERMS_MAX
+            || safe.len() + term.len() + 1 > crate::limits::SEARCH_QUERY_BYTES_MAX
+        {
+            break;
+        }
+        if !safe.is_empty() {
+            safe.push(' ');
+        }
+        safe.push_str(term);
+    }
+    safe
 }
