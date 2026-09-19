@@ -381,6 +381,14 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     {
         tracing::warn!(project = id, error = %err, "knowledge base removal failed");
     }
+    // Only the directory, and only once it is empty: removing it with whatever
+    // it still holds would hide a file the removal above failed to take.
+    let held = crate::brain::knowledge_dir(data_dir).join(id);
+    if let Err(err) = std::fs::remove_dir(&held)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(project = id, error = %err, "knowledge base directory removal failed");
+    }
     Ok(())
 }
 

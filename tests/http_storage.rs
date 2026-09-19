@@ -607,3 +607,61 @@ async fn an_active_window_beyond_the_calendar_does_not_take_the_read_surfaces_do
         );
     }
 }
+
+#[tokio::test]
+async fn knowledge_base_bytes_are_reported_in_usage_and_cleaned_on_project_delete() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj-kb", "Project KB")
+        .await
+        .expect("create project");
+
+    let kb = state
+        .knowledge
+        .open("proj-kb", agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open kb");
+    kb.put("/fs/page.md", b"# Knowledge page content")
+        .await
+        .expect("put kb page");
+    state.notify();
+
+    let body = usage(&state).await;
+    assert!(
+        body["by_kind"]["knowledge"]
+            .as_i64()
+            .expect("knowledge bytes")
+            > 0
+    );
+    let proj_entry = body["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .find(|p| p["project_id"] == "proj-kb")
+        .expect("proj-kb in usage");
+    assert!(proj_entry["kb_bytes"].as_i64().expect("kb_bytes") > 0);
+    assert_eq!(proj_entry["prunable_bytes"], 0);
+    let held = agent_hub::brain::knowledge_dir(&state.config.data_dir).join("proj-kb");
+    assert!(
+        held.is_dir(),
+        "the knowledge base is kept under {}",
+        held.display()
+    );
+
+    // Delete project
+    let (status, _) = call(&state, "DELETE", "/api/v1/projects/proj-kb").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    state.notify();
+
+    let after_delete = usage(&state).await;
+    let proj_after = after_delete["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .find(|p| p["project_id"] == "proj-kb");
+    assert!(proj_after.is_none());
+
+    // The file and the directory that held it are both gone: a project's
+    // knowledge base leaves nothing on the volume once the project does.
+    let held = agent_hub::brain::knowledge_dir(&state.config.data_dir).join("proj-kb");
+    assert!(!held.exists(), "{} outlived its project", held.display());
+}

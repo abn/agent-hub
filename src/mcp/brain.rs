@@ -631,20 +631,13 @@ struct Target {
 }
 
 impl Target {
-    /// The corpus family a write into this store belongs to.
-    fn kind(&self) -> &'static str {
-        match self.session_id {
-            Some(_) => "brain",
-            None => "kb",
-        }
-    }
-
-    /// The search document id for one entry.
+    /// The search document id for one session brain entry.
+    ///
+    /// Only a session brain is written through a target. The knowledge base
+    /// builds its own document ids in its own write path.
     fn doc_id(&self, path: &str) -> String {
-        match &self.session_id {
-            Some(session_id) => format!("brain:{session_id}:{path}"),
-            None => format!("kb:{}:{path}", self.project_id),
-        }
+        let session_id = self.session_id.as_deref().unwrap_or_default();
+        format!("brain:{session_id}:{path}")
     }
 }
 
@@ -1133,47 +1126,29 @@ impl HubServer {
         Ok(project_id)
     }
 
-    /// Index a written value: path as title, content as body.
+    /// Index a value written to a session brain: path as title, content as
+    /// body.
     async fn index_write(&self, target: &Target, path: &str, body: &str) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
         let doc_id = target.doc_id(path);
-        let parsed;
-        let (title, capped_body) = if target.kind() == "kb" {
-            parsed = crate::okf::frontmatter::parse_frontmatter(body)
-                .ok()
-                .flatten();
-            let title = parsed
-                .as_ref()
-                .and_then(|fm| fm.title.as_deref())
-                .unwrap_or(path);
-            let end = body
-                .char_indices()
-                .map(|(i, _)| i)
-                .take_while(|&i| i <= crate::limits::SEARCH_BODY_BYTES_MAX)
-                .last()
-                .unwrap_or(body.len().min(crate::limits::SEARCH_BODY_BYTES_MAX));
-            (title, &body[..end])
-        } else {
-            (path, body)
-        };
         index_doc(
             &conn,
             SearchDoc {
                 doc_id: &doc_id,
                 project_id: &target.project_id,
-                kind: target.kind(),
+                kind: "brain",
                 ref_id: path,
                 session_id: target.session_id.as_deref(),
-                title: Some(title),
-                body: capped_body,
+                title: Some(path),
+                body,
                 updated_at: &updated_at,
             },
         )
         .await
     }
 
-    /// Remove a value's search row.
+    /// Remove a session brain value's search row.
     async fn delete_doc(&self, target: &Target, path: &str) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
         conn.execute(
