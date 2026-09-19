@@ -11,6 +11,8 @@ minimum on interactive controls.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -30,6 +32,7 @@ REQUIRED = [
     "frame-loader.js",
     "vendor/marked.js",
     "vendor/mermaid.runtime.js",
+    "vendor/MANIFEST.json",
     "manifest.webmanifest",
     "sw.js",
     "icon.svg",
@@ -388,6 +391,7 @@ def main() -> int:
     check_first_party_syntax(errors)
     check_no_native_modals(errors)
     check_every_script_is_served(errors)
+    check_vendor_manifest(errors)
 
     for error in dict.fromkeys(errors):
         print(f"web: {error}", file=sys.stderr)
@@ -501,6 +505,88 @@ def check_every_script_is_served(errors: list[str]) -> None:
         name = path.relative_to(WEB).as_posix()
         if name not in embedded:
             errors.append(f"{path}: {ASSET_TABLE} does not serve it")
+
+
+VENDOR_LICENSES = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0"}
+
+
+def check_vendor_manifest(errors: list[str]) -> None:
+    """Verify vendored scripts match web/vendor/MANIFEST.json."""
+    manifest_path = VENDOR / "MANIFEST.json"
+    if not manifest_path.is_file():
+        errors.append("web/vendor/MANIFEST.json is missing")
+        return
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        errors.append(f"web/vendor/MANIFEST.json: invalid JSON ({exc})")
+        return
+
+    if isinstance(data, list):
+        entries = data
+    elif isinstance(data, dict):
+        if "files" in data and isinstance(data["files"], list):
+            entries = data["files"]
+        else:
+            entries = [
+                {"filename": k, **v} if isinstance(v, dict) else v
+                for k, v in data.items()
+            ]
+    else:
+        errors.append("web/vendor/MANIFEST.json: expected JSON array or object")
+        return
+
+    manifest_files: dict[str, dict] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            errors.append(f"web/vendor/MANIFEST.json: invalid entry: {item}")
+            continue
+        filename = item.get("filename")
+        if not filename or not isinstance(filename, str):
+            errors.append("web/vendor/MANIFEST.json: entry missing 'filename'")
+            continue
+        manifest_files[filename] = item
+
+    for filename, item in manifest_files.items():
+        for field in ("version", "license", "sha256"):
+            if not item.get(field):
+                errors.append(f"web/vendor/MANIFEST.json: '{filename}' missing '{field}'")
+        # A field that is present and says nothing is still nothing: the point
+        # of the manifest is that someone can find the release it names.
+        version = str(item.get("version") or "")
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.]+)?", version):
+            errors.append(f"web/vendor/MANIFEST.json: '{filename}' version {version!r} is not a release number")
+        if str(item.get("license") or "") not in VENDOR_LICENSES:
+            errors.append(f"web/vendor/MANIFEST.json: '{filename}' license {item.get('license')!r} is not an SPDX id this project accepts")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or "")):
+            errors.append(f"web/vendor/MANIFEST.json: '{filename}' sha256 is not a digest")
+        if not (item.get("upstream_url") or item.get("upstream") or item.get("url")):
+            errors.append(f"web/vendor/MANIFEST.json: '{filename}' missing upstream URL")
+
+    disk_files = {
+        path.relative_to(VENDOR).as_posix(): path
+        for path in VENDOR.rglob("*")
+        if path.is_file() and path.name != "MANIFEST.json"
+    }
+
+    for name in sorted(disk_files.keys()):
+        if name not in manifest_files:
+            errors.append(f"web/vendor/{name} is not tracked in MANIFEST.json")
+
+    for name, item in sorted(manifest_files.items()):
+        if name not in disk_files:
+            errors.append(f"web/vendor/{name} listed in MANIFEST.json is missing from disk")
+            continue
+
+        target_file = disk_files[name]
+        actual_hash = hashlib.sha256(target_file.read_bytes()).hexdigest().lower()
+        expected_hash = str(item.get("sha256", "")).lower()
+
+        if actual_hash != expected_hash:
+            errors.append(
+                f"web/vendor/{name}: sha256 mismatch (expected {expected_hash}, got {actual_hash})"
+            )
 
 
 if __name__ == "__main__":

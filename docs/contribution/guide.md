@@ -58,6 +58,9 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
   reimplementing it, the wrapper as the single writer per session file, no
   automatic expiry, no chat, and engine-native search. `AGENTS.md` is the
   authoritative list.
+- **Vendored assets are integrity-checked.** Third-party scripts under
+  `web/vendor/` must be registered in `web/vendor/MANIFEST.json` with their
+  upstream URL, license, banner-derived version, and SHA-256 hash.
 - **Committed files are public-ready.** Committed code, tests, documentation,
   and commit messages must never reference internal tracking, task or ticket
   identifiers, wave or lane names, or scratch area paths. Internal process

@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-19, integrity verification for vendored scripts
+
+* **Update**: Documented the manifest and integrity check for third-party scripts
+  under `web/vendor/`. Added guidance to the human surface architecture document
+  and contributor guide explaining how `web/vendor/MANIFEST.json` tracks source,
+  license, version, and SHA-256 digests.
+
 ## 2026-09-18, storage you can read and prune from
 
 * **Update**: The Storage screen now matches the design. It names the data
@@ -100,7 +107,6 @@ software release notes and the repository changelog.
   under the finger.
 * **Note**: Quick answers on a question, a snooze under a swipe, and a note
   sent with a decision stay intended design.
-
 ## 2026-09-18, a session, its brain as a tree
 
 * **Update**: The sessions screen and its detail view now match the design.
