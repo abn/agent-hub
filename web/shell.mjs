@@ -60,6 +60,16 @@ document.addEventListener(
     const target = event.target;
     if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
     if (document.querySelector("dialog[open]")) return;
+    if (location.hash.startsWith("#/search")) {
+      const q = document.getElementById("q");
+      if (q) {
+        event.preventDefault();
+        event.stopPropagation();
+        q.focus();
+        q.select?.();
+        return;
+      }
+    }
     if (!searchField || !searchField.getClientRects().length) return;
     event.preventDefault();
     event.stopPropagation();

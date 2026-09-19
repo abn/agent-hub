@@ -2674,50 +2674,54 @@ def check_desktop_topbar(browser, watch: Watch, port: int) -> None:
     )
     page = context.new_page()
     page.on("pageerror", lambda error: watch.fail(f"topbar: uncaught error: {error}"))
-    page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-    page.wait_for_timeout(400)
-    if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
-        watch.fail("the top bar is not visible at desktop width")
-    box = page.evaluate(
-        "(() => { const pill = document.querySelector('.topsearch');"
-        " const field = document.getElementById('top-search');"
-        " if (!pill || !field) return null;"
-        " const pillBox = pill.getBoundingClientRect();"
-        " const fieldBox = field.getBoundingClientRect();"
-        " return { w: pillBox.width, h: fieldBox.height }; })()"
-    )
-    if not box or box["w"] + 0.5 < 280 or box["h"] + 0.5 < 44:
-        watch.fail(f"the top bar search field is {box}")
-    if not page.evaluate("!!document.querySelector('.topsearch-hint')"):
-        watch.fail("the top bar search field carries no slash hint")
-    node = page.evaluate("(document.getElementById('top-node') || {}).textContent.trim() || ''")
-    if not node or " · " not in node:
-        watch.fail(f"the top bar node line is {node!r}")
-    stored = json.loads(harness.request(watch.port, "GET", "/api/v1/storage"))
-    wanted = f"{stored['node']['host']} · {stored['node']['mode']}"
-    if node != wanted:
-        watch.fail(f"the node line reads {node!r}, expected {wanted!r}")
-    if not page.evaluate("!!document.querySelector('.topbar a[href=\"#/settings\"] svg')"):
-        watch.fail("the top bar settings control draws no gear")
-    page.keyboard.press("/")
-    if not settle(page, "document.activeElement && document.activeElement.id === 'top-search'"):
-        watch.fail(f"slash left the top bar field without focus: {page.evaluate('document.activeElement?.id')!r}")
+    try:
+        page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        page.wait_for_timeout(400)
+        if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
+            watch.fail("the top bar is not visible at desktop width")
+        box = page.evaluate(
+            "(() => { const pill = document.querySelector('.topsearch');"
+            " const field = document.getElementById('top-search');"
+            " if (!pill || !field) return null;"
+            " const pillBox = pill.getBoundingClientRect();"
+            " const fieldBox = field.getBoundingClientRect();"
+            " return { w: pillBox.width, h: fieldBox.height }; })()"
+        )
+        if not box or box["w"] + 0.5 < 280 or box["h"] + 0.5 < 44:
+            watch.fail(f"the top bar search field is {box}")
+        if not page.evaluate("!!document.querySelector('.topsearch-hint')"):
+            watch.fail("the top bar search field carries no slash hint")
+        node = page.evaluate("(document.getElementById('top-node') || {}).textContent.trim() || ''")
+        if not node or " · " not in node:
+            watch.fail(f"the top bar node line is {node!r}")
+        stored = json.loads(harness.request(watch.port, "GET", "/api/v1/storage"))
+        wanted = f"{stored['node']['host']} · {stored['node']['mode']}"
+        if node != wanted:
+            watch.fail(f"the node line reads {node!r}, expected {wanted!r}")
+        if not page.evaluate("!!document.querySelector('.topbar a[href=\"#/settings\"] svg')"):
+            watch.fail("the top bar settings control draws no gear")
+        page.keyboard.press("/")
+        if not settle(page, "document.activeElement && document.activeElement.id === 'top-search'"):
+            watch.fail(f"slash left the top bar field without focus: {page.evaluate('document.activeElement?.id')!r}")
+            return
+        page.fill("#top-search", harness.SEARCH_TERM)
+        page.keyboard.press("Enter")
+        if not settle(page, f"location.hash.startsWith('#/search?q={quote(harness.SEARCH_TERM)}')"):
+            watch.fail(f"Enter on the top bar field did not reach Search: {page.evaluate('location.hash')!r}")
+        if not settle(
+            page,
+            f"document.querySelector('main').textContent.includes({json.dumps(harness.FINISHED_SUMMARY)})",
+        ):
+            watch.fail("the top bar search results do not carry the seeded event")
+        # On Search screen at 1100px, slash must focus screen's own search field #q, not #top-search
+        page.keyboard.press("Escape")
+        page.keyboard.press("/")
+        if not settle(page, "document.activeElement && document.activeElement.id === 'q'"):
+            watch.fail(f"slash on Search screen focused {page.evaluate('document.activeElement?.id')!r}, expected 'q'")
+    finally:
         context.close()
         watch.page.bring_to_front()
         watch.drain_rejections()
-        return
-    page.fill("#top-search", harness.SEARCH_TERM)
-    page.keyboard.press("Enter")
-    if not settle(page, f"location.hash.startsWith('#/search?q={quote(harness.SEARCH_TERM)}')"):
-        watch.fail(f"Enter on the top bar field did not reach Search: {page.evaluate('location.hash')!r}")
-    if not settle(
-        page,
-        f"document.querySelector('main').textContent.includes({json.dumps(harness.FINISHED_SUMMARY)})",
-    ):
-        watch.fail("the top bar search results do not carry the seeded event")
-    context.close()
-    watch.page.bring_to_front()
-    watch.drain_rejections()
 
 
 # What the detail screen's rows that name a session king are, and what their

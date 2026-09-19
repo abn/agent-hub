@@ -11,6 +11,8 @@ software release notes and the repository changelog.
   control ("Back to inbox" on a phone, "Close" on the desktop, named by the
   words it shows), Esc closing the card except from a field that holds text and
   only on the Inbox, and focus returning to the row the card was opened from.
+* **Update**: The keyboard selection follows focus into a row, and `/` on the
+  Search screen focuses that screen's own field.
 * **Update**: The [contributor guide](contribution/guide.md) describes the
   Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
   accessibility walk covers at its two widths.

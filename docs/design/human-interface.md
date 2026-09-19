@@ -108,13 +108,18 @@ a 420px list beside a detail pane.
   query in the address so Back and reload return to it. The field never
   loses focus to its own results; the count is announced instead. Matched
   words are marked in the snippet, and a result opens where it lives.
-- Keyboard: `/` focuses search, `j` and `k` move a selection through the rows
-  of the current screen, Enter opens the selected row, `a` approves and `r`
-  replies on it, and Esc closes what is on top. `?` lists them and says where
-  to switch them off. The selection is a real focus move, so the ring shows it
-  and a reader following focus goes with it; a painted list parks the selection
-  on its first row, so a reader who has never pressed `j` still reaches the
-  list by Tab. Nothing fires while the reader is typing, while a modifier is
+- Keyboard: `/` focuses search, and on the Search screen that is the screen's
+  own field; `j` and `k` move a selection through the rows of the current
+  screen, Enter opens the selected row, `a` approves and `r` replies on it, and
+  Esc closes what is on top, the open inbox card included. Esc pressed in a
+  field that holds text is left to the field, so a half-written answer is
+  never closed from under its writer. `?` lists them and says where to switch
+  them off. The selection is a real focus move, so the ring shows it and a
+  reader following focus goes with it; a painted list parks the selection on
+  its first row, so a reader who has never pressed `j` still reaches the list
+  by Tab. The selection follows focus: Tab or a pointer into a row's own
+  control makes that row the selected one, and `j` and `k` go on from there.
+  Painting a list never takes focus. Nothing fires while the reader is typing, while a modifier is
   held, or while a dialog holds the keyboard. Because a key that needs no
   modifier fires on whatever reaches the keyboard, Settings carries a
   single-key shortcuts switch; turned off, no character key fires, and Esc and
