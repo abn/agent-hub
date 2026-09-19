@@ -154,6 +154,72 @@ def seed_versioned_artifact(port: int, project_id: str) -> str:
     return artifact_id
 
 
+# What the Home checks seed for themselves, late in a run: an approval whose
+# summary carries markup, so the waiting card is shown to keep it as text, and
+# a finished event for the newest list. Not part of the main seed, because
+# Home carries the newest ten events and the screens before it assert on the
+# ten the hub was seeded with.
+HOME_WAITING_SUMMARY = 'cut over <i id="home-pwned">now</i> to the new pool'
+HOME_NEWEST_SUMMARY = "pool scrub finished clean"
+
+
+def seed_home(port: int) -> None:
+    """One open approval and one finished event, the newest on the hub."""
+    session: list[str] = []
+    mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    for index, (kind, summary) in enumerate(
+        (("finished", HOME_NEWEST_SUMMARY), ("approval", HOME_WAITING_SUMMARY)), start=2
+    ):
+        mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": index,
+                "method": "tools/call",
+                "params": {
+                    "name": "signal_append",
+                    "arguments": {"project_id": PROJECT_ID, "kind": kind, "summary": summary},
+                },
+            },
+        )
+
+
+def home_payload(**fields) -> dict:
+    """A Home response with nothing waiting and nothing new, plus overrides.
+
+    The quiet state needs every inbox item read and every feed cursor at its
+    head, which no other check wants done to the seeded hub, so the checks that
+    need it answer the one Home request with this instead.
+    """
+    quiet = {
+        "unread": 0,
+        "waiting": 0,
+        "agents_active": 2,
+        "last_event_at": None,
+        "recent": [],
+        "unseen": [],
+        "storage": {"used_bytes": 6012954214, "capacity_bytes": 34359738368, "free_bytes": 28346784154},
+        "prunable": {"sessions": 0, "bytes": 0},
+    }
+    quiet.update(fields)
+    return quiet
+
+
 def skip(name: str, message: str) -> None:
     """Report a missing part of the toolchain and leave the gate green."""
     print(f"{name}: {message}; skipping")

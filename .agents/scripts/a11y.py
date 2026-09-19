@@ -30,10 +30,15 @@ ROUTES = [
     "search",
     "settings",
     "artifacts",
+    "home-quiet",
 ]
 # The session detail needs a project and a session id from the seeded hub;
 # every other route is addressed by its bare hash.
 SESSION_DETAIL = "session-detail"
+# Home with nothing waiting and nothing new. The seeded hub is never in that
+# state, so the one Home request is answered with a quiet payload instead.
+HOME_QUIET = "home-quiet"
+HOME_REQUEST = "**/api/v1/home"
 
 TAGS = ["wcag2a", "wcag2aa"]
 
@@ -82,9 +87,20 @@ def run() -> int:
                             "location.hash = '#/session?project=%s&id=%s'"
                             % (seeded["project_id"], seeded["session_id"])
                         )
+                    elif route == HOME_QUIET:
+                        quiet = json.dumps(harness.home_payload())
+                        page.route(
+                            HOME_REQUEST,
+                            lambda handled: handled.fulfill(
+                                status=200, content_type="application/json", body=quiet
+                            ),
+                        )
+                        page.evaluate("location.hash = '#/home'")
                     else:
                         page.evaluate(f"location.hash = '#/{route}'")
                     page.wait_for_timeout(300)
+                    if route == HOME_QUIET:
+                        page.unroute(HOME_REQUEST)
                     rendered = page.evaluate(
                         "(() => { const main = document.querySelector('main');"
                         " return !!main && !main.querySelector('.error')"

@@ -16,6 +16,8 @@ import json
 import re
 import sys
 import time
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import hub_harness as harness
@@ -285,7 +287,7 @@ def check_empty_state(page, watch: Watch) -> None:
     watch.enter("empty state: the component")
     # Home by name, not by "a heading is up": the screen being left carries one
     # too, and mounting into it would be painted over a moment later.
-    goto(page, "#/home", "Home")
+    goto(page, "#/home", home_title())
     try:
         drawn = page.evaluate(
             "import('/empty.mjs').then((m) => {"
@@ -1054,7 +1056,7 @@ def check_type_scale(page, watch: Watch, project: str) -> None:
     so Home holds the page title and the project view holds the section one.
     """
     watch.enter("type scale: the page title")
-    goto(page, "#/home", "Home")
+    goto(page, "#/home", home_title())
     title = page.evaluate(
         "(() => { const el = document.querySelector('main h1'); if (!el) return null;"
         " const s = getComputedStyle(el);"
@@ -1873,7 +1875,7 @@ def check_public_gate_remembers_and_forgets(port: int, context, project: str, ar
 def check_shell_tabs(page, watch: Watch) -> None:
     """The tab bar is four labelled icon tabs, and Inbox carries the live badge."""
     watch.enter("shell: tab bar")
-    goto(page, "#/home", "Home")
+    goto(page, "#/home", home_title())
     tabs = page.evaluate(
         "(() => [...document.querySelectorAll('.tabbar a')].map((a) => ({"
         " href: a.getAttribute('href'),"
@@ -1914,7 +1916,7 @@ def check_shell_tabs(page, watch: Watch) -> None:
 def check_mobile_tabbar(page, watch: Watch) -> None:
     """At 390px the tab bar does not overflow and every target is thumb-sized."""
     watch.enter("shell: tab bar at 390px")
-    goto(page, "#/home", "Home")
+    goto(page, "#/home", home_title())
     if page.evaluate(
         "(() => { const bar = document.querySelector('.tabbar');"
         " return bar.scrollWidth > bar.getBoundingClientRect().width; })()"
@@ -2571,6 +2573,356 @@ def check_session_end_flips_row(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+# Home. The title is the reader's clock, so the checks that wait on Home's
+# heading ask for it here rather than holding a word.
+HOME_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+HOME_REQUEST = re.compile(r"/api/v1/home$")
+HOME_PAINTED = "document.querySelector('main .home .home-summary')"
+
+
+def home_part(now: datetime) -> str:
+    if now.hour < 5 or now.hour >= 21:
+        return "night"
+    if now.hour < 12:
+        return "morning"
+    return "afternoon" if now.hour < 17 else "evening"
+
+
+def home_title() -> str:
+    """What Home's heading reads right now: the day and the part of it."""
+    now = datetime.now()
+    day = now - timedelta(days=1) if now.hour < 5 else now
+    return f"{HOME_DAYS[day.weekday()]} {home_part(now)}"
+
+
+def home_event(index: int, minutes: int, **fields) -> dict:
+    event = {
+        "id": f"01HOME{index:020d}",
+        "project_id": "homelab",
+        "kind": "finished",
+        "actor": "backup-agent",
+        "summary": f"home event {index}",
+        "payload": None,
+        "thread_id": None,
+        "needs_action": False,
+        "created_at": (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(),
+        "inbox_status": None,
+    }
+    event.update(fields)
+    return event
+
+
+@contextmanager
+def home_answers(page, payload: dict):
+    """Answer the Home request with a payload the seeded hub cannot be put in."""
+    page.route(
+        HOME_REQUEST,
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(payload)
+        ),
+    )
+    try:
+        yield
+    finally:
+        page.unroute(HOME_REQUEST)
+
+
+def paint_home(page, watch: Watch) -> list[str] | None:
+    """Leave Home, come back, and return the API calls the paint made.
+
+    None when the designed screen never arrived, which is already a failure
+    and leaves the caller nothing to read.
+    """
+    goto(page, "#/settings", "Settings")
+    # A write elsewhere ticks the freshness stream, which refetches the badge.
+    # Let that land before counting, so the count is the paint's alone.
+    page.wait_for_timeout(700)
+    before = len(watch.calls)
+    page.evaluate("location.hash = '#/home'")
+    if not settle(page, HOME_PAINTED):
+        watch.fail("Home did not paint its summary line")
+        return None
+    page.wait_for_timeout(300)
+    return [call for call in watch.calls[before:] if "/api/v1/stream" not in call]
+
+
+HOME_ROWS = (
+    "(() => { const rows = (scope) => [...document.querySelectorAll(scope + ' .home-row')]"
+    ".map((row) => { const link = row.querySelector('a.home-link');"
+    " const box = link && link.getBoundingClientRect();"
+    " const at = box && document.elementFromPoint(box.left + box.width / 2, row.getBoundingClientRect().bottom - 4);"
+    " return { title: link ? link.textContent.trim() : '', href: link ? link.getAttribute('href') : '',"
+    " meta: (row.querySelector('.home-meta') || {}).textContent || '',"
+    " time: !!row.querySelector('time.ts'), unread: !!row.querySelector('.dot-unread'),"
+    " said: !!row.querySelector('.dot-unread + .sr-only'),"
+    " kind: (row.querySelector('.glyph + .sr-only') || {}).textContent || '',"
+    " whole: !!at && at === link }; });"
+    " return { waiting: rows('.home-waiting'), newest: rows('.home-newest') }; })()"
+)
+
+
+def check_home_dashboard(page, watch: Watch, port: int) -> None:
+    """Home is the designed dashboard, drawn from its one request.
+
+    Runs late and seeds its own two events: by now the run has decided every
+    approval the hub was seeded with, so nothing would be waiting.
+    """
+    watch.enter("home: the dashboard")
+    harness.seed_home(port)
+    calls = paint_home(page, watch)
+    if calls is None:
+        return
+    truth = json.loads(harness.request(port, "GET", "/api/v1/home"))
+    if calls != ["GET /api/v1/home"]:
+        watch.fail(f"painting Home made {calls}, expected the one Home request")
+
+    found = heading(page)
+    if found != home_title():
+        watch.fail(f"the title is {found!r}, expected {home_title()!r}")
+    summary = page.evaluate(
+        "(() => { const el = document.querySelector('main .home-summary'); if (!el) return null;"
+        " const s = getComputedStyle(el); return { text: el.textContent.trim(), size: s.fontSize }; })()"
+    )
+    waiting, unread, agents = truth["waiting"], truth["unread"], truth["agents_active"]
+    expected = " · ".join(
+        [
+            f"{waiting} {'thing' if waiting == 1 else 'things'} waiting on you",
+            f"{unread} unread",
+            f"{agents} {'agent' if agents == 1 else 'agents'} active" if agents else "no agents active",
+        ]
+    )
+    if not summary or summary["text"] != expected:
+        watch.fail(f"the summary line reads {summary and summary['text']!r}, expected {expected!r}")
+    elif summary["size"] != "15px":
+        watch.fail(f"the summary line renders at {summary['size']}")
+
+    card = page.evaluate(
+        "(() => { const card = document.querySelector('main .home-waiting'); if (!card) return null;"
+        " const title = card.querySelector('h2'); const more = card.querySelector('a.home-more');"
+        " const probe = document.createElement('span'); probe.style.color = 'var(--action)';"
+        " card.appendChild(probe); const action = getComputedStyle(probe).color; probe.remove();"
+        " return { title: title ? title.textContent.trim() : '',"
+        " toned: !!title && getComputedStyle(title).color === action,"
+        " named: card.getAttribute('aria-labelledby') === (title && title.id),"
+        " more: more ? more.getAttribute('href') : '',"
+        " moreHeight: more ? more.getBoundingClientRect().height : 0 }; })()"
+    )
+    rows = page.evaluate(HOME_ROWS)
+    if not card:
+        watch.fail("something is waiting and Home draws no waiting card")
+    else:
+        if card["title"] != f"Waiting on you · {waiting}":
+            watch.fail(f"the waiting card is titled {card['title']!r}")
+        if not card["toned"]:
+            watch.fail("the waiting card's title is not in the action tone")
+        if not card["named"]:
+            watch.fail("the waiting card is a region with no name")
+        if card["more"] != "#/inbox":
+            watch.fail(f"the waiting card's link goes to {card['more']!r}")
+        elif card["moreHeight"] + 0.5 < 44:
+            watch.fail(f"the Inbox link is a {card['moreHeight']:.0f}px target")
+    if page.evaluate("!!document.getElementById('home-pwned')"):
+        watch.fail("an agent's markup became an element in the waiting card")
+    first = rows["waiting"][0] if rows["waiting"] else None
+    if not first or first["title"] != harness.HOME_WAITING_SUMMARY:
+        watch.fail(f"the waiting card leads with {first and first['title']!r}")
+    elif first["href"] != "#/inbox" or not first["whole"]:
+        watch.fail(f"the waiting row links to {first['href']!r} (whole row: {first['whole']})")
+    elif first["kind"] != "Approval":
+        watch.fail(f"the waiting row names its kind {first['kind']!r}")
+
+    newest = next((r for r in rows["newest"] if r["title"] == harness.HOME_NEWEST_SUMMARY), None)
+    if not newest:
+        watch.fail("the newest list does not carry the newest finished event")
+    else:
+        if newest["href"] != f"#/projects/{harness.PROJECT_ID}/feed":
+            watch.fail(f"a newest row links to {newest['href']!r}, not its project feed")
+        if not newest["meta"].startswith(f"{harness.PROJECT_ID} · "):
+            watch.fail(f"a newest row's meta line reads {newest['meta']!r}, without its project")
+        if not newest["time"]:
+            watch.fail("a newest row carries no time")
+    if any(r["title"] == harness.HOME_WAITING_SUMMARY for r in rows["newest"]):
+        watch.fail("the waiting item is listed a second time under newest")
+
+    storage = page.evaluate(
+        "(() => { const card = document.querySelector('main a.home-storage'); if (!card) return null;"
+        " const bar = card.querySelector('.home-bar'); const fill = bar && bar.firstElementChild;"
+        " return { href: card.getAttribute('href'),"
+        " numbers: (card.querySelector('.home-storage-n') || {}).textContent || '',"
+        " hint: (card.querySelector('.home-storage-hint') || {}).textContent || '',"
+        " barHidden: !!bar && bar.getAttribute('aria-hidden') === 'true',"
+        " share: bar && fill ? fill.getBoundingClientRect().width / bar.getBoundingClientRect().width : null"
+        " }; })()"
+    )
+    capacity = truth["storage"]["capacity_bytes"]
+    if not storage:
+        watch.fail("Home draws no storage card")
+    elif storage["href"] != "#/storage":
+        watch.fail(f"the storage card goes to {storage['href']!r}")
+    elif capacity:
+        if not re.fullmatch(r"[\d.]+( [KMGT]?B)? / [\d.]+ [KMGT]?B", storage["numbers"].strip()):
+            watch.fail(f"the storage numbers read {storage['numbers']!r}")
+        if storage["share"] is None or not storage["barHidden"]:
+            watch.fail("the storage bar is missing, or is not hidden from a reader")
+        if "% used" not in storage["hint"]:
+            watch.fail(f"nothing says the bar's share in words ({storage['hint']!r})")
+
+    # The rows answer to the keyboard map. The selection is parked on the first
+    # row, so down then up is what puts focus there, and Enter opens it.
+    page.evaluate("document.getElementById('main').focus()")
+    page.keyboard.press("j")
+    page.keyboard.press("k")
+    if not settle(page, "document.activeElement.matches('main .home-waiting .home-row')", 2000):
+        watch.fail("`j` and `k` do not move a selection through Home's rows")
+    else:
+        page.keyboard.press("Enter")
+        if not settle(page, "location.hash === '#/inbox'", 3000):
+            watch.fail(f"Enter on the waiting row went to {page.evaluate('location.hash')!r}")
+    watch.drain_rejections()
+
+
+# Every string an agent controls, carrying markup, in every place Home prints one.
+HOME_HOSTILE = '<img src=x onerror="document.body.dataset.homePwned=1">'
+
+
+def check_home_fields(page, watch: Watch) -> None:
+    """Every field Home prints is text, and every number is the response's."""
+    watch.enter("home: the fields")
+    events = [
+        home_event(1, 4, kind="approval", inbox_status="action", summary=f"a {HOME_HOSTILE}"),
+        home_event(2, 9, project_id="research", summary="newest in research"),
+        home_event(3, 70, summary=f"s {HOME_HOSTILE}", actor=f"x {HOME_HOSTILE}"),
+        home_event(4, 80, project_id=f"p {HOME_HOSTILE}", kind=f'k"><b id="home-kind">'),
+        home_event(5, 90, project_id="research", summary="older in research"),
+    ]
+    payload = harness.home_payload(
+        waiting=5,
+        unread=1,
+        agents_active=1,
+        last_event_at=events[0]["created_at"],
+        recent=events,
+        # Homelab's two newest are the waiting approval and the row after it.
+        unseen=[{"project_id": "research", "events": 1}, {"project_id": "homelab", "events": 2}],
+        prunable={"sessions": 3, "bytes": 1567663915},
+    )
+    with home_answers(page, payload):
+        if paint_home(page, watch) is None:
+            return
+        page.wait_for_timeout(200)
+        if page.evaluate(
+            "!!document.body.dataset.homePwned || !!document.getElementById('home-kind')"
+            " || !!document.querySelector('main img')"
+        ):
+            watch.fail("a field of the Home response became an element")
+        text = page.evaluate("document.querySelector('main').textContent")
+        if text.count(HOME_HOSTILE) < 4:
+            watch.fail(f"the hostile string shows as text {text.count(HOME_HOSTILE)} times, expected 4")
+        summary = page.evaluate("document.querySelector('main .home-summary').textContent.trim()")
+        if summary != "5 things waiting on you · 1 unread · 1 agent active":
+            watch.fail(f"the summary line reads {summary!r}")
+        rows = page.evaluate(HOME_ROWS)
+        rest = page.evaluate(
+            "(() => { const a = document.querySelector('main .home-waiting a.home-rest');"
+            " return a && { text: a.textContent.trim(), href: a.getAttribute('href'),"
+            " height: a.getBoundingClientRect().height }; })()"
+        )
+        if len(rows["waiting"]) != 1:
+            watch.fail(f"the waiting card lists {len(rows['waiting'])} rows, expected the 1 open event")
+        if not rest or rest["text"] != "4 more in the Inbox" or rest["href"] != "#/inbox":
+            watch.fail(f"the rest of the queue is offered as {rest!r}")
+        elif rest["height"] + 0.5 < 44:
+            watch.fail(f"the rest-of-queue link is a {rest['height']:.0f}px target")
+        # The count is spent newest first, per project, and on no other row.
+        dots = [r["title"] for r in rows["newest"] if r["unread"]]
+        if dots != ["newest in research", f"s {HOME_HOSTILE}"]:
+            watch.fail(f"the unread dot sits on {dots}")
+        if any(r["unread"] and not r["said"] for r in rows["newest"]):
+            watch.fail("an unread dot has no text beside it")
+        hostile = next((r for r in rows["newest"] if r["meta"].startswith("p ")), None)
+        if not hostile or hostile["href"] != f"#/projects/{quote('p ' + HOME_HOSTILE, safe='')}/feed":
+            watch.fail(f"a project id reaches the link as {hostile and hostile['href']!r}")
+        storage = page.evaluate(
+            "(() => { const card = document.querySelector('main a.home-storage');"
+            " const bar = card.querySelector('.home-bar');"
+            " return { numbers: card.querySelector('.home-storage-n').textContent.trim(),"
+            " hint: card.querySelector('.home-storage-hint').textContent.trim(),"
+            " height: bar.getBoundingClientRect().height,"
+            " share: bar.firstElementChild.getBoundingClientRect().width"
+            " / bar.getBoundingClientRect().width }; })()"
+        )
+        if storage["numbers"] != "5.6 / 32 GB":
+            watch.fail(f"the storage numbers read {storage['numbers']!r}")
+        if storage["hint"] != "17% used · 3 ended sessions can be pruned · 1.46 GB":
+            watch.fail(f"the storage hint reads {storage['hint']!r}")
+        if abs(storage["share"] - 0.175) > 0.005 or storage["height"] != 6:
+            watch.fail(f"the bar is {storage['height']}px tall and {storage['share']:.3f} full")
+
+    unmeasured = harness.home_payload(
+        waiting=1, storage={"used_bytes": 421888, "capacity_bytes": None, "free_bytes": None}
+    )
+    with home_answers(page, unmeasured):
+        if paint_home(page, watch) is None:
+            return
+        storage = page.evaluate(
+            "(() => { const card = document.querySelector('main a.home-storage');"
+            " return { text: card.textContent.replace(/\\s+/g, ' ').trim(),"
+            " bar: !!card.querySelector('.home-bar') }; })()"
+        )
+        if storage["bar"] or "%" in storage["text"]:
+            watch.fail(f"an unmeasured volume still draws a share ({storage['text']!r})")
+        if "412 KB used" not in storage["text"]:
+            watch.fail(f"an unmeasured volume reads {storage['text']!r}")
+        lone = page.evaluate("document.querySelector('main .home-waiting a.home-rest').textContent.trim()")
+        if lone != "1 item in the Inbox":
+            watch.fail(f"a queue older than the newest events is offered as {lone!r}")
+    watch.drain_rejections()
+
+
+def check_home_quiet(page, watch: Watch) -> None:
+    """Nothing waiting and nothing new is the quiet state, not an empty list."""
+    watch.enter("home: quiet")
+    seen = [home_event(1, 12), home_event(2, 40)]
+    payload = harness.home_payload(recent=seen, last_event_at=seen[0]["created_at"])
+    with home_answers(page, payload):
+        calls = paint_home(page, watch)
+        if calls is None:
+            return
+        if calls != ["GET /api/v1/home"]:
+            watch.fail(f"painting a quiet Home made {calls}")
+        quiet = page.evaluate(
+            "(() => { const box = document.querySelector('main .home .empty-state');"
+            " const part = (sel) => ((box && box.querySelector(sel)) || {}).textContent || '';"
+            " return { drawn: !!box, screen: part('.empty-screen'), title: part('.empty-title'),"
+            " body: part('.empty-body'),"
+            " cards: document.querySelectorAll('main .home-waiting, main .home-newest').length,"
+            " storage: !!document.querySelector('main a.home-storage'),"
+            " summary: document.querySelector('main .home-summary').textContent.trim() }; })()"
+        )
+        if not quiet["drawn"]:
+            watch.fail("a quiet Home does not draw the empty state")
+        else:
+            if quiet["screen"] != "home" or quiet["title"] != f"Quiet {home_part(datetime.now())}.":
+                watch.fail(f"the quiet state reads {quiet['screen']!r} / {quiet['title']!r}")
+            if quiet["body"] != "Nothing is waiting on you. 2 agents active, last event 12 minutes ago.":
+                watch.fail(f"the quiet line reads {quiet['body']!r}")
+        if quiet["cards"]:
+            watch.fail("a quiet Home still draws the waiting or newest card")
+        if not quiet["storage"]:
+            watch.fail("a quiet Home drops the storage card")
+        if quiet["summary"] != "Nothing waiting on you · 0 unread · 2 agents active":
+            watch.fail(f"the quiet summary reads {quiet['summary']!r}")
+
+    # One unseen event is news: the list comes back and the quiet state goes.
+    with home_answers(page, dict(payload, unseen=[{"project_id": "homelab", "events": 1}])):
+        if paint_home(page, watch) is None:
+            return
+        if page.evaluate("!!document.querySelector('main .home .empty-state')"):
+            watch.fail("an unseen event still reads as quiet")
+        if not page.evaluate("!!document.querySelector('main .home-newest .home-row')"):
+            watch.fail("an unseen event is not listed")
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -2594,7 +2946,7 @@ def run() -> int:
             set_token(page, watch)
 
             routes = [
-                ("home", "#/home", "Home", [harness.FINISHED_SUMMARY, "waiting on you"]),
+                ("home", "#/home", home_title(), [harness.FINISHED_SUMMARY, "waiting on you"]),
                 ("inbox", "#/inbox", "Inbox", [harness.QUESTION_SUBJECT]),
                 (
                     "projects",
@@ -2690,6 +3042,10 @@ def run() -> int:
             check_empty_project(page, watch, port)
             check_desktop_two_pane(browser, watch, port, project)
             check_desktop_topbar(browser, watch, port)
+            # Late: Home carries the newest ten events, and these seed two more.
+            check_home_dashboard(page, watch, port)
+            check_home_fields(page, watch)
+            check_home_quiet(page, watch)
             # Last: it seeds sixty more events, which every check above would
             # have to look past.
             check_tab_budget(page, watch, port)
