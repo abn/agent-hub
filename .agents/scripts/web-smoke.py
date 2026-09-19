@@ -2921,6 +2921,284 @@ def check_home_quiet(page, watch: Watch) -> None:
         if not page.evaluate("!!document.querySelector('main .home-newest .home-row')"):
             watch.fail("an unseen event is not listed")
     watch.drain_rejections()
+# The project the settings check owns. It renames and then deletes it, so it is
+# made for the check rather than borrowed from the seeded data.
+SETTINGS_PROJECT = "settings-check"
+SETTINGS_NAME = "Settings check"
+SETTINGS_RENAMED = "Renamed by the check"
+SETTINGS_HASH = f"#/projects/{SETTINGS_PROJECT}/settings"
+SETTINGS_POLICIES = ["off", "optional", "required"]
+PSET_NAME = ".pset input[name='display_name']"
+PSET_SAVE = ".pset button[type='submit']"
+# Save is disabled while a save is in flight as well as when nothing differs,
+# so a landed save is the form at rest with nothing left to send.
+PSET_SAVED = (
+    "(() => { const f = document.querySelector('.pset');"
+    " return !!f && !f.hasAttribute('aria-busy')"
+    " && f.querySelector('button[type=submit]').disabled; })()"
+)
+PSET_CHECKED = (
+    "(() => { const r = document.querySelector('.pset input[type=radio]:checked');"
+    " return r ? r.value : ''; })()"
+)
+
+
+def check_project_settings(page, watch: Watch, port: int) -> None:
+    """The project settings screen edits a project and nothing else.
+
+    A save is one request carrying only what changed, a refusal from the hub
+    lands beside the field it is about, the slug is text rather than a field,
+    the policy is a radio group the arrow keys move through, leaving with
+    edits pending asks first, and a reload shows what was saved.
+    """
+    watch.enter("project settings")
+    harness.request(
+        port,
+        "POST",
+        "/api/v1/projects",
+        {"id": SETTINGS_PROJECT, "display_name": SETTINGS_NAME},
+    )
+    path = f"/api/v1/projects/{SETTINGS_PROJECT}"
+    patches: list[str] = []
+
+    def note(request) -> None:
+        if request.method == "PATCH" and request.url.endswith(path):
+            patches.append(request.post_data or "")
+
+    page.on("request", note)
+    try:
+        project_settings_steps(page, watch, port, path, patches)
+    finally:
+        page.remove_listener("request", note)
+    # The delete lands on a project's feed. The checks that follow start from
+    # a screen of their own, so this one does not leave them a list selection.
+    goto(page, "#/home", "Home")
+    watch.drain_rejections()
+
+
+def project_settings_steps(page, watch: Watch, port: int, path: str, patches: list) -> None:
+    # The way in is the gear in the project header.
+    goto(page, f"#/projects/{SETTINGS_PROJECT}/feed", SETTINGS_NAME)
+    gear = page.locator("main .proj-head").get_by_role("link", name="Project settings")
+    if gear.count() == 1:
+        gear.click()
+    else:
+        watch.fail(f"the project header offers {gear.count()} links named Project settings")
+        page.evaluate(f"location.hash = {SETTINGS_HASH!r}")
+    if not settle(page, "!!document.querySelector('main .pset')", 5000):
+        watch.fail(f"no project settings form painted, the heading is {heading(page)!r}")
+        return
+    if heading(page) != "Project settings":
+        watch.fail(f"the heading is {heading(page)!r}, expected 'Project settings'")
+    if set(marked_routes(page)) != {"projects"}:
+        watch.fail(f"the nav marks {marked_routes(page)}, expected the Projects tab")
+
+    form = page.locator(".pset")
+    name = form.get_by_label("Name", exact=True)
+    if name.count() != 1 or name.input_value() != SETTINGS_NAME:
+        watch.fail("the Name field is not one labelled input holding the project's name")
+
+    # The slug is shown, in mono, and is not something a reader can type into.
+    slug = page.evaluate(
+        "(() => { const el = document.querySelector('.pset .pset-slug');"
+        " if (!el) return null;"
+        " return { text: el.textContent.trim(), font: getComputedStyle(el).fontFamily,"
+        "   editable: el.matches('input, textarea, select, [contenteditable]')"
+        "     || !!el.querySelector('input, textarea, select, [contenteditable]') }; })()"
+    )
+    if not slug or slug["text"] != SETTINGS_PROJECT:
+        watch.fail(f"the slug is not shown as {SETTINGS_PROJECT!r}: {slug}")
+    elif "mono" not in slug["font"].lower():
+        watch.fail(f"the slug is set in {slug['font']!r}, not the mono face")
+    elif slug["editable"]:
+        watch.fail("the slug is drawn as a control that takes input")
+    fields = page.evaluate(
+        "[...document.querySelectorAll('.pset input, .pset textarea, .pset select')]"
+        ".map((el) => el.name)"
+    )
+    if sorted(set(fields)) != ["artifact_password_policy", "display_name"]:
+        watch.fail(f"the form's fields are {sorted(set(fields))}, the slug must not be one")
+
+    # The policy is a named radio group over the hub's own three values.
+    group = form.get_by_role("radiogroup", name="Artifact password policy")
+    if group.count() != 1:
+        watch.fail("the password policy is not one radiogroup named by its legend")
+    values = page.evaluate(
+        "[...document.querySelectorAll('.pset [role=radiogroup] input[type=radio]')]"
+        ".map((r) => r.value)"
+    )
+    if values != SETTINGS_POLICIES:
+        watch.fail(f"the policy radios are {values}, expected {SETTINGS_POLICIES}")
+    if page.evaluate(PSET_CHECKED) != "optional":
+        watch.fail(f"a new project shows {page.evaluate(PSET_CHECKED)!r}, not the hub default")
+    if not page.is_disabled(PSET_SAVE):
+        watch.fail("Save is enabled before anything changed")
+
+    # Retention is reserved: said, linked to Storage, and with nothing to press.
+    retention = page.evaluate(
+        "(() => { const el = document.querySelector('.pset .pset-retention');"
+        " if (!el) return null;"
+        " return { text: el.textContent, controls: el.querySelectorAll("
+        "'input, button, select, textarea, [role=switch], [role=checkbox]').length,"
+        " link: (el.querySelector('a') || {}).hash || '',"
+        " label: (el.previousElementSibling || {}).textContent || '' }; })()"
+    )
+    if not retention or "Automatic pruning" not in retention["text"]:
+        watch.fail(f"the reserved retention card is missing: {retention}")
+    else:
+        if retention["controls"]:
+            watch.fail("the reserved retention card carries a control")
+        if retention["link"] != "#/storage":
+            watch.fail(f"the retention card links to {retention['link']!r}, not Storage")
+        if "reserved" not in retention["label"]:
+            watch.fail(f"retention is not marked reserved: {retention['label']!r}")
+
+    # Arrow keys move the choice, and going back to where it was is no change.
+    page.focus(".pset input[type=radio]:checked")
+    page.keyboard.press("ArrowDown")
+    focused = page.evaluate("document.activeElement.value")
+    if page.evaluate(PSET_CHECKED) != "required" or focused != "required":
+        watch.fail(f"ArrowDown left {page.evaluate(PSET_CHECKED)!r} checked, focus on {focused!r}")
+    if page.is_disabled(PSET_SAVE):
+        watch.fail("Save stayed disabled after the policy changed")
+    page.keyboard.press("ArrowUp")
+    if page.evaluate(PSET_CHECKED) != "optional" or not page.is_disabled(PSET_SAVE):
+        watch.fail("moving the policy back did not return Save to disabled")
+    page.keyboard.press("ArrowDown")
+
+    # One request, carrying the policy alone.
+    page.click(PSET_SAVE)
+    if not settle(page, "[...document.querySelectorAll('.toast-text')]"
+                        ".some((t) => t.textContent === 'Project saved.')"):
+        watch.fail("saving raised no success toast")
+    if len(patches) != 1:
+        watch.fail(f"saving the policy sent {len(patches)} PATCH requests, expected one")
+    elif json.loads(patches[0]) != {"artifact_password_policy": "required"}:
+        watch.fail(f"saving the policy sent {patches[0]}, expected the policy alone")
+    if not settle(page, PSET_SAVED):
+        watch.fail("Save stayed enabled after the save landed")
+
+    # A blank name is caught here, said beside the field, and never sent.
+    page.fill(PSET_NAME, "   ")
+    page.click(PSET_SAVE)
+    said = name_problem(page)
+    if len(patches) != 1:
+        watch.fail("a blank name was sent to the hub")
+    if not said["invalid"] or not said["text"]:
+        watch.fail(f"a blank name is not reported on the field: {said}")
+
+    # A name only the hub refuses: its reason lands beside the same field and
+    # the form keeps what was typed.
+    too_long = "n" * 201
+    page.fill(PSET_NAME, too_long)
+    armed, watch.armed = watch.armed, False
+    try:
+        page.click(PSET_SAVE)
+        if not settle(page, "(() => { const i = document.querySelector(" + json.dumps(PSET_NAME)
+                      + "); const id = i.getAttribute('aria-describedby');"
+                      " const e = id && document.getElementById(id.split(' ').pop());"
+                      " return !!e && !e.hidden && /too long/.test(e.textContent); })()"):
+            watch.fail(f"the hub's refusal is not beside the field: {name_problem(page)}")
+    finally:
+        watch.armed = armed
+    if len(patches) != 2:
+        watch.fail(f"the refused save made {len(patches) - 1} requests, expected one")
+    if page.input_value(PSET_NAME) != too_long:
+        watch.fail("the refused save lost what was typed")
+    if not name_problem(page)["invalid"]:
+        watch.fail("the refused name is not marked invalid")
+
+    # Leaving with an edit pending asks first, and Keep is where focus starts.
+    page.fill(PSET_NAME, SETTINGS_RENAMED)
+    if name_problem(page)["invalid"]:
+        watch.fail("the field still reads invalid after it was corrected")
+    page.click('.tabbar a[href="#/inbox"]')
+    if not settle(page, "!!document.querySelector('dialog.dialog[open]')", 3000):
+        watch.fail("leaving with unsaved edits asked nothing")
+        return
+    if "dialog-safe" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the unsaved-changes dialog opened on {page.evaluate(FOCUS_CLASS)!r}")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("dialog.dialog", state="detached")
+    if page.evaluate("location.hash") != SETTINGS_HASH:
+        watch.fail(f"keeping the edits left the address at {page.evaluate('location.hash')!r}")
+    if page.input_value(PSET_NAME) != SETTINGS_RENAMED:
+        watch.fail("keeping the edits lost them")
+
+    # The rename goes alone: the policy is already saved.
+    page.click(PSET_SAVE)
+    if not settle(page, PSET_SAVED):
+        watch.fail("Save stayed enabled after the rename landed")
+    if len(patches) != 3:
+        watch.fail(f"the rename made {len(patches) - 2} requests, expected one")
+    elif json.loads(patches[2]) != {"display_name": SETTINGS_RENAMED}:
+        watch.fail(f"the rename sent {patches[2]}, expected the name alone")
+    if any("\"id\"" in body for body in patches):
+        watch.fail("a save carried the project id")
+
+    # Reload reads the saved values back from the hub.
+    page.reload(wait_until="load")
+    if not settle(page, "!!document.querySelector('main .pset')", 5000):
+        watch.fail("the settings screen did not come back after a reload")
+        return
+    if page.input_value(PSET_NAME) != SETTINGS_RENAMED:
+        watch.fail(f"reload shows the name {page.input_value(PSET_NAME)!r}")
+    if page.evaluate(PSET_CHECKED) != "required":
+        watch.fail(f"reload shows the policy {page.evaluate(PSET_CHECKED)!r}")
+
+    # Discarding lets the navigation through and writes nothing.
+    page.fill(PSET_NAME, "never saved")
+    page.click('.tabbar a[href="#/inbox"]')
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click("dialog.dialog .dialog-commit")
+    if not settle(page, "location.hash === '#/inbox'", 3000):
+        watch.fail("discarding the edits did not follow the link")
+    if len(patches) != 3:
+        watch.fail("discarding the edits wrote to the hub")
+
+    # Delete asks through the dialog, Keep first, and Esc keeps the project.
+    goto(page, SETTINGS_HASH, "Project settings")
+    page.wait_for_selector(".pset .pset-delete")
+    page.click(".pset .pset-delete")
+    page.wait_for_selector("dialog.dialog[open]")
+    if "dialog-safe" not in page.evaluate(FOCUS_CLASS):
+        watch.fail(f"the delete dialog opened on {page.evaluate(FOCUS_CLASS)!r}")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("dialog.dialog", state="detached")
+    listed = json.loads(harness.request(port, "GET", "/api/v1/projects"))["projects"]
+    if not any(p["id"] == SETTINGS_PROJECT for p in listed):
+        watch.fail("Esc on the delete dialog deleted the project")
+    page.click(".pset .pset-delete")
+    page.wait_for_selector("dialog.dialog[open]")
+    page.click("dialog.dialog .dialog-commit")
+    if not settle(page, "location.hash.startsWith('#/projects') && !location.hash.includes('settings')", 5000):
+        watch.fail(f"deleting left the address at {page.evaluate('location.hash')!r}")
+    listed = json.loads(harness.request(port, "GET", "/api/v1/projects"))["projects"]
+    if any(p["id"] == SETTINGS_PROJECT for p in listed):
+        watch.fail("the confirmed delete left the project in place")
+
+    # The address of a project that is gone says so quietly, not as an error.
+    armed, watch.armed = watch.armed, False
+    try:
+        goto(page, SETTINGS_HASH, "Project settings")
+        if not settle(page, "!!document.querySelector('main .empty-state')", 3000):
+            watch.fail("a missing project's settings address shows no empty state")
+        elif f"No project called {SETTINGS_PROJECT}." not in page.inner_text("main .empty-state"):
+            watch.fail(f"the empty state reads {page.inner_text('main .empty-state')!r}")
+    finally:
+        watch.armed = armed
+
+
+def name_problem(page) -> dict:
+    """What the Name field says is wrong with it, through its own ARIA."""
+    return page.evaluate(
+        "(() => { const i = document.querySelector(" + json.dumps(PSET_NAME) + ");"
+        " if (!i) return { invalid: false, text: '' };"
+        " const ids = (i.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);"
+        " const text = ids.map((id) => document.getElementById(id))"
+        "   .filter((e) => e && !e.hidden).map((e) => e.textContent.trim()).join(' ');"
+        " return { invalid: i.getAttribute('aria-invalid') === 'true', text }; })()"
+    )
 
 
 def run() -> int:
@@ -2980,6 +3258,12 @@ def run() -> int:
                     [harness.FINISHED_SUMMARY],
                 ),
                 ("settings", "#/settings", "Settings", [harness.AGENT_NAME]),
+                (
+                    "projects",
+                    f"#/projects/{quote(project)}/settings",
+                    "Project settings",
+                    [project, "Automatic pruning"],
+                ),
             ]
             for route, hash_value, title, data in routes:
                 visit(page, watch, route, hash_value, title, data)
@@ -3046,6 +3330,7 @@ def run() -> int:
             check_home_dashboard(page, watch, port)
             check_home_fields(page, watch)
             check_home_quiet(page, watch)
+            check_project_settings(page, watch, port)
             # Last: it seeds sixty more events, which every check above would
             # have to look past.
             check_tab_budget(page, watch, port)

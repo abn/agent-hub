@@ -31,6 +31,7 @@ ROUTES = [
     "settings",
     "artifacts",
     "home-quiet",
+    "project-settings",
 ]
 # The session detail needs a project and a session id from the seeded hub;
 # every other route is addressed by its bare hash.
@@ -39,6 +40,8 @@ SESSION_DETAIL = "session-detail"
 # state, so the one Home request is answered with a quiet payload instead.
 HOME_QUIET = "home-quiet"
 HOME_REQUEST = "**/api/v1/home"
+# The project settings screen lives under the seeded project's own address.
+PROJECT_SETTINGS = "project-settings"
 
 TAGS = ["wcag2a", "wcag2aa"]
 
@@ -96,6 +99,10 @@ def run() -> int:
                             ),
                         )
                         page.evaluate("location.hash = '#/home'")
+                    elif route == PROJECT_SETTINGS:
+                        page.evaluate(
+                            "location.hash = '#/projects/%s/settings'" % seeded["project_id"]
+                        )
                     else:
                         page.evaluate(f"location.hash = '#/{route}'")
                     page.wait_for_timeout(300)
