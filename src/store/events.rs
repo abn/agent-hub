@@ -164,6 +164,15 @@ async fn append_in_tx_capped(
             "an answer must name the question it replies to".to_string(),
         ));
     }
+    if event.kind != "question"
+        && let Some(tid) = &event.thread_id
+    {
+        let root = get_in_tx(tx, tid).await?;
+        match root {
+            Some(root) if root.project_id == event.project_id => {}
+            _ => return Err(Error::NotFound(format!("event {tid} not found"))),
+        }
+    }
     // A question and an approval both wait on the human, whichever surface
     // wrote them, so the rule lives here rather than at each write path.
     let needs_action = event.needs_action || event.kind == "question" || event.kind == "approval";

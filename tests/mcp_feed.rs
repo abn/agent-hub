@@ -233,6 +233,54 @@ fn signal_append_refuses_hub_owned_kinds() {
 }
 
 #[test]
+fn signal_append_validates_thread_id() {
+    let data_dir = TempDir::new("thread-validate");
+    common::seed_project(&data_dir.0, "p1");
+    common::seed_project(&data_dir.0, "p2");
+    let mut server = McpServer::spawn(&data_dir.0, "stdio-agent");
+    server.initialize();
+
+    let root_res = server.call_tool(
+        "signal_append",
+        json!({"project_id": "p1", "kind": "signal", "summary": "root"}),
+    );
+    let root_id = structured(&root_res)["event_id"]
+        .as_str()
+        .expect("root id")
+        .to_string();
+
+    // Unknown thread_id refused with not_found
+    let bad_res = server.call_tool(
+        "signal_append",
+        json!({
+            "project_id": "p1",
+            "kind": "signal",
+            "summary": "bad",
+            "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        }),
+    );
+    assert_eq!(
+        bad_res["error"]["data"]["error"]["code"], "not_found",
+        "{bad_res}"
+    );
+
+    // Cross-project thread_id refused with not_found
+    let cross_res = server.call_tool(
+        "signal_append",
+        json!({
+            "project_id": "p2",
+            "kind": "signal",
+            "summary": "cross",
+            "thread_id": root_id
+        }),
+    );
+    assert_eq!(
+        cross_res["error"]["data"]["error"]["code"], "not_found",
+        "{cross_res}"
+    );
+}
+
+#[test]
 fn idempotency_key_yields_one_event() {
     let data_dir = TempDir::new("idempotency");
     common::seed_project(&data_dir.0, "p1");

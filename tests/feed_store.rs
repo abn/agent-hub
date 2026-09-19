@@ -561,3 +561,45 @@ async fn the_unseen_count_seeks_and_does_not_scan_the_feed() {
         "the cursor is part of the seek, not a filter over the project: {plan:?}"
     );
 }
+
+#[tokio::test]
+async fn thread_id_must_name_an_existing_event_in_the_same_project() {
+    let db = open().await;
+    let root_id = append(&db, "agent-one", None, event("root event"))
+        .await
+        .expect("append root");
+
+    // Valid thread_id in the same project is accepted.
+    let mut child = event("child event");
+    child.thread_id = Some(root_id.clone());
+    let child_id = append(&db, "agent-one", None, child)
+        .await
+        .expect("append child with valid thread_id");
+    assert!(!child_id.is_empty());
+
+    // Unknown thread_id is refused with NotFound.
+    let mut unknown = event("unknown thread");
+    unknown.thread_id = Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string());
+    let err = append(&db, "agent-one", None, unknown)
+        .await
+        .expect_err("unknown thread_id should be refused");
+    assert_eq!(err.code(), ErrorCode::NotFound);
+
+    // Thread id in another project is refused with NotFound (no existence oracle).
+    let mut cross = event("cross-project thread");
+    cross.project_id = "other-proj".to_string();
+    cross.thread_id = Some(root_id);
+    let err = append(&db, "agent-one", None, cross)
+        .await
+        .expect_err("cross-project thread_id should be refused");
+    assert_eq!(err.code(), ErrorCode::NotFound);
+
+    // Orphan answer is still rejected with InvalidArgument.
+    let mut orphan = event("orphan answer");
+    orphan.kind = "answer".to_string();
+    orphan.thread_id = None;
+    let err = append(&db, "agent-one", None, orphan)
+        .await
+        .expect_err("orphan answer should be rejected");
+    assert_eq!(err.code(), ErrorCode::InvalidArgument);
+}
