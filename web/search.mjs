@@ -296,12 +296,15 @@ export async function searchScreen(term, gen) {
     clearTimeout(timer);
     // A keystroke's timer can outlive the screen. The route then belongs to
     // whichever screen replaced this one.
-    if (!line.isConnected) return;
+    // The next screen may still be fetching, with this one on the page until
+    // it paints, so the route is asked as well as the page.
+    if (!line.isConnected || !location.hash.startsWith("#/search")) return;
     const typed = input.value.trim();
     clear.hidden = !input.value;
     // Replaced rather than pushed: Back leaves the screen instead of walking
     // through every letter, and a reload or a return lands on this query.
-    history.replaceState(null, "", routeFor(typed, type));
+    // The entry keeps whatever state it carries: only its address changes.
+    history.replaceState(history.state, "", routeFor(typed, type));
     const mine = ++asked;
     const state = await find(typed, type);
     if (mine !== asked || !line.isConnected) return;

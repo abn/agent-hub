@@ -565,13 +565,21 @@ def check_search_race(page, watch: Watch) -> None:
     # A letter typed on the way out: its timer fires after the screen has gone,
     # and the route by then is the next screen's to hold.
     watch.enter("search: a keystroke on the way out")
+    # The next screen is held back for a moment, as a busy hub would hold it, so
+    # the keystroke's timer fires while the search screen is still on the page.
+    page.evaluate(
+        "(() => { const send = window.fetch; window.__sendNow = () => { window.fetch = send; };"
+        " window.fetch = (url, options) => String(url).includes('/api/v1/storage')"
+        " ? new Promise((go) => setTimeout(go, 500)).then(() => send(url, options)) : send(url, options); })()"
+    )
     page.evaluate(
         "(text) => { const q = document.getElementById('q'); q.value = text;"
         " q.dispatchEvent(new Event('input', { bubbles: true }));"
         " location.hash = '#/storage'; }",
         harness.SEARCH_TERM,
     )
-    page.wait_for_timeout(600)
+    settle(page, "(document.querySelector('main h1') || {}).textContent === 'Storage'")
+    page.evaluate("window.__sendNow && window.__sendNow()")
     if page.evaluate("location.hash") != "#/storage" or heading(page) != "Storage":
         watch.fail(
             f"the screen left behind took the route back: {page.evaluate('location.hash')!r}"
