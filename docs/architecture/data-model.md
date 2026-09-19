@@ -186,6 +186,15 @@ both win. An agent's personal space is a project, so it gets a knowledge base
 like any other: a durable store the agent alone writes, and every trusted agent
 and the human can read.
 
+Every write to a page is one row in the file's own append-only tool call log:
+the operation, the canonical path, the actor the hub authenticated, the time
+and the version stored. The row is written under the same hold of the writer
+lock as the page, so the log is in the order the writes landed. It is what a
+page's history, its last writer and its trust tier are read from. It holds no
+content, it is never trimmed, and it is bounded only by the file's own size
+limit, so reading it is a scan. The routes over it are in
+[project knowledge base](../usage/knowledge-base.md).
+
 ## Multi-writer stores
 
 Agents write through the wrapper, never the file. The hub process is the single

@@ -132,6 +132,7 @@ than zero.
 | `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `prunable`, and a row per project with its artifact, session, knowledge and prunable bytes |
 | `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages` and `agents_active` for the project header and its tab labels |
+| `GET /api/v1/projects/:id/kb/...` | the knowledge base pages, their history, backlinks, lint and derived numbers, route by route in [project knowledge base](../usage/knowledge-base.md) |
 | `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
 | `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
 | `GET /api/v1/sessions/:id/brain?path=` | `entries[]` with `path`, `type` (`key`, `file` or `dir`) and `size_bytes`, one directory level per request, with `path` echoed and `truncated` when the level held more |

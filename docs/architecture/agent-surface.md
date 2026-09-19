@@ -56,6 +56,7 @@ and session-bound work goes through the proxy.
 | `brain_put` | Write a path into the active session brain, or a page into a project knowledge base. |
 | `brain_list` | List a store's entries, each with its type and size. |
 | `brain_delete` | Remove a path from either store. |
+| `brain_promote` | Copy an entry from the caller's active session brain into a project knowledge base page that cites the session it came from. |
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
 | `whoami` | Report the calling identity, its trust level, and its personal space. |
 | `version` | Report the server version, for a connectivity check. |

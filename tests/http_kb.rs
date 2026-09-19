@@ -1898,3 +1898,134 @@ async fn backlinks_name_other_pages_in_a_stable_order_and_lint_rows_carry_the_pa
     let cached = hub.get(&format!("{base}/lint")).await.ok();
     assert_eq!(cached["checked_at"], lint["checked_at"]);
 }
+
+#[tokio::test]
+async fn the_skill_document_describes_the_promote_tool_that_exists() {
+    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/SKILL.md"))
+        .expect("read the skill document");
+    // The signature is one line and what it returns is on the next.
+    let signature: String = skill
+        .lines()
+        .skip_while(|line| !line.starts_with("brain_promote("))
+        .take(2)
+        .collect();
+    let (params, returns) = signature
+        .split_once("->")
+        .expect("the skill document gives brain_promote a signature and a result");
+    let params = params
+        .split_once('(')
+        .and_then(|(_, rest)| rest.rsplit_once(')'))
+        .map(|(inner, _)| inner)
+        .expect("a parameter list");
+    let names: Vec<&str> = params.split(',').map(str::trim).collect();
+    let required: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| !name.ends_with('?'))
+        .collect();
+    let mut returned: Vec<&str> = returns
+        .trim()
+        .trim_matches(|c| c == '`' || c == '{' || c == '}' || c == '|' || c == ' ')
+        .split(',')
+        .map(|name| name.trim().trim_end_matches("[]"))
+        .collect();
+    returned.sort_unstable();
+
+    // Call the tool exactly as the document says, every parameter named.
+    let hub = Hub::start().await;
+    let project = hub.project("skill").await;
+    let token = hub.agent("deploy-bot", &project).await;
+    let mut agent = hub.mcp(&token).await;
+    agent
+        .ok(
+            "session_start",
+            json!({"project_id": project, "session_name": "work"}),
+        )
+        .await;
+    agent
+        .ok(
+            "brain_put",
+            json!({"path": "/fs/draft.md", "content": "draft", "store": "session"}),
+        )
+        .await;
+
+    let mut arguments = serde_json::Map::new();
+    for name in &names {
+        let value = match name.trim_end_matches('?') {
+            "from_path" => json!("/fs/draft.md"),
+            "to_path" => json!("/fs/page.md"),
+            "project_id" => json!(project),
+            "tags" => json!(["tag"]),
+            "if_version" => json!("absent"),
+            _ => json!("concept"),
+        };
+        arguments.insert(name.trim_end_matches('?').to_string(), value);
+    }
+    let result = agent.ok("brain_promote", Value::Object(arguments)).await;
+    let mut keys: Vec<&str> = result
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, returned, "the result is what the document says");
+
+    // And with only what it marks as required.
+    let mut arguments = serde_json::Map::new();
+    for name in required {
+        let value = if name == "from_path" {
+            "/fs/draft.md"
+        } else {
+            "/fs/second.md"
+        };
+        arguments.insert(name.to_string(), json!(value));
+    }
+    agent.ok("brain_promote", Value::Object(arguments)).await;
+
+    assert!(
+        !skill.contains("sources: [\"agenthub://"),
+        "a citation is a title and a resource, not a bare string"
+    );
+}
+
+#[tokio::test]
+async fn the_usage_page_documents_every_route_and_its_refusals() {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/docs");
+    let page = std::fs::read_to_string(format!("{root}/usage/knowledge-base.md"))
+        .expect("the wiki has a knowledge base usage page");
+    for route in [
+        "GET /api/v1/projects/{id}/kb/pages",
+        "GET /api/v1/projects/{id}/kb/pages/{path}",
+        "PUT /api/v1/projects/{id}/kb/pages/{path}",
+        "DELETE /api/v1/projects/{id}/kb/pages/{path}",
+        "POST /api/v1/projects/{id}/kb/pages/{path}/review",
+        "POST /api/v1/projects/{id}/kb/promote",
+        "GET /api/v1/projects/{id}/kb/history",
+        "GET /api/v1/projects/{id}/kb/backlinks",
+        "GET /api/v1/projects/{id}/kb/lint",
+        "GET /api/v1/projects/{id}/kb/stats",
+    ] {
+        assert!(page.contains(route), "the page documents `{route}`");
+    }
+    for status in ["400", "401", "404", "409", "413", "415"] {
+        assert!(page.contains(status), "the page names the {status} refusal");
+    }
+    assert!(page.contains("brain_promote"));
+    assert!(page.contains("truncated"));
+
+    let log = std::fs::read_to_string(format!("{root}/log.md")).expect("read the log");
+    let first_entry = log
+        .lines()
+        .find(|line| line.starts_with("## "))
+        .expect("the log has entries");
+    let kb_entry = log
+        .lines()
+        .filter(|line| line.starts_with("## "))
+        .position(|line| line.to_lowercase().contains("knowledge base backend"))
+        .expect("the log records the knowledge base backend");
+    assert_eq!(
+        kb_entry, 0,
+        "the newest entry is at the top, found {first_entry}"
+    );
+}

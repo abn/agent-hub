@@ -4,6 +4,27 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-19, knowledge base backend and promote
+
+* **Creation**: [Project knowledge base](usage/knowledge-base.md) documents the
+  ten REST routes the human surface reads and writes pages through, each with
+  its response and its refusals, the path rules both surfaces share, the
+  limits, and the `brain_promote` tool.
+* **Update**: A page write, delete, review and promote go through one write
+  path whether they arrive over REST or the agent tools. A path is made
+  canonical before the store, the write log, the search corpus or lint keys on
+  it; a key-value path, a control character and a backslash are refused on
+  both surfaces.
+* **Update**: A review is recorded under the hub's own name for the human and
+  takes the version the human read, so a page that changed since is a conflict
+  and is not stamped. Deleting a page that does not exist is `not_found` and
+  leaves no log row, no signal and no file.
+* **Update**: The history scans the whole write log, so `total` is the real
+  count and a page keeps its last writer however many writes came after. The
+  bound is the knowledge base file's own size limit, and a cut page says
+  `truncated`.
+* **Note**: There is no move or rename, and wiki links are not followed.
+
 ## 2026-09-19, a search query is words, and a thread is in its project
 
 * **Update**: The served skill document (`GET /SKILL.md`) now says how a search
@@ -122,6 +143,7 @@ software release notes and the repository changelog.
   under the finger.
 * **Note**: Quick answers on a question, a snooze under a swipe, and a note
   sent with a decision stay intended design.
+
 ## 2026-09-18, a session, its brain as a tree
 
 * **Update**: The sessions screen and its detail view now match the design.

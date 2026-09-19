@@ -172,6 +172,7 @@ target, and session-bound work goes through the proxy.
 | `session_end` | Mark the session ended, with an optional `handoff` note for whoever picks the work up. Only the owner may end a session. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write goes only to your own active session, which is the only one it may name. Every write is indexed for search. |
+| `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
 | `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
@@ -198,7 +199,9 @@ brain_get(path, session?, store?, project_id?)
 brain_put(path, content, store, session?, project_id?, if_version?)
 brain_list(path?, session?, store?, project_id?)
                                          -> entries: [{path, type: key|file|dir, size_bytes}]
-brain_delete(path, store, session?, project_id?)
+brain_delete(path, store, session?, project_id?, if_version?)
+brain_promote(from_path, to_path, project_id?, type?, title?, description?, tags?, if_version?)
+                                         -> {ok, path, version, lint[]}
 session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
@@ -378,6 +381,38 @@ A write whose `if_version` no longer matches is refused with `conflict`, and
 the message ends with `current_version=sha256:...`, so a retry is read, merge,
 write again with the new version. Use `if_version: "absent"` to create a page
 only if nothing is there yet. Without `if_version` the last writer wins.
+
+## Promoting session knowledge to the project
+
+When a session note or runbook is ready to share with the whole project,
+`brain_promote` copies it from your active session brain into the project
+knowledge base:
+
+```
+brain_promote(from_path: "/fs/notes/tls.md", to_path: "/fs/services/caddy.md",
+              type: "concept", title: "Caddy reverse proxy",
+              description: "How TLS terminates", tags: ["tls", "proxy"],
+              if_version: "absent")
+      -> {ok, path, version, lint[]}
+```
+
+`from_path` is read from your active session and is left as it was. `to_path`
+is an `/fs/` page path in `project_id`, which defaults to the session's
+project and needs your write access. `type`, `title`, `description` and `tags`
+are patched into the page's frontmatter, creating the block when the entry has
+none; every other byte of the entry is kept. The hub adds the citation itself:
+one entry under `sources`, a mapping with a `title` of
+`<session name> brain <from_path>` and a `resource` of
+`agenthub://session/<session_id>/brain<from_path>`.
+
+`if_version` works as it does on `brain_put`. `lint` is advisory and never
+fails the call. One `kb_promoted` signal is appended to the project feed. A
+frontmatter value may not contain a line break or another control character.
+
+A page path is made canonical before it is stored, so `/fs/a/../b.md` is
+`/fs/b.md` and the result names the canonical path. A `/kv/` path, a control
+character and a backslash are refused with `invalid_argument`. A
+`brain_delete` of a page that does not exist is `not_found`.
 
 ## Feed, inbox, and questions
 
