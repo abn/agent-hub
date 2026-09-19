@@ -23,6 +23,7 @@ NAME = "a11y"
 ROUTES = [
     "home",
     "inbox",
+    "inbox-detail",
     "feed",
     "session-detail",
     "sessions",
@@ -47,6 +48,8 @@ HOME_QUIET = "home-quiet"
 HOME_REQUEST = "**/api/v1/home"
 # The project settings screen lives under the seeded project's own address.
 PROJECT_SETTINGS = "project-settings"
+# The inbox's medium card is addressed by the item it opens.
+INBOX_DETAIL = "inbox-detail"
 
 TAGS = ["wcag2a", "wcag2aa"]
 
@@ -82,6 +85,10 @@ def run() -> int:
             "/api/v1/projects",
             {"id": harness.FEED_EMPTY_PROJECT, "display_name": "Feed empty"},
         )
+        # One inbox item is read before the audit, so the Earlier group and its
+        # quieter rows are on the screen axe reads.
+        if seeded.get("inbox_read_id"):
+            harness.request(port, "POST", f"/api/v1/inbox/{seeded['inbox_read_id']}/read")
         with sync_playwright() as playwright:
             browser = harness.launch_browser(playwright, NAME)
             for theme, color_scheme in (("light", "light"), ("dark", "dark")):
@@ -113,6 +120,10 @@ def run() -> int:
                     elif route == PROJECT_SETTINGS:
                         page.evaluate(
                             "location.hash = '#/projects/%s/settings'" % seeded["project_id"]
+                        )
+                    elif route == INBOX_DETAIL:
+                        page.evaluate(
+                            "location.hash = '#/inbox?open=%s'" % seeded["question_id"]
                         )
                     else:
                         page.evaluate(f"location.hash = '#/{route}'")

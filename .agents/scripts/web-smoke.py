@@ -1976,7 +1976,8 @@ def check_row_keys(page, watch: Watch) -> None:
 def check_enter_opens(page, watch: Watch, project: str) -> None:
     watch.enter("keys: enter")
     page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions'")
-    if not settle(page, "!!document.querySelector('main .row a[href]')"):
+    # An inbox row carries a link too, so the wait names the screen it wants.
+    if not settle(page, "!!document.querySelector('main .proj-head ~ .panes .row a[href]')"):
         watch.fail("the sessions screen has no row to open")
         return
     page.keyboard.press("j")
@@ -3830,6 +3831,566 @@ def check_feed_screen(browser, watch: Watch, port: int) -> None:
     watch.failures.extend(mine.failures)
     context.close()
     watch.page.bring_to_front()
+# The inbox checks find an item by what it says and then hold it by its id, so
+# a repaint or a regroup cannot hand them a different row.
+INBOX_ITEM_ID = (
+    "((want) => { const item = [...document.querySelectorAll('main .inbox-item')]"
+    ".find((el) => (el.querySelector('.title') || {}).textContent.includes(want));"
+    " return item ? item.dataset.id : ''; })"
+)
+INBOX_GROUP_OF = (
+    "((id) => { const item = document.querySelector("
+    "`main .inbox-item[data-id=\"${id}\"]`);"
+    " const group = item && item.closest('[data-group]');"
+    " return group ? group.dataset.group : ''; })"
+)
+# A finger on a row: touch pointer events, dispatched the way the browser
+# would, moved in steps so the screen sees a drag rather than a jump.
+INBOX_SWIPE = (
+    "(([selector, dx, dy, release]) => {"
+    " const el = document.querySelector(selector);"
+    " el.scrollIntoView({ block: 'center' });"
+    " const box = el.getBoundingClientRect();"
+    " const x = box.left + box.width / 2; const y = box.top + box.height / 2;"
+    " const fire = (type, px, py) => el.dispatchEvent(new PointerEvent(type, {"
+    "  bubbles: true, cancelable: true, pointerId: 7, pointerType: 'touch',"
+    "  isPrimary: true, clientX: px, clientY: py }));"
+    " fire('pointerdown', x, y);"
+    " for (let i = 1; i <= 6; i += 1) fire('pointermove', x + (dx * i) / 6, y + (dy * i) / 6);"
+    " if (release) fire('pointerup', x + dx, y + dy);"
+    "})"
+)
+INBOX_ROW_SHIFT = (
+    "((id) => { const row = document.querySelector("
+    "`main .inbox-item[data-id=\"${id}\"] .inbox-row`);"
+    " const t = row ? getComputedStyle(row).transform : 'none';"
+    " return t === 'none' ? 0 : new DOMMatrixReadOnly(t).m41; })"
+)
+
+
+def inbox_item(page, watch: Watch, summary: str) -> str:
+    found = page.evaluate(f"{INBOX_ITEM_ID}({json.dumps(summary)})")
+    if not found:
+        watch.fail(f"the inbox has no item that reads {summary!r}")
+    return found
+
+
+def inbox_group(page, item_id: str) -> str:
+    return page.evaluate(f"{INBOX_GROUP_OF}({json.dumps(item_id)})")
+
+
+def check_inbox_groups(page, watch: Watch, project: str) -> None:
+    """Three groups with their counts, and a triage row that says what it is."""
+    watch.enter("inbox: groups and rows")
+    goto(page, "#/inbox", "Inbox")
+    if not settle(page, "!!document.querySelector('main .inbox-label')"):
+        watch.fail("the inbox paints no group label")
+        return
+    groups = page.evaluate(
+        "[...document.querySelectorAll('main .inbox-label')].map((label) => ({"
+        " group: label.dataset.group, text: label.textContent.trim(),"
+        " colour: getComputedStyle(label).color,"
+        " size: getComputedStyle(label).fontSize,"
+        " caps: getComputedStyle(label).textTransform,"
+        " rows: document.querySelectorAll("
+        "`main .inbox-group[data-group=\"${label.dataset.group}\"] .inbox-row`).length }))"
+    )
+    names = [group["group"] for group in groups]
+    if names[:2] != ["waiting", "unread"]:
+        watch.fail(f"the groups are {names}, expected waiting then unread")
+    for group in groups:
+        title = {"waiting": "Waiting on you", "unread": "Unread"}.get(group["group"])
+        if title and group["text"] != f"{title} · {group['rows']}":
+            watch.fail(f"the {group['group']} label reads {group['text']!r} over {group['rows']} rows")
+        if group["size"] != "12px" or group["caps"] != "uppercase":
+            watch.fail(f"the {group['group']} label is {group['size']} {group['caps']}")
+    if len(groups) > 1 and groups[0]["colour"] == groups[1]["colour"]:
+        watch.fail("the waiting label is not set apart from the unread one")
+
+    unread = inbox_item(page, watch, harness.INBOX_READ_SUMMARY)
+    waiting = inbox_item(page, watch, "Drop the")
+    if not unread or not waiting:
+        return
+    if inbox_group(page, unread) != "unread" or inbox_group(page, waiting) != "waiting":
+        watch.fail("finished work and an approval did not land in their own groups")
+    row = page.evaluate(
+        "((id) => { const item = document.querySelector(`main .inbox-item[data-id=\"${id}\"]`);"
+        " const title = item.querySelector('.title');"
+        " const dot = item.querySelector('.dot-unread');"
+        " const said = dot && dot.nextElementSibling;"
+        " return { weight: getComputedStyle(title).fontWeight, dot: !!dot,"
+        "  said: said ? said.textContent.trim() : '',"
+        "  project: (item.querySelector('.inbox-project') || {}).textContent || '',"
+        "  projectWeight: getComputedStyle(item.querySelector('.inbox-project') || item).fontWeight,"
+        "  foot: (item.querySelector('.inbox-foot') || {}).textContent || '',"
+        "  time: !!item.querySelector('time'),"
+        "  read: !!item.querySelector('[data-action=\"inbox-read\"]') }; })"
+        f"({json.dumps(unread)})"
+    )
+    if row["weight"] != "600" or not row["dot"]:
+        watch.fail(f"an unread row is weight {row['weight']} with dot {row['dot']}")
+    if row["said"] != "Unread":
+        watch.fail(f"the unread dot is a colour with no name beside it ({row['said']!r})")
+    if row["project"].strip() != project or row["projectWeight"] != "600":
+        watch.fail(f"the footer's project reads {row['project']!r} at {row['projectWeight']}")
+    if "unread" in row["foot"].lower().replace("mark unread", ""):
+        if "Mark read" not in row["foot"]:
+            watch.fail(f"the footer prints the raw status: {row['foot']!r}")
+    if not row["time"]:
+        watch.fail("the row carries no time")
+    if not row["read"]:
+        watch.fail("an unread row offers no way to mark it read without a swipe")
+
+    held = page.evaluate(
+        "((id) => { const item = document.querySelector(`main .inbox-item[data-id=\"${id}\"]`);"
+        " const body = item.querySelector('.inbox-row .inbox-body');"
+        " return { body: body ? body.textContent : '',"
+        "  bodySize: body ? getComputedStyle(body).fontSize : '',"
+        "  title: item.querySelector('.title').textContent,"
+        "  acts: [...item.querySelectorAll('.inbox-row button')].map((b) => b.textContent.trim()),"
+        "  heights: [...item.querySelectorAll('.inbox-row button')]"
+        "   .map((b) => b.getBoundingClientRect().height) }; })"
+        f"({json.dumps(waiting)})"
+    )
+    if held["body"] != harness.INBOX_BODY or held["bodySize"] != "13px":
+        watch.fail(f"the waiting row's body line reads {held['body']!r} at {held['bodySize']}")
+    if held["title"].strip() != harness.INBOX_DECLINE_SUMMARY:
+        watch.fail(f"the waiting row's title reads {held['title']!r}")
+    if held["acts"] != ["Decline", "Approve"]:
+        watch.fail(f"an approval row offers {held['acts']}, expected Decline then Approve")
+    if any(abs(height - 32) > 0.5 for height in held["heights"]):
+        watch.fail(f"the row buttons are {held['heights']} tall, not the design's 32px")
+    for planted in ("pwned-inbox-title", "pwned-inbox-body"):
+        if page.evaluate(f"!!document.getElementById({json.dumps(planted)})"):
+            watch.fail(f"an agent's markup became an element in the inbox list ({planted})")
+    watch.drain_rejections()
+
+
+def check_inbox_read_state(page, watch: Watch) -> None:
+    """Marking read moves a row to Earlier, undoes, and the filter hides Earlier."""
+    watch.enter("inbox: read state")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .inbox-item')")
+    item = inbox_item(page, watch, harness.INBOX_READ_SUMMARY)
+    if not item:
+        return
+    sent = watch.count(f"POST /api/v1/inbox/{item}/read")
+    page.click(f'main .inbox-item[data-id="{item}"] [data-action="inbox-read"]')
+    if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(item)}) === 'earlier'"):
+        watch.fail(f"a row marked read sits in {inbox_group(page, item)!r}, not in Earlier")
+        return
+    if watch.count(f"POST /api/v1/inbox/{item}/read") != sent + 1:
+        watch.fail("marking a row read did not post to the read route")
+    quiet = page.evaluate(
+        "((id) => { const item = document.querySelector(`main .inbox-item[data-id=\"${id}\"]`);"
+        " return { weight: getComputedStyle(item.querySelector('.title')).fontWeight,"
+        "  dot: !!item.querySelector('.dot-unread'),"
+        "  back: !!item.querySelector('[data-action=\"inbox-unread\"]') }; })"
+        f"({json.dumps(item)})"
+    )
+    if quiet["weight"] != "500" or quiet["dot"]:
+        watch.fail(f"a read row is weight {quiet['weight']} with dot {quiet['dot']}")
+    if not quiet["back"]:
+        watch.fail("a read row offers no way to mark it unread without a swipe")
+
+    page.click('main [data-action="inbox-unread-only"]')
+    if not settle(
+        page,
+        "(document.querySelector('main [data-action=\"inbox-unread-only\"]') || {})"
+        ".ariaPressed === 'true' && !document.querySelector('main [data-group=\"earlier\"]')",
+    ):
+        watch.fail("Unread only did not press, or left the Earlier group on screen")
+    if not page.evaluate("!!document.querySelector('main [data-group=\"waiting\"] .inbox-row')"):
+        watch.fail("Unread only hid what waits on the reader")
+    page.reload(wait_until="load")
+    if not settle(
+        page,
+        "(document.querySelector('main [data-action=\"inbox-unread-only\"]') || {})"
+        ".ariaPressed === 'true'",
+    ):
+        watch.fail("the filter did not survive a reload")
+    page.click('main [data-action="inbox-unread-only"]')
+    if not settle(page, "!!document.querySelector('main [data-group=\"earlier\"]')"):
+        watch.fail("releasing Unread only did not bring Earlier back")
+
+    # The toast from the mark-read went with the reload, so the way back is the
+    # row's own control.
+    page.click(f'main .inbox-item[data-id="{item}"] [data-action="inbox-unread"]')
+    if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(item)}) === 'unread'"):
+        watch.fail("marking a row unread did not return it to the Unread group")
+    if not settle(page, "!!document.querySelector('.toast-undo')"):
+        watch.fail("the change of read state offers no undo")
+    else:
+        page.click(".toast-undo")
+        if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(item)}) === 'earlier'"):
+            watch.fail("Undo did not put the row back where it was")
+    watch.drain_rejections()
+
+
+def check_inbox_swipe(page, watch: Watch) -> None:
+    """A swipe marks read or reveals the row's actions, and never decides."""
+    watch.enter("inbox: swipe")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .inbox-item')")
+    item = inbox_item(page, watch, harness.INBOX_SWIPE_SUMMARY)
+    held = inbox_item(page, watch, "Drop the")
+    if not item or not held:
+        return
+    row = f'main .inbox-item[data-id="{item}"] .inbox-row'
+    page.evaluate(f"{INBOX_SWIPE}({json.dumps([row, 80, 0, False])})")
+    shift = page.evaluate(f"{INBOX_ROW_SHIFT}({json.dumps(item)})")
+    if abs(shift - 80) > 1:
+        watch.fail(f"the row followed the finger to {shift}px, not 80px")
+    tray = page.evaluate(
+        "((id) => { const tray = document.querySelector("
+        "`main .inbox-item[data-id=\"${id}\"] .swipe-tray-read`);"
+        " return tray && !tray.hidden ? { text: tray.textContent.trim(),"
+        "  width: tray.getBoundingClientRect().width } : null; })"
+        f"({json.dumps(item)})"
+    )
+    if not tray or tray["text"] != "Mark read" or abs(tray["width"] - 112) > 0.5:
+        watch.fail(f"the tray under a right swipe is {tray}, expected 112px of Mark read")
+    sent = watch.count(f"POST /api/v1/inbox/{item}/read")
+    page.evaluate(
+        "window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7,"
+        " pointerType: 'touch', isPrimary: true, clientX: 0, clientY: 0 }))"
+    )
+    if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(item)}) === 'earlier'"):
+        watch.fail("a right swipe past the threshold did not mark the row read")
+    elif watch.count(f"POST /api/v1/inbox/{item}/read") < sent + 1:
+        watch.fail("the swipe moved the row without posting to the read route")
+    live = page.evaluate(
+        "(() => { const r = document.querySelector('.toast-region');"
+        " return r ? r.textContent : ''; })()"
+    )
+    if "Marked read" not in live:
+        watch.fail(f"the swipe was not announced, the live region reads {live!r}")
+    page.evaluate("(document.querySelector('.toast-close') || { click() {} }).click()")
+
+    # A vertical drag is the page scrolling, not a swipe.
+    other = f'main .inbox-item[data-id="{held}"] .inbox-row'
+    page.evaluate(f"{INBOX_SWIPE}({json.dumps([other, 6, 90, True])})")
+    if page.evaluate(f"{INBOX_ROW_SHIFT}({json.dumps(held)})") != 0:
+        watch.fail("a vertical drag moved the row sideways")
+
+    decisions = watch.count("POST /api/v1/approvals/")
+    page.evaluate(f"{INBOX_SWIPE}({json.dumps([other, -120, 0, True])})")
+    revealed = page.evaluate(
+        "((id) => { const item = document.querySelector(`main .inbox-item[data-id=\"${id}\"]`);"
+        " const tray = item.querySelector('.swipe-tray-actions');"
+        " return { open: item.dataset.revealed || '', hidden: !tray || tray.hidden,"
+        "  acts: tray ? [...tray.querySelectorAll('button')].map((b) => ({"
+        "   text: b.textContent.trim(), width: b.getBoundingClientRect().width })) : [] }; })"
+        f"({json.dumps(held)})"
+    )
+    if revealed["open"] != "actions" or revealed["hidden"]:
+        watch.fail(f"a left swipe did not reveal the row's actions ({revealed})")
+    if [act["text"] for act in revealed["acts"]] != ["Decline", "Approve"]:
+        watch.fail(f"the revealed actions are {revealed['acts']}")
+    elif any(abs(act["width"] - 88) > 0.5 for act in revealed["acts"]):
+        watch.fail(f"the revealed actions are not 88px each: {revealed['acts']}")
+    if abs(page.evaluate(f"{INBOX_ROW_SHIFT}({json.dumps(held)})") + 176) > 1:
+        watch.fail("the row did not move 176px to show its two actions")
+    if watch.count("POST /api/v1/approvals/") != decisions:
+        watch.fail("a swipe decided an approval")
+    page.keyboard.press("Escape")
+    if not settle(
+        page,
+        f"!document.querySelector('main .inbox-item[data-id=\"{held}\"]').dataset.revealed",
+    ):
+        watch.fail("Esc did not close the revealed actions")
+
+    # Reduced motion: nothing slides under the finger, and the release still
+    # reveals.
+    page.emulate_media(reduced_motion="reduce")
+    try:
+        page.evaluate(f"{INBOX_SWIPE}({json.dumps([other, -120, 0, False])})")
+        if page.evaluate(f"{INBOX_ROW_SHIFT}({json.dumps(held)})") != 0:
+            watch.fail("the row slid under the finger with reduced motion asked for")
+        page.evaluate(
+            "((selector) => document.querySelector(selector).dispatchEvent("
+            "new PointerEvent('pointerup', { bubbles: true, pointerId: 7, pointerType: 'touch',"
+            " isPrimary: true, clientX: 0, clientY: 0 })))"
+            f"({json.dumps(other)})"
+        )
+        if not settle(
+            page,
+            f"document.querySelector('main .inbox-item[data-id=\"{held}\"]')"
+            ".dataset.revealed === 'actions'",
+        ):
+            watch.fail("with reduced motion the release did not reveal the actions")
+    finally:
+        page.emulate_media(reduced_motion="no-preference")
+
+    # The revealed Decline asks first, and the safe answer leaves things be.
+    page.click(f'main .inbox-item[data-id="{held}"] .swipe-tray-actions [data-action="inbox-tray-decline"]')
+    page.wait_for_selector("dialog.dialog[open]")
+    if page.evaluate("!!document.getElementById('pwned-inbox-title')"):
+        watch.fail("an agent's markup became an element in the decline dialog")
+    if harness.INBOX_DECLINE_SUMMARY not in page.evaluate(
+        "document.querySelector('dialog.dialog').textContent"
+    ):
+        watch.fail("the dialog does not name what is being declined")
+    page.click("dialog.dialog .dialog-safe")
+    page.wait_for_timeout(WRITE_WINDOW)
+    if watch.count("POST /api/v1/approvals/") != decisions:
+        watch.fail("keeping in the dialog still sent a decision")
+    watch.drain_rejections()
+
+
+def check_inbox_detail(page, watch: Watch) -> None:
+    """Opening a waiting item shows the medium card, and Back returns."""
+    watch.enter("inbox: the medium card")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .inbox-item')")
+    item = inbox_item(page, watch, harness.INBOX_QUESTION_SUBJECT)
+    if not item:
+        return
+    # Enter on the selected row is the keyboard's way in.
+    reached = False
+    for _ in range(12):
+        selected = page.evaluate(SELECTED_TAB)
+        if selected and harness.INBOX_QUESTION_SUBJECT in selected["text"]:
+            reached = True
+            break
+        page.keyboard.press("j")
+        page.wait_for_timeout(120)
+    if not reached:
+        watch.fail("the selection never reached the seeded question")
+        page.click(f'main .inbox-item[data-id="{item}"] .title a')
+    else:
+        page.keyboard.press("Enter")
+    if not settle(page, "!!document.querySelector('main .inbox-detail')"):
+        watch.fail("opening a row did not show its detail")
+        return
+    if f"open={item}" not in page.evaluate("location.hash"):
+        watch.fail("the open item is not in the address, so a reload would lose it")
+    card = page.evaluate(
+        "(() => { const card = document.querySelector('main .inbox-detail');"
+        " const title = card.querySelector('.item-title');"
+        " const body = card.querySelector('.inbox-detail-body');"
+        " const pill = card.querySelector('.pill');"
+        " return { pill: pill ? pill.textContent.trim() : '',"
+        "  title: title ? title.textContent.trim() : '',"
+        "  titleSize: title ? getComputedStyle(title).fontSize : '',"
+        "  body: body ? body.textContent : '',"
+        "  bodySize: body ? getComputedStyle(body).fontSize : '',"
+        "  kind: (card.querySelector('.sr-only') || {}).textContent || '',"
+        "  composer: !!card.querySelector('.composer-field'),"
+        "  back: (card.querySelector('.inbox-back') || { getAttribute() {} })"
+        "   .getAttribute('href') }; })()"
+    )
+    if card["pill"] != "Waiting on you":
+        watch.fail(f"the card's pill reads {card['pill']!r}")
+    if card["title"] != harness.INBOX_QUESTION_SUBJECT or card["titleSize"] != "17px":
+        watch.fail(f"the card's title is {card['title']!r} at {card['titleSize']}")
+    if card["body"] != harness.INBOX_BODY or card["bodySize"] != "15px":
+        watch.fail(f"the card's body is {card['body']!r} at {card['bodySize']}")
+    if card["kind"] != "Question":
+        watch.fail(f"the card names its kind as {card['kind']!r}")
+    if not card["composer"]:
+        watch.fail("a question's card carries no composer")
+    if page.evaluate("!!document.getElementById('pwned-inbox-body')"):
+        watch.fail("an agent's markup became an element in the detail card")
+    if card["back"] != "#/inbox":
+        watch.fail(f"the card's way back points at {card['back']!r}")
+
+    # An approval's card carries the decision at full size.
+    page.evaluate("history.back()")
+    settle(page, "!document.querySelector('main .inbox-detail')")
+    held = inbox_item(page, watch, "Drop the")
+    if held:
+        page.click(f'main .inbox-item[data-id="{held}"] .title a')
+        settle(page, "!!document.querySelector('main .inbox-detail')")
+        acts = page.evaluate(
+            "[...document.querySelectorAll('main .inbox-detail .inbox-answers button')]"
+            ".map((b) => ({ text: b.textContent.trim(),"
+            " height: b.getBoundingClientRect().height }))"
+        )
+        if [act["text"] for act in acts] != ["Approve", "Decline"]:
+            watch.fail(f"an approval's card offers {acts}")
+        elif any(act["height"] < 44 for act in acts):
+            watch.fail(f"the card's answers are under 44px: {acts}")
+        page.evaluate("history.back()")
+        settle(page, "!document.querySelector('main .inbox-detail')")
+
+    # Answering from the card resolves the item and returns to the list.
+    page.click(f'main .inbox-item[data-id="{item}"] .title a')
+    if not settle(page, "!!document.querySelector('main .inbox-detail .composer-field')"):
+        watch.fail("the question's card did not come back with its composer")
+        return
+    page.fill("main .inbox-detail .composer-field", ANSWER_BODY)
+    page.click("main .inbox-detail .composer-send")
+    if not settle(
+        page,
+        "!document.querySelector('main .inbox-detail') &&"
+        f" !document.querySelector('main .inbox-item[data-id=\"{item}\"]')",
+    ):
+        watch.fail("answering from the card did not resolve the item and return to the list")
+    watch.drain_rejections()
+
+
+def check_inbox_decline(page, watch: Watch) -> None:
+    """Decline is asked for in the dialog and carries the decision it names."""
+    watch.enter("inbox: decline")
+    goto(page, "#/inbox", "Inbox")
+    settle(page, "!!document.querySelector('main .inbox-item')")
+    held = inbox_item(page, watch, "Drop the")
+    if not held:
+        return
+    sent: list[str] = []
+
+    def note(request) -> None:
+        if request.method == "POST" and f"/api/v1/approvals/{held}/decision" in request.url:
+            sent.append(request.post_data or "")
+
+    page.on("request", note)
+    try:
+        page.click(f'main .inbox-item[data-id="{held}"] .inbox-row [data-action="inbox-decline"]')
+        page.wait_for_selector("dialog.dialog[open]")
+        page.click("dialog.dialog .dialog-commit")
+        if not settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{held}\"]')"):
+            watch.fail("the declined approval still waits")
+    finally:
+        page.remove_listener("request", note)
+    if len(sent) != 1 or json.loads(sent[0] or "{}").get("decision") != "decline":
+        watch.fail(f"declining sent {sent}")
+    watch.drain_rejections()
+
+
+def check_inbox_refresh(page, watch: Watch) -> None:
+    """The last-synced line is a real time, and both ways of refreshing move it."""
+    watch.enter("inbox: refresh")
+    goto(page, "#/inbox", "Inbox")
+    stamp = (
+        "(() => { const t = document.querySelector('main .inbox-sync time');"
+        " return t ? Date.parse(t.dateTime) : 0; })()"
+    )
+    if not settle(page, f"{stamp} > 0"):
+        watch.fail("the inbox carries no last-synced time")
+        return
+    first = page.evaluate(stamp)
+    if abs(first - time.time() * 1000) > 60000:
+        watch.fail("the last-synced time is not the time of the fetch that painted the screen")
+    line = page.evaluate("document.querySelector('main .inbox-sync').textContent")
+    if "last synced" not in line:
+        watch.fail(f"the line reads {line!r}")
+    page.wait_for_timeout(1100)
+    fetched = watch.count("GET /api/v1/inbox?")
+    page.click('main [data-action="inbox-refresh"]')
+    if not settle(page, f"{stamp} > {first}"):
+        watch.fail("Refresh did not move the last-synced time")
+    if watch.count("GET /api/v1/inbox?") <= fetched:
+        watch.fail("Refresh did not read the inbox again")
+    if not settle(
+        page,
+        "(document.activeElement || {}).dataset &&"
+        " document.activeElement.dataset.action === 'inbox-refresh'",
+        2000,
+    ):
+        watch.fail(f"after a refresh focus is on {page.evaluate(FOCUS_CLASS)!r}")
+
+    second = page.evaluate(stamp)
+    page.wait_for_timeout(1100)
+    fetched = watch.count("GET /api/v1/inbox?")
+    page.evaluate("window.scrollTo(0, 0)")
+    page.evaluate(f"{INBOX_SWIPE}({json.dumps(['main .inbox-top', 4, 60, False])})")
+    hint = page.evaluate("document.querySelector('main .inbox-sync').textContent")
+    if "refresh" not in hint.lower():
+        watch.fail(f"a pull gives no sign of what it will do, the line reads {hint!r}")
+    if watch.count("GET /api/v1/inbox?") != fetched:
+        watch.fail("a pull refreshed before it was released")
+    page.evaluate(f"{INBOX_SWIPE}({json.dumps(['main .inbox-top', 4, 200, True])})")
+    if not settle(page, f"{stamp} > {second}"):
+        watch.fail("a pull down did not refresh the inbox")
+    watch.drain_rejections()
+
+
+def check_inbox_mark_all(page, watch: Watch) -> None:
+    """Mark all read empties Unread and leaves what waits where it is."""
+    watch.enter("inbox: mark all read")
+    goto(page, "#/inbox", "Inbox")
+    if not settle(page, "!!document.querySelector('main [data-group=\"unread\"] .inbox-row')"):
+        watch.fail("nothing is unread for Mark all read to act on")
+        return
+    waiting = page.evaluate(
+        "document.querySelectorAll('main [data-group=\"waiting\"] .inbox-row').length"
+    )
+    sent = watch.count("POST /api/v1/inbox/read-all")
+    page.click('main [data-action="inbox-read-all"]')
+    if not settle(page, "!document.querySelector('main [data-group=\"unread\"]')"):
+        watch.fail("Mark all read left rows unread")
+    if watch.count("POST /api/v1/inbox/read-all") != sent + 1:
+        watch.fail("Mark all read did not post to the bulk route")
+    after = page.evaluate(
+        "document.querySelectorAll('main [data-group=\"waiting\"] .inbox-row').length"
+    )
+    if after != waiting:
+        watch.fail(f"Mark all read moved what waits on the reader ({waiting} to {after})")
+    if not page.evaluate(
+        "(document.querySelector('main [data-action=\"inbox-read-all\"]') || {}).disabled"
+    ):
+        watch.fail("with nothing unread, Mark all read still offers itself")
+    watch.drain_rejections()
+
+
+def check_inbox_empty(page, watch: Watch) -> None:
+    """A clear inbox says so with the shared empty state, and offers the read items."""
+    watch.enter("inbox: empty")
+    listing = re.compile(r"/api/v1/inbox\?")
+
+    def clear(route):
+        route.fulfill(status=200, content_type="application/json", body='{"items": []}')
+
+    page.route(listing, clear)
+    try:
+        goto(page, "#/inbox?unread=1", "Inbox")
+        if not settle(page, "!!document.querySelector('main .empty-state')"):
+            watch.fail("a clear inbox does not use the empty-state component")
+            return
+        box = page.evaluate(
+            "(() => { const box = document.querySelector('main .empty-state');"
+            " const link = box.querySelector('.empty-link');"
+            " return { title: box.querySelector('.empty-title').textContent,"
+            "  link: link ? link.textContent : '', href: link ? link.getAttribute('href') : '' }; })()"
+        )
+        if box["title"] != EMPTY_COPY_INBOX["title"]:
+            watch.fail(f"the empty inbox reads {box['title']!r}")
+        if box["link"] != EMPTY_COPY_INBOX["link"] or box["href"] != "#/inbox":
+            watch.fail(f"the way to the read items is {box}")
+    finally:
+        page.unroute(listing, clear)
+    goto(page, "#/inbox", "Inbox")
+    watch.drain_rejections()
+
+
+def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
+    """At desktop width the list keeps its pane, Earlier folds, the card sits beside."""
+    watch.enter("desktop: the inbox")
+    context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"desktop inbox: uncaught error: {error}"))
+    page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
+    try:
+        if not settle(page, "!!document.querySelector('main .panes .pane-list .inbox-item')"):
+            watch.fail("the inbox does not use the two-pane container")
+            return
+        if page.evaluate("(document.querySelector('main details[data-group=\"earlier\"]') || { open: true }).open"):
+            watch.fail("Earlier is not folded at desktop width")
+        page.click("main .pane-list .inbox-item .title a")
+        if not settle(page, "!!document.querySelector('main .pane-detail .inbox-detail')"):
+            watch.fail("an opened item does not sit in the detail pane")
+        if not page.evaluate("!!document.querySelector('main .pane-list .inbox-item')"):
+            watch.fail("opening an item took the list away at desktop width")
+        if not page.evaluate("!!document.querySelector('main .inbox-item[aria-current=\"true\"]')"):
+            watch.fail("the list does not mark which item is open")
+    finally:
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
 
 
 def run() -> int:
@@ -3927,6 +4488,15 @@ def run() -> int:
             check_search_rows_take_keys(page, watch)
             check_toast_leaves_a_writer_alone(page, watch, project)
             check_answer(page, watch, project)
+            check_inbox_groups(page, watch, project)
+            check_inbox_read_state(page, watch)
+            check_inbox_swipe(page, watch)
+            check_inbox_detail(page, watch)
+            check_inbox_decline(page, watch)
+            check_inbox_refresh(page, watch)
+            check_inbox_mark_all(page, watch)
+            check_inbox_empty(page, watch)
+            check_inbox_desktop(browser, watch, port)
             check_approve(page, watch)
             check_session_row_state(page, watch, project)
             check_tree_roles(page, watch, project, seeded["session_id"])

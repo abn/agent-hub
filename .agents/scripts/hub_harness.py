@@ -88,6 +88,16 @@ SEARCH_HOSTILE_QUERIES = [
     '<img src=x onerror="window.__searchPwned=1"> rewrite',
     "(rewrite.*[ +\\ \"",
 ]
+# What the inbox checks act on, so the checks that decide an approval or answer
+# a question keep the items they were seeded with. These are posted first, so
+# they sort below everything else in a group that reads newest first.
+INBOX_READ_SUMMARY = "Weekly digest is ready"
+INBOX_SWIPE_SUMMARY = "Backup verified on the second disk"
+INBOX_DECLINE_SUMMARY = 'Drop the <i id="pwned-inbox-title">staging</i> database'
+# A body an agent wrote. It reaches a row, a detail card and a dialog, and has
+# to stay text in each.
+INBOX_BODY = 'The copy is stale. <img id="pwned-inbox-body" src="x"> Nothing reads from it.'
+INBOX_QUESTION_SUBJECT = "Keep the old export format?"
 
 # A protected artifact, so the password gate can be driven for real. The
 # ciphertext was sealed once by web/crypto.mjs under PROTECTED_PASSWORD
@@ -541,6 +551,23 @@ def seed(port: int) -> dict[str, str]:
     mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
     # Each call is named so two uses of one tool keep their own result.
     calls = [
+        ("inbox-read", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": INBOX_READ_SUMMARY}),
+        ("inbox-swipe", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": INBOX_SWIPE_SUMMARY}),
+        (
+            "inbox-decline",
+            "signal_append",
+            {
+                "project_id": PROJECT_ID,
+                "kind": "approval",
+                "summary": INBOX_DECLINE_SUMMARY,
+                "payload": {"body": INBOX_BODY},
+            },
+        ),
+        (
+            "inbox-question",
+            "question_post",
+            {"project_id": PROJECT_ID, "subject": INBOX_QUESTION_SUBJECT, "body": INBOX_BODY},
+        ),
         ("finished", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
         ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
@@ -627,6 +654,7 @@ def seed(port: int) -> dict[str, str]:
         "artifact_id": results.get("artifact", {}).get("artifact_id", ""),
         "protected_id": results.get("protected", {}).get("artifact_id", ""),
         "question_id": results.get("question", {}).get("question_id", ""),
+        "inbox_read_id": results.get("inbox-read", {}).get("event_id", ""),
     }
 
 
