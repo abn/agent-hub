@@ -207,7 +207,7 @@ it, and the project tabs sit in the same shell.
 
 | Screen | Purpose |
 |---|---|
-| Home | Today at a glance: what waits on you, the latest feed across projects, and storage. |
+| Home | Today at a glance, from the one Home response: a title that is the reader's own day and part of day over a summary line (waiting, unread, agents active); a "Waiting on you" card with the queue's count, the waiting items among the newest events and a way into the Inbox for the rest; "Newest across projects", each row naming its project and linking to that project's feed, with the unseen dot drawn from the per-project cursor counts; and a storage card linking to Storage, with used against capacity, a bar, the same share in words, and what a prune would free. A volume that cannot be measured shows the used bytes alone, with no bar. When nothing waits, nothing is unread and nothing sits above a cursor, the two cards give way to the quiet empty state. The response carries project slugs rather than display names, and no list of the waiting queue itself, so rows name the slug and the card lists only waiting items that are among the newest events. |
 | Inbox | The global queue: a "Waiting on you" group, its open items grouped by actor, above unread finished work. Explicit read state ships on the routes; the "Mark all read" and "Unread only" controls are intended design, not yet shipped. |
 | Project feed | What happened in one project, day-grouped, filterable by kind, with linked threads. |
 | Artifacts | A per-project gallery and viewer: the viewer embeds the artifact page with its unlock form, themes, and version picker, plus a comments drawer with compose, resolve, and delete. |

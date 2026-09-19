@@ -20,6 +20,23 @@ software release notes and the repository changelog.
   project row splits sessions, artifacts and knowledge only. When the volume
   cannot be measured the capacity is left out and the bar is drawn against
   what is used.
+## 2026-09-18, Home as the day at a glance
+
+* **Update**: Home now matches the design. The title is the reader's day and
+  part of day, over a summary line of what waits, what is unread and how many
+  agents are active. A "Waiting on you" card in the action tone carries the
+  queue's count and the waiting items among the newest events, and hands the
+  rest to the Inbox. "Newest across projects" names the project on every row,
+  links each to its project feed, and draws the unseen dot from the
+  per-project cursor counts. A storage card links to Storage with used
+  against capacity, a bar, the same share in words, and what a prune would
+  free. When nothing waits and nothing is new, the cards give way to the quiet
+  empty state. All of it is read from the one Home response, and the rows join
+  the keyboard map.
+* **Note**: Described in [human surface](architecture/human-surface.md). The
+  Home response has no node name, no project display names and no list of the
+  waiting queue, so Home omits the node line, names projects by slug, and
+  lists only the waiting items that are among the newest events.
 
 ## 2026-09-18, a session, its brain as a tree
 
