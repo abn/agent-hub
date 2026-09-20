@@ -5120,6 +5120,23 @@ def check_inbox_card_escape(page, watch: Watch, port: int, project: str) -> None
             watch.fail("Back after Esc reopened the card")
         goto(page, "#/inbox", "Inbox")
 
+        # The close control leaves the card the way Esc does: the card's
+        # address is replaced, so Back does not walk into it again.
+        settle(page, f"!!document.querySelector({json.dumps(row)})")
+        page.click(f"{row} .title a")
+        if not settle(page, "!!document.querySelector('main .inbox-detail .inbox-back')"):
+            watch.fail("the card did not reopen for the close control")
+            return
+        page.click("main .inbox-detail .inbox-back")
+        if not settle(page, "!document.querySelector('main .inbox-detail')"):
+            watch.fail("the close control did not close the card")
+            return
+        page.go_back()
+        page.wait_for_timeout(400)
+        if page.evaluate("!!document.querySelector('main .inbox-detail')"):
+            watch.fail("Back after the close control reopened the card")
+        goto(page, "#/inbox", "Inbox")
+
         # The pane belongs to the inbox. Left by the tab bar with a card open,
         # Esc on the next screen is not the card's to answer.
         settle(page, f"!!document.querySelector({json.dumps(row)})")
@@ -5193,6 +5210,10 @@ def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
             return
         if not settle(page, f"{FOCUSED_ITEM} === {json.dumps(opened)}", timeout=2000):
             watch.fail(f"the close control left focus on {page.evaluate(FOCUS_CLASS)!r}, not on the row that opened the card")
+        page.go_back()
+        page.wait_for_timeout(400)
+        if page.evaluate(f"!!document.querySelector('{card}')"):
+            watch.fail("Back after the close control reopened the desktop inbox card")
     finally:
         context.close()
         watch.page.bring_to_front()

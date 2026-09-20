@@ -520,6 +520,16 @@ main.addEventListener("click", (event) => {
   if (work) work.catch(failed);
 });
 
+// The card's close control leaves the way Esc does: the card's address is
+// replaced, so Back does not walk into a card the reader closed. A press meant
+// for another tab or window is the browser's.
+main.addEventListener("click", (event) => {
+  if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!event.target.closest(".inbox-detail a.inbox-back")) return;
+  event.preventDefault();
+  leave(view()).catch(failed);
+});
+
 // Swipes and the pull. Touch and pen only: a mouse drag selects text, and the
 // row's own controls are what a mouse uses.
 let drag = null;

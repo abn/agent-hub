@@ -38,6 +38,11 @@ software release notes and the repository changelog.
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
+## 2026-09-20, closing the inbox card by its own control
+
+* **Update**: [Human surface](architecture/human-surface.md) records that the
+  inbox card's close control leaves the card the way Esc does. The control used
+  to push a new address, so Back reopened the card the reader had just closed.
 
 ## 2026-09-20, a review is not an edit since the review
 
