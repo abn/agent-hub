@@ -5,22 +5,26 @@
 //! `/mcp`, and speaks HTTP/1.1 over a raw socket so no new client dependency is
 //! needed.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
 use serde_json::json;
 
 mod common;
 
+use common::process::HubProcess;
+use common::stdio::PROTOCOL_VERSION;
 use common::stdio::{StdioClient as McpServer, structured};
 use common::temp::TempDir;
+use common::wire::mcp_post as http_post;
 
-const PROTOCOL_VERSION: &str = "2025-06-18";
 const ADMIN_TOKEN: &str = "mcp-feed-test-token";
+
+/// Start a hub over a data directory, on a port of its own.
+fn serve(data_dir: &Path) -> (HubProcess, u16) {
+    let hub = HubProcess::serve(data_dir, ADMIN_TOKEN, &[]);
+    let port = hub.port();
+    (hub, port)
+}
 
 #[test]
 fn signal_append_round_trips_over_stdio() {
@@ -187,144 +191,6 @@ fn payload_over_cap_returns_payload_too_large() {
         response["error"]["data"]["error"]["code"], "payload_too_large",
         "an oversized payload maps to the hub code: {response}"
     );
-}
-
-/// A child process killed when the test ends.
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
-    listener.local_addr().expect("local addr").port()
-}
-
-fn spawn_http(data_dir: &Path, port: u16) -> ChildGuard {
-    let child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .env("RUST_LOG", "error")
-        .env("HUB_DATA_DIR", data_dir)
-        .env("HUB_BIND", format!("127.0.0.1:{port}"))
-        .env("HUB_ADMIN_TOKEN", ADMIN_TOKEN)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("failed to spawn the hub");
-    ChildGuard(child)
-}
-
-/// How many ports to try before calling a hub start a failure.
-///
-/// `free_port` hands back a port it has already released, so another process
-/// can take it in the gap before the child binds. The child then exits at
-/// once, and a fresh port is a retry rather than a lost test run.
-const START_ATTEMPTS: usize = 3;
-
-/// Start a hub on a port of its own, retrying if the port was taken under it.
-fn serve(data_dir: &Path) -> (ChildGuard, u16) {
-    let mut lost = Vec::new();
-    for _ in 0..START_ATTEMPTS {
-        let port = free_port();
-        let mut guard = spawn_http(data_dir, port);
-        match wait_for_port(&mut guard, port) {
-            Ok(()) => return (guard, port),
-            Err(status) => lost.push(format!("port {port}: {status}")),
-        }
-    }
-    panic!(
-        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
-        lost.join("; ")
-    );
-}
-
-/// Wait until the hub answers, or say how it exited before it could.
-///
-/// Watching the child is what turns "address already in use" from a twenty
-/// second wait and a panic naming the wrong cause into an answer the caller
-/// can act on.
-fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < deadline {
-        // The child first: a port that answers is not this hub when this hub
-        // is already gone, and whatever did answer is another test's.
-        if let Ok(Some(status)) = child.0.try_wait() {
-            return Err(status.to_string());
-        }
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    panic!("the hub did not start on port {port}");
-}
-
-/// One raw HTTP/1.1 POST, read until the server closes or the read stalls.
-fn http_post(port: u16, body: &str, token: Option<&str>, session: Option<&str>) -> HttpResponse {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub listener");
-    stream
-        .set_read_timeout(Some(Duration::from_millis(1500)))
-        .expect("set read timeout");
-
-    let mut request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n",
-        body.len()
-    );
-    if let Some(token) = token {
-        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
-    }
-    if let Some(session) = session {
-        request.push_str(&format!(
-            "mcp-session-id: {session}\r\nmcp-protocol-version: {PROTOCOL_VERSION}\r\n"
-        ));
-    }
-    request.push_str("\r\n");
-    request.push_str(body);
-
-    stream.write_all(request.as_bytes()).expect("write request");
-    stream.flush().expect("flush request");
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut raw = String::new();
-    let mut buffer = [0u8; 4096];
-    while Instant::now() < deadline {
-        match stream.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => raw.push_str(&String::from_utf8_lossy(&buffer[..n])),
-            Err(_) => break,
-        }
-    }
-
-    let status = raw
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .unwrap_or_else(|| panic!("response has no HTTP status line: {raw:?}"));
-    HttpResponse { status, raw }
-}
-
-struct HttpResponse {
-    status: u16,
-    raw: String,
-}
-
-impl HttpResponse {
-    fn header(&self, name: &str) -> Option<String> {
-        self.raw
-            .lines()
-            .take_while(|line| !line.is_empty())
-            .find_map(|line| {
-                let (key, value) = line.split_once(':')?;
-                key.trim()
-                    .eq_ignore_ascii_case(name)
-                    .then(|| value.trim().to_string())
-            })
-    }
 }
 
 #[test]

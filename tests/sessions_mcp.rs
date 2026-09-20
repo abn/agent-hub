@@ -4,51 +4,21 @@
 //! agents, which is the only way to prove that a session belongs to its owner:
 //! the stdio transport is the human admin and never sees the ownership rules.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 use agent_hub::principal::Trust;
-use agent_hub::store::{identity, migrate, open_engine, projects};
+use agent_hub::store::{identity, projects};
 use serde_json::{Value, json};
 
-const PROTOCOL_VERSION: &str = "2025-06-18";
+mod common;
+
+use common::process::HubProcess;
+use common::stdio::PROTOCOL_VERSION;
+use common::temp::TempDir;
+use common::wire::{mcp_post, rest};
+
 const ADMIN_TOKEN: &str = "sessions-mcp-admin";
 const PROJECT: &str = "homelab";
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "agent-hub-sessions-mcp-{}-{nanos}-{tag}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("create temp dir");
-        Self(path)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 /// One agent's authenticated MCP connection.
 #[derive(Clone)]
@@ -104,133 +74,8 @@ impl Agent {
             "params": {"name": name, "arguments": arguments},
         })
         .to_string();
-        let raw = post(self.port, &body, Some(&self.token), Some(&self.session));
-        parse_body(&raw)
+        mcp_post(self.port, &body, Some(&self.token), Some(&self.session)).message()
     }
-}
-
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
-    listener.local_addr().expect("local addr").port()
-}
-
-/// How many ports to try before calling a hub start a failure.
-///
-/// `free_port` hands back a port it has already released, so another process
-/// can take it in the gap before the child binds. The child then exits at
-/// once, and a fresh port is a retry rather than a lost test run.
-const START_ATTEMPTS: usize = 3;
-
-/// Start a hub on a port of its own, retrying if the port was taken under it.
-fn serve(data_dir: &Path) -> (ChildGuard, u16) {
-    let mut lost = Vec::new();
-    for _ in 0..START_ATTEMPTS {
-        let port = free_port();
-        let mut guard = spawn(data_dir, port);
-        match wait_for_port(&mut guard, port) {
-            Ok(()) => return (guard, port),
-            Err(status) => lost.push(format!("port {port}: {status}")),
-        }
-    }
-    panic!(
-        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
-        lost.join("; ")
-    );
-}
-
-fn spawn(data_dir: &Path, port: u16) -> ChildGuard {
-    ChildGuard(
-        Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-            .env("RUST_LOG", "error")
-            .env("HUB_DATA_DIR", data_dir)
-            .env("HUB_BIND", format!("127.0.0.1:{port}"))
-            .env("HUB_ADMIN_TOKEN", ADMIN_TOKEN)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn the hub"),
-    )
-}
-
-/// Wait until the hub answers, or say how it exited before it could.
-///
-/// Watching the child is what turns "address already in use" from a twenty
-/// second wait and a panic naming the wrong cause into an answer the caller
-/// can act on.
-fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < deadline {
-        // The child first: a port that answers is not this hub when this hub
-        // is already gone, and whatever did answer is another test's.
-        if let Ok(Some(status)) = child.0.try_wait() {
-            return Err(status.to_string());
-        }
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("the hub did not start on port {port}");
-}
-
-fn post(port: u16, body: &str, token: Option<&str>, session: Option<&str>) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .expect("set read timeout");
-    let mut request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n\
-         Accept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n",
-        body.len()
-    );
-    if let Some(token) = token {
-        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
-    }
-    if let Some(session) = session {
-        request.push_str(&format!(
-            "mcp-session-id: {session}\r\nmcp-protocol-version: {PROTOCOL_VERSION}\r\n"
-        ));
-    }
-    request.push_str("\r\n");
-    request.push_str(body);
-    stream.write_all(request.as_bytes()).expect("write request");
-    stream.flush().expect("flush request");
-
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let mut raw = String::new();
-    let mut buffer = [0u8; 4096];
-    while Instant::now() < deadline {
-        match stream.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => raw.push_str(&String::from_utf8_lossy(&buffer[..n])),
-            Err(_) => break,
-        }
-    }
-    raw
-}
-
-/// The JSON-RPC message in a response, whether it came as JSON or as one event.
-fn parse_body(raw: &str) -> Value {
-    let body = raw.split("\r\n\r\n").nth(1).unwrap_or_default();
-    // A streamed response arrives as chunked events, so the message is the
-    // first `data:` line that parses; a plain JSON body has no such line.
-    body.lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .find_map(|payload| serde_json::from_str(payload.trim()).ok())
-        .or_else(|| serde_json::from_str(body.trim()).ok())
-        .unwrap_or_else(|| panic!("no JSON-RPC message in the response: {raw}"))
-}
-
-fn header(raw: &str, name: &str) -> Option<String> {
-    raw.lines()
-        .take_while(|line| !line.is_empty())
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.trim()
-                .eq_ignore_ascii_case(name)
-                .then(|| value.trim().to_string())
-        })
 }
 
 fn connect(port: u16, token: &str) -> Agent {
@@ -245,9 +90,9 @@ fn connect(port: u16, token: &str) -> Agent {
         },
     })
     .to_string();
-    let raw = post(port, &body, Some(token), None);
-    let session = header(&raw, "mcp-session-id").expect("session id");
-    post(
+    let response = mcp_post(port, &body, Some(token), None);
+    let session = response.header("mcp-session-id").expect("session id");
+    mcp_post(
         port,
         &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
         Some(token),
@@ -262,8 +107,10 @@ fn connect(port: u16, token: &str) -> Agent {
 
 /// A hub with a project and the named agents, each already connected.
 struct Fleet {
+    // Declared before the directory: the hub is reaped before the directory
+    // it writes into is removed.
+    _child: HubProcess,
     _dir: TempDir,
-    _child: ChildGuard,
     port: u16,
     data_dir: PathBuf,
     agents: Vec<Agent>,
@@ -280,10 +127,7 @@ impl Fleet {
 
     async fn with_trust(tag: &str, agents: &[(&str, Trust)]) -> Self {
         let dir = TempDir::new(tag);
-        let db = open_engine(&dir.0.join("hub.db"))
-            .await
-            .expect("open engine");
-        migrate(&db).await.expect("migrate");
+        let db = common::store::open(&dir).await;
         projects::create(&db, PROJECT, "Homelab")
             .await
             .expect("create project");
@@ -301,12 +145,13 @@ impl Fleet {
         }
         drop(db);
 
-        let (child, port) = serve(&dir.0);
+        let child = HubProcess::serve(&dir, ADMIN_TOKEN, &[]);
+        let port = child.port();
         let agents = tokens.iter().map(|token| connect(port, token)).collect();
-        let data_dir = dir.0.clone();
+        let data_dir = dir.to_path_buf();
         Self {
-            _dir: dir,
             _child: child,
+            _dir: dir,
             port,
             data_dir,
             agents,
@@ -327,30 +172,8 @@ impl Fleet {
 
 /// Call an admin REST route, the way the human's surface does.
 fn admin(port: u16, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .expect("set read timeout");
-    let payload = body.unwrap_or_default();
-    let mut request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
-         Authorization: Bearer {ADMIN_TOKEN}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n",
-        payload.len()
-    );
-    request.push_str(payload);
-    stream.write_all(request.as_bytes()).expect("write request");
-    stream.flush().expect("flush request");
-    let mut raw = String::new();
-    stream.read_to_string(&mut raw).ok();
-    let status = raw
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .unwrap_or(0);
-    let body = raw.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
-    (status, body)
+    let response = rest(port, method, path, Some(ADMIN_TOKEN), body);
+    (response.status, response.body().to_string())
 }
 
 /// Soft-delete a session through the human's prune route.

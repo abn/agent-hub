@@ -1,15 +1,10 @@
 //! One process serves the REST API, the PWA, MCP, and the prune sweeper on one
 //! listener.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use agent_hub::app::AppState;
 use agent_hub::brain::BrainStore;
-use agent_hub::config::{Config, TrustDefault};
 use agent_hub::http::router;
 use agent_hub::principal::Trust;
 use agent_hub::store::{identity, migrate, open_engine, prune, sessions};
@@ -19,122 +14,19 @@ use serde_json::Value as Json;
 use tower::ServiceExt;
 use turso::Value;
 
+mod common;
+
+use common::process::HubProcess;
+use common::state::TestState;
+use common::stdio::PROTOCOL_VERSION;
+use common::temp::TempDir;
+use common::wire;
+
 const ADMIN_TOKEN: &str = "topology-admin-token";
-const PROTOCOL_VERSION: &str = "2025-06-18";
-
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn temp_dir(tag: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create temp dir");
-    dir
-}
-
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
-    listener.local_addr().expect("local addr").port()
-}
-
-fn spawn(data_dir: &Path, port: u16) -> ChildGuard {
-    let child = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .env("RUST_LOG", "error")
-        .env("HUB_DATA_DIR", data_dir)
-        .env("HUB_BIND", format!("127.0.0.1:{port}"))
-        .env("HUB_ADMIN_TOKEN", ADMIN_TOKEN)
-        .env("HUB_SWEEP_INTERVAL_SECS", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("failed to spawn the hub");
-    ChildGuard(child)
-}
-
-/// How many ports to try before calling a hub start a failure.
-///
-/// `free_port` hands back a port it has already released, so another process
-/// can take it in the gap before the child binds. The child then exits at
-/// once, and a fresh port is a retry rather than a lost test run.
-const START_ATTEMPTS: usize = 3;
-
-/// Start a hub on a port of its own, retrying if the port was taken under it.
-fn serve(data_dir: &Path) -> (ChildGuard, u16) {
-    let mut lost = Vec::new();
-    for _ in 0..START_ATTEMPTS {
-        let port = free_port();
-        let mut guard = spawn(data_dir, port);
-        match wait_for_port(&mut guard, port) {
-            Ok(()) => return (guard, port),
-            Err(status) => lost.push(format!("port {port}: {status}")),
-        }
-    }
-    panic!(
-        "the hub exited on every one of {START_ATTEMPTS} ports: {}",
-        lost.join("; ")
-    );
-}
-
-/// Wait until the hub answers, or say how it exited before it could.
-///
-/// Watching the child is what turns "address already in use" from a twenty
-/// second wait and a panic naming the wrong cause into an answer the caller
-/// can act on.
-fn wait_for_port(child: &mut ChildGuard, port: u16) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < deadline {
-        // The child first: a port that answers is not this hub when this hub
-        // is already gone, and whatever did answer is another test's.
-        if let Ok(Some(status)) = child.0.try_wait() {
-            return Err(status.to_string());
-        }
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("the hub did not start on port {port}");
-}
-
 fn request(port: u16, method: &str, path: &str, token: Option<&str>, body: &str) -> (u16, String) {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .expect("set read timeout");
-
-    let mut request =
-        format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n");
-    if let Some(token) = token {
-        request.push_str(&format!("Authorization: Bearer {token}\r\n"));
-    }
-    if !body.is_empty() {
-        request.push_str("Content-Type: application/json\r\n");
-        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
-    }
-    request.push_str("\r\n");
-    request.push_str(body);
-
-    stream.write_all(request.as_bytes()).expect("write request");
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).expect("read response");
-    let response = String::from_utf8_lossy(&bytes).into_owned();
-    let status = response
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .unwrap_or(0);
-    (status, response)
+    let body = (!body.is_empty()).then_some(body);
+    let response = wire::rest(port, method, path, token, body);
+    (response.status, response.raw)
 }
 
 /// A real MCP initialize over streamable HTTP, returning the status and body.
@@ -144,32 +36,13 @@ fn mcp_initialize(port: u16, token: &str) -> (u16, String) {
          \"protocolVersion\":\"{PROTOCOL_VERSION}\",\"capabilities\":{{}},\
          \"clientInfo\":{{\"name\":\"topology\",\"version\":\"0.0.0\"}}}}}}"
     );
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to the hub");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .expect("set read timeout");
-    let request = format!(
-        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n\
-         Accept: application/json, text/event-stream\r\nAuthorization: Bearer {token}\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(request.as_bytes()).expect("write request");
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).expect("read response");
-    let response = String::from_utf8_lossy(&bytes).into_owned();
-    let status = response
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .unwrap_or(0);
-    (status, response)
+    let response = wire::mcp_post(port, &body, Some(token), None);
+    (response.status, response.raw)
 }
 
 #[tokio::test]
 async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
-    let dir = temp_dir("topology");
+    let dir = TempDir::new("topology");
     // Seed an expired prune with a brain file, so the sweeper has something to
     // commit as soon as the server starts.
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
@@ -208,7 +81,8 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     drop(conn);
     drop(db);
 
-    let (child, port) = serve(&dir);
+    let child = HubProcess::serve(&dir, ADMIN_TOKEN, &[("HUB_SWEEP_INTERVAL_SECS", "1")]);
+    let port = child.port();
 
     let (status, health) = request(port, "GET", "/healthz", None, "");
     assert_eq!(status, 200);
@@ -253,27 +127,22 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
 }
 
 /// State over a fresh data directory, for the in-process probe tests.
-async fn probe_state(tag: &str) -> AppState {
-    AppState::open(Config {
-        data_dir: temp_dir(tag),
-        bind: "127.0.0.1:0".parse().expect("socket address"),
-        public_url: None,
-        admin_token: Some(ADMIN_TOKEN.to_string()),
-        trust_default: TrustDefault::Trusted,
-        inbox_caps: agent_hub::limits::InboxCaps::disabled(),
-        active_window: std::time::Duration::from_secs(900),
-        node_name: None,
+async fn probe_state(tag: &str) -> TestState {
+    common::state::open_with(tag, |config| {
+        config.admin_token = Some(ADMIN_TOKEN.to_string());
     })
     .await
-    .expect("open state")
 }
 
-async fn probe(state: AppState) -> (StatusCode, Option<String>, Json) {
+async fn probe(state: &AppState) -> (StatusCode, Option<String>, Json) {
     let request = Request::builder()
         .uri("/readyz")
         .body(Body::empty())
         .expect("build request");
-    let response = router(state).oneshot(request).await.expect("request");
+    let response = router(state.clone())
+        .oneshot(request)
+        .await
+        .expect("request");
     let status = response.status();
     let content_type = response
         .headers()
@@ -295,7 +164,7 @@ async fn readyz_reports_ready_when_the_engine_answers() {
     let state = probe_state("topology-ready").await;
     let schema_version = state.schema_version;
 
-    let (status, _, body) = probe(state).await;
+    let (status, _, body) = probe(&state).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ready");
     assert_eq!(body["schema_version"], schema_version);
@@ -313,7 +182,7 @@ async fn readyz_reports_unavailable_when_the_engine_does_not_answer() {
         .expect("drop the version table");
     drop(conn);
 
-    let (status, content_type, body) = probe(state).await;
+    let (status, content_type, body) = probe(&state).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(content_type.as_deref(), Some("application/problem+json"));
     assert_eq!(body["code"], "unavailable");
@@ -335,7 +204,7 @@ async fn readyz_reports_unavailable_when_the_store_moved_schema() {
     .expect("record a later version");
     drop(conn);
 
-    let (status, content_type, body) = probe(state).await;
+    let (status, content_type, body) = probe(&state).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(content_type.as_deref(), Some("application/problem+json"));
     assert_eq!(body["code"], "unavailable");
