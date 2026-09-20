@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, embedded stdio is supported with isolation
+
+* **Update**: The operational contract and the [quickstart](usage/quickstart.md)
+  document that embedded stdio mode is supported standalone against the local data directory
+  as the local admin when no `HUB_URL` is set. Pointing embedded stdio at a data directory
+  already held by a running hub fails at startup with a clear message:
+  `a hub is already using this directory; set HUB_URL to reach it instead`.
+
 ## 2026-09-20, device-local snooze for waiting items
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

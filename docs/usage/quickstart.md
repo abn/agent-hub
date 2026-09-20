@@ -148,7 +148,7 @@ agent-hub mcp
 With no `HUB_URL` configured that command instead serves the local data
 directory standalone, as the human admin, and says so on stderr. Standalone
 mode opens the data directory itself, so pointing it at a directory a hub is
-already serving fails at startup with `File is locked by another process`.
+already serving fails at startup with `a hub is already using this directory; set HUB_URL to reach it instead`.
 
 A hook has no MCP client, so it calls one tool at a time. The result is JSON
 on stdout and nothing else; logs and errors go to stderr, and the exit code is

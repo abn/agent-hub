@@ -91,7 +91,13 @@ fn mcp() -> ExitCode {
 /// Serve the embedded MCP surface over the local data directory.
 fn embedded() -> Result<()> {
     let (config, runtime) = server_runtime()?;
-    runtime.block_on(agent_hub::mcp::serve_stdio(config))
+    match runtime.block_on(agent_hub::mcp::serve_stdio(config)) {
+        Ok(()) => Ok(()),
+        Err(err) if err.is_locked() => Err(Error::Conflict(
+            "a hub is already using this directory; set HUB_URL to reach it instead".to_string(),
+        )),
+        Err(err) => Err(err),
+    }
 }
 
 /// Bridge stdio to the hub the settings name.

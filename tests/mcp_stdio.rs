@@ -79,3 +79,33 @@ fn stdout_stays_pure_json_with_logging_enabled() {
         "tools/list returns an array"
     );
 }
+
+#[test]
+fn embedded_stdio_against_running_hub_refuses() {
+    use common::process::HubProcess;
+    use std::process::{Command, Stdio};
+
+    let data_dir = TempDir::new("mcp-stdio-conflict");
+    let _hub = HubProcess::serve(&data_dir, "test-token", &[]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .arg("mcp")
+        .env("RUST_LOG", "error")
+        .env("HUB_DATA_DIR", data_dir.path())
+        .env_remove("HUB_URL")
+        .env_remove("HUB_CONFIG")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the binary");
+
+    assert!(!output.status.success(), "process must fail: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("standalone against the local data directory, as the local admin"),
+        "the mode says out loud what it is: {stderr}"
+    );
+    assert!(
+        stderr.contains("a hub is already using this directory; set HUB_URL to reach it instead"),
+        "the refusal names the situation and what to do: {stderr}"
+    );
+}

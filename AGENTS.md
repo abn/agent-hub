@@ -27,6 +27,13 @@ shipped behaviour.
   AgentFS file per project holds the project knowledge base, shared by every
   agent with project write. Agents never touch a file directly: they speak
   MCP, and the wrapper is the single writer per file.
+- **Embedded stdio is supported with isolation.** Embedded stdio mode runs
+  standalone against the local data directory as the local admin when no
+  `HUB_URL` is configured. Two processes must never quietly share one store:
+  running embedded stdio against a data directory that a serving hub already
+  holds fails at startup, and callers reach the running hub through the proxy
+  instead. Embedded mode is for local administrative operations and isolated
+  tool harnesses, not concurrent access to an active hub store.
 - **Session life is session-bound.** A session brain belongs to the agent that
   started it. It survives same-session compaction and resume of the same named
   session by its owner, can be adopted or forked by another agent, and is

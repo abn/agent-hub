@@ -93,6 +93,19 @@ impl Error {
         // which the server cannot time, so a blind retry is not sensible.
         matches!(self.code(), ErrorCode::Unavailable)
     }
+
+    /// Whether this error was caused by a database lock held by another process.
+    pub fn is_locked(&self) -> bool {
+        match self {
+            Self::Engine(msg) => {
+                let lower = msg.to_ascii_lowercase();
+                lower.contains("locked by another process")
+                    || lower.contains("locking error")
+                    || lower.contains("database is locked")
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Convenience result alias.
