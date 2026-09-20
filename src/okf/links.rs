@@ -1,7 +1,24 @@
 //! Link extraction from markdown documents.
 //!
-//! Extracts inline, reference-style, and shortcut links while ignoring code blocks,
-//! inline code spans, and non-prose text. Resolves relative paths within the OKF bundle.
+//! Extracts inline and reference-style links from prose and resolves relative
+//! paths within the OKF bundle. A link inside code is not a link. Code is:
+//!
+//! - A fenced block: a line of three or more backticks or tildes opens it (a
+//!   backtick fence whose info string holds a backtick is a code span, not a
+//!   fence), and only a line of the same character, at least as long, with
+//!   nothing after it, closes it. So a longer fence holds a shorter one, and a
+//!   tilde fence holds a backtick one. An unclosed fence runs to the end.
+//! - An indented block outside a list: lines indented four spaces or a tab,
+//!   starting after a blank line, a heading, a fence or the top of the page,
+//!   up to the next line indented less. An indented line straight after a
+//!   paragraph line continues that paragraph and is prose.
+//! - A code span: a run of backticks up to the next run of the same length on
+//!   the line. A run with no partner is literal.
+//!
+//! Inside a list an indented line is a continuation or a nested item, so it is
+//! read as prose, and a fence there is seen at any indentation. A list ends at
+//! a column-zero line that follows a blank line and is not an item. An
+//! indented code block nested in a list is therefore read as prose.
 
 use std::collections::HashMap;
 
@@ -25,37 +42,18 @@ pub struct ExtractedLink {
 /// `current_page_path` is the canonical path of the document (e.g. `/fs/services/caddy.md`).
 pub fn extract_links(current_page_path: &str, content: &str) -> Vec<ExtractedLink> {
     let mut links = Vec::new();
-    let mut in_fence = false;
-    let mut fence_marker = "";
+    let lines: Vec<&str> = content.lines().collect();
+    let code = code_lines(&lines);
+    let prose = lines
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !code[*idx])
+        .map(|(idx, line)| (idx + 1, *line));
 
     // First pass: collect reference definitions `[label]: target`
     let mut ref_defs: HashMap<String, (String, usize)> = HashMap::new();
-
-    let lines: Vec<&str> = content.lines().collect();
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_num = idx + 1;
-        let trimmed = line.trim();
-
-        if !in_fence && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-            in_fence = true;
-            fence_marker = if trimmed.starts_with("```") {
-                "```"
-            } else {
-                "~~~"
-            };
-            continue;
-        } else if in_fence && trimmed.starts_with(fence_marker) {
-            in_fence = false;
-            fence_marker = "";
-            continue;
-        }
-
-        if in_fence {
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix('[')
+    for (line_num, line) in prose.clone() {
+        if let Some(rest) = line.trim().strip_prefix('[')
             && let Some(close_bracket) = rest.find("]:")
         {
             let label = rest[..close_bracket].trim().to_lowercase();
@@ -72,40 +70,26 @@ pub fn extract_links(current_page_path: &str, content: &str) -> Vec<ExtractedLin
     }
 
     // Second pass: extract inline links and reference uses
-    in_fence = false;
-    fence_marker = "";
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_num = idx + 1;
-        let trimmed = line.trim();
-
-        if !in_fence && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-            in_fence = true;
-            fence_marker = if trimmed.starts_with("```") {
-                "```"
-            } else {
-                "~~~"
-            };
-            continue;
-        } else if in_fence && trimmed.starts_with(fence_marker) {
-            in_fence = false;
-            fence_marker = "";
-            continue;
-        }
-
-        if in_fence {
-            continue;
-        }
-
+    for (line_num, line) in prose {
         // Strip inline code spans from the line
         let prose = strip_code_spans(line);
 
         // Find inline links [text](target)
         let mut search_pos = 0;
+        // Where the next `]` is, kept between brackets. A page is agent-written
+        // and this runs inside a put, so a line of `[` must cost one pass, not
+        // one pass per bracket.
+        let mut next_close: Option<usize> = None;
         while let Some(open_sq) = prose[search_pos..].find('[') {
             let abs_sq = search_pos + open_sq;
-            if let Some(close_sq) = prose[abs_sq..].find(']') {
-                let abs_close_sq = abs_sq + close_sq;
+            if next_close.is_none_or(|at| at < abs_sq) {
+                next_close = prose[abs_sq..].find(']').map(|at| abs_sq + at);
+            }
+            // No `]` after this bracket means none after any later one either.
+            let Some(abs_close_sq) = next_close else {
+                break;
+            };
+            {
                 let after_close = &prose[abs_close_sq + 1..];
 
                 if after_close.starts_with('(') {
@@ -142,18 +126,135 @@ pub fn extract_links(current_page_path: &str, content: &str) -> Vec<ExtractedLin
     links
 }
 
+/// The length of the run of `marker` that `text` starts with.
+fn run_length(text: &str, marker: char) -> usize {
+    text.chars().take_while(|c| *c == marker).count()
+}
+
+/// The fence a line opens, as its character and length.
+fn opens_fence(rest: &str) -> Option<(char, usize)> {
+    let marker = rest.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let len = run_length(rest, marker);
+    // A backtick in the info string makes the line a code span.
+    let is_fence = len >= 3 && !(marker == '`' && rest[len..].contains('`'));
+    is_fence.then_some((marker, len))
+}
+
+/// Whether a line starts a list item: a bullet or a number, then a space.
+fn is_list_item(rest: &str) -> bool {
+    let after_marker = match rest.chars().next() {
+        Some('-' | '*' | '+') => &rest[1..],
+        Some(c) if c.is_ascii_digit() => {
+            let digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            match digits.strip_prefix(['.', ')']) {
+                Some(after) => after,
+                None => return false,
+            }
+        }
+        _ => return false,
+    };
+    after_marker.is_empty() || after_marker.starts_with([' ', '\t'])
+}
+
+/// Which lines are code, by the rules in the module documentation.
+fn code_lines(lines: &[&str]) -> Vec<bool> {
+    let mut code = vec![false; lines.len()];
+    let mut fence: Option<(char, usize)> = None;
+    let mut in_list = false;
+    let mut in_indented = false;
+    let mut after_blank = true;
+    // Whether an indented line here would start a code block and not continue
+    // a paragraph.
+    let mut may_start_indented = true;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let rest = line.trim_start_matches([' ', '\t']);
+        let indent = &line[..line.len() - rest.len()];
+        let deep = indent.contains('\t') || indent.len() >= 4;
+
+        if let Some((marker, len)) = fence {
+            code[idx] = true;
+            let run = run_length(rest, marker);
+            if run >= len && rest[run..].trim().is_empty() {
+                fence = None;
+                may_start_indented = true;
+            }
+            after_blank = false;
+            continue;
+        }
+        if rest.trim().is_empty() {
+            code[idx] = in_indented;
+            after_blank = true;
+            may_start_indented = true;
+            continue;
+        }
+        if !in_list && deep && (in_indented || may_start_indented) {
+            code[idx] = true;
+            in_indented = true;
+            after_blank = false;
+            continue;
+        }
+        in_indented = false;
+
+        if is_list_item(rest) && (in_list || !deep) {
+            in_list = true;
+        } else if indent.is_empty() && after_blank {
+            in_list = false;
+        }
+        after_blank = false;
+
+        if (in_list || !deep)
+            && let Some(opened) = opens_fence(rest)
+        {
+            fence = Some(opened);
+            code[idx] = true;
+            continue;
+        }
+        // A heading is one to six `#` and then a space or the end of the line.
+        // `#tag` is a paragraph, and an indented line after it continues it.
+        let hashes = run_length(rest, '#');
+        may_start_indented = (1..=6).contains(&hashes)
+            && rest[hashes..]
+                .chars()
+                .next()
+                .is_none_or(|next| next == ' ' || next == '\t');
+    }
+    code
+}
+
+/// A line with its code spans removed. A span is a run of backticks up to the
+/// next run of the same length; a run with no partner stays as it is.
 fn strip_code_spans(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
-    let mut in_code = false;
-    for c in line.chars() {
-        if c == '`' {
-            in_code = !in_code;
-        } else if !in_code {
-            out.push(c);
+    let mut rest = line;
+    while let Some(start) = rest.find('`') {
+        out.push_str(&rest[..start]);
+        let len = run_length(&rest[start..], '`');
+        let after = &rest[start + len..];
+        match closing_run(after, len) {
+            Some(end) => rest = &after[end + len..],
+            None => {
+                out.push_str(&rest[start..start + len]);
+                rest = after;
+            }
         }
     }
-
+    out.push_str(rest);
     out
+}
+
+/// The offset in `text` of the next run of exactly `len` backticks.
+fn closing_run(text: &str, len: usize) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = text[from..].find('`') {
+        let at = from + found;
+        let run = run_length(&text[at..], '`');
+        if run == len {
+            return Some(at);
+        }
+        from = at + run;
+    }
+    None
 }
 
 fn classify_link(current_page_path: &str, raw_target: &str, line: usize) -> ExtractedLink {
@@ -264,6 +365,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_hash_without_a_space_is_a_paragraph_not_a_heading() {
+        // A heading is one to six `#` and then a space or the end of the line.
+        // `#tag` is prose, so the indented line after it continues the
+        // paragraph and its link counts; after a real heading it is code.
+        let tagged = "#tag words\n    [a](a.md)\n";
+        let targets = |content: &str| -> Vec<String> {
+            extract_links("/fs/page.md", content)
+                .into_iter()
+                .map(|link| link.target)
+                .collect()
+        };
+        assert_eq!(targets(tagged), vec!["a.md"]);
+        assert_eq!(targets("####### seven\n    [a](a.md)\n"), vec!["a.md"]);
+        assert!(targets("# Heading\n    [a](a.md)\n").is_empty());
+        assert!(targets("###\n    [a](a.md)\n").is_empty());
+    }
+
+    #[test]
+    fn brackets_that_never_close_cost_one_pass() {
+        // A page is agent-written and up to 1 MiB, and this runs inside a put.
+        // A line of `[` with no `]`, or with one at the very end, used to be
+        // rescanned from every bracket.
+        let started = std::time::Instant::now();
+        let open = "[".repeat(1 << 20);
+        assert!(extract_links("/fs/page.md", &open).is_empty());
+        let late = format!("{}](a.md)", "[".repeat(1 << 20));
+        let _ = extract_links("/fs/page.md", &late);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "two 1 MiB lines of brackets took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn test_extract_links() {
         let content = r#"
 # Heading
@@ -295,6 +431,123 @@ An external [Google](https://google.com) and a reference [Doc][doc-ref].
 
         assert_eq!(links[3].target, "../guide.md");
         assert_eq!(links[3].resolved_path.as_deref(), Some("/fs/guide.md"));
+    }
+
+    fn targets(content: &str) -> Vec<String> {
+        extract_links("/fs/page.md", content)
+            .into_iter()
+            .map(|link| link.target)
+            .collect()
+    }
+
+    #[test]
+    fn a_longer_fence_holds_a_shorter_one() {
+        let content = "\
+Before [a](a.md).
+
+````markdown
+```
+[inner](inner.md)
+```
+[still code](still.md)
+````
+
+Between [b](b.md).
+
+~~~~
+~~~
+[tilde](tilde.md)
+~~~
+[tilde still code](tilde-still.md)
+~~~~
+
+After [c](c.md).
+";
+        assert_eq!(targets(content), ["a.md", "b.md", "c.md"]);
+    }
+
+    #[test]
+    fn a_fence_closes_only_on_its_own_character_with_nothing_after_it() {
+        let content = "\
+```
+~~~
+[one](one.md)
+``` not a closer
+[two](two.md)
+``` ```
+[three](three.md)
+```
+Prose [p](p.md).
+";
+        assert_eq!(targets(content), ["p.md"]);
+    }
+
+    #[test]
+    fn a_backtick_line_with_a_backtick_in_its_info_string_is_a_span_not_a_fence() {
+        let content = "```not a fence``` and [a](a.md)\n[b](b.md)\n";
+        assert_eq!(targets(content), ["a.md", "b.md"]);
+    }
+
+    #[test]
+    fn an_indented_code_block_holds_no_links() {
+        let content = "\
+Prose [a](a.md).
+
+    [code](code.md)
+
+    [more code](more.md)
+\t[tabbed code](tabbed.md)
+
+Back to prose [b](b.md).
+    [a lazy continuation is prose](lazy.md)
+";
+        assert_eq!(targets(content), ["a.md", "b.md", "lazy.md"]);
+    }
+
+    #[test]
+    fn an_indented_line_inside_a_list_is_prose() {
+        let content = "\
+- item [a](a.md)
+
+    continued [b](b.md)
+
+    - nested [c](c.md)
+
+    ```
+    [fenced in the list](fenced.md)
+    ```
+
+Paragraph.
+
+    [code again](code.md)
+";
+        assert_eq!(targets(content), ["a.md", "b.md", "c.md"]);
+    }
+
+    #[test]
+    fn a_code_span_of_any_length_holds_no_links() {
+        let content = "\
+A ``[double](double.md)`` span, a `` ` [tick inside](tick.md) `` span,
+a `[single](single.md)` span and [prose](prose.md).
+An unclosed `` run is literal: [kept](kept.md).
+";
+        assert_eq!(targets(content), ["prose.md", "kept.md"]);
+    }
+
+    #[test]
+    fn a_reference_definition_inside_code_defines_nothing() {
+        let content = "\
+See [the doc][doc].
+
+````
+```
+[doc]: inside.md
+```
+````
+
+    [doc]: indented.md
+";
+        assert!(targets(content).is_empty(), "{:?}", targets(content));
     }
 
     #[test]

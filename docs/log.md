@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a link inside code is not a link
+
+* **Update**: [The knowledge base](usage/knowledge-base.md) says what counts as
+  code when links are read for backlinks and lint: a fence that holds a shorter
+  fence, an indented block outside a list, and a code span of any length. It
+  also says that a page's link to itself neither lists it as its own referrer
+  nor keeps it from being reported as an orphan, and names the one case still
+  read as prose, an indented block nested in a list.
+
 ## 2026-09-20, a first line that only looks like an opener is refused
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) lists a new cause

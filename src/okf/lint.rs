@@ -292,8 +292,9 @@ pub fn lint_bundle(pages: &HashMap<String, String>) -> (Vec<LintFinding>, Backli
                         message: format!("link target does not exist ({})", link.target),
                         line: Some(link.line),
                     });
-                } else {
-                    // Record backlink
+                } else if target != src_path {
+                    // Record backlink. A page that links to itself is not
+                    // something else referring to it.
                     *incoming_count.entry(target.clone()).or_insert(0) += 1;
                     let entry = BacklinkEntry {
                         path: src_path.clone(),
@@ -411,5 +412,43 @@ mod tests {
         assert!(codes.contains(&"broken_link"));
         assert!(codes.contains(&"orphan_page"));
         assert!(codes.contains(&"missing_index_entry"));
+    }
+    #[test]
+    fn a_page_that_links_to_itself_is_not_its_own_referrer() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "/fs/index.md".to_string(),
+            "---\nokf_version: \"0.2\"\n---\n# Root\n[Linked](linked.md)\n".to_string(),
+        );
+        pages.insert("/fs/log.md".to_string(), "# Log\n".to_string());
+        pages.insert(
+            "/fs/alone.md".to_string(),
+            "---\ntype: concept\ntitle: Alone\n---\nSee [above](alone.md#top) and [here](./alone.md).\n"
+                .to_string(),
+        );
+        pages.insert(
+            "/fs/linked.md".to_string(),
+            "---\ntype: concept\ntitle: Linked\n---\nSee [myself](/fs/linked.md).\n".to_string(),
+        );
+
+        let (findings, backlinks) = lint_bundle(&pages);
+        assert!(backlinks.backlinks_for("/fs/alone.md").is_empty());
+        let referring: Vec<String> = backlinks
+            .backlinks_for("/fs/linked.md")
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect();
+        assert_eq!(referring, ["/fs/index.md"]);
+
+        let orphans: Vec<&str> = findings
+            .iter()
+            .filter(|finding| finding.code == "orphan_page")
+            .map(|finding| finding.path.as_str())
+            .collect();
+        assert_eq!(
+            orphans,
+            ["/fs/alone.md"],
+            "a link to itself does not bring a page into the bundle"
+        );
     }
 }

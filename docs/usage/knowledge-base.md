@@ -162,7 +162,15 @@ never loses its history or its last writer by being old.
 ### `GET /api/v1/projects/{id}/kb/backlinks`
 
 Query: `path`. Returns `[{path, title}]`, the pages that link to the page, in
-path order. A page that links to itself is not listed.
+path order. A page that links to itself is not listed, and such a link does
+not save the page from `orphan_page` either.
+
+A link inside code is not a link, here or in lint. Code is a fenced block (a
+fence closes only on a line of the same character, at least as long, with
+nothing after it, so a longer fence holds a shorter one), a block indented four
+spaces or a tab after a blank line outside a list, and a code span of any
+number of backticks. Inside a list an indented line is read as prose, so an
+indented code block nested in a list item still counts; fence it instead.
 
 ### `GET /api/v1/projects/{id}/kb/lint`
 

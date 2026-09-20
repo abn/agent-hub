@@ -1908,6 +1908,18 @@ async fn backlinks_name_other_pages_in_a_stable_order_and_lint_rows_carry_the_pa
         .await
         .ok();
     }
+    // Every link on this page is inside code: a fence that holds a shorter
+    // fence, an indented block, and a span of two backticks.
+    hub.put_page(
+        &project,
+        "fs/coded.md",
+        &concept(
+            "coded",
+            "Text.\n\n````\n```\n[t](target.md)\n```\n[t](target.md)\n````\n\n    [t](target.md)\n\nA ``[t](target.md)`` span.",
+        ),
+    )
+    .await
+    .ok();
     let base = format!("/api/v1/projects/{project}/kb");
 
     for _ in 0..3 {
@@ -1925,7 +1937,7 @@ async fn backlinks_name_other_pages_in_a_stable_order_and_lint_rows_carry_the_pa
                 {"path": "/fs/mid.md", "title": "mid"},
                 {"path": "/fs/zeta.md", "title": "zeta"},
             ]),
-            "a page is not its own referrer, and the order does not move"
+            "a page is not its own referrer, a link in code is not a link, and the order does not move"
         );
     }
 

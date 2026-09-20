@@ -580,10 +580,8 @@ pub async fn backlinks(
         return Ok(Json(json!([])));
     };
     let memo = get_or_compute_kb(&state, &project_id, &brain, false).await?;
-    // A page that links to itself is not something else referring to it, and
-    // the order is the path's so it does not move between walks.
+    // The order is the path's so it does not move between walks.
     let mut referring = memo.backlink_graph.backlinks_for(&path);
-    referring.retain(|entry| entry.path != path);
     referring.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Json(json!(referring)))
 }
