@@ -6639,6 +6639,74 @@ def check_project_active_agents_plural(page, watch: Watch, project: str) -> None
     watch.drain_rejections()
 
 
+def check_viewer_history(page, watch: Watch, port: int, project: str) -> None:
+    """The host does not push browser history entries when navigating the viewer frame."""
+    watch.enter("artifacts: browser history in viewer on theme and version switches")
+    artifact = harness.seed_versioned_artifact(port, project)
+    try:
+        goto(page, f"#/projects/{quote(project)}/artifacts", harness.PROJECT_NAME)
+        if not settle(page, f"!!document.querySelector('.artifact-card[data-id=\"{artifact}\"]')"):
+            watch.fail("seeded versioned artifact card did not appear in gallery")
+            return
+        page.click(f'.artifact-card[data-id="{artifact}"]')
+        if not settle(page, "!!document.querySelector('main .hub-viewer #hub-frame')"):
+            watch.fail("the viewer frame did not open from artifact card")
+            return
+        start_len = page.evaluate("history.length")
+        theme0 = page.evaluate("document.querySelector('#hub-frame')?.getAttribute('data-theme')")
+        page.click('[data-action="viewer-theme"]')
+        if not settle(page, f"document.querySelector('#hub-frame')?.getAttribute('data-theme') !== {json.dumps(theme0)}"):
+            watch.fail("clicking viewer theme toggle did not change frame theme")
+            return
+        page.wait_for_timeout(300)
+        theme1 = page.evaluate("document.querySelector('#hub-frame')?.getAttribute('data-theme')")
+        expected_next = "light" if theme1 == "dark" else "dark"
+        button_label = page.evaluate("document.querySelector('#hub-theme-toggle')?.getAttribute('aria-label')")
+        if button_label != f"Switch to {expected_next} theme":
+            watch.fail(f"viewer theme toggle label is {button_label!r}, expected 'Switch to {expected_next} theme'")
+        len1 = page.evaluate("history.length")
+        if len1 != start_len:
+            watch.fail(f"toggling viewer theme changed history length from {start_len} to {len1}")
+            return
+
+        page.click('[data-action="viewer-theme"]')
+        if not settle(page, f"document.querySelector('#hub-frame')?.getAttribute('data-theme') === {json.dumps(theme0)}"):
+            watch.fail("clicking viewer theme toggle second time did not revert frame theme")
+            return
+        page.wait_for_timeout(300)
+        len2 = page.evaluate("history.length")
+        if len2 != start_len:
+            watch.fail(f"toggling viewer theme second time changed history length from {start_len} to {len2}")
+            return
+
+        if not settle(page, "!!document.querySelector('main .hub-version-toggle')"):
+            watch.fail("the viewer carries no version control")
+            return
+        page.click(".hub-version-toggle")
+        if not settle(page, "!document.querySelector('.hub-version-menu').hidden"):
+            watch.fail("the version control opened nothing")
+            return
+        page.click('.hub-version-menu button[data-version="1"]')
+        if not settle(
+            page,
+            "!!document.querySelector('main .hub-version-toggle') && (document.querySelector('main .hub-version-toggle').textContent || '').includes('v1')",
+        ):
+            watch.fail("choosing version 1 did not update the version toggle label")
+            return
+        page.wait_for_timeout(300)
+        len3 = page.evaluate("history.length")
+        if len3 != start_len:
+            watch.fail(f"switching version changed history length from {start_len} to {len3}")
+            return
+
+        page.go_back()
+        if not settle(page, "!location.hash.startsWith('#/artifacts/')"):
+            watch.fail(f"pressing browser back did not leave the viewer in one press: {page.evaluate('location.hash')!r}")
+    finally:
+        goto(page, "#/home", home_title())
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -6810,6 +6878,7 @@ def run() -> int:
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
+                run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_sign_out, browser, watch, port)
                 run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)

@@ -90,6 +90,28 @@ function viewerSource(frame) {
   return frameSrc(frame.dataset.id, viewer.version, frame.getAttribute("data-theme"));
 }
 
+// Navigating the sandboxed frame in place pushes a history entry, which would
+// make the browser's Back undo the theme rather than leave the artifact.
+// Replacing the element avoids pushing history while preserving its setup.
+function replaceFrame(frame, src, srcdoc) {
+  const replacement = document.createElement("iframe");
+  if (frame.id) replacement.id = frame.id;
+  if (frame.hasAttribute("sandbox")) replacement.setAttribute("sandbox", frame.getAttribute("sandbox"));
+  if (frame.hasAttribute("title")) replacement.setAttribute("title", frame.getAttribute("title"));
+  for (const attr of frame.attributes) {
+    if (attr.name.startsWith("data-")) {
+      replacement.setAttribute(attr.name, attr.value);
+    }
+  }
+  if (srcdoc !== undefined) {
+    replacement.srcdoc = srcdoc;
+  } else if (src) {
+    replacement.src = src;
+  }
+  frame.replaceWith(replacement);
+  return replacement;
+}
+
 // A second local escape for the raw srcdoc: the host page's own `esc` spends
 // its budget on attributes, and the raw text lands in a text node.
 function escText(value) {
@@ -104,7 +126,7 @@ export async function toggleRaw(button) {
   const id = frame && frame.dataset.id;
   if (!id) return;
   if (viewer.raw) {
-    frame.src = viewerSource(frame);
+    replaceFrame(frame, viewerSource(frame));
     viewer.raw = false;
     if (button) button.textContent = "Open raw";
     return;
@@ -113,10 +135,11 @@ export async function toggleRaw(button) {
     const query = viewer.version ? `?version=${viewer.version}` : "";
     const raw = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`);
     const text = typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
-    frame.srcdoc =
+    const doc =
       `<style>body{margin:0;padding:24px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;` +
       `font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}</style>` +
       `<pre>${escText(text)}</pre>`;
+    replaceFrame(frame, null, doc);
     viewer.raw = true;
     if (button) button.textContent = "Back to view";
   } catch (error) {
@@ -140,7 +163,8 @@ export function pickVersion(id, version) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const project = params.get("project");
   const base = `#/artifacts/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`;
-  location.hash = project ? `${base}&project=${encodeURIComponent(project)}` : base;
+  const target = project ? `${base}&project=${encodeURIComponent(project)}` : base;
+  location.replace(target);
 }
 
 // The theme control. The framed public page carries its own theme switch; an
@@ -153,14 +177,16 @@ export function toggleViewerTheme() {
   const next = frame.getAttribute("data-theme") === "dark" ? "light" : "dark";
   frame.setAttribute("data-theme", next);
   drawThemeControl(main.querySelector("#hub-theme-toggle"), next);
+  let src;
   if (frame.dataset.kind === "html") {
     const params = new URLSearchParams();
     if (viewer.version) params.set("version", String(viewer.version));
     params.set("theme", next);
-    frame.src = `/artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
+    src = `/artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
   } else {
-    frame.src = viewerSource(frame);
+    src = viewerSource(frame);
   }
+  replaceFrame(frame, src);
 }
 
 // One glyph at a time: the one for the theme a press switches to, which is
