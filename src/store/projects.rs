@@ -69,6 +69,47 @@ pub async fn list(db: &Database) -> Result<Vec<Project>> {
     Ok(projects)
 }
 
+/// The display names of the projects named, by id, in one read.
+///
+/// A response that carries project ids calls this once for all of them rather
+/// than once per row. An id with no project row is absent from the answer, and
+/// no ids means no query.
+pub(crate) async fn display_names(
+    conn: &turso::Connection,
+    ids: &[&str],
+) -> Result<std::collections::HashMap<String, String>> {
+    let mut wanted: Vec<&str> = ids.to_vec();
+    wanted.sort_unstable();
+    wanted.dedup();
+    let mut names = std::collections::HashMap::new();
+    if wanted.is_empty() {
+        return Ok(names);
+    }
+    let holes: Vec<String> = (1..=wanted.len()).map(|at| format!("?{at}")).collect();
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT id, display_name FROM projects WHERE id IN ({})",
+                holes.join(", ")
+            ),
+            wanted
+                .iter()
+                .map(|id| Value::Text(id.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let (Value::Text(id), Value::Text(name)) = (
+            row.get_value(0).map_err(engine)?,
+            row.get_value(1).map_err(engine)?,
+        ) {
+            names.insert(id, name);
+        }
+    }
+    Ok(names)
+}
+
 /// Create a project. The id is a slug, immutable after creation.
 pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Project> {
     validate_id(id)?;

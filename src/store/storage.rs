@@ -12,6 +12,9 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectUsage {
     pub project_id: String,
+    /// The name the projects list shows, absent when no project row carries
+    /// the id.
+    pub project_display_name: Option<String>,
     pub artifact_bytes: i64,
     pub session_bytes: i64,
     pub kb_bytes: i64,
@@ -84,6 +87,7 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         if !by_project.iter().any(|p| p.project_id == project_id) {
             by_project.push(ProjectUsage {
                 project_id: project_id.to_string(),
+                project_display_name: None,
                 artifact_bytes: 0,
                 session_bytes: 0,
                 kb_bytes: 0,
@@ -148,12 +152,15 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
     // A knowledge base is never pruned, so it appears here and never in what
     // the human can reclaim. Only a project that has one is listed, so the
     // report still names the projects that hold something.
+    // The same read names every row, so the names cost no query of their own.
+    let mut names = std::collections::HashMap::new();
     let mut projects = conn
-        .query("SELECT id FROM projects", ())
+        .query("SELECT id, display_name FROM projects", ())
         .await
         .map_err(engine)?;
     while let Some(row) = projects.next().await.map_err(engine)? {
         let project_id = text(row.get_value(0).map_err(engine)?);
+        names.insert(project_id.clone(), text(row.get_value(1).map_err(engine)?));
         let bytes = knowledge_bytes(data_dir, &project_id);
         if bytes == 0 {
             continue;
@@ -164,6 +171,9 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         }
     }
     drop(projects);
+    for entry in &mut by_project {
+        entry.project_display_name = names.get(&entry.project_id).cloned();
+    }
 
     by_project.sort_by(|a, b| a.project_id.cmp(&b.project_id));
     let by_kind = KindBytes {

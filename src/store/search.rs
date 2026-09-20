@@ -84,6 +84,9 @@ pub struct SearchQuery {
 pub struct SearchHit {
     pub doc_id: String,
     pub project_id: String,
+    /// The name the projects list shows, absent when no project row carries
+    /// the id.
+    pub project_display_name: Option<String>,
     pub kind: String,
     pub ref_id: String,
     pub session_id: Option<String>,
@@ -202,6 +205,8 @@ async fn query_limited(
         while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
             hits.push(hit_from_row(&row)?);
         }
+        drop(rows);
+        enrich(&conn, &mut hits).await?;
         return Ok(hits);
     }
 
@@ -214,7 +219,24 @@ async fn query_limited(
     }
     scored.sort_by(|left, right| right.0.total_cmp(&left.0));
     scored.truncate(limit as usize);
-    Ok(scored.into_iter().map(|(_, hit)| hit).collect())
+    drop(rows);
+    let mut hits: Vec<SearchHit> = scored.into_iter().map(|(_, hit)| hit).collect();
+    enrich(&conn, &mut hits).await?;
+    Ok(hits)
+}
+
+/// Fill in what a hit shows beyond its corpus row.
+///
+/// This runs after the page is ranked and cut, so it never touches the match
+/// or the order, and it reads only by the ids of hits already confined to what
+/// the caller may see. Each read is one query for the whole page.
+async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.project_id.as_str()).collect();
+    let names = crate::store::projects::display_names(conn, &ids).await?;
+    for hit in hits.iter_mut() {
+        hit.project_display_name = names.get(&hit.project_id).cloned();
+    }
+    Ok(())
 }
 
 /// A group of hits sharing one corpus family.
@@ -292,6 +314,7 @@ fn hit_from_row(row: &Row) -> Result<SearchHit> {
     Ok(SearchHit {
         doc_id: required(row, 0)?,
         project_id: required(row, 1)?,
+        project_display_name: None,
         kind: required(row, 2)?,
         ref_id: required(row, 3)?,
         session_id: text_at(row, 4)?,

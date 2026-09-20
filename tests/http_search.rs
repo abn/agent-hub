@@ -308,3 +308,38 @@ async fn a_percent_that_is_no_escape_is_read_as_typed() {
         "the word after the stray percent is searched: {body}"
     );
 }
+
+/// Every hit in a response, whatever group it sits in.
+fn hits(body: &serde_json::Value) -> Vec<serde_json::Value> {
+    body["groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .flat_map(|group| group["hits"].as_array().expect("hits").clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_hit_names_its_project_as_the_projects_list_does() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
+        .await
+        .expect("project");
+    seed(&state).await;
+
+    let response = router(state.clone())
+        .oneshot(get("/api/v1/search?q=engine", Some("Bearer token")))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let hits = hits(&body);
+    assert!(!hits.is_empty(), "the seeded signal is found: {body}");
+    for hit in &hits {
+        assert_eq!(hit["project_id"], "proj");
+        assert_eq!(
+            hit["project_display_name"], "Engine Room",
+            "a hit carries the project's display name: {hit}"
+        );
+    }
+}

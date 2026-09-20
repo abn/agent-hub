@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, responses name a project as the projects list does
+
+* **Update**: [The human surface](architecture/human-surface.md) lists
+  `project_display_name` on the storage rows, on Home's `recent` events and
+  `unseen` rows, and on every search hit. It is the name the projects list
+  shows, read once per response, and it is null for an id no project row
+  carries. The screens still print the slug.
+
 ## 2026-09-20, edited since review is about bytes, not seconds
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) restates how

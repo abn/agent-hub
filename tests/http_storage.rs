@@ -647,3 +647,108 @@ async fn knowledge_base_bytes_are_reported_in_usage_and_cleaned_on_project_delet
     let held = agent_hub::brain::knowledge_dir(&state.config.data_dir).join("proj-kb");
     assert!(!held.exists(), "{} outlived its project", held.display());
 }
+
+/// The name the projects list shows for each project id.
+async fn listed_names(state: &AppState) -> std::collections::HashMap<String, String> {
+    let (status, body) = call(state, "GET", "/api/v1/projects").await;
+    assert_eq!(status, StatusCode::OK);
+    body["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .map(|project| {
+            (
+                project["id"].as_str().expect("id").to_string(),
+                project["display_name"].as_str().expect("name").to_string(),
+            )
+        })
+        .collect()
+}
+
+async fn signal_in(state: &AppState, project_id: &str, summary: &str) {
+    agent_hub::store::events::append(
+        &state.db,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: project_id.to_string(),
+            kind: "signal".to_string(),
+            summary: summary.to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+}
+
+#[tokio::test]
+async fn storage_rows_and_home_events_name_their_project_as_the_projects_list_does() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "homelab", "Home Lab")
+        .await
+        .expect("project");
+    let agent = agent_hub::store::identity::create_agent(
+        &state.db,
+        "scout",
+        "Scout",
+        agent_hub::principal::Trust::Untrusted,
+    )
+    .await
+    .expect("agent");
+    let personal = agent.personal_project_id.clone();
+    for project in ["homelab", personal.as_str()] {
+        let session = sessions::start(&state.db, project, "run", "scout")
+            .await
+            .expect("start");
+        write_brain(&state, &session).await;
+        signal_in(&state, project, "something happened").await;
+    }
+    state.notify();
+
+    let names = listed_names(&state).await;
+    assert_eq!(names["homelab"], "Home Lab");
+    assert!(!names[&personal].is_empty(), "a personal space has a name");
+
+    let storage = usage(&state).await;
+    for project in ["homelab", personal.as_str()] {
+        let row = storage["projects"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["project_id"] == project)
+            .unwrap_or_else(|| panic!("a storage row for {project}: {storage}"));
+        assert_eq!(
+            row["project_display_name"], names[project],
+            "the storage row names {project} as the projects list does: {row}"
+        );
+    }
+
+    let (status, home) = call(&state, "GET", "/api/v1/home").await;
+    assert_eq!(status, StatusCode::OK);
+    let recent = home["recent"].as_array().expect("recent");
+    assert!(
+        recent.iter().any(|event| event["project_id"] == personal),
+        "the personal space is among the newest: {home}"
+    );
+    for event in recent {
+        let project = event["project_id"].as_str().expect("project id");
+        if let Some(name) = names.get(project) {
+            assert_eq!(
+                event["project_display_name"], *name,
+                "a recent event names its project: {event}"
+            );
+        }
+    }
+    let unseen = home["unseen"].as_array().expect("unseen");
+    assert!(!unseen.is_empty(), "both projects hold unseen events");
+    for row in unseen {
+        let project = row["project_id"].as_str().expect("project id");
+        assert_eq!(
+            row["project_display_name"], names[project],
+            "an unseen row names its project: {row}"
+        );
+    }
+}
