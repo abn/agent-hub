@@ -79,10 +79,83 @@ function bodyOf(item) {
   return typeof body === "string" ? body.trim() : "";
 }
 
+const SNOOZE_KEY = "hub.snooze";
+const SNOOZE_DURATION_MS = 60 * 60 * 1000;
+
+function loadSnoozes() {
+  try {
+    const raw = localStorage.getItem(SNOOZE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveSnoozes(map) {
+  try {
+    localStorage.setItem(SNOOZE_KEY, JSON.stringify(map));
+  } catch (_) {}
+}
+
+function isSnoozed(id, now = Date.now()) {
+  const map = loadSnoozes();
+  const until = map[id];
+  if (!until) return false;
+  if (now > until) {
+    delete map[id];
+    saveSnoozes(map);
+    return false;
+  }
+  return true;
+}
+
+function addSnooze(id, durationMs = SNOOZE_DURATION_MS) {
+  const map = loadSnoozes();
+  map[id] = Date.now() + durationMs;
+  saveSnoozes(map);
+}
+
+function removeSnooze(id) {
+  const map = loadSnoozes();
+  delete map[id];
+  saveSnoozes(map);
+}
+
+function outcomeOf(item) {
+  if (item.status !== "resolved") return "";
+  if (item.decision && item.decision.decision) {
+    const d = String(item.decision.decision).toLowerCase();
+    if (d === "approved" || d === "approve") return "Approved";
+    if (d === "declined" || d === "decline") return "Declined";
+    return item.decision.decision;
+  }
+  const payload = item.payload || {};
+  if (payload.outcome) {
+    const out = String(payload.outcome).toLowerCase();
+    if (out === "approved" || out === "approve") return "Approved";
+    if (out === "declined" || out === "decline") return "Declined";
+    return payload.outcome;
+  }
+  if (item.kind === "approval") return "Decided";
+  if (item.kind === "question") return "Answered";
+  return "Resolved";
+}
+
+function noteOf(item) {
+  if (item.decision && item.decision.note) {
+    return String(item.decision.note).trim();
+  }
+  const payload = item.payload || {};
+  if (payload.answer) return String(payload.answer).trim();
+  if (payload.note) return String(payload.note).trim();
+  if (payload.decision_note) return String(payload.decision_note).trim();
+  return "";
+}
+
 // What the row's right swipe and its visible control both do. An item that
 // waits carries no read state, so it offers neither.
 function readControl(item) {
-  if (waits(item)) return "";
+  if (waits(item) || item.status === "resolved") return "";
   const id = esc(item.event_id);
   return item.status === "unread"
     ? `<button type="button" class="inbox-quiet" data-action="inbox-read" data-id="${id}">Mark read</button>`
@@ -93,7 +166,17 @@ function decline(item, action) {
   return `<button type="button" data-action="${action}" data-id="${esc(item.event_id)}" data-summary="${esc(item.summary)}">Decline</button>`;
 }
 
+function snoozeButton(item) {
+  if (!waits(item)) return "";
+  return `<button type="button" class="inbox-quiet inbox-snooze-btn" data-action="inbox-snooze" data-id="${esc(item.event_id)}" data-summary="${esc(item.summary)}" title="Snooze for 1 hour">Snooze 1h</button>`;
+}
+
+function bringBackButton(item) {
+  return `<button type="button" class="inbox-quiet" data-action="inbox-unsnooze" data-id="${esc(item.event_id)}" data-summary="${esc(item.summary)}">Bring back</button>`;
+}
+
 function rowActions(item) {
+  if (item.status === "resolved") return "";
   if (!waits(item)) return readControl(item);
   return (item.kind === "approval" ? decline(item, "inbox-decline") : "") + actionFor(item);
 }
@@ -102,6 +185,7 @@ function rowActions(item) {
 // ring and the accessibility tree until a swipe shows them; every action in
 // them is also a control on the row itself.
 function trays(item) {
+  if (item.status === "resolved") return "";
   const id = esc(item.event_id);
   if (!waits(item)) {
     const label = item.status === "unread" ? "Mark read" : "Mark unread";
@@ -122,12 +206,18 @@ function trays(item) {
   return "";
 }
 
-function inboxRow(item, state) {
-  const body = waits(item) ? bodyOf(item) : "";
-  const tone = waits(item) ? "is-waiting" : item.status === "unread" ? "is-unread" : "is-read";
-  const swipe = waits(item) ? (trays(item) ? "actions" : "") : "read";
+function inboxRow(item, state, options = {}) {
+  const isResolved = item.status === "resolved";
+  const body = (waits(item) || isResolved) ? bodyOf(item) : "";
+  const tone = waits(item) ? "is-waiting" : item.status === "unread" ? "is-unread" : isResolved ? "is-resolved" : "is-read";
+  const swipe = waits(item) ? (trays(item) ? "actions" : "") : isResolved ? "" : "read";
   const href = esc(address({ ...state, open: item.event_id }));
   const current = state.open === item.event_id ? ' aria-current="true"' : "";
+  const outcome = isResolved ? outcomeOf(item) : "";
+  const note = isResolved ? noteOf(item) : "";
+  const snoozeBar = waits(item)
+    ? `<div class="inbox-snooze-bar">${options.snoozed ? bringBackButton(item) : snoozeButton(item)}</div>`
+    : "";
   return `<div class="inbox-item" data-id="${esc(item.event_id)}" data-status="${esc(item.status)}" data-swipe="${swipe}"${current}>
     ${trays(item)}
     <div class="row inbox-row ${tone}">
@@ -138,6 +228,7 @@ function inboxRow(item, state) {
           ${stamp(item.updated_at)}
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
+        ${outcome ? `<div class="inbox-outcome"><span class="pill pill-outcome">${esc(outcome)}</span>${note ? ` <span class="inbox-note inbox-outcome-note">${esc(note)}</span>` : ""}</div>` : ""}
         <div class="inbox-foot">
           <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span>
           <span class="inbox-acts">${rowActions(item)}</span>
@@ -145,6 +236,7 @@ function inboxRow(item, state) {
       </div>
       ${item.status === "unread" ? '<span class="dot-unread" aria-hidden="true"></span><span class="sr-only">Unread</span>' : ""}
     </div>
+    ${snoozeBar}
   </div>`;
 }
 
@@ -182,9 +274,18 @@ function earlier(items, state) {
   const folded =
     window.matchMedia(DESKTOP).matches && !items.some((item) => item.event_id === state.open);
   return `<details class="inbox-group inbox-earlier" data-group="earlier"${folded ? "" : " open"}>
-    <summary class="section-label inbox-label" data-group="earlier">Earlier</summary>
+    <summary class="section-label inbox-label" data-group="earlier">Earlier · ${items.length}</summary>
     <div class="inbox-rows">${items.map((row) => inboxRow(row, state)).join("")}</div>
   </details>`;
+}
+
+function snoozedSection(items, state) {
+  if (!items.length) return "";
+  return `<section class="inbox-group inbox-snoozed" data-group="snoozed">
+    <h2 class="section-label inbox-label">Snoozed · ${items.length}</h2>
+    <p class="inbox-snooze-info">Snoozed for 1 hour (remembered on this device).</p>
+    <div class="inbox-rows">${items.map((row) => inboxRow(row, state, { snoozed: true })).join("")}</div>
+  </section>`;
 }
 
 function syncLine() {
@@ -223,6 +324,9 @@ function detail(item, state) {
   const back = esc(address({ ...state, open: "" }));
   const id = esc(item.event_id);
   const body = bodyOf(item);
+  const isResolved = item.status === "resolved";
+  const outcome = isResolved ? outcomeOf(item) : "";
+  const note = isResolved ? noteOf(item) : "";
   let answers = "";
   if (waits(item) && item.kind === "approval") {
     answers = `<div class="inbox-answers">
@@ -237,11 +341,14 @@ function detail(item, state) {
     <div class="inbox-detail-head">
       ${glyph(item.kind)}
       ${waits(item) ? '<span class="pill">Waiting on you</span>' : ""}
+      ${outcome ? `<span class="pill pill-outcome">${esc(outcome)}</span>` : ""}
       <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
     </div>
     <h2 class="item-title" id="inbox-detail-title">${esc(item.summary)}</h2>
     ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}
+    ${note ? `<div class="inbox-detail-resolved-note"><strong>${outcome === "Approved" || outcome === "Declined" ? "Decision note" : "Answer"}:</strong> ${esc(note)}</div>` : ""}
     ${answers}
+    ${waits(item) ? `<div class="inbox-detail-snooze-wrap">${isSnoozed(item.event_id) ? bringBackButton(item) : snoozeButton(item)}</div>` : ""}
   </article>`;
 }
 
@@ -276,20 +383,38 @@ export async function inbox(gen) {
   // in the waiting group gets its own block, so one agent's queue reads as a
   // block rather than a run of rows scattered through the list.
   const state = view();
-  const [action, waitingItems, unread, read] = await Promise.all([
+  const [action, waitingItems, unread, read, resolved] = await Promise.all([
     api("/api/v1/inbox?status=action&limit=500"),
     api("/api/v1/inbox?status=waiting&limit=500"),
     api("/api/v1/inbox?unread_only=true&limit=500"),
     state.unreadOnly ? { items: [] } : api("/api/v1/inbox?status=read&limit=100"),
+    state.unreadOnly ? { items: [] } : api("/api/v1/inbox?status=resolved&limit=100"),
   ]);
   syncedAt = Date.now();
-  const waiting = [...action.items, ...waitingItems.items].sort(
+  const allWaiting = [...action.items, ...waitingItems.items].sort(
     (a, b) => new Date(b.updated_at) - new Date(a.updated_at),
   );
+  const waiting = [];
+  const snoozed = [];
+  for (const item of allWaiting) {
+    if (isSnoozed(item.event_id)) snoozed.push(item);
+    else waiting.push(item);
+  }
+
+  const seenEarlier = new Set();
+  const earlierItems = [];
+  for (const item of [...read.items, ...resolved.items].sort(
+    (a, b) => new Date(b.updated_at) - new Date(a.updated_at),
+  )) {
+    if (!seenEarlier.has(item.event_id)) {
+      seenEarlier.add(item.event_id);
+      earlierItems.push(item);
+    }
+  }
 
   // Opening an item is reading it. The row moves to Earlier in the same paint
   // rather than on the next fetch.
-  let opened = [...waiting, ...unread.items, ...read.items].find(
+  let opened = [...waiting, ...snoozed, ...unread.items, ...earlierItems].find(
     (item) => item.event_id === state.open,
   );
   if (opened && opened.status === "unread") {
@@ -299,7 +424,7 @@ export async function inbox(gen) {
     opened.status = marked.status;
     if (marked.status === "read") {
       unread.items.splice(unread.items.indexOf(opened), 1);
-      read.items.unshift(opened);
+      earlierItems.unshift(opened);
     }
   }
   if (stale(gen)) return;
@@ -332,6 +457,7 @@ export async function inbox(gen) {
     </div>${syncLine()}`;
   const sections =
     (waiting.length ? group("waiting", "Waiting on you", waiting.length, actorGroups(waiting, state)) : "") +
+    snoozedSection(snoozed, state) +
     (unread.items.length
       ? group(
           "unread",
@@ -343,7 +469,7 @@ export async function inbox(gen) {
   const clear = sections
     ? ""
     : emptyStateHTML(EMPTY_COPY.inbox, {}, state.unreadOnly ? { href: address({ open: "" }) } : null);
-  const list = `<div class="inbox-screen">${top}${sections}${clear}${earlier(read.items, state)}</div>`;
+  const list = `<div class="inbox-screen">${top}${sections}${clear}${earlier(earlierItems, state)}</div>`;
 
   // On a phone a card takes the screen and Back returns to the list. On the
   // desktop the list keeps its pane and the card sits beside it.
@@ -509,6 +635,21 @@ async function refresh() {
 
 const failed = (error) => toast(`Nothing changed: ${error.message}`);
 
+async function snoozeItem(id, summary) {
+  addSnooze(id);
+  await render();
+  toast(
+    `Snoozed "${summary || id}" for 1 hour (remembered on this device).`,
+    () => unsnoozeItem(id, summary).catch(failed),
+  );
+}
+
+async function unsnoozeItem(id, summary) {
+  removeSnooze(id);
+  await render();
+  toast(`Returned "${summary || id}" to Waiting on you.`);
+}
+
 // The actions this screen owns. The entry point routes Reply and Approve on a
 // row; everything the inbox added is handled here, beside the code it calls.
 main.addEventListener("click", (event) => {
@@ -521,6 +662,8 @@ main.addEventListener("click", (event) => {
   else if (action === "inbox-unread") work = setRead(id, false);
   else if (action === "inbox-read-all") work = readAll();
   else if (action === "inbox-refresh") work = refresh();
+  else if (action === "inbox-snooze") work = snoozeItem(id, summary);
+  else if (action === "inbox-unsnooze") work = unsnoozeItem(id, summary);
   else if (action === "inbox-unread-only") {
     location.hash = address({ ...state, unreadOnly: !state.unreadOnly });
     // The router parks focus on the region; the toggle the reader pressed is

@@ -5684,7 +5684,8 @@ def check_inbox_detail(page, watch: Watch) -> None:
     if not settle(
         page,
         "!document.querySelector('main .inbox-detail') &&"
-        f" !document.querySelector('main .inbox-item[data-id=\"{item}\"]')",
+        f"location.hash === '#/inbox' &&"
+        f" !document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{item}\"]')",
     ):
         watch.fail("answering from the card did not resolve the item and return to the list")
     watch.drain_rejections()
@@ -5709,7 +5710,7 @@ def check_inbox_decline(page, watch: Watch) -> None:
         page.click(f'main .inbox-item[data-id="{held}"] .inbox-row [data-action="inbox-decline"]')
         page.wait_for_selector("dialog.dialog[open]")
         page.click("dialog.dialog .dialog-commit")
-        if not settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{held}\"]')"):
+        if not settle(page, f"!document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{held}\"]')"):
             watch.fail("the declined approval still waits")
     finally:
         page.remove_listener("request", note)
@@ -5879,7 +5880,7 @@ def check_decision_note(page, watch: Watch, port: int, project: str) -> None:
         page.fill(NOTE_FIELD, f"  {NOTE_HOSTILE}  ")
         page.click("dialog.dialog .dialog-commit")
         page.wait_for_selector("dialog.dialog", state="detached")
-        if not settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{declined}\"]')"):
+        if not settle(page, f"!document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{declined}\"]')"):
             watch.fail("the declined approval still waits")
         if sent != [(declined, {"decision": "decline", "note": NOTE_HOSTILE})]:
             watch.fail(f"declining with a note sent {sent}")
@@ -5918,7 +5919,7 @@ def check_decision_note(page, watch: Watch, port: int, project: str) -> None:
             "(() => { const b = document.querySelector('dialog.dialog .dialog-commit'); b.click(); b.click(); })()"
         )
         page.wait_for_selector("dialog.dialog", state="detached")
-        settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{approved}\"]')")
+        settle(page, f"!document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{approved}\"]')")
         page.wait_for_timeout(WRITE_WINDOW)
         if sent != [(approved, {"decision": "approve"})]:
             watch.fail(f"approving without a note sent {sent}")
@@ -7231,6 +7232,151 @@ def check_markdown_artifact_rendering(browser, page, watch: Watch, port: int, pr
         watch.fail("public page and app viewer rendered different content")
 
 
+def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: str) -> None:
+    """Decided approvals appear in Earlier with outcome and note, and snooze is device-local."""
+    watch.enter("inbox: earlier resolved and snooze")
+    summary_approval = "Deploy authentication gateway"
+    note_text = "LGTM approved for rollout"
+    appr_id = one_off_event(port, project, "approval", summary_approval)
+    harness.request(
+        port,
+        "POST",
+        f"/api/v1/approvals/{appr_id}/decision",
+        {"decision": "approve", "note": note_text},
+    )
+
+    context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"inbox earlier/snooze: uncaught error: {error}"))
+    try:
+        calls_before = watch.count("GET /api/v1/inbox?")
+        page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
+        settle(page, "!!document.querySelector('main .inbox-screen')")
+        calls_paint = watch.count("GET /api/v1/inbox?") - calls_before
+        if calls_paint > 5:
+            watch.fail(f"inbox paint made {calls_paint} requests, expected at most one round")
+
+        earlier_folded = page.evaluate("(document.querySelector('main details[data-group=\"earlier\"]') || {}).open")
+        if earlier_folded:
+            watch.fail("Earlier is not folded by default on desktop")
+
+        if not settle(page, "!!document.querySelector('main details[data-group=\"earlier\"]')"):
+            watch.fail("the decided approval does not appear under Earlier")
+            return
+
+        page.click('main summary[data-group="earlier"]')
+        find_appr = f"{INBOX_ITEM_ID}({json.dumps(summary_approval)})"
+        if not settle(page, find_appr):
+            watch.fail("the decided approval does not appear under Earlier")
+            return
+
+        row_info = page.evaluate(
+            f"((id) => {{"
+            f" const item = document.querySelector(`main .inbox-item[data-id=\"${{id}}\"]`);"
+            f" if (!item) return null;"
+            f" const group = item.closest('[data-group]') ? item.closest('[data-group]').dataset.group : '';"
+            f" const acts = [...item.querySelectorAll('button')].map((b) => b.textContent.trim());"
+            f" const outcome = item.querySelector('.inbox-outcome') ? item.querySelector('.inbox-outcome').textContent.trim() : '';"
+            f" const note = item.querySelector('.inbox-note') ? item.querySelector('.inbox-note').textContent.trim() : '';"
+            f" const text = item.textContent;"
+            f" return {{ group, acts, outcome, note, text }};"
+            f"}})({json.dumps(appr_id)})"
+        )
+        if not row_info or row_info["group"] != "earlier":
+            watch.fail(f"the decided approval is in group {row_info.get('group')!r}, not earlier")
+            return
+        if "Approve" in row_info["acts"] or "Decline" in row_info["acts"]:
+            watch.fail(f"the decided approval row still offers decision controls: {row_info['acts']}")
+        if "Approved" not in row_info["outcome"] and "Approved" not in row_info["text"]:
+            watch.fail(f"the decided approval does not show its outcome in words: {row_info}")
+        if note_text not in row_info["note"] and note_text not in row_info["text"]:
+            watch.fail(f"the decided approval row does not show its note: {row_info}")
+
+        page.click(f'main .inbox-item[data-id="{appr_id}"] .title a')
+        if not settle(page, "!!document.querySelector('main .inbox-detail')"):
+            watch.fail("opening decided approval did not open card")
+            return
+        card_info = page.evaluate(
+            "(() => {"
+            " const card = document.querySelector('main .inbox-detail');"
+            " if (!card) return null;"
+            " const acts = [...card.querySelectorAll('button')].map((b) => b.textContent.trim());"
+            " const text = card.textContent;"
+            " return { acts, text };"
+            "})()"
+        )
+        if "Approve" in card_info["acts"] or "Decline" in card_info["acts"]:
+            watch.fail(f"the open card for decided approval offers decision controls: {card_info['acts']}")
+        if note_text not in card_info["text"]:
+            watch.fail("the open card does not show the decision note at full size")
+
+        summary_wait = "Approve production deployment"
+        wait_id = one_off_event(port, project, "approval", summary_wait)
+        page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
+        find_wait = f"{INBOX_ITEM_ID}({json.dumps(summary_wait)})"
+        if not settle(page, find_wait):
+            watch.fail("seeded waiting item not found for snooze test")
+            return
+
+        snooze_btn = page.evaluate(
+            f"((id) => {{"
+            f" const btn = document.querySelector(`main .inbox-item[data-id=\"${{id}}\"] [data-action=\"inbox-snooze\"]`);"
+            f" return btn ? btn.textContent.trim() : '';"
+            f"}})({json.dumps(wait_id)})"
+        )
+        if not snooze_btn or "1" not in snooze_btn:
+            watch.fail(f"the snooze button text is {snooze_btn!r}, expected period stated")
+
+        page.click(f'main .inbox-item[data-id="{wait_id}"] [data-action="inbox-snooze"]')
+
+        if not settle(page, "!!document.querySelector('.toast .toast-undo')"):
+            watch.fail("snooze did not raise an undo toast")
+            return
+        toast_text = page.text_content(".toast") or ""
+        if "device" not in toast_text.lower():
+            watch.fail(f"snooze toast did not say it is remembered on this device: {toast_text!r}")
+
+        page.click(".toast .toast-undo")
+        if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(wait_id)}) === 'waiting'"):
+            watch.fail("undoing snooze did not restore the item to Waiting on you")
+            return
+
+        page.click(f'main .inbox-item[data-id="{wait_id}"] [data-action="inbox-snooze"]')
+        if not settle(page, f"!document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{wait_id}\"]')"):
+            watch.fail("snoozed row did not leave Waiting on you")
+            return
+
+        if not settle(page, "!!document.querySelector('main [data-group=\"snoozed\"]')"):
+            watch.fail("the inbox does not list snoozed items")
+            return
+        snoozed_group_text = page.text_content('main [data-group="snoozed"]') or ""
+        if "device" not in snoozed_group_text.lower():
+            watch.fail(f"snoozed group does not state it is remembered on device: {snoozed_group_text!r}")
+
+        page.reload(wait_until="load")
+        settle(page, "!!document.querySelector('main .inbox-screen')")
+        if not settle(page, f"!document.querySelector('main [data-group=\"waiting\"] .inbox-item[data-id=\"{wait_id}\"]')"):
+            watch.fail("snoozed row reappeared in Waiting on you after reload")
+            return
+
+        page.click(f'main [data-group="snoozed"] .inbox-item[data-id="{wait_id}"] [data-action="inbox-unsnooze"]')
+        if not settle(page, f"{INBOX_GROUP_OF}({json.dumps(wait_id)}) === 'waiting'"):
+            watch.fail("bringing back snoozed item did not return it to Waiting on you")
+            return
+
+        try:
+            harness.request(port, "POST", f"/api/v1/approvals/{wait_id}/decision", {"decision": "approve"})
+        except Exception:
+            pass
+    finally:
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7403,6 +7549,7 @@ def run() -> int:
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
+                run_step(watch, check_inbox_earlier_and_snooze, browser, watch, port, project)
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_filter_chips, page, watch, project)

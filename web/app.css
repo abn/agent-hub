@@ -1255,3 +1255,61 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
 .feed-row .feed-link::after { content: ""; position: absolute; inset: 0; }
 .feed-row .action, .feed-row .ts { position: relative; z-index: 1; }
 .feed-row:focus-visible, .feed-row:has(.feed-link:focus-visible) { position: relative; z-index: 1; }
+
+/* Inbox: resolved earlier and snooze */
+.inbox-snooze-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--s-4) var(--s-2);
+}
+
+.inbox-snooze-bar button,
+.inbox-detail-snooze-wrap button {
+  min-height: 44px;
+}
+
+.inbox-snooze-info {
+  margin: 0 0 var(--s-2);
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+
+.inbox-outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+}
+
+.pill-outcome {
+  font-size: var(--t-12);
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.inbox-outcome-note {
+  font-size: var(--t-13);
+  color: var(--ink-2);
+  font-style: italic;
+}
+
+.inbox-detail-resolved-note {
+  margin: var(--s-3) 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-2);
+}
+
+.inbox-detail-snooze-wrap {
+  margin-top: var(--s-4);
+}
+
+.inbox-row.is-read,
+.inbox-row.is-resolved {
+  color: var(--ink-2);
+}
+
+.inbox-row [data-action="inbox-read"],
+.inbox-row [data-action="inbox-unread"] {
+  color: var(--ink-2);
+}

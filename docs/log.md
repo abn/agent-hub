@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, device-local snooze for waiting items
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  device-local snooze for waiting items. Snoozed items leave Waiting on you for
+  1 hour, are listed in a Snoozed group where they can be brought back, and
+  snoozing is immediately undoable through a toast.
+
+## 2026-09-20, decided approvals and answered questions in Earlier
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  resolved items moving to Earlier alongside read items, showing their outcome
+  in words and decision note or answer body without decision controls, with the
+  Earlier count reflecting both read and resolved items.
+
 ## 2026-09-20, one markdown renderer for artifacts
 
 * **Update**: [The human surface](architecture/human-surface.md) records that
