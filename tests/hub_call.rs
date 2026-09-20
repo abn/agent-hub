@@ -9,10 +9,9 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
-#[path = "common/hub.rs"]
-mod hub;
+mod common;
 
-use hub::{AGENT, Hub, PROJECT};
+use common::hub::{AGENT, Hub, PROJECT};
 
 /// Run the binary against the hub, with the settings in the environment.
 fn run(hub: &Hub, args: &[&str]) -> Output {
@@ -321,10 +320,9 @@ fn tools_lists_what_the_hub_offers() {
 
 /// A port no unprivileged hub can bind and nothing is listening on.
 ///
-/// This is the race in `free_port` made deterministic. Holding a port with a
-/// listener of our own would not reproduce it: the start probe is a connect,
-/// and that listener would answer it. A port the bind is refused on fails the
-/// way a port another process took in the gap fails.
+/// A hub told to bind it fails the way a hub fails on a port another process
+/// holds: the bind is refused and the process exits. The harness reads that
+/// from the hub itself and asks the supply for another port.
 const UNBINDABLE_PORT: u16 = 1;
 
 #[test]
@@ -335,7 +333,7 @@ fn a_hub_whose_port_was_taken_under_it_starts_on_another() {
         if handed == 1 {
             UNBINDABLE_PORT
         } else {
-            hub::free_port()
+            common::process::ANY_PORT
         }
     };
 

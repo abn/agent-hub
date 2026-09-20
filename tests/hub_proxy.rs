@@ -8,10 +8,10 @@
 
 use serde_json::{Value, json};
 
-#[path = "common/hub.rs"]
-mod hub;
+mod common;
 
-use hub::{AGENT, Hub, PROJECT, StdioClient, structured};
+use common::hub::{AGENT, Hub, PROJECT};
+use common::stdio::{StdioClient, structured};
 
 /// Run the binary as a proxy to the hub, isolated from any real config file.
 fn proxy(hub: &Hub) -> StdioClient {
@@ -50,7 +50,7 @@ fn the_proxy_answers_with_the_hub_and_its_identity() {
         );
     }
 
-    let who = proxy.tool("whoami", json!({}));
+    let who = proxy.call_tool("whoami", json!({}));
     let identity = structured(&who);
     // Embedded stdio would answer as the local admin, so this is the proof
     // that the call was served by the hub against the token.
@@ -63,21 +63,21 @@ fn a_proxy_outlives_a_hub_restart() {
     let mut hub = Hub::start("proxy-restart");
     let mut proxy = proxy(&hub);
     proxy.initialize();
-    let before = proxy.tool("whoami", json!({}));
+    let before = proxy.call_tool("whoami", json!({}));
     assert_eq!(structured(&before)["actor"], AGENT, "{before}");
-    let started = proxy.tool(
+    let started = proxy.call_tool(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "long-run"}),
     );
     assert!(started.get("error").is_none(), "{started}");
-    let noted = proxy.tool(
+    let noted = proxy.call_tool(
         "brain_put",
         json!({"store": "session", "path": "/fs/plan.md", "content": "step two is next"}),
     );
     assert!(noted.get("error").is_none(), "{noted}");
 
     hub.stop();
-    let down = proxy.tool("whoami", json!({}));
+    let down = proxy.call_tool("whoami", json!({}));
     assert!(
         down.get("error").is_some(),
         "a call while the hub is down is an error, not a hang: {down}"
@@ -88,7 +88,7 @@ fn a_proxy_outlives_a_hub_restart() {
     // that answered every later call with the same error would be dead for the
     // rest of the agent's run. The hub forgot the connection; the proxy makes
     // a new one and the call goes through.
-    let after = proxy.tool("whoami", json!({}));
+    let after = proxy.call_tool("whoami", json!({}));
     assert_eq!(
         structured(&after)["actor"],
         AGENT,
@@ -98,17 +98,17 @@ fn a_proxy_outlives_a_hub_restart() {
     // The hub kept which session a connection was on in memory, so that is
     // gone. The agent is told so in words it can act on, and resuming the
     // session by name brings back what it had written.
-    let orphaned = proxy.tool("brain_get", json!({"path": "/fs/plan.md"}));
+    let orphaned = proxy.call_tool("brain_get", json!({"path": "/fs/plan.md"}));
     assert!(
         orphaned.to_string().contains("call session_start first"),
         "a session-bound call says what to do next: {orphaned}"
     );
-    let resumed = proxy.tool(
+    let resumed = proxy.call_tool(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "long-run"}),
     );
     assert!(resumed.get("error").is_none(), "{resumed}");
-    let plan = proxy.tool("brain_get", json!({"path": "/fs/plan.md"}));
+    let plan = proxy.call_tool("brain_get", json!({"path": "/fs/plan.md"}));
     assert_eq!(
         structured(&plan)["content"],
         "step two is next",
@@ -122,7 +122,7 @@ fn one_proxy_process_holds_one_session_through_the_hub() {
     let mut proxy = proxy(&hub);
     proxy.initialize();
 
-    let started = proxy.tool(
+    let started = proxy.call_tool(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "hook-run"}),
     );
@@ -131,7 +131,7 @@ fn one_proxy_process_holds_one_session_through_the_hub() {
         .unwrap_or_else(|| panic!("session_start returns an id: {started}"))
         .to_string();
 
-    let written = proxy.tool(
+    let written = proxy.call_tool(
         "brain_put",
         json!({"store": "session", "path": "/fs/handoff.md", "content": "picked up where I left off"}),
     );
@@ -140,7 +140,7 @@ fn one_proxy_process_holds_one_session_through_the_hub() {
         "a write on the session the same process started: {written}"
     );
 
-    let read = proxy.tool("brain_get", json!({"path": "/fs/handoff.md"}));
+    let read = proxy.call_tool("brain_get", json!({"path": "/fs/handoff.md"}));
     assert_eq!(
         structured(&read)["content"],
         "picked up where I left off",
@@ -160,12 +160,12 @@ fn a_tool_error_comes_back_as_the_hubs_own() {
     let hub = Hub::start("proxy-error");
     let mut proxy = proxy(&hub);
     proxy.initialize();
-    proxy.tool(
+    proxy.call_tool(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "errors"}),
     );
 
-    let missing = proxy.tool("brain_get", json!({"path": "/fs/absent.md"}));
+    let missing = proxy.call_tool("brain_get", json!({"path": "/fs/absent.md"}));
 
     let error = missing
         .get("error")

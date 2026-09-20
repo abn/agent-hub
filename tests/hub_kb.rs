@@ -5,16 +5,15 @@
 //! else, that a failure leaves stdout empty so `|| true` is safe, and that the
 //! project can come from a setting rather than a flag on every line.
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
-#[path = "common/hub.rs"]
-mod hub;
+mod common;
 
-use hub::{Hub, PROJECT};
+use common::hub::{Hub, PROJECT};
 
 const PAGE: &str = "# Homelab\n\nStart here.\n";
 
@@ -48,12 +47,19 @@ fn run_with(hub: &Hub, args: &[&str], env: &[(&str, String)], stdin: Option<&str
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn the binary");
-    child
+    let written = child
         .stdin
         .take()
         .expect("child stdin")
-        .write_all(input.as_bytes())
-        .expect("write to child stdin");
+        .write_all(input.as_bytes());
+    match written {
+        Ok(()) => {}
+        // A command line that is refused is refused before the body is read,
+        // and on a loaded machine the child can be gone before this write. The
+        // exit status and the output are what the test judges, either way.
+        Err(err) if err.kind() == ErrorKind::BrokenPipe => {}
+        Err(err) => panic!("write to child stdin: {err}"),
+    }
     child.wait_with_output().expect("run the binary")
 }
 
