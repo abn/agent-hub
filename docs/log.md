@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, one way to set a token, and it checks
+
+* **Update**: [The human surface](architecture/human-surface.md) says the
+  Connect screen is the only place a token is entered, so a token is never
+  kept without the hub having accepted it. Settings keeps no field of its own:
+  it says whether this device holds a token and links to that screen to change
+  it, beside Sign out. Saving a preference does not touch the token.
+
 ## 2026-09-20, a route change focuses the screen's heading
 
 * **Update**: [The human surface](architecture/human-surface.md) says a route

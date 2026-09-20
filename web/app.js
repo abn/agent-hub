@@ -145,7 +145,6 @@ main.addEventListener("submit", (event) => {
     connectSubmit(form);
   } else if (action === "prefs") {
     savePrefs({
-      token: data.get("token"),
       theme: data.get("theme"),
       density: data.get("density"),
       shortcuts: data.get("shortcuts"),

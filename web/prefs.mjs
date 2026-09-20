@@ -81,8 +81,9 @@ export function saveToken(token) {
   return prefs.token ? write("hub.token", prefs.token) : forget("hub.token");
 }
 
+// The token is not here: it is entered and checked on its own screen, and a
+// form that sent nothing for it would otherwise forget it on every save.
 export function savePrefs(values) {
-  saveToken(values.token);
   prefs.theme = pick(values.theme, THEMES, "system");
   prefs.density = pick(values.density, DENSITIES, "comfortable");
   prefs.shortcuts = pick(values.shortcuts, SWITCH, "on");

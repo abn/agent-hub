@@ -63,12 +63,13 @@ export async function settingsScreen(gen) {
     `
     <h1>Settings</h1>
     <form class="card" data-action="prefs">
-      <label for="token">Control-surface token</label>
-      <input id="token" name="token" type="password" value="${esc(prefs.token)}" autocomplete="off">
       <p class="settings-token-state">${
         prefs.token
-          ? '<span>This device has a token.</span><button type="button" class="danger" data-action="signout">Sign out</button>'
-          : "<span>This device has no token, so the hub refuses every request.</span>"
+          ? '<span>This device has a token.</span><span class="settings-token-acts">' +
+            '<a class="button" href="#/connect">Change token</a>' +
+            '<button type="button" class="danger" data-action="signout">Sign out</button></span>'
+          : '<span>This device has no token, so the hub refuses every request.</span>' +
+            '<span class="settings-token-acts"><a class="button" href="#/connect">Enter a token</a></span>'
       }</p>
       <label for="theme">Theme</label>
       <select id="theme" name="theme">

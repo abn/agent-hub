@@ -281,16 +281,19 @@ def check_router(page, watch: Watch, routes: list) -> None:
 
 
 def set_token(page, watch: Watch) -> None:
-    """Enter the token the way the Settings screen does, then arm the watch."""
-    watch.enter("settings: token")
-    page.evaluate("location.hash = '#/settings'")
-    page.wait_for_timeout(400)
-    page.fill("#token", harness.ADMIN_TOKEN)
-    page.click('form[data-action="prefs"] button[type="submit"]')
-    page.wait_for_timeout(500)
-    stored = page.evaluate("localStorage.getItem('hub.token')")
-    if stored != harness.ADMIN_TOKEN:
-        raise SystemExit(f"{NAME}: the Settings form did not store the token")
+    """Enter the token the way a reader does, on the screen the hub sends them to."""
+    watch.enter("connect: the token")
+    # A cold app has no token, so every screen is refused and the router lands
+    # the reader here on its own. Asking for it by address is the fallback.
+    field = "main .connect .connect-field"
+    if not settle(page, f"!!document.querySelector('{field}')"):
+        page.evaluate("location.hash = '#/connect'")
+        if not settle(page, f"!!document.querySelector('{field}')"):
+            raise SystemExit(f"{NAME}: the app offered no way to enter a token")
+    page.fill(field, harness.ADMIN_TOKEN)
+    page.click("main .connect button[type='submit']")
+    if not settle(page, f"localStorage.getItem('hub.token') === {json.dumps(harness.ADMIN_TOKEN)}"):
+        raise SystemExit(f"{NAME}: the connect screen did not store the token")
     watch.armed = True
     watch.drain_rejections()
 
@@ -6603,6 +6606,28 @@ def check_sign_out(browser, watch: Watch, port: int) -> None:
         if not settle(page, "!!document.querySelector('main [data-action=\"signout\"]')"):
             watch.fail("Settings did not come back")
             return
+
+        watch.enter("settings: one way in, and it is not here")
+        if page.evaluate("!!document.querySelector('main form[data-action=\"prefs\"] #token')"):
+            watch.fail("Settings still takes a token in a field that never checks it")
+        change = page.evaluate(
+            "(document.querySelector('main .settings-token-state a[href=\"#/connect\"]')"
+            " || { getAttribute() { return null; } }).getAttribute('href')"
+        )
+        if change != "#/connect":
+            watch.fail("Settings says a token is held but offers no way to change it")
+
+        # Saving a preference must not take the token with it: the field that
+        # used to carry it is gone, and a form that sends nothing for it would
+        # otherwise sign the reader out for changing a theme.
+        page.select_option('main form[data-action="prefs"] #density', "compact")
+        page.click('main form[data-action="prefs"] button[type="submit"]')
+        page.wait_for_timeout(400)
+        if page.evaluate("localStorage.getItem('hub.token')") != harness.ADMIN_TOKEN:
+            watch.fail("saving a preference on Settings threw the token away")
+            return
+        if page.evaluate("localStorage.getItem('hub.density')") != "compact":
+            watch.fail("saving a preference on Settings did not save the preference")
 
         watch.enter("settings: sign out")
         page.click('main [data-action="signout"]')

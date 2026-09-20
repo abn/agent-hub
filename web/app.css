@@ -913,6 +913,7 @@ button.empty-link {
 .proj-gear svg { display: block; }
 .pset-sub { margin: 2px 0 0; color: var(--ink-3); }
 .pset { display: flex; flex-direction: column; }
+.settings-token-acts { display: flex; align-items: center; gap: var(--s-2); }
 .settings-token-state {
   display: flex;
   align-items: center;
