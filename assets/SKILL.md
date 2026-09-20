@@ -225,7 +225,10 @@ A `search` query is read as words: any text is accepted and never an error,
 a `"quoted phrase"` is matched as a phrase, and punctuation and the bare
 operators `AND`, `OR`, `NOT` and `NEAR` are left out. A query with no word in
 it finds nothing. A `thread_id` given to `signal_append` must be an event in
-the same project; any other id is refused as not found.
+the same project that starts a thread; any other id is refused as not found,
+and the id of a reply is refused with the thread to name instead. A retry with
+the same `idempotency_key` returns the first call's id before any of this is
+checked again.
 
 `search` with `scope: "global"` covers every visible project; otherwise pass
 `project_id`, and `type` filters by kind: `feed`, `artifact`, `brain` for

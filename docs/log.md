@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a thread id names the start of a thread
+
+* **Update**: The served skill document (`GET /SKILL.md`) says that a
+  `thread_id` given to `signal_append` must name the event that starts a
+  thread, that the id of a reply is refused with the thread to name instead,
+  and that a retried write with the same `idempotency_key` is answered with the
+  first call's id before its thread is looked at again.
+
 ## 2026-09-20, a review is not an edit since the review
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) says how `trust`

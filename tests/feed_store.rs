@@ -585,3 +585,97 @@ async fn thread_id_must_name_an_existing_event_in_the_same_project() {
         .expect_err("orphan answer should be rejected");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
 }
+
+#[tokio::test]
+async fn a_thread_id_must_name_a_thread_root() {
+    let db = open().await;
+    let root_id = append(&db, "agent-one", None, event("root event"))
+        .await
+        .expect("append root");
+    let mut child = event("child event");
+    child.thread_id = Some(root_id.clone());
+    let child_id = append(&db, "agent-one", None, child)
+        .await
+        .expect("append child");
+
+    // A reply to the child belongs to the root's thread, not to a thread of
+    // the child's own: the feed reads a thread by one id.
+    let mut grandchild = event("threaded onto a child");
+    grandchild.thread_id = Some(child_id.clone());
+    let err = append(&db, "agent-one", None, grandchild)
+        .await
+        .expect_err("a child is not a thread root");
+    assert_eq!(err.code(), ErrorCode::InvalidArgument);
+    assert!(
+        err.to_string().contains(&root_id),
+        "the refusal names the thread the child belongs to: {err}"
+    );
+
+    // A question roots its own thread, so it is a root like any other.
+    let mut question = event("a question");
+    question.kind = "question".to_string();
+    let question_id = append(&db, "agent-one", None, question)
+        .await
+        .expect("append question");
+    let mut under_question = event("under the question");
+    under_question.thread_id = Some(question_id);
+    append(&db, "agent-one", None, under_question)
+        .await
+        .expect("a question is a thread root");
+
+    let feed = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("read feed")
+        .events;
+    assert!(
+        feed.iter().all(|e| e.summary != "threaded onto a child"),
+        "a refused write leaves nothing behind"
+    );
+}
+
+#[tokio::test]
+async fn a_decision_still_lands_on_an_approval_that_is_itself_threaded() {
+    let db = open().await;
+    let root_id = append(&db, "agent-one", None, event("root event"))
+        .await
+        .expect("append root");
+    let mut approval = event("may I deploy");
+    approval.kind = "approval".to_string();
+    approval.thread_id = Some(root_id);
+    let approval_id = append(&db, "agent-one", None, approval)
+        .await
+        .expect("append threaded approval");
+
+    agent_hub::store::questions::decide(&db, "human", &approval_id, true, None, None)
+        .await
+        .expect("the decision names the approval it replies to, root or not");
+}
+
+#[tokio::test]
+async fn a_replayed_write_is_returned_before_its_thread_is_checked() {
+    let db = open().await;
+    let root_id = append(&db, "agent-one", None, event("root event"))
+        .await
+        .expect("append root");
+    let mut child = event("child event");
+    child.thread_id = Some(root_id);
+    let first = append(&db, "agent-one", Some("k-thread"), child)
+        .await
+        .expect("append child");
+
+    // The retry carries a thread that no longer resolves. The write was
+    // accepted once, so the retry is answered with what the first call got.
+    let mut retry = event("child event");
+    retry.thread_id = Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string());
+    let second = append(&db, "agent-one", Some("k-thread"), retry)
+        .await
+        .expect("a replay is not validated again");
+    assert_eq!(first, second);
+
+    let mut orphan = event("child event");
+    orphan.kind = "answer".to_string();
+    let third = append(&db, "agent-one", Some("k-thread"), orphan)
+        .await
+        .expect("a replay is not validated again");
+    assert_eq!(first, third);
+}

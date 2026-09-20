@@ -125,6 +125,30 @@ fn signal_append_validates_thread_id() {
         "{bad_res}"
     );
 
+    // A reply is not the start of a thread, and the refusal says which is.
+    let child_res = server.call_tool(
+        "signal_append",
+        json!({"project_id": "p1", "kind": "signal", "summary": "child", "thread_id": root_id}),
+    );
+    let child_id = structured(&child_res)["event_id"]
+        .as_str()
+        .expect("child id")
+        .to_string();
+    let nested_res = server.call_tool(
+        "signal_append",
+        json!({"project_id": "p1", "kind": "signal", "summary": "nested", "thread_id": child_id}),
+    );
+    assert_eq!(
+        nested_res["error"]["data"]["error"]["code"], "invalid_argument",
+        "{nested_res}"
+    );
+    assert!(
+        nested_res["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&root_id)),
+        "{nested_res}"
+    );
+
     // Cross-project thread_id refused with not_found
     let cross_res = server.call_tool(
         "signal_append",

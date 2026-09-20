@@ -157,8 +157,25 @@ async fn append_in_tx_capped(
         payload_text.as_deref().map(str::len).unwrap_or(0),
     )?;
 
-    // A question always needs the human and roots its own thread, whichever
-    // tool wrote it. An answer must name the question it replies to.
+    // A question and an approval both wait on the human, whichever surface
+    // wrote them, so the rule lives here rather than at each write path.
+    let needs_action = event.needs_action || event.kind == "question" || event.kind == "approval";
+
+    // Inside the immediate transaction, so a concurrent retry with the same
+    // key serialises and sees the recorded row rather than racing it. This runs
+    // before the thread check and the cap, so a replay of an accepted write is
+    // returned as it was even when its thread no longer resolves.
+    if let Some(key) = idempotency_key
+        && let Some(existing) =
+            crate::store::idempotency::lookup(tx, &event.project_id, key).await?
+    {
+        return Ok(existing);
+    }
+
+    // A question roots its own thread, whichever tool wrote it. An answer must
+    // name the question or the approval it replies to, and an approval may sit
+    // inside a thread. Anything else names a root, so a thread is read by one
+    // id and never forks under one of its own replies.
     if event.kind == "answer" && event.thread_id.is_none() {
         return Err(Error::InvalidArgument(
             "an answer must name the question it replies to".to_string(),
@@ -167,24 +184,18 @@ async fn append_in_tx_capped(
     if event.kind != "question"
         && let Some(tid) = &event.thread_id
     {
-        let root = get_in_tx(tx, tid).await?;
-        match root {
-            Some(root) if root.project_id == event.project_id => {}
+        let root = match get_in_tx(tx, tid).await? {
+            Some(root) if root.project_id == event.project_id => root,
             _ => return Err(Error::NotFound(format!("event {tid} not found"))),
+        };
+        if event.kind != "answer"
+            && let Some(thread) = root.thread_id.as_deref()
+            && thread != root.id
+        {
+            return Err(Error::InvalidArgument(format!(
+                "event {tid} is a reply in thread {thread}; name that thread instead"
+            )));
         }
-    }
-    // A question and an approval both wait on the human, whichever surface
-    // wrote them, so the rule lives here rather than at each write path.
-    let needs_action = event.needs_action || event.kind == "question" || event.kind == "approval";
-
-    // Inside the immediate transaction, so a concurrent retry with the same
-    // key serialises and sees the recorded row rather than racing it. This runs
-    // before the cap so a replay of an accepted write is returned as it was.
-    if let Some(key) = idempotency_key
-        && let Some(existing) =
-            crate::store::idempotency::lookup(tx, &event.project_id, key).await?
-    {
-        return Ok(existing);
     }
 
     // Checked before any row is written, so a refused write leaves nothing
