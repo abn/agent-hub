@@ -1307,7 +1307,11 @@ mod tests {
             .expect("clock before epoch")
             .as_nanos();
         AppState::open(Config {
-            data_dir: std::env::temp_dir()
+            // Under the build tree rather than the system temp directory,
+            // which is often memory. Unit tests get no CARGO_TARGET_TMPDIR, so
+            // the path is built from the manifest directory.
+            data_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target/tmp")
                 .join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id())),
             bind: "127.0.0.1:0".parse().expect("socket address"),
             public_url: None,

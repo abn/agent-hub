@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, tests keep their files under the build tree
+
+* **Update**: The [contributor guide](contribution/guide.md) records where a
+  test may write: under `target/tmp`, through the shared test directory or the
+  browser harness's scratch root, never the system temp directory, which is
+  often memory and keeps what a killed run leaves behind. A hook enforces it.
+
 ## 2026-09-20, the address the hub logs
 
 * **Update**: [Quickstart](usage/quickstart.md) notes that a `HUB_BIND` with

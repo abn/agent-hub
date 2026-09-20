@@ -58,7 +58,8 @@ fn with_env<T>(vars: &[(&str, Option<&str>)], body: impl FnOnce() -> T) -> T {
 
 fn config() -> Config {
     Config {
-        data_dir: PathBuf::from("/tmp/agent-hub-tailnet-test"),
+        // Never created: these tests read configuration and open nothing.
+        data_dir: PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("agent-hub-tailnet-test"),
         bind: "127.0.0.1:0".parse::<SocketAddr>().expect("address"),
         public_url: None,
         admin_token: Some("token".to_string()),

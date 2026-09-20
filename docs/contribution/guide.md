@@ -64,6 +64,13 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
   reimplementing it, the wrapper as the single writer per session file, no
   automatic expiry, no chat, and engine-native search. `AGENTS.md` is the
   authoritative list.
+- **Tests keep their files under the build tree.** A test's throwaway
+  directory comes from the shared `TempDir` in `tests/common`, and a check's
+  from `scratch_root()` in the browser harness; both sit under `target/tmp`
+  and are removed when the test ends. The system temp directory is often
+  memory, and a run that is killed leaves its files there for good, so a hook
+  rejects it in `src/`, `tests/` and the scripts. `cargo clean` empties what
+  a killed run left behind.
 - **Vendored assets are integrity-checked.** Third-party scripts under
   `web/vendor/` must be registered in `web/vendor/MANIFEST.json` with their
   upstream URL, license, banner-derived version, and SHA-256 hash.

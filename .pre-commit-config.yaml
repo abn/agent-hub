@@ -71,6 +71,17 @@ repos:
         language: pygrep
         stages: [commit-msg]
 
+      # Tests and checks keep their throwaway files under the build tree
+      # (`target/tmp`). The system temp directory is often memory, and what a
+      # killed run leaves there is never given back. `tests/harness.rs` names it
+      # to assert a test directory is NOT there.
+      - id: no-system-temp
+        name: reject the system temp directory in tests and checks
+        entry: 'std::env::temp_dir\(|env::temp_dir\(|tempfile\.(mkdtemp|mkstemp|TemporaryDirectory|NamedTemporaryFile)\((?![^)\n]*dir=)|os\.tmpdir\(|gettempdir\(|["''`]/tmp/|["''`]/var/tmp/'
+        language: pygrep
+        files: '^(src|tests|\.agents/scripts)/'
+        exclude: '^tests/harness\.rs$'
+
       - id: no-emoji
         name: reject emoji
         entry: ./.agents/scripts/check-emoji.py

@@ -28,7 +28,12 @@ impl TempDir {
     /// Create a directory named after `tag`, which says whose it is when one
     /// is left behind by a run that was killed.
     pub fn new(tag: &str) -> Self {
-        let root = std::env::temp_dir();
+        // Under the build tree, which cargo names for exactly this. The system
+        // temp directory is often memory, and what a killed run leaves there is
+        // never given back; here it is on disk and `cargo clean` takes it.
+        let root = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|err| panic!("create {}: {err}", root.display()));
         loop {
             let unique = NEXT.fetch_add(1, Ordering::Relaxed);
             let path = root.join(format!("agent-hub-{tag}-{}-{unique}", std::process::id()));

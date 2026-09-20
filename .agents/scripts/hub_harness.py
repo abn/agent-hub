@@ -19,6 +19,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from contextlib import contextmanager
 
 ADMIN_TOKEN = "browser-check-token"
@@ -660,6 +661,18 @@ def seed(port: int) -> dict[str, str]:
     }
 
 
+def scratch_root() -> str:
+    """Where a check keeps its throwaway files: under the build tree.
+
+    The system temp directory is often memory, and a run that is killed leaves
+    its data there for good. The build tree is a disk and `cargo clean` empties
+    it.
+    """
+    root = Path(__file__).resolve().parents[2] / "target" / "tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root)
+
+
 @contextmanager
 def running_hub(name: str):
     """A hub on a free port over a throwaway data directory, seeded."""
@@ -667,7 +680,7 @@ def running_hub(name: str):
     if not os.path.isfile(binary):
         skip(name, f"the hub binary is not built at {binary}")
     port = free_port()
-    data_dir = tempfile.mkdtemp(prefix="agent-hub-check-")
+    data_dir = tempfile.mkdtemp(prefix="agent-hub-check-", dir=scratch_root())
     env = dict(
         os.environ,
         HUB_DATA_DIR=data_dir,

@@ -84,6 +84,11 @@ shipped behaviour.
   (`feat/`, `fix/`, `docs/`, `chore/`, `refactor/`), rebased on latest `main`.
 - **Clean history.** Fix up or amend into the owning commit on active
   branches rather than stacking fix commits.
+- **Tests and checks keep their files under the build tree.** A throwaway
+  directory goes under `target/tmp` (the shared `TempDir` in `tests/common`,
+  `scratch_root()` in the browser harness), never the system temp directory,
+  which is often memory and keeps what a killed run leaves behind. A hook
+  rejects the system temp directory in `src/`, `tests/` and the scripts.
 - **Docs move with the change.** A behaviour change updates the wiki and its
   log. The internal progress log is updated separately and never in the wiki.
 

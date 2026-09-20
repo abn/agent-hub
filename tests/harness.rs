@@ -9,6 +9,26 @@ mod common;
 use common::temp::TempDir;
 
 #[test]
+fn a_test_directory_is_under_the_build_tree_not_the_system_temp_directory() {
+    // The system temp directory is often memory (a tmpfs), so what a killed
+    // run leaves there is memory nobody gets back. The build tree is a disk,
+    // and `cargo clean` empties it.
+    let dir = TempDir::new("harness-where");
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    assert!(
+        dir.path().starts_with(&root),
+        "{} is not under {}",
+        dir.path().display(),
+        root.display()
+    );
+    assert!(
+        !dir.path().starts_with(std::env::temp_dir()),
+        "{} is in the system temp directory",
+        dir.path().display()
+    );
+}
+
+#[test]
 fn directories_made_in_parallel_are_all_different() {
     let makers: Vec<_> = (0..16)
         .map(|_| {

@@ -144,7 +144,9 @@ def test_leaks(root: Path) -> list[str]:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="test-hooks-") as tmp:
+    scratch = SCRIPTS.parents[1] / "target" / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="test-hooks-", dir=scratch) as tmp:
         failures = test_emoji(Path(tmp) / "emoji") + test_leaks(Path(tmp) / "leaks")
     for failure in failures:
         print(f"test-hooks: {failure}", file=sys.stderr)

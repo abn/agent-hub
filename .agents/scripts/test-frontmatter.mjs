@@ -24,7 +24,6 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -1022,7 +1021,10 @@ const PINNED = [
 ];
 
 function runReference(lines) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "frontmatter-differential-"));
+  // Under the build tree: the system temp directory is often memory.
+  const scratch = path.join(ROOT, "target", "tmp");
+  fs.mkdirSync(scratch, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(scratch, "frontmatter-differential-"));
   try {
     const cases = path.join(dir, "cases.jsonl");
     const answers = path.join(dir, "answers.jsonl");
