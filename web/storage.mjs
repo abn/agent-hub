@@ -3,7 +3,7 @@
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { main, paint, stale } from "./dom.mjs";
+import { main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
@@ -35,7 +35,7 @@ export function formatBytes(bytes) {
 const sessionsOf = (count) => (count === 1 ? "1 session" : `${count} sessions`);
 
 // Every string here reaches the page as text, never as markup: a project id
-// is whatever the project was created with.
+// is whatever the project was created with, and its name whatever a human typed.
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -155,7 +155,7 @@ function projectRow(project) {
 
   const top = el("div", "storage-row-top");
   const title = el("div", "title");
-  const link = el("a", "", id);
+  const link = el("a", "", projectName(project));
   link.href = `#/projects/${encodeURIComponent(id)}/sessions`;
   title.appendChild(link);
   top.append(title, el("span", "storage-total mono", formatBytes(total)));
@@ -177,7 +177,7 @@ function projectRow(project) {
     const prune = el("button", "storage-prune", `Prune ${formatBytes(project.prunable_bytes)}`);
     prune.type = "button";
     prune.dataset.id = id;
-    prune.appendChild(el("span", "sr-only", ` in ${id}`));
+    prune.appendChild(el("span", "sr-only", ` in ${projectName(project)}`));
     prune.addEventListener("click", () => pruneProject(project));
     foot.appendChild(prune);
   }
@@ -263,7 +263,7 @@ async function pruneProject(project) {
   }
   const count = project.prunable_sessions;
   const confirmed = await confirmAction({
-    title: `Prune ${sessionsOf(count)} in ${id}?`,
+    title: `Prune ${sessionsOf(count)} in ${projectName(project)}?`,
     body:
       `The brain files and audit logs of these ended sessions are deleted, freeing ` +
       `${formatBytes(project.prunable_bytes)}. Feed events, artifacts and the project ` +
@@ -291,7 +291,7 @@ async function pruneAll(usage, holding) {
       `bases stay.`,
     list: holding.map(
       (project) =>
-        `${project.project_id} · ${sessionsOf(project.prunable_sessions)} · ` +
+        `${projectName(project)} · ${sessionsOf(project.prunable_sessions)} · ` +
         formatBytes(project.prunable_bytes),
     ),
     note: UNDO_NOTE,

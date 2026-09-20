@@ -3,7 +3,7 @@
 // agent wrote reaches the screen as a text node.
 
 import { api } from "./api.mjs";
-import { glyph, main, stale } from "./dom.mjs";
+import { glyph, main, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { relative } from "./time.mjs";
@@ -136,9 +136,9 @@ function destination(hit) {
 
 function whereLine(hit) {
   if (hit.kind === "brain" && hit.session_id) {
-    return `${hit.project_id} · session ${hit.session_id.slice(0, 8)}`;
+    return `${projectName(hit)} · session ${hit.session_id.slice(0, 8)}`;
   }
-  return hit.project_id;
+  return projectName(hit);
 }
 
 function badge(family) {

@@ -3,7 +3,7 @@
 // response, so painting the screen is one request however much it shows.
 
 import { api } from "./api.mjs";
-import { esc, glyph, isOpen, paint } from "./dom.mjs";
+import { esc, glyph, isOpen, paint, projectName } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { SLIVER, SLIVER_WORDS } from "./storage.mjs";
@@ -116,7 +116,7 @@ function homeRow(event, href, { unseen = false, chevron = false } = {}) {
     ${glyph(event.kind)}
     <div class="grow">
       <a class="title home-link" href="${esc(href)}">${esc(event.summary)}</a>
-      <div class="home-meta">${esc(event.project_id)} · ${esc(event.actor)} · ${timeHTML(event.created_at)}</div>
+      <div class="home-meta">${esc(projectName(event))} · ${esc(event.actor)} · ${timeHTML(event.created_at)}</div>
     </div>
     ${unseen ? '<span class="dot-unread"></span><span class="sr-only">Unread</span>' : ""}
     ${chevron ? `<span class="home-chev">${CHEVRON(16)}</span>` : ""}

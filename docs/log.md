@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the screens call a project by its name
+
+* **Update**: [The human surface](architecture/human-surface.md) says the
+  Storage rows and their prune dialogs, Home's rows and the search rows name a
+  project by its `project_display_name`, and by its slug when no name comes
+  with it. Links still carry the slug. The inbox listing carries no display
+  name, so its rows still print the slug.
+
 ## 2026-09-20, the storage report weighs only new events
 
 * **Update**: [The human surface](architecture/human-surface.md) says how a

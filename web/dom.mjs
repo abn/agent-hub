@@ -33,6 +33,11 @@ export function esc(value) {
   );
 }
 
+// What a project is called on screen: the name its human gave it, and its id
+// when no project row carries one. A name is data like any other string, so
+// what this returns still goes through `esc` or `textContent`.
+export const projectName = (row) => row.project_display_name || row.project_id;
+
 // The kind badge, from the design foundation: a 14px line glyph inside a 24px
 // tinted circle, or a typographic mark where the design uses one. A shape per
 // kind, because the tint alone is not a difference a reader can be asked to

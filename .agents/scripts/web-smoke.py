@@ -1162,7 +1162,7 @@ def check_storage_numbers(page, watch: Watch) -> None:
         if total:
             storage_shares(watch, f"the {project['project_id']} row", row["bar"], parts, total)
         button = (
-            f"Prune {storage_bytes(project['prunable_bytes'])} in {project['project_id']}"
+            f"Prune {storage_bytes(project['prunable_bytes'])} in {project['project_display_name']}"
             if project["prunable_sessions"]
             else None
         )
@@ -1325,7 +1325,7 @@ def check_storage_prune(page, watch: Watch) -> None:
     asked = page.evaluate("document.querySelector('dialog.dialog').textContent")
     count = before["prunable_sessions"]
     for needle in (
-        f"Prune {sessions_of(count)}",
+        f"Prune {sessions_of(count)} in {before['project_display_name']}?",
         storage_bytes(before["prunable_bytes"]),
         "Keep",
         "30 s",
@@ -1391,7 +1391,7 @@ def check_storage_prune_all(page, watch: Watch) -> None:
         "[...document.querySelectorAll('dialog.dialog .dialog-list li')].map((li) => li.textContent)"
     )
     wanted = [
-        f"{p['project_id']} · {sessions_of(p['prunable_sessions'])}"
+        f"{p['project_display_name']} · {sessions_of(p['prunable_sessions'])}"
         f" · {storage_bytes(p['prunable_bytes'])}"
         for p in before["projects"]
         if p["prunable_sessions"]
@@ -1455,6 +1455,154 @@ def check_storage_keys(page, watch: Watch) -> None:
     page.keyboard.press("Enter")
     if not settle(page, f"location.hash.startsWith('#/projects/{target}/')"):
         watch.fail(f"Enter on the row went to {page.evaluate('location.hash')!r}")
+    watch.drain_rejections()
+
+
+# A name a human gave a project, carrying markup. The hub hands it over as
+# data, and every screen that prints one has to keep it that.
+NAME_HOSTILE = 'Attic <img src=x onerror="document.body.dataset.namePwned=1">'
+NAME_PWNED = "!!document.body.dataset.namePwned || !!document.querySelector('main img')"
+SEARCH_ROWS = (
+    "[...document.querySelectorAll('main .search-row')].map((row) => {"
+    " const part = (sel) => { const el = row.querySelector(sel);"
+    "  return el ? el.textContent.replace(/\\s+/g, ' ').trim() : ''; };"
+    " const link = row.querySelector('a.search-link');"
+    " const badge = row.querySelector('.glyph');"
+    " return { title: part('.title'), where: part('.search-where'), time: part('.search-time'),"
+    "  kind: badge ? badge.dataset.kind : '', drawn: badge ? badge.innerHTML : '',"
+    "  label: part('.glyph + .sr-only'),"
+    "  href: link ? link.getAttribute('href') : '' }; })"
+)
+
+
+def search_hit(family: str, index: int, **fields) -> dict:
+    """One search hit of a family, with none of the fields only a family carries."""
+    ref = f"01HIT{index:021d}"
+    hit = {
+        "doc_id": f"{family}:{ref}",
+        "project_id": "homelab",
+        "project_display_name": "Home lab",
+        "kind": family,
+        "ref_id": ref,
+        "session_id": None,
+        "title": f"hit {index}",
+        "snippet": f"fixture words {index}",
+        "updated_at": (datetime.now(timezone.utc) - timedelta(minutes=index)).isoformat(),
+    }
+    hit.update(fields)
+    return hit
+
+
+def search_payload(hits: list) -> dict:
+    """A search response over these hits, grouped the way the hub groups them."""
+    groups: dict[str, list] = {}
+    for hit in hits:
+        groups.setdefault(hit["kind"], []).append(hit)
+    return {
+        "count": len(hits),
+        "truncated": False,
+        "took_ms": 2,
+        "groups": [{"kind": kind, "count": len(found), "hits": found} for kind, found in groups.items()],
+    }
+
+
+@contextmanager
+def search_answers(page, payload: dict):
+    """Answer every search request with a payload the seeded hub cannot give."""
+    page.route(
+        SEARCH_CALL,
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(payload)
+        ),
+    )
+    try:
+        yield
+    finally:
+        page.unroute(SEARCH_CALL)
+
+
+def search_rows(page, watch: Watch, payload: dict) -> list:
+    """Paint the search screen over a routed answer and return its rows."""
+    goto(page, "#/settings", "Settings")
+    with search_answers(page, payload):
+        page.evaluate("location.hash = '#/search?q=fixture'")
+        if not settle(page, f"document.querySelectorAll('main .search-row').length === {payload['count']}"):
+            watch.fail(f"the search screen did not draw the {payload['count']} routed hits")
+        return page.evaluate(SEARCH_ROWS)
+
+
+def check_project_names(page, watch: Watch) -> None:
+    """A project goes by the name its human gave it, as text, and by its id without one."""
+    watch.enter("names: the storage rows")
+    usage, drawn = open_storage(page)
+    shown = {row["project"]: row["name"] for row in (drawn or {}).get("rows", [])}
+    for project in (usage or {}).get("projects", []):
+        want = project["project_display_name"] or project["project_id"]
+        if shown.get(project["project_id"]) != want:
+            watch.fail(
+                f"the row for {project['project_id']} is titled"
+                f" {shown.get(project['project_id'])!r}, the hub names it {want!r}"
+            )
+    row = dict(STORAGE_FIXTURE["projects"][0])
+    named = dict(
+        STORAGE_FIXTURE,
+        projects=[
+            dict(row, project_id="attic", project_display_name=NAME_HOSTILE, prunable_sessions=2, prunable_bytes=4096),
+            dict(row, project_id="unnamed", project_display_name=None),
+        ],
+    )
+    _usage, drawn = open_storage(page, named)
+    if page.evaluate(NAME_PWNED):
+        watch.fail("a project's display name became an element on the storage screen")
+    rows = {row["project"]: row for row in (drawn or {}).get("rows", [])}
+    if rows.get("attic", {}).get("name") != NAME_HOSTILE:
+        watch.fail(f"a named project's row is titled {rows.get('attic', {}).get('name')!r}")
+    elif rows["attic"]["prune"] != f"Prune 4 KB in {NAME_HOSTILE}":
+        watch.fail(f"the prune control names its project as {rows['attic']['prune']!r}")
+    if rows.get("unnamed", {}).get("name") != "unnamed":
+        watch.fail(f"a project with no name is titled {rows.get('unnamed', {}).get('name')!r}, not its id")
+    href = page.evaluate(
+        "(document.querySelector('main .storage-row[data-project=\"attic\"] .title a') || { getAttribute() {} })"
+        ".getAttribute('href')"
+    )
+    if href != "#/projects/attic/sessions":
+        watch.fail(f"a named project's row links to {href!r}, not to its id")
+
+    watch.enter("names: Home's rows")
+    events = [
+        home_event(1, 4, project_display_name="Home lab"),
+        home_event(2, 5, project_id="research", project_display_name=None),
+        home_event(3, 6, project_id="attic", project_display_name=NAME_HOSTILE),
+    ]
+    payload = harness.home_payload(recent=events, unseen=[{"project_id": "homelab", "events": 1}])
+    with home_answers(page, payload):
+        if paint_home(page, watch) is None:
+            return
+        if page.evaluate(NAME_PWNED):
+            watch.fail("a project's display name became an element on Home")
+        rows = page.evaluate(HOME_ROWS)["newest"]
+        metas = [row["meta"].split(" · ")[0] for row in rows]
+        if metas != ["Home lab", "research", NAME_HOSTILE]:
+            watch.fail(f"Home's rows name their projects {metas}")
+        hrefs = [row["href"] for row in rows]
+        if hrefs != [f"#/projects/{slug}/feed" for slug in ("homelab", "research", "attic")]:
+            watch.fail(f"Home's rows link to {hrefs}, not to the project ids")
+
+    watch.enter("names: the search rows")
+    hits = [
+        search_hit("feed", 1),
+        search_hit("feed", 2, project_id="research", project_display_name=None),
+        search_hit("feed", 3, project_id="attic", project_display_name=NAME_HOSTILE),
+    ]
+    rows = search_rows(page, watch, search_payload(hits))
+    if page.evaluate(NAME_PWNED):
+        watch.fail("a project's display name became an element in the search results")
+    wheres = [row["where"] for row in rows]
+    if wheres != ["Home lab", "research", NAME_HOSTILE]:
+        watch.fail(f"the search rows say where as {wheres}")
+    hrefs = [row["href"] for row in rows]
+    if hrefs != [f"#/projects/{slug}/feed" for slug in ("homelab", "research", "attic")]:
+        watch.fail(f"the search rows link to {hrefs}, not to the project ids")
     watch.drain_rejections()
 
 
@@ -3826,7 +3974,7 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
     else:
         if newest["href"] != f"#/projects/{harness.PROJECT_ID}/feed":
             watch.fail(f"a newest row links to {newest['href']!r}, not its project feed")
-        if not newest["meta"].startswith(f"{harness.PROJECT_ID} · "):
+        if not newest["meta"].startswith(f"{harness.PROJECT_NAME} · "):
             watch.fail(f"a newest row's meta line reads {newest['meta']!r}, without its project")
         if not newest["time"]:
             watch.fail("a newest row carries no time")
@@ -5694,7 +5842,7 @@ def run() -> int:
                         harness.SESSION_NAME,
                         [harness.BRAIN_PATH],
                     ),
-                    ("storage", "#/storage", "Storage", [project]),
+                    ("storage", "#/storage", "Storage", [harness.PROJECT_NAME]),
                     (
                         "search",
                         f"#/search?q={quote(harness.SEARCH_TERM)}",
@@ -5780,6 +5928,7 @@ def run() -> int:
                 run_step(watch, check_storage_numbers, page, watch)
                 run_step(watch, check_storage_bar, page, watch)
                 run_step(watch, check_storage_keys, page, watch)
+                run_step(watch, check_project_names, page, watch)
                 run_step(watch, check_storage_prune, page, watch)
                 run_step(watch, check_storage_prune_all, page, watch)
                 run_step(watch, check_gate_in_the_app, page, watch, project, seeded["protected_id"])
