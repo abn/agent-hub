@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a storage row splits four ways and an empty project keeps its row
+
+* **Update**: [The human surface](architecture/human-surface.md) lists
+  `events_bytes` on each storage row and `events_shared_bytes` beside
+  `by_kind`, and says how the rows add up: sessions, artifacts and knowledge
+  sum to their kinds exactly, and the rows' event bytes plus the shared part of
+  the hub store make `by_kind.events`. Every project now has a row, so one a
+  prune has just emptied stays listed with zeros.
+
 ## 2026-09-20, responses name a project as the projects list does
 
 * **Update**: [The human surface](architecture/human-surface.md) lists

@@ -752,3 +752,167 @@ async fn storage_rows_and_home_events_name_their_project_as_the_projects_list_do
         );
     }
 }
+
+fn row<'a>(usage: &'a Value, project: &str) -> Option<&'a Value> {
+    usage["projects"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|row| row["project_id"] == project)
+}
+
+const ROW_BYTES: [&str; 5] = [
+    "events_bytes",
+    "session_bytes",
+    "artifact_bytes",
+    "kb_bytes",
+    "prunable_bytes",
+];
+
+#[tokio::test]
+async fn a_project_that_holds_nothing_is_listed_with_zeros() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "quiet", "Quiet")
+        .await
+        .expect("project");
+    state.notify();
+
+    let body = usage(&state).await;
+    let quiet = row(&body, "quiet").unwrap_or_else(|| panic!("a row for quiet: {body}"));
+    for field in ROW_BYTES {
+        assert_eq!(quiet[field], 0, "{field} of a project holding nothing");
+    }
+    assert_eq!(quiet["prunable_sessions"], 0);
+}
+
+#[tokio::test]
+async fn a_project_emptied_by_a_prune_keeps_its_row_until_undo_fills_it_again() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "nightly", "Nightly")
+        .await
+        .expect("project");
+    let session = sessions::start(&state.db, "nightly", "run", "agent-one")
+        .await
+        .expect("start");
+    let brain_bytes = write_brain(&state, &session).await;
+    sessions::end(&state.db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    state.notify();
+    let before = usage(&state).await;
+    assert_eq!(
+        row(&before, "nightly").expect("row")["session_bytes"],
+        brain_bytes
+    );
+
+    let (status, pruned) = call(
+        &state,
+        "DELETE",
+        "/api/v1/storage/projects/nightly/sessions",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let after = usage(&state).await;
+    let emptied = row(&after, "nightly")
+        .unwrap_or_else(|| panic!("the emptied project keeps its row: {after}"));
+    assert_eq!(emptied["session_bytes"], 0);
+    assert_eq!(emptied["prunable_sessions"], 0);
+    assert_eq!(emptied["prunable_bytes"], 0);
+
+    let token = pruned["sessions"][0]["undo_token"]
+        .as_str()
+        .expect("undo token");
+    let (status, _) = call(&state, "POST", &format!("/api/v1/prune/undo/{token}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let restored = usage(&state).await;
+    assert_eq!(
+        row(&restored, "nightly").expect("row")["session_bytes"],
+        brain_bytes,
+        "undo brings the bytes back to the same row"
+    );
+}
+
+#[tokio::test]
+async fn a_row_counts_its_events_and_the_rows_sum_to_the_kinds() {
+    let state = state().await;
+    for project in ["alpha", "beta", "quiet"] {
+        agent_hub::store::projects::create(&state.db, project, "Project")
+            .await
+            .expect("project");
+    }
+    // Bytes, not characters: the summary holds a two-byte letter.
+    let summary = "caf\u{e9} is open";
+    let payload = serde_json::json!({"body": "the kettle is on", "cups": 3});
+    agent_hub::store::events::append(
+        &state.db,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "alpha".to_string(),
+            kind: "signal".to_string(),
+            summary: summary.to_string(),
+            payload: Some(payload.clone()),
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+    signal_in(&state, "beta", "one").await;
+    signal_in(&state, "beta", "three").await;
+    let session = sessions::start(&state.db, "beta", "run", "agent-one")
+        .await
+        .expect("start");
+    write_brain(&state, &session).await;
+    state
+        .knowledge
+        .open("alpha", agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open kb")
+        .put("/fs/page.md", b"# a page")
+        .await
+        .expect("put");
+    state.notify();
+
+    let body = usage(&state).await;
+    assert_eq!(
+        row(&body, "alpha").expect("alpha")["events_bytes"],
+        (summary.len() + payload.to_string().len()) as i64,
+        "an event weighs its summary and its payload text, in bytes: {body}"
+    );
+    assert_eq!(row(&body, "quiet").expect("quiet")["events_bytes"], 0);
+
+    let sum = |field: &str| -> i64 {
+        body["projects"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                row[field]
+                    .as_i64()
+                    .unwrap_or_else(|| panic!("{field}: {row}"))
+            })
+            .sum()
+    };
+    assert!(sum("events_bytes") > 0 && sum("session_bytes") > 0 && sum("kb_bytes") > 0);
+    assert_eq!(sum("session_bytes"), body["by_kind"]["sessions"]);
+    assert_eq!(sum("artifact_bytes"), body["by_kind"]["artifacts"]);
+    assert_eq!(sum("kb_bytes"), body["by_kind"]["knowledge"]);
+    let shared = body["events_shared_bytes"]
+        .as_i64()
+        .unwrap_or_else(|| panic!("the shared part of the hub store: {body}"));
+    assert!(
+        shared > 0,
+        "the indexes and the corpus belong to no project"
+    );
+    assert_eq!(
+        sum("events_bytes") + shared,
+        body["by_kind"]["events"].as_i64().expect("events"),
+        "the rows and the shared part make up the hub store"
+    );
+    assert_eq!(
+        sum("session_bytes") + sum("artifact_bytes") + sum("kb_bytes"),
+        body["total_bytes"].as_i64().expect("total")
+    );
+}

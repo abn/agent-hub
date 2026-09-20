@@ -15,6 +15,10 @@ pub struct ProjectUsage {
     /// The name the projects list shows, absent when no project row carries
     /// the id.
     pub project_display_name: Option<String>,
+    /// The text of the project's feed events: each summary and each payload,
+    /// in bytes. The indexes over them are shared and counted in
+    /// [`StorageUsage::events_shared_bytes`].
+    pub events_bytes: i64,
     pub artifact_bytes: i64,
     pub session_bytes: i64,
     pub kb_bytes: i64,
@@ -70,6 +74,11 @@ pub struct StorageUsage {
     pub data_path: String,
     pub node: Node,
     pub by_kind: KindBytes,
+    /// The part of `by_kind.events` no project row claims: the indexes, the
+    /// search corpus, the inbox, the identity tables and the pages the engine
+    /// holds free. The rows' `events_bytes` and this add up to
+    /// `by_kind.events`.
+    pub events_shared_bytes: i64,
     pub prunable: Prunable,
     pub projects: Vec<ProjectUsage>,
 }
@@ -88,6 +97,7 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
             by_project.push(ProjectUsage {
                 project_id: project_id.to_string(),
                 project_display_name: None,
+                events_bytes: 0,
                 artifact_bytes: 0,
                 session_bytes: 0,
                 kb_bytes: 0,
@@ -149,9 +159,32 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
     }
     drop(sessions);
 
+    // One pass over the feed weighs each project's events by the text the
+    // agents wrote. The cast makes the length a byte count rather than a
+    // character count.
+    let mut events = conn
+        .query(
+            "SELECT project_id,
+                    SUM(LENGTH(CAST(summary AS BLOB)) + LENGTH(CAST(COALESCE(payload, '') AS BLOB)))
+             FROM events GROUP BY project_id",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = events.next().await.map_err(engine)? {
+        let project_id = text(row.get_value(0).map_err(engine)?);
+        let bytes = integer(row.get_value(1).map_err(engine)?);
+        ensure(&mut by_project, &project_id);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
+            entry.events_bytes = bytes;
+        }
+    }
+    drop(events);
+
     // A knowledge base is never pruned, so it appears here and never in what
-    // the human can reclaim. Only a project that has one is listed, so the
-    // report still names the projects that hold something.
+    // the human can reclaim. Every project is listed, one that holds nothing
+    // with zeros: a project a prune has just emptied keeps its row, so the
+    // screen has somewhere to show the undo.
     // The same read names every row, so the names cost no query of their own.
     let mut names = std::collections::HashMap::new();
     let mut projects = conn
@@ -162,9 +195,6 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         let project_id = text(row.get_value(0).map_err(engine)?);
         names.insert(project_id.clone(), text(row.get_value(1).map_err(engine)?));
         let bytes = knowledge_bytes(data_dir, &project_id);
-        if bytes == 0 {
-            continue;
-        }
         ensure(&mut by_project, &project_id);
         if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
             entry.kb_bytes = bytes;
@@ -183,6 +213,10 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         knowledge: by_project.iter().map(|p| p.kb_bytes).sum(),
     };
     let total_bytes = by_kind.sessions + by_kind.artifacts + by_kind.knowledge;
+    // The file always outweighs the text in it. The floor only guards the
+    // instant between the two reads.
+    let events_text: i64 = by_project.iter().map(|p| p.events_bytes).sum();
+    let events_shared_bytes = (by_kind.events - events_text).max(0);
     let volume = volume(data_dir);
     Ok(StorageUsage {
         total_bytes,
@@ -195,6 +229,7 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
             mode: NODE_MODE,
         },
         by_kind,
+        events_shared_bytes,
         prunable,
         projects: by_project,
     })
