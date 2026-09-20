@@ -33,7 +33,7 @@ export function greeting(now = new Date()) {
 // is a number by the time it is interpolated, whatever the payload held.
 const int = (value) => Math.max(0, Math.trunc(Number(value)) || 0);
 
-const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+export const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const agentsLine = (n, none = "No") =>
   n ? `${count(n, "agent", "agents")} active` : `${none} agents active`;

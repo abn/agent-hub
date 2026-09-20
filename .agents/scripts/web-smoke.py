@@ -6624,6 +6624,21 @@ def check_sign_out(browser, watch: Watch, port: int) -> None:
         watch.drain_rejections()
 
 
+def check_project_active_agents_plural(page, watch: Watch, project: str) -> None:
+    """The project header pluralises active agents correctly: 1 agent, not 1 agents."""
+    watch.enter("plurals: active agents in project header")
+    goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+    if not settle(page, "!!document.querySelector('main .proj-stats')"):
+        watch.fail("the project header stats did not render")
+        return
+    text = (page.locator("main .proj-stats").text_content() or "").strip()
+    if "1 agent active" not in text:
+        watch.fail(
+            f"project header with 1 active agent has stats {text!r}, expected '1 agent active'"
+        )
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -6794,6 +6809,7 @@ def run() -> int:
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_sign_out, browser, watch, port)
                 run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)

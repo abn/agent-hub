@@ -9,6 +9,7 @@ import { gallerySection } from "./artifacts.mjs";
 import { esc, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { feedSection } from "./feed.mjs";
+import { count } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { settingsLink } from "./project-settings.mjs";
@@ -55,7 +56,7 @@ async function projectFootprint(projectId) {
 }
 
 function header(project, stats, footprint) {
-  const agents = stats && stats.agents_active != null ? `${stats.agents_active} agents active` : "";
+  const agents = stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "";
   const used = footprint ? ` · <span class="mono">${footprint}</span>` : "";
   const detail = agents || footprint ? `<p class="proj-stats">${agents}${used}</p>` : "";
   return `
