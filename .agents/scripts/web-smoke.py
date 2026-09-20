@@ -7049,6 +7049,81 @@ def check_desktop_shell(browser, watch: Watch, port: int) -> None:
         watch.drain_rejections()
 
 
+def check_feed_row_links(page, watch: Watch, project: str, artifact_id: str) -> None:
+    """A feed row whose event names something the app can show is a link to it."""
+    watch.enter("feed: row links navigate to destinations")
+    try:
+        goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+        settle(page, "!!document.querySelector('.feed-row')")
+
+        no_dest = page.locator(".feed-row:has(.glyph[data-kind='finished'])").first
+        if no_dest.count() == 0:
+            watch.fail("no finished feed row found on the feed")
+        elif no_dest.locator("a").count() > 0:
+            watch.fail("a feed row with no destination rendered a link")
+
+        expected_hash = f"#/artifacts/{quote(artifact_id)}?project={quote(project)}"
+        artifact_row = page.locator(
+            f".feed-row:has(.glyph[data-kind='artifact']):has-text({json.dumps(harness.ARTIFACT_TITLE)})"
+        ).first
+        if artifact_row.count() == 0:
+            watch.fail("no artifact feed row found on the feed")
+            return
+
+        link = artifact_row.locator("a.feed-link")
+        if link.count() == 0:
+            watch.fail("artifact feed row has no link")
+            return
+
+        href = link.get_attribute("href")
+        if href != expected_hash:
+            watch.fail(f"artifact feed row link href is {href!r}, expected {expected_hash!r}")
+            return
+
+        artifact_row.click()
+        if not settle(page, f"location.hash === {json.dumps(expected_hash)}"):
+            watch.fail(
+                f"clicking artifact feed row did not navigate to {expected_hash!r}, was {page.evaluate('location.hash')!r}"
+            )
+            return
+        if not settle(page, "!!document.querySelector('main .hub-viewer')"):
+            watch.fail("artifact viewer did not paint after clicking feed row")
+            return
+        title = page.evaluate("document.querySelector('main .hub-title')?.textContent?.trim() || ''")
+        if title != harness.ARTIFACT_TITLE:
+            watch.fail(f"artifact viewer painted title {title!r}, expected {harness.ARTIFACT_TITLE!r}")
+            return
+
+        goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+        settle(page, "!!document.querySelector('.feed-row')")
+        link = page.locator(
+            f".feed-row:has(.glyph[data-kind='artifact']):has-text({json.dumps(harness.ARTIFACT_TITLE)}) a.feed-link"
+        ).first
+        link.focus()
+        is_focused = page.evaluate(
+            "document.activeElement === document.querySelector('.feed-row:has(.glyph[data-kind=\\'artifact\\']) a.feed-link')"
+        )
+        if not is_focused:
+            watch.fail("artifact feed row link is not focusable")
+            return
+
+        page.keyboard.press("Enter")
+        if not settle(page, f"location.hash === {json.dumps(expected_hash)}"):
+            watch.fail(
+                f"pressing Enter on focused feed link did not navigate to {expected_hash!r}, was {page.evaluate('location.hash')!r}"
+            )
+            return
+        if not settle(page, "!!document.querySelector('main .hub-viewer')"):
+            watch.fail("artifact viewer did not paint after following link with Enter")
+            return
+        title = page.evaluate("document.querySelector('main .hub-title')?.textContent?.trim() || ''")
+        if title != harness.ARTIFACT_TITLE:
+            watch.fail(f"artifact viewer painted title {title!r} after Enter, expected {harness.ARTIFACT_TITLE!r}")
+            return
+    finally:
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7219,6 +7294,7 @@ def run() -> int:
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_filter_chips, page, watch, project)

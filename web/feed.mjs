@@ -66,14 +66,35 @@ function decisionNote(event) {
   return `<div class="feed-note">${word}: ${esc(note)}</div>`;
 }
 
+// Where a feed event leads, when it names an entity the app can show.
+// An artifact event opens that artifact in the viewer in its project.
+// Kinds without a destination or deleted artifacts return no address.
+function feedDestination(event) {
+  if (
+    event.kind === "artifact" &&
+    event.payload &&
+    typeof event.payload.artifact_id === "string" &&
+    event.payload.artifact_id &&
+    event.payload.action !== "deleted"
+  ) {
+    const project = event.project_id || "";
+    return `#/artifacts/${encodeURIComponent(event.payload.artifact_id)}?project=${encodeURIComponent(project)}`;
+  }
+  return "";
+}
+
 // The feed's own row. Event ids sort by age, which is how the hub compares
 // them to the cursor too, so an id above the baseline is an unseen event.
 function feedRow(event, baseline) {
   const unread = event.id > baseline;
+  const href = feedDestination(event);
+  const title = href
+    ? `<a class="title feed-link" href="${esc(href)}">${esc(event.summary)}</a>`
+    : `<div class="title">${esc(event.summary)}</div>`;
   return `<div class="row feed-row${unread ? " unread" : ""}">
     ${glyph(event.kind)}
     <div class="grow" data-id="${esc(event.id)}">
-      <div class="title">${esc(event.summary)}</div>
+      ${title}
       ${decisionNote(event)}
       <div class="meta">${esc(event.actor)} · ${when(event.created_at)}</div>
     </div>

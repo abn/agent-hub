@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, artifact events on the project feed link to their destination
+
+* **Update**: [The human surface](architecture/human-surface.md) notes that an
+  artifact event row on the project feed links to that artifact in the viewer
+  within its project, while rows without an entity destination in the app
+  remain unlinked.
+
 ## 2026-09-20, search matches by prefix with whole-word ranking
 
 * **Update**: [The human surface](architecture/human-surface.md) updates the

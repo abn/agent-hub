@@ -1246,3 +1246,12 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
     margin-bottom: auto;
   }
 }
+
+/* Project feed */
+.feed-row { position: relative; }
+.feed-row:has(.feed-link) { cursor: pointer; }
+.feed-row .feed-link { display: block; color: inherit; text-decoration: none; }
+.feed-row .feed-link:hover { text-decoration: underline; }
+.feed-row .feed-link::after { content: ""; position: absolute; inset: 0; }
+.feed-row .action, .feed-row .ts { position: relative; z-index: 1; }
+.feed-row:focus-visible, .feed-row:has(.feed-link:focus-visible) { position: relative; z-index: 1; }
