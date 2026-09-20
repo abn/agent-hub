@@ -1437,84 +1437,116 @@ HOLD_FETCH = (
 )
 
 
-def check_render_generation_guard(page, watch: Watch, project: str, session_id: str) -> None:
+def guard_holds(project: str, session_id: str, artifact: str) -> dict[str, list[tuple]]:
+    """Per screen the router registers, each request it paints from, held once.
+
+    A hold is a name, the address that asks, the request to hold, and what only
+    that screen puts in the region. The bare per-project addresses paint
+    nothing: they ask for the projects and then move the route, which is as
+    much the next screen's to be spared.
+    """
+    at = f"#/projects/{quote(project)}"
+    api = f"/api/v1/projects/{quote(project)}"
+    return {
+        "home": [("home", "#/home", "/api/v1/home", "main .home")],
+        "inbox": [("inbox", "#/inbox", "/api/v1/inbox?status=action", "main .inbox-screen")],
+        "projects": [
+            ("project feed", f"{at}/feed", f"{api}/feed?", "main .feed-chips, main .feed-row"),
+            ("project artifacts", f"{at}/artifacts", f"{api}/artifacts", "main .gallery, main .artifact-card"),
+            ("project sessions", f"{at}/sessions", "/api/v1/sessions?project=", "main .session-row"),
+            ("project settings", f"{at}/settings", api, "main .pset"),
+        ],
+        "feed": [("the bare feed address", "#/feed", "/api/v1/projects", "main .feed-chips")],
+        "sessions": [("the bare sessions address", "#/sessions", "/api/v1/projects", "main .session-row")],
+        "artifacts": [
+            ("the bare artifacts address", "#/artifacts", "/api/v1/projects", "main .gallery"),
+            (
+                "artifact viewer",
+                f"#/artifacts/{quote(artifact)}",
+                f"/api/v1/artifacts/{quote(artifact)}/versions",
+                "main .hub-viewer",
+            ),
+        ],
+        "session": [
+            (
+                "session detail",
+                f"#/session?project={quote(project)}&id={quote(session_id)}",
+                f"/api/v1/sessions/{quote(session_id)}/brain?path=%2Ffs",
+                "main .stat-row",
+            )
+        ],
+        "search": [
+            (
+                "search",
+                f"#/search?q={quote(harness.SEARCH_TERM)}",
+                "/api/v1/search?",
+                "main .search-results, main #q",
+            )
+        ],
+        "storage": [("storage", "#/storage", "/api/v1/storage", "main .storage")],
+        "settings": [("settings", "#/settings", "/api/v1/agents", 'main form[data-action="prefs"]')],
+    }
+
+
+def check_render_generation_guard(
+    page, watch: Watch, project: str, session_id: str, artifact: str
+) -> None:
     """The screen you left must not paint over the screen you are on.
 
     One request of each screen is held in the page, the reader moves on, the
     next screen paints, and only then is the held answer let go. Whatever the
-    screen left behind does with it, the region must still be the next
-    screen's. The screens guard in different ways (some ask whether they are
-    stale, some only paint through the guarded write, some do both), so each
-    kind is held here: a screen that is guarded once is what decides.
+    screen left behind does with it, the region and the route must still be
+    the next screen's. The screens guard in different ways (some ask whether
+    they are stale, some only paint through the guarded write, some do both),
+    so every screen is held: a screen that is guarded once is what decides.
+    The list is checked against the router's own table, so a new screen fails
+    here until it is held.
     """
-    left = [
-        (
-            "search",
-            f"#/search?q={quote(harness.SEARCH_TERM)}",
-            "/api/v1/search?",
-            "main .search-results, main #q",
-            ("#/storage", "Storage"),
-        ),
-        ("storage", "#/storage", "/api/v1/storage", "main .storage", ("#/settings", "Settings")),
-        ("inbox", "#/inbox", "/api/v1/inbox?status=action", "main .inbox-screen", ("#/settings", "Settings")),
-        (
-            "project feed",
-            f"#/projects/{quote(project)}/feed",
-            f"/api/v1/projects/{quote(project)}/feed?",
-            "main .feed-chips, main .feed-row",
-            ("#/settings", "Settings"),
-        ),
-        (
-            "session detail",
-            f"#/session?project={quote(project)}&id={quote(session_id)}",
-            f"/api/v1/sessions/{quote(session_id)}/brain?path=%2Ffs",
-            "main .stat-row",
-            ("#/settings", "Settings"),
-        ),
-        # The bare per-project addresses paint nothing: they ask for the
-        # projects and then move the route. Left behind, that move is the one
-        # thing they must not make. Search asks the hub nothing, so it paints
-        # while the projects are held.
-        ("the bare feed address", "#/feed", "/api/v1/projects", "main .feed-chips", ("#/search", "Search")),
-        (
-            "the bare sessions address",
-            "#/sessions",
-            "/api/v1/projects",
-            "main .session-row",
-            ("#/search", "Search"),
-        ),
-        ("the bare artifacts address", "#/artifacts", "/api/v1/projects", "main .gallery", ("#/search", "Search")),
-    ]
-    for name, hash_value, needle, marks, (next_hash, next_title) in left:
-        watch.enter(f"router: render guard, leaving {name}")
-        goto(page, "#/home", home_title())
-        page.evaluate(HOLD_FETCH, needle)
-        try:
-            page.evaluate(f"location.hash = {hash_value!r}")
-            if not settle(page, "window.__held.asked > 0"):
-                watch.fail(f"the screen never asked for {needle!r}, so nothing was held")
-                continue
-            goto(page, next_hash, next_title)
-            if heading(page) != next_title:
-                watch.fail(f"the next screen never painted: the heading is {heading(page)!r}")
-                continue
-            page.evaluate("window.__held.release()")
-            if not settle(page, "window.__held.answered >= window.__held.asked"):
-                watch.fail("the held request was never answered")
-            # The answer is read and the screen left behind runs on in the
-            # turns after it arrives.
-            page.wait_for_timeout(400)
-            found = heading(page)
-            stray = page.evaluate(f"!!document.querySelector({json.dumps(marks)})")
-            if found != next_title or stray:
-                watch.fail(
-                    f"the screen left behind painted over {next_hash}: the heading is {found!r}"
-                    + (f" and {marks!r} is in the region" if stray else "")
-                )
-            if page.evaluate("location.hash") != next_hash:
-                watch.fail(f"the screen left behind took the route back to {page.evaluate('location.hash')!r}")
-        finally:
-            page.evaluate("window.__held && window.__held.release(); window.__held && window.__held.restore()")
+    watch.enter("router: render guard, the screens held")
+    holds = guard_holds(project, session_id, artifact)
+    registered = set(harness.router_screens())
+    if registered - set(holds):
+        watch.fail(f"the router registers screens the render guard does not hold: {sorted(registered - set(holds))}")
+    if set(holds) - registered:
+        watch.fail(f"the render guard holds screens the router does not register: {sorted(set(holds) - registered)}")
+    for screen, held in holds.items():
+        for name, hash_value, needle, marks in held:
+            watch.enter(f"router: render guard, leaving {name}")
+            # The bare Search screen asks the hub nothing, so it paints while
+            # anything is held; Search itself is left for Storage. The start is
+            # a screen other than the one held, so the address moves.
+            next_hash, next_title = ("#/storage", "Storage") if screen == "search" else ("#/search", "Search")
+            if screen == "home":
+                goto(page, "#/storage", "Storage")
+            else:
+                goto(page, "#/home", home_title())
+            page.evaluate(HOLD_FETCH, needle)
+            try:
+                page.evaluate(f"location.hash = {hash_value!r}")
+                if not settle(page, "window.__held.asked > 0"):
+                    watch.fail(f"the screen never asked for {needle!r}, so nothing was held")
+                    continue
+                goto(page, next_hash, next_title)
+                if heading(page) != next_title:
+                    watch.fail(f"the next screen never painted: the heading is {heading(page)!r}")
+                    continue
+                page.evaluate("window.__held.release()")
+                if not settle(page, "window.__held.answered >= window.__held.asked"):
+                    watch.fail("the held request was never answered")
+                # The answer is read and the screen left behind runs on in the
+                # turns after it arrives.
+                page.wait_for_timeout(400)
+                found = heading(page)
+                stray = page.evaluate(f"!!document.querySelector({json.dumps(marks)})")
+                if found != next_title or stray:
+                    watch.fail(
+                        f"the screen left behind painted over {next_hash}: the heading is {found!r}"
+                        + (f" and {marks!r} is in the region" if stray else "")
+                    )
+                if page.evaluate("location.hash") != next_hash:
+                    watch.fail(f"the screen left behind took the route back to {page.evaluate('location.hash')!r}")
+            finally:
+                page.evaluate("window.__held && window.__held.release(); window.__held && window.__held.restore()")
     watch.drain_rejections()
 
 
@@ -5631,7 +5663,15 @@ def run() -> int:
                 run_step(watch, check_approve_key, page, watch)
                 run_step(watch, check_agent_markup_is_text, page, watch)
                 run_step(watch, check_home_fetches_once, page, watch)
-                run_step(watch, check_render_generation_guard, page, watch, project, seeded["session_id"])
+                run_step(
+                    watch,
+                    check_render_generation_guard,
+                    page,
+                    watch,
+                    project,
+                    seeded["session_id"],
+                    seeded["artifact_id"],
+                )
                 run_step(watch, check_artifact, page, watch, project)
                 run_step(watch, check_theme, page, watch)
                 run_step(watch, check_system_theme, page, watch)

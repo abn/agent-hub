@@ -126,81 +126,12 @@ EXPECTED = {
 CONTRAST_ALLOWED: dict[str, str] = {}
 
 
-def object_keys(source: str, opener: str) -> list[str]:
-    """The top-level keys of the object literal handed to a call.
-
-    Read the way the language reads it: strings, template literals and
-    comments are skipped, and nesting is counted, so a key is only ever taken
-    from the literal's own level. A property whose key cannot be read (a
-    spread, a computed key) is an error rather than a gap in the list.
-    """
-    at = source.find(opener)
-    if at < 0:
-        raise AssertionError(f"a11y: could not find {opener!r} in web/app.js")
-    index = at + len(opener)
-    depth = 0
-    properties: list[str] = []
-    current: list[str] = []
-    closers = {"(": ")", "[": "]", "{": "}"}
-    stack: list[str] = []
-    while index < len(source):
-        ch = source[index]
-        two = source[index : index + 2]
-        if two == "//":
-            index = source.find("\n", index)
-            if index < 0:
-                break
-            continue
-        if two == "/*":
-            index = source.find("*/", index) + 2
-            continue
-        if ch in "'\"`":
-            end = index + 1
-            while end < len(source) and source[end] != ch:
-                end += 2 if source[end] == "\\" else 1
-            if not stack:
-                current.append(source[index : end + 1])
-            index = end + 1
-            continue
-        if ch in closers:
-            # The opener is kept at the literal's own level, so a method
-            # written `name(...) {}` still shows where its name ends.
-            if not stack:
-                current.append(ch)
-            stack.append(closers[ch])
-        elif stack and ch == stack[-1]:
-            stack.pop()
-        elif ch == "}" and not stack:
-            properties.append("".join(current))
-            break
-        elif ch == "," and not stack:
-            properties.append("".join(current))
-            current = []
-        elif not stack:
-            current.append(ch)
-        index += 1
-    else:
-        raise AssertionError("a11y: the screen table in web/app.js never closes")
-    keys = []
-    for prop in properties:
-        text = prop.strip()
-        if not text:
-            continue
-        found = re.match(r"""^(?:async\s+)?(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\s*(?::|\(|$)""", text)
-        if not found:
-            raise AssertionError(
-                f"a11y: cannot read a screen name from {text[:40]!r} in the screen table of web/app.js"
-            )
-        keys.append(next(group for group in found.groups() if group))
-    return keys
-
-
 def check_router_coverage() -> None:
     """Every screen the router registers is audited, and by the routes named for it."""
-    app_js = (Path(__file__).resolve().parent.parent.parent / "web" / "app.js").read_text(
-        encoding="utf-8"
-    )
-    registered = set(object_keys(app_js, "setScreens({"))
+    try:
+        registered = set(harness.router_screens())
+    except AssertionError as problem:
+        raise AssertionError(f"a11y: {problem}") from None
     problems = []
     missing = registered - set(AUDITED)
     if missing:
