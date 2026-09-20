@@ -6,6 +6,11 @@ use std::sync::Mutex;
 
 use agent_hub::config::{Config, Tailnet, TrustDefault};
 
+mod common;
+
+#[cfg(feature = "tailnet")]
+use common::temp::TempDir;
+
 // The environment is process-global and the tests run threaded, so every test
 // that reads or writes a tailnet variable holds this lock and restores what it
 // found.
@@ -151,8 +156,8 @@ fn a_key_without_the_feature_is_refused() {
 #[cfg(feature = "tailnet")]
 #[tokio::test]
 async fn a_tailnet_without_a_key_is_refused() {
-    let temp = std::env::temp_dir().join(format!("agent-hub-tailnet-nokey-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&temp);
+    let dir = TempDir::new("tailnet-nokey");
+    let temp = dir.join("state");
     let tailnet = Tailnet {
         auth_key: None,
         port: 8080,
@@ -188,8 +193,8 @@ fn acknowledge_unstable_sets_experiment_env() {
 #[cfg(feature = "tailnet")]
 #[tokio::test]
 async fn state_dir_permissions_and_keys_file() {
-    let temp = std::env::temp_dir().join(format!("agent-hub-tailnet-state-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&temp);
+    let dir = TempDir::new("tailnet-state");
+    let temp = dir.join("state");
     let state_dir = temp.join("tailnet");
     let tailnet = Tailnet {
         auth_key: Some("tskey-auth-test".to_string()),
@@ -233,8 +238,8 @@ async fn state_dir_permissions_and_keys_file() {
 #[tokio::test]
 async fn live_tailnet_join() {
     let auth_key = std::env::var("HUB_TAILNET").expect("HUB_TAILNET must be set for the live join");
-    let state_dir =
-        std::env::temp_dir().join(format!("agent-hub-live-tailnet-{}", std::process::id()));
+    let dir = TempDir::new("live-tailnet");
+    let state_dir = dir.join("state");
     let tailnet = Tailnet {
         auth_key: Some(auth_key),
         port: 8080,

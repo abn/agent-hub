@@ -7,25 +7,21 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_hub::config::{ClientConfig, Config};
 
+mod common;
+
+use common::temp::TempDir;
+
 /// A temp directory holding one config file, removed when the test ends.
-struct TempHome(PathBuf);
+struct TempHome(TempDir);
 
 impl TempHome {
     fn new(tag: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "agent-hub-config-{}-{nanos}-{tag}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(path.join(".agent-hub")).expect("create temp home");
-        Self(path)
+        let home = TempDir::new(&format!("config-{tag}"));
+        std::fs::create_dir_all(home.join(".agent-hub")).expect("create temp home");
+        Self(home)
     }
 
     /// Write the default config file and return the home directory.
@@ -36,12 +32,6 @@ impl TempHome {
 
     fn path(&self) -> PathBuf {
         self.0.join(".agent-hub").join("config")
-    }
-}
-
-impl Drop for TempHome {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
