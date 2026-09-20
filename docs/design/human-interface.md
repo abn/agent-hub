@@ -107,13 +107,19 @@ a 420px list beside a detail pane.
 - Search answers as you type, inside 50 ms of the last key, and keeps the
   query in the address so Back and reload return to it. The field never
   loses focus to its own results; the count is announced instead. Matched
-  words are marked in the snippet, and a result opens where it lives.
+  words are marked in the snippet, and a result opens where it lives. The
+  query is sent as typed, quotes and operators included, and the hub makes it
+  safe for the index, so no query is refused.
 - Keyboard: `/` focuses search, and on the Search screen that is the screen's
   own field; `j` and `k` move a selection through the rows of the current
   screen, Enter opens the selected row, `a` approves and `r` replies on it, and
-  Esc closes what is on top, the open inbox card included. Esc pressed in a
-  field that holds text is left to the field, so a half-written answer is
-  never closed from under its writer. `?` lists them and says where to switch
+  Esc closes what is on top, the open inbox card included. The card also
+  carries its own way out, "Back to inbox" on a phone and "Close" on the
+  desktop, named by the words it shows. Either way the card's address is
+  replaced, so Back does not reopen it, and focus returns to the row the card
+  was opened from, or to the Earlier disclosure when that row is folded under
+  it. Esc does not close a card that holds a half-written answer, whether
+  focus is in the field or on the Send button beside it. `?` lists them and says where to switch
   them off. The selection is a real focus move, so the ring shows it and a
   reader following focus goes with it; a painted list parks the selection on
   its first row, so a reader who has never pressed `j` still reaches the list

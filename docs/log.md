@@ -38,6 +38,18 @@ software release notes and the repository changelog.
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
+## 2026-09-20, the design page catches up with the inbox card and search
+
+* **Update**: [Human interface](design/human-interface.md) now records what
+  the entry of 2026-09-19 said it did: the inbox card's close control, the
+  address being replaced on closing so Back does not reopen the card, where
+  focus goes afterwards, Esc leaving a half-written answer alone from the field
+  or the Send button, and the query being sent as typed. That entry now names
+  the page that recorded each change at the time.
+* **Update**: [Human surface](architecture/human-surface.md) no longer says
+  that under 1% of the volume no storage segment would be a pixel wide: just
+  under the threshold the bar would still be a few pixels.
+
 ## 2026-09-20, the viewer's theme control names where a press goes
 
 * **Update**: [Human surface](architecture/human-surface.md) records the
@@ -89,16 +101,19 @@ software release notes and the repository changelog.
 
 ## 2026-09-19, the inbox card, the selection, search as typed, and the checks
 
-* **Update**: [Human surface](architecture/human-surface.md) and
-  [human interface](design/human-interface.md) record the inbox card's close
-  control ("Back to inbox" on a phone, "Close" on the desktop, named by the
-  words it shows), Esc closing the card except from a field that holds text and
-  only on the Inbox, and focus returning to the row the card was opened from.
-* **Update**: The keyboard selection follows focus into a row, and `/` on the
-  Search screen focuses that screen's own field.
-* **Update**: The Search screen sends the query as typed and the hub makes it
-  safe for the index. This replaces the earlier note that the screen sends only
-  the words of a query.
+* **Update**: [Human surface](architecture/human-surface.md) records the inbox
+  card's close control ("Back to inbox" on a phone, "Close" on the desktop,
+  named by the words it shows), Esc closing the card except over a half-written
+  answer and only on the Inbox, and focus returning to the row the card was
+  opened from. [Human interface](design/human-interface.md) recorded Esc alone
+  at the time.
+* **Update**: [Human interface](design/human-interface.md) records that the
+  keyboard selection follows focus into a row, and that `/` on the Search
+  screen focuses that screen's own field.
+* **Update**: [Human surface](architecture/human-surface.md) records that the
+  Search screen sends the query as typed and the hub makes it safe for the
+  index. This replaces the earlier note that the screen sends only the words of
+  a query.
 * **Update**: The storage summary bar is drawn against what is used when under
   1% of the volume is used, and says so; it stays to scale either way.
 * **Update**: The [contributor guide](contribution/guide.md) describes the
