@@ -226,3 +226,7 @@ There is no move or rename. A move is a read, a write with
 history, which is keyed by path, and links to the old path are not rewritten:
 `backlinks` names them first. Wiki links (`[[page]]`) are not links to the hub;
 only markdown links are followed.
+
+Offline reading for the knowledge base is to be evaluated. Today what is cached
+by the service worker is the application shell and its static assets; page content
+is not cached, and reading pages requires an active connection to the hub.

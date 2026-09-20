@@ -43,7 +43,11 @@ default where the human opts each agent in.
   depends on.
 - One live token per agent means no rotation overlap window. That is acceptable
   for one operator on one node, and it can be widened later without a schema
-  change since revoked rows are retained.
+  change since revoked rows are retained. Multiple live tokens per agent is to
+  be evaluated: it is not being built and is not refused. Today the system
+  issues one token per agent and records neither last use nor device; supporting
+  multiple live tokens would need tracking per-token device or client labels
+  and last-used timestamps.
 - Every identity change is audited as a `system` feed event, in the same
   transaction as the change.
 - The local stdio transport is the human admin, because it is a process the

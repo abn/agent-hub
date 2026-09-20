@@ -92,7 +92,10 @@ no cursor, and its first events are new, which is the same rule read forward.
 Identity is a first-class table rather than a field on a token, so the server
 sets the `actor` on every event and a request cannot forge another agent. The
 trust model and grants are described in [agent identity and
-trust](../adr/0012-agent-identity-and-trust.md).
+trust](../adr/0012-agent-identity-and-trust.md). An agent holds one token at a
+time. Multiple live tokens per agent is to be evaluated: it is not being built
+and is not refused, but would need tracking per-token device or client labels
+and last-used timestamps.
 
 Identity changes are audited. Creating an agent, changing its trust, issuing or
 revoking its token, and adding or removing a grant each append a `system` event

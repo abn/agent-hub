@@ -300,7 +300,9 @@ document rather than announced to it, so every dialog holds it and none has to
 remember to. The reader can switch the single-key shortcuts off in Settings.
 The binary embeds every one of them in the same table it
 serves, precaches, and digests for the service worker's cache name, so a
-module the hub does not serve cannot ship. Each render carries a number, and
+module the hub does not serve cannot ship. Offline reading for the knowledge
+base is to be evaluated: what is cached today is the app shell and its assets,
+while page content is not. Each render carries a number, and
 a screen whose fetches resolve after the reader has moved on does not paint
 over the screen that replaced it.
 

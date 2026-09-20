@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, evaluations for multiple tokens and offline knowledge base
+
+* **Note**: [Agent identity and trust](adr/0012-agent-identity-and-trust.md) and
+  the [data model](architecture/data-model.md) record that multiple live tokens
+  per agent is to be evaluated. It is not being built and is not refused: today the
+  system issues one token per agent and records neither device nor last use, so
+  supporting multiple tokens would require tracking per-token provenance and timestamps.
+* **Note**: [The human surface](architecture/human-surface.md) and
+  [the project knowledge base](usage/knowledge-base.md) record that offline reading
+  for the knowledge base is to be evaluated: today what is cached is the app shell
+  and its assets, while page content is not.
+
 ## 2026-09-20, embedded stdio is supported with isolation
 
 * **Update**: The operational contract and the [quickstart](usage/quickstart.md)
