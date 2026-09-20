@@ -283,7 +283,6 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
         body.contains(&format!("http://hub.test/artifacts/{id}/og.svg")),
         "the preview image is absolute in the request origin"
     );
-    assert!(body.contains("<script src=\"/vendor/marked.js\">"));
     assert!(body.contains("<script type=\"module\" src=\"/artifact-viewer.mjs\">"));
     assert!(
         !body.contains("<script>"),
@@ -292,7 +291,7 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
 }
 
 #[tokio::test]
-async fn host_inlines_markdown_source_without_rendering_it() {
+async fn host_inlines_rendered_markdown_safely() {
     let state = state().await;
     let id = artifacts::publish(
         &state.db,
@@ -329,12 +328,12 @@ async fn host_inlines_markdown_source_without_rendering_it() {
     );
     assert!(
         !body.contains("<h1>Runbook</h1>"),
-        "the server does not render markdown; the viewer module does"
+        "the server does not interpret raw markdown in the shell markup"
     );
     assert!(body.contains("id=\"hub-markdown-body\""));
     assert!(
-        body.contains("\\u003cscript\\u003e"),
-        "the inlined source escapes markup"
+        body.contains("Runbook") && !body.contains("<script>alert(1)</script>"),
+        "authored markup is escaped"
     );
     assert!(
         !body.contains("<script>alert(1)</script>"),
@@ -1701,11 +1700,7 @@ async fn og_card_follows_versions() {
 #[tokio::test]
 async fn viewer_and_vendor_routes_serve_javascript() {
     let state = state().await;
-    for uri in [
-        "/vendor/marked.js",
-        "/vendor/mermaid.runtime.js",
-        "/artifact-viewer.mjs",
-    ] {
+    for uri in ["/vendor/mermaid.runtime.js", "/artifact-viewer.mjs"] {
         let app = router(state.clone());
         let response = app
             .oneshot(request("GET", uri, None, None))

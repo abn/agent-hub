@@ -7124,6 +7124,113 @@ def check_feed_row_links(page, watch: Watch, project: str, artifact_id: str) -> 
         watch.drain_rejections()
 
 
+def seed_markdown_safety_artifact(port: int, project_id: str) -> str:
+    session: list[str] = []
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    published = harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_publish",
+                "arguments": {
+                    "project_id": project_id,
+                    "title": "Markdown Safety",
+                    "kind": "markdown",
+                    "content": (
+                        "# Safe Header\n\n"
+                        "Prose with *emphasis* and `code`.\n\n"
+                        "<script id=\"hostile-script\">window.xss=1</script>\n\n"
+                        "<img id=\"hostile-img\" src=\"x\" onerror=\"window.xss=2\">\n\n"
+                        "[click here](javascript:window.xss=3)"
+                    ),
+                },
+            },
+        },
+    )
+    return (published.get("result", {}).get("structuredContent", {}) or {}).get("artifact_id", "")
+
+
+def check_markdown_artifact_rendering(browser, page, watch: Watch, port: int, project: str) -> None:
+    """Markdown renders safely and identically on the public page and in the app viewer."""
+    watch.enter("artifacts: markdown renderer safety and equivalence")
+    artifact = seed_markdown_safety_artifact(port, project)
+    if not artifact:
+        watch.fail("could not seed markdown safety artifact")
+        return
+
+    # 1. Check the public artifact page directly in an isolated browser context
+    alone_context = browser.new_context()
+    try:
+        alone = alone_context.new_page()
+        alone.goto(f"http://127.0.0.1:{port}/artifacts/{artifact}", wait_until="load")
+        if not settle(alone, "!!document.querySelector('#hub-frame')"):
+            watch.fail("public artifact page has no #hub-frame")
+            return
+        public_frame = alone.frame_locator("#hub-frame")
+        try:
+            public_frame.locator("h1").get_by_text("Safe Header").wait_for(timeout=5000)
+        except Exception as error:
+            watch.fail(f"public page frame did not render markdown heading: {error}")
+            return
+
+        if public_frame.locator("#hostile-script").count() > 0:
+            watch.fail("public page rendered raw script tag into DOM element")
+        if public_frame.locator("#hostile-img").count() > 0:
+            watch.fail("public page rendered raw img tag into DOM element")
+        if public_frame.locator('a[href^="javascript:"]').count() > 0:
+            watch.fail("public page rendered unsafe javascript: link element")
+
+        public_body = public_frame.locator("body").inner_text()
+        if "<script id=\"hostile-script\">" not in public_body:
+            watch.fail("public page did not preserve raw script tag as literal text")
+    finally:
+        alone_context.close()
+        watch.page.bring_to_front()
+
+    # 2. Check the in-app viewer
+    goto(page, f"#/artifacts/{quote(artifact)}?project={quote(project)}", "Markdown Safety")
+    if not settle(page, "!!document.querySelector('main .hub-viewer #hub-frame')"):
+        watch.fail("app viewer did not open artifact frame")
+        return
+    viewer_frame = page.frame_locator("#hub-frame").frame_locator("#hub-frame")
+    try:
+        viewer_frame.locator("h1").get_by_text("Safe Header").wait_for(timeout=5000)
+    except Exception as error:
+        watch.fail(f"app viewer frame did not render markdown heading: {error}")
+        return
+
+    if viewer_frame.locator("#hostile-script").count() > 0:
+        watch.fail("app viewer rendered raw script tag into DOM element")
+    if viewer_frame.locator("#hostile-img").count() > 0:
+        watch.fail("app viewer rendered raw img tag into DOM element")
+    if viewer_frame.locator('a[href^="javascript:"]').count() > 0:
+        watch.fail("app viewer rendered unsafe javascript: link element")
+
+    viewer_body = viewer_frame.locator("body").inner_text()
+
+    # 3. Equivalence: both render the same content
+    if public_body.strip() != viewer_body.strip():
+        watch.fail("public page and app viewer rendered different content")
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7295,6 +7402,7 @@ def run() -> int:
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
+                run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_filter_chips, page, watch, project)

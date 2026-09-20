@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, one markdown renderer for artifacts
+
+* **Update**: [The human surface](architecture/human-surface.md) records that
+  markdown artifact rendering is consolidated onto the hub's server-side
+  renderer in `src/markdown.rs`, with strict escaping preserved across both the
+  public standalone route and the in-app viewer, eliminating client-side
+  markdown parsing libraries.
+
 ## 2026-09-20, artifact events on the project feed link to their destination
 
 * **Update**: [The human surface](architecture/human-surface.md) notes that an

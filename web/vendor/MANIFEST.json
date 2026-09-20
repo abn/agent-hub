@@ -1,12 +1,5 @@
 [
   {
-    "filename": "marked.js",
-    "version": "15.0.12",
-    "upstream_url": "https://github.com/markedjs/marked",
-    "license": "MIT",
-    "sha256": "3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c"
-  },
-  {
     "filename": "mermaid.runtime.js",
     "version": "11.16.0",
     "upstream_url": "https://github.com/mermaid-js/mermaid",

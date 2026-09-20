@@ -195,11 +195,6 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
-        path: "/vendor/marked.js",
-        body: include_str!("../../web/vendor/marked.js"),
-        content_type: "application/javascript; charset=utf-8",
-    },
-    Asset {
         path: "/vendor/mermaid.runtime.js",
         body: include_str!("../../web/vendor/mermaid.runtime.js"),
         content_type: "application/javascript; charset=utf-8",

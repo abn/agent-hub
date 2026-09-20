@@ -31,7 +31,6 @@ REQUIRED = [
     "crypto.mjs",
     "artifact-viewer.mjs",
     "frame-loader.js",
-    "vendor/marked.js",
     "vendor/mermaid.runtime.js",
     "vendor/MANIFEST.json",
     "manifest.webmanifest",
@@ -40,7 +39,6 @@ REQUIRED = [
 ]
 VENDOR = WEB / "vendor"
 LICENSE_MARKERS = [
-    ("vendor/marked.js", "MIT Licensed"),
     ("vendor/mermaid.runtime.js", "Bundled license information"),
 ]
 # A URL in an XML namespace declaration is not a fetched asset.

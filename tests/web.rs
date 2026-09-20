@@ -18,7 +18,6 @@ const COMMENTS_JS: &str = include_str!("../web/comments.mjs");
 const APP_CSS: &str = include_str!("../web/app.css");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
-const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// The worker before it is stamped. The served copy has its version and cache
 /// lists filled in, so the digest can only be recomputed from the source.
@@ -246,7 +245,6 @@ async fn serves_every_shell_asset_with_a_policy() {
         ("/crypto.mjs", "export"),
         ("/artifact-viewer.mjs", "hub-frame"),
         ("/frame-loader.js", "postMessage"),
-        ("/vendor/marked.js", "marked"),
         ("/vendor/mermaid.runtime.js", "mermaid"),
         ("/manifest.webmanifest", "Agent Hub"),
         ("/sw.js", "caches"),
@@ -277,7 +275,7 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 39] = [
+const SHELL_PATHS: [&str; 38] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -313,7 +311,6 @@ const SHELL_PATHS: [&str; 39] = [
     "/manifest.webmanifest",
     "/icon.svg",
     "/crypto.mjs",
-    "/vendor/marked.js",
     "/vendor/mermaid.runtime.js",
     "/artifact-viewer.mjs",
     "/frame-loader.js",
@@ -676,26 +673,6 @@ async fn serves_artifact_content_for_the_viewer() {
 }
 
 #[test]
-fn vendored_marked_pins_the_licensed_umd_build() {
-    assert!(
-        MARKED_JS.contains("marked v15.0.12"),
-        "the pinned marked version is vendored"
-    );
-    assert!(
-        MARKED_JS.contains("MIT Licensed"),
-        "the marked license header is intact"
-    );
-    assert!(
-        MARKED_JS.contains("g[\"marked\"]=f()"),
-        "the bundle defines the global marked entry point"
-    );
-    assert!(
-        MARKED_JS.contains("parseInline"),
-        "the bundle is the full build, not a subset"
-    );
-}
-
-#[test]
 fn vendored_mermaid_exposes_initialize_and_run() {
     assert!(
         MERMAID_JS.contains("window.mermaid"),
@@ -755,7 +732,7 @@ fn viewer_module_renders_unlocks_and_themes() {
         "the theme stamps the document element"
     );
     assert!(
-        VIEWER_JS.contains(".parse") && VIEWER_JS.contains("hub-callout"),
+        VIEWER_JS.contains("hub-callout"),
         "markdown renders with callout post-processing"
     );
     for kind in ["note", "tip", "warning", "caution"] {

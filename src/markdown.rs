@@ -29,7 +29,7 @@ pub fn to_html(source: &str) -> String {
             index += 1;
             continue;
         }
-        if let Some(marker) = fence_open(line) {
+        if let Some((marker, lang)) = fence_open(line) {
             index += 1;
             let mut code = String::new();
             while index < lines.len() && !fence_close(lines[index], marker) {
@@ -40,7 +40,15 @@ pub fn to_html(source: &str) -> String {
             if index < lines.len() {
                 index += 1;
             }
-            out.push_str("<pre><code>");
+            if !lang.is_empty()
+                && lang
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+            {
+                out.push_str(&format!("<pre><code class=\"language-{lang}\">"));
+            } else {
+                out.push_str("<pre><code>");
+            }
             out.push_str(&escape_html(&code));
             out.push_str("</code></pre>\n");
             continue;
@@ -236,15 +244,18 @@ fn heading(line: &str) -> Option<(usize, &str)> {
     Some((hashes, rest.trim()))
 }
 
-/// A fenced code block opening, returning its fence marker.
-fn fence_open(line: &str) -> Option<char> {
+/// A fenced code block opening, returning its fence marker and language info string.
+fn fence_open(line: &str) -> Option<(char, &str)> {
     let trimmed = line.trim_start();
     let marker = trimmed.chars().next()?;
     if marker != '`' && marker != '~' {
         return None;
     }
-    if trimmed.chars().take_while(|ch| *ch == marker).count() >= 3 {
-        Some(marker)
+    let count = trimmed.chars().take_while(|ch| *ch == marker).count();
+    if count >= 3 {
+        let rest = trimmed[count..].trim();
+        let lang = rest.split_whitespace().next().unwrap_or("");
+        Some((marker, lang))
     } else {
         None
     }
@@ -345,10 +356,47 @@ mod tests {
     }
 
     #[test]
+    fn renders_fenced_code_with_language_class() {
+        assert_eq!(
+            to_html("```mermaid\ngraph TD\n```"),
+            "<pre><code class=\"language-mermaid\">graph TD\n</code></pre>\n"
+        );
+    }
+
+    #[test]
     fn escapes_raw_html_in_source() {
         let html = to_html("<script>alert(1)</script>");
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn raw_html_reaches_reader_as_text() {
+        let html = to_html("<div id=\"raw\">content</div>");
+        assert!(!html.contains("<div"));
+        assert!(html.contains("&lt;div id=&quot;raw&quot;&gt;content&lt;/div&gt;"));
+    }
+
+    #[test]
+    fn script_tag_reaches_reader_as_text() {
+        let html = to_html("<script>alert('xss')</script>");
+        assert!(!html.contains("<script"));
+        assert!(html.contains("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn event_handler_attribute_reaches_reader_as_text() {
+        let html = to_html("<img src=\"x\" onerror=\"alert(1)\">");
+        assert!(!html.contains("<img"));
+        assert!(html.contains("&lt;img src=&quot;x&quot; onerror=&quot;alert(1)&quot;&gt;"));
+    }
+
+    #[test]
+    fn javascript_url_reaches_reader_as_text() {
+        let html = to_html("[click](javascript:alert(1))");
+        assert!(!html.contains("href="));
+        assert!(!html.contains("javascript:"));
+        assert_eq!(html, "<p>click</p>\n");
     }
 
     #[test]

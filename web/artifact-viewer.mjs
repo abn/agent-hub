@@ -53,24 +53,6 @@ function readJson(id) {
   }
 }
 
-// marked passes raw HTML through by default, so the html renderer is
-// overridden to escape it. This matches the server renderer's total-escape
-// contract: authored angle brackets stay text, never markup.
-function parseMarkdown(source) {
-  const lib = globalThis.marked;
-  if (!lib || typeof lib.parse !== "function" || typeof lib.Marked !== "function") {
-    return null;
-  }
-  const engine = new lib.Marked();
-  engine.use({
-    renderer: {
-      html(token) {
-        return escHtml(token.raw != null ? token.raw : token.text || "");
-      },
-    },
-  });
-  return engine.parse(source);
-}
 
 // A blockquote whose first paragraph starts with a marker becomes a callout
 // aside; the marker line is dropped and any trailing paragraphs are kept.
@@ -167,18 +149,8 @@ function buildSrcdoc({ title, body, theme, withMermaid }) {
   );
 }
 
-function showMarkdown(frame, meta, source, theme) {
-  const parsed = parseMarkdown(source);
-  if (parsed === null) {
-    frame.srcdoc = buildSrcdoc({
-      title: meta.title,
-      body: `<pre>${escHtml(source)}</pre>`,
-      theme,
-      withMermaid: false,
-    });
-    return;
-  }
-  const body = renderMermaidPlaceholders(renderCallouts(parsed));
+function showMarkdown(frame, meta, html, theme) {
+  const body = renderMermaidPlaceholders(renderCallouts(html));
   frame.srcdoc = buildSrcdoc({
     title: meta.title,
     body,
@@ -203,13 +175,16 @@ function renderForTheme(state, theme) {
   document.documentElement.setAttribute("data-theme", theme);
   if (!frame || !meta) return;
   if (unlocked != null) {
-    if (meta.kind === "markdown") showMarkdown(frame, meta, unlocked, theme);
-    else frame.srcdoc = unlocked;
+    if (meta.kind === "markdown") {
+      showMarkdown(frame, meta, `<pre>${escHtml(unlocked)}</pre>`, theme);
+    } else {
+      frame.srcdoc = unlocked;
+    }
     return;
   }
-  const source = readJson("hub-markdown-body");
-  if (typeof source === "string") {
-    showMarkdown(frame, meta, source, theme);
+  const body = readJson("hub-markdown-body");
+  if (typeof body === "string") {
+    showMarkdown(frame, meta, body, theme);
     return;
   }
   if (meta.kind === "html") frame.src = frameUrl(meta, theme);

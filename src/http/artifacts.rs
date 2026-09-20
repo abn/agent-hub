@@ -696,7 +696,8 @@ fn reader_shell(
     };
     let markdown_blob = if artifact.kind == "markdown" {
         let source = String::from_utf8_lossy(bytes);
-        script_json(&json!(source.as_ref()))
+        let rendered = crate::markdown::to_html(&source);
+        script_json(&json!(rendered))
     } else {
         "null".to_string()
     };
@@ -813,7 +814,6 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
          <link rel=\"stylesheet\" href=\"/tokens.css\">\n\
          <style>\n{VIEWER_CSS}</style>\n\
-         <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
         id = artifact.id,
     )
