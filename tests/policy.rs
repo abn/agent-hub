@@ -371,9 +371,14 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
     for (id, name) in [("open", "Open"), ("secret", "Secret Plans")] {
         projects::create(&db, id, name).await.expect("project");
     }
-    let hidden_event = events::append(&db, "spy-agent", None, event("secret", "finished", "quiet"))
-        .await
-        .expect("append");
+    let hidden_event = events::append(
+        &db,
+        "spy-agent",
+        None,
+        event("secret", "finished", "whispered plan"),
+    )
+    .await
+    .expect("append");
     let hidden_session = sessions::start(&db, "secret", "covert-run", "spy-agent")
         .await
         .expect("start");
@@ -448,7 +453,13 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
         assert_eq!(strays.len(), 3, "the three planted rows are found");
         for hit in strays {
             let shown = serde_json::to_string(hit).expect("serialize");
-            for secret in ["spy-agent", "covert-run", "Secret Plans", "finished"] {
+            for secret in [
+                "spy-agent",
+                "covert-run",
+                "Secret Plans",
+                "finished",
+                "whispered",
+            ] {
                 assert!(
                     !shown.contains(secret),
                     "{} shows {secret} of another project: {shown}",

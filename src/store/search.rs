@@ -254,7 +254,7 @@ async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
 
     let events = related(
         conn,
-        "SELECT id, project_id, kind, actor FROM events WHERE id IN",
+        "SELECT id, project_id, kind, actor, summary, payload FROM events WHERE id IN",
         ids_of(hits, "feed", |hit| Some(hit.ref_id.as_str())),
     )
     .await?;
@@ -274,22 +274,30 @@ async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
     for hit in hits.iter_mut() {
         match hit.kind.as_str() {
             "feed" => {
+                // The corpus row holds the serialized payload, which is what
+                // makes every word of it searchable and is nothing to read.
+                // What is shown is what the agent wrote: the payload's `body`
+                // when it is a string, otherwise the summary.
+                hit.snippet = snippet(hit.title.as_deref(), "");
                 if let Some(row) = own(events.get(&hit.ref_id), &hit.project_id) {
-                    hit.event_kind = row.first.as_text();
-                    hit.actor = row.second.as_text();
+                    hit.event_kind = row.text(0);
+                    hit.actor = row.text(1);
+                    let summary = row.text(2);
+                    let body = row.text(3).and_then(|payload| written_body(&payload));
+                    hit.snippet = snippet(summary.as_deref(), body.as_deref().unwrap_or(""));
                 }
             }
             "artifact" => {
                 if let Some(row) = own(artifacts.get(&hit.ref_id), &hit.project_id) {
-                    hit.version = row.first.as_integer();
-                    hit.size_bytes = row.second.as_integer();
+                    hit.version = row.integer(0);
+                    hit.size_bytes = row.integer(1);
                 }
             }
             "brain" => {
                 let session = hit.session_id.as_ref().and_then(|id| sessions.get(id));
                 if let Some(row) = own(session, &hit.project_id) {
-                    hit.session_name = row.first.as_text();
-                    hit.session_status = row.second.as_text();
+                    hit.session_name = row.text(0);
+                    hit.session_status = row.text(1);
                 }
             }
             _ => {}
@@ -304,27 +312,32 @@ fn own<'a>(found: Option<&'a Related>, project_id: &str) -> Option<&'a Related> 
     found.filter(|row| row.project_id == project_id)
 }
 
-/// A row a hit points at: the project that holds it and the two columns the
-/// hit shows.
-struct Related {
-    project_id: String,
-    first: Field,
-    second: Field,
+/// The `body` of an event payload, when the payload is an object that holds
+/// one as a string with something in it.
+fn written_body(payload: &str) -> Option<String> {
+    let payload: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let body = payload.get("body")?.as_str()?;
+    (!body.trim().is_empty()).then(|| body.to_string())
 }
 
-struct Field(Value);
+/// A row a hit points at: the project that holds it, and the columns the hit
+/// shows, in the order the query named them.
+struct Related {
+    project_id: String,
+    columns: Vec<Value>,
+}
 
-impl Field {
-    fn as_text(&self) -> Option<String> {
-        match &self.0 {
-            Value::Text(text) => Some(text.clone()),
+impl Related {
+    fn text(&self, at: usize) -> Option<String> {
+        match self.columns.get(at) {
+            Some(Value::Text(text)) => Some(text.clone()),
             _ => None,
         }
     }
 
-    fn as_integer(&self) -> Option<i64> {
-        match &self.0 {
-            Value::Integer(number) => Some(*number),
+    fn integer(&self, at: usize) -> Option<i64> {
+        match self.columns.get(at) {
+            Some(Value::Integer(number)) => Some(*number),
             _ => None,
         }
     }
@@ -348,8 +361,8 @@ fn ids_of<'a>(
 
 /// Read the rows a family of hits points at, in one query, keyed by id.
 ///
-/// `select` names four columns, the id and the holding project first, and ends
-/// at `IN`. No ids means no query.
+/// `select` names the id and the holding project first, then what the hit
+/// shows, and ends at `IN`. No ids means no query.
 async fn related(
     conn: &Connection,
     select: &str,
@@ -370,12 +383,15 @@ async fn related(
         .await
         .map_err(crate::store::engine)?;
     while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
+        let mut columns = Vec::new();
+        for at in 2..row.column_count() {
+            columns.push(row.get_value(at).map_err(crate::store::engine)?);
+        }
         found.insert(
             required(&row, 0)?,
             Related {
                 project_id: required(&row, 1)?,
-                first: Field(row.get_value(2).map_err(crate::store::engine)?),
-                second: Field(row.get_value(3).map_err(crate::store::engine)?),
+                columns,
             },
         );
     }
@@ -473,7 +489,8 @@ fn hit_from_row(row: &Row) -> Result<SearchHit> {
     })
 }
 
-/// A short plain snippet: the body's opening, or the title when there is no body.
+/// A short plain snippet: the body's opening, or the title when there is no
+/// body. A feed hit is given its own in [`enrich`].
 fn snippet(title: Option<&str>, body: &str) -> String {
     let source = if body.trim().is_empty() {
         title.unwrap_or("")

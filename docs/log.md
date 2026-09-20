@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a feed snippet is never serialized JSON
+
+* **Update**: [The human surface](architecture/human-surface.md) says what a
+  search `snippet` is made of. A feed hit shows the event payload's `body`
+  when it is a string and the summary otherwise, where it used to show the
+  opening of the payload's JSON. The corpus is written as before, so every
+  payload word still matches and an existing store needs no rebuild. The
+  served skill document tells an agent to put the sentence worth reading in
+  `body`.
+
 ## 2026-09-20, a search hit says what kind of thing it is
 
 * **Update**: [The human surface](architecture/human-surface.md) and

@@ -578,3 +578,136 @@ fn a_made_safe_query_keeps_words_and_phrases_and_nothing_else() {
     assert!(long.len() <= agent_hub::limits::SEARCH_QUERY_BYTES_MAX);
     assert!(long.starts_with("\"ab\""));
 }
+
+async fn append_with(db: &turso::Database, summary: &str, payload: Option<serde_json::Value>) {
+    append(
+        db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: summary.to_string(),
+            payload,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+}
+
+async fn snippet_of(db: &turso::Database, text: &str) -> String {
+    let hits = search::query(db, &q(text)).await.expect("search");
+    assert_eq!(hits.len(), 1, "one event matches {text}: {hits:?}");
+    hits[0].snippet.clone()
+}
+
+#[tokio::test]
+async fn a_feed_snippet_is_the_words_an_agent_wrote_never_serialized_json() {
+    let dir = TempDir::new("search-snippet");
+    let db = open(&dir).await;
+
+    append_with(
+        &db,
+        "kettle report",
+        Some(serde_json::json!({"body": "the kettle is on the stove", "step": 3})),
+    )
+    .await;
+    assert_eq!(
+        snippet_of(&db, "kettle").await,
+        "the kettle is on the stove",
+        "a string body is the snippet"
+    );
+
+    // Found by a word that is only in the payload, which still matches; with
+    // no string body to show, the snippet is the summary.
+    append_with(
+        &db,
+        "lantern lit",
+        Some(serde_json::json!({"context": "the harbour wall", "count": 2})),
+    )
+    .await;
+    assert_eq!(snippet_of(&db, "harbour").await, "lantern lit");
+
+    append_with(
+        &db,
+        "anchor weighed",
+        Some(serde_json::json!({"body": {"depth": "twelve fathoms"}})),
+    )
+    .await;
+    assert_eq!(
+        snippet_of(&db, "fathoms").await,
+        "anchor weighed",
+        "a body that is not a string is not shown"
+    );
+
+    append_with(&db, "sails mended", None).await;
+    assert_eq!(snippet_of(&db, "mended").await, "sails mended");
+
+    let long = "rope ".repeat(80);
+    append_with(&db, "rigging", Some(serde_json::json!({"body": long}))).await;
+    let cut = snippet_of(&db, "rigging").await;
+    assert!(cut.starts_with("rope rope"), "{cut}");
+    assert_eq!(
+        cut.chars().count(),
+        201,
+        "two hundred characters and a mark"
+    );
+}
+
+/// A store written before the snippet changed holds the same corpus rows, so
+/// it needs no rebuild: the row still carries the serialized payload, which is
+/// what keeps every payload word searchable, and the snippet no longer reads
+/// from it.
+#[tokio::test]
+async fn a_corpus_row_written_the_old_way_reads_as_a_clean_snippet() {
+    let dir = TempDir::new("search-snippet-old");
+    let db = open(&dir).await;
+    append_with(
+        &db,
+        "kettle report",
+        Some(serde_json::json!({"body": "the kettle is on the stove", "step": 3})),
+    )
+    .await;
+
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("SELECT body FROM search_docs WHERE type = 'feed'", ())
+        .await
+        .expect("read the corpus");
+    let row = rows.next().await.expect("row").expect("one row");
+    let stored: String = row.get(0).expect("body");
+    assert!(
+        stored.starts_with('{') && stored.contains("\"step\":3"),
+        "the corpus row is the serialized payload, as it always was: {stored}"
+    );
+    drop(rows);
+
+    let snippet = snippet_of(&db, "stove").await;
+    assert_eq!(snippet, "the kettle is on the stove");
+    assert!(!snippet.contains('{'), "no JSON in a snippet: {snippet}");
+}
+
+#[tokio::test]
+async fn an_artifact_snippet_is_still_the_opening_of_its_content() {
+    let dir = TempDir::new("search-snippet-artifact");
+    let db = open(&dir).await;
+    seed(&db, &dir).await;
+    let hits = search::query(
+        &db,
+        &SearchQuery {
+            kind: Some("artifact".to_string()),
+            ..q("engine")
+        },
+    )
+    .await
+    .expect("search");
+    assert_eq!(hits.len(), 1);
+    assert!(
+        hits[0].snippet.starts_with("# engine notes"),
+        "{}",
+        hits[0].snippet
+    );
+}

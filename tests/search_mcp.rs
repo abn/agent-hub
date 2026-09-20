@@ -39,6 +39,10 @@ fn search_finds_appended_content() {
         feed["hits"].as_array().is_some_and(|hits| !hits.is_empty()),
         "the appended signal is found under the feed group"
     );
+    assert_eq!(
+        feed["hits"][0]["snippet"], "the engine keeps session state",
+        "the snippet is the body the agent wrote, not the payload's JSON"
+    );
 
     let empty = server.call_tool("search", json!({"query": "   "}));
     assert!(

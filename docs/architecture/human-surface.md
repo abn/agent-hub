@@ -144,6 +144,14 @@ than zero.
 `truncated` says when the limit cut it, so a capped page is never printed as a
 total.
 
+A hit's `snippet` is at most 200 characters of plain text. For an artifact, a
+brain entry or a knowledge base page it is the opening of the indexed text.
+For a feed hit it is what the agent wrote: the event payload's `body` when
+that is a string, otherwise the event's summary, and never the payload's
+serialized JSON. The corpus row of an event still holds the whole payload, so
+a word anywhere in it finds the event; only what is shown changed, which is
+why a store written before the change needs no rebuild.
+
 The volume's capacity and free space come from one `statvfs` on the data
 directory, and the free figure is what a writer that is not root can use. When
 the call fails, `capacity_bytes` and `free_bytes` are `null` and the rest of the
