@@ -36,6 +36,30 @@ async fn state_with_public_url(public_url: Option<&str>) -> TestState {
 }
 
 #[tokio::test]
+async fn the_skill_tells_an_agent_how_to_write_for_the_human() {
+    // The hub is the only thing an agent reads before it writes to a person.
+    // Mechanics alone produce inbox rows that bury the ask in a paragraph, so
+    // the document that teaches the tools teaches the voice with them.
+    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/SKILL.md"))
+        .expect("read the skill document");
+    let guidance = skill
+        .split_once("### Writing for the human")
+        .expect("the skill document tells an agent how to write for the human")
+        .1;
+    let guidance: String = guidance
+        .lines()
+        .take_while(|line| !line.starts_with("## "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for needle in ["summary", "phone", "body"] {
+        assert!(
+            guidance.contains(needle),
+            "the writing guidance says nothing about {needle}: {guidance}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn serves_the_pwa_shell() {
     let state = state().await;
     let app = router(state.clone());

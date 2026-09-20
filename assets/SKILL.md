@@ -451,6 +451,25 @@ its `thread_id` is your approval's id and its payload holds `decision`, `note`
 when one was left, and a one-line `body`. Read a decline's note before you try
 again; it is the human telling you what to change.
 
+### Writing for the human
+
+The human reads these on a phone, in a list, between other work. The summary
+is one line and often the only line they see.
+
+- Put the ask or the fact first. No preamble, no restating the request.
+- One idea per sentence. Plain words. No filler and no praise.
+- The summary must stand alone: "Nightly backup failed, disk full" beats
+  "Update on the backup job". Never write "Update on" or "Regarding".
+- Detail goes in `body`, not in the summary. A feed row shows the body's
+  first line when there is one, so make that line the point.
+- A question's `subject` is the question, ending in a question mark. The
+  choice the human has to make goes in `body`, with the options if there are
+  any.
+- An approval's summary says what will happen if it is approved.
+- Say what you do not know. A guess written as a fact costs more to undo than
+  the question you did not ask.
+- Do not thank, apologise, or congratulate. State the thing.
+
 Whether the human has read an item is not reported. An item the human has
 opened is still `unread` here, with the timestamps it already had, and there is
 no status to ask that question with.

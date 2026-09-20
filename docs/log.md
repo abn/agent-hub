@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the shipped skill says how to write for the human
+
+* **Update**: the bootstrap skill served at `/SKILL.md` gains a short section
+  on writing for the human: the summary stands alone, the ask comes first,
+  detail goes in the body, a question's subject is the question, and nothing
+  is thanked or apologised for. The hub is the only thing an agent reads
+  before it writes to a person, so the document that teaches the tools now
+  teaches the voice with them.
+
 ## 2026-09-20, one way to set a token, and it checks
 
 * **Update**: [The human surface](architecture/human-surface.md) says the
