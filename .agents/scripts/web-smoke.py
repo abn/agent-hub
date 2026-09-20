@@ -5220,6 +5220,95 @@ def check_inbox_desktop(browser, watch: Watch, port: int) -> None:
         watch.drain_rejections()
 
 
+EARLIER_FOCUS_PROJECT = "earlier-focus"
+EARLIER_FOCUS_SUMMARY = "folded row focus report"
+ON_EARLIER = (
+    "(() => { const el = document.activeElement;"
+    " return !!el && el.tagName === 'SUMMARY' && el.dataset.group === 'earlier'; })()"
+)
+
+
+def check_inbox_earlier_focus(browser, watch: Watch, port: int) -> None:
+    """A card whose row is folded under Earlier hands focus to the disclosure.
+
+    Opening an unread item reads it, so at desktop width its row is under a
+    folded Earlier by the time the card closes and cannot take focus itself.
+    """
+    watch.enter("desktop: focus after a card whose row is folded")
+    harness.request(
+        port, "POST", "/api/v1/projects", {"id": EARLIER_FOCUS_PROJECT, "display_name": "Earlier focus"}
+    )
+    context = None
+    try:
+        harness.mcp_call(
+            port,
+            harness.feed_days_session(port),
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "signal_append",
+                    "arguments": {
+                        "project_id": EARLIER_FOCUS_PROJECT,
+                        "kind": "finished",
+                        "summary": EARLIER_FOCUS_SUMMARY,
+                    },
+                },
+            },
+        )
+        context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        )
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
+        page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
+        find = f"{INBOX_ITEM_ID}({json.dumps(EARLIER_FOCUS_SUMMARY)})"
+        if not settle(page, find):
+            watch.fail("the seeded unread item never reached the inbox")
+            return
+        item = page.evaluate(find)
+        row = f'main .inbox-item[data-id="{item}"]'
+        card = "main .pane-detail .inbox-detail"
+        if page.evaluate(f"{INBOX_GROUP_OF}({json.dumps(item)})") != "unread":
+            watch.fail("the seeded item did not arrive unread")
+            return
+        for how, close in (
+            ("Esc", lambda: page.keyboard.press("Escape")),
+            ("the close control", lambda: page.click(CLOSE_SELECTOR)),
+        ):
+            page.click(f"{row} .title a")
+            if not settle(page, f"!!document.querySelector('{card}')"):
+                watch.fail(f"the card did not open before {how}")
+                return
+            close()
+            if not settle(
+                page,
+                f"!document.querySelector('{card}') &&"
+                " !(document.querySelector('main details[data-group=\"earlier\"]') || { open: true }).open",
+            ):
+                watch.fail(f"after {how} the card is still open or Earlier is not folded")
+                return
+            if not settle(page, ON_EARLIER, timeout=2000):
+                watch.fail(
+                    f"{how} on a card whose row is folded left focus on"
+                    f" {page.evaluate(FOCUS_CLASS)!r}, not on the Earlier disclosure"
+                )
+                return
+            # The second pass opens the row from under Earlier, by hand.
+            page.click('main summary[data-group="earlier"]')
+    finally:
+        if context:
+            context.close()
+        try:
+            harness.request(port, "DELETE", f"/api/v1/projects/{EARLIER_FOCUS_PROJECT}")
+        except Exception as err:
+            watch.fail(f"the check's project could not be removed: {err}")
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -5377,6 +5466,7 @@ def run() -> int:
                 run_step(watch, check_inbox_empty, page, watch)
                 run_step(watch, check_inbox_card_escape, page, watch, port, project)
                 run_step(watch, check_inbox_desktop, browser, watch, port)
+                run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_approve, page, watch)
                 run_step(watch, check_session_row_state, page, watch, project)
                 run_step(watch, check_tree_roles, page, watch, project, seeded["session_id"])

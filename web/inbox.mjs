@@ -363,7 +363,11 @@ function returnFocus(id) {
   const item = main.querySelector(`.inbox-item[data-id="${CSS.escape(id)}"]`);
   if (!item) return;
   const row = item.querySelector(".inbox-row");
-  const target = row.getClientRects().length ? row : item.closest("details")?.querySelector("summary");
+  // A row under a folded disclosure still reports a box, so the disclosure is
+  // asked whether it is folded. `checkVisibility` would say the same, but an
+  // older Safari has no such call and the close would throw.
+  const folded = item.closest("details:not([open])");
+  const target = folded ? folded.querySelector("summary") : row;
   if (!target) return;
   requestAnimationFrame(() => {
     if (target.isConnected) target.focus({ preventScroll: true });

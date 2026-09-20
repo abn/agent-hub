@@ -38,6 +38,12 @@ software release notes and the repository changelog.
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
+## 2026-09-20, focus after a card whose row is folded away
+
+* **Update**: [Human surface](architecture/human-surface.md) records where
+  focus goes when an inbox card closes and its row sits under a folded Earlier:
+  to the Earlier disclosure. It used to stay on the page region.
+
 ## 2026-09-20, closing the inbox card by its own control
 
 * **Update**: [Human surface](architecture/human-surface.md) records that the
