@@ -2658,6 +2658,126 @@ def check_viewer_route(page, watch: Watch, project: str, artifact: str) -> None:
     watch.drain_rejections()
 
 
+# One theme control: which glyphs are drawn, which theme each one names, the
+# control's accessible name and its size.
+THEME_CONTROL = (
+    "(() => { const b = document.querySelector('#hub-theme-toggle'); if (!b) return null;"
+    " const box = b.getBoundingClientRect();"
+    " return { name: b.getAttribute('aria-label') || '', width: box.width, height: box.height,"
+    " drawn: [...b.querySelectorAll('svg')].filter((g) => g.getClientRects().length)"
+    ".map((g) => g.getAttribute('data-to') || '?') }; })()"
+)
+
+
+def framed_page(page):
+    """The public page inside the viewer's frame, once it has one."""
+    element = page.query_selector("main #hub-frame")
+    return element.content_frame() if element else None
+
+
+def framed_theme(page) -> str:
+    frame = framed_page(page)
+    try:
+        return frame.evaluate("document.documentElement.getAttribute('data-theme') || ''") if frame else ""
+    except Exception:
+        # Between two loads the frame has no document to ask.
+        return ""
+
+
+def framed_control_named(page) -> bool:
+    frame = framed_page(page)
+    try:
+        return bool(frame) and frame.evaluate(
+            "(document.querySelector('#hub-theme-toggle') || { getAttribute: () => '' })"
+            ".getAttribute('aria-label').startsWith('Switch to ')"
+        )
+    except Exception:
+        return False
+
+
+def check_viewer_theme_control(page, watch: Watch, project: str, artifact: str) -> None:
+    """The theme control draws one glyph, for the theme a press switches to.
+
+    It says the same in its name, and the press does it: the framed page is in
+    the theme the control last named. The framed page's own control keeps to
+    the same rule.
+    """
+    watch.enter("artifacts: the viewer's theme control")
+    page.evaluate(f"location.hash = '#/artifacts/{artifact}?project={quote(project)}'")
+    if not settle(page, "!!document.querySelector('main #hub-theme-toggle')"):
+        watch.fail("the viewer carries no theme control")
+        return
+    other = {"light": "dark", "dark": "light"}
+    shown = page.evaluate("document.documentElement.dataset.theme")
+    try:
+        for step in ("as painted", "after one press", "after a second press"):
+            if not settle_value(page, lambda: framed_theme(page) == shown):
+                watch.fail(f"{step}: the framed page is in {framed_theme(page)!r}, expected {shown!r}")
+                return
+            # The page is served in the light theme and its script names the
+            # control after that, so the theme alone does not say it has run.
+            settle_value(page, lambda: framed_control_named(page), timeout=5000)
+            # Framed, the page leaves the theme to the app: a control of its own
+            # would change the frame behind the app's back, and the app's
+            # control would then name a switch that had already happened.
+            own = framed_page(page).evaluate(THEME_CONTROL)
+            if own and (own["width"] or own["height"] or own["drawn"]):
+                watch.fail(f"{step}: the framed page draws a theme control of its own: {own}")
+            for where, control in (("the viewer's control", page.evaluate(THEME_CONTROL)),):
+                if not control:
+                    watch.fail(f"{step}: {where} is missing")
+                    continue
+                if control["drawn"] != [other[shown]]:
+                    watch.fail(
+                        f"{step}: {where} draws the glyphs for {control['drawn']} in the {shown} theme,"
+                        f" expected only the one for {other[shown]!r}"
+                    )
+                if control["name"] != f"Switch to {other[shown]} theme":
+                    watch.fail(f"{step}: {where} is named {control['name']!r} in the {shown} theme")
+                if where == "the viewer's control" and min(control["width"], control["height"]) + 0.5 < 44:
+                    watch.fail(f"{where} is {control['width']:.0f}x{control['height']:.0f}px, under the 44px floor")
+            if step == "after a second press":
+                break
+            page.click("main #hub-theme-toggle")
+            shown = other[shown]
+        # On its own, unframed, the public page has nobody else to switch its
+        # theme, so its control is there and keeps the same rule.
+        alone = page.context.new_page()
+        try:
+            alone.goto(f"http://127.0.0.1:{watch.port}/artifacts/{artifact}", wait_until="load")
+            settle_value(
+                alone,
+                lambda: alone.evaluate(
+                    "(document.querySelector('#hub-theme-toggle') || { getAttribute: () => '' })"
+                    ".getAttribute('aria-label').startsWith('Switch to ')"
+                ),
+                timeout=5000,
+            )
+            control = alone.evaluate(THEME_CONTROL)
+            theme = alone.evaluate("document.documentElement.dataset.theme")
+            if not control or not (control["width"] and control["height"]):
+                watch.fail("the public page on its own draws no theme control")
+            elif control["drawn"] != [other[theme]] or control["name"] != f"Switch to {other[theme]} theme":
+                watch.fail(f"the public page's control in the {theme} theme is {control}")
+        finally:
+            alone.close()
+            page.bring_to_front()
+    finally:
+        goto(page, "#/home", home_title())
+    watch.drain_rejections()
+
+
+def settle_value(page, ready, timeout: int = 8000) -> bool:
+    """`settle` for a condition read from outside the page, such as a frame's."""
+    deadline = time.monotonic() + timeout / 1000
+    while True:
+        if ready():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        page.wait_for_timeout(100)
+
+
 def check_viewer_back_button(page, watch: Watch, project: str, artifact: str) -> None:
     """The chrome's back button returns to the gallery."""
     watch.enter("artifacts: the viewer back button")
@@ -5292,6 +5412,9 @@ def check_inbox_earlier_focus(browser, watch: Watch, port: int) -> None:
     folded Earlier by the time the card closes and cannot take focus itself.
     """
     watch.enter("desktop: focus after a card whose row is folded")
+    # Run as a browser without `Element.checkVisibility` (Safari before 17.4):
+    # asking the row whether it is drawn must not be the only way to know.
+    without_api = "delete Element.prototype.checkVisibility;"
     harness.request(
         port, "POST", "/api/v1/projects", {"id": EARLIER_FOCUS_PROJECT, "display_name": "Earlier focus"}
     )
@@ -5316,7 +5439,7 @@ def check_inbox_earlier_focus(browser, watch: Watch, port: int) -> None:
         )
         context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
         context.add_init_script(
-            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});" + without_api
         )
         page = context.new_page()
         page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
@@ -5561,6 +5684,7 @@ def run() -> int:
                 run_step(watch, check_artifact_gallery, page, watch, project)
                 run_step(watch, check_viewer_route, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_viewer_back_button, page, watch, project, seeded["artifact_id"])
+                run_step(watch, check_viewer_theme_control, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_version_list, page, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)

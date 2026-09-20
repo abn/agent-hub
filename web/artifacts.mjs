@@ -74,14 +74,20 @@ export function viewerBack() {
 
 const viewer = { id: null, version: null, kind: null, raw: false };
 
-function frameSrc(id, version) {
+// The framed page cannot remember a theme (a sandboxed frame has no store),
+// so the viewer names the one it wants in the address.
+function frameSrc(id, version, theme) {
+  const params = new URLSearchParams();
+  if (version) params.set("version", String(version));
+  if (theme) params.set("theme", theme);
+  const query = params.toString();
   const address = `/artifacts/${encodeURIComponent(id)}`;
-  return version ? `${address}?version=${encodeURIComponent(version)}` : address;
+  return query ? `${address}?${query}` : address;
 }
 
 function viewerSource(frame) {
   if (!frame) return;
-  return frameSrc(frame.dataset.id, viewer.version);
+  return frameSrc(frame.dataset.id, viewer.version, frame.getAttribute("data-theme"));
 }
 
 // A second local escape for the raw srcdoc: the host page's own `esc` spends
@@ -146,6 +152,7 @@ export function toggleViewerTheme() {
   if (!frame) return;
   const next = frame.getAttribute("data-theme") === "dark" ? "light" : "dark";
   frame.setAttribute("data-theme", next);
+  drawThemeControl(main.querySelector("#hub-theme-toggle"), next);
   if (frame.dataset.kind === "html") {
     const params = new URLSearchParams();
     if (viewer.version) params.set("version", String(viewer.version));
@@ -154,6 +161,17 @@ export function toggleViewerTheme() {
   } else {
     frame.src = viewerSource(frame);
   }
+}
+
+// One glyph at a time: the one for the theme a press switches to, which is
+// what the control's name says too.
+function drawThemeControl(button, theme) {
+  if (!button) return;
+  const to = theme === "dark" ? "light" : "dark";
+  for (const glyph of button.querySelectorAll("svg")) {
+    glyph.toggleAttribute("hidden", glyph.dataset.to !== to);
+  }
+  button.setAttribute("aria-label", `Switch to ${to} theme`);
 }
 
 function svg(path, width, height, cls) {
@@ -264,10 +282,14 @@ export async function viewerRoute(params, gen, path) {
   theme.type = "button";
   theme.id = "hub-theme-toggle";
   theme.dataset.action = "viewer-theme";
-  theme.setAttribute("aria-label", "Toggle theme");
   const sun = svg("M 12 19v1 M 12 4v1 M 4 12h1 M 19 12h1 M 6 6l.7.7 M 17.3 17.3l.7.7 M 6 18l.7-.7 M 17.3 6.7l.7-.7 M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", 18, 18, null);
   const moon = svg("M 20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z", 18, 18, null);
+  sun.dataset.to = "light";
+  moon.dataset.to = "dark";
   theme.append(sun, moon);
+  // The frame opens in the app's own theme, and the control starts from there.
+  const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  drawThemeControl(theme, opened);
 
   const versionToggle = document.createElement("button");
   versionToggle.type = "button";
@@ -296,7 +318,8 @@ export async function viewerRoute(params, gen, path) {
   frame.dataset.kind = current.kind;
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("title", "Artifact");
-  frame.src = frameSrc(id, viewer.version);
+  frame.setAttribute("data-theme", opened);
+  frame.src = frameSrc(id, viewer.version, opened);
   wrap.appendChild(frame);
 
   main.appendChild(wrap);

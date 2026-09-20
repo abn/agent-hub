@@ -38,6 +38,16 @@ software release notes and the repository changelog.
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
+## 2026-09-20, the viewer's theme control names where a press goes
+
+* **Update**: [Human surface](architecture/human-surface.md) records the
+  artifact viewer's theme control: one glyph, for the theme a press switches
+  to, and a name that says so. Both glyphs used to be drawn at once under the
+  name "Toggle theme", in the app's viewer and on the artifact page, and for any
+  artifact but an HTML one the press in the app's viewer changed nothing.
+  The viewer now names the theme in the frame's address, and the framed page
+  shows no control of its own, so the two cannot disagree.
+
 ## 2026-09-20, Home's storage bar is to scale or absent
 
 * **Update**: [Human surface](architecture/human-surface.md) records that

@@ -272,11 +272,17 @@ function init() {
   if (!meta) return;
   const store = themeStore();
   const stored = store.read();
+  // Framed by the hub's own viewer, this page has no store to remember a theme
+  // in, so the viewer names the one it wants in the address. On its own the
+  // page keeps to what it stored, then to the system.
+  const asked =
+    window.top === window.self ? null : new URLSearchParams(window.location.search).get("theme");
+  const chosen = [asked, stored].find((theme) => theme === "light" || theme === "dark");
   const state = {
     frame: document.getElementById("hub-frame"),
     meta,
     unlocked: null,
-    theme: stored === "light" || stored === "dark" ? stored : preferredTheme(),
+    theme: chosen || preferredTheme(),
   };
   document.documentElement.setAttribute("data-theme", state.theme);
 
@@ -289,9 +295,13 @@ function init() {
   const toggle = document.getElementById("hub-theme-toggle");
   const showThemeIcon = () => {
     const svgs = toggle ? toggle.querySelectorAll("svg") : [];
-    // The first glyph names the active theme: sun in light, moon in dark.
+    // One glyph at a time, the one for the theme a press switches to: the sun
+    // leads and stands for light. An SVG element has no `hidden` property, so
+    // the attribute is set and the shell's stylesheet honours it.
     svgs.forEach((svg, index) => {
-      svg.hidden = state.theme === "dark" ? index === 0 : index !== 0;
+      const to = index === 0 ? "light" : "dark";
+      svg.setAttribute("data-to", to);
+      svg.toggleAttribute("hidden", to === state.theme);
     });
     if (toggle) {
       toggle.setAttribute(
@@ -300,6 +310,11 @@ function init() {
       );
     }
   };
+  // Framed by the app, the theme is the app's to switch: it opens this page in
+  // its own theme and its control says which way a press goes. A second control
+  // in here would change the frame behind the app's back, and the app's would
+  // then name a switch that had already happened.
+  if (toggle && window.top !== window.self) toggle.hidden = true;
   if (toggle) {
     toggle.addEventListener("click", () => {
       state.theme = state.theme === "dark" ? "light" : "dark";

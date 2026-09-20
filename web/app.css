@@ -423,6 +423,7 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   background: var(--surface);
 }
 #hub-theme-toggle { min-height: 44px; }
+#hub-theme-toggle svg[hidden] { display: none; }
 #hub-version-select { min-height: 44px; }
 #hub-unlock-form button { min-height: 44px; }
 #hub-unlock-error { color: var(--danger); font-size: var(--t-13); }
