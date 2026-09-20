@@ -1531,6 +1531,57 @@ async fn promote_and_review_refuse_a_value_that_could_end_its_line() {
 }
 
 #[tokio::test]
+async fn the_last_write_is_the_newest_write_to_that_path() {
+    let hub = Hub::start().await;
+    let project = hub.project("newest").await;
+    let token = hub.agent("deploy-bot", &project).await;
+    let mut agent = hub.mcp(&token).await;
+    let base = format!("/api/v1/projects/{project}/kb");
+
+    // The human writes the page first, the agent writes it last, and the
+    // newest write of all is to another page.
+    hub.put_page(&project, "fs/page.md", &concept("Page", "One."))
+        .await
+        .ok();
+    agent
+        .ok(
+            "brain_put",
+            json!({
+                "path": "/fs/page.md",
+                "content": concept("Page", "Two."),
+                "store": "project",
+                "project_id": project,
+            }),
+        )
+        .await;
+    hub.put_page(&project, "fs/other.md", &concept("Other", "Three."))
+        .await
+        .ok();
+
+    let read = hub.page(&project, "fs/page.md").await.ok();
+    assert_eq!(
+        read["last_write"]["actor"], "deploy-bot",
+        "the page names its newest writer, not its first"
+    );
+    let listing = hub.get(&format!("{base}/pages?meta=1")).await.ok();
+    let writers: Vec<(&str, &str)> = listing["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .map(|entry| {
+            (
+                entry["path"].as_str().expect("path"),
+                entry["last_write_by"].as_str().expect("last_write_by"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        writers,
+        [("/fs/other.md", "human"), ("/fs/page.md", "deploy-bot")]
+    );
+}
+
+#[tokio::test]
 async fn history_and_last_write_survive_a_long_log() {
     let hub = Hub::start().await;
     let project = hub.project("longlog").await;
@@ -1773,6 +1824,70 @@ async fn an_oversize_body_is_a_problem_document_and_nothing_is_written() {
     hub.put_page(&project, "fs/huge.md", &"x".repeat(page_max))
         .await
         .ok();
+}
+
+#[tokio::test]
+async fn review_and_promote_refuse_a_page_they_would_push_over_the_limit() {
+    let hub = Hub::start().await;
+    let project = hub.project("brim").await;
+    let page_max = agent_hub::limits::KB_PAGE_BYTES_MAX;
+    let base = format!("/api/v1/projects/{project}/kb");
+
+    // A page at the limit is a page, and the stamp a review adds would take
+    // it over.
+    let head = "---\ntype: concept\n---\n";
+    let full = format!("{head}{}", "x".repeat(page_max - head.len()));
+    assert_eq!(full.len(), page_max);
+    let put = hub.put_page(&project, "fs/full.md", &full).await.ok();
+    hub.send(request(
+        "POST",
+        &format!("{base}/pages/fs/full.md/review"),
+        Some(ADMIN),
+        None,
+    ))
+    .await
+    .problem(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large");
+    let page = hub.page(&project, "fs/full.md").await.ok();
+    assert_eq!(
+        page["version"], put["version"],
+        "a refused review writes nothing"
+    );
+    assert_eq!(page["size_bytes"], page_max);
+    assert!(hub.signals(&project, "kb_reviewed").await.is_empty());
+
+    // A session value at the page limit fits its own store, and the block a
+    // promotion adds would take the page over.
+    let session = sessions::start(&hub.state.db, &project, "work", "agent-one")
+        .await
+        .expect("start session");
+    hub.state
+        .brain
+        .open(&project, &session.id)
+        .await
+        .expect("open brain")
+        .put("/fs/notes.md", "x".repeat(page_max).as_bytes())
+        .await
+        .expect("put the session value");
+    hub.send(request(
+        "POST",
+        &format!("{base}/promote"),
+        Some(ADMIN),
+        Some(json!({
+            "from_session_id": session.id,
+            "from_path": "/fs/notes.md",
+            "to_path": "fs/promoted.md",
+            "type": "concept",
+        })),
+    ))
+    .await
+    .problem(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large");
+    hub.page(&project, "fs/promoted.md")
+        .await
+        .problem(StatusCode::NOT_FOUND, "not_found");
+    assert!(hub.signals(&project, "kb_promoted").await.is_empty());
+
+    let history = hub.get(&format!("{base}/history")).await.ok();
+    assert_eq!(history["total"], 1, "only the put is in the log: {history}");
 }
 
 #[tokio::test]

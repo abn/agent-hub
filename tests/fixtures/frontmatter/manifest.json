@@ -637,6 +637,20 @@
       "input": "91_dashes_then_text_is_not_an_opener.input.md",
       "patch": "91_dashes_then_text_is_not_an_opener.patch.json",
       "expected": "91_dashes_then_text_is_not_an_opener.expected.md"
+    },
+    {
+      "id": "92_refuse_review_uneven_indent",
+      "description": "Review will not append under a sequence whose second item sits left of its first: there is no one indent to write the new entry at",
+      "input": "92_refuse_review_uneven_indent.input.md",
+      "patch": "92_refuse_review_uneven_indent.patch.json",
+      "error": "indentation"
+    },
+    {
+      "id": "93_refuse_promote_uneven_indent",
+      "description": "Promote will not append under a sequence with a line that sits left of its first item",
+      "input": "93_refuse_promote_uneven_indent.input.md",
+      "patch": "93_refuse_promote_uneven_indent.patch.json",
+      "error": "indentation"
     }
   ]
 }

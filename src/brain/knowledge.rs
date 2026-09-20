@@ -510,6 +510,77 @@ async fn signal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Config, TrustDefault};
+    use crate::store::events::{FeedQuery, read_feed};
+
+    /// A directory under the build tree, removed when the test ends. Unit
+    /// tests get no CARGO_TARGET_TMPDIR, so the path is built from the
+    /// manifest directory.
+    struct DataDir(std::path::PathBuf);
+
+    impl Drop for DataDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    async fn state(tag: &str) -> (AppState, DataDir) {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/tmp")
+            .join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id()));
+        let state = AppState::open(Config {
+            data_dir: dir.clone(),
+            bind: "127.0.0.1:0".parse().expect("socket address"),
+            public_url: None,
+            admin_token: Some("token".to_string()),
+            trust_default: TrustDefault::Trusted,
+            inbox_caps: crate::limits::InboxCaps::disabled(),
+            active_window: std::time::Duration::from_secs(900),
+            node_name: None,
+        })
+        .await
+        .expect("open state");
+        (state, DataDir(dir))
+    }
+
+    /// The page write nudges the stream before its feed event exists, so a
+    /// listener that refetched on that nudge has not seen the event. The
+    /// signal sends a nudge of its own once the event is stored, and none for
+    /// an event the feed refused.
+    #[tokio::test]
+    async fn a_signal_nudges_the_stream_once_its_event_is_in_the_feed() {
+        let (state, _dir) = state("kb-signal").await;
+        let mut ticks = state.ticker.subscribe();
+        let stored = async || {
+            read_feed(&state.db, "proj", &FeedQuery::default())
+                .await
+                .expect("read feed")
+                .events
+                .len()
+        };
+
+        let payload = json!({"action": "kb_written", "store": "project", "path": "/fs/a.md"});
+        let summary = "Knowledge base page /fs/a.md written".to_string();
+        signal(&state, "proj", "human", None, summary, payload.clone()).await;
+        assert_eq!(stored().await, 1);
+        assert!(
+            ticks.try_recv().is_ok(),
+            "the stored event is followed by a nudge"
+        );
+        assert!(ticks.try_recv().is_err(), "and by one only");
+
+        let too_long = "x".repeat(crate::limits::EVENT_SUMMARY_CHARS_MAX + 1);
+        signal(&state, "proj", "human", None, too_long, payload).await;
+        assert_eq!(stored().await, 1, "the feed refused the second event");
+        assert!(
+            ticks.try_recv().is_err(),
+            "a signal that stored nothing nudges no one"
+        );
+    }
 
     #[test]
     fn a_page_path_is_canonical_whatever_spelling_named_it() {
