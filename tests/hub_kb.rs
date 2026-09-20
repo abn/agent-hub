@@ -7,13 +7,11 @@
 
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-
-use serde_json::Value;
+use std::process::{Output, Stdio};
 
 mod common;
 
-use common::hub::{Hub, PROJECT};
+use common::hub::{Hub, PROJECT, stderr_json, stdout_json};
 
 const PAGE: &str = "# Homelab\n\nStart here.\n";
 
@@ -23,14 +21,11 @@ fn run(hub: &Hub, args: &[&str]) -> Output {
 }
 
 fn run_with(hub: &Hub, args: &[&str], env: &[(&str, String)], stdin: Option<&str>) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
+    let mut command = hub.client();
     command
         .args(args)
-        .env("RUST_LOG", "error")
-        .env("HUB_URL", hub.url())
         .env("HUB_TOKEN", hub.agent_token.clone())
-        // Never the config file or the project of whoever runs the suite.
-        .env("HUB_CONFIG", hub.config_path())
+        // Never the project of whoever runs the suite.
         .env_remove("HUB_PROJECT");
     for (key, value) in env {
         command.env(key, value);
@@ -75,20 +70,6 @@ fn put(hub: &Hub, path: &str, content: &str) -> Output {
 
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).to_string()
-}
-
-fn stdout_json(output: &Output) -> Value {
-    let stdout = stdout(output);
-    serde_json::from_str(stdout.trim())
-        .unwrap_or_else(|err| panic!("stdout is one JSON object ({err}): {stdout:?}"))
-}
-
-fn stderr_json(output: &Output) -> Value {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    stderr
-        .lines()
-        .find_map(|line| serde_json::from_str(line).ok())
-        .unwrap_or_else(|| panic!("stderr carries the error object: {stderr}"))
 }
 
 /// A path inside the hub's own temp directory, removed with it.

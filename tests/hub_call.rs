@@ -7,11 +7,9 @@
 
 use std::process::{Command, Output, Stdio};
 
-use serde_json::Value;
-
 mod common;
 
-use common::hub::{AGENT, Hub, PROJECT};
+use common::hub::{AGENT, Hub, PROJECT, stderr_json, stdout_json};
 
 /// Run the binary against the hub, with the settings in the environment.
 fn run(hub: &Hub, args: &[&str]) -> Output {
@@ -19,13 +17,8 @@ fn run(hub: &Hub, args: &[&str]) -> Output {
 }
 
 fn run_with(hub: &Hub, args: &[&str], env: &[(&str, String)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
-    command
-        .args(args)
-        .env("RUST_LOG", "error")
-        .env("HUB_URL", hub.url())
-        // Never the config file of whoever is running the suite.
-        .env("HUB_CONFIG", hub.config_path());
+    let mut command = hub.client();
+    command.args(args);
     for (key, value) in env {
         command.env(key, value);
     }
@@ -33,20 +26,6 @@ fn run_with(hub: &Hub, args: &[&str], env: &[(&str, String)]) -> Output {
         .stdin(Stdio::null())
         .output()
         .expect("run the binary")
-}
-
-fn stdout_json(output: &Output) -> Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim())
-        .unwrap_or_else(|err| panic!("stdout is one JSON object ({err}): {stdout:?}"))
-}
-
-fn stderr_json(output: &Output) -> Value {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    stderr
-        .lines()
-        .find_map(|line| serde_json::from_str(line).ok())
-        .unwrap_or_else(|| panic!("stderr carries the error object: {stderr}"))
 }
 
 #[test]

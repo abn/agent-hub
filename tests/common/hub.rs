@@ -6,9 +6,11 @@
 //! one of them leaves unused is allowed by the parent module.
 
 use std::path::PathBuf;
+use std::process::{Command, Output};
 
 use agent_hub::principal::Trust;
 use agent_hub::store::projects;
+use serde_json::Value;
 
 use super::process::{ANY_PORT, HubProcess};
 use super::temp::TempDir;
@@ -104,6 +106,18 @@ impl Hub {
         std::fs::write(self.config_path(), contents).expect("write client config");
     }
 
+    /// The built binary pointed at this hub, with no token and no arguments
+    /// yet: what a caller adds to it is what its test is about.
+    pub fn client(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
+        command
+            .env("RUST_LOG", "error")
+            .env("HUB_URL", self.url())
+            // Never the config file of whoever is running the suite.
+            .env("HUB_CONFIG", self.config_path());
+        command
+    }
+
     /// Read a path on the admin API and return the whole response.
     pub fn admin_get(&self, path: &str) -> String {
         wire::rest(self.port, "GET", path, Some(ADMIN_TOKEN), None).raw
@@ -122,4 +136,20 @@ fn seed(dir: &TempDir) -> String {
             .expect("create project");
         seed::agent_token(&db, AGENT, "My Agent", Trust::Trusted).await
     })
+}
+
+/// The one JSON object a command printed on stdout.
+pub fn stdout_json(output: &Output) -> Value {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|err| panic!("stdout is one JSON object ({err}): {stdout:?}"))
+}
+
+/// The error object a failed command printed on stderr, among its log lines.
+pub fn stderr_json(output: &Output) -> Value {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stderr
+        .lines()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .unwrap_or_else(|| panic!("stderr carries the error object: {stderr}"))
 }
