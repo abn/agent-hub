@@ -539,13 +539,52 @@ fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
     }
 }
 
+/// Find the next alphanumeric character strictly greater than `c`.
+fn next_alnum_char(c: char) -> Option<char> {
+    let start = (c as u32).checked_add(1)?;
+    (start..=0x10FFFF)
+        .filter_map(|val| {
+            if (0xD800..=0xDFFF).contains(&val) {
+                None
+            } else {
+                char::from_u32(val)
+            }
+        })
+        .find(|ch| ch.is_alphanumeric())
+}
+
+/// Compute the exclusive lexicographical upper bound for words starting with `prefix`.
+fn prefix_upper_bound(prefix: &str) -> Option<String> {
+    let mut chars: Vec<char> = prefix.chars().collect();
+    while let Some(last) = chars.pop() {
+        if let Some(next) = next_alnum_char(last) {
+            chars.push(next);
+            return Some(chars.into_iter().collect());
+        }
+    }
+    None
+}
+
+/// Format a bare term into a prefix query, boosting an exact whole-word match.
+fn prefix_term(word: &str) -> String {
+    let lower = word.to_lowercase();
+    if word.contains('-') || word.contains('_') {
+        // Multi-token words (e.g. hyphenated or snake_case) match as a phrase prefix.
+        format!("(\"{lower}\"^2 OR \"{lower}\"*)")
+    } else if let Some(upper) = prefix_upper_bound(&lower) {
+        format!("(\"{lower}\"^2 OR title:[{lower} TO {upper}}} OR body:[{lower} TO {upper}}})")
+    } else {
+        format!("(\"{lower}\"^2 OR title:[{lower} TO *] OR body:[{lower} TO *])")
+    }
+}
+
 /// Turn arbitrary user input into a safe FTS query.
 ///
 /// Balanced double-quoted phrases are preserved as phrase queries. Unbalanced
 /// quotes and FTS syntax characters (parentheses, colons, asterisks, booleans)
-/// are stripped, and bare terms are quoted as string literals so no input can
-/// trigger an FTS parse error. If the input contains no searchable terms, an
-/// empty string is returned.
+/// are stripped, and bare terms are expanded into prefix queries so typing
+/// `deplo` matches `deploy` and `deployment` while ranking exact matches first.
+/// If the input contains no searchable terms, an empty string is returned.
 pub fn sanitize_fts(input: &str) -> String {
     // A word is kept only if it holds a letter or a digit: a run of nothing but
     // `-` or `_` is not something the index can look up, and the engine refuses
@@ -593,7 +632,7 @@ pub fn sanitize_fts(input: &str) -> String {
                 // A balanced phrase is honoured as one.
                 terms.push(format!("\"{}\"", words.join(" ")));
             } else {
-                terms.extend(words.into_iter().map(|w| format!("\"{w}\"")));
+                terms.extend(words.into_iter().map(|w| prefix_term(&w)));
             }
         } else if is_word(ch) {
             let mut word = String::new();
@@ -605,14 +644,14 @@ pub fn sanitize_fts(input: &str) -> String {
                 chars.next();
             }
             if searchable(&word) && !operator(&word) {
-                terms.push(format!("\"{word}\""));
+                terms.push(prefix_term(&word));
             }
         } else {
             chars.next();
         }
     }
 
-    // Quoting costs two bytes and a separator per term, so a long query grows
+    // Quoting costs bytes and a separator per term, so a long query grows
     // on its way through here. The engine refuses a query past its own limit;
     // the terms that fit are searched and the rest are left out, which a query
     // of that length will not miss.

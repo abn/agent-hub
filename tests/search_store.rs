@@ -69,6 +69,85 @@ async fn finds_feed_and_artifact_content() {
 }
 
 #[tokio::test]
+async fn searching_deplo_finds_deploy_and_deployment() {
+    let dir = TempDir::new("search-deplo");
+    let db = open(&dir).await;
+    plant(&db, "doc-deploy", "proj", "feed", "we deploy the server").await;
+    plant(
+        &db,
+        "doc-deployment",
+        "proj",
+        "feed",
+        "automated deployment pipeline",
+    )
+    .await;
+    plant(&db, "doc-other", "proj", "feed", "nothing related here").await;
+
+    let hits = search::query(&db, &q("deplo")).await.expect("search");
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.doc_id.as_str()).collect();
+    assert!(
+        ids.contains(&"doc-deploy"),
+        "deplo finds deploy; got {ids:?}"
+    );
+    assert!(
+        ids.contains(&"doc-deployment"),
+        "deplo finds deployment; got {ids:?}"
+    );
+    assert_eq!(hits.len(), 2);
+}
+
+#[tokio::test]
+async fn whole_word_match_ranks_above_prefix_only_match() {
+    let dir = TempDir::new("search-rank-prefix");
+    let db = open(&dir).await;
+    plant(
+        &db,
+        "doc-deployment",
+        "proj",
+        "feed",
+        "deployment pipeline running",
+    )
+    .await;
+    plant(&db, "doc-deploy", "proj", "feed", "deploy the code now").await;
+
+    let hits = search::query(&db, &q("deploy")).await.expect("search");
+    assert_eq!(hits.len(), 2);
+    assert_eq!(
+        hits[0].doc_id, "doc-deploy",
+        "exact whole-word match ranks first"
+    );
+    assert_eq!(
+        hits[1].doc_id, "doc-deployment",
+        "prefix match ranks second"
+    );
+}
+
+#[tokio::test]
+async fn balanced_quoted_phrase_is_unchanged() {
+    let dir = TempDir::new("search-phrase");
+    let db = open(&dir).await;
+    plant(&db, "doc-exact", "proj", "feed", "engine report summary").await;
+    plant(
+        &db,
+        "doc-split",
+        "proj",
+        "feed",
+        "engine is running a report",
+    )
+    .await;
+
+    let hits = search::query(&db, &q("\"engine report\""))
+        .await
+        .expect("search");
+    let ids: Vec<&str> = hits.iter().map(|hit| hit.doc_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["doc-exact"],
+        "quoted phrase only matches exact phrase"
+    );
+}
+
+#[tokio::test]
 async fn filters_by_type_and_project() {
     let dir = TempDir::new("search-filter");
     let db = open(&dir).await;
@@ -547,22 +626,28 @@ async fn hostile_search_queries_do_not_error() {
 fn a_made_safe_query_keeps_words_and_phrases_and_nothing_else() {
     use agent_hub::store::search::sanitize_fts;
 
-    assert_eq!(sanitize_fts("engine state"), "\"engine\" \"state\"");
+    assert_eq!(
+        sanitize_fts("engine state"),
+        "(\"engine\"^2 OR title:[engine TO enginf} OR body:[engine TO enginf}) (\"state\"^2 OR title:[state TO statf} OR body:[state TO statf})"
+    );
     assert_eq!(
         sanitize_fts("\"engine state\" notes"),
-        "\"engine state\" \"notes\""
+        "\"engine state\" (\"notes\"^2 OR title:[notes TO notet} OR body:[notes TO notet})"
     );
     // An unbalanced quote is no phrase; its words are still searched.
-    assert_eq!(sanitize_fts("\"engine state"), "\"engine\" \"state\"");
+    assert_eq!(
+        sanitize_fts("\"engine state"),
+        "(\"engine\"^2 OR title:[engine TO enginf} OR body:[engine TO enginf}) (\"state\"^2 OR title:[state TO statf} OR body:[state TO statf})"
+    );
     // The bare operators are not words the reader is looking for.
     assert_eq!(
         sanitize_fts("engine AND state OR NOT x"),
-        "\"engine\" \"state\" \"x\""
+        "(\"engine\"^2 OR title:[engine TO enginf} OR body:[engine TO enginf}) (\"state\"^2 OR title:[state TO statf} OR body:[state TO statf}) (\"x\"^2 OR title:[x TO y} OR body:[x TO y})"
     );
     // Lower case they are ordinary words.
     assert_eq!(
         sanitize_fts("salt and pepper"),
-        "\"salt\" \"and\" \"pepper\""
+        "(\"salt\"^2 OR title:[salt TO salu} OR body:[salt TO salu}) (\"and\"^2 OR title:[and TO ane} OR body:[and TO ane}) (\"pepper\"^2 OR title:[pepper TO peppes} OR body:[pepper TO peppes})"
     );
     // Punctuation alone is nothing to look up, inside a phrase or out of one.
     for nothing in ["- -", "__ ___", "\"-\"", "()*:", "   ", ""] {
@@ -571,12 +656,12 @@ fn a_made_safe_query_keeps_words_and_phrases_and_nothing_else() {
     // A word may carry them.
     assert_eq!(
         sanitize_fts("last-run snake_case"),
-        "\"last-run\" \"snake_case\""
+        "(\"last-run\"^2 OR \"last-run\"*) (\"snake_case\"^2 OR \"snake_case\"*)"
     );
     // However long the input, what reaches the engine stays under its limit.
     let long = sanitize_fts(&"ab ".repeat(10_000));
     assert!(long.len() <= agent_hub::limits::SEARCH_QUERY_BYTES_MAX);
-    assert!(long.starts_with("\"ab\""));
+    assert!(long.starts_with("(\"ab\"^2"));
 }
 
 async fn append_with(db: &turso::Database, summary: &str, payload: Option<serde_json::Value>) {

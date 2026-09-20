@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, search matches by prefix with whole-word ranking
+
+* **Update**: [The human surface](architecture/human-surface.md) updates the
+  Search row to describe prefix matching: unquoted words match terms that
+  begin with the typed query, whole-word matches rank above prefix-only matches,
+  and balanced quoted phrases remain exact.
+
 ## 2026-09-20, the shipped skill says how to write for the human
 
 * **Update**: the bootstrap skill served at `/SKILL.md` gains a short section
