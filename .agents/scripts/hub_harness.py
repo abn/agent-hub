@@ -688,7 +688,10 @@ def object_keys(source: str, opener: str) -> list[str]:
                 break
             continue
         if two == "/*":
-            index = source.find("*/", index) + 2
+            closed = source.find("*/", index)
+            if closed < 0:
+                raise AssertionError("a comment in the screen table of web/app.js never closes")
+            index = closed + 2
             continue
         if ch in "'\"`":
             end = index + 1
@@ -738,6 +741,16 @@ def router_screens() -> list[str]:
     screen is a failure until it is covered rather than a gap nobody sees.
     """
     app_js = (Path(__file__).resolve().parents[2] / "web" / "app.js").read_text(encoding="utf-8")
+    # One table is read, so one table is all there may be: a second call, or
+    # one handed something other than a literal, registers screens unseen.
+    code = re.sub(r"/\*.*?\*/", "", app_js, flags=re.S)
+    code = re.sub(r"(?m)^\s*//.*$", "", code)
+    calls = re.findall(r"\bsetScreens\s*\(\s*(\{)?", code)
+    if len(calls) != 1 or calls[0] != "{":
+        raise AssertionError(
+            f"web/app.js calls setScreens {len(calls)} times, {calls.count('{')} of them with a literal table;"
+            " the screens are read from exactly one literal table"
+        )
     return object_keys(app_js, "setScreens({")
 
 

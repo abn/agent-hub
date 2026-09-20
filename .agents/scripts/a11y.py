@@ -75,6 +75,10 @@ PUBLIC_PAGES = [
     ("password-gate", lambda port, seeded: f"http://127.0.0.1:{port}/artifacts/{seeded['protected_id']}", "#hub-unlock-form"),
 ]
 
+# The pages outside the app that the walk may not lose: the artifact page and
+# the password gate in front of a protected one.
+PUBLIC_AUDITED = ("public-artifact", "password-gate")
+
 TAGS = ["wcag2a", "wcag2aa"]
 
 # Which audited routes stand for each screen the router registers. Every
@@ -146,6 +150,14 @@ def check_router_coverage() -> None:
     unexpected = [route for route in ROUTES if route not in EXPECTED]
     if unexpected:
         problems.append(f"no expected content is named for {unexpected}")
+    # A state that belongs to no one screen (the toast) is held in the walk by
+    # nothing above, so the two lists have to agree in both directions.
+    unwalked = [route for route in EXPECTED if route not in ROUTES]
+    if unwalked:
+        problems.append(f"expected content is named for {unwalked}, which the walk no longer visits")
+    public = [name for name, _url, _wait in PUBLIC_PAGES]
+    if sorted(public) != sorted(PUBLIC_AUDITED):
+        problems.append(f"the public pages walked are {public}, expected {list(PUBLIC_AUDITED)}")
     if problems:
         raise AssertionError("a11y: " + "; ".join(problems))
 
