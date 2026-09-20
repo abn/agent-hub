@@ -26,6 +26,10 @@ use crate::store::sessions::Session;
 /// it is one fixed string.
 pub const HUMAN: &str = "human";
 
+/// The operation a review is logged under. The human surface reads it back to
+/// tell a review's own write from an edit made after it.
+pub const REVIEW_OP: &str = "kb.review";
+
 /// What a write reports back.
 #[derive(Debug, Clone)]
 pub struct Written {
@@ -189,7 +193,8 @@ pub async fn review(
         return Err(no_page(&path));
     };
     let bytes = brain.get(&path).await?.ok_or_else(|| no_page(&path))?;
-    stamp_review(state, &brain, project_id, path, bytes, if_version).await
+    let at = crate::store::now_rfc3339();
+    stamp_review(state, &brain, project_id, path, bytes, if_version, &at).await
 }
 
 /// Stamp the human's review onto the bytes that were read.
@@ -197,7 +202,9 @@ pub async fn review(
 /// Apart from the read, this is the whole review. It is its own function
 /// because the promise it keeps is about the gap between that read and the
 /// write: a test hands it bytes that have since been replaced, which is the
-/// one way to stand in that gap without waiting for a race to open it.
+/// one way to stand in that gap without waiting for a race to open it. The
+/// time of the review is the caller's for the same reason: the stamp is taken
+/// before the write lands, and a test can say how long before.
 pub async fn stamp_review(
     state: &AppState,
     brain: &super::Brain,
@@ -205,12 +212,13 @@ pub async fn stamp_review(
     path: String,
     bytes: Vec<u8>,
     if_version: Option<&str>,
+    at: &str,
 ) -> Result<Written> {
     let read_version = super::version(&bytes);
     let text = String::from_utf8(bytes)
         .map_err(|_| Error::InvalidArgument(format!("the page at '{path}' is not UTF-8 text")))?;
     // A page whose frontmatter cannot be patched safely is refused, not guessed at.
-    let reviewed = review_frontmatter(&text, HUMAN, &crate::store::now_rfc3339())?;
+    let reviewed = review_frontmatter(&text, HUMAN, at)?;
     crate::limits::check_kb_page(reviewed.len())?;
 
     // One comparison, made under the write lock: against the version the
@@ -221,7 +229,7 @@ pub async fn stamp_review(
         state,
         brain,
         project_id,
-        "kb.review",
+        REVIEW_OP,
         HUMAN,
         path,
         &reviewed,

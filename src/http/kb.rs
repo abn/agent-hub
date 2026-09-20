@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::app::AppState;
-use crate::brain::knowledge::{self, HUMAN, Written};
+use crate::brain::knowledge::{self, HUMAN, REVIEW_OP, Written};
 use crate::brain::{self, Brain, EntryKind, WriteFilter, WriteRecord, is_under};
 use crate::error::Error;
 use crate::http::auth::bearer_token;
@@ -748,8 +748,13 @@ async fn get_or_compute_kb(
                         .ok()
                 })
                 .map(|dt| dt.unix_timestamp());
+            // The log orders what the clocks cannot. A review stamps its time
+            // before its write lands, so on a busy node the review's own write
+            // is timed a second or more after the stamp it carries. When the
+            // last write IS the review, nothing was edited since.
+            let reviewed_last = last_write.is_some_and(|write| write.op == REVIEW_OP);
             match (last_write, verified_ts) {
-                (Some(write), Some(verified)) if write.at > verified => {
+                (Some(write), Some(verified)) if !reviewed_last && write.at > verified => {
                     edited_since_review_count += 1;
                     "edited_since_review"
                 }

@@ -1033,6 +1033,7 @@ async fn a_review_that_names_no_version_loses_to_a_put_that_landed_after_its_rea
         "/fs/page.md".to_string(),
         read,
         None,
+        "2026-01-01T00:00:00Z",
     )
     .await;
     assert!(
@@ -1041,6 +1042,68 @@ async fn a_review_that_names_no_version_loses_to_a_put_that_landed_after_its_rea
     );
     let page = hub.page(&project, "fs/page.md").await.ok();
     assert_eq!(page["content"].as_str().expect("content"), newer);
+}
+
+#[tokio::test]
+async fn a_review_whose_write_lands_later_than_its_stamp_still_reads_as_reviewed() {
+    // The stamp is taken before the write, and the log times the write when
+    // it lands. On a busy node that is a later second, and a page must not
+    // read as edited since its review because of the review's own write.
+    use agent_hub::brain::knowledge;
+    let hub = Hub::start().await;
+    let project = hub.project("slow-review").await;
+    hub.put_page(&project, "fs/page.md", CONCEPT).await.ok();
+
+    let brain = hub
+        .state
+        .knowledge
+        .open_existing(&project, agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open")
+        .expect("the knowledge base exists");
+    let read = brain
+        .get("/fs/page.md")
+        .await
+        .expect("get")
+        .expect("the page");
+    let a_minute_ago = (time::OffsetDateTime::now_utc() - time::Duration::seconds(60))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format");
+    knowledge::stamp_review(
+        &hub.state,
+        &brain,
+        &project,
+        "/fs/page.md".to_string(),
+        read,
+        None,
+        &a_minute_ago,
+    )
+    .await
+    .expect("the review lands");
+
+    let trust = |listing: &Value| {
+        listing["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .find(|entry| entry["path"] == "/fs/page.md")
+            .expect("the page is listed")["trust"]
+            .clone()
+    };
+    let base = format!("/api/v1/projects/{project}/kb");
+    let listing = hub.get(&format!("{base}/pages?meta=1")).await.ok();
+    assert_eq!(trust(&listing), "human_reviewed");
+
+    // An edit after the review is still an edit after the review.
+    hub.put_page(&project, "fs/page.md", &concept("Caddy", "edited later"))
+        .await
+        .ok();
+    let listing = hub.get(&format!("{base}/pages?meta=1")).await.ok();
+    assert_eq!(
+        trust(&listing),
+        "unverified",
+        "a put replaces the page, its review block with it"
+    );
 }
 
 #[tokio::test]

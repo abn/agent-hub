@@ -89,9 +89,11 @@ reader can read.
 `trust` is derived, never stored: `unverified` with no `verified` entry,
 `human_reviewed` when the newest `verified.by` is `human`, `machine_confirmed`
 when it is anything else, and `edited_since_review` when the newest write to
-the path in the write log is later than that `verified.at`. The log records
-whole seconds, so a write in the same second as the review does not count as
-later.
+the path in the write log is later than that `verified.at`. A review's own
+write never counts: it is timed when it lands, which on a busy node is after
+the stamp it carries, so when the newest write is the review the page is as
+reviewed as its stamp says. The log records whole seconds, so an edit in the
+same second as the review does not count as later.
 
 ### `GET /api/v1/projects/{id}/kb/pages/{path}`
 

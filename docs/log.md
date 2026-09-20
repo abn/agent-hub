@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a review is not an edit since the review
+
+* **Update**: [The knowledge base](usage/knowledge-base.md) says how `trust`
+  treats a review's own write. It used to compare clocks only, so a page could
+  read `edited_since_review` the moment a human reviewed it on a busy node.
+
 ## 2026-09-20, tests keep their files under the build tree
 
 * **Update**: The [contributor guide](contribution/guide.md) records where a
