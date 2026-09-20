@@ -437,7 +437,8 @@ client.
 
 An inbox item is `unread` for finished work, `action` while it waits on the
 human, and `resolved` once answered or decided. The `waiting` status is
-reserved. `inbox_read` returns `event_id`, `project_id`, `kind`, `actor`,
+reserved. `inbox_read` returns `event_id`, `project_id`, `project_display_name`
+(the project's name, null when it has none), `kind`, `actor`,
 `summary`, `payload`, `status`, `created_at`, and `updated_at`, newest first
 by event id, so nothing the human does moves a row or shifts a page.
 

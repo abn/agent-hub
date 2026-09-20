@@ -16,6 +16,9 @@ pub const STATUSES: &[&str] = &["unread", "read", "action", "waiting", "resolved
 pub struct InboxItem {
     pub event_id: String,
     pub project_id: String,
+    /// The name the projects list shows, absent when no project row carries
+    /// the id. A screen that lists items says where each is from by this.
+    pub project_display_name: Option<String>,
     pub kind: String,
     pub actor: String,
     pub summary: String,
@@ -251,7 +254,21 @@ async fn list_as(
     }
     drop(rows);
     attach_decisions(&conn, &mut items).await?;
+    name_projects(&conn, &mut items).await?;
     Ok(items)
+}
+
+/// Give each item on a page the name of its project, in one read for the page.
+///
+/// The name is of a project the item already names by id, so a confined
+/// listing learns nothing it was not already shown.
+async fn name_projects(conn: &Connection, items: &mut [InboxItem]) -> Result<()> {
+    let ids: Vec<&str> = items.iter().map(|item| item.project_id.as_str()).collect();
+    let names = super::projects::display_names(conn, &ids).await?;
+    for item in items.iter_mut() {
+        item.project_display_name = names.get(&item.project_id).cloned();
+    }
+    Ok(())
 }
 
 /// Give each decided approval on a page its outcome, in one read for the page.
@@ -343,6 +360,8 @@ pub async fn open_items(db: &Database, limit: i64) -> Result<Vec<InboxItem>> {
     while let Some(row) = rows.next().await.map_err(engine)? {
         items.push(item_from_row(&row)?);
     }
+    drop(rows);
+    name_projects(&conn, &mut items).await?;
     Ok(items)
 }
 
@@ -518,6 +537,7 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         created_at: required_text(row, 7)?,
         updated_at: required_text(row, 8)?,
         decision: None,
+        project_display_name: None,
     })
 }
 

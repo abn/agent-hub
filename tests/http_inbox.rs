@@ -883,3 +883,49 @@ async fn a_decision_note_over_the_cap_is_a_problem_and_the_approval_still_waits(
     assert_eq!(problem_body(refused).await["code"], "payload_too_large");
     assert_eq!(home(&state).await["waiting"], 1, "nothing was decided");
 }
+
+#[tokio::test]
+async fn an_inbox_item_names_its_project() {
+    // The Inbox shows where an item is from. Without the name on the item the
+    // screen can only print the slug, as it did.
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
+        .await
+        .expect("create");
+    seed_approval(&state, "Restart the node?").await;
+    // An item whose project has no row still lists, with no name to give.
+    let orphan = events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "no-such-project".to_string(),
+            kind: "approval".to_string(),
+            summary: "From nowhere".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+
+    let response = router(state.clone())
+        .oneshot(request("GET", "/api/v1/inbox", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let items = body["items"].as_array().expect("items");
+    let named = items
+        .iter()
+        .find(|item| item["summary"] == "Restart the node?")
+        .expect("the approval");
+    assert_eq!(named["project_display_name"], "Engine Room", "{named}");
+    let unnamed = items
+        .iter()
+        .find(|item| item["event_id"] == orphan.as_str())
+        .expect("the orphan");
+    assert!(unnamed["project_display_name"].is_null(), "{unnamed}");
+}

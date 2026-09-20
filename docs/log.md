@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, an inbox item names its project
+
+* **Update**: [The human surface](architecture/human-surface.md) lists
+  `project_display_name` on every inbox item, over REST and over `inbox_read`
+  alike, null for an id no project row carries. Home's `waiting_items` are the
+  same entries, so their shape is unchanged.
+
 ## 2026-09-20, the decision dialogs take a note
 
 * **Update**: [The human surface](architecture/human-surface.md) says the

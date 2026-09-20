@@ -71,6 +71,10 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
     );
     assert_eq!(finished_item["kind"], "finished");
     assert_eq!(
+        finished_item["project_display_name"], "Project",
+        "an item says where it is from by name"
+    );
+    assert_eq!(
         finished_item["actor"], AGENT_ID,
         "the actor is the resolved principal"
     );

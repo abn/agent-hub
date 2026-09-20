@@ -41,7 +41,7 @@ and session-bound work goes through the proxy.
 | `signal_append` | Append an event to a project feed. |
 | `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
-| `inbox_read` | Read the human's global inbox, optionally by status or project. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. |
+| `inbox_read` | Read the human's global inbox, optionally by status or project. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
 | `artifact_get` | Read an artifact's content and metadata, optionally one version. |

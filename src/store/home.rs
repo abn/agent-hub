@@ -33,15 +33,6 @@ pub struct HomeUnseen {
     pub project_display_name: Option<String>,
 }
 
-/// An item that waits on the human as Home's card shows it: the inbox entry,
-/// and the name of its project.
-#[derive(Debug, Clone, Serialize)]
-pub struct HomeWaiting {
-    #[serde(flatten)]
-    pub item: inbox::InboxItem,
-    pub project_display_name: Option<String>,
-}
-
 /// How many waiting items Home carries. The card shows a few and hands over to
 /// the Inbox; `waiting` holds the size of the whole queue.
 pub const HOME_WAITING_LIMIT: i64 = 5;
@@ -59,7 +50,7 @@ pub struct Home {
     /// The newest of those items themselves, newest first, at most
     /// [`HOME_WAITING_LIMIT`] of them, so the card does not depend on a
     /// waiting item being among the newest events.
-    pub waiting_items: Vec<HomeWaiting>,
+    pub waiting_items: Vec<inbox::InboxItem>,
     /// Agents with a session touched inside the active window.
     pub agents_active: i64,
     /// When the newest event landed, absent when nothing has happened yet.
@@ -98,13 +89,13 @@ pub async fn home(
     let unseen = events::unseen_counts(db).await?;
     let agents_active = crate::store::sessions::agents_active(db, active_since, None).await?;
 
-    // One read names every project the response mentions.
+    // One read names every project the feed rows mention. A waiting item
+    // already carries its own name.
     let conn = super::connect(db)?;
     let ids: Vec<&str> = recent
         .iter()
         .map(|event| event.project_id.as_str())
         .chain(unseen.iter().map(|row| row.project_id.as_str()))
-        .chain(waiting_items.iter().map(|item| item.project_id.as_str()))
         .collect();
     let names = crate::store::projects::display_names(&conn, &ids).await?;
     let recent: Vec<HomeEvent> = recent
@@ -119,13 +110,6 @@ pub async fn home(
         .map(|unseen| HomeUnseen {
             project_display_name: names.get(&unseen.project_id).cloned(),
             unseen,
-        })
-        .collect();
-    let waiting_items = waiting_items
-        .into_iter()
-        .map(|item| HomeWaiting {
-            project_display_name: names.get(&item.project_id).cloned(),
-            item,
         })
         .collect();
     Ok(Home {
