@@ -139,24 +139,44 @@ function summary(usage) {
   card.append(figures, bar);
   if (sliver) card.appendChild(el("p", "storage-scale", SLIVER_NOTE));
   card.appendChild(legend);
+  // The hub store is one file. A row owns the bytes of its own events; the
+  // rest of the file is no project's, so the rows' events add up to less than
+  // the legend's, and the card says by how much and why.
+  if (usage.events_shared_bytes > 0) {
+    card.appendChild(
+      el(
+        "p",
+        "storage-shared",
+        `Events includes ${formatBytes(usage.events_shared_bytes)} of hub database that every ` +
+          `project shares. A row counts only its project's own events.`,
+      ),
+    );
+  }
   return card;
 }
 
+// A row's four figures, in the order the bar stacks them. They are the hub's
+// own, and the row's total is their sum.
+const partsOf = (project) => [
+  ["events", project.events_bytes ?? 0],
+  ["sessions", project.session_bytes ?? 0],
+  ["artifacts", project.artifact_bytes ?? 0],
+  ["knowledge", project.kb_bytes ?? 0],
+];
+const totalOf = (project) => partsOf(project).reduce((sum, [, bytes]) => sum + bytes, 0);
+const projectHref = (project) => `#/projects/${encodeURIComponent(project.project_id)}/sessions`;
+
 function projectRow(project) {
   const id = project.project_id;
-  const parts = [
-    ["sessions", project.session_bytes],
-    ["artifacts", project.artifact_bytes],
-    ["knowledge", project.kb_bytes],
-  ];
-  const total = parts.reduce((sum, [, bytes]) => sum + bytes, 0);
+  const parts = partsOf(project);
+  const total = totalOf(project);
   const row = el("div", "row storage-row");
   row.dataset.project = id;
 
   const top = el("div", "storage-row-top");
   const title = el("div", "title");
   const link = el("a", "", projectName(project));
-  link.href = `#/projects/${encodeURIComponent(id)}/sessions`;
+  link.href = projectHref(project);
   title.appendChild(link);
   top.append(title, el("span", "storage-total mono", formatBytes(total)));
 
@@ -183,6 +203,27 @@ function projectRow(project) {
   }
   row.append(top, bar, foot);
   return row;
+}
+
+// The hub lists every project, so that one a prune has just emptied keeps its
+// row: it still holds its events. A project that never held anything would
+// be a row of zeros, and a run of those is noise, so they fold under a count
+// and stay one press away.
+function idleFold(projects) {
+  const fold = el("details", "storage-idle");
+  fold.appendChild(
+    el("summary", "", projects.length === 1 ? "1 project holds nothing" : `${projects.length} projects hold nothing`),
+  );
+  const list = el("ul", "storage-idle-list");
+  for (const project of projects) {
+    const item = el("li");
+    const link = el("a", "", projectName(project));
+    link.href = projectHref(project);
+    item.appendChild(link);
+    list.appendChild(item);
+  }
+  fold.appendChild(list);
+  return fold;
 }
 
 function pruneAllCard(usage) {
@@ -309,8 +350,9 @@ export async function storageScreen(gen) {
   const root = main.querySelector(".storage");
   root.appendChild(head(usage));
   // The hub's own store is never empty, so "nothing stored" is the projects
-  // holding nothing: no brain, no artifact, no knowledge base.
-  if (!usage.total_bytes) {
+  // holding nothing: no brain, no artifact, no knowledge base, and no events
+  // of their own, which `total_bytes` does not count.
+  if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
     root.appendChild(emptyState(EMPTY_COPY.storage));
     return;
   }
@@ -320,7 +362,10 @@ export async function storageScreen(gen) {
   label.id = "storage-by-title";
   byProject.setAttribute("aria-labelledby", label.id);
   const list = el("div", "storage-projects");
-  for (const project of usage.projects) list.appendChild(projectRow(project));
+  const holding = usage.projects.filter((project) => totalOf(project) > 0 || project.prunable_sessions > 0);
+  const idle = usage.projects.filter((project) => !holding.includes(project));
+  for (const project of holding) list.appendChild(projectRow(project));
   byProject.append(label, list);
+  if (idle.length) byProject.appendChild(idleFold(idle));
   root.append(byProject, pruneAllCard(usage));
 }

@@ -997,10 +997,15 @@ STORAGE_FIXTURE = {
         "artifacts": int(2.9 * GIB),
         "knowledge": 0,
     },
+    # The hub store is one file: a row owns its events' own bytes, and the rest
+    # of the file belongs to no project.
+    "events_shared_bytes": int(0.6 * GIB) - 120 * 1024**2,
     "prunable": {"sessions": 0, "bytes": 0},
     "projects": [
         {
             "project_id": '<b id="pwned-storage">attic</b>',
+            "project_display_name": None,
+            "events_bytes": 120 * 1024**2,
             "artifact_bytes": int(2.9 * GIB),
             "session_bytes": int(2.1 * GIB),
             "kb_bytes": 0,
@@ -1025,6 +1030,7 @@ STORAGE_DRAWN = (
     "  summary: summary && { used: text(summary.querySelector('.storage-used')),"
     "   capacity: text(summary.querySelector('.storage-capacity')),"
     "   scale: text(summary.querySelector('.storage-scale')),"
+    "   shared: text(summary.querySelector('.storage-shared')),"
     "   bar: bar(summary.querySelector('.storage-bar')),"
     "   legend: [...summary.querySelectorAll('.storage-legend li')].map((li) => ({"
     "    kind: li.dataset.kind, text: text(li) })) },"
@@ -1034,6 +1040,11 @@ STORAGE_DRAWN = (
     "   detail: text(row.querySelector('.storage-detail')),"
     "   bar: bar(row.querySelector('.storage-bar')),"
     "   prune: text(row.querySelector('button.storage-prune')) })),"
+    "  idle: ((fold) => fold && { open: fold.open, summary: text(fold.querySelector('summary')),"
+    "   height: fold.querySelector('summary').getBoundingClientRect().height,"
+    "   links: [...fold.querySelectorAll('a')].map((a) => ({ name: text(a),"
+    "    href: a.getAttribute('href'), height: a.getBoundingClientRect().height })) })"
+    "   (root.querySelector('details.storage-idle')),"
     "  all: text(root.querySelector('.storage-all')),"
     "  review: text(root.querySelector('.storage-all button.storage-review')) }; })()"
 )
@@ -1114,6 +1125,16 @@ def storage_shares(watch: Watch, where: str, bar: dict, wanted: list, whole: int
             watch.fail(f"{where} separates {kind} from the next segment by colour alone")
 
 
+def storage_parts(project: dict) -> list:
+    """A project row's four figures, in the order the bar stacks them."""
+    return [
+        ("events", project["events_bytes"]),
+        ("sessions", project["session_bytes"]),
+        ("artifacts", project["artifact_bytes"]),
+        ("knowledge", project["kb_bytes"]),
+    ]
+
+
 def check_storage_numbers(page, watch: Watch) -> None:
     """Every figure on the storage screen is the one the hub reported."""
     watch.enter("storage: the numbers")
@@ -1142,17 +1163,24 @@ def check_storage_numbers(page, watch: Watch) -> None:
             if said not in bar["label"]:
                 watch.fail(f"the bar's text alternative leaves out {said!r}: {bar['label']!r}")
 
+    # What no project owns is said in words, with the hub's own figure, so the
+    # rows adding up to less than the legend's events is not left unexplained.
+    shared = storage_bytes(usage["events_shared_bytes"])
+    if shared not in (summary["shared"] or "") or "every project shares" not in (summary["shared"] or ""):
+        watch.fail(f"the part of events no project owns ({shared}) is said as {summary['shared']!r}")
+    rows_events = sum(project["events_bytes"] for project in usage["projects"])
+    if rows_events + usage["events_shared_bytes"] != usage["by_kind"]["events"]:
+        watch.fail("the rows' events and the shared part do not add up to the legend's events")
+
     rows = {row["project"]: row for row in drawn["rows"]}
     for project in usage["projects"]:
+        if not any(count for _kind, count in storage_parts(project)):
+            continue
         row = rows.get(project["project_id"])
         if not row:
             watch.fail(f"no row for {project['project_id']}")
             continue
-        parts = [
-            ("sessions", project["session_bytes"]),
-            ("artifacts", project["artifact_bytes"]),
-            ("knowledge", project["kb_bytes"]),
-        ]
+        parts = storage_parts(project)
         total = sum(count for _kind, count in parts)
         if row["total"] != storage_bytes(total):
             watch.fail(f"{project['project_id']} totals {row['total']!r}, not {storage_bytes(total)}")
@@ -1268,6 +1296,70 @@ def check_storage_bar(page, watch: Watch) -> None:
         if not sliver and (said or named):
             watch.fail(f"a bar drawn against the volume says {said!r} and is named {bar['label']!r}")
 
+    # A row splits four ways, to scale against its own total, and a kind the
+    # project holds none of draws nothing and is still listed in words.
+    watch.enter("storage: a row's four parts")
+    usage, drawn = open_storage(page, STORAGE_FIXTURE)
+    row = drawn["rows"][0] if drawn and drawn["rows"] else None
+    parts = storage_parts(usage["projects"][0])
+    total = sum(count for _kind, count in parts)
+    if not row:
+        watch.fail("the fixture's project draws no row")
+    else:
+        if row["total"] != storage_bytes(total):
+            watch.fail(f"the row totals {row['total']!r}, its four parts make {storage_bytes(total)}")
+        detail = " · ".join(f"{kind} {storage_bytes(count)}" for kind, count in parts)
+        if row["detail"] != detail:
+            watch.fail(f"the row details {row['detail']!r}, expected {detail!r}")
+        storage_shares(watch, "the fixture's row", row["bar"], parts, total)
+        if row["bar"] and row["bar"]["hidden"] != "true":
+            watch.fail("the row's bar is not hidden from a reader who has the words under it")
+
+    # A project a prune emptied still holds its events, and keeps its row. One
+    # that never held anything is folded away under a count, still reachable.
+    watch.enter("storage: projects that hold nothing")
+    base = dict(STORAGE_FIXTURE["projects"][0], project_display_name=None)
+    nothing = dict(events_bytes=0, session_bytes=0, artifact_bytes=0, kb_bytes=0)
+    folded = dict(
+        STORAGE_FIXTURE,
+        projects=[
+            dict(base, project_id="full"),
+            dict(base, **dict(nothing, events_bytes=462), project_id="emptied"),
+            dict(base, **nothing, project_id="blank-one", project_display_name="Blank one"),
+            dict(base, **nothing, project_id="blank-two"),
+        ],
+    )
+    _usage, drawn = open_storage(page, folded)
+    listed = [row["project"] for row in (drawn or {}).get("rows", [])]
+    if listed != ["full", "emptied"]:
+        watch.fail(f"the rows are {listed}, expected the two projects that hold something")
+    emptied = next((row for row in (drawn or {}).get("rows", []) if row["project"] == "emptied"), None)
+    if emptied and (emptied["total"] != "462 B" or not emptied["detail"].startswith("events 462 B · sessions 0 B")):
+        watch.fail(f"the emptied project's row reads {emptied['total']!r} / {emptied['detail']!r}")
+    idle = (drawn or {}).get("idle")
+    if not idle:
+        watch.fail("the projects that hold nothing are not on the screen at all")
+    else:
+        if idle["summary"] != "2 projects hold nothing" or idle["open"]:
+            watch.fail(f"the fold reads {idle['summary']!r} and is {'open' if idle['open'] else 'folded'}")
+        if idle["height"] + 0.5 < 44:
+            watch.fail(f"the fold's disclosure is a {idle['height']:.0f}px target")
+        if [(link["name"], link["href"]) for link in idle["links"]] != [
+            ("Blank one", "#/projects/blank-one/sessions"),
+            ("blank-two", "#/projects/blank-two/sessions"),
+        ]:
+            watch.fail(f"the fold lists {idle['links']}")
+        page.click("main details.storage-idle summary")
+        heights = page.evaluate(
+            "[...document.querySelectorAll('main details.storage-idle a')]"
+            ".map((a) => a.getBoundingClientRect().height)"
+        )
+        if not heights or min(heights) + 0.5 < 44:
+            watch.fail(f"the folded projects' links are {heights}px targets")
+    _usage, drawn = open_storage(page, STORAGE_FIXTURE)
+    if drawn and drawn["idle"]:
+        watch.fail(f"a hub with no empty project still draws the fold: {drawn['idle']}")
+
     watch.enter("storage: a volume that cannot be measured")
     unmeasured = dict(STORAGE_FIXTURE, capacity_bytes=None, free_bytes=None)
     usage, drawn = open_storage(page, unmeasured)
@@ -1277,6 +1369,30 @@ def check_storage_bar(page, watch: Watch) -> None:
         if drawn["summary"]["capacity"]:
             watch.fail(f"a capacity is shown that the hub did not report: {drawn['summary']['capacity']!r}")
         storage_shares(watch, "the summary", drawn["summary"]["bar"], kinds, usage["used_bytes"])
+
+    watch.enter("storage: only events stored")
+    row = dict(STORAGE_FIXTURE["projects"][0])
+    events_only = dict(
+        STORAGE_FIXTURE,
+        total_bytes=0,
+        projects=[
+            dict(
+                row,
+                events_bytes=2048,
+                session_bytes=0,
+                artifact_bytes=0,
+                kb_bytes=0,
+                prunable_sessions=0,
+                prunable_bytes=0,
+            )
+        ],
+        by_kind={"events": 6144, "sessions": 0, "artifacts": 0, "knowledge": 0},
+    )
+    _usage, drawn = open_storage(page, events_only)
+    if not drawn or drawn["empty"]:
+        watch.fail(f"a hub whose projects hold only events reads {drawn and drawn['empty']!r}")
+    elif len(drawn["rows"]) != 1:
+        watch.fail(f"a project that holds only events has {len(drawn['rows'])} rows")
 
     watch.enter("storage: nothing stored")
     nothing = dict(
@@ -1356,10 +1472,12 @@ def check_storage_prune(page, watch: Watch) -> None:
     settle(page, f"!document.querySelector({button!r})")
     if page.query_selector(button):
         watch.fail("the pruned project still offers a prune")
-    # A project left holding nothing drops out of the response altogether.
+    # The emptied project stays in the response and keeps its row until undo.
     after = [p for p in storage_usage(watch)["projects"] if p["project_id"] == project]
-    if after and after[0]["prunable_sessions"]:
-        watch.fail("the hub still holds the project's ended sessions")
+    if not after or after[0]["prunable_sessions"] or after[0]["session_bytes"]:
+        watch.fail(f"the hub reports the pruned project as {after}")
+    if not page.query_selector(f'.storage-projects .storage-row[data-project="{project}"]'):
+        watch.fail("the project a prune emptied lost its row before the undo window closed")
 
     undone = watch.count(UNDO_CALL)
     page.click(".toast-undo")
@@ -1447,7 +1565,11 @@ def check_storage_keys(page, watch: Watch) -> None:
     )
     # A painted list parks its selection on the first row, so the first press
     # moves to the second.
-    ids = [p["project_id"] for p in usage["projects"]] if usage else []
+    ids = [
+        p["project_id"]
+        for p in (usage["projects"] if usage else [])
+        if any(count for _kind, count in storage_parts(p))
+    ]
     target = ids[min(1, len(ids) - 1)] if ids else None
     if on != target:
         watch.fail(f"j put focus on the row for {on!r}, expected {target!r}")

@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a storage row splits four ways
+
+* **Update**: [The human surface](architecture/human-surface.md) says a
+  Storage row now shows a project's events beside its sessions, artifacts and
+  knowledge, in its bar and in words, that the summary card names the shared
+  part of the hub database and gives its size, and that projects holding
+  nothing fold under a count while an emptied project keeps its row.
+
 ## 2026-09-20, the screens call a project by its name
 
 * **Update**: [The human surface](architecture/human-surface.md) says the
