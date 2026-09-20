@@ -409,59 +409,79 @@ export async function answer(id, button) {
 // the refusal of the second would be the last thing the reader is told.
 const deciding = new Set();
 
-async function decide(id, decision) {
+async function decide(id, decision, note) {
   deciding.add(id);
   try {
-    await send(id, decision);
+    await send(id, decision, note);
   } finally {
     deciding.delete(id);
   }
 }
 
-async function send(id, decision) {
+// The note a decision may carry, in the design's words for it. The limit is
+// the hub's, which counts the trimmed note's characters and is the one that
+// refuses; here it only places the count.
+const NOTE = { label: "Add guidance with your decision", limit: 2000 };
+
+// A blank note is no note, so the key is left out rather than sent empty.
+async function send(id, decision, note) {
   try {
     await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
       method: "POST",
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify(note ? { decision, note } : { decision }),
     });
   } catch (error) {
+    // A note past the limit is refused whole: nothing was decided and nothing
+    // moved, so the dialog says so beside the field and the list stays put.
+    if (error.status === 413) {
+      throw new Error(`The note is over the ${NOTE.limit} character limit, so nothing was decided.`);
+    }
     // The item may have been decided elsewhere, so the queue is reread before
     // the failure is reported.
     await render();
-    throw error;
+    throw new Error(`Nothing changed: ${error.message}`);
   }
   await render();
 }
 
-// An approval is a decision. It is recorded on the feed and leaves the waiting
-// queue, so the dialog names what is approved and the toast states the result.
-export async function approve(id, summary) {
+// A decision is recorded on the feed and leaves the waiting queue, so the
+// dialog names what is decided and the toast states the result. The request
+// is sent with the dialog still open: a refusal lands beside the note rather
+// than after the words are gone.
+async function ask(id, decision, { title, danger, tone, done }) {
   if (deciding.has(id)) return;
+  let noted = false;
   const confirmed = await confirmAction({
-    title: summary ? `Approve "${summary}"?` : "Approve this action?",
+    title,
     body: "Your decision is recorded on the feed and resolves the waiting item.",
     safe: "Not now",
-    danger: "Approve",
-    tone: "action",
+    danger,
+    tone,
+    field: NOTE,
+    commit: async (note) => {
+      noted = !!note;
+      await decide(id, decision, note);
+    },
   });
-  if (!confirmed) return;
-  await decide(id, "approve");
-  toast("Approved, recorded on the feed.");
+  if (confirmed) toast(`${done}${noted ? " with your note" : ""}, recorded on the feed.`);
 }
 
-// The other answer to the same question, asked the same way.
-async function declineApproval(id, summary) {
-  if (deciding.has(id)) return;
-  const confirmed = await confirmAction({
-    title: summary ? `Decline "${summary}"?` : "Decline this action?",
-    body: "Your decision is recorded on the feed and resolves the waiting item.",
-    safe: "Not now",
-    danger: "Decline",
+export const approve = (id, summary) =>
+  ask(id, "approve", {
+    title: summary ? `Approve "${summary}"?` : "Approve this action?",
+    danger: "Approve",
+    tone: "action",
+    done: "Approved",
   });
-  if (!confirmed) return;
-  await decide(id, "decline");
-  toast("Declined, recorded on the feed.");
-}
+
+// The other answer to the same question, asked the same way.
+const declineApproval = (id, summary) =>
+  ask(id, "decline", {
+    title: summary ? `Decline "${summary}"?` : "Decline this action?",
+    danger: "Decline",
+    tone: "danger",
+    done: "Declined",
+  });
 
 // Read state moves one way and back, so the toast carries the way back and its
 // live region says what a swipe did for a reader who did not see the row move.

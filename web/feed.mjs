@@ -53,6 +53,19 @@ export function kindChips(active) {
 // who gets neither.
 const UNREAD = `<span class="dot-unread" aria-hidden="true"></span><span class="sr-only">Unread</span>`;
 
+// The note a human left with a decision, on the row of the decision's own
+// event. The word before it is this module's, picked by the payload's
+// `decision`; the note is whatever was typed, so it goes through `esc`.
+const DECIDED = { approved: "Approved", declined: "Declined" };
+
+function decisionNote(event) {
+  const payload = event.payload;
+  const note = payload && typeof payload.note === "string" ? payload.note.trim() : "";
+  if (!note) return "";
+  const word = DECIDED[payload.decision] || "Note";
+  return `<div class="feed-note">${word}: ${esc(note)}</div>`;
+}
+
 // The feed's own row. Event ids sort by age, which is how the hub compares
 // them to the cursor too, so an id above the baseline is an unseen event.
 function feedRow(event, baseline) {
@@ -61,6 +74,7 @@ function feedRow(event, baseline) {
     ${glyph(event.kind)}
     <div class="grow" data-id="${esc(event.id)}">
       <div class="title">${esc(event.summary)}</div>
+      ${decisionNote(event)}
       <div class="meta">${esc(event.actor)} · ${when(event.created_at)}</div>
     </div>
     ${isOpen(event) ? actionFor(event) : ""}

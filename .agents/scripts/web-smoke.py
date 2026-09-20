@@ -5665,6 +5665,224 @@ def check_inbox_decline(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+NOTE_FIELD = "dialog.dialog textarea.dialog-field"
+NOTE_HOSTILE = 'not <b id="note-pwned">today</b>, wait for the backup'
+NOTE_LIMIT = 2000
+NOTE_STATE = (
+    "(() => { const box = document.querySelector('dialog.dialog[open]'); if (!box) return null;"
+    " const field = box.querySelector('textarea.dialog-field');"
+    " const text = (el) => (el && el.getClientRects().length ? el.textContent.replace(/\\s+/g, ' ').trim() : '');"
+    " const label = field && box.querySelector(`label[for=\"${field.id}\"]`);"
+    " return { field: !!field, value: field ? field.value : null,"
+    "  label: label ? label.textContent.replace(/\\s+/g, ' ').trim() : '',"
+    "  labelSize: label ? parseFloat(getComputedStyle(label).fontSize) : 0,"
+    "  required: !!field && field.required, capped: !!field && field.hasAttribute('maxlength'),"
+    "  invalid: field ? field.getAttribute('aria-invalid') : null,"
+    "  described: field ? (field.getAttribute('aria-describedby') || '').split(' ')"
+    "   .map((id) => document.getElementById(id)).filter(Boolean).length : 0,"
+    "  count: text(box.querySelector('.dialog-count')),"
+    "  countLive: (box.querySelector('.dialog-count') || { getAttribute() {} }).getAttribute('aria-live') || '',"
+    "  problem: text(box.querySelector('.dialog-error')),"
+    "  kept: text(box.querySelector('.dialog-kept')),"
+    "  focus: document.activeElement ? document.activeElement.className : '' }; })()"
+)
+
+
+def open_decision(page, watch: Watch, item: str, action: str) -> bool:
+    """Reread the inbox and open one item's decision dialog from its row."""
+    goto(page, "#/settings", "Settings")
+    goto(page, "#/inbox", "Inbox")
+    button = f'main .inbox-item[data-id="{item}"] .inbox-row [data-action="{action}"]'
+    if not settle(page, f"!!document.querySelector({json.dumps(button)})"):
+        watch.fail("the seeded approval is not in the inbox")
+        return False
+    page.click(button)
+    page.wait_for_selector("dialog.dialog[open]")
+    return True
+
+
+def check_decision_note(page, watch: Watch, port: int, project: str) -> None:
+    """A decision may carry a note: optional, counted near its limit, never lost, and shown after."""
+    watch.enter("inbox: a note with a decision")
+    declined = one_off_event(port, project, "approval", "note check: drop the cache volume")
+    approved = one_off_event(port, project, "approval", "note check: restart the proxy")
+    call = "/api/v1/approvals/"
+    sent: list[tuple[str, dict]] = []
+
+    def note(request) -> None:
+        if request.method == "POST" and call in request.url and request.url.endswith("/decision"):
+            sent.append((request.url.split(call)[1].split("/")[0], json.loads(request.post_data or "{}")))
+
+    page.on("request", note)
+    try:
+        if not open_decision(page, watch, declined, "inbox-decline"):
+            return
+        state = page.evaluate(NOTE_STATE)
+        if not state["field"]:
+            watch.fail("the decline dialog offers no note field")
+            return
+        if "Add guidance with your decision" not in state["label"] or "optional" not in state["label"]:
+            watch.fail(f"the note field is labelled {state['label']!r}")
+        if state["labelSize"] < 12 or state["required"]:
+            watch.fail(f"the note's label is {state['labelSize']}px, required: {state['required']}")
+        if "dialog-safe" not in state["focus"]:
+            watch.fail(f"the dialog opened with focus on {state['focus']!r}, not on the safe action")
+        if state["count"] or state["problem"]:
+            watch.fail(f"an empty note already shows {state['count']!r} / {state['problem']!r}")
+        # The field is in the dialog's own ring: back from the first button is
+        # the field, and back from the field wraps inside the dialog.
+        page.keyboard.press("Shift+Tab")
+        if "dialog-field" not in page.evaluate(FOCUS_CLASS):
+            watch.fail(f"Shift+Tab from the safe action reached {page.evaluate(FOCUS_CLASS)!r}, not the note")
+        page.keyboard.press("Shift+Tab")
+        if not page.evaluate(FOCUS_IN_DIALOG) or "dialog-commit" not in page.evaluate(FOCUS_CLASS):
+            watch.fail(f"Shift+Tab from the note left the dialog's ring for {page.evaluate(FOCUS_CLASS)!r}")
+
+        # Esc is Keep, except while the dialog holds words: from the field, a
+        # second time, and from a button beside it, the note stays.
+        page.fill(NOTE_FIELD, "half a note")
+        for where in (NOTE_FIELD, NOTE_FIELD, "dialog.dialog .dialog-safe"):
+            page.focus(where)
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(250)
+            state = page.evaluate(NOTE_STATE)
+            if not state or state["value"] != "half a note":
+                watch.fail(f"Esc on {where!r} threw the note away: {state and state['value']!r}")
+                return
+        if "kept" not in state["kept"]:
+            watch.fail(f"Esc kept the note and said {state['kept']!r}")
+        # Pressed again and again with nothing between: each press is refused
+        # on its own, not only the first the browser lets a page refuse.
+        page.focus(NOTE_FIELD)
+        for press in range(1, 6):
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(120)
+            state = page.evaluate(NOTE_STATE)
+            if not state or state["value"] != "half a note":
+                watch.fail(f"Esc number {press} in a row threw the note away")
+                return
+        if sent:
+            watch.fail(f"Esc sent {sent}")
+
+        # The count shows near the limit, in words past it, and the hub's
+        # refusal lands beside the field with the note and the item untouched.
+        page.fill(NOTE_FIELD, "x" * (NOTE_LIMIT - 300))
+        if page.evaluate(NOTE_STATE)["count"]:
+            watch.fail(f"a note far from the limit shows {page.evaluate(NOTE_STATE)['count']!r}")
+        page.fill(NOTE_FIELD, "x" * (NOTE_LIMIT - 100))
+        near = page.evaluate(NOTE_STATE)
+        if near["count"] != f"{NOTE_LIMIT - 100} of {NOTE_LIMIT} characters" or near["described"] < 1:
+            watch.fail(f"near the limit the count reads {near['count']!r} (described by {near['described']})")
+        if near["countLive"] != "polite":
+            watch.fail(f"the count is not said as it changes (aria-live: {near['countLive']!r})")
+        # The hub counts characters of the trimmed note, so the dialog does:
+        # a character outside the basic plane is one, and padding is none.
+        page.fill(NOTE_FIELD, "   " + chr(0x1F9ED) * (NOTE_LIMIT - 100) + "   ")
+        wide = page.evaluate(NOTE_STATE)["count"]
+        if wide != f"{NOTE_LIMIT - 100} of {NOTE_LIMIT} characters":
+            watch.fail(f"a padded note of {NOTE_LIMIT - 100} wide characters counts as {wide!r}")
+        long_note = "y" * (NOTE_LIMIT + 1)
+        page.fill(NOTE_FIELD, long_note)
+        over = page.evaluate(NOTE_STATE)
+        if "1 over" not in over["count"] or over["capped"]:
+            watch.fail(f"one past the limit the count reads {over['count']!r} (maxlength: {over['capped']})")
+        armed, watch.armed = watch.armed, False
+        try:
+            with page.expect_response(lambda r: r.url.endswith(f"{declined}/decision")) as refused:
+                page.click("dialog.dialog .dialog-commit")
+            if refused.value.status != 413:
+                watch.fail(f"the hub answered a note past the limit with {refused.value.status}")
+            settle(page, "!!(document.querySelector('dialog.dialog .dialog-error') || {}).textContent")
+        finally:
+            watch.armed = armed
+        state = page.evaluate(NOTE_STATE)
+        if not state:
+            watch.fail("a refused note closed the dialog")
+            return
+        if str(NOTE_LIMIT) not in state["problem"] or "nothing was decided" not in state["problem"].lower():
+            watch.fail(f"the refusal beside the field reads {state['problem']!r}")
+        if state["value"] != long_note or state["invalid"] != "true":
+            watch.fail(f"the refused note is {len(state['value'])} characters, invalid: {state['invalid']}")
+        if "dialog-field" not in state["focus"]:
+            watch.fail(f"after a refused note focus is on {state['focus']!r}, not on the note")
+        waiting = json.loads(harness.request(port, "GET", "/api/v1/inbox?status=action&limit=500"))
+        if declined not in [item["event_id"] for item in waiting["items"]]:
+            watch.fail("a refused note still decided the approval")
+        # The refusal was about the note as sent. Once the note changes it is
+        # no longer true, so it goes, and the field is no longer marked wrong.
+        page.fill(NOTE_FIELD, "short")
+        edited = page.evaluate(NOTE_STATE)
+        if edited["problem"] or edited["invalid"] == "true":
+            watch.fail(
+                f"an edited note still reads {edited['problem']!r}, invalid: {edited['invalid']}"
+            )
+        # A toast an earlier decision raised may still be up; none may say this one landed.
+        said = page.evaluate("[...document.querySelectorAll('.toast-text')].map((n) => n.textContent).join(' | ')")
+        if "Declined" in said:
+            watch.fail(f"a refused note raised a toast: {said!r}")
+
+        # A note that fits goes with the decision, trimmed, and is shown on the feed as text.
+        sent.clear()
+        page.fill(NOTE_FIELD, f"  {NOTE_HOSTILE}  ")
+        page.click("dialog.dialog .dialog-commit")
+        page.wait_for_selector("dialog.dialog", state="detached")
+        if not settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{declined}\"]')"):
+            watch.fail("the declined approval still waits")
+        if sent != [(declined, {"decision": "decline", "note": NOTE_HOSTILE})]:
+            watch.fail(f"declining with a note sent {sent}")
+        settle(page, "[...document.querySelectorAll('.toast-text')].some((n) => n.textContent.includes('Declined'))")
+        said = page.text_content(".toast-text") or ""
+        if "Declined" not in said or "note" not in said:
+            watch.fail(f"the toast reads {said!r}")
+        page.evaluate(f"location.hash = '#/projects/{quote(project)}/feed'")
+        shown = (
+            "[...document.querySelectorAll('main .feed-row .feed-note')]"
+            f".map((el) => el.textContent.replace(/\\s+/g, ' ').trim()).filter((text) => text.includes({json.dumps(NOTE_HOSTILE)}))"
+        )
+        if not settle(page, f"{shown}.length > 0"):
+            watch.fail("the feed does not show the note left with the decision")
+        elif page.evaluate(shown) != [f"Declined: {NOTE_HOSTILE}"]:
+            watch.fail(f"the feed shows the decision's note as {page.evaluate(shown)}")
+        if page.evaluate("!!document.getElementById('note-pwned')"):
+            watch.fail("a decision's note became an element on the feed")
+
+        # No note is no `note`: Esc on an empty field is Keep, and approving
+        # without words sends the decision alone.
+        sent.clear()
+        if not open_decision(page, watch, approved, "approve"):
+            return
+        page.focus(NOTE_FIELD)
+        page.keyboard.press("Escape")
+        page.wait_for_selector("dialog.dialog", state="detached")
+        page.wait_for_timeout(WRITE_WINDOW)
+        if sent:
+            watch.fail(f"Esc on an empty note sent {sent}")
+        if not open_decision(page, watch, approved, "approve"):
+            return
+        page.fill(NOTE_FIELD, "   ")
+        # Two presses before the first answer comes back are one decision.
+        page.evaluate(
+            "(() => { const b = document.querySelector('dialog.dialog .dialog-commit'); b.click(); b.click(); })()"
+        )
+        page.wait_for_selector("dialog.dialog", state="detached")
+        settle(page, f"!document.querySelector('main .inbox-item[data-id=\"{approved}\"]')")
+        page.wait_for_timeout(WRITE_WINDOW)
+        if sent != [(approved, {"decision": "approve"})]:
+            watch.fail(f"approving without a note sent {sent}")
+    finally:
+        page.remove_listener("request", note)
+        page.evaluate("document.querySelectorAll('dialog[open]').forEach((d) => d.close())")
+        # Whatever the screen did, neither item outlives this check.
+        for item in (declined, approved):
+            try:
+                harness.request(port, "POST", f"/api/v1/approvals/{item}/decision", {"decision": "approve"})
+            except Exception:
+                pass
+        page.evaluate("document.querySelector('.toast-close')?.click()")
+        goto(page, "#/inbox", "Inbox")
+    watch.drain_rejections()
+
+
 def check_inbox_refresh(page, watch: Watch) -> None:
     """The last-synced line is a real time, and both ways of refreshing move it."""
     watch.enter("inbox: refresh")
@@ -6231,6 +6449,7 @@ def run() -> int:
                 run_step(watch, check_inbox_decline, page, watch)
                 run_step(watch, check_inbox_row_opens, page, watch)
                 run_step(watch, check_inbox_one_decision, page, watch, port, project)
+                run_step(watch, check_decision_note, page, watch, port, project)
                 run_step(watch, check_inbox_refresh, page, watch)
                 run_step(watch, check_inbox_mark_all, page, watch)
                 run_step(watch, check_inbox_empty, page, watch)

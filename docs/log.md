@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the decision dialogs take a note
+
+* **Update**: [The human surface](architecture/human-surface.md) says the
+  Approve and Decline dialogs offer an optional note, how its count, the hub's
+  refusal of one too long and Esc over a written note behave, and that the
+  project feed shows the note on the decision's row. The inbox does not list
+  resolved items, so it shows no decided approval.
+
 ## 2026-09-20, a search row says what it found
 
 * **Update**: [The human surface](architecture/human-surface.md) says a search

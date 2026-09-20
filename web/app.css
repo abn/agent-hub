@@ -523,6 +523,21 @@ html.has-dialog { overflow: hidden; }
   /* ink-3 on surface-2 is 4.47:1 at this size, under the 4.5:1 text needs. */
   color: var(--ink-2); overflow-wrap: anywhere;
 }
+/* The optional note: a labelled field, its count near the limit, and what a
+   refused commit said, stacked 6px apart. */
+.dialog-field-wrap { display: flex; flex-direction: column; gap: 6px; }
+.dialog-label { margin: 0; font-size: var(--t-13); font-weight: 500; color: var(--ink-2); }
+.dialog-optional { font-weight: 400; color: var(--ink-3); }
+.dialog-field {
+  display: block; width: 100%; min-height: 72px; max-height: 40vh; resize: vertical;
+  padding: var(--s-2) var(--s-3); font-size: var(--t-15); line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.dialog-field[aria-invalid="true"] { border-color: var(--danger); }
+.dialog-count, .dialog-kept { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
+.dialog-kept:empty { display: none; }
+.dialog-error { margin: 0; font-size: var(--t-13); color: var(--danger); }
+.dialog-count[hidden], .dialog-error[hidden] { display: none; }
 .dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
 .dialog-note { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
 /* Danger fills only here: on the screens it stays an outline. */
@@ -1022,6 +1037,8 @@ button.empty-link {
 .feed-row .title { color: var(--ink-2); }
 .feed-row .meta { font-size: var(--t-12); font-weight: 400; margin-top: 2px; }
 .feed-row .dot-unread { margin-top: 6px; }
+/* What was said with a decision, under the row's title and wrapped whole. */
+.feed-note { margin-top: 2px; font-size: var(--t-13); line-height: 1.4; color: var(--ink-2); overflow-wrap: anywhere; }
 /* The disclosure is drawn as the design's accent line. It is a button, so it
    keeps the 44px target, and the side padding is what its hover fill covers. */
 .feed-earlier {
