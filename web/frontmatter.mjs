@@ -212,6 +212,12 @@ function isMarkerLine(content, marker) {
   );
 }
 
+// Whether what follows `---` on the first line is a fourth dash. Four or more
+// dashes start a rule or a paragraph in the body, never a block.
+function isDashRule(tail) {
+  return tail.charCodeAt(0) === 0x2d;
+}
+
 const NOT_A_PLAIN_KEY_START = "\"'?[]{}&*!|>%@`,";
 
 // Split a column-zero line into its key and inline value, or null.
@@ -246,13 +252,12 @@ function scan(text) {
   const opening = lineAt(text, 0);
   const first = opening.content;
   if (!(first === "---" && opening.terminated)) {
-    if (first.startsWith("---")) {
+    if (first.startsWith("---") && !isDashRule(first.slice(3))) {
+      // Anything else that starts like the opener is refused: treating it as
+      // a page with no block would write a second block above one that a YAML
+      // reader already sees.
       const tail = first.slice(3);
-      let lead = 0;
-      while (lead < tail.length && isSpaceOrTab(tail.charCodeAt(lead))) {
-        lead += 1;
-      }
-      if (tail.charCodeAt(lead) === CR) {
+      if (tail.includes("\r")) {
         throw refuseLine(
           "carriage_return",
           1,
@@ -265,13 +270,14 @@ function scan(text) {
           "the frontmatter block opens and never closes",
         );
       }
-      if (isBlank(tail)) {
+      if (isSpaceOrTab(tail.charCodeAt(0)) || isBlank(tail)) {
         throw refuseLine(
           "delimiter",
           1,
           "is a frontmatter delimiter that is not exactly '---'",
         );
       }
+      throw unsupportedLine(1);
     }
     const idx = text.indexOf("\n");
     const crlf = idx > 0 && text.charCodeAt(idx - 1) === CR;

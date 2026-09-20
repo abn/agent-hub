@@ -71,8 +71,18 @@ async fn review_of_a_page_that_cannot_be_patched_is_refused_and_writes_nothing()
 
     let mut with_mark = vec![0xEF, 0xBB, 0xBF];
     with_mark.extend_from_slice(b"---\ntype: concept\n---\n\nBody\n");
-    let pages: [(&str, Vec<u8>, &str); 3] = [
+    let pages: [(&str, Vec<u8>, &str); 5] = [
         ("mark.md", with_mark, "byte order mark"),
+        (
+            "opener-comment.md",
+            b"--- # comment\ntype: concept\n---\n".to_vec(),
+            "line 1 is a frontmatter delimiter",
+        ),
+        (
+            "opener-text.md",
+            b"---yaml\ntype: concept\n---\n".to_vec(),
+            "line 1 of the frontmatter",
+        ),
         (
             "flow.md",
             b"---\ntype: concept\nverified: []\n---\n".to_vec(),

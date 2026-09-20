@@ -609,6 +609,34 @@
       "input": "87_noncharacters_are_escaped.input.md",
       "patch": "87_noncharacters_are_escaped.patch.json",
       "expected": "87_noncharacters_are_escaped.expected.md"
+    },
+    {
+      "id": "88_refuse_opener_with_comment",
+      "description": "An opening line that carries a comment is a delimiter that is not exactly three dashes: refused, never given a second block above the first",
+      "input": "88_refuse_opener_with_comment.input.md",
+      "patch": "88_refuse_opener_with_comment.patch.json",
+      "error": "delimiter"
+    },
+    {
+      "id": "89_refuse_opener_with_text",
+      "description": "An opening line with text straight after the dashes is a line the layout rules do not cover: refused, never given a second block above the first",
+      "input": "89_refuse_opener_with_text.input.md",
+      "patch": "89_refuse_opener_with_text.patch.json",
+      "error": "unsupported_line"
+    },
+    {
+      "id": "90_dash_rule_is_not_an_opener",
+      "description": "A first line of four or more dashes is a rule in the body, not an opener: the page has no block and gets one",
+      "input": "90_dash_rule_is_not_an_opener.input.md",
+      "patch": "90_dash_rule_is_not_an_opener.patch.json",
+      "expected": "90_dash_rule_is_not_an_opener.expected.md"
+    },
+    {
+      "id": "91_dashes_then_text_is_not_an_opener",
+      "description": "Four dashes and then text is a paragraph in the body, whatever follows it: the page has no block and gets one",
+      "input": "91_dashes_then_text_is_not_an_opener.input.md",
+      "patch": "91_dashes_then_text_is_not_an_opener.patch.json",
+      "expected": "91_dashes_then_text_is_not_an_opener.expected.md"
     }
   ]
 }

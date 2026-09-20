@@ -90,8 +90,8 @@ three.
 | `invalid_value` | A number with a fractional part, a mapping outside a list, a mixed or nested list, a null inside a value, an empty record, or an integer beyond 53 bits. |
 | `byte_order_mark` | The page starts with a byte order mark. |
 | `carriage_return` | A carriage return without a line feed on the opening line or inside the block. |
-| `delimiter` | The first line is `---` followed only by whitespace, or a line inside the block is exactly `...`, or is `---` or `...` followed by a space or a tab. |
-| `unsupported_line` | A column-zero line in the block is neither a comment nor a plain `key:` line, or an indented line comes before the first key. |
+| `delimiter` | The first line is `---` followed by whitespace, with or without a comment or text after it, or a line inside the block is exactly `...`, or is `---` or `...` followed by a space or a tab. |
+| `unsupported_line` | The first line has anything but whitespace or a fourth dash straight after `---` (`---yaml`), or a column-zero line in the block is neither a comment nor a plain `key:` line, or an indented line comes before the first key. |
 | `unclosed` | The block opens and never closes. |
 | `duplicate_key` | A key the operation names appears more than once in the block. |
 | `anchor` | A key the operation names has an inline value starting with `&` or `*`. |
@@ -106,6 +106,16 @@ nested list, a null inside a value) is refused wherever it sits in the list,
 before any key is looked at. An integer beyond 53 bits, an empty record and a
 bad field name are refused with their own change, after its key. An empty `changes` list is never refused: it
 returns the page unchanged whatever the page holds.
+
+## The first line
+
+Only a first line that is exactly `---` opens a block. A first line that does
+not start with `---`, or that starts with four or more dashes (a rule or a
+paragraph in the body), means the page has no block, and a patch gives it one. Every other first line that starts with `---` is refused, in
+this order: `carriage_return` when it holds one, `unclosed` when it is `---`
+and the page ends there, `delimiter` when whitespace follows the dashes,
+`unsupported_line` otherwise. A YAML reader sees a block under `--- # comment`,
+so writing a second block above it is never right.
 
 ## Adding a case
 

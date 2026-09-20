@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a first line that only looks like an opener is refused
+
+* **Update**: [The knowledge base](usage/knowledge-base.md) lists a new cause
+  of a 400 from review and promote: a page whose first line starts with `---`
+  and is not exactly `---` (`--- # comment`, `---yaml`). The hub used to treat
+  such a page as having no frontmatter and wrote a second block above the
+  first. A first line of four or more dashes is still body text.
+
 ## 2026-09-20, a thread id names the start of a thread
 
 * **Update**: The served skill document (`GET /SKILL.md`) says that a

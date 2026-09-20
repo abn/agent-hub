@@ -58,7 +58,7 @@ is not the admin token.
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_argument` | a refused path, a JSON body that does not parse or carries a field the route does not know, a frontmatter value containing a control character, `verified_by` naming anyone but the human, a history `limit` over 200, deleting a directory that still holds pages |
+| 400 | `invalid_argument` | a refused path, a JSON body that does not parse or carries a field the route does not know, a frontmatter value containing a control character, a review or a promote of a page whose frontmatter cannot be patched safely (a first line such as `--- # comment` or `---yaml`, which starts a block for some readers and not for the hub), `verified_by` naming anyone but the human, a history `limit` over 200, deleting a directory that still holds pages |
 | 401 | `unauthenticated` | no admin token, on every route |
 | 404 | `not_found` | the project, the page, the session or the session brain entry does not exist |
 | 409 | `conflict` | `if_version` does not match; the detail ends `current_version=sha256:...`, or `current_version=absent` |

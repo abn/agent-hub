@@ -9,6 +9,9 @@
 //!
 //! - The block opens when the first line of the page is exactly `---` and
 //!   closes at the next line that is exactly `---`. Lines end in LF or CRLF.
+//! - A page has no block when its first line does not start with `---`, or
+//!   starts with four or more dashes (a rule or a paragraph in the body). Any
+//!   other first line that starts with `---` is refused.
 //! - A top-level key is a column-zero line `<key>:` followed by a space, a tab
 //!   or the end of the line. Its value is the rest of that line plus every
 //!   following indented line. Blank lines and column-zero comment lines belong
@@ -24,13 +27,15 @@
 //! - `byte_order_mark`: the page starts with a byte order mark.
 //! - `carriage_return`: a carriage return without a line feed on the opening
 //!   line or inside the block.
-//! - `delimiter`: a first line that is `---` followed only by whitespace, or a
-//!   line inside the block that is exactly `...`, or `---` or `...` followed by
-//!   a space or a tab. Only a line that is exactly `---` opens or closes.
+//! - `delimiter`: a first line that is `---` followed by whitespace, with or
+//!   without a comment or text after it, or a line inside the block that is
+//!   exactly `...`, or `---` or `...` followed by a space or a tab. Only a
+//!   line that is exactly `---` opens or closes.
 //! - `unclosed`: the block opens and never closes.
-//! - `unsupported_line`: a column-zero line inside the block that is neither a
-//!   comment nor `key:` (a quoted or complex key, a flow mapping, a stray
-//!   scalar), or an indented line before the first key.
+//! - `unsupported_line`: a first line with anything but whitespace or a
+//!   fourth dash straight after `---` (`---yaml`), a column-zero line inside the
+//!   block that is neither a comment nor `key:` (a quoted or complex key, a
+//!   flow mapping, a stray scalar), or an indented line before the first key.
 //!
 //! The patcher adds refusals of its own; see [`patch`].
 
@@ -225,6 +230,12 @@ fn is_marker_line(content: &str, marker: &str) -> bool {
         .is_some_and(|tail| tail.is_empty() || tail.starts_with([' ', '\t']))
 }
 
+/// Whether what follows `---` on the first line is a fourth dash. Four or more
+/// dashes start a rule or a paragraph in the body, never a block.
+fn is_dash_rule(tail: &str) -> bool {
+    tail.starts_with('-')
+}
+
 /// Split a column-zero line into its key and inline value.
 fn split_key(content: &str) -> Option<(&str, &str)> {
     let mut from = 0;
@@ -271,16 +282,22 @@ fn scan(text: &str) -> Result<Layout<'_>, FrontmatterError> {
 
     let (first, open_end, terminated) = line_at(text, 0);
     if !(first == "---" && terminated) {
-        if let Some(tail) = first.strip_prefix("---") {
-            if tail.trim_start_matches([' ', '\t']).starts_with('\r') {
+        if let Some(tail) = first.strip_prefix("---")
+            && !is_dash_rule(tail)
+        {
+            // Anything else that starts like the opener is refused: treating
+            // it as a page with no block would write a second block above one
+            // that a YAML reader already sees.
+            if tail.contains('\r') {
                 return Err(FrontmatterError::CarriageReturn { line: 1 });
             }
             if tail.is_empty() {
                 return Err(FrontmatterError::Unclosed);
             }
-            if tail.trim().is_empty() {
+            if tail.starts_with([' ', '\t']) || tail.trim().is_empty() {
                 return Err(FrontmatterError::Delimiter { line: 1 });
             }
+            return Err(FrontmatterError::UnsupportedLine { line: 1 });
         }
         let newline = match text.find('\n') {
             Some(idx) if text[..idx].ends_with('\r') => "\r\n",
@@ -696,6 +713,12 @@ mod tests {
             ("---\ntype: x\n", "unclosed"),
             ("---", "unclosed"),
             ("--- \ntype: x\n---\n", "delimiter"),
+            ("--- # comment\ntype: x\n---\n", "delimiter"),
+            ("---\t%YAML\ntype: x\n---\n", "delimiter"),
+            ("--- text", "delimiter"),
+            ("---yaml\ntype: x\n---\n", "unsupported_line"),
+            ("---:\n", "unsupported_line"),
+            ("---x\ry\n", "carriage_return"),
             ("---\ntype: x\n--- \nbody\n---\n", "delimiter"),
             ("---\ntype: x\n...\n", "delimiter"),
             ("---\n\"quoted\": x\n---\n", "unsupported_line"),

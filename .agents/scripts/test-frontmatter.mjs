@@ -900,7 +900,11 @@ function entryText(rng, key, nl) {
 function structuredPage(rng) {
   const nl = rng.below(3) === 0 ? "\r\n" : "\n";
   const other = nl === "\n" ? "\r\n" : "\n";
-  let page = `---${nl}`;
+  // Now and then an opener that is not exactly three dashes.
+  const opener = rng.below(10) === 0
+    ? rng.pick(["--- # comment", "---yaml", "--- text", "---\t#", "----", "-----  ", "---- x", `---${NBSP}`, "---x\ry", "---:", "--- ---"])
+    : "---";
+  let page = `${opener}${nl}`;
   for (let i = rng.below(7); i > 0; i -= 1) {
     if (rng.below(3) === 0) {
       const filler = rng.pick(["# a comment  ", "", "#", "   ", "\t", cp(0x85), NBSP, cp(0xfeff), cp(0x2028), " # indented comment"]);
@@ -934,7 +938,7 @@ function pageText(rng, corpusInputs) {
   if (kind === 0) return noise(rng, WIDE_ALPHABET, 40);
   if (kind === 1) return `---\n${noise(rng, WIDE_ALPHABET, 30)}\n---\n${noise(rng, WIDE_ALPHABET, 8)}`;
   if (kind === 2) return mutate(rng, rng.pick(corpusInputs));
-  if (kind === 3) return rng.pick(["", "\n", "---", "---\n", "---\n---", "---\n---\n", "---\r\n---\r\n", "\r\n", "# Title", "---\n\n---\n"]);
+  if (kind === 3) return rng.pick(["", "\n", "---", "---\n", "---\n---", "---\n---\n", "---\r\n---\r\n", "\r\n", "# Title", "---\n\n---\n", "--- #", "---yaml", "----", "----\r", "--- \r\n---\n"]);
   const page = structuredPage(rng);
   return rng.below(3) === 0 ? mutate(rng, page) : page;
 }
