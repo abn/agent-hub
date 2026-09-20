@@ -296,3 +296,58 @@ fn an_agent_is_not_told_what_the_human_has_read() {
         "there is no read status for an agent to ask about"
     );
 }
+
+/// The human declines an approval with a note, as the decision route does.
+fn decline_with_note(data_dir: &Path, approval_id: &str, note: &str) -> String {
+    common::seed::block_on(async {
+        let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
+            .await
+            .expect("open engine");
+        agent_hub::store::migrate(&db).await.expect("migrate");
+        agent_hub::store::questions::decide(&db, "human", approval_id, false, Some(note), None)
+            .await
+            .expect("decide")
+    })
+}
+
+#[test]
+fn an_agent_reads_the_outcome_of_its_approval_and_the_note_left_with_it() {
+    let data_dir = TempDir::new("decision-note");
+    common::seed::seed_project(data_dir.path(), "proj");
+
+    let mut server = spawn(data_dir.path(), &[]);
+    server.initialize();
+    let asked = server.call_tool(
+        "signal_append",
+        json!({"project_id": "proj", "kind": "approval", "summary": "Restart the node?"}),
+    );
+    let approval_id = structured(&asked)["event_id"]
+        .as_str()
+        .expect("event id")
+        .to_string();
+    // Only one process may hold the engine, so the agent steps aside while
+    // the human decides.
+    drop(server);
+    let answer_id = decline_with_note(data_dir.path(), &approval_id, "wait for the backup");
+
+    let mut server = spawn(data_dir.path(), &[]);
+    server.initialize();
+    let resolved = server.call_tool("inbox_read", json!({"status": "resolved"}));
+    let item = item_with_id(items(&resolved), &approval_id);
+    assert_eq!(item["decision"]["decision"], "declined", "{item}");
+    assert_eq!(item["decision"]["note"], "wait for the backup", "{item}");
+    assert_eq!(item["decision"]["event_id"], answer_id.as_str());
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let events = structured(&feed)["events"]
+        .as_array()
+        .unwrap_or_else(|| panic!("feed_read returns events: {feed}"))
+        .clone();
+    let answer = events
+        .iter()
+        .find(|event| event["id"] == answer_id.as_str())
+        .unwrap_or_else(|| panic!("the decision is on the feed: {events:?}"));
+    assert_eq!(answer["thread_id"], approval_id.as_str());
+    assert_eq!(answer["payload"]["decision"], "declined");
+    assert_eq!(answer["payload"]["note"], "wait for the backup");
+}

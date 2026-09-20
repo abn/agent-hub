@@ -56,6 +56,12 @@ pub const SEARCH_BODY_BYTES_MAX: usize = 64 * 1024;
 /// brain the next agent picks up.
 pub const HANDOFF_CHARS_MAX: usize = 4096;
 
+/// Maximum characters of the note the human leaves with a decision.
+///
+/// A note says why, in a sentence or a few; anything longer belongs in a
+/// reply the agent can thread.
+pub const DECISION_NOTE_CHARS_MAX: usize = 2000;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
@@ -215,6 +221,16 @@ pub fn check_handoff(handoff: &str) -> Result<()> {
     if handoff.chars().count() > HANDOFF_CHARS_MAX {
         return Err(Error::PayloadTooLarge(format!(
             "handoff note exceeds {HANDOFF_CHARS_MAX} characters limit={HANDOFF_CHARS_MAX}"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a decision note over the cap.
+pub fn check_decision_note(note: &str) -> Result<()> {
+    if note.chars().count() > DECISION_NOTE_CHARS_MAX {
+        return Err(Error::PayloadTooLarge(format!(
+            "decision note exceeds {DECISION_NOTE_CHARS_MAX} characters limit={DECISION_NOTE_CHARS_MAX}"
         )));
     }
     Ok(())

@@ -23,6 +23,23 @@ pub struct InboxItem {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+    /// How an approval was decided, once it has been.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<Decision>,
+}
+
+/// The outcome of an approval, as its inbox entry shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Decision {
+    /// `approved` or `declined`.
+    pub decision: String,
+    /// What the human said with it, when they said anything.
+    pub note: Option<String>,
+    /// Who decided.
+    pub actor: String,
+    /// The answer event on the approval's thread that records the decision.
+    pub event_id: String,
+    pub decided_at: String,
 }
 
 /// Status counts for the home summary.
@@ -232,7 +249,76 @@ async fn list_as(
     while let Some(row) = rows.next().await.map_err(engine)? {
         items.push(item_from_row(&row)?);
     }
+    drop(rows);
+    attach_decisions(&conn, &mut items).await?;
     Ok(items)
+}
+
+/// Give each decided approval on a page its outcome, in one read for the page.
+///
+/// The decision is the answer event the decision route appends to the
+/// approval's thread. It is looked up by the ids of entries already listed,
+/// and an answer held by another project is not the entry's own, so a listing
+/// shows nothing its confinement did not already allow.
+async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<()> {
+    let decided: Vec<&str> = items
+        .iter()
+        .filter(|item| item.kind == "approval" && item.status == "resolved")
+        .map(|item| item.event_id.as_str())
+        .collect();
+    if decided.is_empty() {
+        return Ok(());
+    }
+    let holes: Vec<String> = (1..=decided.len()).map(|at| format!("?{at}")).collect();
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT thread_id, project_id, id, actor, payload, created_at FROM events
+                 WHERE kind = 'answer' AND thread_id IN ({}) ORDER BY id ASC",
+                holes.join(", ")
+            ),
+            decided
+                .iter()
+                .map(|id| Value::Text(id.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(engine)?;
+    let mut found: Vec<(String, String, Decision)> = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let payload: serde_json::Value = match text_at(&row, 4)? {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|err| Error::Engine(format!("stored payload is not JSON: {err}")))?,
+            None => continue,
+        };
+        let Some(decision) = payload.get("decision").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        found.push((
+            required_text(&row, 0)?,
+            required_text(&row, 1)?,
+            Decision {
+                decision: decision.to_string(),
+                note: payload
+                    .get("note")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                actor: required_text(&row, 3)?,
+                event_id: required_text(&row, 2)?,
+                decided_at: required_text(&row, 5)?,
+            },
+        ));
+    }
+    for item in items.iter_mut() {
+        if item.kind != "approval" || item.status != "resolved" {
+            continue;
+        }
+        item.decision = found
+            .iter()
+            .find(|(thread, project, _)| *thread == item.event_id && *project == item.project_id)
+            .map(|(_, _, decision)| decision.clone());
+    }
+    Ok(())
 }
 
 /// The newest items that still wait on the human, across every project.
@@ -431,6 +517,7 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         status: required_text(row, 6)?,
         created_at: required_text(row, 7)?,
         updated_at: required_text(row, 8)?,
+        decision: None,
     })
 }
 

@@ -441,6 +441,15 @@ reserved. `inbox_read` returns `event_id`, `project_id`, `kind`, `actor`,
 `summary`, `payload`, `status`, `created_at`, and `updated_at`, newest first
 by event id, so nothing the human does moves a row or shifts a page.
 
+To learn how an approval went, read it back: `inbox_read(status: "resolved")`
+returns your approval with a `decision` object holding `decision` (`approved`
+or `declined`), `note` (what the human said with it, null when nothing, at most
+2000 characters), `actor`, `decided_at`, and `event_id`. That `event_id` is an
+`answer` event on the approval's thread, so `feed_read` shows the same outcome:
+its `thread_id` is your approval's id and its payload holds `decision`, `note`
+when one was left, and a one-line `body`. Read a decline's note before you try
+again; it is the human telling you what to change.
+
 Whether the human has read an item is not reported. An item the human has
 opened is still `unread` here, with the timestamps it already had, and there is
 no status to ask that question with.

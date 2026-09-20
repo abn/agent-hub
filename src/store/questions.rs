@@ -139,7 +139,11 @@ pub async fn answer(
     Ok(id)
 }
 
-/// Approve or decline an approval.
+/// Approve or decline an approval, with an optional note saying why.
+///
+/// The note is trimmed, a blank one is no note, and one over
+/// [`crate::limits::DECISION_NOTE_CHARS_MAX`] characters is refused before
+/// anything is decided.
 ///
 /// The decision lands on the feed as an `answer` on the approval's thread, so
 /// it is a durable, human-visibility record, and it resolves the waiting item
@@ -155,6 +159,12 @@ pub async fn decide(
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
+    // Before anything is read or written, so a refused note decides nothing.
+    let note = note.map(str::trim).filter(|note| !note.is_empty());
+    if let Some(note) = note {
+        crate::limits::check_decision_note(note)?;
+    }
+
     let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
@@ -198,11 +208,20 @@ pub async fn decide(
     }
 
     let decision = if approved { "Approved" } else { "Declined" };
-    let note = note.map(str::trim).filter(|note| !note.is_empty());
     let body = match note {
         Some(note) => format!("{decision}: {note}"),
         None => decision.to_string(),
     };
+    // The body reads as one line wherever an answer is shown. The note is
+    // also a field of its own, so a reader that wants the reason does not
+    // have to take the line apart.
+    let mut payload = serde_json::json!({
+        "body": body,
+        "decision": decision.to_lowercase(),
+    });
+    if let Some(note) = note {
+        payload["note"] = serde_json::Value::String(note.to_string());
+    }
     let id = events::append_in_tx(
         &tx,
         actor,
@@ -211,10 +230,7 @@ pub async fn decide(
             project_id: approval.project_id.clone(),
             kind: "answer".to_string(),
             summary: format!("re: {}", approval.summary),
-            payload: Some(serde_json::json!({
-                "body": body,
-                "decision": decision.to_lowercase(),
-            })),
+            payload: Some(payload),
             needs_action: false,
             thread_id: Some(approval_id.to_string()),
             session_id: None,

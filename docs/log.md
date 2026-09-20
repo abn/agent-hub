@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a decision's note is kept, capped and handed back
+
+* **Update**: [The human surface](architecture/human-surface.md) describes the
+  note a decision may carry: stored as `payload.note` on the decision's feed
+  event, returned as `decision.note` on the approval's inbox entry, and
+  refused with a 413 past 2000 characters without deciding anything. The inbox
+  and decision routes join the response table. The served skill document tells
+  an agent how to read the outcome of its approval. The dialogs do not offer a
+  note yet.
+
 ## 2026-09-20, a feed snippet is never serialized JSON
 
 * **Update**: [The human surface](architecture/human-surface.md) says what a

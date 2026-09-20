@@ -819,3 +819,194 @@ async fn an_agent_listing_cannot_tell_a_read_row_from_an_unread_one() {
     assert_eq!(human.len(), 1);
     assert_eq!(human[0].status, "read");
 }
+
+async fn decision_payload(db: &turso::Database, event_id: &str) -> serde_json::Value {
+    events::get(db, event_id)
+        .await
+        .expect("get")
+        .expect("exists")
+        .payload
+        .expect("payload")
+}
+
+#[tokio::test]
+async fn a_decision_note_is_kept_beside_the_decision() {
+    let db = open().await;
+    let noted = events::append(&db, "agent-one", None, approval("Ship it"))
+        .await
+        .expect("append approval");
+    let decision = questions::decide(
+        &db,
+        "human",
+        &noted,
+        false,
+        Some("  not on a Friday  "),
+        None,
+    )
+    .await
+    .expect("decide");
+    let payload = decision_payload(&db, &decision).await;
+    assert_eq!(payload["decision"], "declined");
+    assert_eq!(
+        payload["note"], "not on a Friday",
+        "the note is a field of its own, trimmed: {payload}"
+    );
+    assert_eq!(payload["body"], "Declined: not on a Friday");
+
+    let plain = events::append(&db, "agent-one", None, approval("Roll it back"))
+        .await
+        .expect("append approval");
+    let decision = questions::decide(&db, "human", &plain, true, Some("   "), None)
+        .await
+        .expect("decide");
+    let payload = decision_payload(&db, &decision).await;
+    assert!(
+        payload.get("note").is_none(),
+        "a blank note is no note: {payload}"
+    );
+}
+
+#[tokio::test]
+async fn a_decision_note_over_the_cap_is_refused_and_decides_nothing() {
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+        .await
+        .expect("append approval");
+    let cap = agent_hub::limits::DECISION_NOTE_CHARS_MAX;
+
+    // Characters, not bytes: a note of two-byte letters at the cap fits.
+    let over = "\u{e9}".repeat(cap + 1);
+    let refused = questions::decide(&db, "human", &approval_id, true, Some(&over), None)
+        .await
+        .expect_err("a note over the cap");
+    assert_eq!(refused.code(), ErrorCode::PayloadTooLarge, "{refused}");
+    let open_items = inbox::list(&db, Some("action"), None, 10)
+        .await
+        .expect("list");
+    assert_eq!(open_items.len(), 1, "the approval still waits");
+
+    let fits = "\u{e9}".repeat(cap);
+    let decision = questions::decide(&db, "human", &approval_id, true, Some(&fits), None)
+        .await
+        .expect("a note at the cap");
+    assert_eq!(
+        decision_payload(&db, &decision).await["note"],
+        fits.as_str()
+    );
+}
+
+#[tokio::test]
+async fn a_decided_approval_shows_its_decision_in_the_inbox() {
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+        .await
+        .expect("append approval");
+    let waiting = events::append(&db, "agent-one", None, approval("Reboot the node"))
+        .await
+        .expect("append approval");
+    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+        .await
+        .expect("post");
+    questions::answer(&db, "human", &asked, "yes", None)
+        .await
+        .expect("answer");
+    let decision = questions::decide(
+        &db,
+        "human",
+        &approval_id,
+        false,
+        Some("not on a Friday"),
+        None,
+    )
+    .await
+    .expect("decide");
+    let decided_at = events::get(&db, &decision)
+        .await
+        .expect("get")
+        .expect("exists")
+        .created_at;
+
+    let human = inbox::list(&db, None, None, 50).await.expect("list");
+    let agent = inbox::list_for_agent(&db, None, None, 50, None)
+        .await
+        .expect("agent list");
+    for (who, items) in [("the human", human), ("an agent", agent)] {
+        let shown = serde_json::to_value(&items).expect("serialize");
+        let of = |id: &str| {
+            shown
+                .as_array()
+                .expect("items")
+                .iter()
+                .find(|item| item["event_id"] == id)
+                .unwrap_or_else(|| panic!("{id} is listed for {who}"))
+                .clone()
+        };
+        let decided = of(&approval_id);
+        assert_eq!(decided["status"], "resolved");
+        assert_eq!(
+            decided["decision"],
+            serde_json::json!({
+                "decision": "declined",
+                "note": "not on a Friday",
+                "actor": "human",
+                "event_id": decision,
+                "decided_at": decided_at,
+            }),
+            "the decided approval carries its outcome for {who}: {decided}"
+        );
+        assert!(
+            of(&waiting).get("decision").is_none(),
+            "an approval that still waits has no decision"
+        );
+        assert!(
+            of(&asked).get("decision").is_none(),
+            "an answered question is not a decision"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_decision_is_read_from_the_approval_s_own_project_only() {
+    // A decision is an answer event threaded on the approval. The thread id
+    // alone is not enough to know whose it is: an answer in ANOTHER project
+    // that names the same thread must never be shown as this approval's
+    // outcome, or its actor and note cross a project boundary.
+    let db = open().await;
+    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+        .await
+        .expect("append approval");
+    questions::decide(&db, "human", &approval_id, false, Some("not today"), None)
+        .await
+        .expect("decide");
+
+    // Planted directly, since the write path refuses a thread in another
+    // project. Its id sorts before every real one, so a lookup that ignored
+    // the project would meet it first.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at, session_id)
+         VALUES ('00000000000000000000000000', 'elsewhere', 'answer', 'spy-agent', 'Approved', ?1, ?2, 0, '2026-01-01T00:00:00Z', NULL)",
+        (
+            r#"{"body":"Approved: exfiltrate","decision":"approved","note":"a note from another project"}"#,
+            approval_id.as_str(),
+        ),
+    )
+    .await
+    .expect("plant");
+
+    let items = inbox::list(&db, None, None, 50).await.expect("list");
+    let shown = serde_json::to_value(&items).expect("serialize");
+    let entry = shown
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["event_id"] == approval_id.as_str())
+        .expect("the approval is listed");
+    assert_eq!(entry["decision"]["decision"], "declined", "{entry}");
+    assert_eq!(entry["decision"]["note"], "not today");
+    assert_eq!(entry["decision"]["actor"], "human");
+    assert!(
+        !shown.to_string().contains("another project") && !shown.to_string().contains("spy-agent"),
+        "another project's answer reached the listing: {shown}"
+    );
+}

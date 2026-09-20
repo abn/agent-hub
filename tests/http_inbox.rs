@@ -805,3 +805,81 @@ async fn home_caps_the_waiting_items_and_keeps_the_total_in_the_count() {
     let newest: Vec<&str> = asked.iter().rev().take(5).map(String::as_str).collect();
     assert_eq!(ids, newest, "the five newest, newest first");
 }
+
+#[tokio::test]
+async fn a_decision_note_is_shown_on_the_feed_and_on_the_inbox_item() {
+    let state = state().await;
+    let approval = seed_approval(&state, "Restart the node?").await;
+
+    let decided = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{approval}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "decline", "note": "wait for the backup" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(decided.status(), StatusCode::OK);
+    let answer = json_body(decided).await["event_id"]
+        .as_str()
+        .expect("event id")
+        .to_string();
+
+    let feed = router(state.clone())
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/feed",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(feed.status(), StatusCode::OK);
+    let feed = json_body(feed).await;
+    let event = feed["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .find(|event| event["id"] == answer.as_str())
+        .unwrap_or_else(|| panic!("the decision is on the feed: {feed}"));
+    assert_eq!(event["payload"]["decision"], "declined");
+    assert_eq!(event["payload"]["note"], "wait for the backup", "{event}");
+
+    let inbox = router(state.clone())
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=resolved",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let inbox = json_body(inbox).await;
+    let item = &inbox["items"][0];
+    assert_eq!(item["event_id"], approval.as_str());
+    assert_eq!(item["decision"]["decision"], "declined", "{item}");
+    assert_eq!(item["decision"]["note"], "wait for the backup", "{item}");
+    assert_eq!(item["decision"]["event_id"], answer.as_str());
+    assert_eq!(item["decision"]["actor"], "human");
+}
+
+#[tokio::test]
+async fn a_decision_note_over_the_cap_is_a_problem_and_the_approval_still_waits() {
+    let state = state().await;
+    let approval = seed_approval(&state, "Restart the node?").await;
+    let note = "n".repeat(agent_hub::limits::DECISION_NOTE_CHARS_MAX + 1);
+
+    let refused = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{approval}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "approve", "note": note })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(refused.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(problem_body(refused).await["code"], "payload_too_large");
+    assert_eq!(home(&state).await["waiting"], 1, "nothing was decided");
+}
