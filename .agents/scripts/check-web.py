@@ -306,85 +306,264 @@ def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> N
 FLOOR_PX = 12.0
 FONT_SIZE = re.compile(r"(?<![\w-])font-size\s*:\s*([^;}\"'`<]+)", re.IGNORECASE)
 FONT_SHORTHAND = re.compile(r"(?<![\w-])font\s*:\s*([^;}\"'`<]+)", re.IGNORECASE)
-SCRIPT_FONT_SIZE = re.compile(r"\.fontSize\s*=\s*[\"'`]([^\"'`]+)")
+# A script's own ways to set a size: the style property, an object handed to a
+# helper, and setProperty. The first two are read when they hold a literal.
+SCRIPT_FONT_SIZE = re.compile(r"\bfontSize\s*[=:]\s*[\"'`]([^\"'`]+)")
+SET_PROPERTY = re.compile(r"setProperty\(\s*[\"'`]font(?:-size)?[\"'`]\s*,\s*([^)]*)\)", re.IGNORECASE)
+# The presentation attribute of an SVG or HTML element, in user units or px.
+FONT_SIZE_ATTRIBUTE = re.compile(r"(?<![\w-])font-size\s*=\s*\\?[\"']?\s*([\d.]+[a-z%]*)", re.IGNORECASE)
 LENGTH = re.compile(r"(?<![\w.#-])(\d*\.?\d+)(px|rem|em|pt|%)(?![\w%])", re.IGNORECASE)
+MATH = re.compile(r"\b(?:calc|min|max|clamp)\(", re.IGNORECASE)
 CUSTOM_PROPERTY = re.compile(r"(--[\w-]+)\s*:\s*([^;}]+)")
 VAR_USE = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,[^)]*)?\)")
 INHERITED = {"inherit", "initial", "unset", "revert"}
-# A relative size whose base this check cannot see, with the size it comes to.
+# A relative size whose base this check cannot see from the declaration alone:
+# where the base is set in the same file, and the share taken of it. The base is
+# read, so shrinking it is what fails, not only editing this table.
 FLOOR_ALLOWED = {
-    ("artifact-viewer.mjs", ".9em"): "inline code in the 15px reading column is 13.5px",
+    ("artifact-viewer.mjs", ".9em"): (r"`body\{[^}`]*`?[^}]*?font-size:(\d+(?:\.\d+)?)px", 0.9),
 }
+
+
+def blank_comments(text: str, suffix: str) -> str:
+    """The text with its comments blanked, line for line.
+
+    A comment may name a size without setting one. Newlines are kept, so a
+    line number read off the result is the file's own.
+    """
+    blank = lambda found: re.sub(r"[^\n]", " ", found.group(0))
+    text = re.sub(r"/\*[\s\S]*?\*/", blank, text)
+    if suffix == ".html":
+        text = re.sub(r"<!--[\s\S]*?-->", blank, text)
+    if suffix in (".js", ".mjs"):
+        text = re.sub(r"(?m)(?:^|(?<=\s))//[^\n]*", blank, text)
+    return text
+
+
+class Unreadable(Exception):
+    """A math function this check cannot put a lower bound on."""
+
+
+def math_floor_px(text: str) -> float:
+    """The least a `calc()`, `min()`, `max()` or `clamp()` can come to, in px.
+
+    Worked out rather than searched for a small number, so `calc(24px / 3)` is
+    8px and `calc(1rem - 2px)` is 14px. A unit with no fixed size (a viewport
+    unit, `em`, `%`) has no bound: `max()` may still rest on its other
+    arguments, and everywhere else the value is refused.
+    """
+    tokens = re.findall(r"[a-z-]+\(|\d*\.?\d+[a-z%]*|[-+*/(),]", text.lower())
+    if "".join(tokens) != re.sub(r"\s+", "", text.lower()):
+        raise Unreadable
+    at = 0
+
+    def peek() -> str:
+        return tokens[at] if at < len(tokens) else ""
+
+    def take() -> str:
+        nonlocal at
+        at += 1
+        return tokens[at - 1]
+
+    def arguments() -> list:
+        found = [total()]
+        while peek() == ",":
+            take()
+            found.append(total())
+        if take() != ")":
+            raise Unreadable
+        return found
+
+    def atom():
+        token = take()
+        if token == "(" or token == "calc(":
+            value = total()
+            if take() != ")":
+                raise Unreadable
+            return value
+        if token in ("min(", "max(", "clamp("):
+            found = arguments()
+            sizes = [value for value, _scalar in found]
+            if token == "clamp(" and len(sizes) == 3:
+                low, value, high = sizes
+                inner = None if value is None or high is None else min(value, high)
+                sizes, token = [low, inner], "max("
+            if token == "min(":
+                return (None if None in sizes else min(sizes), False)
+            known = [size for size in sizes if size is not None]
+            return (max(known) if known else None, False)
+        number = re.fullmatch(r"(\d*\.?\d+)([a-z%]*)", token)
+        if not number:
+            raise Unreadable
+        size, unit = float(number.group(1)), number.group(2)
+        if unit == "":
+            return (size, True)
+        scale = {"px": 1.0, "rem": 16.0, "pt": 4 / 3}.get(unit)
+        return (None if scale is None else size * scale, False)
+
+    def product():
+        value, scalar = atom()
+        while peek() in ("*", "/"):
+            operator = take()
+            other, other_scalar = atom()
+            if value is None or other is None or not (scalar or other_scalar):
+                value, scalar = None, False
+            elif operator == "*":
+                value, scalar = value * other, scalar and other_scalar
+            elif not other_scalar or other == 0:
+                raise Unreadable
+            else:
+                value = value / other
+        return value, scalar
+
+    def total():
+        value, scalar = product()
+        while peek() in ("+", "-"):
+            operator = take()
+            other, _other_scalar = product()
+            if value is None or other is None:
+                value = None
+            else:
+                value = value + other if operator == "+" else value - other
+        return value, scalar
+
+    value, scalar = total()
+    if at != len(tokens) or value is None or scalar:
+        raise Unreadable
+    return value
+
+
+def math_part(text: str) -> str:
+    """The first math function in a value, to its closing bracket."""
+    found = MATH.search(text)
+    depth = 0
+    for index in range(found.start(), len(text)):
+        depth += {"(": 1, ")": -1}.get(text[index], 0)
+        if depth == 0 and index > found.end() - 2:
+            return text[found.start() : index + 1]
+    return text[found.start() :]
 
 
 def floor_problem(value: str, properties: dict[str, list[str]], relative_ok: bool) -> str:
     """Why a font size is refused, or an empty string when it holds the floor."""
-    text = value.strip()
+    text = " ".join(value.split())
     if text.lower() in INHERITED:
         return ""
     candidates = [text]
     for name in VAR_USE.findall(text):
         if name not in properties:
             return f"{name} is declared in no stylesheet"
-        candidates += properties[name]
-    lengths = [found for candidate in candidates for found in LENGTH.findall(candidate)]
-    if not lengths:
-        return f"{text!r} is not a size this check can read: write px or a --t token"
-    for number, unit in lengths:
-        size, unit = float(number), unit.lower()
-        if unit == "px" and size < FLOOR_PX:
-            return f"{number}{unit} is below the 12px floor"
-        if unit == "rem" and size * 16 < FLOOR_PX:
-            return f"{number}{unit} is below the 12px floor at a 16px root"
-        if unit == "pt" and size * 4 / 3 < FLOOR_PX:
-            return f"{number}{unit} is below the 12px floor"
-        if unit in ("em", "%"):
-            whole = 1.0 if unit == "em" else 100.0
-            if not relative_ok:
-                return f"{number}{unit} is relative to a size this check cannot see: write px or a --t token"
-            if size < whole:
-                return f"{number}{unit} shrinks a size this check cannot see"
+        # Each value the property is given anywhere, put where it is used.
+        candidates = [
+            VAR_USE.sub(lambda use, given=given: given if use.group(1) == name else use.group(0), candidate)
+            for candidate in candidates
+            for given in properties[name]
+        ]
+    for candidate in candidates:
+        if MATH.search(candidate):
+            try:
+                least = math_floor_px(math_part(candidate))
+            except Unreadable:
+                return f"{candidate!r} has no least size this check can work out: write px or a --t token"
+            if least < FLOOR_PX:
+                return f"{candidate!r} can come to {least:g}px, below the 12px floor"
+            continue
+        lengths = LENGTH.findall(candidate)
+        if not lengths:
+            return f"{text!r} is not a size this check can read: write px or a --t token"
+        for number, unit in lengths:
+            size, unit = float(number), unit.lower()
+            if unit == "px" and size < FLOOR_PX:
+                return f"{number}{unit} is below the 12px floor"
+            if unit == "rem" and size * 16 < FLOOR_PX:
+                return f"{number}{unit} is below the 12px floor at a 16px root"
+            if unit == "pt" and size * 4 / 3 < FLOOR_PX:
+                return f"{number}{unit} is below the 12px floor"
+            if unit in ("em", "%"):
+                whole = 1.0 if unit == "em" else 100.0
+                if not relative_ok:
+                    return f"{number}{unit} is relative to a size this check cannot see: write px or a --t token"
+                if size < whole:
+                    return f"{number}{unit} shrinks a size this check cannot see"
     return ""
+
+
+def allowed_relative(path: Path, content: str, value: str) -> str | None:
+    """None when the value is not an allowance; else why it fails, or ''."""
+    allowance = FLOOR_ALLOWED.get((path.name, value))
+    if allowance is None:
+        return None
+    base_rule, share = allowance
+    base = re.search(base_rule, content)
+    if not base:
+        return f"{value} is allowed against a base size this check no longer finds"
+    size = float(base.group(1)) * share
+    return "" if size >= FLOOR_PX else f"{value} of {base.group(1)}px is {size:g}px, below the 12px floor"
 
 
 def check_text_floor(errors: list[str]) -> None:
     """No first-party stylesheet or template sets text under 12px.
 
-    Read statically: every `font-size` and `font` declaration on a line, in
-    any letter case, in px, rem and pt, inside `clamp()` and `calc()`, through
-    a custom property declared in any stylesheet, in a `style` attribute or a
-    style block a module writes, and in a script's `.fontSize`. A relative
-    size in a stylesheet and any value with no length in it are refused.
+    Read statically, with comments blanked and a declaration read to its end
+    wherever its lines break: every `font-size` and `font` declaration, in any
+    letter case, in px, rem and pt; `calc()`, `min()`, `max()` and `clamp()`
+    worked out to the least they can come to; a custom property declared in any
+    stylesheet, with every value it is given; a `style` attribute or a style
+    block a module writes; a `font-size` attribute; and a script's `fontSize`
+    and `setProperty`. `web/tokens.css` is read like any other sheet. A
+    relative size in a stylesheet, a value with no length in it, a math
+    function with no least size and a size a script computes are refused.
 
     Left to the rendered check in the smoke run, which reads computed sizes:
     `em` and `%` in a module's template where the base is known to be large
-    enough, a size a script computes, and the browser's own size for an element
-    that sets none.
+    enough, and the browser's own size for an element that sets none.
     """
     sheets = [
         path for path in sorted(WEB.rglob("*.css")) if VENDOR not in path.parents
     ]
     properties: dict[str, list[str]] = {}
     for path in sheets:
-        for name, value in CUSTOM_PROPERTY.findall(path.read_text(encoding="utf-8", errors="replace")):
-            properties.setdefault(name, []).append(value.strip())
-    templates = [*first_party_scripts(), *sorted(WEB.glob("*.html"))]
-    for path in [*sheets, *templates]:
-        # The type scale itself is held to the floor with the other tokens.
-        if path.name == "tokens.css":
-            continue
+        text = blank_comments(path.read_text(encoding="utf-8", errors="replace"), ".css")
+        for name, value in CUSTOM_PROPERTY.findall(text):
+            properties.setdefault(name, []).append(" ".join(value.split()))
+    pages = [
+        path
+        for pattern in ("*.html", "*.svg")
+        for path in sorted(WEB.rglob(pattern))
+        if VENDOR not in path.parents
+    ]
+    for path in [*sheets, *first_party_scripts(), *pages]:
         is_sheet = path.suffix == ".css"
-        content = path.read_text(encoding="utf-8", errors="replace")
-        for number, line in enumerate(content.splitlines(), start=1):
-            values = FONT_SIZE.findall(line) + SCRIPT_FONT_SIZE.findall(line)
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        content = blank_comments(raw, path.suffix)
+        found: list[tuple[int, str]] = []
+        for pattern in (FONT_SIZE, SCRIPT_FONT_SIZE, FONT_SIZE_ATTRIBUTE):
+            found += [(match.start(), match.group(1)) for match in pattern.finditer(content)]
+        for match in FONT_SHORTHAND.finditer(content):
             # The shorthand carries the size before the line height.
-            values += [value.split("/")[0] for value in FONT_SHORTHAND.findall(line)]
-            for value in values:
-                if (path.name, value.strip()) in FLOOR_ALLOWED:
-                    continue
+            value = match.group(1)
+            found.append((match.start(), value if MATH.search(value) else value.split("/")[0]))
+        for match in SET_PROPERTY.finditer(content):
+            literal = re.fullmatch(r"\s*[\"'`]([^\"'`$]+)[\"'`]\s*(?:,[^)]*)?", match.group(1))
+            if literal:
+                found.append((match.start(), literal.group(1)))
+            else:
+                number = content.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{path}:{number}: font size: setProperty is handed {match.group(1).strip()!r},"
+                    " a size this check cannot read: set a class, or a literal px size"
+                )
+        for offset, value in sorted(found):
+            number = content.count("\n", 0, offset) + 1
+            value = " ".join(value.split())
+            # An attribute's bare number is in user units, which are px.
+            if re.fullmatch(r"[\d.]+", value):
+                value += "px"
+            problem = allowed_relative(path, raw, value)
+            if problem is None:
                 problem = floor_problem(value, properties, relative_ok=not is_sheet)
-                if problem:
-                    errors.append(f"{path}:{number}: font size: {problem}")
+            if problem:
+                errors.append(f"{path}:{number}: font size: {problem}")
 
 
 # The role of every colour the artifact frame's own stylesheet draws: the rule
