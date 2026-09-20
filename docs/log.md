@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, edited since review is about bytes, not seconds
+
+* **Update**: [The knowledge base](usage/knowledge-base.md) restates how
+  `trust` reaches `edited_since_review`. The write log now notes which write
+  brought in a page's newest verification, and the page is edited when its
+  newest write stored other bytes than that one. A page an agent writes with
+  its own `verified` block no longer reads as edited when the second ticks
+  before its write lands, and an edit in the same second as a review no longer
+  passes as reviewed.
+
 ## 2026-09-20, a link inside code is not a link
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) says what counts as

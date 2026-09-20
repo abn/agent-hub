@@ -697,7 +697,16 @@ async fn get_or_compute_kb(
 
     let tree = walk(brain).await?;
     let (findings, backlink_graph) = lint_bundle(&tree.pages);
-    let (last_writes, last_change) = brain.last_writes().await.map_err(problem)?;
+    // A review always verifies, and its rows from before the log carried the
+    // mark say so by their operation.
+    let crate::brain::LastWrites {
+        by_path: last_writes,
+        verifying: verifying_writes,
+        newest: last_change,
+    } = brain
+        .last_writes(|write| write.verifies || write.op == REVIEW_OP)
+        .await
+        .map_err(problem)?;
 
     let today = current_date_str();
     let mut page_meta: HashMap<&str, Value> = HashMap::new();
@@ -746,17 +755,21 @@ async fn get_or_compute_kb(
                         .ok()
                 })
                 .map(|dt| dt.unix_timestamp());
-            // The log orders what the clocks cannot. A review stamps its time
-            // before its write lands, so on a busy node the review's own write
-            // is timed a second or more after the stamp it carries. When the
-            // last write IS the review, nothing was edited since.
-            let reviewed_last = last_write.is_some_and(|write| write.op == REVIEW_OP);
-            match (last_write, verified_ts) {
-                (Some(write), Some(verified)) if !reviewed_last && write.at > verified => {
-                    edited_since_review_count += 1;
-                    "edited_since_review"
-                }
-                _ => reviewed_tier(&mut machine_count),
+            // Edited since the review means the bytes are not the ones the
+            // verifying write stored, and the log holds both versions, so no
+            // clock is asked. A path whose log has no verifying write was
+            // verified before the log carried the mark: there the newest write
+            // is compared with the entry's own time, as it always was.
+            let edited = match (last_write, verifying_writes.get(path)) {
+                (Some(write), Some(verifying)) => write.version != verifying.version,
+                (Some(write), None) => verified_ts.is_some_and(|verified| write.at > verified),
+                (None, _) => false,
+            };
+            if edited {
+                edited_since_review_count += 1;
+                "edited_since_review"
+            } else {
+                reviewed_tier(&mut machine_count)
             }
         };
 

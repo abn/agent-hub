@@ -26,6 +26,15 @@ use crate::store::sessions::Session;
 /// it is one fixed string.
 pub const HUMAN: &str = "human";
 
+/// How long before its write lands a verification may have been stamped and
+/// still count as made for that write. A busy node puts seconds between the
+/// two; minutes is generous, and anything older was made for other bytes.
+const VERIFIES_WINDOW_SECS: i64 = 5 * 60;
+
+/// How far ahead of this node's clock a stamp may be, for a writer whose clock
+/// runs a little fast. A stamp further in the future verifies nothing.
+const VERIFIES_SKEW_SECS: i64 = 60;
+
 /// The operation a review is logged under. The human surface reads it back to
 /// tell a review's own write from an edit made after it.
 pub const REVIEW_OP: &str = "kb.review";
@@ -150,6 +159,7 @@ pub async fn delete(
     let stamp = Stamp {
         op: "kb.delete",
         actor,
+        verifies: None,
     };
     let deleted = brain
         .delete_if_recorded(&path, if_version, stamp, async || {
@@ -379,7 +389,11 @@ async fn store(
             &path,
             content.as_bytes(),
             if_version,
-            Stamp { op, actor },
+            Stamp {
+                op,
+                actor,
+                verifies: Some(brings_in_newest_verification),
+            },
             async || index(state, project_id, &path, content).await,
         )
         .await?;
@@ -397,6 +411,42 @@ async fn store(
         lint,
         warnings,
     })
+}
+
+/// Whether a write is the one that brings in a page's newest verification:
+/// the page it stores ends its `verified` block with an entry that the page it
+/// replaces did not hold anywhere in its own.
+///
+/// This is what `edited_since_review` rests on. The page is edited since its
+/// review when the bytes it holds are not the bytes the newest such write
+/// stored, so no clock is asked: a page that arrives with a verification of
+/// its own is not an edit since it whatever second it lands in, a retry that
+/// stores the same bytes is no edit, and an edit in the same second as the
+/// review is one. Taking the newest entry away to show an older one brings
+/// nothing in, and neither does an entry the page already held.
+fn brings_in_newest_verification(before: Option<&[u8]>, after: &[u8]) -> bool {
+    let verified = |bytes: &[u8]| {
+        std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|text| parse_frontmatter(text).ok().flatten())
+            .map(|frontmatter| frontmatter.verified)
+            .unwrap_or_default()
+    };
+    let Some(newest) = verified(after).last().cloned() else {
+        return false;
+    };
+    // A verification is about the bytes its author saw, so it is brought in
+    // only by the write it was made for: one landing about when the entry says
+    // it was made. An entry that is genuine but old, taken out and put back
+    // over an edited body or copied onto a page its author never opened, was
+    // made for other bytes and verifies nothing here.
+    let made =
+        time::OffsetDateTime::parse(&newest.at, &time::format_description::well_known::Rfc3339)
+            .map(|at| at.unix_timestamp());
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let fresh = made
+        .is_ok_and(|made| (now - VERIFIES_WINDOW_SECS..=now + VERIFIES_SKEW_SECS).contains(&made));
+    fresh && !before.map(verified).unwrap_or_default().contains(&newest)
 }
 
 /// The advisory findings for the page just written.

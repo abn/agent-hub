@@ -62,6 +62,10 @@ pub enum EntryKind {
     Dir,
 }
 
+/// Whether a write brings in an entry's newest verification, from the bytes
+/// it replaces, when there are any, and the bytes it stores.
+pub type Verifies = fn(Option<&[u8]>, &[u8]) -> bool;
+
 /// Who made a write and what it was, as the write log records it.
 #[derive(Debug, Clone, Copy)]
 pub struct Stamp<'a> {
@@ -69,6 +73,9 @@ pub struct Stamp<'a> {
     pub op: &'a str,
     /// The authenticated actor, never a value the caller supplied.
     pub actor: &'a str,
+    /// Asked under the write lock, and the answer goes on the log row. `None`
+    /// for a store that has no such notion.
+    pub verifies: Option<Verifies>,
 }
 
 /// One row of the write log.
@@ -83,6 +90,20 @@ pub struct WriteRecord {
     pub at: i64,
     /// The version the write stored. A delete stores none.
     pub version: Option<String>,
+    /// Whether the write brought in the entry's newest verification, as its
+    /// [`Stamp`] judged it when the write landed.
+    pub verifies: bool,
+}
+
+/// What the write log says last about each path.
+#[derive(Debug, Default)]
+pub struct LastWrites {
+    /// The newest write to every path the log names.
+    pub by_path: HashMap<String, WriteRecord>,
+    /// The newest write to each path that the caller counts as verifying.
+    pub verifying: HashMap<String, WriteRecord>,
+    /// The newest write of all.
+    pub newest: Option<WriteRecord>,
 }
 
 /// Which rows of the write log a reader wants. Every field narrows.
@@ -387,7 +408,8 @@ impl Brain {
     ) -> Result<i64> {
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
-        self.record_locked(name, path, actor, bytes, version).await
+        self.record_locked(name, path, actor, bytes, version, false)
+            .await
     }
 
     /// Append one row to the write log. The caller holds the write lock.
@@ -398,6 +420,7 @@ impl Brain {
         actor: &str,
         bytes: Option<usize>,
         version: Option<&str>,
+        verifies: bool,
     ) -> Result<i64> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -418,6 +441,9 @@ impl Brain {
         }
         if let Some(v) = version {
             params["version"] = serde_json::json!(v);
+        }
+        if verifies {
+            params["verifies"] = serde_json::json!(true);
         }
         let result = version.map(|v| serde_json::json!({ "version": v }));
 
@@ -491,6 +517,11 @@ impl Brain {
                 actor: field(&parameters, "actor").unwrap_or_default(),
                 at: integer(5).or_else(|| integer(4)).unwrap_or_default(),
                 version: field(&json(3), "version"),
+                verifies: parameters
+                    .as_ref()
+                    .and_then(|parameters| parameters.get("verifies"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
             };
             if visit(record).is_break() {
                 break;
@@ -551,19 +582,27 @@ impl Brain {
         Ok(found)
     }
 
-    /// The newest write to every path the log names, and the newest of all.
-    pub async fn last_writes(&self) -> Result<(HashMap<String, WriteRecord>, Option<WriteRecord>)> {
-        let mut by_path: HashMap<String, WriteRecord> = HashMap::new();
-        let mut newest = None;
+    /// The newest write to every path the log names, the newest of all, and
+    /// the newest write to each path that `verifying` accepts.
+    pub async fn last_writes(
+        &self,
+        verifying: impl Fn(&WriteRecord) -> bool,
+    ) -> Result<LastWrites> {
+        let mut last = LastWrites::default();
         self.scan_log(|record| {
-            if newest.is_none() {
-                newest = Some(record.clone());
+            if last.newest.is_none() {
+                last.newest = Some(record.clone());
             }
-            by_path.entry(record.path.clone()).or_insert(record);
+            if verifying(&record) {
+                last.verifying
+                    .entry(record.path.clone())
+                    .or_insert_with(|| record.clone());
+            }
+            last.by_path.entry(record.path.clone()).or_insert(record);
             std::ops::ControlFlow::Continue(())
         })
         .await?;
-        Ok((by_path, newest))
+        Ok(last)
     }
 
     /// Copy this brain into a new file through the engine.
@@ -656,7 +695,17 @@ impl Brain {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
-        self.check_expected(&namespace, path, expected).await?;
+        // One read serves both questions about what is being replaced.
+        let before = match (expected, stamp.verifies) {
+            (None, None) => None,
+            _ => self.read(&namespace).await?,
+        };
+        if let Some(expected) = expected {
+            ensure_expected(path, expected, before.as_deref())?;
+        }
+        let verifies = stamp
+            .verifies
+            .is_some_and(|judge| judge(before.as_deref(), bytes));
         self.write(&namespace, bytes).await?;
         let version = version(bytes);
         self.record_locked(
@@ -665,6 +714,7 @@ impl Brain {
             stamp.actor,
             Some(bytes.len()),
             Some(&version),
+            verifies,
         )
         .await?;
         indexed().await;
@@ -682,16 +732,7 @@ impl Brain {
         let Some(expected) = expected else {
             return Ok(());
         };
-        let current = self
-            .read(namespace)
-            .await?
-            .map_or_else(|| VERSION_ABSENT.to_string(), |bytes| version(&bytes));
-        if current != expected {
-            return Err(Error::Conflict(format!(
-                "the entry at '{path}' changed since it was read current_version={current}"
-            )));
-        }
-        Ok(())
+        ensure_expected(path, expected, self.read(namespace).await?.as_deref())
     }
 
     /// Read whatever is stored in one namespace.
@@ -862,7 +903,7 @@ impl Brain {
         if !self.remove(&namespace).await? {
             return Ok(false);
         }
-        self.record_locked(stamp.op, path, stamp.actor, None, None)
+        self.record_locked(stamp.op, path, stamp.actor, None, None, false)
             .await?;
         removed().await;
         Ok(true)
@@ -1056,6 +1097,17 @@ pub fn file_bytes(path: &Path) -> i64 {
 /// The directory holding one knowledge base file per project.
 pub fn knowledge_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("kb")
+}
+
+/// Refuse when what is stored is not what the caller expects to replace.
+fn ensure_expected(path: &str, expected: &str, current: Option<&[u8]>) -> Result<()> {
+    let current = current.map_or_else(|| VERSION_ABSENT.to_string(), version);
+    if current != expected {
+        return Err(Error::Conflict(format!(
+            "the entry at '{path}' changed since it was read current_version={current}"
+        )));
+    }
+    Ok(())
 }
 
 /// The version token for stored bytes.

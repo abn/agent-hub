@@ -317,6 +317,7 @@ impl HubServer {
         let stamp = Stamp {
             op: "brain.put",
             actor: &principal.actor,
+            verifies: None,
         };
         let version = target
             .brain
@@ -443,6 +444,7 @@ impl HubServer {
         let stamp = Stamp {
             op: "brain.delete",
             actor: &principal.actor,
+            verifies: None,
         };
         // Deleting what is already absent stays a success at the session
         // store; it is only not logged, because nothing happened.

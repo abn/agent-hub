@@ -88,12 +88,25 @@ reader can read.
 
 `trust` is derived, never stored: `unverified` with no `verified` entry,
 `human_reviewed` when the newest `verified.by` is `human`, `machine_confirmed`
-when it is anything else, and `edited_since_review` when the newest write to
-the path in the write log is later than that `verified.at`. A review's own
-write never counts: it is timed when it lands, which on a busy node is after
-the stamp it carries, so when the newest write is the review the page is as
-reviewed as its stamp says. The log records whole seconds, so an edit in the
-same second as the review does not count as later.
+when it is anything else, and `edited_since_review` when the page no longer
+holds the bytes that were verified.
+
+The write log decides that, not a clock. When a write lands, the hub notes on
+its log row whether it brought in the page's newest verification: the page it
+stores ends its `verified` block with an entry the page it replaces did not
+hold, stamped within five minutes of the write landing. A verification is
+about the bytes its author saw, so an older entry, taken out and put back
+over an edited body or copied onto another page, was made for other bytes and
+brings nothing in. A review always does. The page is `edited_since_review` when the version
+of its newest write is not the version that write stored. So a page an agent
+writes with a `verified` block of its own is not an edit since it, whatever
+second it lands in; a retry that stores the same bytes is no edit; an edit in
+the same second as the review is one; putting the verified bytes back reads as
+verified again, until a later write brings in a verification of its own; and
+taking the newest entry away to show an older one is an
+edit. A page whose log holds no such row, written by a hub from before the
+rows carried the note, is judged as it was then: edited when its newest write
+is later than the newest `verified.at`, to the second.
 
 ### `GET /api/v1/projects/{id}/kb/pages/{path}`
 
@@ -112,8 +125,12 @@ nothing is there. Without it the last writer wins.
 Returns `{ok, path, version, size_bytes, lint[], warnings[]}`. `lint` is
 advisory and never fails a write: `missing_frontmatter`, `missing_type`,
 `unparsed_frontmatter`, `okf_version_misplaced`, `link_escapes_bundle`, and
-`broken_link` for a link whose target is not a page anywhere in the tree. The
-hub stores the bytes as sent.
+`broken_link` for a link whose target is not a page anywhere in the tree. A
+page with no block at all is `missing_frontmatter`; a page whose first line
+only looks like the opener (`--- # comment`, `---yaml`) or whose block cannot
+be read safely is `unparsed_frontmatter`, and a review or a promote of it is
+refused until the first line is exactly `---`. The hub stores the bytes as
+sent.
 
 ### `DELETE /api/v1/projects/{id}/kb/pages/{path}`
 

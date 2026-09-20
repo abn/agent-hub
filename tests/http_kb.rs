@@ -1107,6 +1107,206 @@ async fn a_review_whose_write_lands_later_than_its_stamp_still_reads_as_reviewed
 }
 
 #[tokio::test]
+async fn an_old_verification_copied_onto_other_bytes_verifies_nothing() {
+    // A verification is about the bytes its author saw. An entry that is
+    // genuine but old, carried by a later write onto a body nobody reviewed,
+    // must not make that body read as reviewed, however it gets there: taken
+    // out and put back, or copied to a path the human never opened.
+    let hub = Hub::start().await;
+    let project = hub.project("copied").await;
+    let base = format!("/api/v1/projects/{project}/kb");
+    let trust = async |path: &str| {
+        let listing = hub.get(&format!("{base}/pages?meta=1")).await.ok();
+        listing["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .find(|entry| entry["path"] == path)
+            .expect("the page is listed")["trust"]
+            .as_str()
+            .expect("trust")
+            .to_string()
+    };
+    let an_hour_ago = (time::OffsetDateTime::now_utc() - time::Duration::hours(1))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format");
+    let by_human = format!("  - by: human\n    at: {an_hour_ago}\n");
+    let with = |body: &str| {
+        format!("---\ntitle: Runbook\ntype: concept\nverified:\n{by_human}---\n{body}\n")
+    };
+    let without = |body: &str| format!("---\ntitle: Runbook\ntype: concept\n---\n{body}\n");
+
+    // Out and back: the block is dropped, then returns over an edited body.
+    hub.put_page(&project, "fs/runbook.md", &with("What the human read."))
+        .await
+        .ok();
+    hub.put_page(&project, "fs/runbook.md", &without("What the human read."))
+        .await
+        .ok();
+    hub.put_page(&project, "fs/runbook.md", &with("What nobody read."))
+        .await
+        .ok();
+    assert_ne!(trust("/fs/runbook.md").await, "human_reviewed");
+
+    // Copied: the same old entry on a new path, over a body the human never saw.
+    hub.put_page(&project, "fs/other.md", &with("Never opened by the human."))
+        .await
+        .ok();
+    assert_ne!(trust("/fs/other.md").await, "human_reviewed");
+}
+
+#[tokio::test]
+async fn edited_since_review_is_about_the_bytes_the_verifying_write_stored() {
+    let hub = Hub::start().await;
+    let project = hub.project("verifying").await;
+    let base = format!("/api/v1/projects/{project}/kb");
+    let trust = async |path: &str| {
+        let listing = hub.get(&format!("{base}/pages?meta=1")).await.ok();
+        listing["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .find(|entry| entry["path"] == path)
+            .expect("the page is listed")["trust"]
+            .as_str()
+            .expect("trust")
+            .to_string()
+    };
+
+    // An agent's page carries a verification of its own, stamped before the
+    // write landed: here a whole minute before, where a busy node makes it a
+    // second. The write that brought the entry in is not an edit since it.
+    let a_minute_ago = (time::OffsetDateTime::now_utc() - time::Duration::seconds(60))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format");
+    let page = |body: &str, verified: &str| {
+        format!("---\ntitle: Checked\ntype: concept\nverified:\n{verified}---\n{body}\n")
+    };
+    let by_bot = format!("  - by: deploy-bot\n    at: {a_minute_ago}\n");
+    let checked = page("Checked by the agent.", &by_bot);
+    hub.put_page(&project, "fs/checked.md", &checked).await.ok();
+    assert_eq!(trust("/fs/checked.md").await, "machine_confirmed");
+
+    // A retry stores the same bytes, so nothing was edited.
+    hub.put_page(&project, "fs/checked.md", &checked).await.ok();
+    assert_eq!(trust("/fs/checked.md").await, "machine_confirmed");
+
+    // Other bytes under the same verification are an edit since it, and the
+    // verified bytes coming back are not.
+    hub.put_page(&project, "fs/checked.md", &page("Changed.", &by_bot))
+        .await
+        .ok();
+    assert_eq!(trust("/fs/checked.md").await, "edited_since_review");
+    hub.put_page(&project, "fs/checked.md", &checked).await.ok();
+    assert_eq!(trust("/fs/checked.md").await, "machine_confirmed");
+
+    // The human reviews it, and an edit in the very same second is an edit:
+    // no clock is asked.
+    hub.send(request(
+        "POST",
+        &format!("{base}/pages/fs/checked.md/review"),
+        Some(ADMIN),
+        None,
+    ))
+    .await
+    .ok();
+    assert_eq!(trust("/fs/checked.md").await, "human_reviewed");
+    let reviewed = hub.page(&project, "fs/checked.md").await.ok()["content"]
+        .as_str()
+        .expect("content")
+        .to_string();
+    hub.put_page(
+        &project,
+        "fs/checked.md",
+        &reviewed.replace("Checked by the agent.", "Changed after the review."),
+    )
+    .await
+    .ok();
+    assert_eq!(trust("/fs/checked.md").await, "edited_since_review");
+
+    // Taking the newest entry away to show an older one verifies nothing.
+    hub.put_page(&project, "fs/checked.md", &reviewed)
+        .await
+        .ok();
+    assert_eq!(trust("/fs/checked.md").await, "human_reviewed");
+    hub.put_page(&project, "fs/checked.md", &checked).await.ok();
+    assert_eq!(
+        trust("/fs/checked.md").await,
+        "edited_since_review",
+        "the agent's entry was already on the page the human reviewed"
+    );
+
+    let stats = hub.get(&format!("{base}/stats")).await.ok();
+    assert_eq!(stats["needs_review"]["edited_since_review"], 1, "{stats}");
+}
+
+#[tokio::test]
+async fn a_page_verified_before_the_log_marked_it_is_still_judged_by_its_time() {
+    let hub = Hub::start().await;
+    let project = hub.project("unmarked").await;
+    hub.put_page(&project, "fs/seed.md", CONCEPT).await.ok();
+    let kb = hub
+        .state
+        .knowledge
+        .open(&project, agent_hub::brain::KNOWLEDGE_FILE)
+        .await
+        .expect("open the knowledge base");
+
+    // Rows as an earlier hub wrote them: a page with a verification, and a
+    // log row that does not say whether the write brought it in.
+    let stamp = |offset: time::Duration| {
+        (time::OffsetDateTime::now_utc() + offset)
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("format")
+    };
+    for (name, at) in [
+        ("older", stamp(-time::Duration::minutes(1))),
+        ("newer", stamp(time::Duration::hours(1))),
+    ] {
+        let path = format!("/fs/{name}.md");
+        let page = format!(
+            "---\ntitle: {name}\ntype: concept\nverified:\n  - by: deploy-bot\n    at: {at}\n---\nBody.\n"
+        );
+        kb.put(&path, page.as_bytes()).await.expect("put");
+        kb.record_write(
+            "kb.put",
+            &path,
+            "deploy-bot",
+            Some(page.len()),
+            Some(&agent_hub::brain::version(page.as_bytes())),
+        )
+        .await
+        .expect("record");
+    }
+    drop(kb);
+    hub.state.notify();
+
+    let listing = hub
+        .get(&format!("/api/v1/projects/{project}/kb/pages?meta=1"))
+        .await
+        .ok();
+    let trust: Vec<(&str, &str)> = listing["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .map(|entry| {
+            (
+                entry["path"].as_str().expect("path"),
+                entry["trust"].as_str().expect("trust"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        trust,
+        [
+            ("/fs/newer.md", "machine_confirmed"),
+            ("/fs/older.md", "edited_since_review"),
+            ("/fs/seed.md", "unverified"),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn concurrent_writers_leave_the_log_and_the_index_agreeing_with_the_page() {
     let hub = std::sync::Arc::new(Hub::start().await);
     let project = hub.project("order").await;
