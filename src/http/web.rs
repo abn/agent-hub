@@ -160,6 +160,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/connect.mjs",
+        body: include_str!("../../web/connect.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/frontmatter.mjs",
         body: include_str!("../../web/frontmatter.mjs"),
         content_type: "text/javascript; charset=utf-8",

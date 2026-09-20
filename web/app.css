@@ -913,6 +913,31 @@ button.empty-link {
 .proj-gear svg { display: block; }
 .pset-sub { margin: 2px 0 0; color: var(--ink-3); }
 .pset { display: flex; flex-direction: column; }
+.settings-token-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+
+/* The token screen. A single card, narrow enough to read as one question. */
+.connect { max-width: 26rem; margin: var(--s-4) auto; }
+.connect-mark { color: var(--ink-2); }
+.connect-copy { font-size: var(--t-13); color: var(--ink-2); }
+.connect-show {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+.connect-show input { width: auto; min-height: 0; }
+.connect .primary { width: 100%; }
+
 .pset-field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--s-3); }
 .pset-field label, .pset-label { margin: 0; font-size: var(--t-13); color: var(--ink-2); }
 .pset-hint { color: var(--ink-3); }

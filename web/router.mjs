@@ -47,6 +47,13 @@ export async function render() {
     // reaching into the location itself.
     refreshBadge(await (screens[screen] || screens.home)(params, gen, path));
   } catch (error) {
+    // A refusal to authenticate is not this screen's to report: there is one
+    // screen that can fix it, and it takes the route it interrupted so the
+    // reader arrives where they were going rather than at the start.
+    if (error.status === 401 && screen !== "connect") {
+      location.hash = `#/connect?next=${encodeURIComponent(hash)}`;
+      return;
+    }
     paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
   }
   const focus = pendingFocus;

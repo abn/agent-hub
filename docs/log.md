@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a screen that asks for the access token
+
+* **Update**: [The human surface](architecture/human-surface.md) adds the
+  Connect screen, where a reader enters the hub's access token. A refused
+  request sends them there with the route it interrupted, the token is checked
+  against the hub before it is kept, and a refusal shows the hub's own words
+  beside the field. Settings says whether this device holds a token and offers
+  Sign out, which asks first and then forgets it.
+
 ## 2026-09-20, the Inbox calls a project by its name
 
 * **Update**: [The human surface](architecture/human-surface.md) says an

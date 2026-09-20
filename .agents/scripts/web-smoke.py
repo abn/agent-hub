@@ -1948,6 +1948,10 @@ def guard_holds(project: str, session_id: str, artifact: str) -> dict[str, list[
         ],
         "storage": [("storage", "#/storage", "/api/v1/storage", "main .storage")],
         "settings": [("settings", "#/settings", "/api/v1/agents", 'main form[data-action="prefs"]')],
+        # The screen paints no request of its own, but the badge asks on every
+        # render and the token check asks on submit, and an answer to either
+        # must not move a reader who has gone elsewhere.
+        "connect": [("connect", "#/connect?next=%2Fstorage", "/api/v1/home", "main .connect")],
     }
 
 
@@ -6334,6 +6338,292 @@ def check_inbox_earlier_focus(browser, watch: Watch, port: int) -> None:
         watch.drain_rejections()
 
 
+CONNECT_SCREEN = "main .connect"
+CONNECT_FIELD = "main .connect input[name='token']"
+CONNECT_ERROR = "main .connect .connect-error"
+CONNECT_SEND = "main .connect button[type='submit']"
+
+
+def check_connect_screen(browser, watch: Watch, port: int) -> None:
+    """A reader whose token the hub will not take is asked for one, and put back."""
+    watch.enter("connect: a hub that will not take this browser's token")
+    context = None
+    try:
+        # A stale token that no longer works, which is the harder start: the
+        # screen has to prefer what is typed over what is stored, or a wrong
+        # token can never be corrected from here.
+        context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+        context.add_init_script("localStorage.setItem('hub.token', 'stale-and-wrong');")
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
+        page.goto(f"http://127.0.0.1:{port}/#/storage", wait_until="load")
+        if not settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')"):
+            watch.fail(
+                f"a hub that refused the token left the reader on {page.evaluate('location.hash')!r}"
+                " with no way to enter another"
+            )
+            return
+        # It carries where the reader was going, so the token is not a detour.
+        if "next=%2Fstorage" not in page.evaluate("location.hash"):
+            watch.fail(f"the screen forgot where the reader was going: {page.evaluate('location.hash')!r}")
+        if page.evaluate(f"!document.querySelector({json.dumps(CONNECT_FIELD)})"):
+            watch.fail("the screen asks for a token with no field to type it in")
+            return
+
+        watch.enter("connect: the parts the screen is made of")
+        parts = page.evaluate(
+            "(() => { const form = document.querySelector('main .connect form');"
+            " const field = form.querySelector('.connect-field');"
+            " const box = form.querySelector('.connect-error');"
+            " const label = form.querySelector(`label[for=\"${field.id}\"]`);"
+            " const user = form.querySelector('input[name=\"username\"]');"
+            " return { described: (field.getAttribute('aria-describedby') || '').split(' ').includes(box.id),"
+            "  alert: box.getAttribute('role') || '', labelled: !!label && !!label.textContent.trim(),"
+            "  user: !!user && user.autocomplete === 'username', type: field.type,"
+            "  next: form.dataset.next || '' }; })()"
+        )
+        if not parts["described"]:
+            watch.fail("the field is not described by its own error line, so the words are read to nobody")
+        if parts["alert"] != "alert":
+            watch.fail(f"the error line is a {parts['alert']!r} region, so a refusal is not announced")
+        if not parts["labelled"]:
+            watch.fail("the token field has no label")
+        if not parts["user"]:
+            watch.fail("no username field, so a password manager has no pair to store the token against")
+        # A token is unreadable as dots and is usually pasted.
+        page.check("main .connect input[data-role='show-token']")
+        if page.evaluate(f"document.querySelector({json.dumps(CONNECT_FIELD)}).type") != "text":
+            watch.fail("Show token left the token hidden")
+        page.uncheck("main .connect input[data-role='show-token']")
+        if page.evaluate(f"document.querySelector({json.dumps(CONNECT_FIELD)}).type") != "password":
+            watch.fail("Show token could not be turned back off")
+
+        watch.enter("connect: a next that is not a route of this app")
+        for wanted, expected in (("//evil.example", "/home"), ("/connect", "/home"), ("%2Fstorage", "/storage")):
+            page.evaluate(f"location.hash = '#/connect?next={wanted}'")
+            if not settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')"):
+                watch.fail(f"the screen did not paint for next={wanted!r}")
+                continue
+            got = page.evaluate("(document.querySelector('main .connect form') || { dataset: {} }).dataset.next || ''")
+            if got != expected:
+                watch.fail(f"next={wanted!r} was taken as {got!r}, expected {expected!r}")
+        page.evaluate("location.hash = '#/connect?next=%2Fstorage'")
+        settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')")
+
+        watch.enter("connect: nothing typed")
+        asked = watch_calls_to(page, "/api/v1/home")
+        page.click(CONNECT_SEND)
+        if not settle(page, f"!!document.querySelector('{CONNECT_ERROR}:not([hidden])')"):
+            watch.fail("an empty token was sent off without a word")
+        if page.evaluate(asked) != 0:
+            watch.fail("an empty token was put to the hub")
+
+        watch.enter("connect: a token the hub does not know")
+        page.fill(CONNECT_FIELD, "not-the-token")
+        page.click(CONNECT_SEND)
+        if not settle(page, f"!!document.querySelector('{CONNECT_ERROR}:not([hidden])')"):
+            watch.fail("a token the hub refused was not reported on the screen")
+            return
+        # The hub's own words, not a sentence the screen made up: it answers a
+        # token it does not know and a hub with no token configured with the
+        # same code, and only the words tell them apart.
+        detail = page.evaluate(
+            "fetch('/api/v1/home').then((r) => r.json()).then((p) => p.detail || '')"
+        )
+        said = page.text_content(CONNECT_ERROR) or ""
+        if not detail or detail not in said:
+            watch.fail(f"a refused token reads {said!r}, and the hub said {detail!r}")
+        if page.evaluate("localStorage.getItem('hub.token')") != "stale-and-wrong":
+            watch.fail("a token the hub refused was stored over the one that was there")
+        if page.input_value(CONNECT_FIELD) != "not-the-token":
+            watch.fail("the refused token was thrown away, so it cannot be corrected")
+        if "connect" not in (page.evaluate("document.activeElement.className") or ""):
+            watch.fail("a refused token left focus off the field it must be fixed in")
+
+        watch.enter("connect: pressed twice before the hub answers")
+        page.fill(CONNECT_FIELD, harness.ADMIN_TOKEN)
+        page.evaluate(HOLD_FETCH, "/api/v1/home")
+        try:
+            page.click(CONNECT_SEND)
+            if not settle(page, "window.__held.asked > 0"):
+                watch.fail("the token was never put to the hub")
+            else:
+                busy = page.evaluate(
+                    "(() => { const b = document.querySelector('main .connect button[type=\"submit\"]');"
+                    " const f = document.querySelector('main .connect form');"
+                    " return { disabled: b.disabled, busy: f.getAttribute('aria-busy') || '' }; })()"
+                )
+                if not busy["disabled"] or busy["busy"] != "true":
+                    watch.fail(f"while the hub is asked the screen reads {busy}")
+                page.evaluate(
+                    "(() => { const b = document.querySelector('main .connect button[type=\"submit\"]');"
+                    " b.disabled = false; b.click(); })()"
+                )
+                page.wait_for_timeout(200)
+                if page.evaluate("window.__held.asked") != 1:
+                    watch.fail(f"a second press asked the hub {page.evaluate('window.__held.asked')} times")
+        finally:
+            page.evaluate("(() => { if (window.__held) { window.__held.release(); window.__held.restore(); } })()")
+
+        # Letting that answer go completes the press, which lands. Wait for it,
+        # or the next step fills a form that is about to be replaced.
+        settle(page, "location.hash === '#/storage'")
+        page.wait_for_timeout(200)
+
+        watch.enter("connect: the reader moves on before the hub answers")
+        page.evaluate("location.hash = '#/connect?next=%2Fstorage'")
+        settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')")
+        page.fill(CONNECT_FIELD, harness.ADMIN_TOKEN)
+        page.evaluate(HOLD_FETCH, "/api/v1/home")
+        try:
+            page.click(CONNECT_SEND)
+            settle(page, "window.__held.asked > 0")
+            page.evaluate("location.hash = '#/settings'")
+            settle(page, "!!document.querySelector('main form[data-action=\"prefs\"]')")
+        finally:
+            page.evaluate("(() => { if (window.__held) { window.__held.release(); window.__held.restore(); } })()")
+        page.wait_for_timeout(600)
+        if not page.evaluate("location.hash.startsWith('#/settings')"):
+            watch.fail(
+                "an answer that arrived after the reader moved on took them to"
+                f" {page.evaluate('location.hash')!r}"
+            )
+            page.evaluate("location.hash = '#/connect?next=%2Fstorage'")
+            settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')")
+            page.fill(CONNECT_FIELD, harness.ADMIN_TOKEN)
+
+        watch.enter("connect: the token the hub was started with")
+        page.evaluate("location.hash = '#/connect?next=%2Fstorage'")
+        settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')")
+        page.fill(CONNECT_FIELD, harness.ADMIN_TOKEN)
+        page.click(CONNECT_SEND)
+        if not settle(page, "location.hash === '#/storage'"):
+            watch.fail(f"a good token landed on {page.evaluate('location.hash')!r}, not where the reader was going")
+        if page.evaluate("localStorage.getItem('hub.token')") != harness.ADMIN_TOKEN:
+            watch.fail("a good token was not kept, so the next screen asks again")
+        if not settle(page, "!!document.querySelector('main .storage')"):
+            watch.fail("the screen the reader wanted never painted")
+    finally:
+        if context:
+            context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
+def check_connect_without_storage(browser, watch: Watch, port: int) -> None:
+    """A browser that will not keep the token says so, rather than asking again for no reason."""
+    watch.enter("connect: a browser that refuses storage")
+    context = None
+    try:
+        context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+        # What Safari with site data blocked, a full quota and old private
+        # modes do: reads work, writes throw.
+        context.add_init_script(
+            "(() => { const real = window.localStorage;"
+            " Object.defineProperty(window, 'localStorage', { configurable: true, value: {"
+            "  getItem: (key) => real.getItem(key),"
+            "  setItem: () => { throw new Error('storage is blocked'); },"
+            "  removeItem: () => { throw new Error('storage is blocked'); },"
+            "  key: (at) => real.key(at), clear: () => {}, get length() { return real.length; } } }); })()"
+        )
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
+        page.goto(f"http://127.0.0.1:{port}/#/storage", wait_until="load")
+        if not settle(page, f"!!document.querySelector('{CONNECT_SCREEN}')"):
+            watch.fail("a browser without storage never reached the screen that asks for a token")
+            return
+        page.fill(CONNECT_FIELD, harness.ADMIN_TOKEN)
+        page.click(CONNECT_SEND)
+        if not settle(page, "location.hash === '#/storage'"):
+            watch.fail("a good token did not work in a browser that cannot store it")
+        said = page.evaluate("[...document.querySelectorAll('.toast-text')].map((n) => n.textContent).join(' | ')")
+        if "store the token" not in said:
+            watch.fail(f"a browser that could not keep the token said {said!r}")
+    finally:
+        if context:
+            context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
+def watch_calls_to(page, needle: str) -> str:
+    """Count requests to an address from now on, as an expression to evaluate."""
+    page.evaluate(
+        "((needle) => { const send = window.fetch; window.__counted = 0;"
+        " window.fetch = (url, options) => { if (String(url).includes(needle)) window.__counted += 1;"
+        "  return send(url, options); }; })",
+        needle,
+    )
+    return "window.__counted"
+
+
+def check_sign_out(browser, watch: Watch, port: int) -> None:
+    """Settings can give the token back, and says the hub will ask again."""
+    watch.enter("settings: sign out")
+    context = None
+    try:
+        context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+        context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
+        page.goto(f"http://127.0.0.1:{port}/#/settings", wait_until="load")
+        if not settle(page, "!!document.querySelector('main [data-action=\"signout\"]')"):
+            watch.fail("Settings offers no way to give the token back")
+            return
+        page.click('main [data-action="signout"]')
+        if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+            watch.fail("signing out did not ask first, so a stray press locks the reader out")
+            return
+        # Keeping is the safe action, and it has to actually keep: a reader who
+        # pressed Sign out by mistake still has their token.
+        page.click("dialog.dialog .dialog-safe")
+        page.wait_for_selector("dialog.dialog", state="detached")
+        page.wait_for_timeout(300)
+        if page.evaluate("localStorage.getItem('hub.token')") != harness.ADMIN_TOKEN:
+            watch.fail("keeping the token at the dialog signed the reader out anyway")
+            return
+        if not page.evaluate("location.hash.startsWith('#/settings')"):
+            watch.fail(f"keeping the token left Settings for {page.evaluate('location.hash')!r}")
+
+        # A refusal can arrive with a dialog open, and the screen that asks for
+        # a token is the one screen that must never be unreachable behind one.
+        watch.enter("connect: a dialog left open by the screen behind")
+        page.click('main [data-action="signout"]')
+        settle(page, "!!document.querySelector('dialog.dialog[open]')")
+        page.evaluate("location.hash = '#/connect'")
+        if not settle(page, "!!document.querySelector('main .connect .connect-field')"):
+            watch.fail("the screen that asks for a token did not paint over an open dialog")
+        elif page.evaluate("!!document.querySelector('dialog[open]')"):
+            watch.fail("a dialog from the screen behind is still modal over the token field")
+        else:
+            page.focus("main .connect .connect-field")
+            if "connect-field" not in (page.evaluate("document.activeElement.className") or ""):
+                watch.fail("the token field could not take focus")
+        page.evaluate("location.hash = '#/settings'")
+        if not settle(page, "!!document.querySelector('main [data-action=\"signout\"]')"):
+            watch.fail("Settings did not come back")
+            return
+
+        watch.enter("settings: sign out")
+        page.click('main [data-action="signout"]')
+        if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+            watch.fail("the sign out dialog did not open a second time")
+            return
+        page.click("dialog.dialog .dialog-commit")
+        if not settle(page, "localStorage.getItem('hub.token') === null"):
+            watch.fail("signing out kept the token")
+        if not settle(page, "!!document.querySelector('main .connect .connect-field')"):
+            watch.fail(
+                f"signing out left the reader on {page.evaluate('location.hash')!r}"
+                " with no way back in"
+            )
+    finally:
+        if context:
+            context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -6408,6 +6698,7 @@ def run() -> int:
                 routes = [
                     ("home", "#/home", home_title(), [harness.FINISHED_SUMMARY, "waiting on you"]),
                     ("inbox", "#/inbox", "Inbox", [harness.QUESTION_SUBJECT]),
+                    ("connect", "#/connect", "Connect to this hub", []),
                     (
                         "projects",
                         f"#/projects/{quote(project)}/feed",
@@ -6502,6 +6793,9 @@ def run() -> int:
                 run_step(watch, check_inbox_card_escape, page, watch, port, project)
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
+                run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(watch, check_sign_out, browser, watch, port)
+                run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)
                 run_step(watch, check_session_row_state, page, watch, project)
                 run_step(watch, check_tree_roles, page, watch, project, seeded["session_id"])

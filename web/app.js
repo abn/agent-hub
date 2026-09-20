@@ -6,6 +6,7 @@
 
 import { reissueToken, revokeToken, setAgentTrust, ungrant } from "./agents.mjs";
 import { api } from "./api.mjs";
+import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
 import {
   openArtifact,
   pickVersion,
@@ -27,7 +28,7 @@ import { projectSettingsScreen } from "./project-settings.mjs";
 import { render, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
 import { endSession, pruneSession, sessionDetail } from "./sessions.mjs";
-import { deleteProject, enableNotifications, settingsScreen } from "./settings.mjs";
+import { deleteProject, enableNotifications, settingsScreen, signOut } from "./settings.mjs";
 import { installShell } from "./shell.mjs";
 import { storageScreen } from "./storage.mjs";
 import { toast } from "./toast.mjs";
@@ -69,6 +70,7 @@ setScreens({
   search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
+  connect: (params, gen) => connectScreen(params, gen),
 });
 
 // What a failed write says. The detail is the hub's own; the sentence around
@@ -111,6 +113,7 @@ main.addEventListener("click", (event) => {
   if (action === "viewer-raw") toggleRaw(button);
   if (action === "viewer-theme") toggleViewerTheme();
   if (action === "project-delete") acted(button, deleteProject(id));
+  if (action === "signout") acted(button, signOut());
   if (action === "notification-enable") acted(button, enableNotifications());
 });
 
@@ -138,7 +141,9 @@ main.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = new FormData(form);
   const action = form.dataset.action;
-  if (action === "prefs") {
+  if (action === "connect") {
+    connectSubmit(form);
+  } else if (action === "prefs") {
     savePrefs({
       token: data.get("token"),
       theme: data.get("theme"),
@@ -171,6 +176,7 @@ main.addEventListener("submit", (event) => {
 });
 
 main.addEventListener("change", (event) => {
+  if (event.target.dataset.role === "show-token") connectShow(event.target);
   if (event.target.dataset.role === "project") {
     const screen = location.hash.replace(/^#/, "").split("?")[0] || "/feed";
     location.hash = `${screen}?project=${encodeURIComponent(event.target.value)}`;

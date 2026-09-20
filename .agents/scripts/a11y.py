@@ -33,6 +33,7 @@ ROUTES = [
     "search?q=check%20notes",
     "search?q=zeppelin",
     "settings",
+    "connect",
     "artifacts",
     "home-quiet",
     "project-settings",
@@ -96,6 +97,7 @@ AUDITED = {
     "search": ["search", "search?q=check%20notes", "search?q=zeppelin"],
     "storage": ["storage", STORAGE_DIALOG],
     "settings": ["settings"],
+    "connect": ["connect"],
 }
 
 # What only that screen, painted with its seeded data, puts on the page. The
@@ -115,6 +117,7 @@ EXPECTED = {
     "search?q=check%20notes": "main .search-results .search-row",
     "search?q=zeppelin": "main .search-results .empty-title",
     "settings": "main .row .title",
+    "connect": "main .connect .connect-field",
     "artifacts": "main .gallery .artifact-card",
     HOME_QUIET: "main .home .empty-state",
     PROJECT_SETTINGS: "main .pset",

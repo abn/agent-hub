@@ -5,7 +5,7 @@ import { agentsSection } from "./agents.mjs";
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { errorCard, esc, paint } from "./dom.mjs";
-import { prefs } from "./prefs.mjs";
+import { prefs, saveToken } from "./prefs.mjs";
 import { render } from "./router.mjs";
 import { toast } from "./toast.mjs";
 
@@ -65,6 +65,11 @@ export async function settingsScreen(gen) {
     <form class="card" data-action="prefs">
       <label for="token">Control-surface token</label>
       <input id="token" name="token" type="password" value="${esc(prefs.token)}" autocomplete="off">
+      <p class="settings-token-state">${
+        prefs.token
+          ? '<span>This device has a token.</span><button type="button" class="danger" data-action="signout">Sign out</button>'
+          : "<span>This device has no token, so the hub refuses every request.</span>"
+      }</p>
       <label for="theme">Theme</label>
       <select id="theme" name="theme">
         <option value="system"${prefs.theme === "system" ? " selected" : ""}>System</option>
@@ -99,6 +104,26 @@ export async function settingsScreen(gen) {
 
 // `leave` is for a screen that is about the project itself: once the project is
 // gone there is nothing there to repaint, so it says where to go instead.
+// Giving the token back is asked about first: the reader may not have it to
+// hand a second time, and nothing else on this screen locks them out.
+export async function signOut() {
+  const confirmed = await confirmAction({
+    title: "Sign out of this hub?",
+    body: "This device forgets the access token. The hub asks for it again, and nothing else is removed.",
+    note: "You need the token to get back in.",
+    safe: "Keep",
+    danger: "Sign out",
+  });
+  if (!confirmed) return;
+  const forgotten = saveToken("");
+  location.hash = "#/connect";
+  toast(
+    forgotten
+      ? "Signed out. This device has forgotten the token."
+      : "This browser would not forget the token, so it is still stored here.",
+  );
+}
+
 export async function deleteProject(id, leave) {
   const confirmed = await confirmAction({
     title: `Delete project ${id}?`,
