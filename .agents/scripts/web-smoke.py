@@ -1584,6 +1584,7 @@ def check_storage_keys(page, watch: Watch) -> None:
 # data, and every screen that prints one has to keep it that.
 NAME_HOSTILE = 'Attic <img src=x onerror="document.body.dataset.namePwned=1">'
 NAME_PWNED = "!!document.body.dataset.namePwned || !!document.querySelector('main img')"
+INBOX_LISTING = re.compile(r"/api/v1/inbox\?")
 SEARCH_ROWS = (
     "[...document.querySelectorAll('main .search-row')].map((row) => {"
     " const part = (sel) => { const el = row.querySelector(sel);"
@@ -1725,6 +1726,48 @@ def check_project_names(page, watch: Watch) -> None:
     hrefs = [row["href"] for row in rows]
     if hrefs != [f"#/projects/{slug}/feed" for slug in ("homelab", "research", "attic")]:
         watch.fail(f"the search rows link to {hrefs}, not to the project ids")
+
+    watch.enter("names: the inbox rows and the open card")
+    items = [
+        home_waiting_item(1, 4),
+        home_waiting_item(2, 5, project_id="research", project_display_name=None),
+        home_waiting_item(3, 6, project_id="attic", project_display_name=NAME_HOSTILE),
+    ]
+
+    def answer(route):
+        waiting = "status=action" in route.request.url
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"items": items if waiting else []}),
+        )
+
+    page.route(INBOX_LISTING, answer)
+    try:
+        goto(page, "#/settings", "Settings")
+        page.evaluate("location.hash = '#/inbox'")
+        if not settle(page, "document.querySelectorAll('main .inbox-item').length === 3"):
+            watch.fail("the inbox did not draw the three routed items")
+        if page.evaluate(NAME_PWNED):
+            watch.fail("a project's display name became an element in the inbox")
+        shown = page.evaluate(
+            "[...document.querySelectorAll('main .inbox-item .inbox-project')].map((el) => el.textContent)"
+        )
+        if shown != ["Home lab", "research", NAME_HOSTILE]:
+            watch.fail(f"the inbox rows name their projects {shown}")
+        # A phone shows the card in the list's place, so it is opened after the rows are read.
+        page.evaluate(f"location.hash = '#/inbox?open={items[2]['event_id']}'")
+        settle(page, "!!document.querySelector('main .inbox-detail .inbox-project')")
+        if page.evaluate(NAME_PWNED):
+            watch.fail("a project's display name became an element on the inbox card")
+        card = page.evaluate(
+            "(document.querySelector('main .inbox-detail .inbox-project') || {}).textContent || ''"
+        )
+        if card != NAME_HOSTILE:
+            watch.fail(f"the open card names its project {card!r}")
+    finally:
+        page.unroute(INBOX_LISTING)
+        goto(page, "#/settings", "Settings")
     watch.drain_rejections()
 
 
@@ -5333,8 +5376,11 @@ def check_inbox_groups(page, watch: Watch, project: str) -> None:
         watch.fail(f"an unread row is weight {row['weight']} with dot {row['dot']}")
     if row["said"] != "Unread":
         watch.fail(f"the unread dot is a colour with no name beside it ({row['said']!r})")
-    if row["project"].strip() != project or row["projectWeight"] != "600":
-        watch.fail(f"the footer's project reads {row['project']!r} at {row['projectWeight']}")
+    if row["project"].strip() != harness.PROJECT_NAME or row["projectWeight"] != "600":
+        watch.fail(
+            f"the footer's project reads {row['project']!r} at {row['projectWeight']},"
+            f" the hub names {project} {harness.PROJECT_NAME!r}"
+        )
     if "unread" in row["foot"].lower().replace("mark unread", ""):
         if "Mark read" not in row["foot"]:
             watch.fail(f"the footer prints the raw status: {row['foot']!r}")

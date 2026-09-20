@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the Inbox calls a project by its name
+
+* **Update**: [The human surface](architecture/human-surface.md) says an
+  Inbox row's footer and the open card name a project by its display name, and
+  by its slug when no name comes with it, as the other screens do.
+
 ## 2026-09-20, an inbox item names its project
 
 * **Update**: [The human surface](architecture/human-surface.md) lists

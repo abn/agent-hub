@@ -4,7 +4,7 @@
 import { api } from "./api.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { actionFor, esc, glyph, main, paint, stale } from "./dom.mjs";
+import { actionFor, esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
 import { twoPane } from "./project.mjs";
@@ -139,7 +139,7 @@ function inboxRow(item, state) {
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
         <div class="inbox-foot">
-          <span class="inbox-project">${esc(item.project_id)}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span>
+          <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span>
           <span class="inbox-acts">${rowActions(item)}</span>
         </div>
       </div>
@@ -237,7 +237,7 @@ function detail(item, state) {
     <div class="inbox-detail-head">
       ${glyph(item.kind)}
       ${waits(item) ? '<span class="pill">Waiting on you</span>' : ""}
-      <span class="inbox-detail-meta"><span class="inbox-project">${esc(item.project_id)}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
+      <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
     </div>
     <h2 class="item-title" id="inbox-detail-title">${esc(item.summary)}</h2>
     ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}
