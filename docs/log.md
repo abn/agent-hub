@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, Sessions layout on phone width
+
+* **Update**: [The human surface](architecture/human-surface.md) describes the
+  Sessions screen phone layout, where the list is shown alone rather than
+  stacking beside an unrequested detail pane, an opened session replaces the
+  list, closing it returns focus to the opened row, and controls meet the tap
+  target floor.
+
 ## 2026-09-20, feed chips start uppercase and wrap across lines
 
 * **Update**: [The human surface](architecture/human-surface.md) says the

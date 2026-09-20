@@ -1209,3 +1209,15 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
 .inbox-answers button.action { font-weight: 600; }
 .inbox-reply .composer { margin: 0; }
 /* end component: inbox */
+
+/* Sessions phone layout */
+@media (max-width: 1099px) {
+  .pane-detail { display: none; }
+}
+.pane-detail:empty { display: none; padding: 0; }
+.session-row { min-width: 0; }
+.session-row .session-link { min-width: 0; overflow: hidden; }
+.session-row .session-link .grow { min-width: 0; }
+.session-row .session-link .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .session-link .meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row button { min-height: 44px; flex-shrink: 0; }

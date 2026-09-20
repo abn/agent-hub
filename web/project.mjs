@@ -83,10 +83,36 @@ function tabs(current, segment, stats) {
     </div>`;
 }
 
+let lastOpenSession = "";
+
+function returnSessionFocus(id) {
+  requestAnimationFrame(() => {
+    const link = document.querySelector(`.session-row a[href*="id=${CSS.escape(id)}"]`);
+    const row = link ? link.closest(".session-row") : null;
+    const target = row || link;
+    if (target) {
+      if (target.tabIndex < 0) target.tabIndex = 0;
+      target.focus();
+    }
+  });
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest?.(".session-link, .session-row a");
+    if (link) {
+      const href = link.getAttribute("href") || "";
+      const match = href.match(/[?&]id=([^&]+)/);
+      if (match) {
+        lastOpenSession = decodeURIComponent(match[1]);
+      }
+    }
+  });
+}
+
 // The sessions segment on desktop: the list in the 420px pane and the session
-// detail in the other. The detail pane's internals belong to the next surface
-// to fill it; for now it holds one session's real summary, so the container
-// exists and the layout is the intended two-pane.
+// detail in the other. On a phone the detail pane is hidden by media query and
+// the card replaces the list when opened, returning focus to the row when closed.
 function sessionsTwoPane(current, listHTML, sessions) {
   const s = sessions[0];
   const detail = s
@@ -136,6 +162,11 @@ export async function projectScreen(params, gen, path) {
     const { sessions, card } = await sessionRows(id);
     if (stale(gen)) return;
     paint(gen, `${shell}${sessionsTwoPane(id, card, sessions)}`);
+    if (lastOpenSession) {
+      const closed = lastOpenSession;
+      lastOpenSession = "";
+      returnSessionFocus(closed);
+    }
   } else {
     paint(gen, `${shell}${await feedSection(id, stats)}`);
   }

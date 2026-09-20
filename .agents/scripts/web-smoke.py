@@ -6811,6 +6811,111 @@ def check_filter_chips(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_sessions_phone(browser, watch: Watch, port: int, project: str) -> None:
+    """Phone width sees one thing at a time on Sessions, without horizontal overflow."""
+    watch.enter("sessions: phone layout and focus")
+    context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"sessions phone: uncaught error: {error}"))
+    try:
+        route = f"#/projects/{quote(project)}/sessions"
+        page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+        page.evaluate(f"location.hash = {route!r}")
+        if not settle(page, "!!document.querySelector('main .session-row')"):
+            watch.fail("sessions list did not render on phone")
+            return
+
+        scroll_w = page.evaluate("document.documentElement.scrollWidth")
+        inner_w = page.evaluate("window.innerWidth")
+        if scroll_w > inner_w:
+            watch.fail(f"sessions screen overflows horizontally: scrollWidth {scroll_w}px > innerWidth {inner_w}px")
+
+        detail_visible = page.evaluate("""() => {
+            const p = document.querySelector("main .pane-detail");
+            if (!p) return false;
+            const style = getComputedStyle(p);
+            if (style.display === "none" || style.visibility === "hidden") return false;
+            const r = p.getBoundingClientRect();
+            return (r.width > 0 && r.height > 0) || p.textContent.trim().length > 0;
+        }""")
+        if detail_visible:
+            watch.fail("detail pane holds visible content on phone when no session is open")
+
+        end_ctrl = page.evaluate("""() => {
+            const btn = document.querySelector("main .session-row button[data-action='end']");
+            if (!btn) return null;
+            const r = btn.getBoundingClientRect();
+            return {
+                left: r.left,
+                right: r.right,
+                height: r.height,
+                width: r.width,
+                vw: window.innerWidth
+            };
+        }""")
+        if not end_ctrl:
+            watch.fail("session row has no End control")
+        else:
+            if end_ctrl["right"] > end_ctrl["vw"] or end_ctrl["left"] < 0:
+                watch.fail(f"End control bounding rect overflows viewport: right={end_ctrl['right']}, vw={end_ctrl['vw']}")
+            if end_ctrl["height"] + 0.5 < 44:
+                watch.fail(f"End control is {end_ctrl['height']}px tall, under the 44px minimum")
+
+        opened_id = page.evaluate("""() => {
+            const link = document.querySelector("main .session-row .session-link");
+            const match = (link ? link.getAttribute("href") : "").match(/[?&]id=([^&]+)/);
+            return match ? decodeURIComponent(match[1]) : "";
+        }""")
+        page.click("main .session-row .session-link")
+        if not settle(page, "!!document.querySelector('main .stat-card')"):
+            watch.fail("opening session from phone list did not show session detail")
+            return
+        if page.evaluate("!!document.querySelector('main .session-row')"):
+            watch.fail("session detail stacked with list on phone instead of replacing it")
+
+        page.click("main a[href*='sessions']")
+        if not settle(page, "!!document.querySelector('main .session-row')"):
+            watch.fail("closing session did not return to list on phone")
+            return
+
+        focused_on_row = page.evaluate("""(id) => {
+            const active = document.activeElement;
+            if (!active) return false;
+            const row = active.closest(".session-row") || (active.classList.contains("session-row") ? active : null);
+            if (!row) return false;
+            const link = row.querySelector("a[href*='" + id + "']");
+            const btn = row.querySelector("[data-id='" + id + "']");
+            return !!(link || btn);
+        }""", opened_id)
+        if not focused_on_row:
+            active_info = page.evaluate("document.activeElement ? (document.activeElement.tagName + '.' + document.activeElement.className) : 'none'")
+            watch.fail(f"closing session left focus on {active_info!r}, not on opened row")
+
+        # Desktop check at 1100x800: both panes shown
+        page.set_viewport_size({"width": 1100, "height": 800})
+        page.evaluate(f"location.hash = {route!r}")
+        if not settle(page, "!!document.querySelector('main .panes')"):
+            watch.fail("desktop sessions view did not use two-pane container")
+            return
+        desk_panes = page.evaluate("""() => {
+            const list = document.querySelector('main .pane-list');
+            const detail = document.querySelector('main .pane-detail');
+            return {
+                listVisible: !!list && getComputedStyle(list).display !== 'none',
+                detailVisible: !!detail && getComputedStyle(detail).display !== 'none'
+            };
+        }""")
+        if not (desk_panes["listVisible"] and desk_panes["detailVisible"]):
+            watch.fail(f"desktop sessions does not show both panes: {desk_panes}")
+    finally:
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -6984,6 +7089,7 @@ def run() -> int:
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_filter_chips, page, watch, project)
+                run_step(watch, check_sessions_phone, browser, watch, port, project)
                 run_step(watch, check_sign_out, browser, watch, port)
                 run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)
