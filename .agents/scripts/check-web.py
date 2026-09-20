@@ -387,6 +387,71 @@ def check_text_floor(errors: list[str]) -> None:
                     errors.append(f"{path}:{number}: font size: {problem}")
 
 
+# The role of every colour the artifact frame's own stylesheet draws: the rule
+# it sits in, the property, the theme, and the token it has to copy. The frame
+# is read rule by rule against this table, so a colour in a rule that is not
+# here, a second rule for a role, and a colour not written as a hex literal all
+# fail, where reading each role's first match let a later rule override it.
+VIEWER_ROLES = [
+    ('html[data-theme="light"]', "background", "light", "--bg", "light background"),
+    ('html[data-theme="light"]', "color", "light", "--ink", "light text"),
+    ('html[data-theme="dark"]', "background", "dark", "--bg", "dark background"),
+    ('html[data-theme="dark"]', "color", "dark", "--ink", "dark text"),
+    ("body", "color", "light", "--ink-2", "light body text"),
+    ('html[data-theme="dark"] body', "color", "dark", "--ink-2", "dark body text"),
+    ("h1,h2,h3", "color", "light", "--ink", "light headings"),
+    ('html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3', "color", "dark", "--ink", "dark headings"),
+    ("a", "color", "light", "--accent", "light link"),
+    ('html[data-theme="dark"] a', "color", "dark", "--accent", "dark link"),
+    ("pre", "background", "light", "--surface-2", "light pre background"),
+    ("pre", "border", "light", "--line", "light pre border"),
+    ('html[data-theme="dark"] pre', "background", "dark", "--surface-2", "dark pre background"),
+    ('html[data-theme="dark"] pre', "border-color", "dark", "--line", "dark pre border"),
+    (":not(pre)>code", "background", "light", "--surface-2", "light inline code background"),
+    (":not(pre)>code", "border", "light", "--line", "light inline code border"),
+    ('html[data-theme="dark"] :not(pre)>code', "background", "dark", "--surface-2", "dark inline code background"),
+    ('html[data-theme="dark"] :not(pre)>code', "border-color", "dark", "--line", "dark inline code border"),
+    ("th,td", "border", "light", "--line", "light table border"),
+    ('html[data-theme="dark"] th,html[data-theme="dark"] td', "border-color", "dark", "--line", "dark table border"),
+    ("blockquote", "border-left", "light", "--line", "light blockquote border"),
+    ('html[data-theme="dark"] blockquote', "border-color", "dark", "--line", "dark blockquote border"),
+    ("blockquote", "color", "light", "--ink-3", "light blockquote text"),
+    ('html[data-theme="dark"] blockquote', "color", "dark", "--ink-3", "dark blockquote text"),
+    (".hub-callout", "background", "light", "--surface-2", "light callout background"),
+    (".hub-callout", "border-left", "light", "--line-strong", "light callout border"),
+    ('html[data-theme="dark"] .hub-callout', "background", "dark", "--surface-2", "dark callout background"),
+    ('html[data-theme="dark"] .hub-callout', "border-color", "dark", "--line-strong", "dark callout border"),
+    (".hub-callout.note", "border-color", "light", "--accent", "light note callout"),
+    ('html[data-theme="dark"] .hub-callout.note', "border-color", "dark", "--accent", "dark note callout"),
+    (".hub-callout.tip", "border-color", "light", "--ok", "light tip callout"),
+    ('html[data-theme="dark"] .hub-callout.tip', "border-color", "dark", "--ok", "dark tip callout"),
+    (".hub-callout.warning", "border-color", "light", "--action", "light warning callout"),
+    ('html[data-theme="dark"] .hub-callout.warning', "border-color", "dark", "--action", "dark warning callout"),
+    (".hub-callout.caution", "border-color", "light", "--danger", "light caution callout"),
+    ('html[data-theme="dark"] .hub-callout.caution', "border-color", "dark", "--danger", "dark caution callout"),
+]
+# The properties that can carry a colour, and what else their values may hold.
+COLOUR_PROPERTIES = re.compile(r"^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline(?:-color)?|fill|stroke|box-shadow|text-decoration(?:-color)?|caret-color)$")
+NOT_A_COLOUR = re.compile(
+    r"^(?:[-+]?[\d.]+(?:px|r?em|%)?|solid|dashed|dotted|double|none|hidden|inherit|initial|unset)$",
+    re.I,
+)
+HEX6 = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def frame_rules(source: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """The rules of a stylesheet written on one level: selector, then declarations."""
+    rules = []
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", source):
+        declarations = []
+        for declaration in body.split(";"):
+            if ":" in declaration:
+                name, value = declaration.split(":", 1)
+                declarations.append((name.strip().lower(), value.strip()))
+        rules.append((selector.strip(), declarations))
+    return rules
+
+
 def check_viewer_palette(
     errors: list[str], viewer_text: str, light: dict[str, str], dark: dict[str, str]
 ) -> None:
@@ -394,60 +459,46 @@ def check_viewer_palette(
     if not match:
         errors.append("web/artifact-viewer.mjs: frameStyle() definition not found")
         return
-    css = match.group(1)
-
-    rules = [
-        (r'html\[data-theme="light"\]\{[^}]*background:(#[0-9A-Fa-f]{6})', light, "--bg", "light background"),
-        (r'html\[data-theme="light"\]\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink", "light text"),
-        (r'html\[data-theme="dark"\]\{[^}]*background:(#[0-9A-Fa-f]{6})', dark, "--bg", "dark background"),
-        (r'html\[data-theme="dark"\]\{[^}]*color:(#[0-9A-Fa-f]{6})', dark, "--ink", "dark text"),
-        (r'body\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink-2", "light body text"),
-        (r'html\[data-theme="dark"\] body\{color:(#[0-9A-Fa-f]{6})\}', dark, "--ink-2", "dark body text"),
-        (r'h1,h2,h3\{color:(#[0-9A-Fa-f]{6})', light, "--ink", "light headings"),
-        (r'html\[data-theme="dark"\] h1[^}]*\{color:(#[0-9A-Fa-f]{6})\}', dark, "--ink", "dark headings"),
-        (r'a\{color:(#[0-9A-Fa-f]{6})\}', light, "--accent", "light link"),
-        (r'html\[data-theme="dark"\] a\{color:(#[0-9A-Fa-f]{6})\}', dark, "--accent", "dark link"),
-        (r'pre\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light pre background"),
-        (r'pre\{[^}]*border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light pre border"),
-        (r'html\[data-theme="dark"\] pre\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark pre background"),
-        (r'html\[data-theme="dark"\] pre\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark pre border"),
-        (r':not\(pre\)>code\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light inline code background"),
-        (r':not\(pre\)>code\{[^}]*border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light inline code border"),
-        (r'html\[data-theme="dark"\] :not\(pre\)>code\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark inline code background"),
-        (r'html\[data-theme="dark"\] :not\(pre\)>code\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark inline code border"),
-        (r'th,td\{border:1px solid (#[0-9A-Fa-f]{6})', light, "--line", "light table border"),
-        (r'html\[data-theme="dark"\] td\{border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark table border"),
-        (r'blockquote\{[^}]*border-left:3px solid (#[0-9A-Fa-f]{6})', light, "--line", "light blockquote border"),
-        (r'html\[data-theme="dark"\] blockquote\{border-color:(#[0-9A-Fa-f]{6})', dark, "--line", "dark blockquote border"),
-        (r'blockquote\{[^}]*color:(#[0-9A-Fa-f]{6})', light, "--ink-3", "light blockquote text"),
-        (r'html\[data-theme="dark"\] blockquote\{[^}]*color:(#[0-9A-Fa-f]{6})', dark, "--ink-3", "dark blockquote text"),
-        (r'\.hub-callout\{background:(#[0-9A-Fa-f]{6})', light, "--surface-2", "light callout background"),
-        (r'\.hub-callout\{[^}]*border-left:\.25rem solid (#[0-9A-Fa-f]{6})', light, "--line-strong", "light callout border"),
-        (r'html\[data-theme="dark"\] \.hub-callout\{background:(#[0-9A-Fa-f]{6})', dark, "--surface-2", "dark callout background"),
-        (r'html\[data-theme="dark"\] \.hub-callout\{[^}]*border-color:(#[0-9A-Fa-f]{6})', dark, "--line-strong", "dark callout border"),
-        (r'\.hub-callout\.note\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--accent", "light note callout"),
-        (r'html\[data-theme="dark"\] \.hub-callout\.note\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--accent", "dark note callout"),
-        (r'\.hub-callout\.tip\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--ok", "light tip callout"),
-        (r'html\[data-theme="dark"\] \.hub-callout\.tip\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--ok", "dark tip callout"),
-        (r'\.hub-callout\.warning\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--action", "light warning callout"),
-        (r'html\[data-theme="dark"\] \.hub-callout\.warning\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--action", "dark warning callout"),
-        (r'\.hub-callout\.caution\{border-color:(#[0-9A-Fa-f]{6})\}', light, "--danger", "light caution callout"),
-        (r'html\[data-theme="dark"\] \.hub-callout\.caution\{border-color:(#[0-9A-Fa-f]{6})\}', dark, "--danger", "dark caution callout"),
-    ]
+    where = "web/artifact-viewer.mjs"
+    sheet = "".join(re.findall(r"`([^`]*)`", match.group(1)))
+    sheet = re.sub(r"</?style>", "", sheet)
+    roles = {(selector, prop): (theme, token, desc) for selector, prop, theme, token, desc in VIEWER_ROLES}
+    themes = {"light": light, "dark": dark}
 
     found_colors: dict[str, str] = {}
-    for pattern, tokens, token_name, desc in rules:
-        m = re.search(pattern, css)
-        if not m:
-            errors.append(f"web/artifact-viewer.mjs: could not find {desc} color in frameStyle")
-            continue
-        hex_val = m.group(1).upper()
-        found_colors[desc] = hex_val
-        expected = tokens.get(token_name, "").upper()
-        if hex_val != expected:
-            errors.append(
-                f"web/artifact-viewer.mjs: {desc} is {hex_val}, but web/tokens.css declares {expected} for {token_name}"
-            )
+    refused: set[str] = set()
+    for selector, declarations in frame_rules(sheet):
+        for prop, value in declarations:
+            if not COLOUR_PROPERTIES.match(prop):
+                continue
+            words = [word for word in re.split(r"\s+(?![^(]*\))", value) if not NOT_A_COLOUR.match(word)]
+            if not words:
+                continue
+            shown = f"{selector}{{{prop}:{value}}}"
+            role = roles.get((selector, prop))
+            if role is None:
+                errors.append(f"{where}: frameStyle draws a colour that has no role here: {shown}")
+                continue
+            theme, token_name, desc = role
+            if desc in found_colors:
+                errors.append(f"{where}: frameStyle sets the {desc} twice, and the later rule wins: {shown}")
+                continue
+            if len(words) != 1 or not HEX6.match(words[0]):
+                refused.add(desc)
+                errors.append(
+                    f"{where}: the {desc} is written {value!r}; a copied token is one six-digit hex colour"
+                )
+                continue
+            hex_val = words[0].upper()
+            found_colors[desc] = hex_val
+            expected = themes[theme].get(token_name, "").upper()
+            if hex_val != expected:
+                errors.append(
+                    f"{where}: {desc} is {hex_val}, but web/tokens.css declares {expected} for {token_name}"
+                )
+    for _selector, _prop, _theme, _token, desc in VIEWER_ROLES:
+        if desc not in found_colors and desc not in refused:
+            errors.append(f"{where}: could not find {desc} color in frameStyle")
 
     contrast_pairs = [
         ("light body text", "light inline code background", 4.5),
@@ -500,6 +551,14 @@ def check_palette_copies(errors: list[str], tokens_css: str) -> None:
                     errors.append(
                         f"{path}:{number}: {found} is not a colour web/tokens.css declares"
                     )
+
+    # The artifact page's own stylesheet loads tokens.css, so it has no reason
+    # to copy a colour at all: every one it draws is a token.
+    shell_path = WEB / "artifact-shell.css"
+    if shell_path.is_file():
+        for number, line in enumerate(shell_path.read_text(encoding="utf-8").splitlines(), start=1):
+            for found in re.findall(r"#[0-9A-Fa-f]{3,8}\b|\b(?:rgba?|hsla?)\([^)]*\)", line):
+                errors.append(f"{shell_path}:{number}: {found} is a colour literal; this sheet draws tokens only")
 
     viewer_path = WEB / "artifact-viewer.mjs"
     if viewer_path.is_file():
@@ -554,6 +613,7 @@ SERVED_PAIRS = [
     (r'html\[data-theme=\\"light\\"\]\{\{color-scheme:light;background:(#[0-9A-Fa-f]{6});color:(#[0-9A-Fa-f]{6})', "the light raw frame"),
     (r'html\[data-theme=\\"dark\\"\]\{\{color-scheme:dark;background:(#[0-9A-Fa-f]{6});color:(#[0-9A-Fa-f]{6})', "the dark raw frame"),
 ]
+SERVED_FRAME_RULES = ('html[data-theme="light"]', 'html[data-theme="dark"]')
 CARD_FILL = r'<rect width=\\"1200\\" height=\\"630\\" fill=\\"(#[0-9A-Fa-f]{6})\\"'
 CARD_TEXT = r'<text [^>]*fill=\\"(#[0-9A-Fa-f]{6})\\"'
 
@@ -561,8 +621,30 @@ CARD_TEXT = r'<text [^>]*fill=\\"(#[0-9A-Fa-f]{6})\\"'
 def check_served_palettes(errors: list[str]) -> None:
     """The text the hub draws outside the PWA reads at 4.5:1 on its own ground."""
     if not SERVED.is_file():
+        errors.append(
+            f"{SERVED}: not found, so the raw frame and the link preview card went unread;"
+            " point SERVED at the file that draws them"
+        )
         return
     source = SERVED.read_text(encoding="utf-8")
+    # The raw frame's stylesheet is two rules of three declarations. Anything
+    # more is a colour, or a rule that could carry one, that nothing here reads.
+    sheets = [
+        sheet
+        for sheet in re.findall(r"<style>([\s\S]*?)</style>", source)
+        if "color-scheme" in sheet
+    ]
+    if len(sheets) != 1:
+        errors.append(f"{SERVED}: expected one raw frame stylesheet, found {len(sheets)}")
+    for sheet in sheets:
+        plain = re.sub(r"\\\n\s*", "", sheet).replace('\\"', '"').replace("{{", "{").replace("}}", "}")
+        for selector, declarations in frame_rules(plain):
+            names = [name for name, _value in declarations]
+            if selector not in SERVED_FRAME_RULES or names != ["color-scheme", "background", "color"]:
+                errors.append(
+                    f"{SERVED}: the raw frame's stylesheet holds a rule this check does not read:"
+                    f" {selector}{{{';'.join(names)}}}"
+                )
     pairs = []
     for pattern, what in SERVED_PAIRS:
         found = re.search(pattern, source)
