@@ -453,39 +453,121 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
     );
 }
 
+/// What an agent would write to break out of, or into, the viewer's style.
+const STYLE_BREAKOUT: &str = "</style><style>body{display:none}</style><style>";
+
+/// The rules the viewer cannot lose, typed here and not read from the
+/// stylesheet, so a rule dropped from the file or a page that stops embedding
+/// it fails. The theme toggle's own rules are left to the screen checks.
+const VIEWER_RULES: &[&str] = &[
+    "body>header{position:sticky;top:0;z-index:10;display:flex;",
+    "#hub-back[hidden]{display:none}",
+    "#hub-forget[hidden]{display:none}",
+    "#hub-forget-note:empty{display:none}",
+    "#hub-meta-line{font-family:var(--font-mono);font-size:12px;",
+    "iframe#hub-frame{width:100%;min-height:60vh;border:0;display:block}",
+    "#hub-password{width:100%;min-height:48px;font-size:17px;",
+    "#hub-unlock-form button[type=\"submit\"]{width:100%;min-height:48px;",
+    "#hub-unlock-error{font-size:12px;color:var(--danger)}",
+    ".hub-comment-body{margin:0 0 var(--s-2);overflow-wrap:anywhere}",
+    "@media (pointer:coarse){ #hub-back,#hub-theme-toggle{width:44px;height:44px} #hub-forget{min-height:44px} #hub-version-select{min-height:44px} }",
+];
+
+/// The one style block of a viewer page, whitespace folded.
+fn style_block(page: &str) -> String {
+    assert_eq!(
+        page.matches("<style").count(),
+        1,
+        "the page opens one style block: {page}"
+    );
+    assert_eq!(
+        page.matches("</style").count(),
+        1,
+        "the page closes one style block: {page}"
+    );
+    let open = page.find("<style>").expect("a bare style element") + "<style>".len();
+    let close = page.find("</style>").expect("the style element closes");
+    assert!(open <= close, "the style element closes after it opens");
+    page[open..close]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[tokio::test]
-async fn public_artifact_page_snapshot_matches_modulo_whitespace() {
+async fn the_viewer_page_carries_its_rules_and_nothing_authored_reaches_the_style() {
     let state = state().await;
-    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
-
-    let app = router(state.clone());
-    let response = app
-        .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+    let plain = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+    let envelope = json!({
+        "alg": "AES-256-GCM",
+        "kdf": "PBKDF2-HMAC-SHA256",
+        "iterations": 600000,
+        "salt": "c2FsdA",
+        "iv": "aXY",
+    });
+    let mut pages = vec![("a plain html artifact".to_string(), plain)];
+    for (kind, envelope) in [
+        ("html", None),
+        ("markdown", None),
+        ("html", Some(envelope.clone())),
+    ] {
+        let protected = envelope.is_some();
+        let content = match protected {
+            true => CIPHERTEXT.to_string(),
+            false => format!("# Notes\n\n{STYLE_BREAKOUT}\n"),
+        };
+        let id = artifacts::publish(
+            &state.db,
+            &state.data_dir,
+            NewArtifact {
+                actor: "agent-one",
+                project_id: "proj",
+                title: STYLE_BREAKOUT,
+                kind,
+                content: content.as_bytes(),
+                envelope,
+                description: STYLE_BREAKOUT,
+                favicon: "",
+                label: Some(STYLE_BREAKOUT),
+            },
+            None,
+        )
         .await
-        .expect("request");
-    let body = text_body(response).await;
-
-    fn normalize_ws(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
+        .expect("publish")
+        .id;
+        let name = match protected {
+            true => format!("a protected {kind} artifact"),
+            false => format!("a hostile {kind} artifact"),
+        };
+        pages.push((name, id));
     }
 
-    let normalized = normalize_ws(&body);
-    let css = include_str!("../web/artifact-shell.css");
-    let normalized_css = normalize_ws(css);
-
-    assert!(
-        normalized.contains(&format!("<style> {normalized_css} </style>"))
-            || normalized.contains(&format!("<style>{normalized_css}</style>")),
-        "the rendered page includes the exact stylesheet modulo whitespace"
-    );
-    assert!(
-        normalized.starts_with("<!doctype html> <html lang=\"en\" data-theme=\"light\"> <head>")
-    );
-    assert!(normalized.contains("<link rel=\"stylesheet\" href=\"/tokens.css\">"));
-    assert!(normalized.contains("<script src=\"/vendor/marked.js\"></script> <script type=\"module\" src=\"/artifact-viewer.mjs\"></script> </head>"));
-    assert!(
-        normalized.contains("<iframe id=\"hub-frame\" title=\"Report\" sandbox=\"allow-scripts\"")
-    );
+    let mut blocks = Vec::new();
+    for (name, id) in &pages {
+        let response = router(state.clone())
+            .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{name}");
+        assert_eq!(csp(&response), HOST_CSP, "{name}: the shell policy");
+        let page = text_body(response).await;
+        assert!(
+            !page.contains("style=\""),
+            "{name}: no element carries a style of its own"
+        );
+        let block = style_block(&page);
+        for rule in VIEWER_RULES {
+            assert!(block.contains(rule), "{name}: the style lost `{rule}`");
+        }
+        blocks.push((name, block));
+    }
+    let (_, first) = &blocks[0];
+    for (name, block) in &blocks[1..] {
+        assert_eq!(
+            block, first,
+            "{name}: the style is the same whatever the artifact says"
+        );
+    }
 }
 
 #[tokio::test]
