@@ -236,7 +236,11 @@ session brains, or `kb` for knowledge base pages. `session_id` narrows the
 results to one session's brain content. Results are confined to the projects
 the caller can see, and come back with `count`, the hits this page carries
 before grouping, `truncated` when the limit cut the result, and `took_ms`, how
-long the query itself took.
+long the query itself took. Every hit names its project twice, as `project_id`
+and as `project_display_name`, and carries what its family has to show: a
+`feed` hit the event's `event_kind` and `actor`, an `artifact` hit its current
+`version` and that version's `size_bytes`, a `brain` hit the `session_name` and
+`session_status`. A field that belongs to another family is left off.
 
 ## Sessions and the brain
 

@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a search hit says what kind of thing it is
+
+* **Update**: [The human surface](architecture/human-surface.md) and
+  [the agent surface](architecture/agent-surface.md) list what a search hit
+  carries by family: `event_kind` and `actor` for a feed hit, `version` and
+  `size_bytes` for an artifact, `session_name` and `session_status` for a
+  session brain entry. The fields are read after the result is ranked and
+  confined, so the order is unchanged and nothing of a project the caller
+  cannot see is shown. The served skill document names them for agents.
+
 ## 2026-09-20, home carries the node and the head of the waiting queue
 
 * **Update**: [The human surface](architecture/human-surface.md) lists two

@@ -356,3 +356,111 @@ async fn visibility_lists_the_reachable_projects() {
         Visibility::All => panic!("an untrusted agent must not see everything"),
     }
 }
+
+/// A corpus row is trusted for its own project and nothing else: a row that
+/// names an event, an artifact or a session of another project shows nothing
+/// of it, whoever asks.
+#[tokio::test]
+async fn a_hit_shows_nothing_of_a_row_in_another_project() {
+    use agent_hub::store::artifacts::{self, NewArtifact};
+    use agent_hub::store::search::{SearchDoc, index_doc};
+    use agent_hub::store::sessions;
+
+    let dir = common::temp::TempDir::new("policy-search-fields");
+    let db = common::store::open(&dir).await;
+    for (id, name) in [("open", "Open"), ("secret", "Secret Plans")] {
+        projects::create(&db, id, name).await.expect("project");
+    }
+    let hidden_event = events::append(&db, "spy-agent", None, event("secret", "finished", "quiet"))
+        .await
+        .expect("append");
+    let hidden_session = sessions::start(&db, "secret", "covert-run", "spy-agent")
+        .await
+        .expect("start");
+    let hidden_artifact = artifacts::publish(
+        &db,
+        &dir,
+        NewArtifact {
+            actor: "spy-agent",
+            project_id: "secret",
+            title: "dossier",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"quiet",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+
+    let conn = db.connect().expect("connect");
+    for (doc_id, kind, ref_id, session_id) in [
+        ("stray:feed", "feed", hidden_event.as_str(), None),
+        (
+            "stray:artifact",
+            "artifact",
+            hidden_artifact.id.as_str(),
+            None,
+        ),
+        (
+            "stray:brain",
+            "brain",
+            "/fs/plan.md",
+            Some(hidden_session.id.as_str()),
+        ),
+    ] {
+        index_doc(
+            &conn,
+            SearchDoc {
+                doc_id,
+                project_id: "open",
+                kind,
+                ref_id,
+                session_id,
+                title: Some("stray"),
+                body: "haystack needle",
+                updated_at: "2026-09-18T00:00:00Z",
+            },
+        )
+        .await
+        .expect("index");
+    }
+
+    let query = SearchQuery {
+        text: "needle".to_string(),
+        project_id: None,
+        kind: None,
+        session_id: None,
+        limit: 50,
+    };
+    let visible = vec!["open".to_string()];
+    for confinement in [Some(visible.as_slice()), None] {
+        let hits = search::query_visible(&db, &query, confinement)
+            .await
+            .expect("search");
+        let strays: Vec<_> = hits
+            .iter()
+            .filter(|hit| hit.doc_id.starts_with("stray:"))
+            .collect();
+        assert_eq!(strays.len(), 3, "the three planted rows are found");
+        for hit in strays {
+            let shown = serde_json::to_string(hit).expect("serialize");
+            for secret in ["spy-agent", "covert-run", "Secret Plans", "finished"] {
+                assert!(
+                    !shown.contains(secret),
+                    "{} shows {secret} of another project: {shown}",
+                    hit.doc_id
+                );
+            }
+            let fields = serde_json::to_value(hit).expect("serialize");
+            assert!(
+                fields.get("version").is_none() && fields.get("size_bytes").is_none(),
+                "{} shows an artifact of another project: {shown}",
+                hit.doc_id
+            );
+        }
+    }
+}

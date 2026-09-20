@@ -107,7 +107,13 @@ and two would clobber each other. Knowledge meant for another agent belongs in
 the project knowledge base.
 
 `search` takes `session_id` to narrow results to one session's brain content,
-under the same project confinement as every other search.
+under the same project confinement as every other search. A hit carries its
+project's display name and what its family shows: the event kind and actor for
+a feed hit, the current version and its size for an artifact, the session's
+name and status for a brain entry. Those are read after the result is ranked
+and confined, by the ids of the hits alone, and a corpus row shows nothing of
+a row another project holds, so no field reaches past what the caller can see.
+The served skill document, `GET /SKILL.md`, names the fields.
 
 Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A knowledge base holds pages only, so a `/kv/` path there is an

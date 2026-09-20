@@ -343,3 +343,133 @@ async fn a_hit_names_its_project_as_the_projects_list_does() {
         );
     }
 }
+
+async fn plant_brain_entry(state: &AppState, project_id: &str, session_id: &str, body: &str) {
+    let conn = state.db.connect().expect("connect");
+    agent_hub::store::search::index_doc(
+        &conn,
+        agent_hub::store::search::SearchDoc {
+            doc_id: &format!("brain:{session_id}:/fs/plan.md"),
+            project_id,
+            kind: "brain",
+            ref_id: "/fs/plan.md",
+            session_id: Some(session_id),
+            title: Some("/fs/plan.md"),
+            body,
+            updated_at: "2026-09-18T00:00:00Z",
+        },
+    )
+    .await
+    .expect("index a brain entry");
+}
+
+#[tokio::test]
+async fn a_hit_carries_what_its_row_shows_for_its_family() {
+    use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
+    use agent_hub::store::sessions;
+
+    let state = state().await;
+    append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "proj".to_string(),
+            kind: "finished".to_string(),
+            summary: "needle report done".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+    let artifact = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "needle chart",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"first",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &artifact.id,
+        b"needle, second cut",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+    let session = sessions::start(&state.db, "proj", "nightly-run", "agent-two")
+        .await
+        .expect("start");
+    plant_brain_entry(&state, "proj", &session.id, "needle notes").await;
+    sessions::end(&state.db, &session.id, "agent-two", None)
+        .await
+        .expect("end");
+
+    let response = router(state.clone())
+        .oneshot(get("/api/v1/search?q=needle", Some("Bearer token")))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let hits = hits(&body);
+    let of = |kind: &str| {
+        hits.iter()
+            .find(|hit| hit["kind"] == kind)
+            .unwrap_or_else(|| panic!("a {kind} hit: {body}"))
+    };
+
+    // Publishing an artifact lands on the feed too, so the report is picked
+    // by its title.
+    let feed = hits
+        .iter()
+        .find(|hit| hit["title"] == "needle report done")
+        .unwrap_or_else(|| panic!("the report: {body}"));
+    assert_eq!(feed["kind"], "feed");
+    assert_eq!(feed["event_kind"], "finished", "{feed}");
+    assert_eq!(feed["actor"], "agent-one", "{feed}");
+
+    let chart = of("artifact");
+    assert_eq!(chart["version"], 2, "the current version: {chart}");
+    assert_eq!(
+        chart["size_bytes"],
+        b"needle, second cut".len(),
+        "the current version's size: {chart}"
+    );
+
+    let brain = of("brain");
+    assert_eq!(brain["session_name"], "nightly-run", "{brain}");
+    assert_eq!(brain["session_status"], "ended", "{brain}");
+
+    // A field belongs to one family and is left off the others.
+    for field in ["version", "size_bytes", "session_name", "session_status"] {
+        assert!(feed.get(field).is_none(), "{field} on a feed hit: {feed}");
+    }
+    for field in ["event_kind", "actor"] {
+        assert!(
+            chart.get(field).is_none(),
+            "{field} on an artifact: {chart}"
+        );
+        assert!(
+            brain.get(field).is_none(),
+            "{field} on a brain hit: {brain}"
+        );
+    }
+}

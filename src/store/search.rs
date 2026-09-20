@@ -93,6 +93,21 @@ pub struct SearchHit {
     pub title: Option<String>,
     pub snippet: String,
     pub updated_at: String,
+    /// For a feed hit, the kind of the event and who wrote it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    /// For an artifact hit, its current version and that version's size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<i64>,
+    /// For a session brain hit, the session's name and its status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_status: Option<String>,
 }
 
 /// The corpus columns a hit is built from, in the order `hit_from_row` reads.
@@ -236,7 +251,135 @@ async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
     for hit in hits.iter_mut() {
         hit.project_display_name = names.get(&hit.project_id).cloned();
     }
+
+    let events = related(
+        conn,
+        "SELECT id, project_id, kind, actor FROM events WHERE id IN",
+        ids_of(hits, "feed", |hit| Some(hit.ref_id.as_str())),
+    )
+    .await?;
+    let artifacts = related(
+        conn,
+        "SELECT id, project_id, current_ver, size_bytes FROM artifacts WHERE id IN",
+        ids_of(hits, "artifact", |hit| Some(hit.ref_id.as_str())),
+    )
+    .await?;
+    let sessions = related(
+        conn,
+        "SELECT id, project_id, session_name, status FROM sessions WHERE id IN",
+        ids_of(hits, "brain", |hit| hit.session_id.as_deref()),
+    )
+    .await?;
+
+    for hit in hits.iter_mut() {
+        match hit.kind.as_str() {
+            "feed" => {
+                if let Some(row) = own(events.get(&hit.ref_id), &hit.project_id) {
+                    hit.event_kind = row.first.as_text();
+                    hit.actor = row.second.as_text();
+                }
+            }
+            "artifact" => {
+                if let Some(row) = own(artifacts.get(&hit.ref_id), &hit.project_id) {
+                    hit.version = row.first.as_integer();
+                    hit.size_bytes = row.second.as_integer();
+                }
+            }
+            "brain" => {
+                let session = hit.session_id.as_ref().and_then(|id| sessions.get(id));
+                if let Some(row) = own(session, &hit.project_id) {
+                    hit.session_name = row.first.as_text();
+                    hit.session_status = row.second.as_text();
+                }
+            }
+            _ => {}
+        }
+    }
     Ok(())
+}
+
+/// A corpus row speaks for its own project only: a row that names something
+/// held by another project shows nothing of it.
+fn own<'a>(found: Option<&'a Related>, project_id: &str) -> Option<&'a Related> {
+    found.filter(|row| row.project_id == project_id)
+}
+
+/// A row a hit points at: the project that holds it and the two columns the
+/// hit shows.
+struct Related {
+    project_id: String,
+    first: Field,
+    second: Field,
+}
+
+struct Field(Value);
+
+impl Field {
+    fn as_text(&self) -> Option<String> {
+        match &self.0 {
+            Value::Text(text) => Some(text.clone()),
+            _ => None,
+        }
+    }
+
+    fn as_integer(&self) -> Option<i64> {
+        match &self.0 {
+            Value::Integer(number) => Some(*number),
+            _ => None,
+        }
+    }
+}
+
+/// The ids one family of hits points at, without repeats.
+fn ids_of<'a>(
+    hits: &'a [SearchHit],
+    kind: &str,
+    id: impl Fn(&'a SearchHit) -> Option<&'a str>,
+) -> Vec<&'a str> {
+    let mut ids: Vec<&str> = hits
+        .iter()
+        .filter(|hit| hit.kind == kind)
+        .filter_map(id)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// Read the rows a family of hits points at, in one query, keyed by id.
+///
+/// `select` names four columns, the id and the holding project first, and ends
+/// at `IN`. No ids means no query.
+async fn related(
+    conn: &Connection,
+    select: &str,
+    ids: Vec<&str>,
+) -> Result<std::collections::HashMap<String, Related>> {
+    let mut found = std::collections::HashMap::new();
+    if ids.is_empty() {
+        return Ok(found);
+    }
+    let holes: Vec<String> = (1..=ids.len()).map(|at| format!("?{at}")).collect();
+    let mut rows = conn
+        .query(
+            &format!("{select} ({})", holes.join(", ")),
+            ids.iter()
+                .map(|id| Value::Text(id.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(crate::store::engine)?;
+    while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
+        found.insert(
+            required(&row, 0)?,
+            Related {
+                project_id: required(&row, 1)?,
+                first: Field(row.get_value(2).map_err(crate::store::engine)?),
+                second: Field(row.get_value(3).map_err(crate::store::engine)?),
+            },
+        );
+    }
+    Ok(found)
 }
 
 /// A group of hits sharing one corpus family.
@@ -321,6 +464,12 @@ fn hit_from_row(row: &Row) -> Result<SearchHit> {
         snippet: snippet(title.as_deref(), &body),
         title,
         updated_at: required(row, 7)?,
+        event_kind: None,
+        actor: None,
+        version: None,
+        size_bytes: None,
+        session_name: None,
+        session_status: None,
     })
 }
 

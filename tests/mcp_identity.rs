@@ -1102,3 +1102,174 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
     drop(_child);
     drop(data_dir);
 }
+
+/// What a search hit shows beyond its corpus row is read after the result is
+/// confined, so an agent sees the fields of its own hits and nothing of a
+/// project it cannot reach: not its name, its actors, its sessions or its
+/// artifacts.
+#[tokio::test]
+async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
+    use agent_hub::store::search::{SearchDoc, index_doc};
+    use agent_hub::store::sessions;
+
+    let data_dir = TempDir::new("search-fields");
+    let db = open_engine(&data_dir.join("hub.db"))
+        .await
+        .expect("open engine");
+    migrate(&db).await.expect("migrate");
+    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+        .await
+        .expect("create strict");
+    let own = strict.personal_project_id.clone();
+    projects::create(&db, "hidden-vault", "Secret Plans")
+        .await
+        .expect("hidden project");
+    let token = identity::issue_token(&db, "strict")
+        .await
+        .expect("token")
+        .token;
+
+    let mut finished = signal(&own, "needle in personal");
+    finished.kind = "finished".to_string();
+    events::append(&db, "strict", None, finished)
+        .await
+        .expect("own event");
+    events::append(
+        &db,
+        "spy-agent",
+        None,
+        signal("hidden-vault", "needle in hiding"),
+    )
+    .await
+    .expect("hidden event");
+    artifacts::publish(
+        &db,
+        &data_dir,
+        NewArtifact {
+            actor: "spy-agent",
+            project_id: "hidden-vault",
+            title: "needle dossier",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "markdown",
+            content: b"needle",
+            envelope: None,
+        },
+        None,
+    )
+    .await
+    .expect("hidden artifact");
+    let own_session = sessions::start(&db, &own, "own-run", "strict")
+        .await
+        .expect("own session");
+    let hidden_session = sessions::start(&db, "hidden-vault", "covert-run", "spy-agent")
+        .await
+        .expect("hidden session");
+    let conn = db.connect().expect("connect");
+    for (project, session) in [
+        (own.as_str(), &own_session),
+        ("hidden-vault", &hidden_session),
+    ] {
+        index_doc(
+            &conn,
+            SearchDoc {
+                doc_id: &format!("brain:{}:/fs/plan.md", session.id),
+                project_id: project,
+                kind: "brain",
+                ref_id: "/fs/plan.md",
+                session_id: Some(&session.id),
+                title: Some("/fs/plan.md"),
+                body: "needle plan",
+                updated_at: "2026-09-18T00:00:00Z",
+            },
+        )
+        .await
+        .expect("index a brain entry");
+    }
+    drop(conn);
+    drop(db);
+
+    let (_child, port) = serve(&data_dir);
+    let session = initialize(port, &token);
+    let found = call(
+        port,
+        &token,
+        &session,
+        "search",
+        json!({"query": "needle", "scope": "global"}),
+    );
+    assert_eq!(found.status, 200, "search: {}", found.raw);
+    let message = found.message();
+    let result = &message["result"]["structuredContent"];
+    let hits: Vec<&serde_json::Value> = result["groups"]
+        .as_array()
+        .unwrap_or_else(|| panic!("groups: {}", found.raw))
+        .iter()
+        .flat_map(|group| group["hits"].as_array().expect("hits"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        2,
+        "its own event and its own brain entry: {result}"
+    );
+    for hit in &hits {
+        assert_eq!(hit["project_id"], own.as_str());
+        assert!(
+            hit["project_display_name"].is_string(),
+            "a hit names its project: {hit}"
+        );
+    }
+    let feed = hits.iter().find(|hit| hit["kind"] == "feed").expect("feed");
+    assert_eq!(feed["event_kind"], "finished", "{feed}");
+    assert_eq!(feed["actor"], "strict", "{feed}");
+    let brain = hits
+        .iter()
+        .find(|hit| hit["kind"] == "brain")
+        .expect("brain");
+    assert_eq!(brain["session_name"], "own-run", "{brain}");
+    assert_eq!(brain["session_status"], "active", "{brain}");
+
+    for secret in [
+        "hidden-vault",
+        "Secret Plans",
+        "spy-agent",
+        "covert-run",
+        "needle dossier",
+        hidden_session.id.as_str(),
+    ] {
+        assert!(
+            !found.raw.contains(secret),
+            "the answer shows {secret} of a project the agent cannot see: {}",
+            found.raw
+        );
+    }
+
+    // Asking for the hidden project by name reads as asking for one that is
+    // not there.
+    let hidden = call(
+        port,
+        &token,
+        &session,
+        "search",
+        json!({"query": "needle", "project_id": "hidden-vault"}),
+    );
+    let missing = call(
+        port,
+        &token,
+        &session,
+        "search",
+        json!({"query": "needle", "project_id": "nowhere"}),
+    );
+    let said = |response: &HttpResponse| {
+        response.message()["error"]["message"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a tool error: {}", response.raw))
+            .to_string()
+    };
+    assert_eq!(
+        said(&hidden),
+        said(&missing).replace("nowhere", "hidden-vault"),
+        "a denied project and a missing one read alike"
+    );
+}
