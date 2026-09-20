@@ -194,21 +194,51 @@ def nav_targets(page) -> list[str]:
     )
 
 
+# What only one segment of a project puts in the region. The three segments
+# share the project's heading, and the feed names the artifact and the session
+# in its own rows, so neither the heading nor the text says which one painted.
+SEGMENT_ROWS = {
+    "feed": "main .feed-row",
+    "artifacts": "main .gallery .artifact-card",
+    "sessions": "main .session-row",
+}
+
+
 def visit(page, watch: Watch, route: str, hash_value: str, title: str, data: list[str]) -> None:
     watch.enter(hash_value)
     goto(page, hash_value, title)
     found = heading(page)
     if found != title:
         watch.fail(f"the heading is {found!r}, expected {title!r}")
-    # A project view paints its header and then its segment, so the heading can
-    # be up before the list under it. The data is waited for, not read once.
+    # A project segment is the one screen whose heading was already up before
+    # the visit: it has painted when its own tab is the current one and its own
+    # rows are there, and its data is looked for in those rows alone.
+    within = "main"
+    segment = re.fullmatch(r"#/projects/[^/?]+/(feed|artifacts|sessions)", hash_value)
+    if segment:
+        within = SEGMENT_ROWS[segment.group(1)]
+        painted = (
+            "(() => { const tab = document.querySelector('main .seg a[aria-current=\"page\"]');"
+            f" return !!tab && tab.getAttribute('href') === {json.dumps(hash_value)}"
+            f" && !!document.querySelector({json.dumps(within)}); }})()"
+        )
+        if not settle(page, painted, timeout=5000):
+            current = page.evaluate(
+                "(document.querySelector('main .seg a[aria-current=\"page\"]') || { textContent: 'none' }).textContent"
+            )
+            watch.fail(
+                f"the {segment.group(1)} segment never painted: the current tab is {current!r} and"
+                f" {within!r} is {'in' if page.evaluate(f'!!document.querySelector({json.dumps(within)})') else 'not in'} the region"
+            )
+    # The data is waited for, not read once: a slow fetch is not a failure.
     for needle in data:
         if not settle(
             page,
-            f"document.querySelector('main').textContent.includes({json.dumps(needle)})",
+            f"[...document.querySelectorAll({json.dumps(within)})]"
+            f".some((el) => el.textContent.includes({json.dumps(needle)}))",
             timeout=5000,
         ):
-            watch.fail(f"the screen does not show {needle!r}")
+            watch.fail(f"the screen does not show {needle!r}" + (f" in {within!r}" if segment else ""))
     if page.evaluate("!!document.querySelector('main .error')"):
         watch.fail("the screen rendered an error card")
     marked = marked_routes(page)
