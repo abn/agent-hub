@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a route change focuses the screen's heading
+
+* **Update**: [The human surface](architecture/human-surface.md) says a route
+  change moves focus to the new screen's own heading rather than to the whole
+  content region, so the focus ring frames the heading, and that a screen which
+  has already placed focus inside itself keeps it.
+
+## 2026-09-20, desktop shell polish and vertical centring for Connect
+
+* **Update**: [The human surface](architecture/human-surface.md) notes that
+  on desktop the Connect card is vertically centred in the available space.
+
 ## 2026-09-20, Sessions layout on phone width
 
 * **Update**: [The human surface](architecture/human-surface.md) describes the

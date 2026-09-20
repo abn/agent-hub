@@ -1221,3 +1221,27 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
 .session-row .session-link .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-row .session-link .meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-row button { min-height: 44px; flex-shrink: 0; }
+
+/* Desktop shell */
+.topbar nav a,
+.topbar .wordmark,
+.topbar .wordmark a,
+.topbar a.wordmark,
+.topbar .topgear,
+.topbar > a {
+  text-decoration: none;
+}
+
+@media (min-width: 720px) {
+  main:has(.connect) {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .connect {
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+}

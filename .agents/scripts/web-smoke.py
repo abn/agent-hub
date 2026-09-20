@@ -6916,6 +6916,114 @@ def check_sessions_phone(browser, watch: Watch, port: int, project: str) -> None
         watch.drain_rejections()
 
 
+def check_desktop_shell(browser, watch: Watch, port: int) -> None:
+    """Desktop shell: links not underlined, route focus on heading, connect card centered."""
+    watch.enter("desktop: shell links, route focus ring, and connect centring")
+    context = None
+    phone_context = None
+    try:
+        context = browser.new_context(viewport={"width": 1100, "height": 800}, color_scheme="light")
+        context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"desktop shell: uncaught error: {error}"))
+        page.goto(f"http://127.0.0.1:{port}/#/home", wait_until="load")
+        if not settle(page, "!!document.querySelector('.topbar nav a')"):
+            watch.fail("desktop top bar nav links not found")
+            return
+
+        styles = page.evaluate(
+            "() => Array.from(document.querySelectorAll('.topbar nav a')).map("
+            "  a => window.getComputedStyle(a).textDecorationLine"
+            ")"
+        )
+        if any(s != "none" for s in styles):
+            watch.fail(f"desktop top bar nav links have text-decoration: {styles}")
+            return
+
+        gear_style = page.evaluate(
+            "() => window.getComputedStyle(document.querySelector('.topbar .topgear')).textDecorationLine"
+        )
+        if gear_style != "none":
+            watch.fail(f"desktop top bar settings control has text-decoration: {gear_style}")
+            return
+
+        # Every screen, not one: a screen that paints no heading would fall back
+        # to the region and draw the page-tall ring again, and one route would
+        # never see it. The heading itself is the assertion, not its size: a
+        # ring the right size around the wrong thing is still wrong.
+        for route in ("#/inbox", "#/search", "#/storage", "#/settings", "#/home"):
+            page.evaluate(f"location.hash = {json.dumps(route)}")
+            if not settle(page, f"location.hash.startsWith({json.dumps(route)}) && !!document.querySelector('main h1')"):
+                watch.fail(f"{route} did not settle after the route change")
+                return
+            landed = page.evaluate(
+                "() => {"
+                "  const el = document.activeElement;"
+                "  const h1 = document.querySelector('main h1');"
+                "  const r = el ? el.getBoundingClientRect() : { height: 0 };"
+                "  return { onHeading: !!el && el === h1, tag: el ? el.tagName : '',"
+                "    cls: el ? String(el.className || '') : '', height: r.height };"
+                "}"
+            )
+            if not landed["onHeading"]:
+                watch.fail(
+                    f"after moving to {route} focus is on <{landed['tag']} class={landed['cls']!r}>,"
+                    " not the screen's own heading"
+                )
+                return
+            if landed["height"] >= 400:
+                watch.fail(
+                    f"{route} focuses a heading {landed['height']}px tall, half the viewport or more,"
+                    " so the ring is drawn round the page again"
+                )
+                return
+
+        page.evaluate("location.hash = '#/connect'")
+        if not settle(page, "!!document.querySelector('main .connect')"):
+            watch.fail("connect screen did not settle")
+            return
+
+        desktop_pos = page.evaluate(
+            "() => {"
+            "  const card = document.querySelector('main .connect');"
+            "  const r = card.getBoundingClientRect();"
+            "  return { top: r.top, height: r.height, center: r.top + r.height / 2 };"
+            "}"
+        )
+        if abs(desktop_pos["center"] - 400) > 50:
+            watch.fail(
+                f"connect card vertical center {desktop_pos['center']:.1f} is not centered at 1100x800 "
+                f"(expected within 50px of 400)"
+            )
+            return
+
+        phone_context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+        phone_context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+        phone_page = phone_context.new_page()
+        phone_page.on("pageerror", lambda error: watch.fail(f"phone connect: uncaught error: {error}"))
+        phone_page.goto(f"http://127.0.0.1:{port}/#/connect", wait_until="load")
+        if not settle(phone_page, "!!document.querySelector('main .connect')"):
+            watch.fail("connect screen on phone did not settle")
+            return
+
+        phone_top = phone_page.evaluate(
+            "() => document.querySelector('main .connect').getBoundingClientRect().top"
+        )
+        if phone_top > 100:
+            watch.fail(
+                f"connect card on phone at 390x844 moved from top of screen: top={phone_top:.1f}"
+            )
+            return
+
+    finally:
+        if phone_context:
+            phone_context.close()
+        if context:
+            context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7090,6 +7198,7 @@ def run() -> int:
                 run_step(watch, check_viewer_history, page, watch, port, project)
                 run_step(watch, check_filter_chips, page, watch, project)
                 run_step(watch, check_sessions_phone, browser, watch, port, project)
+                run_step(watch, check_desktop_shell, browser, watch, port)
                 run_step(watch, check_sign_out, browser, watch, port)
                 run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)

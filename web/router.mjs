@@ -59,6 +59,15 @@ export async function render() {
   const focus = pendingFocus;
   pendingFocus = null;
   const chip = focus && main.querySelector(`[data-action="kind"][data-kind="${CSS.escape(focus)}"]`);
-  if (chip) chip.focus({ preventScroll: true });
-  else main.focus({ preventScroll: true });
+  if (chip) {
+    chip.focus({ preventScroll: true });
+  } else if (!main.contains(document.activeElement) || document.activeElement === main) {
+    const heading = main.querySelector("h1, [role='heading']");
+    if (heading) {
+      if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+      heading.focus({ preventScroll: true });
+    } else {
+      main.focus({ preventScroll: true });
+    }
+  }
 }
