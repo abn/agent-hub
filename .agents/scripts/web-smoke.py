@@ -3971,6 +3971,25 @@ def home_event(index: int, minutes: int, **fields) -> dict:
     return event
 
 
+def home_waiting_item(index: int, minutes: int, **fields) -> dict:
+    """One entry of the waiting queue's head, shaped as the Home response shapes it."""
+    at = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    item = {
+        "event_id": f"01WAIT{index:020d}",
+        "project_id": "homelab",
+        "project_display_name": "Home lab",
+        "kind": "approval",
+        "actor": "deploy-bot",
+        "summary": f"waiting item {index}",
+        "payload": None,
+        "status": "action",
+        "created_at": at,
+        "updated_at": at,
+    }
+    item.update(fields)
+    return item
+
+
 @contextmanager
 def home_answers(page, payload: dict):
     """Answer the Home request with a payload the seeded hub cannot be put in."""
@@ -4090,6 +4109,13 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
     elif first["kind"] != "Approval":
         watch.fail(f"the waiting row names its kind {first['kind']!r}")
 
+    node = page.evaluate(HOME_NODE)
+    if not node or node["text"] != f"{truth['node']['host']} · {truth['node']['mode']}":
+        watch.fail(f"the node line reads {node and node['text']!r}, the hub says {truth['node']}")
+    wanted = [item["summary"] for item in truth["waiting_items"][:3]]
+    if [row["title"] for row in rows["waiting"]] != wanted:
+        watch.fail(f"the waiting card lists {[row['title'] for row in rows['waiting']]}, the queue's head is {wanted}")
+
     newest = next((r for r in rows["newest"] if r["title"] == harness.HOME_NEWEST_SUMMARY), None)
     if not newest:
         watch.fail("the newest list does not carry the newest finished event")
@@ -4146,6 +4172,95 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
     watch.drain_rejections()
 
 
+HOME_NODE = (
+    "(() => { const el = document.querySelector('main .home .home-node'); if (!el) return null;"
+    " const s = getComputedStyle(el); return { text: el.textContent.replace(/\\s+/g, ' ').trim(),"
+    " size: parseFloat(s.fontSize), mono: s.fontFamily.includes('mono'),"
+    " shown: el.getClientRects().length > 0 }; })()"
+)
+
+
+def check_home_waiting_items(page, watch: Watch) -> None:
+    """The waiting card is the head of the queue itself, and Home says which node it is on.
+
+    None of the waiting items here is among the newest events, which is the
+    case the card could not draw before the response carried the queue.
+    """
+    watch.enter("home: the waiting queue's head")
+    items = [
+        home_waiting_item(1, 3, summary=f"w {HOME_HOSTILE}", actor=f"a {HOME_HOSTILE}"),
+        home_waiting_item(2, 30, kind="question", project_id="research", project_display_name=None),
+        home_waiting_item(3, 300, project_display_name=f"n {HOME_HOSTILE}"),
+        home_waiting_item(4, 3000, summary="fourth in the queue"),
+        home_waiting_item(5, 30000, summary="fifth in the queue"),
+    ]
+    payload = harness.home_payload(
+        waiting=7,
+        waiting_items=items,
+        recent=[home_event(1, 1), home_event(2, 2)],
+        node={"host": 'attic <b id="home-node-pwned">nas</b>', "mode": "local"},
+    )
+    with home_answers(page, payload):
+        calls = paint_home(page, watch)
+        if calls is None:
+            return
+        if calls != ["GET /api/v1/home"]:
+            watch.fail(f"painting Home made {calls}, expected the one Home request")
+        if page.evaluate(
+            "!!document.body.dataset.homePwned || !!document.getElementById('home-node-pwned')"
+            " || !!document.querySelector('main img')"
+        ):
+            watch.fail("a field of the waiting queue or the node became an element")
+        rows = page.evaluate(HOME_ROWS)["waiting"]
+        if [row["title"] for row in rows] != [item["summary"] for item in items[:3]]:
+            watch.fail(
+                f"the waiting card lists {[row['title'] for row in rows]},"
+                " expected the first three of the queue the response carries"
+            )
+        else:
+            hrefs = [row["href"] for row in rows]
+            if hrefs != [f"#/inbox?open={item['event_id']}" for item in items[:3]]:
+                watch.fail(f"the waiting rows open {hrefs}")
+            metas = [row["meta"].rsplit(" · ", 1)[0] for row in rows]
+            if metas != [
+                f"Home lab · a {HOME_HOSTILE}",
+                "research · deploy-bot",
+                f"n {HOME_HOSTILE} · deploy-bot",
+            ]:
+                watch.fail(f"the waiting rows' meta lines read {metas}")
+            if [row["kind"] for row in rows] != ["Approval", "Question", "Approval"]:
+                watch.fail(f"the waiting rows name their kinds {[row['kind'] for row in rows]}")
+            if not all(row["time"] and row["whole"] for row in rows):
+                watch.fail("a waiting row has no time, or is not one target")
+        rest = page.evaluate(
+            "(document.querySelector('main .home-waiting a.home-rest') || {}).textContent || ''"
+        ).strip()
+        if rest != "4 more in the Inbox":
+            watch.fail(f"with 7 waiting and 3 shown the rest is offered as {rest!r}")
+        title = page.evaluate("document.querySelector('main .home-waiting h2').textContent.trim()")
+        if title != "Waiting on you · 7":
+            watch.fail(f"the waiting card is titled {title!r}")
+        node = page.evaluate(HOME_NODE)
+        if not node or node["text"] != 'attic <b id="home-node-pwned">nas</b> · local':
+            watch.fail(f"the node line reads {node and node['text']!r}")
+        elif node["size"] < 12 or not node["mono"] or not node["shown"]:
+            watch.fail(f"the node line is drawn as {node}")
+
+    # A queue the card shows whole has no rest to offer, and a response with no
+    # node draws no line rather than an empty one.
+    with home_answers(page, harness.home_payload(waiting=2, waiting_items=items[:2])):
+        if paint_home(page, watch) is None:
+            return
+        shown = page.evaluate(
+            "({ rows: document.querySelectorAll('main .home-waiting .home-row').length,"
+            " rest: !!document.querySelector('main .home-waiting a.home-rest'),"
+            " node: !!document.querySelector('main .home-node') })"
+        )
+        if shown != {"rows": 2, "rest": False, "node": False}:
+            watch.fail(f"a queue of two with no node draws {shown}")
+    watch.drain_rejections()
+
+
 # Every string an agent controls, carrying markup, in every place Home prints one.
 HOME_HOSTILE = '<img src=x onerror="document.body.dataset.homePwned=1">'
 
@@ -4162,6 +4277,7 @@ def check_home_fields(page, watch: Watch) -> None:
     ]
     payload = harness.home_payload(
         waiting=5,
+        waiting_items=[home_waiting_item(1, 4, summary=f"a {HOME_HOSTILE}")],
         unread=1,
         agents_active=1,
         last_event_at=events[0]["created_at"],
@@ -4192,7 +4308,7 @@ def check_home_fields(page, watch: Watch) -> None:
             " height: a.getBoundingClientRect().height }; })()"
         )
         if len(rows["waiting"]) != 1:
-            watch.fail(f"the waiting card lists {len(rows['waiting'])} rows, expected the 1 open event")
+            watch.fail(f"the waiting card lists {len(rows['waiting'])} rows, expected the 1 item of the queue")
         if not rest or rest["text"] != "4 more in the Inbox" or rest["href"] != "#/inbox":
             watch.fail(f"the rest of the queue is offered as {rest!r}")
         elif rest["height"] + 0.5 < 44:
@@ -6077,6 +6193,7 @@ def run() -> int:
                 run_step(watch, check_desktop_topbar, browser, watch, port)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
+                run_step(watch, check_home_waiting_items, page, watch)
                 run_step(watch, check_home_fields, page, watch)
                 run_step(watch, check_home_storage_scale, page, watch)
                 run_step(watch, check_home_quiet, page, watch)

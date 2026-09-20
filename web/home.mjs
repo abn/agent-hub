@@ -123,12 +123,14 @@ function homeRow(event, href, { unseen = false, chevron = false } = {}) {
   </div>`;
 }
 
-// The response carries the newest events rather than the waiting queue, so
-// the card lists the waiting items among them and says how many more the
-// Inbox holds. The count beside the title is the whole queue either way.
-function waitingCard(waiting, open) {
+// The response carries the head of the waiting queue, newest first, so the
+// card does not depend on a waiting item being among the newest events. It
+// shows the first few and says how many more the Inbox holds. The count
+// beside the title, and the one the rest is worked out from, is the whole
+// queue's.
+function waitingCard(waiting, items) {
   if (!waiting) return "";
-  const shown = open.slice(0, WAITING_ROWS);
+  const shown = items.slice(0, WAITING_ROWS);
   const rest = waiting - shown.length;
   const more =
     rest > 0
@@ -139,7 +141,7 @@ function waitingCard(waiting, open) {
       <h2 id="home-waiting-title">Waiting on you · ${waiting}</h2>
       <a class="home-more" href="#/inbox">Inbox${CHEVRON(12)}</a>
     </div>
-    ${shown.map((event) => homeRow(event, `#/inbox?open=${encodeURIComponent(event.id)}`, { chevron: true })).join("")}
+    ${shown.map((item) => homeRow(item, `#/inbox?open=${encodeURIComponent(item.event_id)}`, { chevron: true })).join("")}
     ${more}
   </section>`;
 }
@@ -192,6 +194,15 @@ function storageCard(storage, prunable) {
   </a>`;
 }
 
+// The design's status strip names the node the reader is looking at. It is
+// the same datum the top bar and the Storage screen print, carried on the
+// Home response so the screen stays one request. The top bar already says it
+// from the width it appears at, so the stylesheet draws this line below that.
+function nodeLine(node) {
+  const parts = [node?.host, node?.mode].filter((part) => typeof part === "string" && part);
+  return parts.length ? `<p class="home-node mono">${parts.map(esc).join(" · ")}</p>` : "";
+}
+
 // Quiet is when nothing waits and nothing is new: no open item, nothing
 // unread, and no event above any project's cursor.
 function quietCard(data) {
@@ -214,13 +225,14 @@ export async function home(gen) {
     gen,
     `<div class="home">
       <header>
+        ${nodeLine(data.node)}
         <h1>${esc(greeting())}</h1>
         <p class="home-summary">${summaryLine(data)}</p>
       </header>
       ${
         quiet
           ? quietCard(data)
-          : waitingCard(waiting, recent.filter(isOpen)) +
+          : waitingCard(waiting, data.waiting_items || []) +
             newestCard(
               recent.filter((event) => !isOpen(event)),
               unseen,

@@ -4,7 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
-## 2026-09-20, a storage row splits four ways
+## 2026-09-20, Home lists the waiting queue itself and names the node
+
+* **Update**: [The human surface](architecture/human-surface.md) says Home's
+  waiting card is drawn from `waiting_items`, three shown and the rest counted
+  from `waiting`, and that Home carries the status strip's node line from
+  `node` where the top bar is not on screen. Home is still one request.
+
+## 2026-09-20, the Storage screen draws a row's four parts
 
 * **Update**: [The human surface](architecture/human-surface.md) says a
   Storage row now shows a project's events beside its sessions, artifacts and

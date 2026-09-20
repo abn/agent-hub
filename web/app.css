@@ -825,6 +825,12 @@ button.empty-link {
    design stacks them. */
 .home { display: flex; flex-direction: column; gap: 20px; }
 .home h1 { line-height: 1.15; margin: 0; }
+/* The status strip's node line, right-aligned over the title as the design
+   draws it. From the width the top bar shows at, the top bar says it. */
+.home-node { margin: 0 0 var(--s-2); text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
+@media (min-width: 720px) {
+  .home-node { display: none; }
+}
 .home-summary { margin: var(--s-1) 0 0; font-size: var(--t-15); color: var(--ink-2); }
 /* A card here holds rows edge to edge, so it carries no padding of its own.
    It does not clip, because a focused row draws its ring outside its box; the
