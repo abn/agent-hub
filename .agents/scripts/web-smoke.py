@@ -4964,12 +4964,12 @@ def check_feed_chips(page, watch: Watch, seen: list | None = None) -> None:
         return
     if chips["role"] != "group" or not chips["name"]:
         watch.fail(f"the chip row is a {chips['role']!r} named {chips['name']!r}")
-    want = ["All", "signal", "finished", "question", "answer", "approval", "artifact", "session"]
+    want = ["All", "Signal", "Finished", "Question", "Answer", "Approval", "Artifact", "Session"]
     if chips["labels"] != want:
         watch.fail(f"the chips read {chips['labels']}")
     if chips["pressed"] != ["true"] + ["false"] * 7:
         watch.fail(f"with no filter the pressed states are {chips['pressed']}")
-    if chips["tops"] != 1 or chips["scrolls"] != "auto" or not chips["wide"] or chips["page"]:
+    if chips["tops"] <= 1 or chips["scrolls"] == "auto" or chips["wide"] or chips["page"]:
         watch.fail(
             f"the chips sit on {chips['tops']} line(s), overflow-x {chips['scrolls']},"
             f" row scrolls {chips['wide']}, page scrolls {chips['page']}"
@@ -6707,6 +6707,110 @@ def check_viewer_history(page, watch: Watch, port: int, project: str) -> None:
         watch.drain_rejections()
 
 
+def check_filter_chips(page, watch: Watch, project: str) -> None:
+    """Filter chips start uppercase, fit within the viewport, are keyboard reachable and filter."""
+    watch.enter("feed: filter chips casing and overflow")
+    goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+    if not settle(page, "!!document.querySelector('main .feed-chips')"):
+        watch.fail("the feed chips row did not render")
+        return
+    feed_data = page.evaluate(
+        "(() => {"
+        " const row = document.querySelector('main .feed-chips');"
+        " if (!row) return null;"
+        " const chips = [...row.querySelectorAll('button.chip')];"
+        " return {"
+        "   scrollWidth: document.documentElement.scrollWidth,"
+        "   innerWidth: window.innerWidth,"
+        "   chips: chips.map(c => ({"
+        "     text: (c.innerText || c.textContent || '').trim(),"
+        "     kind: c.dataset.kind || '',"
+        "     w: c.getBoundingClientRect().width,"
+        "     h: c.getBoundingClientRect().height,"
+        "     top: Math.round(c.getBoundingClientRect().top),"
+        "     right: Math.round(c.getBoundingClientRect().right)"
+        "   }))"
+        " }; })()"
+    )
+    if not feed_data or not feed_data["chips"]:
+        watch.fail("no feed chips found")
+        return
+    if feed_data["scrollWidth"] > feed_data["innerWidth"]:
+        watch.fail(
+            f"feed screen has horizontal page scroll: scrollWidth {feed_data['scrollWidth']} > innerWidth {feed_data['innerWidth']}"
+        )
+    first_top = feed_data["chips"][0]["top"]
+    last_top = feed_data["chips"][-1]["top"]
+    if last_top <= first_top:
+        watch.fail(
+            f"feed chips do not wrap onto subsequent lines: first chip top {first_top}, last chip top {last_top}"
+        )
+    for chip in feed_data["chips"]:
+        if not chip["text"] or not chip["text"][0].isupper():
+            watch.fail(f"feed chip {chip['kind']!r} text {chip['text']!r} does not start uppercase")
+        if chip["kind"] != chip["kind"].lower():
+            watch.fail(f"feed chip data-kind {chip['kind']!r} is not lowercase")
+        if chip["w"] + 0.5 < 44 or chip["h"] + 0.5 < 44:
+            watch.fail(
+                f"feed chip {chip['kind']!r} target {chip['w']:.0f}x{chip['h']:.0f}px is under the 44px minimum"
+            )
+        if chip["right"] > feed_data["innerWidth"]:
+            watch.fail(
+                f"feed chip {chip['kind']!r} overflows viewport: right {chip['right']} > innerWidth {feed_data['innerWidth']}"
+            )
+
+    page.focus("main .feed-chips button.chip")
+    focused = [page.evaluate("document.activeElement.dataset.kind")]
+    for _ in range(len(feed_data["chips"]) - 1):
+        page.keyboard.press("Tab")
+        focused.append(page.evaluate("document.activeElement.dataset.kind"))
+    expected_kinds = [c["kind"] for c in feed_data["chips"]]
+    if focused != expected_kinds:
+        watch.fail(f"tabbing through feed chips focused {focused!r}, expected {expected_kinds!r}")
+
+    finished_chip = 'main .feed-chips [data-kind="finished"]'
+    all_chip = 'main .feed-chips [data-kind="all"]'
+    feed_press(page, watch, finished_chip, "finished chip")
+    if not settle(page, f"document.querySelector('{finished_chip}')?.getAttribute('aria-pressed') === 'true'"):
+        watch.fail("pressing finished chip did not activate it")
+    feed_press(page, watch, all_chip, "all chip")
+    if not settle(page, f"document.querySelector('{all_chip}')?.getAttribute('aria-pressed') === 'true'"):
+        watch.fail("pressing all chip did not restore all filter")
+
+    goto(page, "#/search", "Search")
+    if not settle(page, "!!document.querySelector('main .search-scopes')"):
+        watch.fail("the search scopes row did not render")
+        return
+    search_data = page.evaluate(
+        "(() => {"
+        " const row = document.querySelector('main .search-scopes');"
+        " if (!row) return null;"
+        " const chips = [...row.querySelectorAll('button.chip')];"
+        " return {"
+        "   scrollWidth: document.documentElement.scrollWidth,"
+        "   innerWidth: window.innerWidth,"
+        "   chips: chips.map(c => ({"
+        "     text: (c.innerText || c.textContent || '').trim(),"
+        "     scope: c.dataset.scope || '',"
+        "     w: c.getBoundingClientRect().width,"
+        "     h: c.getBoundingClientRect().height"
+        "   }))"
+        " }; })()"
+    )
+    if not search_data or not search_data["chips"]:
+        watch.fail("no search chips found")
+        return
+    if search_data["scrollWidth"] > search_data["innerWidth"]:
+        watch.fail(
+            f"search screen has horizontal page scroll: scrollWidth {search_data['scrollWidth']} > innerWidth {search_data['innerWidth']}"
+        )
+    for chip in search_data["chips"]:
+        if not chip["text"] or not chip["text"][0].isupper():
+            watch.fail(f"search chip {chip['scope']!r} text {chip['text']!r} does not start uppercase")
+
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -6879,6 +6983,7 @@ def run() -> int:
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_project_active_agents_plural, page, watch, project)
                 run_step(watch, check_viewer_history, page, watch, port, project)
+                run_step(watch, check_filter_chips, page, watch, project)
                 run_step(watch, check_sign_out, browser, watch, port)
                 run_step(watch, check_connect_without_storage, browser, watch, port)
                 run_step(watch, check_approve, page, watch)

@@ -9,7 +9,7 @@ import { focusAfterRender, render } from "./router.mjs";
 import { byDay } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
-// The design's chip labels are the kind names themselves.
+// Chip labels are capitalized kind names.
 const KINDS = ["signal", "finished", "question", "answer", "approval", "artifact", "session"];
 const ALL = "all";
 // One page of the feed. Older pages are asked for with the hub's own cursor.
@@ -45,7 +45,7 @@ export function activeKinds(projectId) {
 export function kindChips(active) {
   const chip = (kind, label, pressed) =>
     `<button type="button" class="chip" data-action="kind" data-kind="${kind}" aria-pressed="${pressed}">${label}</button>`;
-  const chips = KINDS.map((kind) => chip(kind, kind, active.has(kind))).join("");
+  const chips = KINDS.map((kind) => chip(kind, kind.charAt(0).toUpperCase() + kind.slice(1), active.has(kind))).join("");
   return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", active.size === 0)}${chips}</div>`;
 }
 

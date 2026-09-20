@@ -1033,14 +1033,13 @@ button.empty-link {
 .search-where { margin-top: 3px; font-size: var(--t-12); color: var(--ink-3); }
 /* end component: search */
 /* component: feed */
-/* The kind filters are one line that scrolls sideways, never a wrapped block.
-   The 4px of padding is room for a chip's focus ring, which a scrolling box
-   would otherwise clip, and the negative margin gives the same 4px back. */
+/* The kind filters wrap across lines so every filter is visible without
+   relying on horizontal scrolling. */
 .feed-chips {
-  display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
-  padding: 4px; margin: var(--s-1) -4px 0;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: var(--s-1) 0 0;
 }
-.feed-chips .chip { flex: none; }
+.feed-chips .chip { flex: none; min-width: 44px; text-align: center; }
 .feed-chips + h2.day { margin-top: var(--s-1); }
 .feed-chips ~ h2.day, .feed-fold h2.day { margin-bottom: 6px; }
 /* A day's rows run to the edge of their surface. On a phone the surface runs

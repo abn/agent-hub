@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, feed chips start uppercase and wrap across lines
+
+* **Update**: [The human surface](architecture/human-surface.md) says the
+  project feed's kind filter chips start uppercase to match search scopes, meet
+  the 44px tap target floor, and wrap across lines to remain reachable without
+  horizontal scrolling.
+
 ## 2026-09-20, a screen that asks for the access token
 
 * **Update**: [The human surface](architecture/human-surface.md) adds the
