@@ -86,9 +86,35 @@ pub struct StorageUsage {
 /// The label a surface prints beside the host name.
 const NODE_MODE: &str = "local";
 
+/// What the feed's events weigh, per project, up to the newest event weighed.
+///
+/// The feed only grows at its head, so a report that holds the last one's
+/// weights reads the events above `high_water` and nothing else. Removing
+/// events is the one thing that makes the weights wrong, and whoever removes
+/// them starts over from [`EventBytes::default`].
+#[derive(Debug, Clone, Default)]
+pub struct EventBytes {
+    /// The newest event already weighed, empty before the first.
+    high_water: String,
+    by_project: std::collections::HashMap<String, i64>,
+}
+
 /// Compute storage usage from artifact sizes, session brain file sizes, and
 /// knowledge base file sizes, with the volume the data directory sits on.
 pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<StorageUsage> {
+    Ok(usage_from(db, data_dir, host, EventBytes::default())
+        .await?
+        .0)
+}
+
+/// The same report, weighing only the events above what `weighed` already
+/// holds, and handing back the weights for the next report.
+pub async fn usage_from(
+    db: &Database,
+    data_dir: &Path,
+    host: &str,
+    mut weighed: EventBytes,
+) -> Result<(StorageUsage, EventBytes)> {
     let conn = super::connect(db)?;
 
     let mut by_project: Vec<ProjectUsage> = Vec::new();
@@ -159,27 +185,42 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
     }
     drop(sessions);
 
-    // One pass over the feed weighs each project's events by the text the
-    // agents wrote. The cast makes the length a byte count rather than a
-    // character count.
-    let mut events = conn
-        .query(
-            "SELECT project_id,
-                    SUM(LENGTH(CAST(summary AS BLOB)) + LENGTH(CAST(COALESCE(payload, '') AS BLOB)))
-             FROM events GROUP BY project_id",
-            (),
+    // Each project's events are weighed by the text the agents wrote. The
+    // cast makes the length a byte count rather than a character count. Only
+    // the events above the last report's newest are read, by the primary key,
+    // so a report costs what was appended since and not the whole feed. The
+    // first report has nothing to stand on and reads the table in order, which
+    // is far cheaper than walking all of it through the key. Either way it is
+    // one statement, so the newest id it meets is exactly where it stopped.
+    const WEIGH: &str = "SELECT project_id, id,
+                LENGTH(CAST(summary AS BLOB)) + LENGTH(CAST(COALESCE(payload, '') AS BLOB))
+         FROM events";
+    let mut events = if weighed.high_water.is_empty() {
+        conn.query(WEIGH, ()).await
+    } else {
+        conn.query(
+            &format!("{WEIGH} WHERE id > ?1"),
+            vec![Value::Text(weighed.high_water.clone())],
         )
         .await
-        .map_err(engine)?;
+    }
+    .map_err(engine)?;
     while let Some(row) = events.next().await.map_err(engine)? {
         let project_id = text(row.get_value(0).map_err(engine)?);
-        let bytes = integer(row.get_value(1).map_err(engine)?);
-        ensure(&mut by_project, &project_id);
-        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
-            entry.events_bytes = bytes;
+        let id = text(row.get_value(1).map_err(engine)?);
+        *weighed.by_project.entry(project_id).or_insert(0) +=
+            integer(row.get_value(2).map_err(engine)?);
+        if id > weighed.high_water {
+            weighed.high_water = id;
         }
     }
     drop(events);
+    for (project_id, bytes) in &weighed.by_project {
+        ensure(&mut by_project, project_id);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == *project_id) {
+            entry.events_bytes = *bytes;
+        }
+    }
 
     // A knowledge base is never pruned, so it appears here and never in what
     // the human can reclaim. Every project is listed, one that holds nothing
@@ -201,8 +242,24 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         }
     }
     drop(projects);
+    // Weights can be held across a project's going. A project with no row of
+    // its own is gone: it is not listed for the bytes its events once had, and
+    // its weight is let go so a project made later with the same id starts
+    // from nothing.
+    weighed
+        .by_project
+        .retain(|project_id, _| names.contains_key(project_id));
+    by_project.retain(|entry| {
+        names.contains_key(&entry.project_id)
+            || entry.session_bytes > 0
+            || entry.artifact_bytes > 0
+            || entry.kb_bytes > 0
+    });
     for entry in &mut by_project {
         entry.project_display_name = names.get(&entry.project_id).cloned();
+        if !names.contains_key(&entry.project_id) {
+            entry.events_bytes = 0;
+        }
     }
 
     by_project.sort_by(|a, b| a.project_id.cmp(&b.project_id));
@@ -218,7 +275,7 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
     let events_text: i64 = by_project.iter().map(|p| p.events_bytes).sum();
     let events_shared_bytes = (by_kind.events - events_text).max(0);
     let volume = volume(data_dir);
-    Ok(StorageUsage {
+    let usage = StorageUsage {
         total_bytes,
         used_bytes: total_bytes + by_kind.events,
         capacity_bytes: volume.map(|(capacity, _)| capacity),
@@ -232,7 +289,8 @@ pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<Storage
         events_shared_bytes,
         prunable,
         projects: by_project,
-    })
+    };
+    Ok((usage, weighed))
 }
 
 /// The volume's capacity and the space free to a writer that is not root.
@@ -334,6 +392,11 @@ pub struct KbCacheEntry {
 #[derive(Debug, Default)]
 pub struct StatsCache {
     entry: std::sync::Mutex<Option<Cached>>,
+    events: std::sync::Mutex<Option<(std::time::Instant, EventBytes)>>,
+    /// How many times the weights have been forgotten. A report notes it
+    /// before it weighs and keeps what it weighed only if nothing was forgotten
+    /// in between.
+    forgets: std::sync::atomic::AtomicU64,
     kb_cache: std::sync::Mutex<std::collections::HashMap<String, KbCacheEntry>>,
 }
 
@@ -346,6 +409,12 @@ struct Cached {
 
 /// How long a memo stays fresh when nothing has been written.
 const STATS_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long the event weights are added to before the feed is weighed afresh.
+///
+/// Both paths that remove events drop the weights themselves. This bounds how
+/// long a number could stay wrong if a later one forgets to.
+const EVENT_BYTES_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl StatsCache {
     /// A memo with nothing in it.
@@ -384,7 +453,24 @@ impl StatsCache {
         if let Some(cached) = self.fresh(generation) {
             return Ok(cached);
         }
-        let usage = usage(db, data_dir, host).await?;
+        let started = self.weighing();
+        let weighed = self
+            .events
+            .lock()
+            .ok()
+            .and_then(|mut held| held.take())
+            .filter(|(since, _)| since.elapsed() < EVENT_BYTES_TTL);
+        let since = weighed
+            .as_ref()
+            .map_or_else(std::time::Instant::now, |(since, _)| *since);
+        let (usage, weighed) = usage_from(
+            db,
+            data_dir,
+            host,
+            weighed.map(|(_, weighed)| weighed).unwrap_or_default(),
+        )
+        .await?;
+        self.keep_weights_since(started, since, weighed);
         if let Ok(mut entry) = self.entry.lock() {
             *entry = Some(Cached {
                 generation,
@@ -393,6 +479,49 @@ impl StatsCache {
             });
         }
         Ok(usage)
+    }
+
+    /// Drop the event weights, so the next report weighs the whole feed.
+    ///
+    /// Called by whatever removes events: the weights only ever add.
+    pub fn forget_events(&self) {
+        if let Ok(mut held) = self.events.lock() {
+            // Counted under the same lock the weights are kept under, so a
+            // report either sees the count move or has its weights dropped.
+            self.forgets
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *held = None;
+        }
+    }
+
+    /// What a report notes before it weighs: how often the weights have been
+    /// forgotten so far.
+    pub fn weighing(&self) -> u64 {
+        self.forgets.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Keep what a report weighed, unless the weights were forgotten while it
+    /// was weighing. A report can be in flight across a project delete or a
+    /// committed prune, and what it weighed was weighed before the events
+    /// went: putting that back would undo the forgetting.
+    pub fn keep_weights(&self, started: u64, weighed: EventBytes) -> bool {
+        self.keep_weights_since(started, std::time::Instant::now(), weighed)
+    }
+
+    fn keep_weights_since(
+        &self,
+        started: u64,
+        since: std::time::Instant,
+        weighed: EventBytes,
+    ) -> bool {
+        let Ok(mut held) = self.events.lock() else {
+            return false;
+        };
+        if self.weighing() != started {
+            return false;
+        }
+        *held = Some((since, weighed));
+        true
     }
 
     fn fresh(&self, generation: u64) -> Option<StorageUsage> {

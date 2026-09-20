@@ -167,11 +167,16 @@ files and blobs that each belong to one project, so the rows' `session_bytes`,
 and `by_kind.knowledge` exactly, and all three to `total_bytes`. The hub store
 is one file every project shares, so `by_kind.events` is that file's size and
 a row's `events_bytes` is what can honestly be given to one project: the bytes
-of its events' summaries and payloads. The rest of the file (the indexes, the
+of its events' summaries and payloads, the hub's own audit events about the
+project included, since they go when the project does. The rest of the file (the indexes, the
 search corpus, the inbox, the identity tables, free pages) is
 `events_shared_bytes`, and the rows' `events_bytes` plus `events_shared_bytes`
-is `by_kind.events`. The event bytes are one grouped pass over the feed,
-memoised with the file sizes.
+is `by_kind.events`. The feed is weighed once, on the first report after a
+start; later reports read only the events appended since, and the two things
+that remove events, a committed prune and a project delete, start the weighing
+over, as does every ten minutes. A report still weighing when events are
+removed does not keep what it weighed, and a project that is gone has no row
+whatever weights were held for it.
 
 A decision may carry a note saying why. It is trimmed, a blank one is no
 note, and one over 2000 characters is a 413 with `payload_too_large` that

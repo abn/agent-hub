@@ -100,6 +100,20 @@ impl AppState {
         let _ = self.ticker.send(());
     }
 
+    /// Commit every prune whose undo window has passed.
+    ///
+    /// A committed prune removes the session's own events, so the storage
+    /// report's event weights are dropped with them, and the screens are told
+    /// to refetch.
+    pub async fn sweep_prunes(&self) -> Result<u64> {
+        let committed = store::prune::sweep(&self.db, &self.data_dir).await?;
+        if committed > 0 {
+            self.stats.forget_events();
+            self.notify();
+        }
+        Ok(committed)
+    }
+
     /// The generation a cached number must have been computed at to be served.
     pub fn generation(&self) -> u64 {
         self.generation.load(std::sync::atomic::Ordering::Relaxed)
@@ -123,8 +137,7 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(async move {
         let interval = sweep_interval();
         loop {
-            match store::prune::sweep(&sweeper.db, &sweeper.data_dir).await {
-                Ok(committed) if committed > 0 => sweeper.notify(),
+            match sweeper.sweep_prunes().await {
                 Ok(_) => {}
                 Err(err) => tracing::warn!(error = %err, "prune sweep failed"),
             }

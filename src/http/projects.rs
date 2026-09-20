@@ -193,6 +193,9 @@ pub async fn delete(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    // The project's events went with it, and the storage report only ever
+    // adds to what it has weighed.
+    state.stats.forget_events();
     state.notify();
     Ok(StatusCode::NO_CONTENT)
 }

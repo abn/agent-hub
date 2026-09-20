@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the storage report weighs only new events
+
+* **Update**: [The human surface](architecture/human-surface.md) says how a
+  storage row's `events_bytes` stays cheap on a long feed: the first report
+  weighs the feed, later ones add the events appended since, and a committed
+  prune, a project delete or ten minutes start it over.
+
 ## 2026-09-20, a decision's note is kept, capped and handed back
 
 * **Update**: [The human surface](architecture/human-surface.md) describes the

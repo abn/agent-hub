@@ -923,3 +923,161 @@ async fn a_row_counts_its_events_and_the_rows_sum_to_the_kinds() {
         body["total_bytes"].as_i64().expect("total")
     );
 }
+
+fn events_bytes(usage: &Value, project: &str) -> i64 {
+    row(usage, project).unwrap_or_else(|| panic!("a row for {project}: {usage}"))["events_bytes"]
+        .as_i64()
+        .expect("events bytes")
+}
+
+/// The report weighs only the events it has not weighed before, so what it
+/// kept must stay exact: a later event adds its own bytes and nothing else,
+/// and events that are removed take theirs away.
+#[tokio::test]
+async fn event_bytes_stay_exact_as_events_come_and_go() {
+    let state = state().await;
+    for project in ["alpha", "beta"] {
+        agent_hub::store::projects::create(&state.db, project, "Project")
+            .await
+            .expect("project");
+        signal_in(&state, project, "first").await;
+    }
+    state.notify();
+    let first = usage(&state).await;
+    assert_eq!(events_bytes(&first, "alpha"), "first".len() as i64);
+
+    signal_in(&state, "alpha", "second one").await;
+    state.notify();
+    let second = usage(&state).await;
+    assert_eq!(
+        events_bytes(&second, "alpha"),
+        ("first".len() + "second one".len()) as i64,
+        "a later event adds its own bytes"
+    );
+    assert_eq!(events_bytes(&second, "beta"), "first".len() as i64);
+
+    // A session's own lifecycle events go when its prune is committed.
+    let session = ended_session(&state, "beta", "nightly").await;
+    state.notify();
+    let with_session = events_bytes(&usage(&state).await, "beta");
+    assert!(
+        with_session > "first".len() as i64,
+        "start and end are events"
+    );
+    prune::prune_session(&state.db, &session.id)
+        .await
+        .expect("prune");
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    state
+        .db
+        .connect()
+        .expect("connect")
+        .execute(
+            "UPDATE sessions SET deleted_at = ?1 WHERE deleted_at IS NOT NULL",
+            vec![turso::Value::Text(
+                old.format(&time::format_description::well_known::Rfc3339)
+                    .expect("format"),
+            )],
+        )
+        .await
+        .expect("age");
+    assert_eq!(state.sweep_prunes().await.expect("sweep"), 1);
+    assert_eq!(
+        events_bytes(&usage(&state).await, "beta"),
+        "first".len() as i64,
+        "a committed prune takes the session's events out of the weight"
+    );
+
+    let (status, _) = call(&state, "DELETE", "/api/v1/projects/alpha").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let after = usage(&state).await;
+    assert!(
+        row(&after, "alpha").is_none(),
+        "a deleted project has no row"
+    );
+    let sum: i64 = after["projects"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["events_bytes"].as_i64().expect("bytes"))
+        .sum();
+    assert_eq!(
+        sum + after["events_shared_bytes"].as_i64().expect("shared"),
+        after["by_kind"]["events"].as_i64().expect("events")
+    );
+}
+
+#[tokio::test]
+async fn weights_held_for_a_project_that_is_gone_list_nothing_for_it() {
+    // The report holds each project's event weight between reports. If a
+    // project goes while those weights are held, by any path that does not
+    // drop them, the next report must not list a row for a project that does
+    // not exist, nor hand its bytes to a project later made with the same id.
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "doomed", "Doomed")
+        .await
+        .expect("create");
+    agent_hub::store::events::append(
+        &state.db,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "doomed".to_string(),
+            kind: "signal".to_string(),
+            summary: "about to go".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+    state.notify();
+    assert!(events_bytes(&usage(&state).await, "doomed") > 0);
+
+    // Removed underneath the memo: the store is asked directly, so nothing
+    // tells the memo to forget.
+    agent_hub::store::projects::delete(&state.db, &state.config.data_dir, "doomed")
+        .await
+        .expect("delete");
+    state.notify();
+    let after = usage(&state).await;
+    assert!(
+        !after["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .any(|row| row["project_id"] == "doomed"),
+        "a project that is gone has no row: {after}"
+    );
+
+    agent_hub::store::projects::create(&state.db, "doomed", "Doomed again")
+        .await
+        .expect("create again");
+    state.notify();
+    assert_eq!(
+        events_bytes(&usage(&state).await, "doomed"),
+        0,
+        "a new project does not inherit the old one's bytes"
+    );
+}
+
+#[test]
+fn a_report_that_outlives_a_forget_does_not_put_its_weights_back() {
+    // A report can be in flight across a delete or a committed prune. What it
+    // weighed was weighed before the events went, so it must not overwrite
+    // the forgetting: the next report starts over.
+    let cache = agent_hub::store::storage::StatsCache::new();
+    let started = cache.weighing();
+    cache.forget_events();
+    assert!(
+        !cache.keep_weights(started, agent_hub::store::storage::EventBytes::default()),
+        "weights from before a forget were kept"
+    );
+    let started = cache.weighing();
+    assert!(
+        cache.keep_weights(started, agent_hub::store::storage::EventBytes::default()),
+        "weights with no forget in between were dropped"
+    );
+}
