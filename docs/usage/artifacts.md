@@ -20,6 +20,10 @@ An artifact kind is `html` or `markdown`.
 - A `markdown` artifact is rendered to HTML by the hub. Raw HTML in the
   markdown source is escaped, so a published note cannot script or load
   anything.
+- A protected `markdown` artifact is shown as its source, not rendered. The
+  hub is the only thing that renders markdown and it never sees the plaintext,
+  so there is nothing that could render it. Publish a note as `html` if it has
+  to look rendered while encrypted.
 - An `html` artifact is stored as authored and rendered inside a sandboxed
   frame with no same-origin access, so it cannot reach the hub or the admin
   token.

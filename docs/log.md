@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a protected markdown artifact is shown as source
+
+* **Update**: [Artifacts](usage/artifacts.md) says a protected `markdown`
+  artifact is shown as its source rather than rendered. Consolidating on one
+  renderer put it on the hub, and the hub never sees a protected artifact's
+  plaintext, so nothing can render it. A browser check pins the behaviour.
+
 ## 2026-09-20, evaluations for multiple tokens and offline knowledge base
 
 * **Note**: [Agent identity and trust](adr/0012-agent-identity-and-trust.md) and

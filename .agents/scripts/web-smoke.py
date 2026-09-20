@@ -2890,6 +2890,18 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
         )
     except Exception as error:
         watch.fail(f"typing the password did not show the artifact: {error}")
+    # An encrypted note is shown as its source, not rendered. The hub renders
+    # markdown, and the hub never sees this plaintext, so there is nothing on
+    # the server to render it and nothing in the browser that renders markdown.
+    # Pinned here because it is a real limit a reader meets, and because it
+    # arrived silently when the browser renderer was removed.
+    opened = gate.frame_locator("#hub-frame")
+    if opened.locator("pre").count() < 1:
+        watch.fail("an unlocked note is not shown as source, so something renders plaintext now")
+    else:
+        source = opened.locator("pre").first.inner_text()
+        if harness.PROTECTED_BODY_MARK not in source:
+            watch.fail(f"the unlocked note's source does not carry its own text: {source[:120]!r}")
     watch.drain_rejections()
 
 
