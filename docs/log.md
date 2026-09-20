@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, home carries the node and the head of the waiting queue
+
+* **Update**: [The human surface](architecture/human-surface.md) lists two
+  more fields on the home response: `node`, the host and mode Storage already
+  carries, and `waiting_items`, the newest five items that wait on the human,
+  newest first, shaped as inbox entries. `waiting` stays the size of the whole
+  queue, and Home is still one request.
+
 ## 2026-09-20, a storage row splits four ways and an empty project keeps its row
 
 * **Update**: [The human surface](architecture/human-surface.md) lists

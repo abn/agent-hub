@@ -720,3 +720,88 @@ async fn unread_only_cannot_contradict_the_status_filter() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(problem_body(response).await["code"], "invalid_argument");
 }
+
+async fn home(state: &AppState) -> Value {
+    let response = router(state.clone())
+        .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    json_body(response).await
+}
+
+#[tokio::test]
+async fn home_lists_what_waits_even_when_newer_events_have_buried_it() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
+        .await
+        .expect("project");
+    let approval = seed_approval(&state, "Restart the node?").await;
+    let question = seed_question(&state, "Deploy tonight?").await;
+    for n in 0..12 {
+        seed_finished(&state, &format!("report {n} done")).await;
+    }
+
+    let body = home(&state).await;
+    assert_eq!(body["waiting"], 2);
+    assert!(
+        body["recent"]
+            .as_array()
+            .expect("recent")
+            .iter()
+            .all(|event| event["needs_action"] == false),
+        "the newest ten hold nothing that waits: {body}"
+    );
+    let items = body["waiting_items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the waiting items themselves: {body}"));
+    let ids: Vec<&str> = items
+        .iter()
+        .map(|item| item["event_id"].as_str().expect("event id"))
+        .collect();
+    assert_eq!(ids, [question.as_str(), approval.as_str()], "newest first");
+    assert_eq!(items[0]["kind"], "question");
+    assert_eq!(items[0]["summary"], "Deploy tonight?");
+    assert_eq!(items[0]["actor"], "agent-one");
+    assert_eq!(items[0]["status"], "action");
+    assert_eq!(items[0]["project_id"], "proj");
+    assert_eq!(items[0]["project_display_name"], "Engine Room");
+
+    // A decided approval no longer waits, so it leaves the card.
+    let decided = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/approvals/{approval}/decision"),
+            Some("Bearer token"),
+            Some(json!({ "decision": "approve" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(decided.status(), StatusCode::OK);
+    let body = home(&state).await;
+    assert_eq!(body["waiting"], 1);
+    let items = body["waiting_items"].as_array().expect("waiting items");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["event_id"], question.as_str());
+}
+
+#[tokio::test]
+async fn home_caps_the_waiting_items_and_keeps_the_total_in_the_count() {
+    let state = state().await;
+    let mut asked = Vec::new();
+    for n in 0..7 {
+        asked.push(seed_question(&state, &format!("question {n}?")).await);
+    }
+    seed_finished(&state, "unread work is not waiting").await;
+
+    let body = home(&state).await;
+    assert_eq!(body["waiting"], 7, "the count is the whole queue");
+    let ids: Vec<&str> = body["waiting_items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the waiting items themselves: {body}"))
+        .iter()
+        .map(|item| item["event_id"].as_str().expect("event id"))
+        .collect();
+    let newest: Vec<&str> = asked.iter().rev().take(5).map(String::as_str).collect();
+    assert_eq!(ids, newest, "the five newest, newest first");
+}

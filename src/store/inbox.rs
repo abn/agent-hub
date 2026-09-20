@@ -235,6 +235,31 @@ async fn list_as(
     Ok(items)
 }
 
+/// The newest items that still wait on the human, across every project.
+///
+/// This is the human's own view, so it is not confined. The count of the whole
+/// queue is [`counts`]; this is only the head of it.
+pub async fn open_items(db: &Database, limit: i64) -> Result<Vec<InboxItem>> {
+    let limit = limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
+                    i.status, e.created_at, i.updated_at
+             FROM inbox i JOIN events e ON e.id = i.event_id
+             WHERE i.status IN ('action', 'waiting')
+             ORDER BY e.id DESC LIMIT ?1",
+            vec![Value::Integer(limit)],
+        )
+        .await
+        .map_err(engine)?;
+    let mut items = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        items.push(item_from_row(&row)?);
+    }
+    Ok(items)
+}
+
 /// The status of an inbox entry, if it is tracked there.
 ///
 /// Reads inside a caller's transaction so a status check and the write it

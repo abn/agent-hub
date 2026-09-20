@@ -464,6 +464,13 @@ async fn home_carries_the_counts_its_summary_line_and_cards_show() {
         "the empty state's last event time is the newest event's own"
     );
     assert!(body["unread"].is_number() && body["waiting"].is_number());
+
+    let storage = usage(&state).await;
+    assert_eq!(body["node"]["host"], "node-under-test");
+    assert_eq!(
+        body["node"], storage["node"],
+        "home names the node exactly as storage does: {body}"
+    );
 }
 
 #[tokio::test]
