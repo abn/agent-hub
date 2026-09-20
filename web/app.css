@@ -847,7 +847,8 @@ button.empty-link {
 .home-row .dot-unread { margin-top: 6px; }
 .home-chev { flex: none; display: inline-flex; color: var(--ink-3); }
 /* The storage card is one link to the Storage screen. The bar draws the two
-   numbers above it and the line under it says the same share in words. */
+   numbers above it and the line under it says the same share in words. The
+   fill is to scale, never widened: under 1% the card draws no bar. */
 .home-storage {
   display: flex; flex-direction: column; gap: var(--s-2); padding: 14px var(--s-4);
   color: inherit; text-decoration: none;
@@ -856,7 +857,7 @@ button.empty-link {
 .home-storage-label { font-weight: 600; }
 .home-storage-n { margin-left: auto; }
 .home-bar { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-.home-bar span { display: block; height: 100%; min-width: 2px; background: var(--ink-3); }
+.home-bar span { display: block; height: 100%; background: var(--ink-3); }
 .home-storage-hint { font-size: var(--t-12); color: var(--ink-3); }
 .home .empty-state { margin-bottom: 0; }
 /* end component: home */

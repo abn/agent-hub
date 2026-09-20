@@ -38,6 +38,14 @@ software release notes and the repository changelog.
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
+## 2026-09-20, Home's storage bar is to scale or absent
+
+* **Update**: [Human surface](architecture/human-surface.md) records that
+  Home's storage card keeps to the Storage screen's threshold. Under 1% of the
+  volume it draws no bar and says "Under 1% of the volume is used"; from 1% up
+  the fill is the share, with no minimum width. It used to widen the fill to
+  two pixels, which no share under 0.6% of the bar is.
+
 ## 2026-09-20, focus after a card whose row is folded away
 
 * **Update**: [Human surface](architecture/human-surface.md) records where

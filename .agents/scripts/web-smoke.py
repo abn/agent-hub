@@ -3624,9 +3624,14 @@ def check_home_dashboard(page, watch: Watch, port: int) -> None:
     elif capacity:
         if not re.fullmatch(r"[\d.]+( [KMGT]?B)? / [\d.]+ [KMGT]?B", storage["numbers"].strip()):
             watch.fail(f"the storage numbers read {storage['numbers']!r}")
-        if storage["share"] is None or not storage["barHidden"]:
+        # The seeded hub is a sliver of any real volume, and then there is no
+        # bar; `check_home_storage_scale` pins both sides of that.
+        sliver = 0 < truth["storage"]["used_bytes"] < capacity * 0.01
+        if sliver and (storage["share"] is not None or HOME_SLIVER_WORDS not in storage["hint"]):
+            watch.fail(f"under 1% of the volume Home draws a bar, or does not say so ({storage['hint']!r})")
+        if not sliver and (storage["share"] is None or not storage["barHidden"]):
             watch.fail("the storage bar is missing, or is not hidden from a reader")
-        if "% used" not in storage["hint"]:
+        if not sliver and "% used" not in storage["hint"]:
             watch.fail(f"nothing says the bar's share in words ({storage['hint']!r})")
 
     # The rows answer to the keyboard map. The selection is parked on the first
@@ -3738,6 +3743,58 @@ def check_home_fields(page, watch: Watch) -> None:
         lone = page.evaluate("document.querySelector('main .home-waiting a.home-rest').textContent.trim()")
         if lone != "1 item in the Inbox":
             watch.fail(f"a queue older than the newest events is offered as {lone!r}")
+    watch.drain_rejections()
+
+
+HOME_STORAGE_CARD = (
+    "(() => { const card = document.querySelector('main a.home-storage'); if (!card) return null;"
+    " const bar = card.querySelector('.home-bar'); const fill = bar && bar.firstElementChild;"
+    " return { hint: (card.querySelector('.home-storage-hint') || {}).textContent || '',"
+    " bar: !!bar, fill: fill ? fill.getBoundingClientRect().width : 0,"
+    " track: bar ? bar.getBoundingClientRect().width : 0 }; })()"
+)
+# What Home says in place of a bar when the share is too small to draw. The
+# Storage screen opens its own note with the same sentence.
+HOME_SLIVER_WORDS = "Under 1% of the volume is used"
+
+
+def check_home_storage_scale(page, watch: Watch) -> None:
+    """Home's bar is to scale or absent, on the Storage screen's own threshold.
+
+    Under one part in a hundred a fill against the volume is nothing to see,
+    and Home has one number, so a bar against what is used would always be
+    full. It draws none and says why. From 1% up the fill is the share.
+    """
+    watch.enter("home: the storage bar's scale")
+    volume = 6_000_000_000_000
+    for what, used, capacity, want_bar, words in (
+        ("a small hub on a large volume", 3_000_000, volume, False, HOME_SLIVER_WORDS),
+        ("just under 1%", volume // 100 - 1, volume, False, HOME_SLIVER_WORDS),
+        ("exactly 1%", volume // 100, volume, True, "1% used"),
+        ("nothing used", 0, volume, True, "0% used"),
+    ):
+        payload = harness.home_payload(
+            waiting=1, storage={"used_bytes": used, "capacity_bytes": capacity, "free_bytes": capacity - used}
+        )
+        with home_answers(page, payload):
+            if paint_home(page, watch) is None:
+                return
+            card = page.evaluate(HOME_STORAGE_CARD)
+        if not card:
+            watch.fail(f"{what}: Home draws no storage card")
+            continue
+        if card["bar"] != want_bar:
+            watch.fail(
+                f"{what}: Home {'draws a bar' if card['bar'] else 'draws no bar'}"
+                f" ({card['fill']:.2f}px of {card['track']:.0f}px), hint {card['hint']!r}"
+            )
+        if words not in card["hint"].split(" · "):
+            watch.fail(f"{what}: the hint reads {card['hint']!r}, without {words!r}")
+        if card["bar"] and abs(card["fill"] - card["track"] * used / capacity) > 0.5:
+            watch.fail(
+                f"{what}: the fill is {card['fill']:.2f}px of {card['track']:.0f}px,"
+                f" its share is {card['track'] * used / capacity:.2f}px"
+            )
     watch.drain_rejections()
 
 
@@ -5511,6 +5568,7 @@ def run() -> int:
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_fields, page, watch)
+                run_step(watch, check_home_storage_scale, page, watch)
                 run_step(watch, check_home_quiet, page, watch)
                 run_step(watch, check_project_settings, page, watch, port)
                 run_step(watch, check_settings_guard_history, page, watch, project)

@@ -6,6 +6,7 @@ import { api } from "./api.mjs";
 import { esc, glyph, isOpen, paint } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
+import { SLIVER, SLIVER_WORDS } from "./storage.mjs";
 import { timeHTML } from "./time.mjs";
 
 // How many waiting items the card carries before it hands over to the Inbox.
@@ -161,14 +162,16 @@ function newestCard(events, unseen) {
 // The bar is a drawing of the two numbers beside it, so it is hidden from a
 // reader and the share it draws is written out underneath. A volume that
 // could not be measured has no capacity, and then there is no bar to draw.
+// Nor is there under the Storage screen's threshold: a fill to scale would be
+// nothing to see, and Home holds one number, so a bar against what is used
+// would always be full. The words say it instead, and no fill is ever widened.
 function storageCard(storage, prunable) {
   const used = int(storage.used_bytes);
   const capacity = storage.capacity_bytes == null ? 0 : int(storage.capacity_bytes);
   const share = capacity ? Math.min(1, used / capacity) : null;
+  const sliver = share !== null && used > 0 && used < capacity * SLIVER;
   const hints = [];
-  if (share !== null) {
-    hints.push(used && share < 0.01 ? "Less than 1% used" : `${Math.round(share * 100)}% used`);
-  }
+  if (share !== null) hints.push(sliver ? SLIVER_WORDS : `${Math.round(share * 100)}% used`);
   const sessions = int(prunable.sessions);
   if (sessions) {
     hints.push(
@@ -181,7 +184,7 @@ function storageCard(storage, prunable) {
       <span class="mono home-storage-n">${share === null ? `${size(used)} used` : usedOfCapacity(used, capacity)}</span>
     </span>
     ${
-      share === null
+      share === null || sliver
         ? ""
         : `<span class="home-bar" aria-hidden="true"><span style="width: ${(share * 100).toFixed(1)}%"></span></span>`
     }

@@ -88,10 +88,12 @@ function head(usage) {
   return box;
 }
 
-// The share of the volume under which the summary bar stops being drawn
-// against the volume, and what the card says when it does.
-const SLIVER = 0.01;
-const SLIVER_NOTE = "Under 1% of the volume is used. The bar is drawn against what is used.";
+// The share of the volume under which a bar stops being drawn against the
+// volume, and what the card says when it does. Home keeps to the same
+// threshold and opens with the same words.
+export const SLIVER = 0.01;
+export const SLIVER_WORDS = "Under 1% of the volume is used";
+const SLIVER_NOTE = `${SLIVER_WORDS}. The bar is drawn against what is used.`;
 
 function summary(usage) {
   const card = el("section", "card storage-summary");
