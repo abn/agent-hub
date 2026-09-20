@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod http;
+pub mod process;
 pub mod seed;
 pub mod state;
 pub mod stdio;

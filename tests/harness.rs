@@ -122,3 +122,60 @@ fn a_directory_that_cannot_be_removed_fails_the_test() {
     std::fs::remove_dir_all(&path).expect("remove by hand");
     assert!(dropped.is_err(), "a cleanup failure was swallowed");
 }
+
+mod process {
+    use std::net::TcpStream;
+
+    use super::common::process::{ANY_PORT, HubProcess, parse_listening, without_escapes};
+    use super::common::temp::TempDir;
+    use super::common::wire;
+
+    #[test]
+    fn a_hub_asked_for_any_port_says_which_one_it_got() {
+        let dir = TempDir::new("harness-any-port");
+
+        let hub = HubProcess::serve(&dir, "harness-admin", &[]);
+
+        assert_ne!(
+            hub.port(),
+            ANY_PORT,
+            "the log names the port that was bound"
+        );
+        let health = wire::rest(hub.port(), "GET", "/healthz", None, None);
+        assert_eq!(health.status, 200, "this hub answers there: {}", health.raw);
+    }
+
+    #[test]
+    fn a_hub_on_a_port_another_hub_holds_is_refused_not_mistaken_for_it() {
+        let first_dir = TempDir::new("harness-held-port");
+        let first = HubProcess::serve(&first_dir, "harness-admin", &[]);
+        let second_dir = TempDir::new("harness-held-port");
+
+        // The port answers, since the first hub listens on it. A start that
+        // only probed the port would take the first hub for the second.
+        assert!(TcpStream::connect(("127.0.0.1", first.port())).is_ok());
+        let second = HubProcess::start(&second_dir, "harness-admin", first.port(), &[]);
+
+        let refusal = second.err().expect("the second hub cannot have the port");
+        assert!(
+            refusal.contains("in use"),
+            "the refusal carries what the hub logged: {refusal}"
+        );
+    }
+
+    #[test]
+    fn the_listening_line_is_read_with_or_without_colour() {
+        let plain = "2026-01-01T00:00:00Z  INFO agent_hub::app: hub listening bind=127.0.0.1:4312 schema_version=9";
+        let coloured = "\u{1b}[2m2026-01-01T00:00:00Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2magent_hub::app\u{1b}[0m\u{1b}[2m:\u{1b}[0m hub listening \u{1b}[3mbind\u{1b}[0m\u{1b}[2m=\u{1b}[0m127.0.0.1:4312 \u{1b}[3mschema_version\u{1b}[0m\u{1b}[2m=\u{1b}[0m9";
+
+        assert_eq!(
+            parse_listening(plain).map(|address| address.port()),
+            Some(4312)
+        );
+        assert_eq!(
+            parse_listening(&without_escapes(coloured)).map(|address| address.port()),
+            Some(4312)
+        );
+        assert_eq!(parse_listening("prune sweep failed bind=1.2.3.4:5"), None);
+    }
+}

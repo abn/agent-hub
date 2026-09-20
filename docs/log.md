@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, the address the hub logs
+
+* **Update**: [Quickstart](usage/quickstart.md) notes that a `HUB_BIND` with
+  port `0` takes a free port, and that the `hub listening` log line names the
+  address the listener was given rather than the one configured.
+
 ## 2026-09-19, the inbox card, the selection, search as typed, and the checks
 
 * **Update**: [Human surface](architecture/human-surface.md) and

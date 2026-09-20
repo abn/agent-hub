@@ -154,7 +154,9 @@ pub async fn run(config: Config) -> Result<()> {
     }
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    tracing::info!(bind = %bind, schema_version, "hub listening");
+    // The address the listener got, which is not the configured one when the
+    // operator asked for port 0.
+    tracing::info!(bind = %listener.local_addr()?, schema_version, "hub listening");
 
     axum::serve(listener, router).await?;
     Ok(())

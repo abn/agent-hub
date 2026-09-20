@@ -37,7 +37,7 @@ The binary reads its configuration from the environment.
 | Variable | Default | Purpose |
 |---|---|---|
 | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
-| `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to |
+| `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the `hub listening` log line names it |
 | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
 | `HUB_AGENT_ID` | `local` | Actor label recorded for the embedded stdio admin process; advisory against a running hub, which takes the identity from the token |
