@@ -6,6 +6,7 @@ import { api } from "./api.mjs";
 import { glyph, main, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
+import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 
 // The design asks for results as you type inside 50 ms.
@@ -20,8 +21,9 @@ const SCOPES = [
 ];
 
 // A corpus family as the reader knows it, and the kind badge its rows draw. A
-// feed hit does not say which kind of event it is, so it draws the neutral
-// mark and leaves the naming to its group header.
+// feed hit draws the badge of the event it is and says its kind; one that
+// does not say which kind it is draws the neutral mark and leaves the naming
+// to its group header.
 const FAMILIES = {
   feed: { label: "Feed", badge: "signal", named: false },
   artifact: { label: "Artifacts", badge: "artifact", named: true },
@@ -134,25 +136,42 @@ function destination(hit) {
   return "";
 }
 
+const said = (value) => (typeof value === "string" && value ? value : "");
+
+// Where the hit lives and what it is, in words: the project, then what only
+// its family carries. A feed hit names who wrote it; an artifact its current
+// version and size; a brain hit its session by name and whether that session
+// is active or ended, as a word, since nothing else on the row says it. A key
+// the hit does not carry adds nothing to the line. The line is set as text.
 function whereLine(hit) {
-  if (hit.kind === "brain" && hit.session_id) {
-    return `${projectName(hit)} · session ${hit.session_id.slice(0, 8)}`;
+  const parts = [projectName(hit)];
+  if (hit.kind === "feed") {
+    parts.push(said(hit.actor));
+  } else if (hit.kind === "artifact") {
+    if (Number.isFinite(hit.version)) parts.push(`v${hit.version}`);
+    if (Number.isFinite(hit.size_bytes)) parts.push(formatBytes(hit.size_bytes));
+  } else if (hit.kind === "brain" && hit.session_id) {
+    parts.push(`session ${said(hit.session_name) || hit.session_id.slice(0, 8)}`, said(hit.session_status));
   }
-  return projectName(hit);
+  return parts.filter(Boolean).join(" · ");
 }
 
-function badge(family) {
-  // The kind is one of this module's own literals, never a field of the hit.
+// A family's badge is one of this module's own literals. A feed hit's is the
+// event's kind, which an agent chose: `glyph` escapes it into the attribute
+// and the label, and a kind it has no mark for draws the neutral one under
+// the kind's own word.
+function badge(hit, family) {
+  const kind = hit.kind === "feed" ? said(hit.event_kind) : "";
   const holder = document.createElement("template");
-  holder.innerHTML = glyph(family.badge);
-  if (!family.named) holder.content.querySelector(".sr-only")?.remove();
+  holder.innerHTML = glyph(kind || family.badge);
+  if (!kind && !family.named) holder.content.querySelector(".sr-only")?.remove();
   return holder.content;
 }
 
 function resultRow(hit, words) {
   const family = FAMILIES[hit.kind] || FAMILIES.feed;
   const row = el("div", "row search-row");
-  row.appendChild(badge(family));
+  row.appendChild(badge(hit, family));
   const href = destination(hit);
   const body = el(href ? "a" : "div", "search-link grow");
   if (href) body.href = href;

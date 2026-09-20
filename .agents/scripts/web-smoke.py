@@ -1728,6 +1728,94 @@ def check_project_names(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+SEARCH_HOSTILE = '<img src=x onerror="document.body.dataset.hitPwned=1">'
+
+
+def check_search_hit_fields(page, watch: Watch) -> None:
+    """A result row says what kind of thing it found, in words, and nothing it was not told."""
+    watch.enter("search: what a hit is, on the seeded hub")
+    page.evaluate(f"location.hash = '#/search?q={quote(harness.SEARCH_GROUPS_TERM)}'")
+    settle(page, "document.querySelectorAll('main .search-row').length > 2")
+    truth = json.loads(
+        harness.request(watch.port, "GET", f"/api/v1/search?q={quote(harness.SEARCH_GROUPS_TERM)}")
+    )
+    rows = {row["title"]: row for row in page.evaluate(SEARCH_ROWS)}
+    for group in truth["groups"]:
+        for hit in group["hits"]:
+            row = rows.get(hit["title"])
+            if not row:
+                watch.fail(f"no row for the hit {hit['title']!r}")
+                continue
+            name = hit["project_display_name"] or hit["project_id"]
+            if hit["kind"] == "feed":
+                want = f"{name} · {hit['actor']}"
+                label = KIND_LABELS.get(hit["event_kind"], hit["event_kind"])
+                if row["kind"] != hit["event_kind"] or row["label"] != label:
+                    watch.fail(
+                        f"the feed hit {hit['title']!r} draws the {row['kind']!r} badge and says"
+                        f" {row['label']!r}, the event is {hit['event_kind']!r}"
+                    )
+            elif hit["kind"] == "artifact":
+                want = f"{name} · v{hit['version']} · {storage_bytes(hit['size_bytes'])}"
+            else:
+                want = f"{name} · session {hit['session_name']} · {hit['session_status']}"
+            if row["where"] != want:
+                watch.fail(f"the {hit['kind']} hit {hit['title']!r} says where as {row['where']!r}, expected {want!r}")
+
+    watch.enter("search: what a hit is, field by field")
+    session = "01SESSION0000000000000000A"
+    hits = [
+        search_hit("feed", 1, event_kind="approval", actor="deploy-bot"),
+        search_hit("feed", 2, event_kind='k"><b id="hit-kind">', actor=f"a {SEARCH_HOSTILE}"),
+        search_hit("feed", 3),
+        search_hit("artifact", 4, version=3, size_bytes=18432),
+        search_hit("artifact", 5, version=None),
+        search_hit("brain", 6, session_id=session, session_name=f"s {SEARCH_HOSTILE}", session_status="active"),
+        search_hit("brain", 7, session_id=session, session_name="old run", session_status="ended"),
+        search_hit("brain", 8, session_id=session),
+    ]
+    rows = search_rows(page, watch, search_payload(hits))
+    if page.evaluate(
+        "!!document.body.dataset.hitPwned || !!document.getElementById('hit-kind')"
+        " || !!document.querySelector('main .search-results img')"
+    ):
+        watch.fail("a field of a search hit became an element")
+    wheres = [row["where"] for row in rows]
+    wanted = [
+        "Home lab · deploy-bot",
+        f"Home lab · a {SEARCH_HOSTILE}",
+        "Home lab",
+        "Home lab · v3 · 18 KB",
+        "Home lab",
+        f"Home lab · session s {SEARCH_HOSTILE} · active",
+        "Home lab · session old run · ended",
+        f"Home lab · session {session[:8]}",
+    ]
+    if wheres != wanted:
+        for got, want in zip(wheres, wanted):
+            if got != want:
+                watch.fail(f"a row says where as {got!r}, expected {want!r}")
+    badges = [(row["kind"], row["label"]) for row in rows[:3]]
+    if badges != [("approval", "Approval"), ('k"><b id="hit-kind">', 'k"><b id="hit-kind">'), ("signal", "")]:
+        watch.fail(f"the feed rows draw and name their kinds as {badges}")
+    elif rows[0]["drawn"] == rows[2]["drawn"]:
+        watch.fail("an approval hit draws the neutral mark, so only its colour says what it is")
+    text = page.evaluate("document.querySelector('main .search-results').textContent")
+    for word in ("undefined", "null", "NaN"):
+        if word in text:
+            watch.fail(f"a key the hit does not carry is printed as {word!r}")
+
+    watch.enter("search: a kind named after something every object has")
+    # An agent chooses its kinds. One that is also a member of every object is
+    # still only a kind the screen does not know: its own word, the plain mark.
+    plain = search_rows(page, watch, search_payload([search_hit("feed", 1, event_kind="no-such-kind")]))
+    for kind in ("constructor", "__proto__", "toString"):
+        rows = search_rows(page, watch, search_payload([search_hit("feed", 1, event_kind=kind)]))
+        if not rows or rows[0]["label"] != kind or rows[0]["drawn"] != plain[0]["drawn"]:
+            watch.fail(f"the kind {kind!r} is named {rows and rows[0]['label']!r}")
+    watch.drain_rejections()
+
+
 def check_agent_markup_is_text(page, watch: Watch) -> None:
     """One shared helper escapes every screen, so its loss must not pass quietly."""
     watch.enter("home: agent markup")
@@ -6132,6 +6220,7 @@ def run() -> int:
                 run_step(watch, check_search_race, page, watch)
                 run_step(watch, check_search_is_text, page, watch)
                 run_step(watch, check_search_rows_take_keys, page, watch)
+                run_step(watch, check_search_hit_fields, page, watch)
                 run_step(watch, check_toast_leaves_a_writer_alone, page, watch, project)
                 run_step(watch, check_answer, page, watch, project)
                 run_step(watch, check_inbox_groups, page, watch, project)

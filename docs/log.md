@@ -4,6 +4,12 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-20, a search row says what it found
+
+* **Update**: [The human surface](architecture/human-surface.md) says a search
+  row draws the event kind and actor of a feed hit, the version and size of an
+  artifact hit, and the session name and status of a session brain hit.
+
 ## 2026-09-20, Home lists the waiting queue itself and names the node
 
 * **Update**: [The human surface](architecture/human-surface.md) says Home's

@@ -75,10 +75,14 @@ const NAMES = {
   session: "Session",
 };
 
+// A kind is an agent's word, so it is looked up among the table's own keys:
+// `constructor` is a kind nobody drew, not the thing every object carries.
+const own = (table, key) => (Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined);
+
 export const glyph = (kind) =>
   `<span class="glyph" data-kind="${esc(kind)}" aria-hidden="true">${
-    MARKS[kind] || MARKS.signal
-  }</span><span class="sr-only">${esc(NAMES[kind] || kind)}</span>`;
+    own(MARKS, kind) || MARKS.signal
+  }</span><span class="sr-only">${esc(own(NAMES, kind) || kind)}</span>`;
 
 export const when = (ts) => timeHTML(ts);
 
