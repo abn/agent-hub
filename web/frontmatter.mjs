@@ -664,14 +664,17 @@ export function read(text) {
 // ---------------------------------------------------------------------------
 // Emitter
 
-// Control characters and the line and mark characters YAML treats specially.
+// Control characters, the line and mark characters YAML treats specially,
+// and the two noncharacters a YAML stream may not hold.
 function needsEscape(code) {
   return (
     code < 0x20 ||
     (code >= 0x7f && code <= 0x9f) ||
     code === 0x2028 ||
     code === 0x2029 ||
-    code === 0xfeff
+    code === 0xfeff ||
+    code === 0xfffe ||
+    code === 0xffff
   );
 }
 

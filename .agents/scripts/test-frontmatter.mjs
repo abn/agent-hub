@@ -763,7 +763,7 @@ function propertyChecks(manifest) {
 const NBSP = cp(0xa0);
 const WIDE_ALPHABET = [
   ...ALPHABET,
-  NBSP, cp(0x3000), cp(0x2029), cp(0x7f), cp(0x9f), cp(0x10ffff), cp(0xfffd), cp(0x130),
+  NBSP, cp(0x3000), cp(0x2029), cp(0x7f), cp(0x9f), cp(0x10ffff), cp(0xfffd), cp(0xfffe), cp(0xffff), cp(0x130),
   "\u000b", "\u000c", "</script>", "~", "%", "@", "`", "?", "<", "=", "+", ".", "9", "2026-",
   "T", "Z", "null", "No", "x", " # ", ":\t", "- ", "-\t", "[a, b]", '"q"', "'s'", "\\n", "\\u00e9",
   "\\U0001D11E", "\\uD834", "\\UFFFFFFFF", "\\x41", "|", ">-", "|2+", "&anchor", "*alias", "title", "tags", "type",

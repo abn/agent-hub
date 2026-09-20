@@ -602,6 +602,13 @@
       "input": "86_refuse_mapping_inside_record.input.md",
       "patch": "86_refuse_mapping_inside_record.patch.json",
       "error": "invalid_value"
+    },
+    {
+      "id": "87_noncharacters_are_escaped",
+      "description": "U+FFFE and U+FFFF are not characters a YAML stream may hold: inside a value they are escaped, and a value that holds one is never written plain",
+      "input": "87_noncharacters_are_escaped.input.md",
+      "patch": "87_noncharacters_are_escaped.patch.json",
+      "expected": "87_noncharacters_are_escaped.expected.md"
     }
   ]
 }

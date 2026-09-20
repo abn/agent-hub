@@ -21,11 +21,12 @@
 //!
 //! - A string is written plain only when that is safe; otherwise it is double
 //!   quoted with `\\`, `\"`, `\n`, `\r`, `\t` and four-digit uppercase
-//!   `\uXXXX` escapes for the remaining control characters, so no value can
-//!   end its line or its quoting. Plain is refused for: the empty string;
-//!   leading or trailing whitespace; a control character, U+2028, U+2029 or
-//!   U+FEFF; a first character that is a YAML indicator or one of
-//!   `` ~ < = + . ``; a leading digit unless the whole string is a date
+//!   `\uXXXX` escapes for the remaining control characters and for U+2028,
+//!   U+2029, U+FEFF, U+FFFE and U+FFFF, so no value can end its line or its
+//!   quoting and none holds a character a YAML stream may not. Plain is
+//!   refused for: the empty string; leading or trailing whitespace; any
+//!   character that is escaped; a first character that is a YAML indicator or
+//!   one of `` ~ < = + . ``; a leading digit unless the whole string is a date
 //!   (`2026-09-19`) or an RFC 3339 timestamp; `: `, ` #` or a trailing `:`;
 //!   the words `true false null yes no on off y n` in any case.
 //! - A boolean is `true` or `false`; an integer is its decimal digits.
@@ -442,10 +443,13 @@ fn emit_scalar(out: &mut String, scalar: &Scalar) {
     }
 }
 
-/// Control characters and the line and mark characters YAML treats specially.
+/// Control characters, the line and mark characters YAML treats specially,
+/// and the two noncharacters a YAML stream may not hold.
 fn needs_escape(c: char) -> bool {
     let code = u32::from(c);
-    code < 0x20 || (0x7F..=0x9F).contains(&code) || matches!(code, 0x2028 | 0x2029 | 0xFEFF)
+    code < 0x20
+        || (0x7F..=0x9F).contains(&code)
+        || matches!(code, 0x2028 | 0x2029 | 0xFEFF | 0xFFFE | 0xFFFF)
 }
 
 fn emit_double_quoted(out: &mut String, s: &str) {
