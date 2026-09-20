@@ -15,7 +15,7 @@ import {
   viewerBack,
   viewerRoute,
 } from "./artifacts.mjs";
-import { main } from "./dom.mjs";
+import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
 import { toggleKind } from "./feed.mjs";
 import { home } from "./home.mjs";
@@ -34,9 +34,12 @@ import { toast } from "./toast.mjs";
 
 // The legacy per-project addresses feed, sessions and artifacts now live at
 // `#/projects/<id>/<segment>`. A hash that names one redirects so a saved
-// link keeps working; a bare one lands on the first project.
-const toFirstProject = (segment) => async () => {
+// link keeps working; a bare one lands on the first project. The move waits on
+// the projects, so a reader who has gone elsewhere by then is left where they
+// are.
+const toFirstProject = (segment, gen) => async () => {
   const { projects } = await api("/api/v1/projects");
+  if (stale(gen)) return;
   const target = projects.length
     ? `#/projects/${encodeURIComponent(projects[0].id)}/${segment}`
     : "#/projects";
@@ -50,17 +53,17 @@ setScreens({
     path.split("/")[3] === "settings" ? projectSettingsScreen(gen, path) : projectScreen(params, gen, path),
   feed: (params, gen) => {
     if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/feed`;
-    else toFirstProject("feed")();
+    else toFirstProject("feed", gen)();
   },
   sessions: (params, gen) => {
     if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/sessions`;
-    else toFirstProject("sessions")();
+    else toFirstProject("sessions", gen)();
   },
   artifacts: (params, gen, path) => {
     const segments = (path || "").split("/");
     if (segments[2]) viewerRoute(params, gen, path);
     else if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/artifacts`;
-    else toFirstProject("artifacts")();
+    else toFirstProject("artifacts", gen)();
   },
   session: (params, gen) => sessionDetail(params.get("project"), params.get("id"), gen),
   search: (params, gen) => searchScreen(params.get("q"), gen),

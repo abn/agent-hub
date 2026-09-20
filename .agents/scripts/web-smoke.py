@@ -1471,6 +1471,19 @@ def check_render_generation_guard(page, watch: Watch, project: str, session_id: 
             "main .stat-row",
             ("#/settings", "Settings"),
         ),
+        # The bare per-project addresses paint nothing: they ask for the
+        # projects and then move the route. Left behind, that move is the one
+        # thing they must not make. Search asks the hub nothing, so it paints
+        # while the projects are held.
+        ("the bare feed address", "#/feed", "/api/v1/projects", "main .feed-chips", ("#/search", "Search")),
+        (
+            "the bare sessions address",
+            "#/sessions",
+            "/api/v1/projects",
+            "main .session-row",
+            ("#/search", "Search"),
+        ),
+        ("the bare artifacts address", "#/artifacts", "/api/v1/projects", "main .gallery", ("#/search", "Search")),
     ]
     for name, hash_value, needle, marks, (next_hash, next_title) in left:
         watch.enter(f"router: render guard, leaving {name}")
