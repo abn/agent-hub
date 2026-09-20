@@ -224,7 +224,6 @@ async fn state_dir_permissions_and_keys_file() {
             "state directory is 0o700"
         );
     }
-    let _ = std::fs::remove_dir_all(&temp);
 }
 
 // The one test that needs a real tailnet, so it is ignored by default. Run it

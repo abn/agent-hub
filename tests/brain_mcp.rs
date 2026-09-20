@@ -162,11 +162,7 @@ fn session_and_brain_tools_round_trip_over_stdio() {
     // committed.
     drop(server);
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build a runtime");
-    let hits = runtime.block_on(async {
+    let hits = common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open the hub store");
@@ -224,11 +220,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
 
     // End and prune the session while no MCP server holds it, age the
     // tombstone past the undo window, and sweep, so the file is truly gone.
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    let brain_path = runtime.block_on(async {
+    let brain_path = common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
@@ -326,11 +318,7 @@ fn a_non_canonical_path_indexes_and_deletes_one_row() {
 
     drop(server);
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build a runtime");
-    let hits = runtime.block_on(async {
+    let hits = common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open the hub store");
@@ -798,11 +786,7 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
 
     // Prune the session the way the sweeper does, with the tombstone aged past
     // the undo window so the file is really removed.
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
@@ -1111,11 +1095,7 @@ fn a_pruned_session_is_not_readable() {
         id
     };
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build a runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
@@ -1154,7 +1134,7 @@ fn a_pruned_session_is_not_readable() {
     );
     drop(server);
 
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
@@ -1419,11 +1399,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
     drop(server);
 
     // Verify database contents
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         // Verify session brain tool_calls table
         let session_brain = agent_hub::brain::BrainStore::for_data_dir(data_dir.path())
             .open("proj", &session_id)
@@ -1550,11 +1526,7 @@ fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
     drop(server);
 
     // Verify DB events and KB tool_calls
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open db");

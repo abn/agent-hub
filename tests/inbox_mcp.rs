@@ -235,11 +235,7 @@ fn approval_signal_is_refused_at_the_inbox_cap() {
 /// Only one process may hold the engine, so the human's side of this happens
 /// in the test rather than over the REST surface of a running hub.
 fn seed_read_report(data_dir: &Path, summary: &str) -> String {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
             .await
             .expect("open engine");

@@ -213,8 +213,6 @@ fn the_blob_layer_enforces_the_artifact_cap() {
     assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
 
     blob::write(&dir, "proj", "art", 1, "html", b"a small blob").expect("under the cap");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[tokio::test]
@@ -245,5 +243,4 @@ async fn removing_a_brain_file_goes_through_the_store() {
 
     drop(reopened);
     drop(store);
-    std::fs::remove_dir_all(&dir).ok();
 }

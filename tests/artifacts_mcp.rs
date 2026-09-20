@@ -283,11 +283,7 @@ fn artifact_get_of_an_absent_id_is_not_found() {
 
 /// Set a project's artifact password policy before the hub is spawned over it.
 fn set_policy(data_dir: &Path, project_id: &str, policy: &str) {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build runtime");
-    runtime.block_on(async {
+    common::seed::block_on(async {
         let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
             .await
             .expect("open engine");

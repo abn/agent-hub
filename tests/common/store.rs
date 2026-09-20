@@ -23,14 +23,7 @@ pub async fn open(data_dir: &Path) -> turso::Database {
 pub struct TestDb {
     // Declared before the directory so the engine is released first.
     db: turso::Database,
-    dir: TempDir,
-}
-
-impl TestDb {
-    /// The data directory, for a test that looks at the files under it.
-    pub fn dir(&self) -> &Path {
-        self.dir.path()
-    }
+    _dir: TempDir,
 }
 
 impl Deref for TestDb {
@@ -45,5 +38,5 @@ impl Deref for TestDb {
 pub async fn fresh(tag: &str) -> TestDb {
     let dir = TempDir::new(tag);
     let db = open(dir.path()).await;
-    TestDb { db, dir }
+    TestDb { db, _dir: dir }
 }

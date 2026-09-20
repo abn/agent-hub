@@ -98,11 +98,6 @@ impl HubProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-
-    /// Whether the process has exited, and how.
-    pub fn exited(&mut self) -> Option<std::process::ExitStatus> {
-        self.child.try_wait().expect("poll the hub")
-    }
 }
 
 impl Drop for HubProcess {

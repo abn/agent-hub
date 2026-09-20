@@ -85,5 +85,4 @@ async fn resolve_agent_accepts_admin_and_rejects_unknown_tokens() {
     assert_eq!(absent.code(), ErrorCode::Unauthenticated);
 
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }

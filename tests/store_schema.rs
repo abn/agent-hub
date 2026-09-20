@@ -174,7 +174,6 @@ async fn migrate_creates_schema_and_search_index() {
     drop(rows);
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -264,7 +263,6 @@ async fn migration_four_backfills_version_history() {
     drop(meta);
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -394,7 +392,6 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
 
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -444,7 +441,6 @@ async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
 
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -564,7 +560,6 @@ async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
     drop(index);
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -670,7 +665,6 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
     drop(cursors);
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -743,7 +737,6 @@ async fn migration_six_clears_indexed_audit_events() {
     drop(rows);
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }
 
 #[tokio::test]
@@ -844,5 +837,4 @@ async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
 
     drop(conn);
     drop(db);
-    std::fs::remove_dir_all(&dir).expect("clean temp dir");
 }

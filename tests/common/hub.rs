@@ -71,13 +71,6 @@ impl Hub {
         }
     }
 
-    /// Stop the hub and start it again on the same port and data directory,
-    /// the way an upgrade or a reboot of the node looks to a client.
-    pub fn restart(&mut self) {
-        self.stop();
-        self.start_again();
-    }
-
     /// Stop the hub and wait for it to be gone, so the engine's lock on the
     /// data directory is free for the next process.
     pub fn stop(&mut self) {

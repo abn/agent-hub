@@ -123,7 +123,6 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     );
 
     drop(child);
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// State over a fresh data directory, for the in-process probe tests.
