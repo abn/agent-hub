@@ -1236,6 +1236,38 @@ def check_storage_bar(page, watch: Watch) -> None:
         if bar and "against what is used" not in (bar["label"] or ""):
             watch.fail(f"the bar changed its scale and its text alternative says {bar['label']!r}")
 
+    # The scale changes under one part in a hundred and nowhere else: a byte
+    # under it is drawn against what is used and says so, and exactly on it is
+    # drawn against the volume and says nothing.
+    volume = 1_000_000_000
+    for what, events, sliver in (("one byte under 1%", 5_999_999, True), ("exactly 1%", 6_000_000, False)):
+        watch.enter(f"storage: the scale threshold, {what}")
+        edge = dict(
+            STORAGE_FIXTURE,
+            used_bytes=events + 4_000_000,
+            capacity_bytes=volume,
+            free_bytes=volume - events - 4_000_000,
+            by_kind={"events": events, "sessions": 4_000_000, "artifacts": 0, "knowledge": 0},
+        )
+        usage, drawn = open_storage(page, edge)
+        if not drawn or not drawn["summary"] or not drawn["summary"]["bar"]:
+            watch.fail("the storage screen draws no summary bar")
+            continue
+        bar = drawn["summary"]["bar"]
+        storage_shares(
+            watch,
+            f"the summary at {what}",
+            bar,
+            [(kind, usage["by_kind"][kind]) for kind in STORAGE_KINDS],
+            usage["used_bytes"] if sliver else usage["capacity_bytes"],
+        )
+        said = drawn["summary"]["scale"] or ""
+        named = "against what is used" in (bar["label"] or "")
+        if sliver and ("against what is used" not in said or not named):
+            watch.fail(f"the card says {said!r} and the bar is named {bar['label']!r}, neither the change of scale")
+        if not sliver and (said or named):
+            watch.fail(f"a bar drawn against the volume says {said!r} and is named {bar['label']!r}")
+
     watch.enter("storage: a volume that cannot be measured")
     unmeasured = dict(STORAGE_FIXTURE, capacity_bytes=None, free_bytes=None)
     usage, drawn = open_storage(page, unmeasured)
