@@ -62,6 +62,7 @@ export async function settingsScreen(gen) {
     gen,
     `
     <h1>Settings</h1>
+    <div class="prose settings">
     <form class="card" data-action="prefs">
       <p class="settings-token-state">${
         prefs.token
@@ -99,7 +100,8 @@ export async function settingsScreen(gen) {
     </form>
     ${notificationsSection()}
     ${projects}
-    ${agents}`,
+    ${agents}
+    </div>`,
   );
 }
 

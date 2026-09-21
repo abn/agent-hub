@@ -752,7 +752,6 @@ export async function viewerRoute(params, gen, path) {
   back.dataset.action = "viewer-back";
   back.setAttribute("aria-label", "Back to artifacts");
   back.innerHTML = glyphSvg("chevronBack", { size: 20 });
-  back.addEventListener("click", viewerBack);
 
   const pathEl = document.createElement("div");
   pathEl.className = "hub-viewer-path mono";

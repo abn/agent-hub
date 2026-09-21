@@ -1,17 +1,27 @@
-// The shell around the screens: the desktop top bar's node line and its
-// search field's slash shortcut. The top bar is static markup in the shell
-// document; what comes from the hub fills in at runtime.
+// The shell around the screens: the desktop app rail's node line, project list,
+// unread badge mirroring, and sync indicator.
 
 import { api } from "./api.mjs";
+import { esc } from "./dom.mjs";
 import { prefs } from "./prefs.mjs";
+import { relative } from "./time.mjs";
 
 const nodeLine = document.getElementById("top-node");
-const searchField = document.getElementById("top-search");
+const railProjects = document.getElementById("rail-projects");
+const syncLine = document.getElementById("rail-sync");
+
+let lastSyncTime = Date.now();
+
+export function updateRailSync(time = Date.now()) {
+  lastSyncTime = time;
+  if (syncLine) {
+    syncLine.textContent = `synced ${relative(lastSyncTime)}`;
+  }
+}
 
 // The node line names the hub the operator is looking at. It is the storage
 // response's node, which the real-numbers surface already reports, so the two
-// cannot drift. Without a token there is nothing to say, and the line stays
-// out of the way until one is entered.
+// cannot drift.
 let askedForToken = false;
 async function fillNodeLine() {
   if (!prefs.token) {
@@ -21,17 +31,16 @@ async function fillNodeLine() {
   }
   try {
     const usage = await api("/api/v1/storage");
-    nodeLine.textContent = `${usage.node.host} · ${usage.node.mode}`;
+    if (nodeLine) {
+      nodeLine.textContent = `${usage.node.host} · ${usage.node.mode}`;
+    }
   } catch {
-    // A hub that refuses still has a line to draw once it accepts a token;
-    // try again on the same cadence as the mailbox stream.
     setTimeout(fillNodeLine, 15000);
   }
 }
 
-// The tab bar's badge is the app's one count. The top bar badge mirrors it so
-// the desktop Inbox link reads the same number, without the shell touching
-// the freshness module's single source of truth.
+// The tab bar's badge is the app's one count. The rail badge mirrors it so
+// the desktop Inbox link reads the same number.
 const tabBadge = document.getElementById("tab-badge");
 const topBadge = document.getElementById("top-badge");
 function mirrorBadge() {
@@ -48,39 +57,88 @@ if (tabBadge && "MutationObserver" in window) {
   });
 }
 
-// Slash focuses the top bar's own search field on desktop, before the keyboard
-// map's slash handler (which navigates to the Search screen) sees the key.
-// The capture phase runs first, and the shortcut is only claimed when the
-// field is actually on screen, so mobile keeps the map's behaviour untouched.
-document.addEventListener(
-  "keydown",
-  (event) => {
-    if (event.key !== "/" || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (prefs.shortcuts !== "on") return;
-    const target = event.target;
-    if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
-    if (document.querySelector("dialog[open]")) return;
-    if (location.hash.startsWith("#/search")) {
-      const q = document.getElementById("q");
-      if (q) {
-        event.preventDefault();
-        event.stopPropagation();
-        q.focus();
-        q.select?.();
-        return;
+// Personal spaces have owner_agent set or follow personal space naming.
+// By owner ruling, personal spaces NEVER appear in the rail.
+function isPersonalSpace(p) {
+  return Boolean(
+    p.owner_agent ||
+      p.id.startsWith("space-") ||
+      (p.display_name && p.display_name.endsWith(" (personal)")),
+  );
+}
+
+// Render regular projects into the rail's PROJECTS list.
+export async function renderRailProjects() {
+  if (!railProjects || !prefs.token) return;
+  try {
+    const { projects } = await api("/api/v1/projects");
+    const regular = (projects || []).filter((p) => !isPersonalSpace(p));
+
+    const statsList = await Promise.all(
+      regular.map((p) =>
+        api(`/api/v1/projects/${encodeURIComponent(p.id)}/stats`).catch(() => null),
+      ),
+    );
+
+    let waitingItems = [];
+    try {
+      const [actionRes, waitingRes] = await Promise.all([
+        api("/api/v1/inbox?status=action&limit=500"),
+        api("/api/v1/inbox?status=waiting&limit=500"),
+      ]);
+      waitingItems = [...(actionRes?.items || []), ...(waitingRes?.items || [])];
+    } catch {}
+
+    const waitingMap = new Map();
+    for (const item of waitingItems) {
+      if (item.project_id) {
+        waitingMap.set(item.project_id, (waitingMap.get(item.project_id) || 0) + 1);
       }
     }
-    if (!searchField || !searchField.getClientRects().length) return;
-    event.preventDefault();
-    event.stopPropagation();
-    searchField.focus();
-    searchField.select?.();
-  },
-  true,
-);
+
+    const currentHash = location.hash.replace(/^#/, "").split("?")[0];
+    railProjects.innerHTML = "";
+
+    for (let i = 0; i < regular.length; i++) {
+      const p = regular[i];
+      const stats = statsList[i];
+      const isLive = (stats?.agents_active || 0) > 0;
+      const waiting = waitingMap.get(p.id) || 0;
+      const isCurrent = currentHash.startsWith(`/projects/${encodeURIComponent(p.id)}`);
+
+      const a = document.createElement("a");
+      a.href = `#/projects/${encodeURIComponent(p.id)}/feed`;
+      a.className = "rail-item rail-project-item";
+      a.dataset.projectId = p.id;
+      if (isCurrent) a.setAttribute("aria-current", "page");
+
+      const dot = document.createElement("span");
+      dot.className = `rail-dot ${isLive ? "live" : "idle"}`;
+      dot.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.className = "rail-label";
+      label.textContent = p.display_name || p.id;
+
+      a.append(dot, label);
+
+      if (waiting > 0) {
+        const badge = document.createElement("span");
+        badge.className = "badge waiting rail-project-badge";
+        badge.textContent = String(waiting);
+        badge.setAttribute("aria-label", `${waiting} waiting on you`);
+        a.appendChild(badge);
+      }
+
+      railProjects.appendChild(a);
+    }
+  } catch {}
+}
 
 export function installShell() {
   if (askedForToken) return;
   fillNodeLine();
   mirrorBadge();
+  renderRailProjects();
+  setInterval(() => updateRailSync(lastSyncTime), 30000);
 }

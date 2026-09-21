@@ -3,6 +3,16 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, app rail, pane layout zones, and prose measure
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  desktop shell layout: a permanent vertical app rail replacing the horizontal
+  top bar (200px fixed at 1100px and above, 56px icon rail at 720 to 1099px),
+  the four layout zones (Rail, Index, Stage, and Aside) across breakpoints,
+  exclusion of personal agent spaces from the rail, and relocation of the
+  viewport width cap to a 640px measure container for prose.
+
+
 ## 2026-09-22, agent creation and project grant forms on access screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

@@ -20,15 +20,36 @@ export function focusAfterRender(kind) {
   pendingFocus = kind;
 }
 
-function setCurrent(screen) {
+function setCurrent(screen, path = "") {
   // The project-owned screens sit under the Projects tab: the segmented
   // project view has that tab on every segment, and the artifact viewer is
   // the artifact inside a project, so it keeps the tab where it was opened.
   const nav = screen === "artifacts" ? "projects" : screen;
-  document.querySelectorAll(".tabbar a, .topbar nav a").forEach((anchor) => {
-    const target = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
-    if (target === nav) anchor.setAttribute("aria-current", "page");
-    else anchor.removeAttribute("aria-current");
+  document.querySelectorAll(".tabbar a, .rail a").forEach((anchor) => {
+    if (anchor.classList.contains("rail-project-item")) {
+      const projId = anchor.dataset.projectId;
+      if (
+        projId &&
+        (path === `/projects/${projId}` ||
+          path.startsWith(`/projects/${projId}/`) ||
+          path === `/projects/${encodeURIComponent(projId)}` ||
+          path.startsWith(`/projects/${encodeURIComponent(projId)}/`))
+      ) {
+        anchor.setAttribute("aria-current", "page");
+      } else {
+        anchor.removeAttribute("aria-current");
+      }
+      return;
+    }
+    const href = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
+    const target = href.split("/")[0];
+    if (anchor.classList.contains("rail-item")) {
+      if (anchor.dataset.route === nav) anchor.setAttribute("aria-current", "page");
+      else anchor.removeAttribute("aria-current");
+    } else {
+      if (target === nav) anchor.setAttribute("aria-current", "page");
+      else anchor.removeAttribute("aria-current");
+    }
   });
   document.title = screen.charAt(0).toUpperCase() + screen.slice(1) + " · Agent Hub";
 }
@@ -40,7 +61,7 @@ export async function render() {
   const [path, query = ""] = hash.split("?");
   const params = new URLSearchParams(query);
   const screen = path.split("/")[1] || "home";
-  setCurrent(screen);
+  setCurrent(screen, path);
   try {
     // The path is handed over so a route with an id of its own, such as the
     // project view and the artifact viewer, can read its segment without

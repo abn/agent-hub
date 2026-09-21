@@ -237,17 +237,38 @@ undo is the route it already was, once per token.
 
 The interface follows the design foundation, whose tokens, type, spacing,
 states, and copy are final. It installs to a phone home screen and works
-equally well on desktop. Mobile is primary, with a four-tab bar of labelled
-icons (Home, Inbox, Projects, Search) ending in a safe-area bottom edge;
-desktop swaps it for a top bar that adds an inline search field with a slash
-hint, the node line naming the hub the storage response reports, and a gear
-to Settings. Each project is an address of its own: the feed, the artifact
-gallery and the sessions list are segmented tabs under `#/projects/<id>/`,
-every one with its own route, and the artifact viewer is a route too
-(`#/artifacts/<id>`), so reload and the browser's Back keep the artifact on
-screen. A desktop list plus detail layout (a 420px list pane beside a detail
-pane) is a layout primitive screens opt into; Sessions is the first to use
-it, and the project tabs sit in the same shell.
+equally well on desktop. Mobile uses a tab bar of labelled icons ending in a
+safe-area bottom edge. Desktop replaces the top bar with a permanent app rail:
+a 56px icon rail at 720 to 1099px, and a 200px fixed rail from 1100px.
+
+The rail provides vertical navigation with a brand header and node identity,
+primary destinations (Home, Inbox with unread or waiting badge, and Search with
+a keyboard shortcut hint), a PROJECTS section listing active projects with live
+activity dots (filled dot for active agent work, ring for idle) and waiting count
+badges, and a footer with Storage, Settings, and a sync indicator. Agent
+personal spaces are omitted from the rail to avoid clutter, remaining accessible
+on the Projects register screen (`#/projects`) without deletion controls.
+
+Reading measure is constrained by moving the width cap off the main container
+and onto prose containers at 640px. Thread bodies, artifact documents, wiki
+pages, settings groups, and empty-state copy keep this measure, while lists,
+tables, and multi-pane stages expand to fill available width.
+
+The layout architecture defines four structural zones from left to right: Rail
+(200px or 56px), Index (280 to 420px fixed: 280px for artifacts, 340px for
+sessions, 420px for inbox and search), Stage (`minmax(640px, 1fr)`), and Aside
+(320px). Breakpoints govern zone presence:
+- Below 720px: Phone layout with bottom tab bar and stacked single column.
+- 720 to 1099px: 56px icon rail with one pane at a time and 640px prose.
+- 1100 to 1279px: 200px rail with index and stage; aside remains a header toggle.
+- 1280px and above: Aside opens as a 320px column. Above 1600px the stage grows
+  while the 640px prose block stays held left against the rail.
+
+Panes are divided by 1px borders, scroll independently, and provide sticky
+headers. Each project is an address of its own: the feed, the artifact gallery,
+and the sessions list are segmented tabs under `#/projects/<id>/`, every one
+with its own route, and the artifact viewer is a route too (`#/artifacts/<id>`),
+so reload and the browser Back keep the artifact on screen.
 
 | Screen | Purpose |
 |---|---|

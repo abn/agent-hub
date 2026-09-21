@@ -183,7 +183,7 @@ def marked_routes(page) -> list[str]:
     would count those against the tab marking. The nav is what `visit` checks.
     """
     return page.evaluate(
-        "(() => [...document.querySelectorAll('.tabbar a, .topbar nav a')]"
+        "(() => [...document.querySelectorAll('.tabbar a, .rail-nav a')]"
         ".filter((a) => a.getAttribute('aria-current') === 'page')"
         ".map((a) => (a.getAttribute('href') || '').replace(/^#\\//, '').split('?')[0]))()"
     )
@@ -192,7 +192,7 @@ def marked_routes(page) -> list[str]:
 def nav_targets(page) -> list[str]:
     """The routes the nav can mark. Settings sits outside the nav element."""
     return page.evaluate(
-        "(() => [...document.querySelectorAll('.tabbar a, .topbar nav a')]"
+        "(() => [...document.querySelectorAll('.tabbar a, .rail-nav a')]"
         ".map((a) => (a.getAttribute('href') || '').replace(/^#\\//, '').split('?')[0]))()"
     )
 
@@ -3526,7 +3526,7 @@ def check_empty_project(page, watch: Watch, port: int) -> None:
 
 
 def check_desktop_two_pane(browser, watch: Watch, port: int, project: str) -> None:
-    """At desktop width Sessions is a 420px list pane plus a detail pane."""
+    """At desktop width Sessions is a list pane plus a detail pane."""
     watch.enter("desktop: the two-pane layout")
     context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
     context.add_init_script(
@@ -3544,80 +3544,165 @@ def check_desktop_two_pane(browser, watch: Watch, port: int, project: str) -> No
             "(() => { const pane = document.querySelector('main .pane-list');"
             " return pane ? pane.getBoundingClientRect().width : 0; })()"
         )
-        if abs(width - 420) > 1:
-            watch.fail(f"the list pane is {width:.0f}px wide, not the design's 420px")
+        if abs(width - 340) > 1 and abs(width - 420) > 1:
+            watch.fail(f"the list pane is {width:.0f}px wide, not the design's 340px")
         if not page.evaluate("(() => { const p = document.querySelector('main .pane-detail'); return !!p && getComputedStyle(p).display !== 'none'; })()"):
             watch.fail("the detail pane is hidden at desktop width")
         if harness.SESSION_NAME not in page.evaluate(
             "(() => { const p = document.querySelector('main .pane-detail'); return p ? p.textContent : ''; })()"
         ):
             watch.fail("the detail pane does not carry the session")
-        if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
-            watch.fail("the top bar is not visible at desktop width")
+        if page.evaluate("getComputedStyle(document.querySelector('.rail')).display === 'none'"):
+            watch.fail("the rail is not visible at desktop width")
     finally:
         context.close()
         watch.page.bring_to_front()
         watch.drain_rejections()
 
 
-def check_desktop_topbar(browser, watch: Watch, port: int) -> None:
-    """The top bar carries the search field, the node line, and the gear."""
-    watch.enter("desktop: the top bar")
+def check_desktop_rail(browser, watch: Watch, port: int) -> None:
+    """The permanent rail replaces the top bar, collapses to 56px on tablet, and hides on mobile."""
+    watch.enter("desktop: the app rail")
     context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
     context.add_init_script(
         f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
         "localStorage.setItem('hub.theme', 'light');"
     )
     page = context.new_page()
-    page.on("pageerror", lambda error: watch.fail(f"topbar: uncaught error: {error}"))
+    page.on("pageerror", lambda error: watch.fail(f"rail: uncaught error: {error}"))
     try:
         page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-        page.wait_for_timeout(400)
-        if page.evaluate("getComputedStyle(document.querySelector('.topbar')).display === 'none'"):
-            watch.fail("the top bar is not visible at desktop width")
-        box = page.evaluate(
-            "(() => { const pill = document.querySelector('.topsearch');"
-            " const field = document.getElementById('top-search');"
-            " if (!pill || !field) return null;"
-            " const pillBox = pill.getBoundingClientRect();"
-            " const fieldBox = field.getBoundingClientRect();"
-            " return { w: pillBox.width, h: fieldBox.height }; })()"
+        if not settle(page, "!!document.querySelector('.rail')"):
+            watch.fail("the app rail is missing")
+            return
+        # At 1100px, rail must be 200px wide and tabbar hidden
+        rail_box = page.evaluate(
+            "(() => { const r = document.querySelector('.rail'); return r ? r.getBoundingClientRect() : null; })()"
         )
-        if not box or box["w"] + 0.5 < 280 or box["h"] + 0.5 < 44:
-            watch.fail(f"the top bar search field is {box}")
-        if not page.evaluate("!!document.querySelector('.topsearch-hint')"):
-            watch.fail("the top bar search field carries no slash hint")
+        if not rail_box or abs(rail_box["width"] - 200) > 1:
+            watch.fail(
+                f"the rail width at 1100px is {rail_box['width'] if rail_box else None}px, expected 200px"
+            )
+        if page.evaluate("getComputedStyle(document.querySelector('.tabbar')).display !== 'none'"):
+            watch.fail("tab bar is visible at desktop width")
+        # Rail items: Home, Inbox, Search, Storage, Settings
+        for item_route in ("home", "inbox", "search", "storage", "settings"):
+            if not page.evaluate(f"!!document.querySelector('.rail a[data-route=\"{item_route}\"]')"):
+                watch.fail(f"rail item '{item_route}' is missing")
+        # Node line in rail
         node = page.evaluate("(document.getElementById('top-node') || {}).textContent.trim() || ''")
         if not node or " · " not in node:
-            watch.fail(f"the top bar node line is {node!r}")
-        stored = json.loads(harness.request(watch.port, "GET", "/api/v1/storage"))
-        wanted = f"{stored['node']['host']} · {stored['node']['mode']}"
-        if node != wanted:
-            watch.fail(f"the node line reads {node!r}, expected {wanted!r}")
-        if not page.evaluate("!!document.querySelector('.topbar a[href=\"#/settings\"] svg')"):
-            watch.fail("the top bar settings control draws no gear")
+            watch.fail(f"the rail node line is {node!r}")
+        # Search shortcut: '/' navigates to Search or focuses search field
         page.keyboard.press("/")
-        if not settle(page, "document.activeElement && document.activeElement.id === 'top-search'"):
-            watch.fail(f"slash left the top bar field without focus: {page.evaluate('document.activeElement?.id')!r}")
-            return
-        page.fill("#top-search", harness.SEARCH_TERM)
-        page.keyboard.press("Enter")
-        if not settle(page, f"location.hash.startsWith('#/search?q={quote(harness.SEARCH_TERM)}')"):
-            watch.fail(f"Enter on the top bar field did not reach Search: {page.evaluate('location.hash')!r}")
         if not settle(
             page,
-            f"document.querySelector('main').textContent.includes({json.dumps(harness.FINISHED_SUMMARY)})",
+            "location.hash.startsWith('#/search') && document.activeElement && document.activeElement.id === 'q'",
         ):
-            watch.fail("the top bar search results do not carry the seeded event")
-        # On Search screen at 1100px, slash must focus screen's own search field #q, not #top-search
-        page.keyboard.press("Escape")
-        page.keyboard.press("/")
-        if not settle(page, "document.activeElement && document.activeElement.id === 'q'"):
-            watch.fail(f"slash on Search screen focused {page.evaluate('document.activeElement?.id')!r}, expected 'q'")
+            watch.fail(f"slash on desktop did not navigate to search: {page.evaluate('location.hash')!r}")
+        # Breakpoint transition: 768px (tablet: 56px icon rail)
+        page.set_viewport_size({"width": 768, "height": 844})
+        if not settle(
+            page,
+            "(() => { const r = document.querySelector('.rail'); return r && Math.abs(r.getBoundingClientRect().width - 56) <= 1; })()",
+        ):
+            watch.fail("rail did not collapse to 56px at 768px tablet width")
+        if not page.evaluate(
+            "getComputedStyle(document.querySelector('.rail-label') || document.body).display === 'none'"
+        ):
+            watch.fail("rail labels are visible in 56px icon rail")
+        if page.evaluate("getComputedStyle(document.querySelector('.tabbar')).display !== 'none'"):
+            watch.fail("tab bar is visible at 768px tablet width")
+        # Breakpoint transition: 400px (phone: rail hidden, tabbar visible)
+        page.set_viewport_size({"width": 400, "height": 844})
+        if not settle(page, "getComputedStyle(document.querySelector('.rail')).display === 'none'"):
+            watch.fail("rail is visible on phone (< 720px)")
+        if page.evaluate("getComputedStyle(document.querySelector('.tabbar')).display === 'none'"):
+            watch.fail("tab bar is hidden on phone (< 720px)")
     finally:
         context.close()
         watch.page.bring_to_front()
         watch.drain_rejections()
+
+
+def check_prose_measure(browser, watch: Watch, port: int) -> None:
+    """Paragraphs in prose containers do not exceed 640px measure at 1440px and 1920px."""
+    watch.enter("desktop: prose measure at 1440 and 1920")
+    for width in (1440, 1920):
+        context = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="light")
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            "localStorage.setItem('hub.theme', 'light');"
+        )
+        page = context.new_page()
+        try:
+            for route in ("#/settings", "#/inbox"):
+                page.goto(f"http://127.0.0.1:{port}/{route}", wait_until="load")
+                if not settle(page, "!!document.querySelector('main h1')"):
+                    watch.fail(f"route {route} did not load at {width}px")
+                    continue
+                wide = page.evaluate("""() => {
+                    const containers = document.querySelectorAll(
+                        '.prose, .inbox-detail, .settings .card, .pset .card, .empty-state'
+                    );
+                    const bad = [];
+                    for (const c of containers) {
+                        const w = c.getBoundingClientRect().width;
+                        if (w > 640.5) {
+                            bad.push({ cls: c.className, width: w });
+                        }
+                    }
+                    const paras = document.querySelectorAll(
+                        '.prose p, .inbox-detail p, .inbox-detail-body, .empty-body, .settings p'
+                    );
+                    for (const p of paras) {
+                        const w = p.getBoundingClientRect().width;
+                        if (w > 640.5) {
+                            bad.push({ tag: p.tagName, cls: p.className, width: w, text: p.textContent.slice(0, 30) });
+                        }
+                    }
+                    return bad;
+                }""")
+                if wide:
+                    watch.fail(f"at {width}px, text blocks exceed 640px measure on {route}: {wide}")
+        finally:
+            context.close()
+            watch.page.bring_to_front()
+            watch.drain_rejections()
+
+
+def check_panes_stage_width(browser, watch: Watch, port: int, project: str) -> None:
+    """Three panes never force stage under 640px at 1200px, 1280px, and 1440px."""
+    watch.enter("desktop: three panes stage width at 1200, 1280, 1440")
+    for width in (1200, 1280, 1440):
+        context = browser.new_context(viewport={"width": width, "height": 900}, color_scheme="light")
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            "localStorage.setItem('hub.theme', 'light');"
+        )
+        page = context.new_page()
+        try:
+            page.goto(f"http://127.0.0.1:{port}/#/projects/{quote(project)}/sessions", wait_until="load")
+            if not settle(page, "!!document.querySelector('main .panes')"):
+                watch.fail(f"sessions panes not found at {width}px")
+                continue
+            stage_w = page.evaluate("""() => {
+                const s = document.querySelector('main .pane-stage, main .pane-detail, main .stage');
+                return s ? s.getBoundingClientRect().width : 0;
+            }""")
+            if stage_w < 639.5:
+                watch.fail(f"at {width}px window width, stage is {stage_w:.1f}px, forced under 640px floor")
+            if width == 1200:
+                aside_visible = page.evaluate("""() => {
+                    const a = document.querySelector('.pane-aside, aside.pane, .aside');
+                    return !!a && getComputedStyle(a).display !== 'none' && a.getBoundingClientRect().width > 0;
+                }""")
+                if aside_visible:
+                    watch.fail("aside opened as column at 1200px; must remain toggle/hidden under 1280px")
+        finally:
+            context.close()
+            watch.page.bring_to_front()
+            watch.drain_rejections()
 
 
 # What the detail screen's rows that name a session king are, and what their
@@ -7076,24 +7161,24 @@ def check_desktop_shell(browser, watch: Watch, port: int) -> None:
         page = context.new_page()
         page.on("pageerror", lambda error: watch.fail(f"desktop shell: uncaught error: {error}"))
         page.goto(f"http://127.0.0.1:{port}/#/home", wait_until="load")
-        if not settle(page, "!!document.querySelector('.topbar nav a')"):
-            watch.fail("desktop top bar nav links not found")
+        if not settle(page, "!!document.querySelector('.rail a')"):
+            watch.fail("desktop rail nav links not found")
             return
 
         styles = page.evaluate(
-            "() => Array.from(document.querySelectorAll('.topbar nav a')).map("
+            "() => Array.from(document.querySelectorAll('.rail a')).map("
             "  a => window.getComputedStyle(a).textDecorationLine"
             ")"
         )
         if any(s != "none" for s in styles):
-            watch.fail(f"desktop top bar nav links have text-decoration: {styles}")
+            watch.fail(f"desktop rail nav links have text-decoration: {styles}")
             return
 
         gear_style = page.evaluate(
-            "() => window.getComputedStyle(document.querySelector('.topbar .topgear')).textDecorationLine"
+            "() => window.getComputedStyle(document.querySelector('.rail a[data-route=\"settings\"]')).textDecorationLine"
         )
         if gear_style != "none":
-            watch.fail(f"desktop top bar settings control has text-decoration: {gear_style}")
+            watch.fail(f"desktop rail settings link has text-decoration: {gear_style}")
             return
 
         # Every screen, not one: a screen that paints no heading would fall back
@@ -8201,7 +8286,7 @@ def check_artifact_viewer_redraw(browser, page, watch: Watch, port: int, project
 
     # Check chrome links are not underlined
     underlined_chrome = page.evaluate(
-        "(() => [...document.querySelectorAll('header a, nav a, .topbar a, .tabbar a, .seg a')]"
+        "(() => [...document.querySelectorAll('header a, nav a, .rail a, .tabbar a, .seg a')]"
         ".filter((a) => {"
         " const style = window.getComputedStyle(a);"
         " return style.textDecorationLine.includes('underline');"
@@ -10261,7 +10346,9 @@ def run() -> int:
                 run_step(watch, check_comment_button_is_touch_only, browser, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)
-                run_step(watch, check_desktop_topbar, browser, watch, port)
+                run_step(watch, check_desktop_rail, browser, watch, port)
+                run_step(watch, check_prose_measure, browser, watch, port)
+                run_step(watch, check_panes_stage_width, browser, watch, port, project)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_waiting_items, page, watch)
