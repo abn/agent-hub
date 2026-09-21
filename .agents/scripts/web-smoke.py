@@ -7068,6 +7068,30 @@ def check_desktop_shell(browser, watch: Watch, port: int) -> None:
                     " so the ring is drawn round the page again"
                 )
                 return
+            # Where focus lands was already held above; whether anything is
+            # drawn around it was not, and that is the half a reader sees. The
+            # heading is not interactive and cannot be tabbed to, so a ring on
+            # it marks nothing reachable and appears unprompted on every load.
+            # Measured, not read from the stylesheet: the global focus rule
+            # paints with box-shadow and leaves the outline transparent, so a
+            # check that looked for an outline would pass while a box sat on
+            # screen.
+            ring = page.evaluate(
+                "() => { const el = document.activeElement; const cs = getComputedStyle(el);"
+                " return { shadow: cs.boxShadow, outline: cs.outlineStyle,"
+                "   outlineColor: cs.outlineColor, width: cs.outlineWidth }; }"
+            )
+            drawn = ring["shadow"] != "none" or (
+                ring["outline"] not in ("none", "")
+                and "rgba(0, 0, 0, 0)" not in ring["outlineColor"]
+                and ring["width"] not in ("0px", "")
+            )
+            if drawn:
+                watch.fail(
+                    f"{route} draws a focus ring around its heading, which nothing can tab to:"
+                    f" box-shadow {ring['shadow']!r}, outline {ring['width']} {ring['outlineColor']!r}"
+                )
+                return
 
         page.evaluate("location.hash = '#/connect'")
         if not settle(page, "!!document.querySelector('main .connect')"):

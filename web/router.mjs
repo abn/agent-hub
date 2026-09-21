@@ -63,10 +63,18 @@ export async function render() {
     chip.focus({ preventScroll: true });
   } else if (!main.contains(document.activeElement) || document.activeElement === main) {
     const heading = main.querySelector("h1, [role='heading']");
+    // Marked so the stylesheet can leave the ring off this one element. The
+    // target is moved to for announcement, not because a reader steered here,
+    // and nothing can tab to it, so a ring marks nothing reachable. The mark
+    // is narrow on purpose: a blanket rule over [tabindex="-1"] would take
+    // the ring off the brain tree's roving items, which are reached by arrow
+    // keys and need it.
     if (heading) {
       if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+      heading.dataset.routeFocus = "";
       heading.focus({ preventScroll: true });
     } else {
+      main.dataset.routeFocus = "";
       main.focus({ preventScroll: true });
     }
   }

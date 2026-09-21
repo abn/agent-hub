@@ -372,6 +372,17 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 }
 /* end component: viewer chrome */
 
+/* The router moves focus to a screen's heading after every render so a screen
+   reader announces the screen that just arrived. That target is not
+   interactive and nothing can tab to it, so the global focus ring drew a box
+   around a heading on every single load, unprompted, with nothing to act on.
+   Only the router's own mark is exempted: [tabindex="-1"] as a whole would
+   also cover the brain tree's roving items, which are reached with arrow keys
+   and whose ring is the only thing showing where the reader is. */
+[data-route-focus]:focus-visible, [data-route-focus]:focus {
+  box-shadow: none; border-radius: 0;
+}
+
 /* An empty field has nothing in it that says a control is there, so its border
    is the whole of what identifies it and has to be seen: the design's
    --line-strong reads 1.65:1 on --surface, under the 3:1 non-text minimum, so
