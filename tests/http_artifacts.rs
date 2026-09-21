@@ -1377,6 +1377,67 @@ async fn host_shows_the_picker_only_with_history() {
 }
 
 #[tokio::test]
+async fn version_picker_shows_index_with_comment_never_prose_alone() {
+    let state = state().await;
+    let id = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "Report",
+            kind: "html",
+            content: b"<p>v1</p>",
+            envelope: None,
+            description: "A report",
+            favicon: "star",
+            label: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish v1")
+    .id;
+
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>v2</p>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            base_version: None,
+            force: false,
+            label: Some(Some("the standing list, answered")),
+        },
+        None,
+    )
+    .await
+    .expect("publish v2");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request("GET", &format!("/artifacts/{id}"), None, None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = text_body(response).await;
+    assert!(
+        body.contains("<option value=\"2\" selected>v2 · the standing list, answered</option>"),
+        "the option text starts with the version index, with the comment beside it: {body}"
+    );
+    assert!(
+        !body.contains("<option value=\"2\" selected>the standing list, answered</option>"),
+        "the option text never shows prose alone in place of the version index"
+    );
+    assert!(
+        body.contains("<option value=\"1\">v1</option>"),
+        "unlabeled versions fall back to v1 index"
+    );
+}
+
+#[tokio::test]
 async fn host_rejects_bad_versions() {
     let state = state().await;
     let id = publish_versioned(&state).await;
@@ -1700,7 +1761,11 @@ async fn og_card_follows_versions() {
 #[tokio::test]
 async fn viewer_and_vendor_routes_serve_javascript() {
     let state = state().await;
-    for uri in ["/vendor/mermaid.runtime.js", "/artifact-viewer.mjs"] {
+    for uri in [
+        "/vendor/marked.js",
+        "/vendor/mermaid.runtime.js",
+        "/artifact-viewer.mjs",
+    ] {
         let app = router(state.clone());
         let response = app
             .oneshot(request("GET", uri, None, None))

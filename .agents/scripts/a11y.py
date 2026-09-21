@@ -320,8 +320,13 @@ def enter_state(page, route: str, seeded: dict) -> None:
             "location.hash = '#/artifacts/%s?project=%s'"
             % (seeded["artifact_id"], seeded["project_id"])
         )
-        page.wait_for_selector("main .comments-toggle", timeout=5000)
-        page.click("main .comments-toggle", timeout=5000)
+        page.wait_for_selector("main .hub-more, main .comments-toggle", timeout=5000)
+        if page.locator("main .comments-toggle").count() > 0 and page.locator("main .comments-toggle").first.is_visible():
+            page.click("main .comments-toggle", timeout=5000)
+        else:
+            page.click("main .hub-more", timeout=5000)
+            page.wait_for_selector("main [data-action='start-thread']", timeout=5000)
+            page.click("main [data-action='start-thread']", timeout=5000)
     elif route == TOAST:
         page.evaluate("location.hash = '#/home'")
         page.evaluate(

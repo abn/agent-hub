@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, artifact viewer redraw, version sheet, and grouped list
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  redrawn artifact viewer, version sheet, and grouped artifacts gallery. The
+  artifacts list groups by Day (default), Agent, or Kind with count badges in
+  headers. The viewer eliminates the nested bordered card and inner scroller
+  in favour of page-level scroll, 16px gutters, and a 640px prose width; the chrome
+  carries a 44px back chevron, mono path, and overflow menu; the document renders
+  its own H1. The version sheet replaces inline dropdowns with 44px rows and
+  an accent rail marking Current. The comments strip renders only when threads
+  exist, and chrome links are never underlined.
+
 ## 2026-09-21, sessions list and session detail redraw
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
@@ -35,12 +47,13 @@ software release notes and the repository changelog.
   from one agent within two minutes collapse into one row ("published N artifacts"),
   and event verbs are lower case and past tense while objects are kept as written.
 
-## 2026-09-20, a protected markdown artifact is shown as source
+## 2026-09-20, client-side rendering restored for protected markdown artifacts
 
-* **Update**: [Artifacts](usage/artifacts.md) says a protected `markdown`
-  artifact is shown as its source rather than rendered. Consolidating on one
-  renderer put it on the hub, and the hub never sees a protected artifact's
-  plaintext, so nothing can render it. A browser check pins the behaviour.
+* **Update**: [Artifacts](usage/artifacts.md) records that browser-side rendering
+  is restored for decrypted protected markdown artifacts using vendored `marked.js`
+  with total-escaping override, ensuring authored angle brackets remain text while
+  supporting callouts and mermaid diagrams. Public markdown artifacts continue
+  using server-side rendering.
 
 ## 2026-09-20, evaluations for multiple tokens and offline knowledge base
 

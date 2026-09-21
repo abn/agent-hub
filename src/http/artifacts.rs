@@ -814,6 +814,7 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
          <link rel=\"stylesheet\" href=\"/tokens.css\">\n\
          <style>\n{VIEWER_CSS}</style>\n\
+         <script src=\"/vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
         id = artifact.id,
     )
@@ -982,16 +983,29 @@ fn salt_fingerprint(salt_b64: &str) -> String {
 fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
     let mut options = String::new();
     for version in versions.iter().rev().take(50) {
-        let fallback = format!("Version {}", version.version);
-        let label = version.label.as_deref().unwrap_or(&fallback);
-        let label = escape_html(label);
+        let v_str = format!("v{}", version.version);
+        let text = match version
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(label)
+                if !label.eq_ignore_ascii_case(&v_str)
+                    && !label.eq_ignore_ascii_case(&format!("version {}", version.version)) =>
+            {
+                format!("{v_str} · {label}")
+            }
+            _ => v_str,
+        };
+        let text = escape_html(&text);
         let selected = if version.version == shown {
             " selected"
         } else {
             ""
         };
         options.push_str(&format!(
-            "<option value=\"{n}\"{selected}>{label}</option>\n",
+            "<option value=\"{n}\"{selected}>{text}</option>\n",
             n = version.version,
         ));
     }

@@ -182,7 +182,7 @@ async function deleteComment(comment) {
   }
 }
 
-function openCommentsDrawer() {
+export function openCommentsDrawer() {
   const els = commentsDrawer.elements;
   if (!els) return;
   commentsDrawer.lastFocus = document.activeElement;
@@ -190,18 +190,18 @@ function openCommentsDrawer() {
   clearDrawerError();
   els.backdrop.hidden = false;
   els.drawer.hidden = false;
-  els.toggle.setAttribute("aria-expanded", "true");
+  if (els.toggle) els.toggle.setAttribute("aria-expanded", "true");
   els.close.focus();
   loadComments();
 }
 
-function closeCommentsDrawer() {
+export function closeCommentsDrawer() {
   const els = commentsDrawer.elements;
   commentsDrawer.open = false;
   if (!els) return;
   els.backdrop.hidden = true;
   els.drawer.hidden = true;
-  els.toggle.setAttribute("aria-expanded", "false");
+  if (els.toggle) els.toggle.setAttribute("aria-expanded", "false");
   if (commentsDrawer.lastFocus && document.contains(commentsDrawer.lastFocus)) {
     commentsDrawer.lastFocus.focus();
   }

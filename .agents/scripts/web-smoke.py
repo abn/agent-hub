@@ -2894,18 +2894,17 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
         )
     except Exception as error:
         watch.fail(f"typing the password did not show the artifact: {error}")
-    # An encrypted note is shown as its source, not rendered. The hub renders
-    # markdown, and the hub never sees this plaintext, so there is nothing on
-    # the server to render it and nothing in the browser that renders markdown.
-    # Pinned here because it is a real limit a reader meets, and because it
-    # arrived silently when the browser renderer was removed.
+    # A decrypted artifact is rendered in the browser (restored browser-side renderer).
     opened = gate.frame_locator("#hub-frame")
-    if opened.locator("pre").count() < 1:
-        watch.fail("an unlocked note is not shown as source, so something renders plaintext now")
-    else:
-        source = opened.locator("pre").first.inner_text()
-        if harness.PROTECTED_BODY_MARK not in source:
-            watch.fail(f"the unlocked note's source does not carry its own text: {source[:120]!r}")
+    try:
+        opened.locator("h1").get_by_text("Sealed note").wait_for(timeout=10000)
+    except Exception as error:
+        watch.fail(f"the unlocked note did not render markdown heading: {error}")
+    if opened.locator("body > pre").count() > 0:
+        watch.fail("the unlocked note is shown as source in a pre tag rather than rendering")
+    body_text = opened.locator("body").inner_text()
+    if harness.PROTECTED_BODY_MARK not in body_text:
+        watch.fail(f"the unlocked note does not carry its own text: {body_text[:120]!r}")
     watch.drain_rejections()
 
 
@@ -3235,65 +3234,37 @@ def check_viewer_theme_control(page, watch: Watch, project: str, artifact: str) 
     """
     watch.enter("artifacts: the viewer's theme control")
     page.evaluate(f"location.hash = '#/artifacts/{artifact}?project={quote(project)}'")
-    if not settle(page, "!!document.querySelector('main #hub-theme-toggle')"):
-        watch.fail("the viewer carries no theme control")
+    if page.locator("main #hub-theme-toggle").count() > 0:
+        watch.fail("the viewer still carries a stray theme control")
         return
     other = {"light": "dark", "dark": "light"}
     shown = page.evaluate("document.documentElement.dataset.theme")
+    if not settle_value(page, lambda: framed_theme(page) == shown):
+        watch.fail(f"as painted: the framed page is in {framed_theme(page)!r}, expected {shown!r}")
+        return
+
+    # On its own, unframed, the public page has nobody else to switch its
+    # theme, so its control is there and keeps the same rule.
+    alone = page.context.new_page()
     try:
-        for step in ("as painted", "after one press", "after a second press"):
-            if not settle_value(page, lambda: framed_theme(page) == shown):
-                watch.fail(f"{step}: the framed page is in {framed_theme(page)!r}, expected {shown!r}")
-                return
-            # The page is served in the light theme and its script names the
-            # control after that, so the theme alone does not say it has run.
-            settle_value(page, lambda: framed_control_named(page), timeout=5000)
-            # Framed, the page leaves the theme to the app: a control of its own
-            # would change the frame behind the app's back, and the app's
-            # control would then name a switch that had already happened.
-            own = framed_page(page).evaluate(THEME_CONTROL)
-            if own and (own["width"] or own["height"] or own["drawn"]):
-                watch.fail(f"{step}: the framed page draws a theme control of its own: {own}")
-            for where, control in (("the viewer's control", page.evaluate(THEME_CONTROL)),):
-                if not control:
-                    watch.fail(f"{step}: {where} is missing")
-                    continue
-                if control["drawn"] != [other[shown]]:
-                    watch.fail(
-                        f"{step}: {where} draws the glyphs for {control['drawn']} in the {shown} theme,"
-                        f" expected only the one for {other[shown]!r}"
-                    )
-                if control["name"] != f"Switch to {other[shown]} theme":
-                    watch.fail(f"{step}: {where} is named {control['name']!r} in the {shown} theme")
-                if where == "the viewer's control" and min(control["width"], control["height"]) + 0.5 < 44:
-                    watch.fail(f"{where} is {control['width']:.0f}x{control['height']:.0f}px, under the 44px floor")
-            if step == "after a second press":
-                break
-            page.click("main #hub-theme-toggle")
-            shown = other[shown]
-        # On its own, unframed, the public page has nobody else to switch its
-        # theme, so its control is there and keeps the same rule.
-        alone = page.context.new_page()
-        try:
-            alone.goto(f"http://127.0.0.1:{watch.port}/artifacts/{artifact}", wait_until="load")
-            settle_value(
-                alone,
-                lambda: alone.evaluate(
-                    "(document.querySelector('#hub-theme-toggle') || { getAttribute: () => '' })"
-                    ".getAttribute('aria-label').startsWith('Switch to ')"
-                ),
-                timeout=5000,
-            )
-            control = alone.evaluate(THEME_CONTROL)
-            theme = alone.evaluate("document.documentElement.dataset.theme")
-            if not control or not (control["width"] and control["height"]):
-                watch.fail("the public page on its own draws no theme control")
-            elif control["drawn"] != [other[theme]] or control["name"] != f"Switch to {other[theme]} theme":
-                watch.fail(f"the public page's control in the {theme} theme is {control}")
-        finally:
-            alone.close()
-            page.bring_to_front()
+        alone.goto(f"http://127.0.0.1:{watch.port}/artifacts/{artifact}", wait_until="load")
+        settle_value(
+            alone,
+            lambda: alone.evaluate(
+                "(document.querySelector('#hub-theme-toggle') || { getAttribute: () => '' })"
+                ".getAttribute('aria-label').startsWith('Switch to ')"
+            ),
+            timeout=5000,
+        )
+        control = alone.evaluate(THEME_CONTROL)
+        theme = alone.evaluate("document.documentElement.dataset.theme")
+        if not control or not (control["width"] and control["height"]):
+            watch.fail("the public page on its own draws no theme control")
+        elif control["drawn"] != [other[theme]] or control["name"] != f"Switch to {other[theme]} theme":
+            watch.fail(f"the public page's control in the {theme} theme is {control}")
     finally:
+        alone.close()
+        page.bring_to_front()
         goto(page, "#/home", home_title())
     watch.drain_rejections()
 
@@ -6684,31 +6655,6 @@ def check_viewer_history(page, watch: Watch, port: int, project: str) -> None:
             watch.fail("the viewer frame did not open from artifact card")
             return
         start_len = page.evaluate("history.length")
-        theme0 = page.evaluate("document.querySelector('#hub-frame')?.getAttribute('data-theme')")
-        page.click('[data-action="viewer-theme"]')
-        if not settle(page, f"document.querySelector('#hub-frame')?.getAttribute('data-theme') !== {json.dumps(theme0)}"):
-            watch.fail("clicking viewer theme toggle did not change frame theme")
-            return
-        page.wait_for_timeout(300)
-        theme1 = page.evaluate("document.querySelector('#hub-frame')?.getAttribute('data-theme')")
-        expected_next = "light" if theme1 == "dark" else "dark"
-        button_label = page.evaluate("document.querySelector('#hub-theme-toggle')?.getAttribute('aria-label')")
-        if button_label != f"Switch to {expected_next} theme":
-            watch.fail(f"viewer theme toggle label is {button_label!r}, expected 'Switch to {expected_next} theme'")
-        len1 = page.evaluate("history.length")
-        if len1 != start_len:
-            watch.fail(f"toggling viewer theme changed history length from {start_len} to {len1}")
-            return
-
-        page.click('[data-action="viewer-theme"]')
-        if not settle(page, f"document.querySelector('#hub-frame')?.getAttribute('data-theme') === {json.dumps(theme0)}"):
-            watch.fail("clicking viewer theme toggle second time did not revert frame theme")
-            return
-        page.wait_for_timeout(300)
-        len2 = page.evaluate("history.length")
-        if len2 != start_len:
-            watch.fail(f"toggling viewer theme second time changed history length from {start_len} to {len2}")
-            return
 
         if not settle(page, "!!document.querySelector('main .hub-version-toggle')"):
             watch.fail("the viewer carries no version control")
@@ -6724,10 +6670,11 @@ def check_viewer_history(page, watch: Watch, port: int, project: str) -> None:
         ):
             watch.fail("choosing version 1 did not update the version toggle label")
             return
+        # Switching version must not push browser history
         page.wait_for_timeout(300)
-        len3 = page.evaluate("history.length")
-        if len3 != start_len:
-            watch.fail(f"switching version changed history length from {start_len} to {len3}")
+        len_after = page.evaluate("history.length")
+        if len_after != start_len:
+            watch.fail(f"switching version changed history length from {start_len} to {len_after}")
             return
 
         page.go_back()
@@ -7073,7 +7020,7 @@ def check_feed_row_links(page, watch: Watch, project: str, artifact_id: str) -> 
         if not settle(page, "!!document.querySelector('main .hub-viewer')"):
             watch.fail("artifact viewer did not paint after clicking feed row")
             return
-        title = page.evaluate("document.querySelector('main .hub-title')?.textContent?.trim() || ''")
+        title = page.evaluate("document.querySelector('main #hub-frame')?.getAttribute('title') || document.querySelector('main .hub-title')?.textContent?.trim() || ''")
         if title != harness.ARTIFACT_TITLE:
             watch.fail(f"artifact viewer painted title {title!r}, expected {harness.ARTIFACT_TITLE!r}")
             return
@@ -7100,7 +7047,7 @@ def check_feed_row_links(page, watch: Watch, project: str, artifact_id: str) -> 
         if not settle(page, "!!document.querySelector('main .hub-viewer')"):
             watch.fail("artifact viewer did not paint after following link with Enter")
             return
-        title = page.evaluate("document.querySelector('main .hub-title')?.textContent?.trim() || ''")
+        title = page.evaluate("document.querySelector('main #hub-frame')?.getAttribute('title') || document.querySelector('main .hub-title')?.textContent?.trim() || ''")
         if title != harness.ARTIFACT_TITLE:
             watch.fail(f"artifact viewer painted title {title!r} after Enter, expected {harness.ARTIFACT_TITLE!r}")
             return
@@ -7878,6 +7825,145 @@ def check_sessions_redraw(browser, page, watch: Watch, port: int, project: str, 
         watch.drain_rejections()
 
 
+def check_artifact_viewer_redraw(browser, page, watch: Watch, port: int, project: str) -> None:
+    """Artifact viewer redraw (Screens 01, 02, 03):
+    - Artifacts list grouped by day with counts, grouping control changes mode, 3-col grid on desktop from 768px.
+    - Viewer: 1 chrome with mono path, title once (in document), version once (pill).
+    - No inner scroller: document scrolls page, long prose not cut off.
+    - Theme switch removed from viewer.
+    - Version sheet: 44px rows, author, time, size, Current marked.
+    - No underlined chrome links; back is 44px chevron.
+    """
+    watch.enter("artifacts: viewer redraw, version sheet, grouped list")
+
+    # 1. Check Artifacts list grouping at 390px
+    page.set_viewport_size({"width": 390, "height": 844})
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    if not settle(page, "!!document.querySelector('.hub-group-header')"):
+        watch.fail("artifacts list is not grouped: no group headers")
+        return
+
+    # Check group header carries counts
+    headers = page.evaluate(
+        "(() => [...document.querySelectorAll('.hub-group-header')].map((h) => h.textContent.trim()))()"
+    )
+    if not any(" · " in h for h in headers):
+        watch.fail(f"group headers do not carry counts: {headers}")
+
+    # Check grouping control exists and changes grouping
+    toggle = page.locator(".hub-group-toggle")
+    if toggle.count() < 1:
+        watch.fail("no grouping control found")
+        return
+    initial_text = toggle.first.inner_text().strip()
+    toggle.first.click()
+    page.wait_for_timeout(300)
+    agent_option = page.locator('.hub-group-menu button[data-group="agent"]')
+    if agent_option.count() > 0:
+        agent_option.first.click()
+        page.wait_for_timeout(300)
+        new_headers = page.evaluate(
+            "(() => [...document.querySelectorAll('.hub-group-header')].map((h) => h.textContent.trim()))()"
+        )
+        if new_headers == headers and len(headers) > 1:
+            watch.fail("changing grouping mode did not change headers")
+
+    # Check back affordance in list: 44px chevron, no underlined chrome links
+    back_btn = page.locator('button[data-action="projects-index"], .hub-back')
+    if back_btn.count() > 0:
+        box = back_btn.first.bounding_box()
+        if box and (box["width"] < 43 or box["height"] < 43):
+            watch.fail(f"back button hit area is under 44px: {box}")
+
+    # Check chrome links are not underlined
+    underlined_chrome = page.evaluate(
+        "(() => [...document.querySelectorAll('header a, nav a, .topbar a, .tabbar a, .seg a')]"
+        ".filter((a) => {"
+        " const style = window.getComputedStyle(a);"
+        " return style.textDecorationLine.includes('underline');"
+        "}).map((a) => a.textContent.trim()))()"
+    )
+    if underlined_chrome:
+        watch.fail(f"chrome links are underlined: {underlined_chrome}")
+
+    # Check desktop grid from 768px
+    page.set_viewport_size({"width": 1100, "height": 900})
+    page.wait_for_timeout(300)
+    is_grid = page.evaluate(
+        "(() => {"
+        " const el = document.querySelector('.gallery, .artifact-card-grid, .hub-artifacts-grid');"
+        " if (!el) return false;"
+        " const display = window.getComputedStyle(el).display;"
+        " return display === 'grid' || display === 'flex';"
+        "})()"
+    )
+    if not is_grid:
+        watch.fail("artifacts list on desktop from 768px does not maintain grid layout")
+
+    # 2. Check Viewer (Screen 01)
+    page.set_viewport_size({"width": 390, "height": 844})
+    card = page.locator('.artifact-card').first
+    card.click()
+    if not settle(page, "!!document.querySelector('.hub-viewer')"):
+        watch.fail("viewer did not open")
+        return
+
+    # Theme switch removed from viewer
+    if page.locator("main #hub-theme-toggle").count() > 0:
+        watch.fail("stray theme toggle is still present on the artifact viewer screen")
+
+    # Header carries mono path
+    path_el = page.locator(".hub-viewer-path, .hub-path")
+    if path_el.count() < 1:
+        watch.fail("viewer top chrome carries no mono path")
+    else:
+        path_text = path_el.first.inner_text().strip()
+        if " / " not in path_text:
+            watch.fail(f"mono path in viewer chrome does not contain '/': {path_text}")
+
+    # Top chrome carries NO title
+    chrome_titles = page.locator(".hub-viewer-bar h1, .hub-viewer-bar .hub-title")
+    if chrome_titles.count() > 0:
+        watch.fail("viewer top chrome still draws document title")
+
+    # No inner scroller: check iframe style and sizing
+    frame = page.locator("#hub-frame")
+    if frame.count() < 1:
+        watch.fail("no #hub-frame found")
+        return
+    frame_border = frame.evaluate("el => window.getComputedStyle(el).borderStyle")
+    if frame_border not in ("none", ""):
+        watch.fail(f"inner viewer card still has border: {frame_border}")
+
+    # 3. Check Version sheet (Screen 02)
+    v_toggle = page.locator(".hub-version-toggle")
+    if v_toggle.count() < 1:
+        watch.fail("no version toggle pill found")
+        return
+    v_toggle.first.click()
+    page.wait_for_timeout(400)
+    sheet = page.locator(".hub-version-sheet, .hub-version-menu:not([hidden])")
+    if sheet.count() < 1 or sheet.first.is_hidden():
+        watch.fail("version sheet did not open")
+        return
+
+    sheet_rows = page.locator(".hub-version-row, .hub-version-menu button")
+    if sheet_rows.count() < 1:
+        watch.fail("version sheet contains no version rows")
+    else:
+        row_box = sheet_rows.first.bounding_box()
+        if row_box and row_box["height"] < 43:
+            watch.fail(f"version sheet row height is under 44px: {row_box['height']}")
+        row_texts = page.evaluate(
+            "(() => [...document.querySelectorAll('.hub-version-row, .hub-version-menu button')]"
+            ".map((r) => r.textContent))()"
+        )
+        if not any("Current" in r for r in row_texts):
+            watch.fail(f"version sheet does not mark Current version: {row_texts}")
+
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -8051,6 +8137,7 @@ def run() -> int:
                 run_step(watch, check_feed_chips_and_row_grammar, page, watch, port, project)
                 run_step(watch, check_projects_index, browser, watch, port)
                 run_step(watch, check_sessions_redraw, browser, page, watch, port, project, seeded["session_id"])
+                run_step(watch, check_artifact_viewer_redraw, browser, page, watch, port, project)
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
                 run_step(watch, check_inbox_earlier_and_snooze, browser, watch, port, project)

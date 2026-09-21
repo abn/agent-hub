@@ -3,7 +3,7 @@
 // own, so reload and the browser's Back both keep the artifact on screen.
 
 import { api } from "./api.mjs";
-import { commentsPanel, commentsToggle, startComments } from "./comments.mjs";
+import { commentsPanel, commentsToggle, openCommentsDrawer, startComments } from "./comments.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { relative } from "./time.mjs";
@@ -14,7 +14,7 @@ const LOCK_PATH = "M 7 11V8a5 5 0 0 1 10 0v3 M 5 11h14v10H5z";
 function cardGlyph(protectedArtifact) {
   const path = protectedArtifact ? LOCK_PATH : DOC_PATH;
   const cls = protectedArtifact ? "lock" : "doc";
-  return `<svg class="${cls}" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
+  return `<svg class="${cls}" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
 }
 
 function formatBytes(bytes) {
@@ -26,28 +26,145 @@ function formatBytes(bytes) {
 }
 
 function cardMeta(artifact) {
-  const age = artifact.updated_at ? relative(Date.parse(artifact.updated_at)) : "";
-  return `v${artifact.version} · ${formatBytes(artifact.size_bytes)} · ${age}`;
+  const age = artifact.created_at || artifact.updated_at ? relative(Date.parse(artifact.created_at || artifact.updated_at)) : "";
+  const actor = artifact.actor || "agent";
+  const enc = artifact.protected ? " · encrypted" : "";
+  return `${actor} · v${artifact.version} · ${formatBytes(artifact.size_bytes)} · ${age}${enc}`;
 }
 
 export function artifactCard(artifact) {
-  return `<button type="button" class="artifact-card" data-action="artifact-open" data-id="${esc(artifact.id)}">
-    <span class="artifact-preview">${cardGlyph(artifact.protected)}</span>
+  const enc = artifact.protected ? " encrypted" : " plain";
+  const age = artifact.created_at || artifact.updated_at ? relative(Date.parse(artifact.created_at || artifact.updated_at)) : "";
+  const actor = artifact.actor || "agent";
+  const encLabel = artifact.protected ? " · encrypted" : "";
+  return `<button type="button" class="artifact-card artifact-row" data-action="artifact-open" data-id="${esc(artifact.id)}">
+    <span class="artifact-preview${enc}">${cardGlyph(artifact.protected)}</span>
     <span class="artifact-body">
       <span class="artifact-title">${esc(artifact.title)}</span>
-      <span class="artifact-meta mono">${cardMeta(artifact)}</span>
+      <span class="artifact-meta mono">${esc(actor)} · <span class="mono">v${artifact.version} · ${formatBytes(artifact.size_bytes)}</span> · ${age}${encLabel}</span>
     </span>
+    <svg class="artifact-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
   </button>`;
 }
 
-// The gallery the project view's Artifacts segment paints. Only the listing
-// is fetched: the preview tiles are the kind glyph and the lock glyph, never
-// the body content.
+let activeGrouping = "day";
+
+function groupDayKey(dateStr) {
+  if (!dateStr) return "TODAY";
+  const d = new Date(dateStr);
+  const now = new Date();
+  const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (isToday) return "TODAY";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday = d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate();
+  if (isYesterday) return "YESTERDAY";
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  return `${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+function groupArtifacts(artifacts, mode) {
+  const groups = new Map();
+  for (const artifact of artifacts) {
+    let key;
+    if (mode === "agent") {
+      key = (artifact.actor || "AGENT").toUpperCase();
+    } else if (mode === "kind") {
+      key = (artifact.kind || "DOCUMENT").toUpperCase();
+    } else {
+      key = groupDayKey(artifact.created_at || artifact.updated_at);
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(artifact);
+  }
+  return [...groups.entries()].map(([title, items]) => ({ title, items }));
+}
+
+// The gallery the project view's Artifacts segment paints. Grouped list by day, agent, or kind.
 export async function gallerySection(projectId) {
   const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
-  if (!artifacts.length) return emptyStateHTML(EMPTY_COPY.artifacts);
-  return `<div class="gallery">${artifacts.map(artifactCard).join("")}</div>`;
+  if (!artifacts || !artifacts.length) return emptyStateHTML(EMPTY_COPY.artifacts);
+
+  const totalBytes = artifacts.reduce((acc, a) => acc + (Number(a.size_bytes) || 0), 0);
+  const groups = groupArtifacts(artifacts, activeGrouping);
+
+  const modeLabel = activeGrouping === "agent" ? "Agent" : activeGrouping === "kind" ? "Kind" : "Day";
+
+  const groupSections = groups
+    .map(
+      (g) =>
+        `<div class="hub-group-header">${esc(g.title)} · ${g.items.length}</div>
+         <div class="hub-group-items">${g.items.map(artifactCard).join("")}</div>`
+    )
+    .join("");
+
+  return `
+    <div class="hub-artifacts-summary">
+      <span class="mono">${artifacts.length} artifacts · ${formatBytes(totalBytes)}</span>
+      <div class="hub-group-wrap">
+        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">${modeLabel}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+        <div class="hub-group-menu" id="hub-group-menu" hidden>
+          <button type="button" data-group="day"${activeGrouping === "day" ? ' class="active" aria-current="true"' : ""}>Day</button>
+          <button type="button" data-group="agent"${activeGrouping === "agent" ? ' class="active" aria-current="true"' : ""}>Agent</button>
+          <button type="button" data-group="kind"${activeGrouping === "kind" ? ' class="active" aria-current="true"' : ""}>Kind</button>
+        </div>
+      </div>
+    </div>
+    <div class="gallery hub-artifacts-list">
+      ${groupSections}
+    </div>
+  `;
 }
+
+// Global click listener for group menu in gallery and start-thread in viewer
+document.addEventListener("click", (e) => {
+  const toggleBtn = e.target.closest('[data-action="artifact-group-toggle"]');
+  if (toggleBtn) {
+    const menu = document.getElementById("hub-group-menu");
+    if (menu) {
+      const open = menu.hidden;
+      menu.hidden = !open;
+      toggleBtn.setAttribute("aria-expanded", String(open));
+    }
+    return;
+  }
+  const groupOpt = e.target.closest("#hub-group-menu button");
+  if (groupOpt && groupOpt.dataset.group) {
+    activeGrouping = groupOpt.dataset.group;
+    const parts = location.hash.replace(/^#/, "").split("/");
+    const projectId = parts[2] || "";
+    if (projectId) {
+      gallerySection(projectId).then((html) => {
+        const summary = main.querySelector(".hub-artifacts-summary");
+        const list = main.querySelector(".hub-artifacts-list");
+        if (summary && list) {
+          const temp = document.createElement("div");
+          temp.innerHTML = html;
+          const newSummary = temp.querySelector(".hub-artifacts-summary");
+          const newList = temp.querySelector(".hub-artifacts-list");
+          if (newSummary) summary.replaceWith(newSummary);
+          if (newList) list.replaceWith(newList);
+        }
+      });
+    }
+    return;
+  }
+  const startThread = e.target.closest('[data-action="start-thread"]');
+  if (startThread) {
+    const menu = main.querySelector(".hub-overflow-menu");
+    if (menu) menu.hidden = true;
+    const more = main.querySelector(".hub-more");
+    if (more) more.setAttribute("aria-expanded", "false");
+    openCommentsDrawer();
+    return;
+  }
+  const menu = document.getElementById("hub-group-menu");
+  if (menu && !menu.hidden && !e.target.closest(".hub-group-wrap")) {
+    menu.hidden = true;
+    const toggle = document.getElementById("hub-group-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", "false");
+  }
+});
 
 // The legacy gallery address still works: it now points at the project's
 // Artifacts segment.
@@ -149,10 +266,12 @@ export async function toggleRaw(button) {
 
 export function toggleVersionMenu(button) {
   const menu = document.getElementById("hub-version-menu");
+  const backdrop = document.getElementById("hub-version-backdrop");
   if (!menu) return;
   const open = menu.hidden;
   menu.hidden = !open;
-  button.setAttribute("aria-expanded", String(open));
+  if (backdrop) backdrop.hidden = !open;
+  if (button) button.setAttribute("aria-expanded", String(open));
   if (open) {
     const active = menu.querySelector('[aria-current="true"]');
     (active || menu.querySelector("button"))?.focus();
@@ -167,16 +286,11 @@ export function pickVersion(id, version) {
   location.replace(target);
 }
 
-// The theme control. The framed public page carries its own theme switch; an
-// html artifact can be re-framed through the theme-aware frame route, so the
-// host control does that and reloads the public page for the kinds whose theme
-// the page owns.
 export function toggleViewerTheme() {
   const frame = main.querySelector("#hub-frame");
   if (!frame) return;
   const next = frame.getAttribute("data-theme") === "dark" ? "light" : "dark";
   frame.setAttribute("data-theme", next);
-  drawThemeControl(main.querySelector("#hub-theme-toggle"), next);
   let src;
   if (frame.dataset.kind === "html") {
     const params = new URLSearchParams();
@@ -187,17 +301,6 @@ export function toggleViewerTheme() {
     src = viewerSource(frame);
   }
   replaceFrame(frame, src);
-}
-
-// One glyph at a time: the one for the theme a press switches to, which is
-// what the control's name says too.
-function drawThemeControl(button, theme) {
-  if (!button) return;
-  const to = theme === "dark" ? "light" : "dark";
-  for (const glyph of button.querySelectorAll("svg")) {
-    glyph.toggleAttribute("hidden", glyph.dataset.to !== to);
-  }
-  button.setAttribute("aria-label", `Switch to ${to} theme`);
 }
 
 function svg(path, width, height, cls) {
@@ -218,32 +321,85 @@ function svg(path, width, height, cls) {
   return el;
 }
 
-function chromeTitle() {
-  const el = document.createElement("div");
-  el.className = "hub-title";
-  return el;
-}
+// Version sheet (Screen 02): replaces inline version select
+function buildVersionSheet(id, versions, shown, projectId) {
+  const backdrop = document.createElement("div");
+  backdrop.id = "hub-version-backdrop";
+  backdrop.className = "hub-version-backdrop";
+  backdrop.hidden = true;
 
-// The version menu, listed newest first so the current head is the first item.
-function versionMenu(id, versions, shown) {
-  const menu = document.createElement("div");
-  menu.id = "hub-version-menu";
-  menu.className = "hub-version-menu";
-  menu.hidden = true;
-  menu.setAttribute("role", "group");
-  menu.setAttribute("aria-label", "Versions");
-  for (const version of versions) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.action = "version-pick";
-    button.dataset.id = id;
-    button.dataset.version = String(version.version);
-    if (version.version === shown) button.setAttribute("aria-current", "true");
-    const age = version.created_at ? relative(Date.parse(version.created_at)) : "";
-    button.textContent = `v${version.version} · ${formatBytes(version.size_bytes)} · ${age}`;
-    menu.appendChild(button);
+  const sheet = document.createElement("div");
+  sheet.id = "hub-version-menu";
+  sheet.className = "hub-version-sheet hub-version-menu";
+  sheet.hidden = true;
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-label", "Versions");
+
+  const handle = document.createElement("div");
+  handle.className = "hub-version-sheet-handle";
+
+  const head = document.createElement("div");
+  head.className = "hub-version-sheet-header";
+  head.innerHTML = `
+    <span class="hub-version-sheet-title">Versions</span>
+    <span class="hub-version-sheet-count mono">${versions.length} · newest first</span>
+  `;
+
+  const list = document.createElement("div");
+  list.className = "hub-version-sheet-list";
+
+  for (const v of versions) {
+    const isCurrent = v.version === shown;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `hub-version-row${isCurrent ? " current" : ""}`;
+    row.dataset.action = "version-pick";
+    row.dataset.id = id;
+    row.dataset.version = String(v.version);
+    if (isCurrent) row.setAttribute("aria-current", "true");
+
+    const age = v.created_at ? relative(Date.parse(v.created_at)) : "";
+    const actor = v.actor || "agent";
+    const primaryText = isCurrent ? "Current" : actor;
+    const secondaryText = isCurrent ? `${actor} · ${age}` : age;
+
+    row.innerHTML = `
+      <span class="hub-version-num mono">v${v.version}</span>
+      <span class="hub-version-info">
+        <span class="hub-version-primary">${esc(primaryText)}</span>
+        <span class="hub-version-secondary">${esc(secondaryText)}</span>
+      </span>
+      <span class="hub-version-size mono">${formatBytes(v.size_bytes)}</span>
+    `;
+    list.appendChild(row);
   }
-  return menu;
+
+  const footer = document.createElement("div");
+  footer.className = "hub-version-sheet-footer";
+  footer.textContent = "Versions are whole saves. Nothing is compared - the hub keeps no diff.";
+
+  sheet.append(handle, head, list, footer);
+
+  const closeSheet = () => {
+    backdrop.hidden = true;
+    sheet.hidden = true;
+    const toggle = main.querySelector(".hub-version-toggle");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+    }
+  };
+
+  backdrop.addEventListener("click", closeSheet);
+  sheet.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeSheet();
+    }
+  });
+
+  return { backdrop, sheet };
 }
 
 export async function viewerRoute(params, gen, path) {
@@ -254,6 +410,7 @@ export async function viewerRoute(params, gen, path) {
     return;
   }
   const version = params.get("version");
+  const projectId = params.get("project") || "";
   viewer.id = id;
   viewer.version = version ? Number(version) : null;
   viewer.raw = false;
@@ -277,10 +434,27 @@ export async function viewerRoute(params, gen, path) {
   viewer.version = shown;
   viewer.kind = current.kind;
 
+  // Mono path: {project} / {slug}
+  const projDisplay = projectId || current.project_id || "agent-hub";
+  const slug = (current.title || "artifact")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
+  const monoPath = `${projDisplay} / ${slug}`;
+
+  // Fetch comments count for comments strip
+  let commentsCount = 0;
+  try {
+    const comList = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
+    commentsCount = Array.isArray(comList) ? comList.length : Array.isArray(comList?.comments) ? comList.comments.length : 0;
+  } catch {}
+  if (stale(gen)) return;
+
   main.innerHTML = "";
   const wrap = document.createElement("div");
   wrap.className = "hub-viewer";
 
+  // Top header (Screen 01): 44px back chevron, mono path, 44px overflow more button
   const bar = document.createElement("div");
   bar.className = "hub-viewer-bar";
 
@@ -289,33 +463,70 @@ export async function viewerRoute(params, gen, path) {
   back.className = "hub-back";
   back.dataset.action = "viewer-back";
   back.setAttribute("aria-label", "Back to artifacts");
-  back.appendChild(svg("M 15 6l-6 6 6 6", 20, 20, null));
+  back.appendChild(svg("M 15 5l-7 7 7 7", 20, 20, null));
 
-  const block = document.createElement("div");
-  block.className = "grow";
-  const title = document.createElement("div");
-  title.className = "hub-title";
-  title.textContent = current.title;
-  const meta = document.createElement("div");
-  meta.className = "hub-meta mono";
-  const age = current.created_at ? relative(Date.parse(current.created_at)) : "";
-  meta.textContent = `v${shown} · ${formatBytes(current.size_bytes)} · ${age}`;
-  block.append(title, meta);
+  const pathEl = document.createElement("div");
+  pathEl.className = "hub-viewer-path mono";
+  pathEl.textContent = monoPath;
+  pathEl.title = monoPath;
 
-  const { toggle, badge } = commentsToggle();
+  const moreBtn = document.createElement("button");
+  moreBtn.type = "button";
+  moreBtn.className = "hub-more";
+  moreBtn.setAttribute("aria-label", "More");
+  moreBtn.setAttribute("aria-expanded", "false");
+  moreBtn.setAttribute("aria-haspopup", "true");
+  moreBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="12" cy="19" r="1.7"></circle></svg>`;
 
-  const theme = document.createElement("button");
-  theme.type = "button";
-  theme.id = "hub-theme-toggle";
-  theme.dataset.action = "viewer-theme";
-  const sun = svg("M 12 19v1 M 12 4v1 M 4 12h1 M 19 12h1 M 6 6l.7.7 M 17.3 17.3l.7.7 M 6 18l.7-.7 M 17.3 6.7l.7-.7 M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", 18, 18, null);
-  const moon = svg("M 20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z", 18, 18, null);
-  sun.dataset.to = "light";
-  moon.dataset.to = "dark";
-  theme.append(sun, moon);
-  // The frame opens in the app's own theme, and the control starts from there.
-  const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-  drawThemeControl(theme, opened);
+  const overflowMenu = document.createElement("div");
+  overflowMenu.className = "hub-overflow-menu";
+  overflowMenu.hidden = true;
+
+  const raw = document.createElement("button");
+  raw.type = "button";
+  raw.className = "hub-raw";
+  raw.dataset.action = "viewer-raw";
+  raw.textContent = "Open raw";
+  overflowMenu.appendChild(raw);
+
+  if (commentsCount === 0) {
+    const startThread = document.createElement("button");
+    startThread.type = "button";
+    startThread.className = "hub-start-thread";
+    startThread.dataset.action = "start-thread";
+    startThread.textContent = "Start a thread";
+    overflowMenu.appendChild(startThread);
+  }
+
+  moreBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = overflowMenu.hidden;
+    overflowMenu.hidden = !open;
+    moreBtn.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", (e) => {
+    if (!overflowMenu.hidden && !overflowMenu.contains(e.target) && e.target !== moreBtn) {
+      overflowMenu.hidden = true;
+      moreBtn.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  bar.append(back, pathEl, moreBtn, overflowMenu);
+  wrap.appendChild(bar);
+
+  // Document meta line with version pill (Screen 01):
+  const metaWrap = document.createElement("div");
+  metaWrap.className = "hub-viewer-meta-wrap";
+
+  const metaLine = document.createElement("div");
+  metaLine.className = "hub-viewer-meta";
+
+  const actorSpan = document.createElement("span");
+  actorSpan.className = "hub-viewer-actor";
+  actorSpan.textContent = current.actor || "agent";
+
+  const dot1 = document.createElement("span");
+  dot1.textContent = "·";
 
   const versionToggle = document.createElement("button");
   versionToggle.type = "button";
@@ -323,34 +534,75 @@ export async function viewerRoute(params, gen, path) {
   versionToggle.dataset.action = "version-toggle";
   versionToggle.setAttribute("aria-expanded", "false");
   versionToggle.setAttribute("aria-controls", "hub-version-menu");
-  versionToggle.textContent = `v${shown} `;
-  versionToggle.appendChild(svg("M 6 9l6 6 6-6", 12, 12, "chev"));
+  versionToggle.innerHTML = `v${shown} of ${versions.length} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>`;
 
-  const raw = document.createElement("button");
-  raw.type = "button";
-  raw.className = "hub-raw";
-  raw.dataset.action = "viewer-raw";
-  raw.textContent = "Open raw";
+  const dot2 = document.createElement("span");
+  dot2.textContent = "·";
 
-  bar.append(back, block, toggle, theme, versionToggle, raw);
-  wrap.appendChild(bar);
+  const sizeSpan = document.createElement("span");
+  sizeSpan.className = "mono hub-viewer-size";
+  sizeSpan.textContent = formatBytes(current.size_bytes);
 
-  const menu = versionMenu(id, versions, shown);
-  wrap.appendChild(menu);
+  const dot3 = document.createElement("span");
+  dot3.textContent = "·";
 
+  const ageSpan = document.createElement("span");
+  ageSpan.className = "hub-viewer-age";
+  ageSpan.textContent = current.created_at ? relative(Date.parse(current.created_at)) : "";
+
+  metaLine.append(actorSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
+  metaWrap.appendChild(metaLine);
+  wrap.appendChild(metaWrap);
+
+  // Sandboxed frame: replaces element rather than src on navigation to avoid pushing history
+  const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   const frame = document.createElement("iframe");
   frame.id = "hub-frame";
   frame.dataset.id = id;
   frame.dataset.kind = current.kind;
   frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("title", "Artifact");
+  frame.setAttribute("title", current.title);
   frame.setAttribute("data-theme", opened);
   frame.src = frameSrc(id, viewer.version, opened);
   wrap.appendChild(frame);
 
+  // Auto-size frame to avoid inner scrollbar
+  const onHeight = (event) => {
+    if (event.source !== frame.contentWindow) return;
+    const h = event.data && event.data.hubFrameHeight;
+    if (typeof h !== "number" || !isFinite(h)) return;
+    frame.style.height = `${Math.max(Math.round(h), 200)}px`;
+  };
+  window.addEventListener("message", onHeight);
+
+  // Comments footer strip (Screen 01) when thread exists
+  const { toggle, badge } = commentsToggle();
+  toggle.style.display = "none";
+  wrap.appendChild(toggle);
+  if (commentsCount > 0) {
+    const strip = document.createElement("button");
+    strip.type = "button";
+    strip.className = "hub-comments-strip comments-toggle";
+    strip.dataset.action = "comments-toggle";
+    strip.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>
+      <span class="grow" style="text-align:left">Comments</span>
+      <span class="mono hub-comments-count">${commentsCount}</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
+    `;
+    strip.addEventListener("click", () => {
+      openCommentsDrawer();
+    });
+    wrap.appendChild(strip);
+  }
+
+  // Version sheet (Screen 02)
+  const { backdrop, sheet } = buildVersionSheet(id, versions, shown, projectId);
+  wrap.append(backdrop, sheet);
+
   main.appendChild(wrap);
-  const { backdrop, drawer } = commentsPanel({ toggle, badge });
-  main.append(backdrop, drawer);
+  const { backdrop: comBackdrop, drawer: comDrawer } = commentsPanel({ toggle, badge });
+  main.append(comBackdrop, comDrawer);
 }
 
 // The old viewer name, kept so a caller that referenced it still resolves.

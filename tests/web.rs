@@ -18,6 +18,7 @@ const COMMENTS_JS: &str = include_str!("../web/comments.mjs");
 const APP_CSS: &str = include_str!("../web/app.css");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
+const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// The worker before it is stamped. The served copy has its version and cache
 /// lists filled in, so the digest can only be recomputed from the source.
@@ -243,6 +244,7 @@ async fn serves_every_shell_asset_with_a_policy() {
         ("/router.mjs", "location.hash"),
         ("/app.css", "var(--"),
         ("/crypto.mjs", "export"),
+        ("/vendor/marked.js", "marked"),
         ("/artifact-viewer.mjs", "hub-frame"),
         ("/frame-loader.js", "postMessage"),
         ("/vendor/mermaid.runtime.js", "mermaid"),
@@ -275,7 +277,7 @@ async fn serves_every_shell_asset_with_a_policy() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 38] = [
+const SHELL_PATHS: [&str; 39] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -311,6 +313,7 @@ const SHELL_PATHS: [&str; 38] = [
     "/manifest.webmanifest",
     "/icon.svg",
     "/crypto.mjs",
+    "/vendor/marked.js",
     "/vendor/mermaid.runtime.js",
     "/artifact-viewer.mjs",
     "/frame-loader.js",
@@ -670,6 +673,26 @@ async fn serves_artifact_content_for_the_viewer() {
         "the server holds no plaintext to render for a protected artifact"
     );
     assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
+}
+
+#[test]
+fn vendored_marked_pins_the_licensed_umd_build() {
+    assert!(
+        MARKED_JS.contains("marked v15.0.12"),
+        "the pinned marked version is vendored"
+    );
+    assert!(
+        MARKED_JS.contains("MIT Licensed"),
+        "the marked license header is intact"
+    );
+    assert!(
+        MARKED_JS.contains("g[\"marked\"]=f()"),
+        "the bundle defines the global marked entry point"
+    );
+    assert!(
+        MARKED_JS.contains("parseInline"),
+        "the bundle is the full build, not a subset"
+    );
 }
 
 #[test]

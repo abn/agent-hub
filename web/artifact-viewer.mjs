@@ -53,6 +53,25 @@ function readJson(id) {
   }
 }
 
+// marked passes raw HTML through by default, so the html renderer is
+// overridden to escape it. This matches the server renderer's total-escape
+// contract: authored angle brackets stay text, never markup.
+function parseMarkdown(source) {
+  const lib = globalThis.marked;
+  if (!lib || typeof lib.parse !== "function" || typeof lib.Marked !== "function") {
+    return null;
+  }
+  const engine = new lib.Marked();
+  engine.use({
+    renderer: {
+      html(token) {
+        return escHtml(token.raw != null ? token.raw : token.text || "");
+      },
+    },
+  });
+  return engine.parse(source);
+}
+
 
 // A blockquote whose first paragraph starts with a marker becomes a callout
 // aside; the marker line is dropped and any trailing paragraphs are kept.
@@ -149,8 +168,28 @@ function buildSrcdoc({ title, body, theme, withMermaid }) {
   );
 }
 
-function showMarkdown(frame, meta, html, theme) {
+function showRenderedMarkdown(frame, meta, html, theme) {
   const body = renderMermaidPlaceholders(renderCallouts(html));
+  frame.srcdoc = buildSrcdoc({
+    title: meta.title,
+    body,
+    theme,
+    withMermaid: body.includes('<pre class="mermaid">'),
+  });
+}
+
+function showMarkdown(frame, meta, source, theme) {
+  const parsed = parseMarkdown(source);
+  if (parsed === null) {
+    frame.srcdoc = buildSrcdoc({
+      title: meta.title,
+      body: `<pre>${escHtml(source)}</pre>`,
+      theme,
+      withMermaid: false,
+    });
+    return;
+  }
+  const body = renderMermaidPlaceholders(renderCallouts(parsed));
   frame.srcdoc = buildSrcdoc({
     title: meta.title,
     body,
@@ -176,7 +215,7 @@ function renderForTheme(state, theme) {
   if (!frame || !meta) return;
   if (unlocked != null) {
     if (meta.kind === "markdown") {
-      showMarkdown(frame, meta, `<pre>${escHtml(unlocked)}</pre>`, theme);
+      showMarkdown(frame, meta, unlocked, theme);
     } else {
       frame.srcdoc = unlocked;
     }
@@ -184,7 +223,7 @@ function renderForTheme(state, theme) {
   }
   const body = readJson("hub-markdown-body");
   if (typeof body === "string") {
-    showMarkdown(frame, meta, body, theme);
+    showRenderedMarkdown(frame, meta, body, theme);
     return;
   }
   if (meta.kind === "html") frame.src = frameUrl(meta, theme);
@@ -289,7 +328,11 @@ function init() {
   // its own theme and its control says which way a press goes. A second control
   // in here would change the frame behind the app's back, and the app's would
   // then name a switch that had already happened.
-  if (toggle && window.top !== window.self) toggle.hidden = true;
+  if (window.top !== window.self) {
+    if (toggle) toggle.hidden = true;
+    const header = document.querySelector("body > header");
+    if (header) header.style.display = "none";
+  }
   if (toggle) {
     toggle.addEventListener("click", () => {
       state.theme = state.theme === "dark" ? "light" : "dark";
@@ -310,6 +353,9 @@ function init() {
     if (typeof height !== "number" || !isFinite(height)) return;
     const clamped = Math.min(Math.max(Math.round(height), 120), 12000);
     state.frame.style.height = `${clamped}px`;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ hubFrameHeight: document.body.scrollHeight || clamped }, "*");
+    }
   });
 
   const pickerWrap = document.getElementById("hub-picker-wrap");
