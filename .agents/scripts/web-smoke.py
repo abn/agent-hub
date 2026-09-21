@@ -2905,6 +2905,16 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
     body_text = opened.locator("body").inner_text()
     if harness.PROTECTED_BODY_MARK not in body_text:
         watch.fail(f"the unlocked note does not carry its own text: {body_text[:120]!r}")
+    # The hub never sees this plaintext, so the browser renderer is the only
+    # thing between markup an agent authored and the reader. The public path is
+    # escaped by the hub; this path is escaped by the renderer's own override,
+    # and nothing held that until now.
+    if opened.locator("img").count() > 0:
+        watch.fail("markup inside a sealed note became an element")
+    if opened.locator("body[data-sealed-pwned]").count() > 0:
+        watch.fail("a handler inside a sealed note ran")
+    if harness.PROTECTED_HOSTILE_MARK not in body_text:
+        watch.fail(f"the sealed note's markup did not reach the reader as text: {body_text[:160]!r}")
     watch.drain_rejections()
 
 

@@ -113,12 +113,13 @@ PROTECTED_ENVELOPE = {
     "alg": "AES-256-GCM",
     "kdf": "PBKDF2-HMAC-SHA256",
     "iterations": 600000,
-    "salt": "ChSWXU12X6bscw3zzyawEA==",
-    "iv": "l+2FyzScbmMjDaWf",
+    "salt": "5xYSg3xqet5Lx3pG6bz3aw==",
+    "iv": "5fneWQMWrMPcW6o6",
 }
-PROTECTED_CIPHERTEXT = (
-    "dRJDZwTaa3LRtXzCOOVvkNwTHu/VgqumT4PmLgvBha48u7jpHgl5rKV+hqNeC3jKhBlbpXCMXw=="
-)
+PROTECTED_CIPHERTEXT = "+LaviI/3fSFBVHqyu84QRnq8jW24dk2Bm72duRlWjIAZDF7VUNjGM830Fwpps5Y/49ifKR/SHz+YCbFLp1asmbt06+0B/K+mvMCXlNxAXtxFNLnAVxh0Sh/NbzqucMvguGYA0QfDKyDOTaurpIjKgpcdk6IoH7vCWD5J"
+# The sealed plaintext carries markup, so the checks can prove that a note the
+# hub never sees is still escaped by the browser renderer that draws it.
+PROTECTED_HOSTILE_MARK = 'onerror="document.body.dataset.sealedPwned=1"'
 
 
 def seed_versioned_artifact(port: int, project_id: str) -> str:
