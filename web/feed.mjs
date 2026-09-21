@@ -9,8 +9,14 @@ import { focusAfterRender, render } from "./router.mjs";
 import { byDay } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
-// Chip labels are capitalized kind names.
-const KINDS = ["signal", "finished", "question", "answer", "approval", "artifact", "session"];
+// Feed chips cover question, approval, finished, signal only.
+const FEED_KINDS = [
+  { kind: "question", label: "Questions" },
+  { kind: "approval", label: "Approvals" },
+  { kind: "finished", label: "Finished" },
+  { kind: "signal", label: "Signals" },
+];
+const VALID_KINDS = new Set(FEED_KINDS.map((k) => k.kind));
 const ALL = "all";
 // One page of the feed. Older pages are asked for with the hub's own cursor.
 const PAGE = 100;
@@ -39,14 +45,21 @@ window.addEventListener("hashchange", () => {
 });
 
 export function activeKinds(projectId) {
-  return new Set(projectFilters.get(projectId) || []);
+  const kinds = projectFilters.get(projectId) || [];
+  return new Set(kinds.filter((k) => VALID_KINDS.has(k)));
 }
 
-export function kindChips(active) {
-  const chip = (kind, label, pressed) =>
-    `<button type="button" class="chip" data-action="kind" data-kind="${kind}" aria-pressed="${pressed}">${label}</button>`;
-  const chips = KINDS.map((kind) => chip(kind, kind.charAt(0).toUpperCase() + kind.slice(1), active.has(kind))).join("");
-  return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", active.size === 0)}${chips}</div>`;
+export function kindChips(active, counts = {}) {
+  const total = counts.total ?? 0;
+  const chip = (kind, label, count, pressed) => {
+    const dot = kind === ALL ? "" : `<span class="chip-dot" aria-hidden="true"></span>`;
+    return `<button type="button" class="chip" data-action="kind" data-kind="${kind}" aria-pressed="${pressed}">${dot}${label} · ${count}</button>`;
+  };
+  const chips = FEED_KINDS
+    .filter(({ kind }) => (counts[kind] ?? 0) > 0)
+    .map(({ kind, label }) => chip(kind, label, counts[kind] ?? 0, active.has(kind)))
+    .join("");
+  return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", total, active.size === 0)}${chips}</div>`;
 }
 
 // The dot is a colour and a shape, so the word sits beside it for a reader
@@ -83,14 +96,132 @@ function feedDestination(event) {
   return "";
 }
 
+export function formatEventSummary(event) {
+  const summary = event.summary || "";
+  if (event.kind === "signal") {
+    return summary;
+  }
+  if (event.kind === "question") {
+    if (/^asked:\s*/i.test(summary)) return `asked: ${summary.replace(/^asked:\s*/i, "")}`;
+    return `asked: ${summary}`;
+  }
+  if (event.kind === "answer") {
+    if (/^re:\s*/i.test(summary)) return `answered ${summary.replace(/^re:\s*/i, "")}`;
+    if (/^answered\s+/i.test(summary)) return `answered ${summary.replace(/^answered\s+/i, "")}`;
+    return `answered ${summary}`;
+  }
+  if (event.kind === "session") {
+    const started = summary.match(/^session\s+(.+?)\s+started$/i);
+    if (started) return `started ${started[1]}`;
+    const ended = summary.match(/^session\s+(.+?)\s+ended$/i);
+    if (ended) return `ended ${ended[1]}`;
+    const picked = summary.match(/^session\s+(.+?)\s+picked up from\s+(.+)$/i);
+    if (picked) return `picked up ${picked[1]} from ${picked[2]}`;
+    const forked = summary.match(/^session\s+(.+?)\s+forked from\s+(.+)$/i);
+    if (forked) return `forked ${forked[1]} from ${forked[2]}`;
+    const reassigned = summary.match(/^session\s+(.+?)\s+reassigned to\s+(.+)$/i);
+    if (reassigned) return `reassigned ${reassigned[1]} to ${reassigned[2]}`;
+    const capVerb = summary.match(/^([A-Z][a-z]+ed)\s+(.*)$/);
+    if (capVerb) return `${capVerb[1].toLowerCase()} ${capVerb[2]}`;
+    return summary;
+  }
+  if (event.kind === "artifact") {
+    const capVerb = summary.match(/^([A-Z][a-z]+ed)\s+(.*)$/);
+    if (capVerb) return `${capVerb[1].toLowerCase()} ${capVerb[2]}`;
+    return summary;
+  }
+  if (event.kind === "approval") {
+    if (/^re:\s*/i.test(summary)) return `decided ${summary.replace(/^re:\s*/i, "")}`;
+    const capVerb = summary.match(/^([A-Z][a-z]+ed)\s+(.*)$/);
+    if (capVerb) return `${capVerb[1].toLowerCase()} ${capVerb[2]}`;
+    return summary;
+  }
+  if (event.kind === "finished") {
+    const capVerb = summary.match(/^([A-Z][a-z]+ed)\s+(.*)$/);
+    if (capVerb) return `${capVerb[1].toLowerCase()} ${capVerb[2]}`;
+    return summary;
+  }
+  return summary;
+}
+
+function isArtifactPublish(e) {
+  return (
+    e.kind === "artifact" &&
+    (e.payload?.action === "published" || /^published\s+/i.test(e.summary || ""))
+  );
+}
+
+function collapseDayEvents(events) {
+  const result = [];
+  let i = 0;
+  while (i < events.length) {
+    const event = events[i];
+    if (
+      event.kind === "finished" &&
+      /artifacts?\s+published/i.test(event.summary || "") &&
+      i + 1 < events.length &&
+      isArtifactPublish(events[i + 1])
+    ) {
+      i++;
+      continue;
+    }
+    if (isArtifactPublish(event)) {
+      const cluster = [event];
+      let j = i + 1;
+      while (
+        j < events.length &&
+        isArtifactPublish(events[j]) &&
+        events[j].actor === event.actor &&
+        Math.abs(Date.parse(event.created_at) - Date.parse(events[j].created_at)) <= 120000
+      ) {
+        cluster.push(events[j]);
+        j++;
+      }
+      if (cluster.length >= 3) {
+        result.push({
+          collapsed: true,
+          count: cluster.length,
+          kind: "artifact",
+          actor: event.actor,
+          created_at: event.created_at,
+          id: event.id,
+          project_id: event.project_id || cluster[0].project_id,
+          events: cluster,
+        });
+        i = j;
+        continue;
+      }
+    }
+    result.push(event);
+    i++;
+  }
+  return result;
+}
+
+function collapsedArtifactRow(item, baseline) {
+  const unread = item.events.some((e) => e.id > baseline);
+  const project = item.project_id || "";
+  const href = `#/projects/${encodeURIComponent(project)}/artifacts`;
+  const title = `<a class="title feed-link" href="${esc(href)}">published ${item.count} artifacts</a>`;
+  return `<div class="row feed-row${unread ? " unread" : ""}">
+    ${glyph("artifact")}
+    <div class="grow" data-id="${esc(item.id)}">
+      ${title}
+      <div class="meta">${esc(item.actor)} · ${when(item.created_at)}</div>
+    </div>
+    ${unread ? UNREAD : ""}
+  </div>`;
+}
+
 // The feed's own row. Event ids sort by age, which is how the hub compares
 // them to the cursor too, so an id above the baseline is an unseen event.
 function feedRow(event, baseline) {
   const unread = event.id > baseline;
   const href = feedDestination(event);
+  const summaryText = formatEventSummary(event);
   const title = href
-    ? `<a class="title feed-link" href="${esc(href)}">${esc(event.summary)}</a>`
-    : `<div class="title">${esc(event.summary)}</div>`;
+    ? `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`
+    : `<div class="title">${esc(summaryText)}</div>`;
   return `<div class="row feed-row${unread ? " unread" : ""}">
     ${glyph(event.kind)}
     <div class="grow" data-id="${esc(event.id)}">
@@ -108,7 +239,9 @@ function dayGroups(groups, baseline) {
     .map(
       (group) =>
         `<h2 class="day">${esc(group.label)}</h2>
-         <div class="card feed-day">${group.events.map((event) => feedRow(event, baseline)).join("")}</div>`,
+         <div class="card feed-day">${collapseDayEvents(group.events)
+           .map((item) => (item.collapsed ? collapsedArtifactRow(item, baseline) : feedRow(item, baseline)))
+           .join("")}</div>`,
     )
     .join("");
 }
@@ -189,6 +322,23 @@ export async function feedSection(current, stats = null) {
   // window.
   const page = await api(feedPath(current, active));
   const held = visits.get(current);
+
+  let counts = held?.counts;
+  if (!counts) {
+    let allEvents = page.events;
+    if (active.size > 0) {
+      try {
+        const unfiltered = await api(feedPath(current, new Set()));
+        allEvents = unfiltered.events;
+      } catch {}
+    }
+    counts = { total: stats?.events ?? allEvents.length };
+    for (const k of FEED_KINDS) counts[k.kind] = 0;
+    for (const event of allEvents) {
+      if (counts[event.kind] != null) counts[event.kind]++;
+    }
+  }
+
   const visit = {
     baseline: held ? held.baseline : page.last_seen || "",
     sent: held ? held.sent : page.last_seen || "",
@@ -198,6 +348,7 @@ export async function feedSection(current, stats = null) {
     more: page.events.length === PAGE,
     filtered: active.size > 0,
     total: stats && stats.events != null ? stats.events : null,
+    counts,
   };
   visits.set(current, visit);
   if (!visit.events.length) {
@@ -211,11 +362,11 @@ export async function feedSection(current, stats = null) {
         }
       : EMPTY_COPY.feed;
     const where = { action: "feed-copy-setup", id: current };
-    return `${kindChips(active)}${emptyStateHTML(copy, { project: current }, where)}`;
+    return `${kindChips(active, counts)}${emptyStateHTML(copy, { project: current }, where)}`;
   }
   markSeen(current, visit);
   const recent = byDay(visit.events).filter((group) => RECENT.includes(group.label));
-  return `${kindChips(active)}${dayGroups(recent, visit.baseline)}${foldHTML(current, visit)}`;
+  return `${kindChips(active, counts)}${dayGroups(recent, visit.baseline)}${foldHTML(current, visit)}`;
 }
 
 // The kind chips are per project. The toggle keeps focus on the chip it

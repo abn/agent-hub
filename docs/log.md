@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, project feed chips redraw and row grammar
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  redrawn project feed chips and row grammar: 32px pills (13/500) on one
+  scrolling row with 6px kind dots, sentence case labels, and counts appended
+  ("All · 9", "Questions · 2", "Approvals · 1", "Finished · 3"). Selected chip
+  carries an ink fill. Artifact and Session chips are dropped as they duplicate
+  project tabs, kinds with zero events are hidden, sibling artifact publishes
+  from one agent within two minutes collapse into one row ("published N artifacts"),
+  and event verbs are lower case and past tense while objects are kept as written.
+
 ## 2026-09-20, a protected markdown artifact is shown as source
 
 * **Update**: [Artifacts](usage/artifacts.md) says a protected `markdown`
@@ -104,12 +115,12 @@ software release notes and the repository changelog.
   list, closing it returns focus to the opened row, and controls meet the tap
   target floor.
 
-## 2026-09-20, feed chips start uppercase and wrap across lines
+## 2026-09-20, feed chips meet the tap target floor on a single scrolling row
 
-* **Update**: [The human surface](architecture/human-surface.md) says the
-  project feed's kind filter chips start uppercase to match search scopes, meet
-  the 44px tap target floor, and wrap across lines to remain reachable without
-  horizontal scrolling.
+* **Update**: [The human surface](architecture/human-surface.md) records that
+  the project feed's kind filter chips meet the 44px tap target floor on a single
+  scrolling row with sentence case labels and counts, superseding earlier wrapped
+  layouts.
 
 ## 2026-09-20, a screen that asks for the access token
 

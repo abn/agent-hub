@@ -21,7 +21,10 @@ const SEGMENTS = ["feed", "artifacts", "sessions"];
 // defaults to the feed, so `#/projects/<id>` is the project's feed.
 export function segmentOf(hash) {
   const parts = (hash.replace(/^#/, "").split("?")[0] || "").split("/");
-  const segment = SEGMENTS.includes(parts[3]) ? parts[3] : "feed";
+  let seg = parts[3];
+  if (seg === "artifact") seg = "artifacts";
+  if (seg === "session") seg = "sessions";
+  const segment = SEGMENTS.includes(seg) ? seg : "feed";
   return { id: parts[2] || "", segment };
 }
 
@@ -126,7 +129,10 @@ function sessionsTwoPane(current, listHTML, sessions) {
 
 export async function projectScreen(params, gen, path) {
   const parts = (path || "").split("/");
-  const segment = SEGMENTS.includes(parts[3]) ? parts[3] : "feed";
+  let seg = parts[3];
+  if (seg === "artifact") seg = "artifacts";
+  if (seg === "session") seg = "sessions";
+  const segment = SEGMENTS.includes(seg) ? seg : "feed";
   const { projects, current } = await pickProject(parts[2]);
   if (stale(gen)) return;
   if (!projects.length) {
@@ -145,6 +151,15 @@ export async function projectScreen(params, gen, path) {
     // The address named no project, or one that is gone. Land on the first
     // project, keeping the segment the reader asked for.
     location.hash = `#/projects/${encodeURIComponent(current)}/${segment}`;
+    return;
+  }
+  const kindParam = params?.get("kind") || params?.get("kinds");
+  if (kindParam === "artifact") {
+    location.hash = `#/projects/${encodeURIComponent(id)}/artifacts`;
+    return;
+  }
+  if (kindParam === "session") {
+    location.hash = `#/projects/${encodeURIComponent(id)}/sessions`;
     return;
   }
   const project = projects.find((p) => p.id === id);

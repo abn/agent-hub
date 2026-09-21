@@ -4979,12 +4979,12 @@ def check_feed_chips(page, watch: Watch, seen: list | None = None) -> None:
         return
     if chips["role"] != "group" or not chips["name"]:
         watch.fail(f"the chip row is a {chips['role']!r} named {chips['name']!r}")
-    want = ["All", "Signal", "Finished", "Question", "Answer", "Approval", "Artifact", "Session"]
+    want = ["All · 111", "Finished · 1", "Signals · 99"]
     if chips["labels"] != want:
         watch.fail(f"the chips read {chips['labels']}")
-    if chips["pressed"] != ["true"] + ["false"] * 7:
+    if chips["pressed"] != ["true", "false", "false"]:
         watch.fail(f"with no filter the pressed states are {chips['pressed']}")
-    if chips["tops"] <= 1 or chips["scrolls"] == "auto" or chips["wide"] or chips["page"]:
+    if chips["tops"] != 1 or chips["page"]:
         watch.fail(
             f"the chips sit on {chips['tops']} line(s), overflow-x {chips['scrolls']},"
             f" row scrolls {chips['wide']}, page scrolls {chips['page']}"
@@ -6779,23 +6779,17 @@ def check_filter_chips(page, watch: Watch, project: str) -> None:
         )
     first_top = feed_data["chips"][0]["top"]
     last_top = feed_data["chips"][-1]["top"]
-    if last_top <= first_top:
+    if last_top != first_top:
         watch.fail(
-            f"feed chips do not wrap onto subsequent lines: first chip top {first_top}, last chip top {last_top}"
+            f"feed chips wrap onto multiple lines: first chip top {first_top}, last chip top {last_top}"
         )
     for chip in feed_data["chips"]:
         if not chip["text"] or not chip["text"][0].isupper():
             watch.fail(f"feed chip {chip['kind']!r} text {chip['text']!r} does not start uppercase")
         if chip["kind"] != chip["kind"].lower():
             watch.fail(f"feed chip data-kind {chip['kind']!r} is not lowercase")
-        if chip["w"] + 0.5 < 44 or chip["h"] + 0.5 < 44:
-            watch.fail(
-                f"feed chip {chip['kind']!r} target {chip['w']:.0f}x{chip['h']:.0f}px is under the 44px minimum"
-            )
-        if chip["right"] > feed_data["innerWidth"]:
-            watch.fail(
-                f"feed chip {chip['kind']!r} overflows viewport: right {chip['right']} > innerWidth {feed_data['innerWidth']}"
-            )
+        if abs(chip["h"] - 32) > 1:
+            watch.fail(f"feed chip {chip['kind']!r} height is {chip['h']}px, expected 32px")
 
     page.focus("main .feed-chips button.chip")
     focused = [page.evaluate("document.activeElement.dataset.kind")]
@@ -7389,6 +7383,188 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
         watch.drain_rejections()
 
 
+def check_feed_chips_and_row_grammar(page, watch: Watch, port: int, project: str) -> None:
+    """Feed chips: 32px pill, 13/500, one scrolling row with 6px dot, sentence case with counts.
+    Dropped chips (artifact, session) are not drawn, and kinds with 0 events are hidden.
+    Sibling artifact publishes within two minutes collapse into one row.
+    Event verbs are lower case and past tense; signals stay sentences.
+    """
+    watch.enter("feed: chips redraw and row grammar")
+    goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+    if not settle(page, "!!document.querySelector('main .feed-chips')"):
+        watch.fail("the feed chips row did not render")
+        return
+
+    # 1. Chip geometry & styling
+    chips_info = page.evaluate(
+        "(() => {"
+        " const row = document.querySelector('main .feed-chips');"
+        " if (!row) return null;"
+        " const chips = [...row.querySelectorAll('button.chip')];"
+        " return {"
+        "   scrollWidth: row.scrollWidth,"
+        "   clientWidth: row.clientWidth,"
+        "   overflowX: getComputedStyle(row).overflowX,"
+        "   pageScrollWidth: document.documentElement.scrollWidth,"
+        "   pageClientWidth: document.documentElement.clientWidth,"
+        "   chips: chips.map(c => ({"
+        "     text: (c.innerText || c.textContent || '').trim(),"
+        "     kind: c.dataset.kind || '',"
+        "     action: c.dataset.action || '',"
+        "     pressed: c.getAttribute('aria-pressed'),"
+        "     h: c.getBoundingClientRect().height,"
+        "     fontSize: getComputedStyle(c).fontSize,"
+        "     top: Math.round(c.getBoundingClientRect().top),"
+        "     dot: (() => {"
+        "       const d = c.querySelector('.chip-dot');"
+        "       if (!d) return null;"
+        "       const r = d.getBoundingClientRect();"
+        "       return { w: Math.round(r.width), h: Math.round(r.height) };"
+        "     })()"
+        "   }))"
+        " }; })()"
+    )
+    if not chips_info or not chips_info["chips"]:
+        watch.fail("no feed chips found")
+        return
+
+    # Geometry: pill height 32px, text size 13px, one row (no wrap)
+    first_top = chips_info["chips"][0]["top"]
+    for c in chips_info["chips"]:
+        if abs(c["h"] - 32) > 1:
+            watch.fail(f"chip {c['kind']!r} height is {c['h']}px, expected 32px")
+        if c["fontSize"] != "13px":
+            watch.fail(f"chip {c['kind']!r} font-size is {c['fontSize']}, expected 13px")
+        if c["top"] != first_top:
+            watch.fail(f"chip {c['kind']!r} wrapped onto another line: top {c['top']} != {first_top}")
+        if c["kind"] != "all":
+            if not c["dot"] or c["dot"]["w"] != 6 or c["dot"]["h"] != 6:
+                watch.fail(f"chip {c['kind']!r} does not have a 6px kind dot: {c['dot']}")
+
+    # Page should not scroll horizontally
+    if chips_info["pageScrollWidth"] > chips_info["pageClientWidth"]:
+        watch.fail(
+            f"feed screen has horizontal page scroll: {chips_info['pageScrollWidth']} > {chips_info['pageClientWidth']}"
+        )
+
+    # Dropped chips: artifact, session, answer must not be present
+    kinds = [c["kind"] for c in chips_info["chips"]]
+    for dropped in ("artifact", "session", "answer"):
+        if dropped in kinds:
+            watch.fail(f"dropped kind {dropped!r} drew a chip in {kinds}")
+
+    # Labels and counts: "All · <n>", sentence case
+    for c in chips_info["chips"]:
+        text = c["text"]
+        if " · " not in text:
+            watch.fail(f"chip {c['kind']!r} label {text!r} does not have count appended with middle dot")
+        else:
+            label, count_str = text.split(" · ", 1)
+            if not count_str.isdigit():
+                watch.fail(f"chip {c['kind']!r} count {count_str!r} is not a number")
+            elif int(count_str) <= 0:
+                watch.fail(f"chip {c['kind']!r} with 0 events was drawn: {text}")
+            if not label[0].isupper():
+                watch.fail(f"chip {c['kind']!r} label {label!r} is not sentence case")
+
+    # Selected chip has ink fill
+    all_chip = next((c for c in chips_info["chips"] if c["kind"] == "all"), None)
+    if not all_chip or all_chip["pressed"] != "true":
+        watch.fail("All chip is not initially pressed")
+
+    # Filter toggle works: pressing another chip filters, pressing All restores
+    other = next((c for c in chips_info["chips"] if c["kind"] != "all"), None)
+    if other:
+        target_selector = f'main .feed-chips [data-kind="{other["kind"]}"]'
+        feed_press(page, watch, target_selector, f"{other['kind']} chip")
+        if not settle(page, f"document.querySelector('{target_selector}')?.getAttribute('aria-pressed') === 'true'"):
+            watch.fail(f"pressing {other['kind']} chip did not set aria-pressed true")
+        all_selector = 'main .feed-chips [data-kind="all"]'
+        feed_press(page, watch, all_selector, "All chip")
+        if not settle(page, f"document.querySelector('{all_selector}')?.getAttribute('aria-pressed') === 'true'"):
+            watch.fail("pressing All chip did not restore aria-pressed true")
+
+    # Keyboard navigation: tabbing reaches all chips in order
+    page.focus("main .feed-chips button.chip")
+    focused = [page.evaluate("document.activeElement.dataset.kind")]
+    for _ in range(len(chips_info["chips"]) - 1):
+        page.keyboard.press("Tab")
+        focused.append(page.evaluate("document.activeElement.dataset.kind"))
+    expected_kinds = [c["kind"] for c in chips_info["chips"]]
+    if focused != expected_kinds:
+        watch.fail(f"tabbing through feed chips focused {focused!r}, expected {expected_kinds!r}")
+
+    # Dropped kind address resolution: navigating to dropped kind route lands sanely
+    goto(page, f"#/projects/{quote(project)}/feed?kind=artifact", harness.PROJECT_NAME)
+    page.wait_for_timeout(200)
+    current_hash = page.evaluate("location.hash")
+    empty_error = page.evaluate("!!document.querySelector('main .error, main .empty-state')")
+    if empty_error:
+        watch.fail(f"address naming dropped kind resulted in empty error state at {current_hash}")
+
+    # Sibling artifact publishes collapse:
+    now = datetime.now(timezone.utc)
+    cluster_events = [
+        {
+            "id": f"evt-art-{i}",
+            "project_id": project,
+            "kind": "artifact",
+            "actor": "claude-code",
+            "summary": f"published artifact-{i}",
+            "payload": {"action": "published", "artifact_id": f"art-{i}", "title": f"artifact-{i}"},
+            "created_at": (now - timedelta(seconds=i * 20)).isoformat(),
+        }
+        for i in range(4)
+    ]
+    spread_events = [
+        {
+            "id": f"evt-spread-{i}",
+            "project_id": project,
+            "kind": "artifact",
+            "actor": "claude-code",
+            "summary": f"published spread-{i}",
+            "payload": {"action": "published", "artifact_id": f"art-s-{i}", "title": f"spread-{i}"},
+            "created_at": (now - timedelta(minutes=i * 3)).isoformat(),
+        }
+        for i in range(4)
+    ]
+
+    def handle_mock_cluster(route):
+        route.fulfill(status=200, content_type="application/json", json={"events": cluster_events, "last_seen": ""})
+
+    goto(page, "#/home", home_title())
+    page.route(f"**/api/v1/projects/{quote(project)}/feed*", handle_mock_cluster)
+    try:
+        goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+        settle(page, "document.querySelectorAll('main .feed-row').length > 0")
+        row_titles = page.evaluate("[...document.querySelectorAll('main .feed-row .title')].map(e => e.textContent.trim())")
+        if "published 4 artifacts" not in row_titles:
+            watch.fail(f"4 sibling artifact publishes within 2m did not collapse into 'published 4 artifacts': {row_titles}")
+        if len(row_titles) != 1:
+            watch.fail(f"expected exactly 1 collapsed row, got {len(row_titles)}: {row_titles}")
+    finally:
+        page.unroute(f"**/api/v1/projects/{quote(project)}/feed*", handle_mock_cluster)
+
+    def handle_mock_spread(route):
+        route.fulfill(status=200, content_type="application/json", json={"events": spread_events, "last_seen": ""})
+
+    goto(page, "#/home", home_title())
+    page.route(f"**/api/v1/projects/{quote(project)}/feed*", handle_mock_spread)
+    try:
+        goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+        settle(page, "document.querySelectorAll('main .feed-row').length > 0")
+        spread_rows = page.evaluate("[...document.querySelectorAll('main .feed-row .title')].map(e => e.textContent.trim())")
+        if len(spread_rows) != 4:
+            watch.fail(f"4 artifact publishes spread over 10m should draw 4 rows, got {len(spread_rows)}: {spread_rows}")
+    finally:
+        page.unroute(f"**/api/v1/projects/{quote(project)}/feed*", handle_mock_spread)
+
+    # Return to normal feed
+    goto(page, "#/home", home_title())
+    goto(page, f"#/projects/{quote(project)}/feed", harness.PROJECT_NAME)
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7559,6 +7735,7 @@ def run() -> int:
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(watch, check_feed_chips_and_row_grammar, page, watch, port, project)
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
                 run_step(watch, check_inbox_earlier_and_snooze, browser, watch, port, project)
