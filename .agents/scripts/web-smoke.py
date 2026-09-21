@@ -2886,6 +2886,34 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
         watch.fail("the viewer chrome carries no forget control")
     if not gate.locator("#hub-forget").is_hidden():
         watch.fail("the forget control shows with nothing remembered")
+    # A locked artifact has nothing to show, so the frame takes no room. It
+    # used to sit in flow at 60vh, which made this short gate scroll; on a
+    # phone the reader scrolled to reach the button and the heading slid under
+    # the sticky header. Measured, not asserted from the markup, because the
+    # UA [hidden] rule loses to the frame's own display:block.
+    locked_frame = gate.locator("#hub-frame").bounding_box()
+    if locked_frame and locked_frame["height"] > 1:
+        watch.fail(
+            f"the locked gate reserves {locked_frame['height']:.0f}px for an empty frame"
+        )
+    overflow = gate.locator("html").evaluate("el => el.scrollHeight - el.clientHeight")
+    if overflow > 1:
+        watch.fail(f"the locked gate scrolls by {overflow}px with nothing below it")
+    # The password is dots until the reader asks to see it, and goes back to
+    # dots when they are done.
+    field = gate.locator("#hub-password")
+    toggle = gate.locator("#hub-show-password")
+    if toggle.count() != 1:
+        watch.fail("the gate offers no way to read the password back")
+    else:
+        if field.get_attribute("type") != "password":
+            watch.fail("the password field does not start masked")
+        toggle.check()
+        if field.get_attribute("type") != "text":
+            watch.fail("show password left the field masked")
+        toggle.uncheck()
+        if field.get_attribute("type") != "password":
+            watch.fail("clearing show password left the value on screen")
     gate.locator("#hub-password").fill(harness.PROTECTED_PASSWORD)
     gate.locator('#hub-unlock-form button[type="submit"]').click()
     try:

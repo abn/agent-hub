@@ -465,6 +465,9 @@ const VIEWER_RULES: &[&str] = &[
     "#hub-forget-note:empty{display:none}",
     "#hub-meta-line{font-family:var(--font-mono);font-size:12px;",
     "iframe#hub-frame{width:100%;min-height:60vh;border:0;display:block}",
+    // Without this the frame's own display:block beats the UA [hidden] rule
+    // and the locked gate keeps reserving 60vh for an empty frame.
+    "iframe#hub-frame[hidden]{display:none}",
     "#hub-password{width:100%;min-height:48px;font-size:17px;",
     "#hub-unlock-form button[type=\"submit\"]{width:100%;min-height:48px;",
     "#hub-unlock-error{font-size:12px;color:var(--danger)}",
@@ -805,6 +808,20 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
     assert!(body.contains("id=\"hub-unlock-form\""));
     assert!(body.contains("id=\"hub-password\""));
     assert!(body.contains("id=\"hub-remember\""));
+    // A pasted or thumb-typed password is unreadable as dots, so the reader
+    // can look at it on their own screen before the hub refuses it.
+    assert!(
+        body.contains("id=\"hub-show-password\"") && body.contains("Show password"),
+        "the gate offers no way to read the password back"
+    );
+    // A locked artifact has nothing to frame. The frame is 60vh tall, so left
+    // in flow it gave the gate a screenful of empty space, which made the
+    // short gate scroll and slid the heading under the sticky header.
+    assert!(
+        body.contains("<iframe id=\"hub-frame\"")
+            && body.contains("sandbox=\"allow-scripts\" hidden>"),
+        "the locked gate ships a visible empty frame"
+    );
     // One refusal deliberately leaves focus where it is, so the line has to
     // announce itself rather than rely on a focus move to be heard.
     assert!(body.contains("<p id=\"hub-unlock-error\" role=\"alert\" hidden>"));

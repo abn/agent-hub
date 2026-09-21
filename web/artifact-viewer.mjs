@@ -219,14 +219,40 @@ function renderForTheme(state, theme) {
     } else {
       frame.srcdoc = unlocked;
     }
+    reveal(frame);
     return;
   }
   const body = readJson("hub-markdown-body");
   if (typeof body === "string") {
     showRenderedMarkdown(frame, meta, body, theme);
+    reveal(frame);
     return;
   }
-  if (meta.kind === "html") frame.src = frameUrl(meta, theme);
+  if (meta.kind === "html") {
+    frame.src = frameUrl(meta, theme);
+    reveal(frame);
+  }
+}
+
+// A locked artifact has nothing to put in the frame, and the frame is 60vh
+// tall, so leaving it in flow gave the gate a screenful of empty space below
+// it. On a phone that made the short gate scroll, and scrolling slid the
+// heading under the sticky header. The protected shell therefore ships the
+// frame hidden and it appears only once it has something to show.
+function reveal(frame) {
+  frame.hidden = false;
+}
+
+// This document's height, for a host embedding it. Repeats are dropped: the
+// host resizing us to what we asked for changes our size, which would
+// otherwise bounce straight back as another message.
+let reportedHeight = 0;
+function reportHeight() {
+  if (!window.parent || window.parent === window) return;
+  const height = document.documentElement.scrollHeight;
+  if (height === reportedHeight) return;
+  reportedHeight = height;
+  window.parent.postMessage({ hubFrameHeight: height }, "*");
 }
 
 // Whether this document may keep anything at all. Inside the viewer frame the
@@ -353,10 +379,19 @@ function init() {
     if (typeof height !== "number" || !isFinite(height)) return;
     const clamped = Math.min(Math.max(Math.round(height), 120), 12000);
     state.frame.style.height = `${clamped}px`;
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ hubFrameHeight: document.body.scrollHeight || clamped }, "*");
-    }
+    reportHeight();
   });
+
+  // Telling the host how tall this page is used to happen only as a side
+  // effect of the inner frame reporting its own height. A locked artifact
+  // never loads that frame, so nothing was ever reported and the app left
+  // this document in an iframe shorter than the gate, which then scrolled
+  // inside it. This page reports for itself instead, whenever it changes
+  // size, so the gate is as tall as it needs to be before anything unlocks.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(reportHeight).observe(document.documentElement);
+  }
+  reportHeight();
 
   const pickerWrap = document.getElementById("hub-picker-wrap");
   const picker = document.getElementById("hub-version-select");
@@ -382,6 +417,16 @@ function init() {
   if (remember && !storageWorks()) {
     (remember.closest(".hub-remember") || remember).remove();
     remember = null;
+  }
+  // A password is typed on a phone keyboard into a field showing dots, and a
+  // wrong character is indistinguishable from a right one until the whole
+  // thing is refused. Revealing it is the reader's own call on their own
+  // screen.
+  const showPassword = document.getElementById("hub-show-password");
+  if (showPassword && password) {
+    showPassword.addEventListener("change", () => {
+      password.type = showPassword.checked ? "text" : "password";
+    });
   }
   // The gate that remembered a password is hidden once it unlocks by itself,
   // so forgetting needs its own control in the chrome.
