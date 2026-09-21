@@ -156,10 +156,11 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
         1,
         "the answer resolves exactly one item"
     );
-    assert_eq!(
-        item_with_id(resolved_items, &question_id)["status"],
-        "resolved"
-    );
+    let resolved_item = item_with_id(resolved_items, &question_id);
+    assert_eq!(resolved_item["status"], "resolved");
+    assert_eq!(resolved_item["answer"]["body"], "Yes, ship it");
+    assert_eq!(resolved_item["answer"]["actor"], "mcp-inbox");
+    assert_eq!(resolved_item["answer"]["event_id"], answer_id);
 
     let action = server.call_tool("inbox_read", json!({"status": "action"}));
     assert_eq!(

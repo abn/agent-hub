@@ -7185,6 +7185,16 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
         {"decision": "approve", "note": note_text},
     )
 
+    summary_question = "Which database engine should we target?"
+    answer_text = "Turso native Rust engine"
+    quest_id = one_off_question(port, project, summary_question)
+    harness.request(
+        port,
+        "POST",
+        f"/api/v1/questions/{quest_id}/answer",
+        {"body": answer_text},
+    )
+
     context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
     context.add_init_script(
         f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
@@ -7204,13 +7214,17 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
             watch.fail("Earlier is not folded by default on desktop")
 
         if not settle(page, "!!document.querySelector('main details[data-group=\"earlier\"]')"):
-            watch.fail("the decided approval does not appear under Earlier")
+            watch.fail("the resolved items do not appear under Earlier")
             return
 
         page.click('main summary[data-group="earlier"]')
         find_appr = f"{INBOX_ITEM_ID}({json.dumps(summary_approval)})"
         if not settle(page, find_appr):
             watch.fail("the decided approval does not appear under Earlier")
+            return
+        find_quest = f"{INBOX_ITEM_ID}({json.dumps(summary_question)})"
+        if not settle(page, find_quest):
+            watch.fail("the answered question does not appear under Earlier")
             return
 
         row_info = page.evaluate(
@@ -7235,8 +7249,48 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
         if note_text not in row_info["note"] and note_text not in row_info["text"]:
             watch.fail(f"the decided approval row does not show its note: {row_info}")
 
+        quest_row = page.evaluate(
+            f"((id) => {{"
+            f" const item = document.querySelector(`main .inbox-item[data-id=\"${{id}}\"]`);"
+            f" if (!item) return null;"
+            f" const group = item.closest('[data-group]') ? item.closest('[data-group]').dataset.group : '';"
+            f" const acts = [...item.querySelectorAll('button')].map((b) => b.textContent.trim());"
+            f" const outcome = item.querySelector('.inbox-outcome') ? item.querySelector('.inbox-outcome').textContent.trim() : '';"
+            f" const note = item.querySelector('.inbox-note') ? item.querySelector('.inbox-note').textContent.trim() : '';"
+            f" const text = item.textContent;"
+            f" return {{ group, acts, outcome, note, text }};"
+            f"}})({json.dumps(quest_id)})"
+        )
+        if not quest_row or quest_row["group"] != "earlier":
+            watch.fail(f"the answered question is in group {quest_row.get('group')!r}, not earlier")
+            return
+        if "Reply" in quest_row["acts"]:
+            watch.fail(f"the answered question row still offers reply control: {quest_row['acts']}")
+        if "Answered" not in quest_row["outcome"] and "Answered" not in quest_row["text"]:
+            watch.fail(f"the answered question does not show its outcome in words: {quest_row}")
+        if answer_text not in quest_row["note"] and answer_text not in quest_row["text"]:
+            watch.fail(f"the answered question row does not show its answer: {quest_row}")
+
+        page.click(f'main .inbox-item[data-id="{quest_id}"] .title a')
+        if not settle(page, f"!!document.querySelector('main .inbox-detail') && document.querySelector('main .inbox-detail').textContent.includes({json.dumps(summary_question)})"):
+            watch.fail("opening answered question did not open card")
+            return
+        quest_card = page.evaluate(
+            "(() => {"
+            " const card = document.querySelector('main .inbox-detail');"
+            " if (!card) return null;"
+            " const acts = [...card.querySelectorAll('button')].map((b) => b.textContent.trim());"
+            " const text = card.textContent;"
+            " return { acts, text };"
+            "})()"
+        )
+        if "Reply" in quest_card["acts"]:
+            watch.fail(f"the open card for answered question offers reply control: {quest_card['acts']}")
+        if answer_text not in quest_card["text"]:
+            watch.fail("the open card does not show the answer at full size")
+
         page.click(f'main .inbox-item[data-id="{appr_id}"] .title a')
-        if not settle(page, "!!document.querySelector('main .inbox-detail')"):
+        if not settle(page, f"!!document.querySelector('main .inbox-detail') && document.querySelector('main .inbox-detail').textContent.includes({json.dumps(summary_approval)})"):
             watch.fail("opening decided approval did not open card")
             return
         card_info = page.evaluate(
@@ -7254,6 +7308,7 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
             watch.fail("the open card does not show the decision note at full size")
 
         summary_wait = "Approve production deployment"
+
         wait_id = one_off_event(port, project, "approval", summary_wait)
         page.goto(f"http://127.0.0.1:{port}/#/inbox", wait_until="load")
         find_wait = f"{INBOX_ITEM_ID}({json.dumps(summary_wait)})"
@@ -7261,16 +7316,17 @@ def check_inbox_earlier_and_snooze(browser, watch: Watch, port: int, project: st
             watch.fail("seeded waiting item not found for snooze test")
             return
 
-        snooze_btn = page.evaluate(
+        btn_info = page.evaluate(
             f"((id) => {{"
             f" const btn = document.querySelector(`main .inbox-item[data-id=\"${{id}}\"] [data-action=\"inbox-snooze\"]`);"
             f" return btn ? btn.textContent.trim() : '';"
             f"}})({json.dumps(wait_id)})"
         )
-        if not snooze_btn or "1" not in snooze_btn:
-            watch.fail(f"the snooze button text is {snooze_btn!r}, expected period stated")
+        if not btn_info or "1" not in btn_info:
+            watch.fail(f"the snooze button text is {btn_info!r}, expected period stated")
 
         page.click(f'main .inbox-item[data-id="{wait_id}"] [data-action="inbox-snooze"]')
+
 
         if not settle(page, "!!document.querySelector('.toast .toast-undo')"):
             watch.fail("snooze did not raise an undo toast")

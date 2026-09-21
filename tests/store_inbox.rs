@@ -1010,3 +1010,98 @@ async fn a_decision_is_read_from_the_approval_s_own_project_only() {
         "another project's answer reached the listing: {shown}"
     );
 }
+
+#[tokio::test]
+async fn an_answered_question_shows_its_answer_in_the_inbox() {
+    let db = open().await;
+    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+        .await
+        .expect("post");
+    let waiting = questions::post(&db, &InboxCaps::disabled(), question("Which region?"))
+        .await
+        .expect("post");
+    let answer = questions::answer(&db, "human", &asked, "yes, after the backup", None)
+        .await
+        .expect("answer");
+    let answered_at = events::get(&db, &answer)
+        .await
+        .expect("get")
+        .expect("exists")
+        .created_at;
+
+    let human = inbox::list(&db, None, None, 50).await.expect("list");
+    let agent = inbox::list_for_agent(&db, None, None, 50, None)
+        .await
+        .expect("agent list");
+    for (who, items) in [("the human", human), ("an agent", agent)] {
+        let shown = serde_json::to_value(&items).expect("serialize");
+        let of = |id: &str| {
+            shown
+                .as_array()
+                .expect("items")
+                .iter()
+                .find(|item| item["event_id"] == id)
+                .unwrap_or_else(|| panic!("{id} is listed for {who}"))
+                .clone()
+        };
+        let resolved = of(&asked);
+        assert_eq!(resolved["status"], "resolved");
+        assert_eq!(
+            resolved["answer"],
+            serde_json::json!({
+                "body": "yes, after the backup",
+                "actor": "human",
+                "event_id": answer,
+                "answered_at": answered_at,
+            }),
+            "the answered question carries its outcome for {who}: {resolved}"
+        );
+        assert!(
+            of(&waiting).get("answer").is_none(),
+            "a question that still waits has no answer"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_answer_is_read_from_the_question_s_own_project_only() {
+    let db = open().await;
+    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+        .await
+        .expect("post");
+    let answer = questions::answer(&db, "human", &asked, "yes, after the backup", None)
+        .await
+        .expect("answer");
+
+    // Planted directly, since the write path refuses a thread in another
+    // project. Its id sorts before every real one, so a lookup that ignored
+    // the project would meet it first.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at, session_id)
+         VALUES ('00000000000000000000000000', 'elsewhere', 'answer', 'spy-agent', 're: Deploy tonight?', ?1, ?2, 0, '2026-01-01T00:00:00Z', NULL)",
+        (
+            r#"{"body":"planted answer from elsewhere"}"#,
+            asked.as_str(),
+        ),
+    )
+    .await
+    .expect("plant");
+
+    let items = inbox::list(&db, None, None, 50).await.expect("list");
+    let shown = serde_json::to_value(&items).expect("serialize");
+    let entry = shown
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["event_id"] == asked.as_str())
+        .expect("the question is listed");
+    assert_eq!(entry["answer"]["body"], "yes, after the backup", "{entry}");
+    assert_eq!(entry["answer"]["actor"], "human");
+    assert_eq!(entry["answer"]["event_id"], answer);
+    assert!(
+        !shown.to_string().contains("planted answer from elsewhere")
+            && !shown.to_string().contains("spy-agent"),
+        "another project's answer reached the listing: {shown}"
+    );
+}

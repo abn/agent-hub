@@ -485,7 +485,7 @@ async fn the_human_reassigns_an_active_session() {
 /// A fixed instant, so the coalescing window and the active window are read
 /// against explicit times rather than a sleep.
 fn at(offset_secs: i64) -> time::OffsetDateTime {
-    time::OffsetDateTime::from_unix_timestamp(1_790_000_000).expect("a valid instant")
+    time::OffsetDateTime::from_unix_timestamp(1_890_000_000).expect("a valid instant")
         + time::Duration::seconds(offset_secs)
 }
 

@@ -865,6 +865,43 @@ async fn a_decision_note_is_shown_on_the_feed_and_on_the_inbox_item() {
 }
 
 #[tokio::test]
+async fn an_answered_question_shows_its_answer_on_the_inbox_item() {
+    let state = state().await;
+    let question = seed_question(&state, "Deploy tonight?").await;
+
+    let answered = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/questions/{question}/answer"),
+            Some("Bearer token"),
+            Some(json!({ "body": "yes, after the backup" })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(answered.status(), StatusCode::OK);
+    let answer = json_body(answered).await["event_id"]
+        .as_str()
+        .expect("event id")
+        .to_string();
+
+    let inbox = router(state.clone())
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=resolved",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let inbox = json_body(inbox).await;
+    let item = &inbox["items"][0];
+    assert_eq!(item["event_id"], question.as_str());
+    assert_eq!(item["answer"]["body"], "yes, after the backup", "{item}");
+    assert_eq!(item["answer"]["event_id"], answer.as_str());
+    assert_eq!(item["answer"]["actor"], "human");
+}
+
+#[tokio::test]
 async fn a_decision_note_over_the_cap_is_a_problem_and_the_approval_still_waits() {
     let state = state().await;
     let approval = seed_approval(&state, "Restart the node?").await;

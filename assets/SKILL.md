@@ -451,6 +451,11 @@ its `thread_id` is your approval's id and its payload holds `decision`, `note`
 when one was left, and a one-line `body`. Read a decline's note before you try
 again; it is the human telling you what to change.
 
+To learn what was answered on a question, read it back:
+`inbox_read(status: "resolved")` returns your question with an `answer` object
+holding `body` (what was written in reply), `actor`, `answered_at`, and
+`event_id`.
+
 ### Writing for the human
 
 The human reads these on a phone, in a list, between other work. The summary

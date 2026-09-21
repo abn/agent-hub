@@ -29,6 +29,9 @@ pub struct InboxItem {
     /// How an approval was decided, once it has been.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision: Option<Decision>,
+    /// How a question was answered, once it has been.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Answer>,
 }
 
 /// The outcome of an approval, as its inbox entry shows it.
@@ -43,6 +46,18 @@ pub struct Decision {
     /// The answer event on the approval's thread that records the decision.
     pub event_id: String,
     pub decided_at: String,
+}
+
+/// How a question was answered, as its inbox entry shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Answer {
+    /// What was written in reply.
+    pub body: String,
+    /// Who answered.
+    pub actor: String,
+    /// The answer event on the question's thread that records the answer.
+    pub event_id: String,
+    pub answered_at: String,
 }
 
 /// Status counts for the home summary.
@@ -254,6 +269,7 @@ async fn list_as(
     }
     drop(rows);
     attach_decisions(&conn, &mut items).await?;
+    attach_answers(&conn, &mut items).await?;
     name_projects(&conn, &mut items).await?;
     Ok(items)
 }
@@ -334,6 +350,69 @@ async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<
             .iter()
             .find(|(thread, project, _)| *thread == item.event_id && *project == item.project_id)
             .map(|(_, _, decision)| decision.clone());
+    }
+    Ok(())
+}
+
+/// Give each resolved question on a page its answer, in one read for the page.
+///
+/// The answer is the answer event the question route appends to the question's
+/// thread. It is looked up by the ids of entries already listed, and an answer
+/// held by another project is not the entry's own, so a listing shows nothing
+/// its confinement did not already allow.
+async fn attach_answers(conn: &Connection, items: &mut [InboxItem]) -> Result<()> {
+    let answered: Vec<&str> = items
+        .iter()
+        .filter(|item| item.kind == "question" && item.status == "resolved")
+        .map(|item| item.event_id.as_str())
+        .collect();
+    if answered.is_empty() {
+        return Ok(());
+    }
+    let holes: Vec<String> = (1..=answered.len()).map(|at| format!("?{at}")).collect();
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT thread_id, project_id, id, actor, payload, created_at FROM events
+                 WHERE kind = 'answer' AND thread_id IN ({}) ORDER BY id ASC",
+                holes.join(", ")
+            ),
+            answered
+                .iter()
+                .map(|id| Value::Text(id.to_string()))
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(engine)?;
+    let mut found: Vec<(String, String, Answer)> = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let payload: serde_json::Value = match text_at(&row, 4)? {
+            Some(json) => serde_json::from_str(&json)
+                .map_err(|err| Error::Engine(format!("stored payload is not JSON: {err}")))?,
+            None => continue,
+        };
+        let Some(body) = payload.get("body").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        found.push((
+            required_text(&row, 0)?,
+            required_text(&row, 1)?,
+            Answer {
+                body: body.to_string(),
+                actor: required_text(&row, 3)?,
+                event_id: required_text(&row, 2)?,
+                answered_at: required_text(&row, 5)?,
+            },
+        ));
+    }
+    for item in items.iter_mut() {
+        if item.kind != "question" || item.status != "resolved" {
+            continue;
+        }
+        item.answer = found
+            .iter()
+            .find(|(thread, project, _)| *thread == item.event_id && *project == item.project_id)
+            .map(|(_, _, answer)| answer.clone());
     }
     Ok(())
 }
@@ -537,6 +616,7 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         created_at: required_text(row, 7)?,
         updated_at: required_text(row, 8)?,
         decision: None,
+        answer: None,
         project_display_name: None,
     })
 }

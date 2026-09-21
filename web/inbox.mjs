@@ -145,6 +145,9 @@ function noteOf(item) {
   if (item.decision && item.decision.note) {
     return String(item.decision.note).trim();
   }
+  if (item.answer && item.answer.body) {
+    return String(item.answer.body).trim();
+  }
   const payload = item.payload || {};
   if (payload.answer) return String(payload.answer).trim();
   if (payload.note) return String(payload.note).trim();

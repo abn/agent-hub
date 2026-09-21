@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, resolved questions carry attached answers in inbox
+
+* **Update**: [The human surface](architecture/human-surface.md) and
+  [the agent surface](architecture/agent-surface.md) document that a resolved
+  question in the inbox carries its attached answer object holding who replied,
+  when, and what was written, matching the shape returned by `inbox_read`.
+
 ## 2026-09-21, artifact viewer redraw, version sheet, and grouped list
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
