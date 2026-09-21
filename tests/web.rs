@@ -8,7 +8,7 @@ use tower::ServiceExt;
 
 mod common;
 
-use common::http::{get, json_body as json, request, text_body as text};
+use common::http::{body_bytes, get, json_body as json, request, text_body as text};
 use common::state::TestState;
 
 const APP_JS: &str = include_str!("../web/app.js");
@@ -274,10 +274,61 @@ async fn serves_every_shell_asset_with_a_policy() {
     );
 }
 
+#[tokio::test]
+async fn manifest_lists_png_icons_and_serves_them() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(get("/manifest.webmanifest", None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let manifest: serde_json::Value = json(response).await;
+    let icons = manifest["icons"].as_array().expect("manifest icons array");
+    let pngs: Vec<_> = icons
+        .iter()
+        .filter(|icon| icon["type"].as_str() == Some("image/png"))
+        .collect();
+    assert!(
+        !pngs.is_empty(),
+        "manifest lists no PNG icons, so Chrome on Android will not install"
+    );
+    let has_192 = pngs
+        .iter()
+        .any(|icon| icon["sizes"].as_str() == Some("192x192"));
+    let has_512 = pngs.iter().any(|icon| {
+        icon["sizes"].as_str() == Some("512x512")
+            && icon["purpose"].as_str().unwrap_or("any").contains("any")
+    });
+    let has_maskable = pngs
+        .iter()
+        .any(|icon| icon["purpose"].as_str().unwrap_or("").contains("maskable"));
+    assert!(has_192, "manifest must list a 192px PNG icon");
+    assert!(has_512, "manifest must list a 512px PNG icon");
+    assert!(has_maskable, "manifest must list a maskable PNG icon");
+
+    for icon in pngs {
+        let src = icon["src"].as_str().expect("src");
+        let app = router(state.clone());
+        let response = app.oneshot(get(src, None)).await.expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{src} must be served");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("image/png"),
+            "{src} must be served with image/png content type"
+        );
+        let bytes = body_bytes(response).await;
+        assert!(!bytes.is_empty(), "{src} must not be empty");
+    }
+}
+
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 39] = [
+const SHELL_PATHS: [&str; 42] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -312,6 +363,9 @@ const SHELL_PATHS: [&str; 39] = [
     "/tokens.css",
     "/manifest.webmanifest",
     "/icon.svg",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-512-maskable.png",
     "/crypto.mjs",
     "/vendor/marked.js",
     "/vendor/mermaid.runtime.js",
@@ -395,7 +449,7 @@ async fn service_worker_cache_name_follows_the_assets() {
         assert_eq!(response.status(), StatusCode::OK, "{path}");
         hasher.update(path.as_bytes());
         hasher.update([0]);
-        hasher.update(text(response).await.as_bytes());
+        hasher.update(&body_bytes(response).await);
         hasher.update([0]);
     }
     let version: String = hasher

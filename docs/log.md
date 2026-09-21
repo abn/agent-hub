@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, phone shell layering, mobile settings route, and install icons
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  phone shell fixes: the fixed tab bar carries `z-index: 20` so list row controls
+  cannot paint over it while staying below toasts, dialogs, and drawers. The
+  projects index screen at `#/projects` adds a Settings gear icon beside the
+  New link so Settings is reachable on a phone from Home without visiting a
+  project. The web app manifest includes raster PNG icons (192px, 512px, and
+  maskable) generated from the mark and served by the embedded shell table.
+
 ## 2026-09-21, resolved questions carry attached answers in inbox
 
 * **Update**: [The human surface](architecture/human-surface.md) and

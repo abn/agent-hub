@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 /// One embedded asset: where it is served, what it holds, and what it is.
 struct Asset {
     path: &'static str,
-    body: &'static str,
+    body: &'static [u8],
     content_type: &'static str,
 }
 
@@ -21,197 +21,212 @@ struct Asset {
 static SHELL_ASSETS: &[Asset] = &[
     Asset {
         path: "/",
-        body: include_str!("../../web/index.html"),
+        body: include_bytes!("../../web/index.html"),
         content_type: "text/html; charset=utf-8",
     },
     Asset {
         path: "/app.js",
-        body: include_str!("../../web/app.js"),
+        body: include_bytes!("../../web/app.js"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/api.mjs",
-        body: include_str!("../../web/api.mjs"),
+        body: include_bytes!("../../web/api.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/router.mjs",
-        body: include_str!("../../web/router.mjs"),
+        body: include_bytes!("../../web/router.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/dom.mjs",
-        body: include_str!("../../web/dom.mjs"),
+        body: include_bytes!("../../web/dom.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/time.mjs",
-        body: include_str!("../../web/time.mjs"),
+        body: include_bytes!("../../web/time.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/prefs.mjs",
-        body: include_str!("../../web/prefs.mjs"),
+        body: include_bytes!("../../web/prefs.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/keys.mjs",
-        body: include_str!("../../web/keys.mjs"),
+        body: include_bytes!("../../web/keys.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/empty.mjs",
-        body: include_str!("../../web/empty.mjs"),
+        body: include_bytes!("../../web/empty.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/toast.mjs",
-        body: include_str!("../../web/toast.mjs"),
+        body: include_bytes!("../../web/toast.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/dialog.mjs",
-        body: include_str!("../../web/dialog.mjs"),
+        body: include_bytes!("../../web/dialog.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/composer.mjs",
-        body: include_str!("../../web/composer.mjs"),
+        body: include_bytes!("../../web/composer.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/events.mjs",
-        body: include_str!("../../web/events.mjs"),
+        body: include_bytes!("../../web/events.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/projects.mjs",
-        body: include_str!("../../web/projects.mjs"),
+        body: include_bytes!("../../web/projects.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/home.mjs",
-        body: include_str!("../../web/home.mjs"),
+        body: include_bytes!("../../web/home.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/inbox.mjs",
-        body: include_str!("../../web/inbox.mjs"),
+        body: include_bytes!("../../web/inbox.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/feed.mjs",
-        body: include_str!("../../web/feed.mjs"),
+        body: include_bytes!("../../web/feed.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/brain-tree.mjs",
-        body: include_str!("../../web/brain-tree.mjs"),
+        body: include_bytes!("../../web/brain-tree.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/sessions.mjs",
-        body: include_str!("../../web/sessions.mjs"),
+        body: include_bytes!("../../web/sessions.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/project.mjs",
-        body: include_str!("../../web/project.mjs"),
+        body: include_bytes!("../../web/project.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/shell.mjs",
-        body: include_str!("../../web/shell.mjs"),
+        body: include_bytes!("../../web/shell.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/storage.mjs",
-        body: include_str!("../../web/storage.mjs"),
+        body: include_bytes!("../../web/storage.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/search.mjs",
-        body: include_str!("../../web/search.mjs"),
+        body: include_bytes!("../../web/search.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/settings.mjs",
-        body: include_str!("../../web/settings.mjs"),
+        body: include_bytes!("../../web/settings.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/project-settings.mjs",
-        body: include_str!("../../web/project-settings.mjs"),
+        body: include_bytes!("../../web/project-settings.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/agents.mjs",
-        body: include_str!("../../web/agents.mjs"),
+        body: include_bytes!("../../web/agents.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/artifacts.mjs",
-        body: include_str!("../../web/artifacts.mjs"),
+        body: include_bytes!("../../web/artifacts.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/comments.mjs",
-        body: include_str!("../../web/comments.mjs"),
+        body: include_bytes!("../../web/comments.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/connect.mjs",
-        body: include_str!("../../web/connect.mjs"),
+        body: include_bytes!("../../web/connect.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/frontmatter.mjs",
-        body: include_str!("../../web/frontmatter.mjs"),
+        body: include_bytes!("../../web/frontmatter.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/app.css",
-        body: include_str!("../../web/app.css"),
+        body: include_bytes!("../../web/app.css"),
         content_type: "text/css; charset=utf-8",
     },
     Asset {
         path: "/tokens.css",
-        body: include_str!("../../web/tokens.css"),
+        body: include_bytes!("../../web/tokens.css"),
         content_type: "text/css; charset=utf-8",
     },
     Asset {
         path: "/manifest.webmanifest",
-        body: include_str!("../../web/manifest.webmanifest"),
+        body: include_bytes!("../../web/manifest.webmanifest"),
         content_type: "application/manifest+json",
     },
     Asset {
         path: "/icon.svg",
-        body: include_str!("../../web/icon.svg"),
+        body: include_bytes!("../../web/icon.svg"),
         content_type: "image/svg+xml",
     },
     Asset {
+        path: "/icon-192.png",
+        body: include_bytes!("../../web/icon-192.png"),
+        content_type: "image/png",
+    },
+    Asset {
+        path: "/icon-512.png",
+        body: include_bytes!("../../web/icon-512.png"),
+        content_type: "image/png",
+    },
+    Asset {
+        path: "/icon-512-maskable.png",
+        body: include_bytes!("../../web/icon-512-maskable.png"),
+        content_type: "image/png",
+    },
+    Asset {
         path: "/crypto.mjs",
-        body: include_str!("../../web/crypto.mjs"),
+        body: include_bytes!("../../web/crypto.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
         path: "/vendor/marked.js",
-        body: include_str!("../../web/vendor/marked.js"),
+        body: include_bytes!("../../web/vendor/marked.js"),
         content_type: "application/javascript; charset=utf-8",
     },
     Asset {
         path: "/vendor/mermaid.runtime.js",
-        body: include_str!("../../web/vendor/mermaid.runtime.js"),
+        body: include_bytes!("../../web/vendor/mermaid.runtime.js"),
         content_type: "application/javascript; charset=utf-8",
     },
     Asset {
         path: "/artifact-viewer.mjs",
-        body: include_str!("../../web/artifact-viewer.mjs"),
+        body: include_bytes!("../../web/artifact-viewer.mjs"),
         content_type: "application/javascript; charset=utf-8",
     },
     Asset {
         path: "/frame-loader.js",
-        body: include_str!("../../web/frame-loader.js"),
+        body: include_bytes!("../../web/frame-loader.js"),
         content_type: "application/javascript; charset=utf-8",
     },
 ];
@@ -254,7 +269,7 @@ fn shell_version() -> String {
     for asset in SHELL_ASSETS {
         hasher.update(asset.path.as_bytes());
         hasher.update([0]);
-        hasher.update(asset.body.as_bytes());
+        hasher.update(asset.body);
         hasher.update([0]);
     }
     hasher
@@ -276,7 +291,7 @@ pub fn asset_paths() -> impl Iterator<Item = &'static str> {
 /// an added asset costs a row in the table rather than a route and a handler.
 pub async fn asset(uri: Uri) -> Response {
     match SHELL_ASSETS.iter().find(|asset| asset.path == uri.path()) {
-        Some(asset) => respond(asset.body, asset.content_type),
+        Some(asset) => respond(Body::from(asset.body), asset.content_type),
         // Only the table's own paths route here. Anything else gets the same
         // answer the fallback gives every path the hub does not serve.
         None => super::not_found().await.into_response(),
@@ -289,15 +304,18 @@ pub async fn asset(uri: Uri) -> Response {
 /// only installs a new worker when these bytes differ, so a cached copy would
 /// pin the old shell across an upgrade.
 pub async fn service_worker() -> Response {
-    let mut response = respond(STAMPED_WORKER.as_str(), "text/javascript; charset=utf-8");
+    let mut response = respond(
+        Body::from(STAMPED_WORKER.as_str()),
+        "text/javascript; charset=utf-8",
+    );
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
 
-fn respond(body: &'static str, content_type: &'static str) -> Response {
-    let mut response = Response::new(Body::from(body));
+fn respond(body: Body, content_type: &'static str) -> Response {
+    let mut response = Response::new(body);
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert(

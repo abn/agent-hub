@@ -3047,8 +3047,8 @@ def check_shell_tabs(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
-def check_mobile_tabbar(page, watch: Watch) -> None:
-    """At 390px the tab bar does not overflow and every target is thumb-sized."""
+def check_mobile_tabbar(page, watch: Watch, project: str) -> None:
+    """At 390px the tab bar does not overflow, targets are thumb-sized, and content does not paint over it."""
     watch.enter("shell: tab bar at 390px")
     goto(page, "#/home", home_title())
     if page.evaluate(
@@ -3061,6 +3061,99 @@ def check_mobile_tabbar(page, watch: Watch) -> None:
         ".filter((a) => a.getBoundingClientRect().height + 0.5 < 44).length)()"
     ):
         watch.fail("a tab target is under 44px at 390px")
+
+    # Layering check: no row content from a list must be drawn over the bar
+    goto(page, f"#/projects/{quote(project)}/feed", "Checks")
+    page.wait_for_selector(".feed-row")
+    overlap_failure = page.evaluate("""(() => {
+        const bar = document.querySelector('.tabbar');
+        if (!bar) return "no tab bar found";
+        const barRect = bar.getBoundingClientRect();
+        window.scrollTo(0, 200);
+        const targets = Array.from(document.querySelectorAll('.feed-row .action, .feed-row .ts'));
+        for (const target of targets) {
+            const rect = target.getBoundingClientRect();
+            if (rect.top < barRect.bottom && rect.bottom > barRect.top) {
+                const cx = rect.left + rect.width / 2;
+                const cy = Math.max(barRect.top + 2, Math.min(barRect.bottom - 2, rect.top + rect.height / 2));
+                const hit = document.elementFromPoint(cx, cy);
+                if (hit && !bar.contains(hit)) {
+                    return `row content <${hit.tagName.toLowerCase()} class="${hit.className}"> paints over the tab bar at (${Math.round(cx)}, ${Math.round(cy)})`;
+                }
+            }
+        }
+        return null;
+    })()""")
+    if overlap_failure:
+        watch.fail(overlap_failure)
+
+    # Toast check: assert a toast still draws above the bar
+    toast_layer_ok = page.evaluate("""(() => {
+        const bar = document.querySelector('.tabbar');
+        const region = document.querySelector('.toast-region');
+        if (!bar || !region) return false;
+        const barZ = parseInt(getComputedStyle(bar).zIndex) || 0;
+        const toastZ = parseInt(getComputedStyle(region).zIndex) || 0;
+        return toastZ > barZ;
+    })()""")
+    if not toast_layer_ok:
+        watch.fail("the toast region does not draw above the tab bar")
+    watch.drain_rejections()
+
+
+def check_phone_settings(page, watch: Watch) -> None:
+    """Settings is reachable on a phone from Home without visiting a project."""
+    watch.enter("shell: settings reachable on a phone")
+    goto(page, "#/home", home_title())
+    page.click('.tabbar a[href="#/projects"]')
+    if not settle(page, "location.hash === '#/projects' && !!document.querySelector('main .projects-screen')"):
+        watch.fail(f"clicking Projects tab did not paint #/projects: {page.evaluate('location.hash')}")
+        watch.drain_rejections()
+        return
+    gear = page.locator('main a[href="#/settings"][aria-label="Settings"], main a.projects-gear')
+    if not gear.count():
+        watch.fail("the projects screen offers no settings control for a phone")
+        watch.drain_rejections()
+        return
+    gear.first.click()
+    if not settle(page, "location.hash === '#/settings' && !!document.querySelector('main form[data-action=\"prefs\"]')"):
+        watch.fail(f"clicking settings did not navigate to #/settings: {page.evaluate('location.hash')}")
+        watch.drain_rejections()
+        return
+    if heading(page) != "Settings":
+        watch.fail(f"landed on heading {heading(page)!r}, expected 'Settings'")
+    watch.drain_rejections()
+
+
+def check_install_manifest(page, watch: Watch) -> None:
+    """The manifest lists raster icons of at least 192px and a maskable icon, and they are served."""
+    watch.enter("shell: install manifest icons")
+    res = json.loads(harness.request(watch.port, "GET", "/manifest.webmanifest"))
+    icons = res.get("icons", [])
+    png_icons = [i for i in icons if i.get("type") == "image/png"]
+    if not png_icons:
+        watch.fail("the manifest lists no PNG icons of at least 192px")
+        watch.drain_rejections()
+        return
+    has_192 = any(i.get("sizes") == "192x192" for i in png_icons)
+    has_512 = any(i.get("sizes") == "512x512" and "any" in (i.get("purpose") or "any") for i in png_icons)
+    has_maskable = any("maskable" in (i.get("purpose") or "") for i in png_icons)
+    if not has_192:
+        watch.fail("the manifest lists no 192px PNG icon")
+    if not has_512:
+        watch.fail("the manifest lists no 512px PNG icon")
+    if not has_maskable:
+        watch.fail("the manifest lists no maskable PNG icon")
+    for icon in png_icons:
+        src = icon.get("src", "")
+        served = page.evaluate(f"""fetch({json.dumps(src)}).then(r => ({{
+            status: r.status,
+            contentType: r.headers.get('content-type') || ''
+        }}))""")
+        if served.get("status") != 200:
+            watch.fail(f"manifest icon {src} returned status {served.get('status')}")
+        if "image/png" not in served.get("contentType", ""):
+            watch.fail(f"manifest icon {src} served with content-type {served.get('contentType')!r}")
     watch.drain_rejections()
 
 
@@ -8435,7 +8528,9 @@ def run() -> int:
 
                 run_step(watch, check_public_gate, port, context, project, seeded["protected_id"])
                 run_step(watch, check_shell_tabs, page, watch)
-                run_step(watch, check_mobile_tabbar, page, watch)
+                run_step(watch, check_mobile_tabbar, page, watch, project)
+                run_step(watch, check_phone_settings, page, watch)
+                run_step(watch, check_install_manifest, page, watch)
                 run_step(watch, check_artifact_link, page, watch, project)
                 run_step(watch, check_segmented_tabs, page, watch, project)
                 run_step(watch, check_artifact_gallery, page, watch, project)

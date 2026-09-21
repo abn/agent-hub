@@ -10,7 +10,7 @@
 .topbar .wordmark { font-weight: 600; }
 .topbar nav { display: flex; gap: var(--s-3); }
 .tabbar {
-  display: flex; gap: 2px; position: fixed; inset: auto 0 0 0;
+  display: flex; gap: 2px; position: fixed; inset: auto 0 0 0; z-index: 20;
   background: var(--surface); border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
 }
@@ -1439,6 +1439,31 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
     position: absolute;
     inset: -6px 0;
   }
+}
+.projects-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.projects-gear {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  text-decoration: none;
+  border-radius: var(--r-1);
+}
+.projects-gear:hover {
+  color: var(--ink);
+}
+.projects-gear:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.projects-gear svg {
+  display: block;
 }
 .projects-list {
   display: flex;

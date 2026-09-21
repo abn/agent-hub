@@ -21,7 +21,7 @@ WEB = Path("web")
 # The table the hub serves the shell from. Every first-party script has to be
 # in it, or the browser asks for a module the binary does not carry.
 ASSET_TABLE = Path("src/http/web.rs")
-EMBEDDED = re.compile(r'include_str!\("\.\./\.\./web/([^"]+)"\)')
+EMBEDDED = re.compile(r'include_(?:str|bytes)!\("\.\./\.\./web/([^"]+)"\)')
 REQUIRED = [
     "index.html",
     "app.js",
