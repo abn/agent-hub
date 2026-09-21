@@ -7307,7 +7307,18 @@ def seed_markdown_safety_artifact(port: int, project_id: str) -> str:
                         "Prose with *emphasis* and `code`.\n\n"
                         "<script id=\"hostile-script\">window.xss=1</script>\n\n"
                         "<img id=\"hostile-img\" src=\"x\" onerror=\"window.xss=2\">\n\n"
-                        "[click here](javascript:window.xss=3)"
+                        "[click here](javascript:window.xss=3)\n\n"
+                        # Agents wrap at eighty columns, so nearly every bullet
+                        # they write is a continuation line, and nearly every
+                        # document they write has a table in it. Both belong in
+                        # the fixture the renderer is judged on.
+                        "- A bullet whose sentence runs past the end of one\n"
+                        "  line and continues on the next, indented.\n"
+                        "- A second bullet.\n\n"
+                        "| Thing | Value |\n"
+                        "|---|---|\n"
+                        "| first | one |\n"
+                        "| second | two |\n"
                     ),
                 },
             },
@@ -7345,6 +7356,32 @@ def check_markdown_artifact_rendering(browser, page, watch: Watch, port: int, pr
             watch.fail("public page rendered raw img tag into DOM element")
         if public_frame.locator('a[href^="javascript:"]').count() > 0:
             watch.fail("public page rendered unsafe javascript: link element")
+
+        # Structure, not just safety. A renderer that escapes everything and
+        # understands nothing is safe and useless: the hub publishes its own
+        # notes here, and they are bullets that wrap and tables of numbers.
+        # Asserted on the rendered tree rather than the source, because the
+        # source was always correct; it was the reading of it that was not.
+        wrapped = public_frame.locator("li", has_text="runs past the end of one")
+        if wrapped.count() != 1:
+            watch.fail(
+                f"a bullet that wraps onto a second line produced {wrapped.count()} list items"
+            )
+        elif "indented" not in (wrapped.first.inner_text() or ""):
+            watch.fail(
+                "a bullet that wraps lost its continuation line out of the list item:"
+                f" {wrapped.first.inner_text()!r}"
+            )
+        if public_frame.locator("li").count() != 2:
+            watch.fail(
+                f"two bullets rendered as {public_frame.locator('li').count()} list items"
+            )
+        if public_frame.locator("table").count() != 1:
+            watch.fail("a pipe table did not render as a table")
+        elif public_frame.locator("table td").count() != 4:
+            watch.fail(
+                f"the table rendered {public_frame.locator('table td').count()} cells, expected 4"
+            )
 
         public_body = public_frame.locator("body").inner_text()
         if "<script id=\"hostile-script\">" not in public_body:

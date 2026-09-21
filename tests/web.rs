@@ -780,9 +780,10 @@ async fn serves_artifact_content_for_the_viewer() {
     assert_eq!(body["title"], "Note");
     assert_eq!(body["protected"], false);
     assert_eq!(body["content"], "hello");
-    assert_eq!(
-        body["rendered"], "<p>hello</p>\n",
-        "the viewer gets hub-rendered markdown for a public artifact"
+    assert!(
+        body.get("rendered").is_none(),
+        "the hub no longer renders markdown: the browser parses the source, so a\
+         second and weaker rendering is not offered over the API"
     );
     assert!(body["envelope"].is_null());
 
@@ -817,8 +818,8 @@ async fn serves_artifact_content_for_the_viewer() {
     assert_eq!(body["protected"], true);
     assert_eq!(body["content"], "Y2lwaGVy");
     assert!(
-        body["rendered"].is_null(),
-        "the server holds no plaintext to render for a protected artifact"
+        body.get("rendered").is_none(),
+        "no rendering is offered for any artifact, protected or not"
     );
     assert_eq!(body["envelope"]["alg"], "AES-256-GCM");
 }

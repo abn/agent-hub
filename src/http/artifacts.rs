@@ -70,10 +70,6 @@ pub struct ArtifactContent {
     pub envelope: Option<serde_json::Value>,
     /// The content, as the stored UTF-8 text; a ciphertext arrives base64.
     pub content: String,
-    /// The rendered HTML for a public markdown artifact, so the viewer can show
-    /// it in a sandboxed frame. Null for every other kind and for a protected
-    /// artifact, whose plaintext never reaches the server.
-    pub rendered: Option<String>,
     /// The version the content was read at.
     pub version: i64,
     /// Artifact description.
@@ -146,16 +142,12 @@ pub async fn content(
         )))
     })?;
 
-    let rendered = (!artifact.protected && artifact.kind == "markdown")
-        .then(|| crate::markdown::to_html(&content));
-
     Ok(Json(ArtifactContent {
         title: artifact.title,
         kind: artifact.kind,
         protected: artifact.protected,
         envelope: artifact.envelope,
         content,
-        rendered,
         version: artifact.version,
         description: artifact.description,
         favicon: artifact.favicon,
@@ -697,10 +689,16 @@ fn reader_shell(
     } else {
         "null".to_string()
     };
+    // The source, not HTML. The hub used to render markdown here with a
+    // hand-rolled parser that knew nothing of tables and ended a list item at
+    // the first newline, so every bullet an agent wrapped at eighty columns
+    // broke out of its list and every table came through as pipes. The
+    // browser already carries a real parser and already uses it for protected
+    // artifacts, whose plaintext the server never sees; sending it the source
+    // makes both kinds render the same way rather than keeping a weaker
+    // second renderer alive for the public half.
     let markdown_blob = if artifact.kind == "markdown" {
-        let source = String::from_utf8_lossy(bytes);
-        let rendered = crate::markdown::to_html(&source);
-        script_json(&json!(rendered))
+        script_json(&json!(String::from_utf8_lossy(bytes)))
     } else {
         "null".to_string()
     };

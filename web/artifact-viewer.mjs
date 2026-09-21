@@ -53,9 +53,27 @@ function readJson(id) {
   }
 }
 
+// A link target the reader may safely be given. Carried over from the
+// renderer the hub used to run server-side, because marked will happily emit
+// `javascript:` as an href and an artifact's links are written by an agent.
+// A scheme-relative or rooted path has no scheme to judge, so it passes; a
+// named scheme has to be one of three; anything with whitespace or a control
+// character in it is refused rather than trimmed into something else.
+function safeHref(url) {
+  const value = String(url == null ? "" : url).trim();
+  if (!value || /[\s\u0000-\u001f\u007f]/.test(value)) return null;
+  const colon = value.indexOf(":");
+  if (colon === -1) return value;
+  const scheme = value.slice(0, colon);
+  if (/[/?#]/.test(scheme)) return value;
+  return ["http", "https", "mailto"].includes(scheme.toLowerCase()) ? value : null;
+}
+
 // marked passes raw HTML through by default, so the html renderer is
-// overridden to escape it. This matches the server renderer's total-escape
-// contract: authored angle brackets stay text, never markup.
+// overridden to escape it: authored angle brackets stay text, never markup.
+// The link renderer is overridden for the same reason, one level down. A
+// refused target keeps the label and loses the link, so the reader still
+// reads what was written and cannot be sent anywhere by it.
 function parseMarkdown(source) {
   const lib = globalThis.marked;
   if (!lib || typeof lib.parse !== "function" || typeof lib.Marked !== "function") {
@@ -66,6 +84,13 @@ function parseMarkdown(source) {
     renderer: {
       html(token) {
         return escHtml(token.raw != null ? token.raw : token.text || "");
+      },
+      link(token) {
+        const text = this.parser.parseInline(token.tokens || []);
+        const href = safeHref(token.href);
+        if (!href) return text;
+        const title = token.title ? ` title="${escHtml(token.title)}"` : "";
+        return `<a href="${escHtml(href)}"${title}>${text}</a>`;
       },
     },
   });
@@ -180,15 +205,6 @@ function buildSrcdoc({ title, body, theme, withMermaid }) {
   );
 }
 
-function showRenderedMarkdown(frame, meta, html, theme) {
-  const body = renderMermaidPlaceholders(renderCallouts(html));
-  frame.srcdoc = buildSrcdoc({
-    title: meta.title,
-    body,
-    theme,
-    withMermaid: body.includes('<pre class="mermaid">'),
-  });
-}
 
 function showMarkdown(frame, meta, source, theme) {
   const parsed = parseMarkdown(source);
@@ -239,9 +255,12 @@ function renderForTheme(state, theme) {
     reveal(frame);
     return;
   }
+  // The blob is markdown source now, not server HTML, so a public artifact
+  // goes through the same parser as a protected one. Escaping is the
+  // renderer's own override either way, which is what the safety check holds.
   const body = readJson("hub-markdown-body");
   if (typeof body === "string") {
-    showRenderedMarkdown(frame, meta, body, theme);
+    showMarkdown(frame, meta, body, theme);
     reveal(frame);
     return;
   }
