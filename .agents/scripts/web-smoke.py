@@ -132,7 +132,9 @@ class Watch:
         return sum(1 for call in self.calls if call.startswith(prefix))
 
     def enter(self, phase: str) -> None:
+        global _running
         self.phase = phase
+        _running = self
 
     def fail(self, message: str) -> None:
         self.failures.append(f"{self.phase}: {message}")
@@ -560,7 +562,8 @@ def check_search_as_you_type(page, watch: Watch) -> None:
     watch.enter("search: back from a result")
     here = page.evaluate("location.hash")
     page.click("main .search-row a[href]")
-    settle(page, "!location.hash.startsWith('#/search')")
+    if not settle(page, "!location.hash.startsWith('#/search')"):
+        watch.fail("opening a result never left the search screen")
     page.go_back()
     if not settle(page, "document.querySelectorAll('main .search-row').length > 0"):
         watch.fail("Back from a result lost the results")
@@ -569,7 +572,12 @@ def check_search_as_you_type(page, watch: Watch) -> None:
 
     watch.enter("search: clear")
     page.click("main .search-clear")
-    settle(page, "!!document.querySelector('main .empty-title')")
+    # Every assertion below reads the screen this waits for. When the wait was
+    # unchecked and timed out, all three fired at once against a screen still
+    # holding its results, and reported a search that would not clear rather
+    # than a screen that had not finished clearing.
+    if not settle(page, "!!document.querySelector('main .empty-title')"):
+        watch.fail("clearing the search never brought the empty state back")
     state = page.evaluate(SEARCH_STATE)
     if state["value"] or state["rows"] or state["line"]:
         watch.fail(f"clear left {state['value']!r}, {state['rows']} rows and {state['line']!r}")
@@ -2242,14 +2250,38 @@ def settle(page, expression: str, timeout: int = 8000) -> bool:
 
     Polled from here rather than with a page-side waiter: the shell is served
     under a content security policy that refuses evaluated source.
+
+    A timeout used to return False and say nothing. Most callers test the
+    result, but where one does not, the check carried on against a page that
+    had not caught up and failed later on an assertion that read as unrelated:
+    a search that would not clear, a list that would not redraw. The condition
+    that never came true is the thing worth knowing, so it names itself here
+    even when the caller ignores it.
     """
     deadline = time.monotonic() + timeout / 1000
     while True:
         if page.evaluate(f"!!({expression})"):
             return True
         if time.monotonic() >= deadline:
+            _note_timeout(expression, timeout)
             return False
         page.wait_for_timeout(100)
+
+
+# The phase that is running, so a wait which never completes can say where it
+# was. settle() is called from nearly three hundred places and threading a
+# Watch through all of them would be a larger change than this warrants.
+_running = None
+
+# Every condition that never came true, in order, for the run's own summary.
+TIMED_OUT: list[str] = []
+
+
+def _note_timeout(expression: str, timeout: int) -> None:
+    where = _running.phase if _running is not None else "before any phase"
+    line = f"{where}: waited {timeout}ms and {expression} never became true"
+    TIMED_OUT.append(line)
+    print(f"web-smoke: slow: {line}", flush=True)
 
 
 def check_relative_time(page, watch: Watch) -> None:
@@ -8035,9 +8067,23 @@ def check_sessions_redraw(browser, page, watch: Watch, port: int, project: str, 
         if min_h + 0.5 < 44:
             watch.fail(f"session row height {min_h}px is below 44px tap target")
 
-        # Open session detail on phone: replaces list
+        # Open session detail on phone: replaces list.
+        #
+        # Waited on, not slept on. A fixed 300ms was long enough on an idle
+        # machine and not on a busy one, so this check failed on a tree that
+        # was fine whenever the box was under load, which is the worst way for
+        # a gate to behave: it taught the reader to run it again rather than
+        # to believe it. The condition is the same one the assertions below
+        # read, so if it never arrives they now say so rather than measuring a
+        # half-drawn screen.
         phone_page.click("main .session-row a")
-        phone_page.wait_for_timeout(300)
+        if not settle(
+            phone_page,
+            "!document.querySelector('main .pane-list')"
+            " || getComputedStyle(document.querySelector('main .pane-list')).display === 'none'"
+            " || document.querySelectorAll('main .session-row').length === 0",
+        ):
+            watch.fail("opening session on phone never replaced the list with the detail")
         phone_detail = phone_page.evaluate("""() => {
             const list = document.querySelector('main .pane-list');
             const hasDetail = !!document.querySelector('main .session-copy-id') ||

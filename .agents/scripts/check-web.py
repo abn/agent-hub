@@ -856,8 +856,49 @@ def check_served_palettes(errors: list[str]) -> None:
             )
 
 
+# A gate that flakes teaches the reader to run it again rather than to believe
+# it, so the two habits that make it flake are capped here and may only fall.
+#
+# A bare `settle(...)` statement throws away the one thing it returns, so a
+# condition that never arrives is not noticed and the assertions that follow
+# read a page that has not caught up. A `wait_for_timeout` guesses instead of
+# waiting, which is right until the machine is busy.
+#
+# Neither is banned outright: there are too many to convert in one change and
+# converting one blind is how a real check gets weakened into a passing one.
+# The counts below are what was there when the cap was written. Lower them
+# when you fix one. Raising one needs a reason better than "it was easier".
+BARE_SETTLE_BUDGET = 65
+FIXED_SLEEP_BUDGET = 94
+SMOKE = Path(__file__).resolve().parent / "web-smoke.py"
+
+
+def check_waiting_habits(errors: list[str]) -> None:
+    if not SMOKE.is_file():
+        errors.append(f"{SMOKE} is missing, so its waiting habits cannot be capped")
+        return
+    lines = SMOKE.read_text(encoding="utf-8", errors="replace").splitlines()
+    bare = sum(1 for line in lines if re.match(r"^\s+settle\(", line))
+    slept = sum(1 for line in lines if "wait_for_timeout" in line)
+    if bare > BARE_SETTLE_BUDGET:
+        errors.append(
+            f"web-smoke.py: {bare} settle() calls throw their result away, over the"
+            f" cap of {BARE_SETTLE_BUDGET}. A wait nobody checks is how a busy machine"
+            " turns a green tree red somewhere unrelated: test the result, or say"
+            " in a comment why a timeout is acceptable here"
+        )
+    if slept > FIXED_SLEEP_BUDGET:
+        errors.append(
+            f"web-smoke.py: {slept} fixed waits, over the cap of {FIXED_SLEEP_BUDGET}."
+            " Wait for the condition the next assertion reads, with settle(), rather"
+            " than for a number of milliseconds that was enough on an idle machine"
+        )
+
+
 def main() -> int:
     errors: list[str] = []
+
+    check_waiting_habits(errors)
 
     if not WEB.is_dir():
         print("web: web/ does not exist", file=sys.stderr)
