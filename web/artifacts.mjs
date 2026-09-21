@@ -166,6 +166,20 @@ document.addEventListener("click", (e) => {
   }
 });
 
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const menu = document.getElementById("hub-group-menu");
+  if (menu && !menu.hidden) {
+    e.stopPropagation();
+    menu.hidden = true;
+    const toggle = document.getElementById("hub-group-toggle");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+    }
+  }
+});
+
 // The legacy gallery address still works: it now points at the project's
 // Artifacts segment.
 export async function artifactsScreen(selected, gen) {
@@ -349,7 +363,7 @@ function buildVersionSheet(id, versions, shown, projectId) {
   const list = document.createElement("div");
   list.className = "hub-version-sheet-list";
 
-  for (const v of versions) {
+  for (const v of [...versions].reverse()) {
     const isCurrent = v.version === shown;
     const row = document.createElement("button");
     row.type = "button";
@@ -398,6 +412,12 @@ function buildVersionSheet(id, versions, shown, projectId) {
       closeSheet();
     }
   });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !sheet.hidden) {
+      e.stopPropagation();
+      closeSheet();
+    }
+  });
 
   return { backdrop, sheet };
 }
@@ -425,8 +445,9 @@ export async function viewerRoute(params, gen, path) {
     return;
   }
   if (stale(gen)) return;
-  const shown = viewer.version || (versions[0] && versions[0].version) || 1;
-  const current = versions.find((v) => v.version === shown) || versions[0];
+  const newest = (versions.length && versions[versions.length - 1].version) || 1;
+  const shown = viewer.version || newest;
+  const current = versions.find((v) => v.version === shown) || versions[versions.length - 1] || versions[0];
   if (!current) {
     paint(gen, `<h1>Artifact</h1><p class="error">No versions of this artifact.</p>`);
     return;
@@ -505,9 +526,17 @@ export async function viewerRoute(params, gen, path) {
     moreBtn.setAttribute("aria-expanded", String(open));
   });
   document.addEventListener("click", (e) => {
-    if (!overflowMenu.hidden && !overflowMenu.contains(e.target) && e.target !== moreBtn) {
+    if (!overflowMenu.hidden && !overflowMenu.contains(e.target) && !e.target.closest(".hub-more")) {
       overflowMenu.hidden = true;
       moreBtn.setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !overflowMenu.hidden) {
+      e.stopPropagation();
+      overflowMenu.hidden = true;
+      moreBtn.setAttribute("aria-expanded", "false");
+      moreBtn.focus();
     }
   });
 

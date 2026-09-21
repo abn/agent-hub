@@ -7974,6 +7974,195 @@ def check_artifact_viewer_redraw(browser, page, watch: Watch, port: int, project
     watch.drain_rejections()
 
 
+def check_artifact_viewer_menus_and_version(
+    browser, page, watch: Watch, port: int, project: str
+) -> None:
+    """Artifact viewer menus and versioning:
+    - Group menu in gallery is closed until opened, closes on toggle, Escape, outside click.
+    - On opening artifact viewer, neither overflow menu nor version sheet is visible.
+    - Overflow menu opens on control, closes on control, Escape, and outside click.
+    - Version sheet opens on control, closes on control, Escape, and outside click.
+    - Artifact with multiple versions opens at newest version with no version in address.
+    - Version sheet marks newest version as Current.
+    - Explicit ?version= opens that version.
+    """
+    watch.enter("artifacts: viewer menus and versioning")
+
+    # 1. Check Group menu in gallery
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    if not settle(page, "!!document.querySelector('.hub-group-toggle')"):
+        watch.fail("artifacts list grouping toggle not found")
+        return
+
+    group_menu = page.locator(".hub-group-menu")
+    if group_menu.count() > 0 and group_menu.first.is_visible():
+        watch.fail("group menu is visible on opening artifacts gallery")
+
+    # Toggle open
+    page.click(".hub-group-toggle")
+    if not group_menu.first.is_visible():
+        watch.fail("group menu did not open on toggle click")
+
+    # Toggle close
+    page.click(".hub-group-toggle")
+    if group_menu.first.is_visible():
+        watch.fail("group menu did not close on second toggle click")
+
+    # Open and close with Escape
+    page.click(".hub-group-toggle")
+    if not group_menu.first.is_visible():
+        watch.fail("group menu did not re-open")
+    page.keyboard.press("Escape")
+    if group_menu.first.is_visible():
+        watch.fail("group menu did not close on Escape")
+
+    # Open and close on press outside
+    page.click(".hub-group-toggle")
+    if not group_menu.first.is_visible():
+        watch.fail("group menu did not re-open")
+    page.mouse.click(10, 10)
+    if group_menu.first.is_visible():
+        watch.fail("group menu did not close on press outside")
+
+    # 2. Seed versioned artifact and test viewer menus & newest version default
+    artifact_id = harness.seed_versioned_artifact(port, project)
+    listed = json.loads(
+        harness.request(port, "GET", f"/api/v1/artifacts/{artifact_id}/versions")
+    )
+    versions = sorted(v["version"] for v in listed["versions"])
+    if len(versions) < 2:
+        watch.fail(f"seeded versioned artifact has fewer than 2 versions: {versions}")
+        return
+    oldest_v = versions[0]
+    newest_v = versions[-1]
+
+    # Open artifact viewer with NO version specified in hash
+    page.evaluate(f"location.hash = '#/artifacts/{artifact_id}'")
+    if not settle(page, "!!document.querySelector('.hub-viewer')"):
+        watch.fail("viewer did not open for versioned artifact")
+        return
+
+    overflow_menu = page.locator(".hub-overflow-menu")
+    version_sheet = page.locator(".hub-version-sheet")
+    version_backdrop = page.locator(".hub-version-backdrop")
+
+    # Real visibility tests: neither menu may be visible on open
+    if overflow_menu.count() > 0 and overflow_menu.first.is_visible():
+        watch.fail("overflow menu is visible on opening artifact viewer")
+    if version_sheet.count() > 0 and version_sheet.first.is_visible():
+        watch.fail("version sheet is visible on opening artifact viewer")
+    if version_backdrop.count() > 0 and version_backdrop.first.is_visible():
+        watch.fail("version sheet backdrop is visible on opening artifact viewer")
+
+    # Check newest version is shown by default
+    v_toggle = page.locator(".hub-version-toggle")
+    if v_toggle.count() < 1:
+        watch.fail("no version toggle pill found")
+        return
+    toggle_text = v_toggle.first.inner_text().strip()
+    if f"v{newest_v} of" not in toggle_text:
+        watch.fail(
+            f"artifact with no version in address opened at {toggle_text!r}, expected v{newest_v}"
+        )
+
+    # 3. Overflow menu interaction: open, close on control, Escape, press outside
+    more_btn = page.locator(".hub-more")
+    if more_btn.count() < 1:
+        watch.fail("no overflow more button found")
+        return
+
+    # Open on control
+    more_btn.click()
+    if not overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not open on control click")
+
+    # Close on control
+    more_btn.click()
+    if overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not close on control click")
+
+    # Re-open and close on Escape
+    more_btn.click()
+    if not overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not re-open")
+    page.keyboard.press("Escape")
+    if overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not close on Escape")
+
+    # Re-open and close on press outside
+    more_btn.click()
+    if not overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not re-open")
+    page.click(".hub-viewer-path")
+    if overflow_menu.first.is_visible():
+        watch.fail("overflow menu did not close on press outside")
+
+    # 4. Version sheet interaction: open, newest marked Current, close on control, Escape, outside
+    # Open on control
+    v_toggle.click()
+    if not version_sheet.first.is_visible():
+        watch.fail("version sheet did not open on control click")
+
+    # Verify sheet marks newest version as Current
+    newest_row = page.locator(f'.hub-version-row[data-version="{newest_v}"]')
+    if newest_row.count() < 1:
+        watch.fail(f"no version row for v{newest_v}")
+    else:
+        newest_cls = newest_row.first.get_attribute("class") or ""
+        if "current" not in newest_cls:
+            watch.fail(f"version sheet does not mark v{newest_v} as current: class={newest_cls!r}")
+        if "Current" not in newest_row.first.inner_text():
+            watch.fail(
+                f"version sheet row for v{newest_v} does not say 'Current': {newest_row.first.inner_text()!r}"
+            )
+
+    # Close on control
+    v_toggle.click()
+    if version_sheet.first.is_visible():
+        watch.fail("version sheet did not close on control click")
+
+    # Re-open and close on Escape
+    v_toggle.click()
+    if not version_sheet.first.is_visible():
+        watch.fail("version sheet did not re-open")
+    page.keyboard.press("Escape")
+    if version_sheet.first.is_visible():
+        watch.fail("version sheet did not close on Escape")
+
+    # Re-open and close on press outside
+    v_toggle.click()
+    if not version_sheet.first.is_visible():
+        watch.fail("version sheet did not re-open")
+    # Click outside the sheet (on the backdrop)
+    page.mouse.click(10, 10)
+    if version_sheet.first.is_visible():
+        watch.fail("version sheet did not close on press outside")
+
+    # 5. Explicit ?version= still opens that version
+    page.evaluate(
+        f"location.hash = '#/artifacts/{artifact_id}?version={oldest_v}&project={quote(project)}'"
+    )
+    if not settle(
+        page,
+        f"(() => {{ const t = document.querySelector('.hub-version-toggle');"
+        f" return t && t.textContent.includes('v{oldest_v} of'); }})()",
+    ):
+        watch.fail(f"explicit ?version={oldest_v} did not open version {oldest_v}")
+    else:
+        v_toggle.click()
+        if not version_sheet.first.is_visible():
+            watch.fail("version sheet did not open on explicit version")
+        oldest_row = page.locator(f'.hub-version-row[data-version="{oldest_v}"]')
+        if oldest_row.count() > 0:
+            if "current" not in (oldest_row.first.get_attribute("class") or ""):
+                watch.fail(f"explicit version v{oldest_v} not marked as current in sheet")
+            if "Current" not in oldest_row.first.inner_text():
+                watch.fail(f"explicit version row v{oldest_v} does not say 'Current'")
+        page.keyboard.press("Escape")
+
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -8198,6 +8387,7 @@ def run() -> int:
                 run_step(watch, check_viewer_back_button, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_viewer_theme_control, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_version_list, page, watch, port, project)
+                run_step(watch, check_artifact_viewer_menus_and_version, browser, page, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)
                 run_step(watch, check_desktop_topbar, browser, watch, port)
