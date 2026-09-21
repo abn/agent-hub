@@ -112,7 +112,7 @@ EXPECTED = {
     "projects": "main .projects-screen .project-row",
     INBOX_DETAIL: "main .inbox-detail .item-title",
     "feed": "main .feed-chips ~ .feed-day .feed-row",
-    SESSION_DETAIL: "main .stat-row",
+    SESSION_DETAIL: "main .session-copy-id",
     "sessions": "main .session-row",
     "storage": "main .storage .storage-row",
     "search": "main .search-results .empty-state",

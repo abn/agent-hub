@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, sessions list and session detail redraw
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  redrawn sessions list and detail views. The list groups sessions into active and
+  ended sections with counts and a "Prune all" control on the ended header. Rows
+  lead with the owner in their meta line, display size in a right-hand column, and
+  use a stretched link to make the entire row pressable. The detail view removes
+  separate stat cards in favor of a single unified meta line, middle-truncates the
+  session ID in a copy control with full ID copied to clipboard and 44px tap reach,
+  unifies keys and files into a single brain tree with `kv/` and `fs/` folders and leaf
+  names only, and replaces disabled prune buttons with a single primary action and
+  informative helper sentence.
+
 ## 2026-09-21, projects index screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

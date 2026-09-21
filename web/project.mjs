@@ -13,7 +13,7 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { settingsLink } from "./project-settings.mjs";
-import { sessionRows } from "./sessions.mjs";
+import { sessionRows, sessionDetailView, wireSessionDetail } from "./sessions.mjs";
 
 const SEGMENTS = ["feed", "artifacts", "sessions"];
 
@@ -117,15 +117,12 @@ if (typeof document !== "undefined") {
 // The sessions segment on desktop: the list in the 420px pane and the session
 // detail in the other. On a phone the detail pane is hidden by media query and
 // the card replaces the list when opened, returning focus to the row when closed.
-function sessionsTwoPane(current, listHTML, sessions) {
-  const s = sessions[0];
-  const detail = s
-    ? `<div class="card">
-        <div class="item-title">${esc(s.session_name)}</div>
-        <p class="meta mono">${esc(s.agent)} · ${esc(s.status)} · ${esc(s.id)}</p>
-      </div>`
+function sessionsTwoPane(current, listHTML, sessions, selectedSession, detailHTML, hasSelection) {
+  const detail = selectedSession
+    ? (detailHTML || `<p class="empty">Loading session…</p>`)
     : `<p class="empty">No sessions yet.</p>`;
-  return twoPane(`<h2 class="section-label">Sessions</h2>${listHTML}`, detail);
+  const paneClass = hasSelection ? "panes has-selection" : "panes";
+  return `<div class="${paneClass}"><div class="pane-list">${listHTML}</div><div class="pane-detail">${detail}</div></div>`;
 }
 
 async function projectsIndexScreen(gen, projects) {
@@ -332,9 +329,20 @@ export async function projectScreen(params, gen, path) {
   if (segment === "artifacts") {
     paint(gen, `${shell}${await gallerySection(id)}`);
   } else if (segment === "sessions") {
-    const { sessions, card } = await sessionRows(id);
+    const selectedId = params?.get?.("id") || params?.get?.("session");
+    const { sessions, card } = await sessionRows(id, selectedId);
     if (stale(gen)) return;
-    paint(gen, `${shell}${sessionsTwoPane(id, card, sessions)}`);
+    const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
+    const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
+    let detailHTML = "";
+    if (selectedSession) {
+      detailHTML = await sessionDetailView(id, selectedSession.id, gen);
+    }
+    if (stale(gen)) return;
+    paint(gen, `${shell}${sessionsTwoPane(id, card, sessions, selectedSession, detailHTML, !!selectedId)}`);
+    if (selectedSession) {
+      wireSessionDetail(main.querySelector(".pane-detail") || main, id, selectedSession.id);
+    }
     if (lastOpenSession) {
       const closed = lastOpenSession;
       lastOpenSession = "";

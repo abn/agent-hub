@@ -899,14 +899,18 @@ def check_approve(page, watch: Watch) -> None:
 def check_prune(page, watch: Watch, project: str, session_id: str) -> None:
     """Prune asks first, keeps on Esc, and stays reversible while the toast is up."""
     watch.enter("sessions: prune")
-    page.evaluate(f"location.hash = '#/sessions?project={quote(project)}'")
+    goto(
+        page,
+        f"#/session?project={quote(project)}&id={quote(session_id)}",
+        harness.SESSION_NAME,
+    )
     # Only an ended session can be pruned, so the seeded one is ended here.
-    page.wait_for_selector('.session-row [data-action="end"]')
-    page.click('.session-row [data-action="end"]')
-    page.wait_for_selector('.session-row [data-action="prune"]')
+    page.wait_for_selector('main [data-action="end"]')
+    page.click('main [data-action="end"]')
+    page.wait_for_selector('main [data-action="prune"]')
 
     pruned = watch.count(PRUNE_CALL)
-    page.click('.session-row [data-action="prune"]')
+    page.click('main [data-action="prune"]')
     # Waiting on the absence of a request is the one thing no selector says.
     page.wait_for_timeout(WRITE_WINDOW)
     if watch.count(PRUNE_CALL) != pruned:
@@ -933,7 +937,7 @@ def check_prune(page, watch: Watch, project: str, session_id: str) -> None:
     if "danger" not in page.evaluate(FOCUS_CLASS):
         watch.fail(f"closing the dialog left focus on {page.evaluate(FOCUS_CLASS)!r}, not the opener")
 
-    page.click('.session-row [data-action="prune"]')
+    page.click('main [data-action="prune"]')
     page.wait_for_selector("dialog.dialog[open]")
     page.click(".dialog-commit")
     # The undo control is what marks the new toast: the one before it carried
@@ -1938,7 +1942,7 @@ def guard_holds(project: str, session_id: str, artifact: str) -> dict[str, list[
                 "session detail",
                 f"#/session?project={quote(project)}&id={quote(session_id)}",
                 f"/api/v1/sessions/{quote(session_id)}/brain?path=%2Ffs",
-                "main .stat-row",
+                "main .session-copy-id",
             )
         ],
         "search": [
@@ -3674,34 +3678,27 @@ def check_file_enter(page, watch: Watch, project: str, session_id: str) -> None:
 
 
 def check_stat_cards(page, watch: Watch, project: str, session_id: str) -> None:
-    """The three stat cards show real numbers from the detail route."""
-    watch.enter("session: the stat cards")
+    """Screen 07 removes stat cards and carries numbers in the single meta line."""
+    watch.enter("session: one meta line and no stat cards")
     goto(
         page,
         f"#/session?project={quote(project)}&id={quote(session_id)}",
         harness.SESSION_NAME,
     )
-    cards = page.evaluate(
-        "(() => [...document.querySelectorAll('main .stat-card')].map((c) => {"
-        " const label = c.querySelector('.stat-label');"
-        " const value = c.querySelector('.stat-value');"
-        " return { label: label && label.textContent.trim(),"
-        " value: value && value.textContent.trim() };"
-        " }))()"
-    )
-    labels = [c["label"] for c in cards if c["label"]]
-    for wanted in ("Started", "Events", "Brain"):
-        if wanted not in labels:
-            watch.fail(f"the stat cards do not name {wanted!r}: {labels}")
-    if not cards or not all(c["value"] for c in cards):
-        watch.fail(f"a stat card shows no value: {cards}")
-    # The seeded events count is at least the two the pickup produced... The
-    # checks session has its own events. Assert it is a number, not a blank.
+    cards = page.evaluate("document.querySelectorAll('main .stat-card').length")
+    if cards > 0:
+        watch.fail(f"session detail still renders {cards} stat cards; Screen 07 removes them")
+    meta = page.evaluate("document.querySelector('main .session-detail-title-block .meta, main .meta')?.textContent || ''")
+    if not meta:
+        watch.fail("session detail has no meta line")
+    for wanted in ("started", "events"):
+        if wanted not in meta.lower():
+            watch.fail(f"meta line does not carry {wanted!r}: {meta!r}")
     watch.drain_rejections()
 
 
 def check_action_bar(page, watch: Watch, project: str, session_id: str) -> None:
-    """The pinned action bar names End and Prune, with Prune disabled until ended."""
+    """The action bar names End session and sentence replaces disabled Prune (ends first)."""
     watch.enter("session: the action bar")
     goto(
         page,
@@ -3709,29 +3706,26 @@ def check_action_bar(page, watch: Watch, project: str, session_id: str) -> None:
         harness.SESSION_NAME,
     )
     bar = page.evaluate(
-        "(() => { const bar = document.querySelector('main .session-actions');"
+        "(() => { const bar = document.querySelector('main .session-actions, main .session-actions-footer');"
         " if (!bar) return null;"
+        " const note = bar.querySelector('.action-helper-sentence, .session-action-note');"
         " return { end: !!bar.querySelector('[data-action=\"end\"]'),"
         " prune: !!bar.querySelector('[data-action=\"prune\"]'),"
-        " pruneDisabled: (bar.querySelector('[data-action=\"prune\"]') || {}).disabled,"
+        " pruneEndsFirst: bar.textContent.includes('Prune (ends first)'),"
         " text: bar.textContent.trim(),"
-        " fixed: getComputedStyle(bar).position === 'fixed' }; })()"
+        " noteText: note ? note.textContent.trim() : '' }; })()"
     )
     if not bar:
-        watch.fail("the session detail has no pinned action bar")
+        watch.fail("the session detail has no action bar")
         return
     if "End session" not in bar["text"]:
         watch.fail(f"the action bar does not name End session: {bar['text']!r}")
-    if "Prune (ends first)" not in bar["text"]:
-        watch.fail(f"the action bar does not say the design's Prune (ends first): {bar['text']!r}")
+    if bar["pruneEndsFirst"]:
+        watch.fail(f"the action bar still contains disabled 'Prune (ends first)': {bar['text']!r}")
+    if "Pruning becomes available once the session has ended" not in bar["noteText"]:
+        watch.fail(f"the helper sentence is missing or incorrect: {bar['noteText']!r}")
     if not bar["end"]:
         watch.fail("the End button is missing")
-    if not bar["prune"] or not bar["pruneDisabled"]:
-        watch.fail("Prune is enabled on a live session")
-    if not bar["fixed"]:
-        # The 390px viewport is the mobile shape: the design pins the bar above
-        # the tab bar, so it must measure as fixed here.
-        watch.fail("the action bar is not pinned on a phone")
     watch.drain_rejections()
 
 
@@ -3784,16 +3778,15 @@ def check_session_times(page, watch: Watch, project: str, session_id: str) -> No
         watch.fail(f"the row's time reads {meta.rsplit('·', 1)[-1].strip()!r}, expected {expected!r}")
     goto(page, f"#/session?project={quote(project)}&id={quote(session_id)}", harness.SESSION_NAME)
     started = page.evaluate(
-        "(() => { const card = [...document.querySelectorAll('main .stat-card')]"
-        ".find((c) => c.textContent.includes('Started'));"
-        " return card ? card.querySelector('.stat-value').textContent.trim() : ''; })()"
+        "(() => { const m = document.querySelector('main .session-detail-title-block .meta, main .session-detail-view .meta');"
+        " return m ? m.textContent.trim() : ''; })()"
     )
     wanted = page.evaluate(
         "(iso) => import('/time.mjs').then((m) => m.relative(Date.parse(iso)))",
         detail["created_at"],
     )
-    if started != wanted:
-        watch.fail(f"the Started card reads {started!r}, expected {wanted!r}")
+    if f"started {wanted}" not in started:
+        watch.fail(f"the session detail meta reads {started!r}, expected 'started {wanted}'")
     watch.drain_rejections()
 
 
@@ -6876,25 +6869,9 @@ def check_sessions_phone(browser, watch: Watch, port: int, project: str) -> None
         if detail_visible:
             watch.fail("detail pane holds visible content on phone when no session is open")
 
-        end_ctrl = page.evaluate("""() => {
-            const btn = document.querySelector("main .session-row button[data-action='end']");
-            if (!btn) return null;
-            const r = btn.getBoundingClientRect();
-            return {
-                left: r.left,
-                right: r.right,
-                height: r.height,
-                width: r.width,
-                vw: window.innerWidth
-            };
-        }""")
-        if not end_ctrl:
-            watch.fail("session row has no End control")
-        else:
-            if end_ctrl["right"] > end_ctrl["vw"] or end_ctrl["left"] < 0:
-                watch.fail(f"End control bounding rect overflows viewport: right={end_ctrl['right']}, vw={end_ctrl['vw']}")
-            if end_ctrl["height"] + 0.5 < 44:
-                watch.fail(f"End control is {end_ctrl['height']}px tall, under the 44px minimum")
+        row_h = page.evaluate("document.querySelector('main .session-row')?.getBoundingClientRect()?.height || 0")
+        if row_h + 0.5 < 44:
+            watch.fail(f"session row is {row_h}px tall, under the 44px minimum")
 
         opened_id = page.evaluate("""() => {
             const link = document.querySelector("main .session-row .session-link");
@@ -6902,7 +6879,7 @@ def check_sessions_phone(browser, watch: Watch, port: int, project: str) -> None
             return match ? decodeURIComponent(match[1]) : "";
         }""")
         page.click("main .session-row .session-link")
-        if not settle(page, "!!document.querySelector('main .stat-card')"):
+        if not settle(page, "location.hash.startsWith('#/session?') && !document.querySelector('main .session-row')"):
             watch.fail("opening session from phone list did not show session detail")
             return
         if page.evaluate("!!document.querySelector('main .session-row')"):
@@ -7668,6 +7645,235 @@ def check_projects_index(browser, watch: Watch, port: int) -> None:
                 pass
         if context:
             context.close()
+
+
+def seed_second_session(port: int, project_id: str) -> str:
+    session_client = []
+    harness.mcp_call(
+        port,
+        session_client,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session_client, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    res = harness.mcp_call(
+        port,
+        session_client,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "session_start",
+                "arguments": {"project_id": project_id, "session_name": "second-ended-session"},
+            },
+        },
+    )
+    second_id = (res.get("result", {}).get("structuredContent", {}) or {}).get("session_id", "")
+    if second_id:
+        harness.request(port, "POST", f"/api/v1/sessions/{quote(second_id)}/end")
+    return second_id
+
+
+def check_sessions_redraw(browser, page, watch: Watch, port: int, project: str, seeded_session_id: str) -> None:
+    """Sessions list (Screen 06) and detail (Screen 07) conform to Round 3 design."""
+    watch.enter("sessions: list redraw and detail selection")
+    second_session_id = seed_second_session(port, project)
+    if not second_session_id:
+        watch.fail("could not seed second session")
+        return
+
+    # 1. Desktop check at 1100x800: two-pane list + detail
+    context = browser.new_context(
+        viewport={"width": 1100, "height": 800},
+        permissions=["clipboard-read", "clipboard-write"],
+    )
+    context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+    desk_page = context.new_page()
+    desk_page.on("pageerror", lambda error: watch.fail(f"sessions desktop: uncaught error: {error}"))
+    try:
+        desk_page.goto(f"http://127.0.0.1:{port}/#/projects/{quote(project)}/sessions", wait_until="load")
+        if not settle(desk_page, "!!document.querySelector('main .session-row')"):
+            watch.fail("sessions list did not render session rows")
+            return
+
+        # Both panes visible in desktop two-pane layout
+        panes = desk_page.evaluate("""() => {
+            const list = document.querySelector('main .pane-list');
+            const detail = document.querySelector('main .pane-detail');
+            return {
+                listVisible: !!list && getComputedStyle(list).display !== 'none',
+                detailVisible: !!detail && getComputedStyle(detail).display !== 'none'
+            };
+        }""")
+        if not (panes["listVisible"] and panes["detailVisible"]):
+            watch.fail(f"desktop sessions does not show both panes: {panes}")
+            return
+
+        # Active and ended groups present
+        groups = desk_page.evaluate("""() => {
+            const text = document.querySelector('main .pane-list')?.textContent || '';
+            return {
+                hasActive: /ACTIVE\\s*[·•]/i.test(text),
+                hasEnded: /ENDED\\s*[·•]/i.test(text),
+                hasPruneAll: /Prune all/i.test(text),
+            };
+        }""")
+        if not groups["hasActive"]:
+            watch.fail("sessions list does not have an ACTIVE group header")
+        if not groups["hasEnded"]:
+            watch.fail("sessions list does not have an ENDED group header")
+        if not groups["hasPruneAll"]:
+            watch.fail("sessions list ended header has no 'Prune all' control")
+
+        # Row structure: state dot, owner leading meta, size in right column
+        row_props = desk_page.evaluate("""() => {
+            const row = document.querySelector('main .session-row');
+            if (!row) return null;
+            const dot = row.querySelector('.state-dot');
+            const size = row.querySelector('.session-size');
+            const meta = row.querySelector('.meta');
+            return {
+                hasDot: !!dot,
+                metaText: meta ? meta.textContent.trim() : '',
+                hasSize: !!size,
+            };
+        }""")
+        if not row_props or not row_props["hasDot"]:
+            watch.fail("session row does not render state dot")
+        if not row_props or not row_props["hasSize"]:
+            watch.fail("session row has no right-column size")
+        if not row_props or not any(row_props["metaText"].startswith(o) for o in ("checks/agent", "human", harness.AGENT_NAME)):
+            watch.fail(f"session row meta does not lead with owner: {row_props['metaText'] if row_props else 'none'}")
+
+        # Defect 1: Whole row is pressable at its centre (stretched link / row is <a>)
+        pressable = desk_page.evaluate("""() => {
+            const row = document.querySelector('main .session-row');
+            if (!row) return { found: false };
+            const r = row.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            if (!hit) return { found: false };
+            const link = hit.closest('a');
+            return {
+                found: true,
+                hitTag: hit.tagName.toLowerCase(),
+                hitClass: hit.className,
+                isLink: !!link,
+                linkHref: link ? link.getAttribute('href') : '',
+            };
+        }""")
+        if not pressable["found"] or not pressable["isLink"]:
+            watch.fail(f"element at session row centre is not pressable link: {pressable}")
+
+        # Defect 2: Detail pane must render the SELECTED session, not statically the first session
+        desk_page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions?id={quote(seeded_session_id)}'")
+        if not settle(desk_page, f"(() => {{ const p = document.querySelector('main .pane-detail'); return !!p && p.textContent.includes({json.dumps(harness.SESSION_NAME)}); }})()", timeout=5000):
+            detail_text = desk_page.evaluate("document.querySelector('main .pane-detail')?.textContent || ''")
+            watch.fail(f"detail pane did not update to render selected second session: {detail_text[:120]!r}")
+
+        # Detail screen properties on desktop pane-detail
+        detail_checks = desk_page.evaluate("""() => {
+            const detail = document.querySelector('main .pane-detail');
+            if (!detail) return null;
+            const statCards = detail.querySelectorAll('.stat-card');
+            const copyBtn = detail.querySelector('.session-copy-id');
+            const copyText = copyBtn ? copyBtn.textContent.trim() : '';
+            const copyTitle = copyBtn ? copyBtn.getAttribute('title') || '' : '';
+            const tree = detail.querySelector('[role="tree"]');
+            const selectedItems = tree ? tree.querySelectorAll('[role="treeitem"][aria-selected="true"]') : [];
+            const treeFolders = tree ? [...tree.querySelectorAll('[role="treeitem"][aria-expanded]')].map(f => f.textContent.trim()) : [];
+            const pruneEndsFirst = detail.textContent.includes('Prune (ends first)');
+            return {
+                statCardCount: statCards.length,
+                hasCopyBtn: !!copyBtn,
+                copyText,
+                copyTitle,
+                isTruncated: copyText.includes('…'),
+                treeCount: detail.querySelectorAll('[role="tree"]').length,
+                selectedCount: selectedItems.length,
+                hasKvFolder: treeFolders.some(f => f.includes('kv/')),
+                hasFsFolder: treeFolders.some(f => f.includes('fs/')),
+                hasPruneEndsFirst: pruneEndsFirst,
+            };
+        }""")
+        if not detail_checks:
+            watch.fail("no detail pane found to inspect")
+            return
+        if detail_checks["statCardCount"] > 0:
+            watch.fail(f"detail pane still renders {detail_checks['statCardCount']} stat cards (Screen 07 removes them)")
+        if not detail_checks["hasCopyBtn"] or not detail_checks["isTruncated"]:
+            watch.fail(f"detail pane session id copy control not middle-truncated: text={detail_checks['copyText']!r}")
+        if detail_checks["copyTitle"] != seeded_session_id:
+            watch.fail(f"copy button title {detail_checks['copyTitle']!r} does not carry full id {seeded_session_id!r}")
+        if detail_checks["treeCount"] != 1:
+            watch.fail(f"brain should be 1 unified tree, found {detail_checks['treeCount']}")
+        if not (detail_checks["hasKvFolder"] and detail_checks["hasFsFolder"]):
+            watch.fail(f"unified tree missing kv/ or fs/ folders: {detail_checks}")
+        if detail_checks["selectedCount"] > 0:
+            watch.fail("unified tree has pre-selected treeitem before any tap")
+        if detail_checks["hasPruneEndsFirst"]:
+            watch.fail("detail pane still contains disabled 'Prune (ends first)' button")
+
+    finally:
+        context.close()
+
+    # 2. Phone check at 390x844: one thing at a time, touch targets, no horizontal overflow
+    phone_context = browser.new_context(
+        viewport={"width": 390, "height": 844},
+    )
+    phone_context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+    phone_page = phone_context.new_page()
+    phone_page.on("pageerror", lambda error: watch.fail(f"sessions phone: uncaught error: {error}"))
+    try:
+        phone_page.goto(f"http://127.0.0.1:{port}/#/projects/{quote(project)}/sessions", wait_until="load")
+        if not settle(phone_page, "!!document.querySelector('main .session-row')"):
+            watch.fail("sessions list on phone did not render rows")
+            return
+
+        scroll_w = phone_page.evaluate("document.documentElement.scrollWidth")
+        inner_w = phone_page.evaluate("window.innerWidth")
+        if scroll_w > inner_w:
+            watch.fail(f"phone sessions list overflows horizontally: {scroll_w}px > {inner_w}px")
+
+        # Check tap target minimum 44px on rows
+        min_h = phone_page.evaluate("document.querySelector('main .session-row')?.getBoundingClientRect()?.height || 0")
+        if min_h + 0.5 < 44:
+            watch.fail(f"session row height {min_h}px is below 44px tap target")
+
+        # Open session detail on phone: replaces list
+        phone_page.click("main .session-row a")
+        phone_page.wait_for_timeout(300)
+        phone_detail = phone_page.evaluate("""() => {
+            const list = document.querySelector('main .pane-list');
+            const hasDetail = !!document.querySelector('main .session-copy-id') ||
+                              !!document.querySelector('main [role="tree"]') ||
+                              !!document.querySelector('main h1, main h2, main h3');
+            return {
+                listHiddenOrAbsent: !list || getComputedStyle(list).display === 'none' || document.querySelectorAll('main .session-row').length === 0,
+                hasDetail,
+            };
+        }""")
+        if not phone_detail["hasDetail"]:
+            watch.fail("opening session on phone did not show session detail")
+        if not phone_detail["listHiddenOrAbsent"]:
+            watch.fail("opening session on phone did not replace list with detail")
+
+        # Phone detail scroll width check
+        p_scroll = phone_page.evaluate("document.documentElement.scrollWidth")
+        p_inner = phone_page.evaluate("window.innerWidth")
+        if p_scroll > p_inner:
+            watch.fail(f"phone session detail overflows horizontally: {p_scroll}px > {p_inner}px")
+
+    finally:
+        phone_context.close()
         watch.page.bring_to_front()
         watch.drain_rejections()
 
@@ -7769,7 +7975,7 @@ def run() -> int:
                         "session",
                         f"#/session?project={quote(project)}&id={quote(seeded['session_id'])}",
                         harness.SESSION_NAME,
-                        [harness.BRAIN_PATH],
+                        [harness.BRAIN_PATH.rsplit("/", 1)[-1]],
                     ),
                     ("storage", "#/storage", "Storage", [harness.PROJECT_NAME]),
                     (
@@ -7844,6 +8050,7 @@ def run() -> int:
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_feed_chips_and_row_grammar, page, watch, port, project)
                 run_step(watch, check_projects_index, browser, watch, port)
+                run_step(watch, check_sessions_redraw, browser, page, watch, port, project, seeded["session_id"])
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
                 run_step(watch, check_inbox_earlier_and_snooze, browser, watch, port, project)
