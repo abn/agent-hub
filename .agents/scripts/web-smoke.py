@@ -7565,6 +7565,113 @@ def check_feed_chips_and_row_grammar(page, watch: Watch, port: int, project: str
     watch.drain_rejections()
 
 
+def check_projects_index(browser, watch: Watch, port: int) -> None:
+    """The projects index lists every project, reads zero counts in words, navigates, and shows priority badges."""
+    watch.enter("projects index: route lands on index, lists projects, zero counts in words")
+    context = None
+    empty_proj = "projects-index-empty"
+    created_empty = False
+    try:
+        try:
+            harness.request(port, "POST", "/api/v1/projects", {"id": empty_proj, "display_name": "Empty Project"})
+            created_empty = True
+        except Exception:
+            pass
+        seeded_proj = harness.PROJECT_ID
+
+        for width_name, width in [("phone", 390), ("desktop", 1100)]:
+            watch.enter(f"projects index: {width_name} layout")
+            context = browser.new_context(viewport={"width": width, "height": 844 if width == 390 else 800}, color_scheme="dark")
+            context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+            page = context.new_page()
+            page.on("pageerror", lambda error: watch.fail(f"uncaught error: {error}"))
+            page.goto(f"http://127.0.0.1:{port}/#/projects", wait_until="load")
+
+            if not settle(page, "location.hash === '#/projects'"):
+                watch.fail(f"#/projects redirected to {page.evaluate('location.hash')!r}")
+                return
+
+            if not settle(page, "!!document.querySelector('main .projects-screen')"):
+                watch.fail("projects index did not render the projects screen container")
+                return
+
+            empty_text = page.evaluate(f"""(() => {{
+                const row = document.querySelector('main .project-row[data-id="{empty_proj}"]');
+                return row ? row.textContent : '';
+            }})()""")
+            if not empty_text:
+                watch.fail(f"empty project {empty_proj} not found in projects index")
+                return
+
+            if "no agents active" not in empty_text:
+                watch.fail(f"zero agents active did not read 'no agents active': {empty_text!r}")
+            if "0 agents active" in empty_text or "0 active" in empty_text:
+                watch.fail(f"zero agents active read as '0': {empty_text!r}")
+            if "no artifacts" not in empty_text:
+                watch.fail(f"zero artifacts did not read 'no artifacts': {empty_text!r}")
+            if "0 artifacts" in empty_text:
+                watch.fail(f"zero artifacts read as '0': {empty_text!r}")
+
+            badge_info = page.evaluate(f"""(() => {{
+                const row = document.querySelector('main .project-row[data-id="{seeded_proj}"]');
+                if (!row) return null;
+                const badges = row.querySelectorAll('.project-badge, .badge');
+                const badge = badges[0];
+                return {{
+                    count: badges.length,
+                    text: badge ? badge.textContent.trim() : '',
+                    isAction: badge ? (badge.classList.contains('badge-waiting') || badge.classList.contains('action') || badge.dataset.kind === 'action') : false,
+                }};
+            }})()""")
+            if not badge_info:
+                watch.fail(f"seeded project {seeded_proj} not found in projects index")
+                return
+            if badge_info["count"] != 1:
+                watch.fail(f"row with both unread and waiting drew {badge_info['count']} badges, expected 1")
+            if not badge_info["isAction"]:
+                watch.fail("the single badge for waiting+unread was not the amber/waiting badge")
+
+            personal_folded = page.evaluate("""(() => {
+                const fold = document.querySelector('main details.projects-agent-spaces');
+                return fold && !fold.open;
+            })()""")
+            if not personal_folded:
+                watch.fail("personal agent spaces are not behind a closed fold/disclosure")
+
+            watch.enter(f"projects index: {width_name} navigation by click")
+            page.click(f'main .project-row[data-id="{empty_proj}"] a')
+            if not settle(page, f"location.hash === '#/projects/{empty_proj}/feed'"):
+                watch.fail(f"clicking project row did not navigate to feed: {page.evaluate('location.hash')!r}")
+
+            watch.enter(f"projects index: {width_name} keyboard navigation")
+            page.goto(f"http://127.0.0.1:{port}/#/projects", wait_until="load")
+            settle(page, "!!document.querySelector('main .project-row')")
+            page.focus("main")
+            page.keyboard.press("j")
+            selected_id = page.evaluate("""(() => {
+                const row = document.querySelector('main .project-row[tabindex="0"]');
+                return row ? row.dataset.id : '';
+            })()""")
+            if not selected_id:
+                watch.fail("keyboard navigation with 'j' did not select a row with tabindex=0")
+            page.keyboard.press("Enter")
+            if not settle(page, f"location.hash.startsWith('#/projects/{selected_id}')"):
+                watch.fail(f"Enter on keyboard-selected row did not navigate to project: {page.evaluate('location.hash')!r}")
+
+            context.close()
+            context = None
+    finally:
+        if created_empty:
+            try:
+                harness.request(port, "DELETE", f"/api/v1/projects/{empty_proj}")
+            except Exception:
+                pass
+        if context:
+            context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -7736,6 +7843,7 @@ def run() -> int:
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
                 run_step(watch, check_feed_chips_and_row_grammar, page, watch, port, project)
+                run_step(watch, check_projects_index, browser, watch, port)
                 run_step(watch, check_feed_row_links, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_markdown_artifact_rendering, browser, page, watch, port, project)
                 run_step(watch, check_inbox_earlier_and_snooze, browser, watch, port, project)

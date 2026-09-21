@@ -24,6 +24,7 @@ NAME = "a11y"
 ROUTES = [
     "home",
     "inbox",
+    "projects",
     "inbox-detail",
     "feed",
     "session-detail",
@@ -89,7 +90,7 @@ TAGS = ["wcag2a", "wcag2aa"]
 AUDITED = {
     "home": ["home", HOME_QUIET],
     "inbox": ["inbox", INBOX_DETAIL, APPROVAL_DIALOG],
-    "projects": [PROJECT_SETTINGS, f"projects/{harness.FEED_EMPTY_PROJECT}/feed"],
+    "projects": ["projects", PROJECT_SETTINGS, f"projects/{harness.FEED_EMPTY_PROJECT}/feed"],
     "feed": ["feed"],
     "sessions": ["sessions"],
     "artifacts": ["artifacts", COMMENTS_DRAWER],
@@ -108,6 +109,7 @@ AUDITED = {
 EXPECTED = {
     "home": "main .home .home-summary",
     "inbox": "main .inbox-screen .inbox-item",
+    "projects": "main .projects-screen .project-row",
     INBOX_DETAIL: "main .inbox-detail .item-title",
     "feed": "main .feed-chips ~ .feed-day .feed-row",
     SESSION_DETAIL: "main .stat-row",

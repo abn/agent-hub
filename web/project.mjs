@@ -9,7 +9,7 @@ import { gallerySection } from "./artifacts.mjs";
 import { esc, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { feedSection } from "./feed.mjs";
-import { count } from "./home.mjs";
+import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { settingsLink } from "./project-settings.mjs";
@@ -40,6 +40,7 @@ export function twoPane(listHTML, detailHTML) {
 }
 
 function size(bytes) {
+  if (!bytes) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -127,6 +128,159 @@ function sessionsTwoPane(current, listHTML, sessions) {
   return twoPane(`<h2 class="section-label">Sessions</h2>${listHTML}`, detail);
 }
 
+async function projectsIndexScreen(gen, projects) {
+  const [statsList, storage, inboxData, homeData] = await Promise.all([
+    Promise.all(
+      projects.map((p) =>
+        api(`/api/v1/projects/${encodeURIComponent(p.id)}/stats`).catch(() => null),
+      ),
+    ),
+    api("/api/v1/storage").catch(() => null),
+    api("/api/v1/inbox?limit=500").catch(() => ({ items: [] })),
+    api("/api/v1/home").catch(() => null),
+  ]);
+
+  if (stale(gen)) return;
+
+  const statsMap = new Map(projects.map((p, i) => [p.id, statsList[i]]));
+  const usageMap = new Map((storage?.projects || []).map((row) => [row.project_id, row]));
+
+  const waitingMap = new Map();
+  const unreadMap = new Map();
+  for (const item of inboxData.items || []) {
+    if (!item.project_id) continue;
+    if (item.status === "action" || item.status === "waiting") {
+      waitingMap.set(item.project_id, (waitingMap.get(item.project_id) || 0) + 1);
+    } else if (item.status === "unread") {
+      unreadMap.set(item.project_id, (unreadMap.get(item.project_id) || 0) + 1);
+    }
+  }
+
+  const unseenMap = new Map((homeData?.unseen || []).map((u) => [u.project_id, u.events || 0]));
+
+  const isPersonal = (p) => p.id.startsWith("space-") || p.display_name.endsWith(" (personal)");
+  const regularProjects = projects.filter((p) => !isPersonal(p));
+  const agentSpaces = projects.filter(isPersonal);
+
+  const renderRow = (p) => {
+    const stats = statsMap.get(p.id);
+    const usage = usageMap.get(p.id);
+
+    const agentsActive = stats?.agents_active || 0;
+    const agentsText =
+      agentsActive === 0
+        ? "no agents active"
+        : agentsActive === 1
+          ? "1 agent active"
+          : `${agentsActive} agents active`;
+
+    const artifactsCount = stats?.artifacts || 0;
+    const artifactsText =
+      artifactsCount === 0
+        ? "no artifacts"
+        : artifactsCount === 1
+          ? "1 artifact"
+          : `${artifactsCount} artifacts`;
+
+    const footprintBytes = usage
+      ? (usage.artifact_bytes || 0) + (usage.session_bytes || 0) + (usage.kb_bytes || 0)
+      : 0;
+    const footprintText = size(footprintBytes);
+
+    const waitingCount = waitingMap.get(p.id) || 0;
+    const unreadCount = unreadMap.get(p.id) || unseenMap.get(p.id) || 0;
+
+    let badgeHTML = "";
+    const hasWaiting = waitingCount > 0;
+    const hasUnread = !hasWaiting && unreadCount > 0;
+    if (hasWaiting) {
+      badgeHTML = `<span class="project-badge badge-waiting" data-kind="action" aria-label="${waitingCount} waiting on you">${waitingCount}</span>`;
+    } else if (hasUnread) {
+      badgeHTML = `<span class="project-badge badge-unread" data-kind="unread" aria-label="${unreadCount} unread">${unreadCount}</span>`;
+    }
+
+    const titleClass = hasWaiting || hasUnread ? "project-title unread" : "project-title";
+
+    return `
+      <div class="row project-row" data-id="${esc(p.id)}">
+        <a class="project-link" href="#/projects/${encodeURIComponent(p.id)}/feed">
+          <span class="project-info">
+            <span class="title ${titleClass}">${esc(p.display_name)}</span>
+            <span class="meta project-meta">${agentsText} · ${artifactsText} · <span class="mono">${footprintText}</span></span>
+          </span>
+          ${badgeHTML}
+          <svg class="project-chev" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 9 5l7 7-7 7"/></svg>
+        </a>
+      </div>`;
+  };
+
+  const regularRows = regularProjects.map(renderRow).join("");
+
+  let spacesHTML = "";
+  if (agentSpaces.length > 0) {
+    spacesHTML = `
+      <details class="projects-agent-spaces">
+        <summary class="projects-agent-spaces-summary">
+          <span>Agent spaces · ${agentSpaces.length}</span>
+        </summary>
+        <div class="projects-agent-spaces-list">
+          ${agentSpaces.map(renderRow).join("")}
+        </div>
+      </details>`;
+  }
+
+  const totalUsedBytes = storage?.used_bytes ?? 0;
+  const totalFootprint = size(totalUsedBytes);
+  const countWord = `${count(projects.length, "project", "projects")}`;
+
+  let storageSection = "";
+  if (storage) {
+    const used = storage.used_bytes || 0;
+    const capacity = storage.capacity_bytes || 0;
+    const share = capacity ? Math.min(1, used / capacity) : 0;
+    const prunableSessions = storage.prunable?.sessions || 0;
+    const prunableBytes = storage.prunable?.bytes || 0;
+
+    let pruneHint = "";
+    if (prunableSessions > 0) {
+      pruneHint = `<div class="projects-storage-hint">${count(prunableSessions, "ended session", "ended sessions")} can be pruned · <span class="mono">${size(prunableBytes)}</span></div>`;
+    }
+
+    storageSection = `
+      <section class="projects-storage" aria-label="Storage">
+        <div class="projects-storage-label">STORAGE</div>
+        <div class="card projects-storage-card">
+          <div class="projects-storage-head">
+            <span class="projects-storage-title">Disk</span>
+            <span class="mono projects-storage-capacity">${capacity ? usedOfCapacity(used, capacity) : size(used)}</span>
+          </div>
+          <div class="projects-storage-bar" aria-hidden="true">
+            <div class="projects-storage-fill" style="width: ${(share * 100).toFixed(1)}%"></div>
+          </div>
+          ${pruneHint}
+        </div>
+      </section>`;
+  }
+
+  const html = `
+    <div class="projects-screen">
+      <div class="projects-head">
+        <div>
+          <h1 class="projects-title">Projects</h1>
+          <div class="projects-meta">${countWord} · <span class="mono">${totalFootprint}</span></div>
+        </div>
+        <a href="#/settings" class="projects-new">New</a>
+      </div>
+      <div class="projects-list">
+        ${regularRows}
+        ${spacesHTML}
+      </div>
+      ${storageSection}
+    </div>`;
+
+  paint(gen, html);
+}
+
 export async function projectScreen(params, gen, path) {
   const parts = (path || "").split("/");
   let seg = parts[3];
@@ -147,8 +301,12 @@ export async function projectScreen(params, gen, path) {
     return;
   }
   const id = parts[2];
-  if (!id || !projects.some((p) => p.id === id)) {
-    // The address named no project, or one that is gone. Land on the first
+  if (!id) {
+    await projectsIndexScreen(gen, projects);
+    return;
+  }
+  if (!projects.some((p) => p.id === id)) {
+    // The address named a project that is gone. Land on the first
     // project, keeping the segment the reader asked for.
     location.hash = `#/projects/${encodeURIComponent(current)}/${segment}`;
     return;

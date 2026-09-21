@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, projects index screen
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the projects index screen at `#/projects`, which lists all projects with
+  agent, artifact, and footprint counts, amber waiting or accent unread badges,
+  and a collapsible fold for personal agent spaces.
+
 ## 2026-09-21, project feed chips redraw and row grammar
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
