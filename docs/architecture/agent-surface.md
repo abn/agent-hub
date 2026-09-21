@@ -58,14 +58,14 @@ and session-bound work goes through the proxy.
 | `brain_delete` | Remove a path from either store. |
 | `brain_promote` | Copy an entry from the caller's active session brain into a project knowledge base page that cites the session it came from. |
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
-| `whoami` | Report the calling identity, its trust level, and its personal space. |
+| `whoami` | Report the calling identity and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
 
 A publish carries a description, a favicon mark, and a version label.
 `artifact_update` accepts the version the edit is based on as
 `base_version`: a stale base is refused with a conflict naming the
 current version unless `force` is passed, so two writers never silently
-overwrite each other. History and deletion follow the same trust rules
+overwrite each other. History and deletion follow the same access rules
 as reads and writes, and an artifact a caller may not reach reads as
 forbidden whether it is missing or denied. Commenting works the same
 way: posting needs write access and returns a delete token shown once,
@@ -90,8 +90,8 @@ recovers from.
 `brain_get` and `brain_list` take an optional `session` naming another session
 to read, either `{session_id}` or `{agent, name}` with a `project_id` that
 defaults to the active session's project; omitted, it is the active session.
-Read access to the target's project is the whole rule, which in the default
-trusted posture means every agent reads every session. Reading another session
+Read access to the target's project is the whole rule, so an agent with
+read access to a project reads its sessions. Reading another session
 touches neither the caller's active session nor its existence, so a caller that
 never started one still reads. A read opens no file that is not already there,
 and a session the human has pruned is `not_found` from the moment it is marked.
@@ -132,19 +132,16 @@ page only when nothing is stored at the path. Without `if_version` the last
 writer wins. The comparison and the write happen under the store's writer lock,
 so two callers holding the same version cannot both succeed.
 
-## Trust
+## Identity and access
 
-Every HTTP call carries a bearer token bound to a stable agent identity, and
-the server sets the `actor`; a request cannot forge it. A proxy and a one-shot
-call are HTTP calls, so they are the token's agent, and `HUB_AGENT_ID` is
+Every HTTP call carries a bearer token bound to a stable identity, and the
+server sets the `actor`; a request cannot forge it. A proxy and a one-shot call
+are HTTP calls, so they are the token's identity, and `HUB_AGENT_ID` is
 advisory there: only the embedded standalone stdio mode carries no token, acts
-as the human admin, and takes its actor label from `HUB_AGENT_ID`. A trusted
-agent reads every resource
-and writes shared projects and its own personal space, but not another agent's;
-an untrusted agent reaches only its own space and the projects explicitly
-granted to it, at the granted level. Global reads are confined to the caller's
-visible projects, so a search or an inbox read never crosses a boundary. See
-[agent identity and trust](../adr/0012-agent-identity-and-trust.md).
+as the human admin, and takes its actor label from `HUB_AGENT_ID`. A token
+reaches every ordinary project and its own personal space; confidential
+projects require explicit grants. Global reads are confined to the caller's
+visible projects, so a search or an inbox read never crosses a boundary.
 
 ## Pagination, errors, and idempotency
 

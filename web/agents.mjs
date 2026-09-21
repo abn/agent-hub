@@ -1,114 +1,245 @@
-// Agents and access: the Settings section that lists agents, their trust, their
-// tokens, and their grants.
+// Access: tokens, confidential projects, and agents that identified themselves.
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { errorCard, esc, main } from "./dom.mjs";
+import { errorCard, esc, main, paint } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
+import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
+import { relative } from "./time.mjs";
+import { toast } from "./toast.mjs";
 
-export async function agentsSection() {
-  let agents;
+export function truncateMiddle(val, startLen = 8, endLen = 4) {
+  if (!val) return "";
+  if (val.length <= startLen + endLen + 1) return val;
+  return `${val.slice(0, startLen)}\u2026${val.slice(-endLen)}`;
+}
+
+export async function accessScreen(gen) {
+  let agents = [];
+  let projects = [];
+  const grantsByAgent = {};
   try {
-    agents = (await api("/api/v1/agents")).agents;
+    const res = await Promise.all([api("/api/v1/agents"), api("/api/v1/projects")]);
+    agents = res[0].agents || [];
+    projects = res[1].projects || [];
+    await Promise.all(
+      agents.map(async (agent) => {
+        try {
+          grantsByAgent[agent.id] = (
+            await api(`/api/v1/agents/${encodeURIComponent(agent.id)}/grants`)
+          ).grants || [];
+        } catch {
+          grantsByAgent[agent.id] = [];
+        }
+      }),
+    );
   } catch (error) {
-    return errorCard("Agents and access", error);
+    paint(gen, errorCard("Access", error));
+    return;
   }
 
-  const grantsByAgent = {};
-  await Promise.all(
-    agents.map(async (agent) => {
-      try {
-        grantsByAgent[agent.id] = (
-          await api(`/api/v1/agents/${encodeURIComponent(agent.id)}/grants`)
-        ).grants;
-      } catch {
-        grantsByAgent[agent.id] = [];
-      }
-    }),
-  );
+  const token = prefs.token || "";
+  const tokenTruncated = truncateMiddle(token, 10, 4);
+  const confidentialProjects = projects.filter((p) => p.confidential);
 
-  const rows = agents
-    .map((agent) => {
-      const grants = grantsByAgent[agent.id] || [];
-      const grantRows = grants
+  const confidentialRows = confidentialProjects.length
+    ? confidentialProjects
         .map(
-          (grant) =>
-            `<div class="meta mono">${esc(grant.project_id)} · ${esc(grant.access)} ` +
-            `<button type="button" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" aria-label="Remove grant on ${esc(grant.project_id)}">Remove</button></div>`,
+          (p) => `
+      <div class="row confidential-row">
+        <span class="confidential-name grow">${esc(p.display_name)} ${glyphSvg("lock", { size: 14 })}</span>
+        <span class="meta">confidential</span>
+      </div>`,
         )
-        .join("");
-      const promote = agent.trust === "trusted" ? "untrusted" : "trusted";
-      return `<div class="row">
-        <div class="grow">
-          <div class="title">${esc(agent.display_name)} <span class="pill">${esc(agent.trust)}</span></div>
-          <div class="meta mono">${esc(agent.id)} · ${esc(agent.personal_project_id)}</div>
-          <div class="toolbar">
-            <button type="button" data-action="agent-trust" data-id="${esc(agent.id)}" data-trust="${promote}" aria-label="${agent.trust === "trusted" ? "Demote" : "Promote"} ${esc(agent.display_name)}">${agent.trust === "trusted" ? "Demote" : "Promote"}</button>
-            <button type="button" data-action="agent-token" data-id="${esc(agent.id)}" aria-label="Reissue token for ${esc(agent.display_name)}">Reissue token</button>
-            <button type="button" class="danger" data-action="agent-revoke" data-id="${esc(agent.id)}" aria-label="Revoke token for ${esc(agent.display_name)}">Revoke token</button>
+        .join("")
+    : '<p class="empty">No confidential projects.</p>';
+
+  const agentRows = agents.length
+    ? agents
+        .map((agent) => {
+          const grants = grantsByAgent[agent.id] || [];
+          const grantRows = grants.length
+            ? `<div class="agent-grants">
+                ${grants
+                  .map(
+                    (grant) => `
+                  <div class="agent-grant-row">
+                    <span class="meta mono">${esc(grant.project_id)} · ${esc(grant.access)}</span>
+                    <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" aria-label="Remove grant on ${esc(grant.project_id)} for ${esc(agent.display_name || agent.id)}">Remove grant</button>
+                  </div>`,
+                  )
+                  .join("")}
+              </div>`
+            : "";
+
+          return `
+      <div class="row agent-record-row" data-agent-id="${esc(agent.id)}">
+        <div class="agent-record-main">
+          <div class="grow">
+            <div class="agent-title-line">
+              <span class="title">${esc(agent.display_name || agent.id)}</span>
+              <span class="record-badge">record</span>
+            </div>
+            <div class="meta">first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · <span class="mono">${esc(agent.personal_project_id)}</span></div>
           </div>
-          <div class="meta">Grants</div>
-          ${grantRows || '<div class="meta">None.</div>'}
-          <form data-action="agent-grant">
-            <input type="hidden" name="agent" value="${esc(agent.id)}">
-            <label class="sr-only" for="grant-project-${esc(agent.id)}">Project</label>
-            <input id="grant-project-${esc(agent.id)}" name="project" required placeholder="project id">
-            <label class="sr-only" for="grant-access-${esc(agent.id)}">Access</label>
-            <select id="grant-access-${esc(agent.id)}" name="access">
-              <option value="read">read</option>
-              <option value="write">write</option>
-            </select>
-            <p><button class="primary" type="submit">Add grant</button></p>
-          </form>
+          <div class="agent-record-actions">
+            <button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" aria-label="Reissue token for ${esc(agent.display_name || agent.id)}">Reissue token</button>
+            <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" aria-label="Revoke token for ${esc(agent.display_name || agent.id)}">Revoke token</button>
+          </div>
         </div>
+        ${grantRows}
       </div>`;
-    })
+        })
+        .join("")
+    : '<p class="empty">No agents have identified themselves yet.</p>';
+
+  paint(
+    gen,
+    `
+    <div class="access-header">
+      <a class="access-back-btn" href="#/settings" aria-label="Back to settings">
+        ${glyphSvg("chevronBack", { size: 20 })}
+      </a>
+      <h1 class="access-title">Access</h1>
+    </div>
+    <div class="access-screen">
+      <div class="access-section-head">
+        <span class="section-label">TOKEN</span>
+      </div>
+      <div class="card token-card">
+        <div class="token-head">
+          <span class="token-name">hub-main</span>
+          <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
+        </div>
+        <button type="button" class="token-copy-btn" data-action="copy-token" data-token="${esc(token)}" aria-label="Copy full token: ${esc(token)}">
+          <span class="mono token-val">${esc(tokenTruncated || "no token")}</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 9 9h10v12H9z"/><path d="M 15 9V4H5v14h4"/></svg>
+        </button>
+        <p class="token-sentence">The admin token comes from the hub's startup configuration. It changes when the operator restarts the hub with a different HUB_ADMIN_TOKEN.</p>
+        <p class="token-sentence meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</p>
+      </div>
+
+      <div class="access-section-head">
+        <span class="section-label">CONFIDENTIAL PROJECTS</span>
+        <span class="section-sub">A confidential project is absent, not refused: a token with no grant to it sees no project, no rows, no error.</span>
+      </div>
+      <div class="card confidential-projects">
+        ${confidentialRows}
+      </div>
+
+      <div class="access-section-head agents-head">
+        <span class="section-label">AGENTS THAT IDENTIFIED THEMSELVES</span>
+        <span class="mono agents-count">${agents.length}</span>
+      </div>
+      <div class="card agents-records">
+        ${agentRows}
+      </div>
+
+      <div class="access-section-head">
+        <span class="section-label">REVOKED TOKENS</span>
+        <span class="section-sub">History, not state.</span>
+      </div>
+      <div class="card revoked-tokens">
+        <p class="empty">No revoked tokens.</p>
+      </div>
+    </div>
+  `,
+  );
+}
+
+export async function agentsSection() {
+  let agents = [];
+  try {
+    agents = (await api("/api/v1/agents")).agents || [];
+  } catch (error) {
+    return errorCard("Access", error);
+  }
+
+  const agentRows = agents
+    .map(
+      (agent) => `
+    <div class="row agent-record-row">
+      <div class="grow">
+        <div class="title">${esc(agent.display_name || agent.id)} <span class="record-badge">record</span></div>
+        <div class="meta">first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · <span class="mono">${esc(agent.personal_project_id)}</span></div>
+      </div>
+    </div>`,
+    )
     .join("");
 
-  return `<div class="card">
-    <h2>Agents and access</h2>
-    <form data-action="agent-create">
-      <label for="agent-id">Agent id</label>
-      <input id="agent-id" name="id" required autocomplete="off" placeholder="laptop/claude">
-      <label for="agent-name">Display name</label>
-      <input id="agent-name" name="display_name" required>
-      <label for="agent-trust">Trust</label>
-      <select id="agent-trust" name="trust">
-        <option value="">deployment default</option>
-        <option value="trusted">trusted</option>
-        <option value="untrusted">untrusted</option>
-      </select>
-      <p><button class="primary" type="submit">Create agent</button></p>
-    </form>
-    ${rows || '<p class="empty">No agents yet.</p>'}
-  </div>`;
+  return `
+    <div class="card access-card">
+      <h2>Access</h2>
+      <p class="meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</p>
+      <p><a class="button" href="#/access">Manage access</a></p>
+      <div class="meta" style="margin-top: var(--s-3); margin-bottom: var(--s-1);">Agents that identified themselves:</div>
+      ${agentRows || '<p class="empty">No agents yet.</p>'}
+    </div>
+  `;
 }
 
-function showToken(token) {
+export async function copyToken(token) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch {}
+  }
+  toast("Token copied.");
+}
+
+export function showToken(token, agentName = "") {
+  const existing = document.querySelector(".issued-token-card");
+  if (existing) existing.remove();
+
   const card = document.createElement("div");
-  card.className = "card";
+  card.className = "card issued-token-card";
   card.setAttribute("role", "status");
   card.setAttribute("aria-live", "polite");
-  const label = document.createElement("p");
-  label.className = "title";
-  label.textContent = "New token, shown once";
-  const code = document.createElement("p");
-  code.className = "token";
-  code.textContent = token;
-  const note = document.createElement("p");
-  note.className = "meta";
-  note.textContent = "Copy it now. Reissuing replaces it and revokes the previous token.";
-  card.append(label, code, note);
-  main.prepend(card);
-  card.scrollIntoView();
-}
 
-export async function setAgentTrust(id, trust) {
-  await api(`/api/v1/agents/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ trust }),
-  });
-  await render();
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = agentName ? `New token for ${agentName}, shown once` : "New token, shown once";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "token-copy-btn";
+  copyBtn.dataset.action = "copy-token";
+  copyBtn.dataset.token = token;
+  copyBtn.setAttribute("aria-label", `Copy new token: ${token}`);
+
+  const val = document.createElement("span");
+  val.className = "mono token-val";
+  val.textContent = token;
+
+  const copySvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  copySvg.setAttribute("width", "16");
+  copySvg.setAttribute("height", "16");
+  copySvg.setAttribute("viewBox", "0 0 24 24");
+  copySvg.setAttribute("fill", "none");
+  copySvg.setAttribute("stroke", "currentColor");
+  copySvg.setAttribute("stroke-width", "1.8");
+  copySvg.setAttribute("stroke-linecap", "round");
+  copySvg.setAttribute("stroke-linejoin", "round");
+  copySvg.setAttribute("aria-hidden", "true");
+  const path1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path1.setAttribute("d", "M 9 9h10v12H9z");
+  const path2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path2.setAttribute("d", "M 15 9V4H5v14h4");
+  copySvg.append(path1, path2);
+
+  copyBtn.append(val, copySvg);
+  copyBtn.addEventListener("click", () => copyToken(token));
+
+  const note = document.createElement("p");
+  note.className = "token-sentence meta";
+  note.textContent = "Copy it now. Reissuing replaces it and revokes the previous token.";
+
+  card.append(title, copyBtn, note);
+
+  const container = document.querySelector(".access-screen") || main;
+  container.prepend(card);
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 export async function reissueToken(id) {
@@ -116,7 +247,7 @@ export async function reissueToken(id) {
     method: "POST",
   });
   await render();
-  showToken(issued.token);
+  showToken(issued.token, id);
 }
 
 export async function revokeToken(id) {
@@ -126,15 +257,31 @@ export async function revokeToken(id) {
     note: "Revoking cannot be undone.",
     safe: "Keep",
     danger: "Revoke token",
+    commit: async () => {
+      await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
+      await render();
+    },
   });
-  if (!confirmed) return;
-  await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
-  await render();
+  if (confirmed) {
+    toast(`Token revoked for ${id}.`);
+  }
 }
 
 export async function ungrant(id, project) {
-  await api(`/api/v1/agents/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
-    method: "DELETE",
+  const confirmed = await confirmAction({
+    title: `Remove grant on ${project}?`,
+    body: `The agent will lose access to project ${project}.`,
+    note: "Removing a grant cannot be undone.",
+    safe: "Keep",
+    danger: "Remove grant",
+    commit: async () => {
+      await api(`/api/v1/agents/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
+        method: "DELETE",
+      });
+      await render();
+    },
   });
-  await render();
+  if (confirmed) {
+    toast(`Grant removed on ${project}.`);
+  }
 }

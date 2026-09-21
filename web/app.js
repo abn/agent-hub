@@ -4,7 +4,13 @@
 // the delegated events to the handler that owns each action, and starts the
 // freshness stream. Everything else lives in its own module beside this file.
 
-import { reissueToken, revokeToken, setAgentTrust, ungrant } from "./agents.mjs";
+import {
+  accessScreen,
+  copyToken,
+  reissueToken,
+  revokeToken,
+  ungrant,
+} from "./agents.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
 import {
@@ -70,6 +76,7 @@ setScreens({
   search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
+  access: (params, gen) => accessScreen(gen),
   connect: (params, gen) => connectScreen(params, gen),
 });
 
@@ -101,7 +108,7 @@ main.addEventListener("click", (event) => {
   if (action === "kind") toggleKind(button.dataset.kind, projectFromHash());
   if (action === "end") acted(button, endSession(id));
   if (action === "prune") acted(button, pruneSession(id, button.dataset.agent));
-  if (action === "agent-trust") acted(button, setAgentTrust(id, button.dataset.trust));
+  if (action === "copy-token") copyToken(button.dataset.token);
   if (action === "agent-token") acted(button, reissueToken(id));
   if (action === "agent-revoke") acted(button, revokeToken(id));
   if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));
@@ -156,20 +163,6 @@ main.addEventListener("submit", (event) => {
       body: JSON.stringify({ id: data.get("id"), display_name: data.get("display_name") }),
     })
       .then(() => (location.hash = "#/feed"))
-      .catch(failed);
-  } else if (action === "agent-create") {
-    const payload = { id: data.get("id"), display_name: data.get("display_name") };
-    const trust = String(data.get("trust") || "");
-    if (trust) payload.trust = trust;
-    api("/api/v1/agents", { method: "POST", body: JSON.stringify(payload) })
-      .then(() => render())
-      .catch(failed);
-  } else if (action === "agent-grant") {
-    api(`/api/v1/agents/${encodeURIComponent(data.get("agent"))}/grants`, {
-      method: "POST",
-      body: JSON.stringify({ project_id: data.get("project"), access: data.get("access") }),
-    })
-      .then(() => render())
       .catch(failed);
   }
 });

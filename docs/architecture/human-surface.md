@@ -262,14 +262,20 @@ it, and the project tabs sit in the same shell.
 | Connect | At `#/connect`, the screen that asks for the access token. A screen the hub refuses to paint sends the reader here, carrying the route it interrupted, so a token entered is followed by the screen they were going to rather than the start. A refused write is not a refused screen: it says so where it was pressed and leaves the reader where they are. The route it carries is followed only when it is one route of this app, and never this screen itself. One password field with a "Show token" control, a hidden username field so a password manager stores the pair, and the copy names where the token comes from. On desktop the card is vertically centred in the available space. The token is checked against the hub before it is kept, so a token the hub refuses never becomes the one every later screen sends. A refusal shows the hub's own words in a live region beside the field, keeps what was typed and returns focus to it, and stores nothing. A browser that refuses to store the token says so rather than asking again on the next load with no explanation. Settings has no field of its own; it links here to change a token. Its sections catch their own refusals, so Settings stays reachable without a token and the way back in is one link away. |
 | Project settings | Reached from the gear in a project's header, at `#/projects/<id>/settings`. The name is an editable field; the slug is shown in mono as text, not as a field, because it is read-only after creation. Save stays disabled until something differs from the hub's copy and sends only what differs. A blank name is caught on the screen, and a name the hub refuses is reported beside that control with the hub's own reason while the form keeps what was typed. Leaving with edits pending asks first, in the confirmation dialog. Retention is a reserved card that says automatic pruning is not in v1 and links to Storage; it carries no control. Delete project opens the same confirmation the global Settings list uses, and is not offered for an agent's personal space. |
 
-Agent and access management lives under Settings, not a tab. It lists agents
-with their trust level, creates an agent and its personal space, promotes or
-demotes it, issues or revokes its single token (shown once), and manages
-grants. The artifact viewer embeds the artifact page: the host shell shows
-an unlock form for a protected artifact and decrypts in the browser, then
-renders HTML or rendered markdown inside the same sandboxed frame. Markdown
-renders in the page with raw HTML in its source escaped; protected markdown
-renders from the decrypted source, so the server never sees it.
+Access management lives on its own screen reached from Settings (`#/access`).
+It displays the admin token with a copy control, stating that it originates from
+startup configuration and changes on restart with a different `HUB_ADMIN_TOKEN`.
+Confidential projects are absent rather than refused. Agents that identified
+themselves are displayed as records with their personal space path, alongside
+controls to reissue or revoke their token and remove project grants under a
+confirmation dialog, and a list of revoked tokens as history. Agent records
+lead nowhere and carry no capability switches. The artifact viewer embeds the
+artifact page:
+the host shell shows an unlock form for a protected artifact and decrypts in
+the browser, then renders HTML or rendered markdown inside the same sandboxed
+frame. Markdown renders in the page with raw HTML in its source escaped;
+protected markdown renders from the decrypted source, so the server never sees
+it.
 
 The session listing route carries the agent that owns each session, the
 handoff note its last owner left, and its lineage: whether the work was adopted
@@ -369,9 +375,9 @@ intended design, not yet shipped. See the
 
 - The control surface uses a config-set admin token. It is required when the
   bind is not loopback, since the surface rejects every request without one.
-- The MCP endpoint uses a per-agent bearer token bound to an identity and a
-  trust level, by [decision](../adr/0012-agent-identity-and-trust.md). The
-  stdio transport is the local admin and needs no token.
+- The MCP endpoint uses bearer tokens. A token is an identity in its own
+  right, and grants are binary per project. The stdio transport is the local
+  admin and needs no token.
 - Shared artifacts use a password and browser-side encryption, so the
   recipient needs nothing else.
 - The PWA asks for that token on the Connect screen, and only there, so a

@@ -34,6 +34,7 @@ ROUTES = [
     "search?q=check%20notes",
     "search?q=zeppelin",
     "settings",
+    "access",
     "connect",
     "artifacts",
     "home-quiet",
@@ -98,6 +99,7 @@ AUDITED = {
     "search": ["search", "search?q=check%20notes", "search?q=zeppelin"],
     "storage": ["storage", STORAGE_DIALOG],
     "settings": ["settings"],
+    "access": ["access"],
     "connect": ["connect"],
 }
 
@@ -119,6 +121,7 @@ EXPECTED = {
     "search?q=check%20notes": "main .search-results .search-row",
     "search?q=zeppelin": "main .search-results .empty-title",
     "settings": "main .row .title",
+    "access": "main .access-screen",
     "connect": "main .connect .connect-field",
     "artifacts": "main .gallery .artifact-card",
     HOME_QUIET: "main .home .empty-state",

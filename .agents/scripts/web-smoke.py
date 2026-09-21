@@ -1964,6 +1964,7 @@ def guard_holds(project: str, session_id: str, artifact: str) -> dict[str, list[
         ],
         "storage": [("storage", "#/storage", "/api/v1/storage", "main .storage")],
         "settings": [("settings", "#/settings", "/api/v1/agents", 'main form[data-action="prefs"]')],
+        "access": [("access", "#/access", "/api/v1/agents", "main .access-screen")],
         # The screen paints no request of its own, but the badge asks on every
         # render and the token check asks on submit, and an answer to either
         # must not move a reader who has gone elsewhere.
@@ -9329,13 +9330,16 @@ def check_document_comments(
                     watch.fail("[390px] comment sheet does not have Resolve button")
                 else:
                     resolve_btn.click()
-                    p_mobile.wait_for_timeout(400)
+                    if not settle(p_mobile, "!!document.querySelector('.hub-sheet-resolve span')?.textContent?.includes('Reopen')", timeout=4000):
+                        watch.fail("[390px] Resolve button did not flip to Reopen")
                     reopen_btn = sheet.locator("button").filter(has_text="Reopen").first
                     if reopen_btn.count() == 0:
                         watch.fail("[390px] Resolve button did not flip to Reopen")
-                    # Reopening restores highlight
-                    reopen_btn.click()
-                    p_mobile.wait_for_timeout(400)
+                    else:
+                        # Reopening restores highlight
+                        reopen_btn.click()
+                        if not settle(p_mobile, "!!document.querySelector('.hub-sheet-resolve span')?.textContent?.includes('Resolve')", timeout=4000):
+                            watch.fail("[390px] Reopen button did not flip back to Resolve")
 
         # G. Open comments list (Screen 06)
         com_btn = p_mobile.locator(".hub-comments-btn, .comments-toggle, [data-action='comments-toggle']").first
@@ -9414,6 +9418,279 @@ def check_document_comments(
     finally:
         ctx_desktop.close()
 
+    watch.drain_rejections()
+
+
+def check_access_screen(browser, watch: Watch, port: int) -> None:
+    """The Access screen renders the token, confidential projects, and agents as a record."""
+    watch.enter("access: the access screen paints")
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844},
+        color_scheme="light",
+        permissions=["clipboard-read", "clipboard-write"],
+    )
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    # Seed a grant on the seeded agent so it has a grant to display and ungrant
+    agent_esc = urllib.parse.quote(harness.AGENT_ID, safe="")
+    try:
+        harness.request(
+            port,
+            "POST",
+            f"/api/v1/agents/{agent_esc}/grants",
+            {"project_id": harness.PROJECT_ID, "access": "read"},
+        )
+    except Exception:
+        pass
+
+    page = context.new_page()
+    page.on("pageerror", lambda error: watch.fail(f"access: uncaught error: {error}"))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/access", wait_until="load")
+        if not settle(page, "!!document.querySelector('main .access-screen')"):
+            watch.fail("the access screen did not paint")
+            return
+
+        # 1. Token section
+        watch.enter("access: token section and copy control")
+        token_card = page.locator("main .token-card")
+        if token_card.count() == 0:
+            watch.fail("the token section is not drawn")
+            return
+
+        if not page.locator("main .token-name").count():
+            watch.fail("the token card has no token name")
+        pill = page.locator("main .token-pill")
+        if not pill.count() or "live" not in pill.text_content().lower():
+            watch.fail("the token card has no live pill")
+
+        copy_btn = page.locator("main button[data-action='copy-token']")
+        if copy_btn.count() == 0:
+            watch.fail("no copy control found for the token")
+            return
+        copy_text = copy_btn.text_content().strip()
+        if "\u2026" not in copy_text and "..." not in copy_text:
+            watch.fail(f"the token mono value is not middle-truncated: {copy_text!r}")
+
+        copy_btn.click()
+        page.wait_for_timeout(100)
+        clipboard_val = page.evaluate("navigator.clipboard.readText()")
+        if clipboard_val != harness.ADMIN_TOKEN:
+            watch.fail(f"copy control yielded {clipboard_val!r}, expected full token {harness.ADMIN_TOKEN!r}")
+
+        # Dead controls removed
+        watch.enter("access: dead controls removed")
+        for dead_sel in [
+            "main button[data-action='rotate-token']",
+            "main button[data-action='revoke-token']",
+            "main button[data-action='mint-token']",
+            "main [data-action='confidential-toggle']",
+        ]:
+            if page.locator(dead_sel).count() > 0:
+                watch.fail(f"dead control {dead_sel!r} is still present on screen")
+
+        # Admin token configuration copy
+        watch.enter("access: admin token copy truth")
+        token_card_text = page.locator("main .token-card").text_content()
+        if "startup configuration" not in token_card_text.lower():
+            watch.fail("admin token card does not state it comes from startup configuration")
+
+        sentence = "A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does."
+        body_text = page.locator("main").text_content()
+        if sentence not in body_text:
+            watch.fail(f"verbatim sentence not found in token card: {sentence!r}")
+
+        # 2. No occurrence of the word trust anywhere in the served interface
+        watch.enter("access: no occurrence of the word trust")
+        full_text = page.evaluate("document.body.innerText.toLowerCase()")
+        if "trust" in full_text:
+            watch.fail("the served interface on #/access contains the word 'trust'")
+        page.evaluate("location.hash = '#/settings'")
+        if not settle(page, "!!document.querySelector('main form[data-action=\"prefs\"]')"):
+            watch.fail("navigating to #/settings did not render prefs form")
+        settings_text = page.evaluate("document.body.innerText.toLowerCase()")
+        if "trust" in settings_text:
+            watch.fail("the served interface on #/settings contains the word 'trust'")
+        page.evaluate("location.hash = '#/access'")
+        if not settle(page, "!!document.querySelector('main .access-screen')"):
+            watch.fail("navigating back to #/access did not render access screen")
+
+        # 3. Ordinary projects are not listed
+        watch.enter("access: ordinary projects are not listed")
+        projects_resp = json.loads(harness.request(port, "GET", "/api/v1/projects"))
+        ordinary = [p["display_name"] for p in projects_resp.get("projects", []) if not p.get("confidential")]
+        confidential_section = page.locator("main .confidential-projects")
+        if confidential_section.count() > 0:
+            section_text = confidential_section.text_content()
+            for ord_name in ordinary:
+                if ord_name in section_text:
+                    watch.fail(f"ordinary project {ord_name!r} is listed in confidential projects")
+
+        # 4. Agent rows lead nowhere and are marked as a record
+        watch.enter("access: agent rows lead nowhere and are marked as record")
+        agent_rows = page.locator("main .agent-record-row")
+        if agent_rows.count() == 0:
+            watch.fail("no agent record rows painted")
+        for i in range(agent_rows.count()):
+            row = agent_rows.nth(i)
+            tag_name = row.evaluate("el => el.tagName")
+            if tag_name == "A" or row.locator("a").count() > 0:
+                watch.fail("agent row contains a link or is a link; rows must lead nowhere")
+            text = row.text_content().lower()
+            if "record" not in text:
+                watch.fail("agent row is not marked as a record")
+            if not row.locator(".mono").count():
+                watch.fail("agent row has no mono personal-space path")
+
+        # 5. Every number shown has a source in the API response
+        watch.enter("access: all numbers are sourced from API")
+        agents_resp = json.loads(harness.request(port, "GET", "/api/v1/agents"))
+        actual_agent_count = len(agents_resp.get("agents", []))
+        token_text = page.locator("main .token-card").text_content()
+        if "3 agents" in token_text or "last used" in token_text:
+            watch.fail("token card carries unsourced numbers (last used or 3 agents)")
+        count_elem = page.locator("main .agents-count")
+        if count_elem.count() > 0:
+            if count_elem.text_content().strip() != str(actual_agent_count):
+                watch.fail(f"agent count is {count_elem.text_content().strip()!r}, expected {actual_agent_count}")
+
+        # 6. Reissuing token produces a new usable token
+        watch.enter("access: reissuing token produces new usable token")
+
+        def check_mcp_auth(agent_token: str) -> int:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0.0.0"},
+                },
+            }
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/mcp",
+                data=json.dumps(payload).encode(),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {agent_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    return resp.status
+            except urllib.error.HTTPError as err:
+                return err.code
+            except Exception:
+                return 0
+
+        agent_row = page.locator(f"main .agent-record-row:has-text('{harness.AGENT_NAME}')")
+        if agent_row.count() == 0:
+            watch.fail(f"agent row for {harness.AGENT_NAME!r} not found")
+        reissue_btn = agent_row.locator("button[data-action='agent-token']")
+        if reissue_btn.count() == 0:
+            watch.fail("reissue token button missing on agent row")
+        else:
+            reissue_btn.click()
+            if not settle(page, "!!document.querySelector('main .issued-token-card')"):
+                watch.fail("reissuing token did not display issued token card")
+            else:
+                token_1 = page.locator("main .issued-token-card .token-val").text_content().strip()
+                if not token_1:
+                    watch.fail("issued token card carries empty token value")
+                else:
+                    auth1 = check_mcp_auth(token_1)
+                    if auth1 != 200:
+                        watch.fail(f"issued token 1 failed to authenticate over MCP, status={auth1}")
+
+                    page.locator(f"main .agent-record-row:has-text('{harness.AGENT_NAME}') button[data-action='agent-token']").click()
+                    if not settle(page, f"document.querySelector('main .issued-token-card .token-val')?.textContent?.trim() !== '{token_1}'", timeout=3000):
+                        watch.fail("reissuing token a second time did not update token value")
+                    token_2 = page.locator("main .issued-token-card .token-val").text_content().strip()
+                    if token_2 == token_1:
+                        watch.fail("second reissue produced identical token")
+                    else:
+                        auth1_again = check_mcp_auth(token_1)
+                        if auth1_again != 401:
+                            watch.fail(f"previous token was not invalidated after reissue, status={auth1_again}")
+
+                        auth2 = check_mcp_auth(token_2)
+                        if auth2 != 200:
+                            watch.fail(f"issued token 2 failed to authenticate over MCP, status={auth2}")
+
+        # 7. Revoking agent token actually revokes
+        watch.enter("access: revoking agent token actually revokes")
+        revoke_btn = page.locator(f"main .agent-record-row:has-text('{harness.AGENT_NAME}') button[data-action='agent-revoke']")
+        if revoke_btn.count() == 0:
+            watch.fail("revoke token button missing on agent row")
+        else:
+            revoke_btn.click()
+            if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+                watch.fail("revoke token did not open confirmation dialog")
+            else:
+                page.click("dialog.dialog[open] .dialog-safe")
+                if not settle(page, "!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("canceling revoke dialog did not close dialog")
+                if 'token_2' in locals():
+                    auth_kept = check_mcp_auth(token_2)
+                    if auth_kept != 200:
+                        watch.fail(f"canceling revoke dialog invalidated token anyway, status={auth_kept}")
+
+                page.locator(f"main .agent-record-row:has-text('{harness.AGENT_NAME}') button[data-action='agent-revoke']").click()
+                if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("re-opening revoke dialog failed")
+                page.click("dialog.dialog[open] .dialog-commit")
+                if not settle(page, "!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("confirming revoke dialog did not close dialog")
+
+                if 'token_2' in locals():
+                    auth_revoked = check_mcp_auth(token_2)
+                    if auth_revoked != 401:
+                        watch.fail(f"revoked agent token still authenticated over MCP, status={auth_revoked}")
+
+        # 8. Ungrant actually removes grant
+        watch.enter("access: ungrant actually removes grant")
+        ungrant_sel = f"main .agent-record-row:has-text('{harness.AGENT_NAME}') button[data-action='agent-ungrant'][data-project='{harness.PROJECT_ID}']"
+        ungrant_btn = page.locator(ungrant_sel)
+        if ungrant_btn.count() == 0:
+            watch.fail(f"ungrant button for project {harness.PROJECT_ID!r} missing on agent row")
+        else:
+            ungrant_btn.click()
+            if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+                watch.fail("ungrant did not open confirmation dialog")
+            else:
+                page.click("dialog.dialog[open] .dialog-safe")
+                if not settle(page, "!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("canceling ungrant dialog did not close dialog")
+                grants_kept = json.loads(harness.request(port, "GET", f"/api/v1/agents/{agent_esc}/grants"))["grants"]
+                if not any(g["project_id"] == harness.PROJECT_ID for g in grants_kept):
+                    watch.fail("canceling ungrant removed grant anyway")
+
+                page.locator(ungrant_sel).click()
+                if not settle(page, "!!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("re-opening ungrant dialog failed")
+                page.click("dialog.dialog[open] .dialog-commit")
+                if not settle(page, "!document.querySelector('dialog.dialog[open]')"):
+                    watch.fail("confirming ungrant dialog did not close dialog")
+
+                grants_after = json.loads(harness.request(port, "GET", f"/api/v1/agents/{agent_esc}/grants"))["grants"]
+                if any(g["project_id"] == harness.PROJECT_ID for g in grants_after):
+                    watch.fail("grant still exists in API response after ungrant")
+                if page.locator(ungrant_sel).count() > 0:
+                    watch.fail("ungrant button still visible on agent row after ungrant")
+
+        # 9. No control on the screen is a dead apologies toast
+        watch.enter("access: no control is an apology toast")
+        toasts = page.locator(".toast").all_text_contents()
+        for t in toasts:
+            if "not supported by the backend" in t:
+                watch.fail(f"access screen displayed apology toast: {t!r}")
+
+    finally:
+        context.close()
     watch.drain_rejections()
 
 
@@ -9588,6 +9865,7 @@ def run() -> int:
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(watch, check_access_screen, browser, watch, port)
                 run_step(
                     watch,
                     check_artifact_share,

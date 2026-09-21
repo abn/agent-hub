@@ -240,8 +240,11 @@ export function confirmAction({
         el.remove();
         // Esc and the backdrop leave the return value empty, which is Keep.
         const committed = el.returnValue === "commit";
-        const back = opener instanceof HTMLElement && opener.isConnected ? opener : main;
-        back.focus({ preventScroll: true });
+        if (opener instanceof HTMLElement && opener.isConnected) {
+          opener.focus({ preventScroll: true });
+        } else if (!document.activeElement || document.activeElement === document.body) {
+          main.focus({ preventScroll: true });
+        }
         resolve(committed);
       },
       { once: true },

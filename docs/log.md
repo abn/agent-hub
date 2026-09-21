@@ -25,6 +25,18 @@ software release notes and the repository changelog.
   on desktop from 900px, prose stays at 560px beside a fixed 272px comments
   margin column with interactive cards.
 
+## 2026-09-21, access screen and identity model documentation
+
+* **Update**: [The human surface](architecture/human-surface.md) and
+  [the agent surface](architecture/agent-surface.md) document the standalone
+  Access screen (`#/access`), replacing the previous trust management model.
+  Grants are binary per project; tokens act as their own identities and may be
+  shared by multiple agents. The Access screen displays the admin token with a
+  copy control and configuration origin note, agent records with personal space
+  paths and per-agent token reissue, revocation, and ungranting actions under
+  a confirmation dialog, and revoked tokens as history. Confidential projects
+  are absent rather than refused.
+
 ## 2026-09-21, unified chip design across feed and search
 
 * **Update**: [The human surface](architecture/human-surface.md) documents that
