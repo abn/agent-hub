@@ -285,6 +285,47 @@ async fn serves_every_shell_asset_with_a_policy() {
     );
 }
 
+/// Two hubs installed from the same browser are two icons with one name
+/// unless the node says which is which. The name is what a launcher shows, so
+/// it carries the node; `id` deliberately does not exist here, because it
+/// resolves against the origin of `start_url` rather than the manifest URL,
+/// so a written-down `id` would collide a hub at `/` with one at `/hub/`.
+#[tokio::test]
+async fn the_manifest_names_the_node_when_one_is_configured() {
+    let state = common::state::open_with("web-node-name", |config| {
+        config.node_name = Some("workshop".to_string());
+    })
+    .await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(get("/manifest.webmanifest", None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let manifest: serde_json::Value = json(response).await;
+    assert_eq!(manifest["name"], "Agent Hub (workshop)");
+    assert_eq!(manifest["short_name"], "workshop");
+    assert!(
+        manifest.get("id").is_none(),
+        "an id resolves against the origin, so writing one down collides two hubs on one host"
+    );
+}
+
+/// A hub with no node configured is the shell exactly as it ships: the name
+/// is not decorated with an empty pair of brackets.
+#[tokio::test]
+async fn the_manifest_is_untouched_without_a_node_name() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(get("/manifest.webmanifest", None))
+        .await
+        .expect("request");
+    let manifest: serde_json::Value = json(response).await;
+    assert_eq!(manifest["name"], "Agent Hub");
+    assert_eq!(manifest["short_name"], "Agent Hub");
+}
+
 #[tokio::test]
 async fn manifest_lists_png_icons_and_serves_them() {
     let state = state().await;

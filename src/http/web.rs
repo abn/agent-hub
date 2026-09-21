@@ -3,8 +3,12 @@
 use std::sync::LazyLock;
 
 use axum::body::Body;
+use axum::extract::State;
 use axum::http::{HeaderValue, Uri, header};
 use axum::response::{IntoResponse, Response};
+use serde_json::json;
+
+use crate::app::AppState;
 
 /// One embedded asset: where it is served, what it holds, and what it is.
 struct Asset {
@@ -315,6 +319,56 @@ pub async fn asset(uri: Uri) -> Response {
         None => super::not_found().await.into_response(),
     }
 }
+
+/// `GET /manifest.webmanifest`
+///
+/// Served from the table's bytes with the node's name folded in, because a
+/// browser keys an installed app on its manifest and shows `name` in the
+/// launcher: two hubs installed from one browser are otherwise two icons
+/// reading "Agent Hub". Only `name` and `short_name` change, and only when a
+/// node is configured, so a hub that sets nothing serves exactly what ships.
+///
+/// Deliberately no `id`. It resolves against the origin of `start_url`, not
+/// the manifest's own URL, so a written-down relative `id` would resolve to
+/// the origin root for a hub served at `/` and one served at `/hub/` alike
+/// and collide them. Left out, it defaults to the resolved `start_url`, which
+/// is relative and so already carries whatever prefix serves the app.
+pub async fn manifest(State(state): State<AppState>) -> Response {
+    let body = match state.config.node_name.as_deref() {
+        Some(node) => named_manifest(node),
+        None => String::from_utf8_lossy(manifest_bytes()).into_owned(),
+    };
+    respond(Body::from(body), "application/manifest+json")
+}
+
+/// The shipped manifest with the node folded into the two name fields. A
+/// manifest that will not parse is a bug in the embedded asset, not in the
+/// request, so the shipped bytes are served unchanged rather than failing the
+/// install: a launcher entry with a vaguer name beats no manifest at all.
+fn named_manifest(node: &str) -> String {
+    let shipped = String::from_utf8_lossy(manifest_bytes()).into_owned();
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&shipped) else {
+        return shipped;
+    };
+    let Some(object) = value.as_object_mut() else {
+        return shipped;
+    };
+    object.insert("name".to_string(), json!(format!("Agent Hub ({node})")));
+    object.insert("short_name".to_string(), json!(node));
+    serde_json::to_string_pretty(&value).unwrap_or(shipped)
+}
+
+fn manifest_bytes() -> &'static [u8] {
+    SHELL_ASSETS
+        .iter()
+        .find(|asset| asset.path == MANIFEST_PATH)
+        .expect("the asset table serves the manifest")
+        .body
+}
+
+/// The one table path the router sends to its own handler rather than to
+/// `asset`, so registering both would be a duplicate route.
+pub const MANIFEST_PATH: &str = "/manifest.webmanifest";
 
 /// `GET /sw.js`
 ///

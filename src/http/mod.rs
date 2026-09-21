@@ -41,11 +41,18 @@ pub fn router(state: AppState) -> Router {
     // precache list and the routes cannot drift apart as modules are added.
     let mut assets: Router<AppState> = Router::new();
     for path in web::asset_paths() {
+        // The manifest is served from the table's bytes but with the node's
+        // name folded in, so it needs the state the generic handler has no
+        // use for. Registering it here too would be a duplicate route.
+        if path == web::MANIFEST_PATH {
+            continue;
+        }
         assets = assets.route(path, get(web::asset));
     }
     assets
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route(web::MANIFEST_PATH, get(web::manifest))
         .route("/sw.js", get(web::service_worker))
         .route("/SKILL.md", get(skill::skill))
         .route("/api/v1/agents", get(agents::list).post(agents::create))
