@@ -9,16 +9,6 @@ use crate::blob;
 use crate::brain::BrainStore;
 use crate::error::{Error, Result};
 
-/// What a project asks of an artifact published to it.
-///
-/// `off` means its artifacts are stored in plain text, `required` means every
-/// one of them is encrypted in the browser, and `optional` leaves the choice
-/// to the agent, which is what the hub did before a project could say.
-pub const ARTIFACT_PASSWORD_POLICIES: &[&str] = &["off", "optional", "required"];
-
-/// The policy a project has until someone changes it.
-pub const DEFAULT_ARTIFACT_PASSWORD_POLICY: &str = "optional";
-
 /// A project.
 #[derive(Debug, Clone, Serialize)]
 pub struct Project {
@@ -26,8 +16,6 @@ pub struct Project {
     pub display_name: String,
     pub owner_agent: Option<String>,
     pub created_at: String,
-    /// What the project asks of a protected artifact.
-    pub artifact_password_policy: String,
     /// Feed events newer than the human's last-seen cursor on this project.
     pub unseen_events: i64,
 }
@@ -39,7 +27,6 @@ pub struct Project {
 #[derive(Debug, Clone, Default)]
 pub struct ProjectChanges<'a> {
     pub display_name: Option<&'a str>,
-    pub artifact_password_policy: Option<&'a str>,
 }
 
 /// List projects, oldest first.
@@ -47,7 +34,7 @@ pub async fn list(db: &Database) -> Result<Vec<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, artifact_password_policy
+            "SELECT id, display_name, owner_agent, created_at
              FROM projects ORDER BY created_at ASC",
             (),
         )
@@ -141,7 +128,6 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
         display_name: display_name.to_string(),
         owner_agent: None,
         created_at,
-        artifact_password_policy: DEFAULT_ARTIFACT_PASSWORD_POLICY.to_string(),
         unseen_events: 0,
     })
 }
@@ -155,9 +141,6 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
 pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Result<Project> {
     if let Some(display_name) = changes.display_name {
         validate_display_name(display_name)?;
-    }
-    if let Some(policy) = changes.artifact_password_policy {
-        validate_artifact_password_policy(policy)?;
     }
 
     let mut conn = super::connect(db)?;
@@ -185,10 +168,6 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
         params.push(Value::Text(display_name.to_string()));
         sets.push(format!("display_name = ?{}", params.len()));
     }
-    if let Some(policy) = changes.artifact_password_policy {
-        params.push(Value::Text(policy.to_string()));
-        sets.push(format!("artifact_password_policy = ?{}", params.len()));
-    }
     if !sets.is_empty() {
         params.push(Value::Text(id.to_string()));
         let sql = format!(
@@ -203,29 +182,6 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
     get(db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("project {id} not found")))
-}
-
-/// What a project asks of an artifact published to it.
-///
-/// An unknown project answers with the default rather than an error: the
-/// caller that needs the project to exist says so itself, and the artifact
-/// store has already read the row it is writing against.
-pub async fn artifact_password_policy(db: &Database, id: &str) -> Result<String> {
-    let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT artifact_password_policy FROM projects WHERE id = ?1",
-            vec![Value::Text(id.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => match row.get_value(0).map_err(engine)? {
-            Value::Text(policy) => Ok(policy),
-            _ => Ok(DEFAULT_ARTIFACT_PASSWORD_POLICY.to_string()),
-        },
-        None => Ok(DEFAULT_ARTIFACT_PASSWORD_POLICY.to_string()),
-    }
 }
 
 /// Insert a project inside a caller's transaction.
@@ -299,7 +255,7 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, artifact_password_policy
+            "SELECT id, display_name, owner_agent, created_at
              FROM projects WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
@@ -471,7 +427,6 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         display_name: text(1)?,
         owner_agent,
         created_at: text(3)?,
-        artifact_password_policy: text(4)?,
         // Filled by the caller, which counts every project it returns in one
         // query rather than one query per row.
         unseen_events: 0,
@@ -490,17 +445,6 @@ fn validate_display_name(display_name: &str) -> Result<()> {
         ));
     }
     Ok(())
-}
-
-fn validate_artifact_password_policy(policy: &str) -> Result<()> {
-    if ARTIFACT_PASSWORD_POLICIES.contains(&policy) {
-        Ok(())
-    } else {
-        Err(Error::InvalidArgument(format!(
-            "artifact_password_policy must be one of {}, got '{policy}'",
-            ARTIFACT_PASSWORD_POLICIES.join(", ")
-        )))
-    }
 }
 
 fn validate_id(id: &str) -> Result<()> {

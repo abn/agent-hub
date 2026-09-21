@@ -3,6 +3,14 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-21, share sheet and per-artifact password choice
+
+* **Update**: [Artifacts](usage/artifacts.md) and [The human surface](architecture/human-surface.md)
+  document that the per-project password policy setting has been removed.
+  Encryption is a per-artifact choice made when sharing through the share
+  sheet in the artifact viewer overflow menu. The sheet provides a public link,
+  an optional password switch that encrypts before leaving the device, separate
+  copy actions for the link and password, and link revocation.
 
 ## 2026-09-21, unified chip design across feed and search
 

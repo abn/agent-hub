@@ -4,6 +4,7 @@
 
 import { api } from "./api.mjs";
 import { commentsPanel, commentsToggle, openCommentsDrawer, startComments } from "./comments.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -439,6 +440,245 @@ function buildVersionSheet(id, versions, shown, projectId) {
   return { backdrop, sheet };
 }
 
+// Share sheet (Screens 08 & 09): opens from overflow menu
+function buildShareSheet(id, current, shown, moreBtn) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "hub-share-backdrop";
+  backdrop.hidden = true;
+
+  const sheet = document.createElement("div");
+  sheet.className = "hub-share-sheet";
+  sheet.hidden = true;
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-label", "Share this artifact");
+
+  const handle = document.createElement("div");
+  handle.className = "hub-share-handle";
+
+  const header = document.createElement("div");
+  header.className = "hub-share-header";
+  header.innerHTML = `
+    <span class="hub-share-title">Share this artifact</span>
+    <span class="hub-share-subline">${esc(current.title || "")} · <span class="mono">v${shown}</span></span>
+  `;
+
+  const shareUrl = `${location.origin}/artifacts/${encodeURIComponent(id)}`;
+
+  const linkRow = document.createElement("div");
+  linkRow.className = "hub-share-link-row";
+  linkRow.innerHTML = `
+    ${glyphSvg("link", { size: 18 })}
+    <span class="hub-share-url mono">${esc(shareUrl)}</span>
+    <button type="button" class="hub-share-copy-btn" data-action="copy-link">Copy</button>
+  `;
+
+  const copyLinkBtn = linkRow.querySelector('button[data-action="copy-link"]');
+  copyLinkBtn.addEventListener("click", async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+    } catch {}
+    toast("Link copied");
+  });
+
+  const helper = document.createElement("div");
+  helper.className = "hub-share-helper";
+  helper.textContent = "Anyone with this link can open it. No account, no sign-in.";
+
+  let isLocked = false;
+  let hasLink = false;
+  let password = "";
+  let showPassword = false;
+
+  function generatePassword() {
+    const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*";
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    let res = "";
+    for (let i = 0; i < 16; i++) {
+      res += chars[bytes[i] % chars.length];
+    }
+    return res;
+  }
+
+  const pwRow = document.createElement("div");
+  pwRow.className = "hub-share-pw-row";
+  pwRow.innerHTML = `
+    <span class="hub-share-pw-icon">${glyphSvg("lock", { size: 18 })}</span>
+    <span class="hub-share-pw-info">
+      <span class="hub-share-pw-label">Lock with a password</span>
+      <span class="hub-share-pw-helper">Encrypts this artifact. The hub cannot read it, and cannot recover it if the password is lost.</span>
+    </span>
+    <button type="button" role="switch" aria-checked="false" aria-label="Lock with a password" class="hub-share-switch">
+      <span class="hub-share-switch-track"><span class="hub-share-switch-thumb"></span></span>
+    </button>
+  `;
+
+  const pwHelper = pwRow.querySelector(".hub-share-pw-helper");
+  const switchBtn = pwRow.querySelector(".hub-share-switch");
+
+  const pwControls = document.createElement("div");
+  pwControls.className = "hub-share-pw-controls";
+  pwControls.hidden = true;
+  pwControls.innerHTML = `
+    <div class="hub-share-pw-field">
+      <input type="password" class="hub-share-pw-input mono" placeholder="Password" aria-label="Password">
+      <button type="button" class="hub-share-pw-toggle" aria-label="Show password">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>
+      </button>
+    </div>
+    <div class="hub-share-pw-gen-row">
+      <button type="button" class="hub-share-pw-gen" data-action="generate-password">${glyphSvg("key", { size: 16 })}Generate</button>
+      <span style="font-size: 12px; line-height: 1.45; color: var(--ink-2);">Send it by another route than the link.</span>
+    </div>
+    <div class="hub-share-cost">Encryption happens here, not on the server. If this password is lost the artifact is unreadable by everyone, including us. Existing readers of the current link will be asked for it.</div>
+  `;
+
+  const pwInput = pwControls.querySelector(".hub-share-pw-input");
+  const pwToggle = pwControls.querySelector(".hub-share-pw-toggle");
+  const genBtn = pwControls.querySelector('button[data-action="generate-password"]');
+
+  pwInput.addEventListener("input", () => {
+    password = pwInput.value;
+  });
+
+  pwToggle.addEventListener("click", () => {
+    showPassword = !showPassword;
+    pwInput.type = showPassword ? "text" : "password";
+    pwToggle.setAttribute("aria-label", showPassword ? "Hide password" : "Show password");
+  });
+
+  genBtn.addEventListener("click", () => {
+    password = generatePassword();
+    pwInput.value = password;
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "hub-share-actions";
+  actions.innerHTML = `
+    <div class="hub-share-status">
+      <span class="hub-share-status-dot"></span>
+      <span>This artifact has no link yet</span>
+    </div>
+    <button type="button" class="hub-share-primary">Create link</button>
+  `;
+
+  const statusRow = actions.querySelector(".hub-share-status");
+  const primaryBtn = actions.querySelector(".hub-share-primary");
+
+  const copyPwBtn = document.createElement("button");
+  copyPwBtn.type = "button";
+  copyPwBtn.className = "hub-share-copy-pw-btn";
+  copyPwBtn.dataset.action = "copy-password";
+  copyPwBtn.textContent = "Copy password";
+  copyPwBtn.addEventListener("click", async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pwInput.value || password);
+      }
+    } catch {}
+    toast("Password copied");
+  });
+
+  const postNote = document.createElement("div");
+  postNote.className = "hub-share-post-note";
+  postNote.hidden = true;
+  postNote.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 5 12l5 5 9-9"/></svg>
+    <span>After creating, the sheet offers Copy link and Copy password separately.</span>
+  `;
+
+  switchBtn.addEventListener("click", () => {
+    isLocked = !isLocked;
+    switchBtn.setAttribute("aria-checked", String(isLocked));
+    if (isLocked) {
+      pwRow.classList.add("is-on");
+      pwHelper.textContent = "On. The artifact is encrypted before it leaves this device.";
+      pwControls.hidden = false;
+      postNote.hidden = false;
+      if (!hasLink) {
+        primaryBtn.textContent = "Create locked link";
+      }
+      if (!password) {
+        password = generatePassword();
+        pwInput.value = password;
+      }
+    } else {
+      pwRow.classList.remove("is-on");
+      pwHelper.textContent = "Encrypts this artifact. The hub cannot read it, and cannot recover it if the password is lost.";
+      pwControls.hidden = true;
+      postNote.hidden = true;
+      copyPwBtn.remove();
+      if (!hasLink) {
+        primaryBtn.textContent = "Create link";
+      }
+    }
+  });
+
+  primaryBtn.addEventListener("click", async () => {
+    if (!hasLink) {
+      hasLink = true;
+      statusRow.hidden = true;
+      primaryBtn.textContent = "Revoke link";
+      primaryBtn.classList.add("is-revoking");
+      if (isLocked) {
+        if (!actions.contains(copyPwBtn)) {
+          actions.insertBefore(copyPwBtn, primaryBtn);
+        }
+      }
+    } else {
+      const ok = await confirmAction({
+        title: "Revoke public link?",
+        body: "The old URL stops working immediately. Anyone with the link will no longer be able to open this artifact.",
+        safe: "Keep link",
+        danger: "Revoke link",
+      });
+      if (ok) {
+        hasLink = false;
+        statusRow.hidden = false;
+        primaryBtn.textContent = isLocked ? "Create locked link" : "Create link";
+        primaryBtn.classList.remove("is-revoking");
+        copyPwBtn.remove();
+      }
+    }
+  });
+
+  sheet.append(handle, header, linkRow, helper, pwRow, pwControls, actions, postNote);
+
+  const closeSheet = () => {
+    backdrop.hidden = true;
+    sheet.hidden = true;
+    if (moreBtn) {
+      moreBtn.setAttribute("aria-expanded", "false");
+      moreBtn.focus();
+    }
+  };
+
+  const openSheet = () => {
+    backdrop.hidden = false;
+    sheet.hidden = false;
+    primaryBtn.focus();
+  };
+
+  backdrop.addEventListener("click", closeSheet);
+  sheet.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeSheet();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !sheet.hidden) {
+      e.stopPropagation();
+      closeSheet();
+    }
+  });
+
+  return { backdrop, sheet, openSheet, closeSheet };
+}
+
 export async function viewerRoute(params, gen, path) {
   const parts = (path || "").split("/");
   const id = parts[2];
@@ -563,6 +803,8 @@ export async function viewerRoute(params, gen, path) {
   overflowMenu.className = "hub-overflow-menu";
   overflowMenu.hidden = true;
 
+  let openShareSheet = () => {};
+
   const menuItems = [
     { text: "Start a thread", action: "start-thread", run: () => openCommentsDrawer() },
     { text: "Comments", action: "comments-toggle", run: () => openCommentsDrawer() },
@@ -594,7 +836,7 @@ export async function viewerRoute(params, gen, path) {
     {
       text: "Share",
       action: "share",
-      run: () => {},
+      run: () => openShareSheet(),
     },
     {
       text: "Open in browser",
@@ -681,7 +923,14 @@ export async function viewerRoute(params, gen, path) {
   ageSpan.className = "hub-viewer-age";
   ageSpan.textContent = current.created_at ? relative(Date.parse(current.created_at)) : "";
 
-  metaLine.append(actorSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
+  if (current.protected) {
+    const lockedSpan = document.createElement("span");
+    lockedSpan.className = "hub-viewer-locked";
+    lockedSpan.textContent = "Locked · only readable with the password";
+    metaLine.append(lockedSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
+  } else {
+    metaLine.append(actorSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
+  }
   metaWrap.appendChild(metaLine);
   wrap.appendChild(metaWrap);
 
@@ -730,6 +979,11 @@ export async function viewerRoute(params, gen, path) {
   // Version sheet (Screen 02)
   const { backdrop, sheet } = buildVersionSheet(id, versions, shown, projectId);
   wrap.append(backdrop, sheet);
+
+  // Share sheet (Screens 08 & 09)
+  const share = buildShareSheet(id, current, shown, moreBtn);
+  openShareSheet = share.openSheet;
+  wrap.append(share.backdrop, share.sheet);
 
   main.appendChild(wrap);
   const { backdrop: comBackdrop, drawer: comDrawer } = commentsPanel({ toggle, badge });

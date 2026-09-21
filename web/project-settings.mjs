@@ -1,5 +1,5 @@
-// Project settings: the name, the slug it cannot change, the artifact password
-// policy, the reserved retention card, and the way to delete the project.
+// Project settings: the name, the slug it cannot change, the reserved retention card,
+// and the way to delete the project.
 //
 // The markup is painted from literals and every value the hub or the reader
 // supplied is placed afterwards through `value` and `textContent`, so nothing
@@ -11,13 +11,6 @@ import { esc, main, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { deleteProject } from "./settings.mjs";
 import { toast } from "./toast.mjs";
-
-// The hub's own policy values, in its order, under the design's copy.
-const POLICIES = [
-  ["off", "Off", "Artifacts stored in plain text on this server"],
-  ["optional", "Optional", "Agents may encrypt per artifact"],
-  ["required", "Required", "All artifacts E2EE · decrypted on your device"],
-];
 
 const NOT_FOUND = {
   screen: "project settings",
@@ -120,16 +113,6 @@ function localDate(timestamp) {
 
 function skeleton(projectId, deletable) {
   const back = `#/projects/${esc(encodeURIComponent(projectId))}/feed`;
-  const options = POLICIES.map(
-    ([value, label, note]) => `
-      <label class="pset-option">
-        <input type="radio" name="artifact_password_policy" value="${value}" aria-describedby="pset-policy-${value}">
-        <span class="grow">
-          <span class="pset-option-name">${label}</span>
-          <span class="pset-option-note" id="pset-policy-${value}">${note}</span>
-        </span>
-      </label>`,
-  ).join("");
   return `
     <div class="proj-head">
       <a class="proj-back" href="${back}" aria-label="Back to the project">
@@ -151,11 +134,6 @@ function skeleton(projectId, deletable) {
         <span class="pset-hint mono">used in MCP calls · read-only after creation</span>
         <p class="pset-slug"></p>
       </div>
-      <fieldset class="pset-policy" role="radiogroup">
-        <legend class="section-label">Artifact password policy</legend>
-        <div class="pset-options">${options}</div>
-        <p class="pset-error" id="pset-policy-error" hidden></p>
-      </fieldset>
       <h2 class="section-label">Retention <span class="pset-reserved">· reserved</span></h2>
       <p class="pset-retention">Automatic pruning isn’t in v1. You are the garbage collector: see <a href="#/storage">Storage</a>.</p>
       <p class="pset-error pset-problem" role="alert" hidden></p>
@@ -201,11 +179,8 @@ export async function projectSettingsScreen(gen, path) {
   const form = main.querySelector(".pset");
   const name = form.elements.display_name;
   const nameError = form.querySelector("#pset-name-error");
-  const policy = form.querySelector(".pset-policy");
-  const policyError = form.querySelector("#pset-policy-error");
   const problem = form.querySelector(".pset-problem");
   const save = form.querySelector('button[type="submit"]');
-  const radios = [...form.querySelectorAll('input[type="radio"]')];
 
   const created = localDate(saved.created_at);
   main.querySelector(".pset-sub").textContent = created ? `${saved.id} · created ${created}` : saved.id;
@@ -213,7 +188,6 @@ export async function projectSettingsScreen(gen, path) {
 
   const show = () => {
     name.value = saved.display_name;
-    for (const radio of radios) radio.checked = radio.value === saved.artifact_password_policy;
   };
   show();
 
@@ -223,10 +197,6 @@ export async function projectSettingsScreen(gen, path) {
     const body = {};
     const typed = name.value.trim();
     if (typed !== saved.display_name) body.display_name = typed;
-    const picked = radios.find((radio) => radio.checked);
-    if (picked && picked.value !== saved.artifact_password_policy) {
-      body.artifact_password_policy = picked.value;
-    }
     return body;
   };
   let saving = false;
@@ -242,11 +212,6 @@ export async function projectSettingsScreen(gen, path) {
 
   name.addEventListener("input", () => {
     say(name, nameError, "");
-    problem.hidden = true;
-    sync();
-  });
-  policy.addEventListener("change", () => {
-    say(policy, policyError, "");
     problem.hidden = true;
     sync();
   });
@@ -279,8 +244,6 @@ export async function projectSettingsScreen(gen, path) {
       if ("display_name" in body && /display name/i.test(error.message)) {
         say(name, nameError, error.message);
         name.focus();
-      } else if (/artifact_password_policy/.test(error.message)) {
-        say(policy, policyError, error.message);
       } else {
         problem.textContent = `Nothing changed: ${error.message}`;
         problem.hidden = false;

@@ -72,8 +72,6 @@ pub struct ProjectPatch {
     pub id: Option<String>,
     #[serde(default)]
     pub display_name: Option<String>,
-    #[serde(default)]
-    pub artifact_password_policy: Option<String>,
 }
 
 /// `GET /api/v1/projects/{id}`
@@ -118,10 +116,7 @@ pub async fn update(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let payload = json_body(
-        body,
-        "project body must be JSON with display_name or artifact_password_policy",
-    )?;
+    let payload = json_body(body, "project body must be JSON with display_name")?;
 
     if payload.id.is_some() {
         return Err(Problem::from_error(&crate::error::Error::InvalidArgument(
@@ -132,9 +127,8 @@ pub async fn update(
 
     let changes = projects::ProjectChanges {
         display_name: payload.display_name.as_deref(),
-        artifact_password_policy: payload.artifact_password_policy.as_deref(),
     };
-    let changed = changes.display_name.is_some() || changes.artifact_password_policy.is_some();
+    let changed = changes.display_name.is_some();
 
     let project = projects::update(&state.db, &id, changes)
         .await

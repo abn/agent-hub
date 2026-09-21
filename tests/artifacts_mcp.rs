@@ -5,9 +5,6 @@
 //! protected one with an envelope, and proves the publish and update events
 //! land on the feed. Any non-JSON stdout line fails the test because it would
 //! corrupt the protocol.
-
-use std::path::Path;
-
 use serde_json::{Value, json};
 
 mod common;
@@ -282,34 +279,14 @@ fn artifact_get_of_an_absent_id_is_not_found() {
 }
 
 /// Set a project's artifact password policy before the hub is spawned over it.
-fn set_policy(data_dir: &Path, project_id: &str, policy: &str) {
-    common::seed::block_on(async {
-        let db = agent_hub::store::open_engine(&data_dir.join("hub.db"))
-            .await
-            .expect("open engine");
-        agent_hub::store::migrate(&db).await.expect("migrate");
-        agent_hub::store::projects::update(
-            &db,
-            project_id,
-            agent_hub::store::projects::ProjectChanges {
-                artifact_password_policy: Some(policy),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("set the policy");
-    });
-}
-
 #[test]
-fn a_project_that_requires_protection_refuses_a_plain_publish() {
-    let data_dir = TempDir::new("policy-required");
+fn an_agent_can_publish_plain_and_protected_artifacts_to_the_same_project() {
+    let data_dir = TempDir::new("policy-free");
     common::seed::seed_project(data_dir.path(), "proj");
-    set_policy(data_dir.path(), "proj", "required");
     let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
-    let refused = server.call_tool(
+    let plain = server.call_tool(
         "artifact_publish",
         json!({
             "project_id": "proj",
@@ -318,41 +295,9 @@ fn a_project_that_requires_protection_refuses_a_plain_publish() {
             "content": "in the clear",
         }),
     );
-    assert_eq!(tool_error_code(&refused), "invalid_argument");
-    let message = refused.to_string();
-    assert!(
-        message.contains("envelope"),
-        "the agent is told what to send instead: {message}"
-    );
+    assert_eq!(structured(&plain)["version"], 1);
 
-    let accepted = server.call_tool(
-        "artifact_publish",
-        json!({
-            "project_id": "proj",
-            "title": "Report",
-            "kind": "markdown",
-            "content": "ciphertextbase64",
-            "envelope": {
-                "alg": "AES-GCM",
-                "kdf": "PBKDF2-SHA256",
-                "iterations": 600000,
-                "salt": "c2FsdA==",
-                "iv": "aXY=",
-            },
-        }),
-    );
-    assert_eq!(structured(&accepted)["version"], 1);
-}
-
-#[test]
-fn a_project_with_protection_off_refuses_an_envelope() {
-    let data_dir = TempDir::new("policy-off");
-    common::seed::seed_project(data_dir.path(), "proj");
-    set_policy(data_dir.path(), "proj", "off");
-    let mut server = McpServer::mcp(data_dir.path(), &[]);
-    server.initialize();
-
-    let refused = server.call_tool(
+    let protected = server.call_tool(
         "artifact_publish",
         json!({
             "project_id": "proj",
@@ -368,18 +313,7 @@ fn a_project_with_protection_off_refuses_an_envelope() {
             },
         }),
     );
-    assert_eq!(tool_error_code(&refused), "invalid_argument");
-
-    let accepted = server.call_tool(
-        "artifact_publish",
-        json!({
-            "project_id": "proj",
-            "title": "Report",
-            "kind": "markdown",
-            "content": "in the clear",
-        }),
-    );
-    assert_eq!(structured(&accepted)["version"], 1);
+    assert_eq!(structured(&protected)["version"], 1);
 }
 
 #[test]
@@ -455,64 +389,6 @@ fn an_agent_publishes_a_version_in_the_clear_by_saying_so() {
         .map(|version| version["protected"].as_bool().expect("protected"))
         .collect();
     assert_eq!(protection, vec![true, true, false]);
-}
-
-#[test]
-fn protection_off_tells_an_agent_how_to_publish_in_the_clear() {
-    let data_dir = TempDir::new("policy-off-remedy");
-    common::seed::seed_project(data_dir.path(), "proj");
-    let mut server = McpServer::mcp(data_dir.path(), &[]);
-    server.initialize();
-
-    let published = server.call_tool(
-        "artifact_publish",
-        json!({
-            "project_id": "proj",
-            "title": "Secret report",
-            "kind": "markdown",
-            "content": "ciphertextbase64",
-            "envelope": {
-                "alg": "AES-GCM",
-                "kdf": "PBKDF2-SHA256",
-                "iterations": 600000,
-                "salt": "c2FsdA==",
-                "iv": "aXY=",
-            },
-        }),
-    );
-    let artifact_id = structured(&published)["artifact_id"]
-        .as_str()
-        .expect("an id")
-        .to_string();
-
-    // The hub has to be stopped before the policy is set: one process holds
-    // the engine.
-    drop(server);
-    set_policy(data_dir.path(), "proj", "off");
-    let mut server = McpServer::mcp(data_dir.path(), &[]);
-    server.initialize();
-
-    let refused = server.call_tool(
-        "artifact_update",
-        json!({"artifact_id": artifact_id, "content": "more ciphertext"}),
-    );
-    assert_eq!(tool_error_code(&refused), "invalid_argument");
-    assert!(
-        refused.to_string().contains("envelope: null"),
-        "the refusal names a request the agent can make: {refused}"
-    );
-
-    let accepted = server.call_tool(
-        "artifact_update",
-        json!({
-            "artifact_id": artifact_id,
-            "content": "# in the clear",
-            "envelope": Value::Null,
-        }),
-    );
-    assert_eq!(structured(&accepted)["version"], 2);
-    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
-    assert_eq!(structured(&got)["protected"], false);
 }
 
 #[test]

@@ -1112,177 +1112,38 @@ fn protected<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
     }
 }
 
-/// A project at one artifact password policy.
-async fn project_at(db: &turso::Database, policy: &str) {
-    projects::create(db, "proj", "Proj")
+#[tokio::test]
+async fn two_artifacts_in_one_project_may_differ_one_locked_one_not() {
+    let dir = TempDir::new("artifact-mixed");
+    let db = open(&dir).await;
+    projects::create(&db, "proj", "Proj")
         .await
         .expect("create project");
-    set_policy(db, policy).await;
-}
 
-async fn set_policy(db: &turso::Database, policy: &str) {
-    projects::update(
-        db,
-        "proj",
-        projects::ProjectChanges {
-            artifact_password_policy: Some(policy),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("set the policy");
-}
-
-#[tokio::test]
-async fn a_project_that_requires_protection_refuses_plain_content() {
-    let dir = TempDir::new("artifact-required");
-    let db = open(&dir).await;
-    project_at(&db, "required").await;
-
-    let refused = artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
-        .await
-        .expect_err("a plain publish is refused");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-    assert!(
-        refused.to_string().contains("envelope"),
-        "the refusal says what to send instead: {refused}"
-    );
-    assert!(
-        artifacts::list(&db, "proj").await.expect("list").is_empty(),
-        "a refused publish writes nothing"
-    );
-
-    artifacts::publish(&db, &dir, protected("Report", b"ciphertext"), None)
-        .await
-        .expect("a protected publish is accepted");
-}
-
-#[tokio::test]
-async fn a_project_with_protection_off_refuses_an_envelope() {
-    let dir = TempDir::new("artifact-off");
-    let db = open(&dir).await;
-    project_at(&db, "off").await;
-
-    let refused = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
-        .await
-        .expect_err("a protected publish is refused");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-    assert!(
-        refused.to_string().contains("envelope"),
-        "the refusal names the envelope: {refused}"
-    );
-
-    artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
+    let plain = artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
         .await
         .expect("a plain publish is accepted");
-}
+    assert!(!plain.protected);
 
-#[tokio::test]
-async fn an_optional_policy_takes_either_kind() {
-    let dir = TempDir::new("artifact-optional");
-    let db = open(&dir).await;
-    project_at(&db, "optional").await;
-
-    artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
-        .await
-        .expect("a plain publish is accepted");
-    artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
+    let locked = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
         .await
         .expect("a protected publish is accepted");
+    assert!(locked.protected);
+
+    let listed = artifacts::list(&db, "proj").await.expect("list");
+    assert_eq!(listed.len(), 2);
+    let plain_listed = listed.iter().find(|a| a.id == plain.id).expect("plain");
+    let locked_listed = listed.iter().find(|a| a.id == locked.id).expect("locked");
+    assert!(!plain_listed.protected);
+    assert!(locked_listed.protected);
 }
-
-#[tokio::test]
-async fn a_policy_change_applies_to_the_next_version_only() {
-    let dir = TempDir::new("artifact-policy-change");
-    let db = open(&dir).await;
-    project_at(&db, "optional").await;
-    let artifact = artifacts::publish(&db, &dir, public("Report", b"first draft"), None)
-        .await
-        .expect("publish");
-
-    set_policy(&db, "required").await;
-
-    // What was published stays published and stays readable.
-    let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
-    assert_eq!(bytes, b"first draft");
-    assert!(!read.protected);
-
-    let refused = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"second draft",
-        EnvelopeUpdate::Keep,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect_err("a plain new version is refused");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-
-    let updated = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"ciphertext",
-        EnvelopeUpdate::Set(envelope()),
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect("a protected new version is accepted");
-    assert_eq!(updated.version, 2);
-    assert!(updated.protected);
-
-    // The first version is still what it was, in the clear.
-    let (first, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, 1)
-        .await
-        .expect("read version one");
-    assert!(!first.protected);
-    assert_eq!(bytes, b"first draft");
-}
-
-#[tokio::test]
-async fn turning_protection_off_holds_for_a_new_version_of_a_protected_artifact() {
-    let dir = TempDir::new("artifact-policy-off-change");
-    let db = open(&dir).await;
-    project_at(&db, "optional").await;
-    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
-        .await
-        .expect("publish");
-
-    set_policy(&db, "off").await;
-
-    // An update carries the envelope forward unless it is given a new one, so
-    // the version it would write is still protected, and the project no longer
-    // takes one.
-    let refused = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"more ciphertext",
-        EnvelopeUpdate::Keep,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect_err("a protected new version is refused");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-
-    // The artifact itself is untouched: what was published stays published.
-    let (read, bytes) = artifacts::get(&db, &dir, &artifact.id).await.expect("get");
-    assert!(read.protected);
-    assert_eq!(bytes, b"ciphertext");
-}
-
 #[tokio::test]
 async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
     let dir = TempDir::new("artifact-clear");
     let db = open(&dir).await;
-    project_at(&db, "optional").await;
+    projects::create(&db, "proj", "Proj")
+        .await
+        .expect("create project");
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
         .await
         .expect("publish");
@@ -1339,89 +1200,6 @@ async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
             .collect::<Vec<_>>(),
         vec![true, true, false]
     );
-}
-
-#[tokio::test]
-async fn protection_off_names_the_way_to_publish_in_the_clear() {
-    let dir = TempDir::new("artifact-off-remedy");
-    let db = open(&dir).await;
-    project_at(&db, "optional").await;
-    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
-        .await
-        .expect("publish");
-    set_policy(&db, "off").await;
-
-    let refused = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"more ciphertext",
-        EnvelopeUpdate::Keep,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect_err("the version it would write is still protected");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-    assert!(
-        refused.to_string().contains("envelope: null"),
-        "the refusal names a request the agent can actually make: {refused}"
-    );
-
-    let cleared = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"in the clear",
-        EnvelopeUpdate::Clear,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect("and that request is accepted");
-    assert!(!cleared.protected);
-    assert_eq!(cleared.version, 2);
-}
-
-#[tokio::test]
-async fn required_protection_refuses_an_update_that_clears_it() {
-    let dir = TempDir::new("artifact-required-clear");
-    let db = open(&dir).await;
-    project_at(&db, "required").await;
-    let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
-        .await
-        .expect("publish");
-
-    let refused = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"in the clear",
-        EnvelopeUpdate::Clear,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect_err("the project requires protection");
-    assert_eq!(refused.code(), ErrorCode::InvalidArgument);
-    assert!(refused.to_string().contains("envelope"));
-
-    let kept = artifacts::update(
-        &db,
-        &dir,
-        "agent-one",
-        &artifact.id,
-        b"more ciphertext",
-        EnvelopeUpdate::Keep,
-        UpdateOptions::default(),
-        None,
-    )
-    .await
-    .expect("carrying the envelope forward is accepted");
-    assert!(kept.protected);
 }
 
 #[tokio::test]

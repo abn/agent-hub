@@ -4730,8 +4730,7 @@ def check_project_settings(page, watch: Watch, port: int) -> None:
 
     A save is one request carrying only what changed, a refusal from the hub
     lands beside the field it is about, the slug is text rather than a field,
-    the policy is a radio group the arrow keys move through, leaving with
-    edits pending asks first, and a reload shows what was saved.
+    leaving with edits pending asks first, and a reload shows what was saved.
     """
     watch.enter("project settings")
     harness.request(
@@ -4798,21 +4797,15 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
         "[...document.querySelectorAll('.pset input, .pset textarea, .pset select')]"
         ".map((el) => el.name)"
     )
-    if sorted(set(fields)) != ["artifact_password_policy", "display_name"]:
-        watch.fail(f"the form's fields are {sorted(set(fields))}, the slug must not be one")
+    if sorted(set(fields)) != ["display_name"]:
+        watch.fail(f"the form's fields are {sorted(set(fields))}, expected ['display_name']")
 
-    # The policy is a named radio group over the hub's own three values.
+    # Password policy was removed; no policy radiogroup or fields should exist.
     group = form.get_by_role("radiogroup", name="Artifact password policy")
-    if group.count() != 1:
-        watch.fail("the password policy is not one radiogroup named by its legend")
-    values = page.evaluate(
-        "[...document.querySelectorAll('.pset [role=radiogroup] input[type=radio]')]"
-        ".map((r) => r.value)"
-    )
-    if values != SETTINGS_POLICIES:
-        watch.fail(f"the policy radios are {values}, expected {SETTINGS_POLICIES}")
-    if page.evaluate(PSET_CHECKED) != "optional":
-        watch.fail(f"a new project shows {page.evaluate(PSET_CHECKED)!r}, not the hub default")
+    if group.count() != 0:
+        watch.fail("the password policy is still present as a radiogroup")
+    if page.locator(".pset-policy").count() != 0:
+        watch.fail(".pset-policy element is still present in project settings")
     if not page.is_disabled(PSET_SAVE):
         watch.fail("Save is enabled before anything changed")
 
@@ -4835,36 +4828,11 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
         if "reserved" not in retention["label"]:
             watch.fail(f"retention is not marked reserved: {retention['label']!r}")
 
-    # Arrow keys move the choice, and going back to where it was is no change.
-    page.focus(".pset input[type=radio]:checked")
-    page.keyboard.press("ArrowDown")
-    focused = page.evaluate("document.activeElement.value")
-    if page.evaluate(PSET_CHECKED) != "required" or focused != "required":
-        watch.fail(f"ArrowDown left {page.evaluate(PSET_CHECKED)!r} checked, focus on {focused!r}")
-    if page.is_disabled(PSET_SAVE):
-        watch.fail("Save stayed disabled after the policy changed")
-    page.keyboard.press("ArrowUp")
-    if page.evaluate(PSET_CHECKED) != "optional" or not page.is_disabled(PSET_SAVE):
-        watch.fail("moving the policy back did not return Save to disabled")
-    page.keyboard.press("ArrowDown")
-
-    # One request, carrying the policy alone.
-    page.click(PSET_SAVE)
-    if not settle(page, "[...document.querySelectorAll('.toast-text')]"
-                        ".some((t) => t.textContent === 'Project saved.')"):
-        watch.fail("saving raised no success toast")
-    if len(patches) != 1:
-        watch.fail(f"saving the policy sent {len(patches)} PATCH requests, expected one")
-    elif json.loads(patches[0]) != {"artifact_password_policy": "required"}:
-        watch.fail(f"saving the policy sent {patches[0]}, expected the policy alone")
-    if not settle(page, PSET_SAVED):
-        watch.fail("Save stayed enabled after the save landed")
-
     # A blank name is caught here, said beside the field, and never sent.
     page.fill(PSET_NAME, "   ")
     page.click(PSET_SAVE)
     said = name_problem(page)
-    if len(patches) != 1:
+    if len(patches) != 0:
         watch.fail("a blank name was sent to the hub")
     if not said["invalid"] or not said["text"]:
         watch.fail(f"a blank name is not reported on the field: {said}")
@@ -4883,8 +4851,8 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
             watch.fail(f"the hub's refusal is not beside the field: {name_problem(page)}")
     finally:
         watch.armed = armed
-    if len(patches) != 2:
-        watch.fail(f"the refused save made {len(patches) - 1} requests, expected one")
+    if len(patches) != 1:
+        watch.fail(f"the refused save made {len(patches)} requests, expected one")
     if page.input_value(PSET_NAME) != too_long:
         watch.fail("the refused save lost what was typed")
     if not name_problem(page)["invalid"]:
@@ -4907,14 +4875,17 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
     if page.input_value(PSET_NAME) != SETTINGS_RENAMED:
         watch.fail("keeping the edits lost them")
 
-    # The rename goes alone: the policy is already saved.
+    # The rename goes alone.
     page.click(PSET_SAVE)
+    if not settle(page, "[...document.querySelectorAll('.toast-text')]"
+                        ".some((t) => t.textContent === 'Project saved.')"):
+        watch.fail("saving raised no success toast")
     if not settle(page, PSET_SAVED):
         watch.fail("Save stayed enabled after the rename landed")
-    if len(patches) != 3:
-        watch.fail(f"the rename made {len(patches) - 2} requests, expected one")
-    elif json.loads(patches[2]) != {"display_name": SETTINGS_RENAMED}:
-        watch.fail(f"the rename sent {patches[2]}, expected the name alone")
+    if len(patches) != 2:
+        watch.fail(f"the rename made {len(patches) - 1} requests, expected one")
+    elif json.loads(patches[1]) != {"display_name": SETTINGS_RENAMED}:
+        watch.fail(f"the rename sent {patches[1]}, expected the name alone")
     if any("\"id\"" in body for body in patches):
         watch.fail("a save carried the project id")
 
@@ -4925,8 +4896,6 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
         return
     if page.input_value(PSET_NAME) != SETTINGS_RENAMED:
         watch.fail(f"reload shows the name {page.input_value(PSET_NAME)!r}")
-    if page.evaluate(PSET_CHECKED) != "required":
-        watch.fail(f"reload shows the policy {page.evaluate(PSET_CHECKED)!r}")
 
     # Discarding lets the navigation through and writes nothing.
     page.fill(PSET_NAME, "never saved")
@@ -4935,7 +4904,7 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
     page.click("dialog.dialog .dialog-commit")
     if not settle(page, "location.hash === '#/inbox'", 3000):
         watch.fail("discarding the edits did not follow the link")
-    if len(patches) != 3:
+    if len(patches) != 2:
         watch.fail("discarding the edits wrote to the hub")
 
     # Delete asks through the dialog, Keep first, and Esc keeps the project.
@@ -8668,6 +8637,262 @@ def check_artifact_title_bar(
     watch.drain_rejections()
 
 
+def check_artifact_share(
+    browser, page, watch: Watch, port: int, project: str, artifact_id: str, protected_id: str
+) -> None:
+    """Item 3 Share:
+    - Share opens from the overflow menu and the sheet matches the drawn geometry.
+    - The link is created and copied; the helper reads as specified.
+    - With the password switch on, the primary changes label, the cost sentence shows,
+      and creating yields two separate copy actions.
+    - A recipient with the link opens the artifact; with a password, the existing gate appears and opens it.
+    - Two artifacts in one project may differ: one locked, one not.
+    - The project settings screen no longer offers a password policy.
+    """
+    watch.enter("artifacts: share sheet and password choice")
+    try:
+        # Navigate to the plain artifact in viewer
+        goto(page, f"#/artifacts/{quote(artifact_id)}?project={quote(project)}", "Artifact")
+        page.wait_for_selector(".hub-viewer", timeout=10000)
+
+        # Open overflow menu
+        more_btn = page.locator(".hub-more")
+        if more_btn.count() == 0:
+            watch.fail("overflow button .hub-more not found")
+            return
+        more_btn.click()
+        page.wait_for_selector(".hub-overflow-menu:not([hidden])", timeout=5000)
+
+        # Click Share
+        share_btn = page.locator('.hub-overflow-menu button[data-action="share"]')
+        if share_btn.count() == 0 or not share_btn.is_visible():
+            watch.fail("Share button not found or not visible in overflow menu")
+            return
+        share_btn.click()
+
+        # Verify Share sheet opens
+        sheet = page.locator(".hub-share-sheet")
+        if sheet.count() == 0 or not sheet.is_visible():
+            watch.fail("Share sheet (.hub-share-sheet) did not open")
+            return
+
+        # Check geometry
+        geo = page.evaluate(
+            """(() => {
+                const s = document.querySelector('.hub-share-sheet');
+                if (!s) return null;
+                const cs = window.getComputedStyle(s);
+                const handle = s.querySelector('.hub-share-handle');
+                const hcs = handle ? window.getComputedStyle(handle) : null;
+                const header = s.querySelector('.hub-share-title');
+                const headcs = header ? window.getComputedStyle(header) : null;
+                return {
+                    radius: cs.borderTopLeftRadius,
+                    handleW: hcs ? hcs.width : null,
+                    handleH: hcs ? hcs.height : null,
+                    titleSize: headcs ? headcs.fontSize : null,
+                    titleWeight: headcs ? headcs.fontWeight : null,
+                };
+            })()"""
+        )
+        if not geo:
+            watch.fail("could not read geometry of Share sheet")
+            return
+        if geo["radius"] != "20px":
+            watch.fail(f"sheet top radius is {geo['radius']}, expected 20px")
+        if geo["handleW"] != "36px" or geo["handleH"] != "4px":
+            watch.fail(f"sheet handle is {geo['handleW']}x{geo['handleH']}, expected 36x4px")
+        if geo["titleSize"] != "17px" or geo["titleWeight"] not in ("600", "bold"):
+            watch.fail(f"sheet title is {geo['titleSize']}/{geo['titleWeight']}, expected 17px/600")
+
+        # Check sub-line
+        subline = page.locator(".hub-share-subline").inner_text()
+        if not subline or "v" not in subline:
+            watch.fail(f"sheet sub-line is missing or invalid: {subline!r}")
+
+        # Check link row exists with link glyph, mono url, and copy button
+        link_row = page.locator(".hub-share-link-row")
+        if link_row.count() == 0:
+            watch.fail("link row (.hub-share-link-row) is missing")
+            return
+        if page.locator(".hub-share-link-row svg").count() == 0:
+            watch.fail("link row missing link svg glyph")
+        url_text = page.locator(".hub-share-url").inner_text()
+        if not url_text:
+            watch.fail("link row missing URL text")
+
+        # Check helper text verbatim
+        helper = page.locator(".hub-share-helper").inner_text().strip()
+        expected_helper = "Anyone with this link can open it. No account, no sign-in."
+        if helper != expected_helper:
+            watch.fail(f"share helper text is {helper!r}, expected {expected_helper!r}")
+
+        # Check password switch row off by default
+        pw_switch = page.locator('.hub-share-sheet [role="switch"]')
+        if pw_switch.count() == 0:
+            watch.fail("password switch not found in share sheet")
+            return
+        if pw_switch.get_attribute("aria-checked") != "false":
+            watch.fail(f"password switch is {pw_switch.get_attribute('aria-checked')}, expected false")
+        pw_label = page.locator(".hub-share-pw-label").inner_text().strip()
+        if "Lock with a password" not in pw_label:
+            watch.fail(f"password switch label is {pw_label!r}, expected 'Lock with a password'")
+        pw_helper_off = page.locator(".hub-share-pw-helper").inner_text().strip()
+        expected_pw_off = "Encrypts this artifact. The hub cannot read it, and cannot recover it if the password is lost."
+        if pw_helper_off != expected_pw_off:
+            watch.fail(f"password helper (off) is {pw_helper_off!r}, expected {expected_pw_off!r}")
+
+        # Check primary button before creating: "Create link" and status "This artifact has no link yet"
+        primary_btn = page.locator(".hub-share-primary")
+        if primary_btn.inner_text().strip() != "Create link":
+            watch.fail(f"primary button is {primary_btn.inner_text()!r}, expected 'Create link'")
+        status_line = page.locator(".hub-share-status").inner_text().strip()
+        if "This artifact has no link yet" not in status_line:
+            watch.fail(f"status line before create is {status_line!r}, expected 'This artifact has no link yet'")
+
+        # Click Create link
+        primary_btn.click()
+
+        # After creating: status "This artifact has no link yet" is gone, button becomes "Revoke link"
+        if page.locator(".hub-share-status").is_visible():
+            watch.fail("status 'This artifact has no link yet' still visible after creating link")
+        if primary_btn.inner_text().strip() != "Revoke link":
+            watch.fail(f"primary button after create is {primary_btn.inner_text()!r}, expected 'Revoke link'")
+
+        # Copy link action
+        copy_link_btn = page.locator('.hub-share-link-row button[data-action="copy-link"]')
+        copy_link_btn.click()
+        if not settle(page, "[...document.querySelectorAll('.toast-text')].some((t) => t.textContent.includes('Link copied'))"):
+            watch.fail("copying link did not toast 'Link copied'")
+
+        # Revoke link
+        primary_btn.click()
+        # Confirmation dialog appears
+        confirm_dlg = page.locator("dialog.dialog[open]")
+        if confirm_dlg.count() == 0:
+            watch.fail("revoking link did not open confirmation dialog")
+            return
+        dlg_text = confirm_dlg.inner_text()
+        if "old URL stops working" not in dlg_text:
+            watch.fail(f"revoke confirmation dialog does not say old URL stops working: {dlg_text!r}")
+        # Confirm revoke
+        confirm_btn = confirm_dlg.locator(".dialog-commit")
+        confirm_btn.click()
+        page.wait_for_selector("dialog.dialog", state="detached")
+
+        # Sheet returns to unshared state
+        if primary_btn.inner_text().strip() != "Create link":
+            watch.fail("after revoke, primary button did not return to 'Create link'")
+        if "This artifact has no link yet" not in page.locator(".hub-share-status").inner_text():
+            watch.fail("after revoke, status did not return to 'This artifact has no link yet'")
+
+        # Now test Password Switch ON
+        pw_switch.click()
+        if pw_switch.get_attribute("aria-checked") != "true":
+            watch.fail("clicking password switch did not set aria-checked='true'")
+        pw_helper_on = page.locator(".hub-share-pw-helper").inner_text().strip()
+        expected_pw_on = "On. The artifact is encrypted before it leaves this device."
+        if pw_helper_on != expected_pw_on:
+            watch.fail(f"password helper (on) is {pw_helper_on!r}, expected {expected_pw_on!r}")
+
+        # Cost sentence block shows verbatim
+        cost_block = page.locator(".hub-share-cost").inner_text().strip()
+        expected_cost = (
+            "Encryption happens here, not on the server. If this password is lost the artifact is unreadable by everyone, "
+            "including us. Existing readers of the current link will be asked for it."
+        )
+        if cost_block != expected_cost:
+            watch.fail(f"cost sentence block is {cost_block!r}, expected {expected_cost!r}")
+
+        # Primary button changed to "Create locked link"
+        if primary_btn.inner_text().strip() != "Create locked link":
+            watch.fail(f"primary button with switch on is {primary_btn.inner_text()!r}, expected 'Create locked link'")
+
+        # Generate button exists and generates password
+        gen_btn = page.locator('.hub-share-sheet button[data-action="generate-password"]')
+        if gen_btn.count() == 0:
+            watch.fail("Generate button not found")
+            return
+        gen_btn.click()
+        pw_val = page.locator(".hub-share-pw-field input").input_value()
+        if not pw_val or len(pw_val) < 8:
+            watch.fail(f"Generate did not populate password field: {pw_val!r}")
+
+        # Create locked link
+        primary_btn.click()
+
+        # Creating locked link yields TWO separate copy actions: Copy link and Copy password
+        copy_link_action = page.locator('.hub-share-sheet [data-action="copy-link"]')
+        copy_pw_action = page.locator('.hub-share-sheet [data-action="copy-password"]')
+        if copy_link_action.count() != 1:
+            watch.fail("separate 'Copy link' action missing after creating locked link")
+        if copy_pw_action.count() != 1:
+            watch.fail("separate 'Copy password' action missing after creating locked link")
+
+        # Ensure there is NO combined copy action
+        combined = page.locator('.hub-share-sheet button:has-text("Copy link and password")')
+        if combined.count() > 0:
+            watch.fail("found forbidden combined copy action in sheet")
+
+        # Test copying password
+        copy_pw_action.click()
+        if not settle(page, "[...document.querySelectorAll('.toast-text')].some((t) => t.textContent.includes('Password copied'))"):
+            watch.fail("copying password did not toast 'Password copied'")
+
+        # Close share sheet
+        page.keyboard.press("Escape")
+
+        # Verify recipient with link opens plain artifact directly without gate
+        recipient_context = browser.new_context()
+        try:
+            rpage = recipient_context.new_page()
+            rpage.goto(f"http://127.0.0.1:{port}/artifacts/{artifact_id}", wait_until="load")
+            rpage.wait_for_selector("#hub-frame", timeout=10000)
+            if rpage.locator("#hub-unlock-form").count() > 0 and rpage.locator("#hub-unlock-form").is_visible():
+                watch.fail("plain artifact presented a password gate to recipient")
+
+            # Verify recipient with link opens protected artifact and meets existing gate
+            rpage.goto(f"http://127.0.0.1:{port}/artifacts/{protected_id}", wait_until="load")
+            rpage.wait_for_selector("#hub-password", timeout=10000)
+            if rpage.locator("#hub-unlock-form").is_hidden():
+                watch.fail("protected artifact did not present the password gate")
+            rpage.fill("#hub-password", harness.PROTECTED_PASSWORD)
+            rpage.click('#hub-unlock-form button[type="submit"]')
+            rpage.frame_locator("#hub-frame").get_by_text(harness.PROTECTED_BODY_MARK).wait_for(timeout=15000)
+        finally:
+            recipient_context.close()
+
+        # Two artifacts in one project may differ: one locked, one not
+        # Check gallery in project
+        goto(page, f"#/projects/{quote(project)}/artifacts", "Gallery")
+        page.wait_for_selector(".artifact-card", timeout=10000)
+        plain_card = page.locator(f'.artifact-card[data-id="{artifact_id}"]')
+        locked_card = page.locator(f'.artifact-card[data-id="{protected_id}"]')
+        if plain_card.count() == 0 or locked_card.count() == 0:
+            watch.fail("both plain and locked artifacts must appear in the same project gallery")
+        if plain_card.locator(".artifact-preview.encrypted").count() != 0:
+            watch.fail("plain artifact incorrectly marked as encrypted in gallery")
+        if locked_card.locator(".artifact-preview.encrypted").count() == 0:
+            watch.fail("locked artifact missing encrypted mark in gallery")
+
+        # Project settings screen no longer offers a password policy
+        goto(page, f"#/projects/{quote(project)}/settings", "Settings")
+        page.wait_for_selector(".pset", timeout=10000)
+        if page.locator('.pset [role="radiogroup"]').count() > 0:
+            watch.fail("project settings screen still offers a password policy radiogroup")
+        if page.locator(".pset-policy").count() > 0:
+            watch.fail("project settings screen still carries .pset-policy")
+        fields = page.evaluate(
+            "[...document.querySelectorAll('.pset input, .pset textarea, .pset select')].map((el) => el.name)"
+        )
+        if "artifact_password_policy" in fields:
+            watch.fail("project settings form still contains artifact_password_policy field")
+    finally:
+        page.evaluate("document.querySelectorAll('.hub-share-sheet, .hub-share-backdrop').forEach((el) => el.remove())")
+        page.evaluate("document.querySelectorAll('dialog[open]').forEach((d) => d.close())")
+    watch.drain_rejections()
+
+
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
 
@@ -8838,6 +9063,17 @@ def run() -> int:
                 run_step(watch, check_inbox_desktop, browser, watch, port)
                 run_step(watch, check_inbox_earlier_focus, browser, watch, port)
                 run_step(watch, check_connect_screen, browser, watch, port)
+                run_step(
+                    watch,
+                    check_artifact_share,
+                    browser,
+                    page,
+                    watch,
+                    port,
+                    project,
+                    seeded["artifact_id"],
+                    seeded["protected_id"],
+                )
                 run_step(watch, check_feed_chips_and_row_grammar, page, watch, port, project)
                 run_step(watch, check_projects_index, browser, watch, port)
                 run_step(watch, check_sessions_redraw, browser, page, watch, port, project, seeded["session_id"])

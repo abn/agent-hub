@@ -120,31 +120,21 @@ Protected artifacts have no version picker: switching
 versions means reloading with `?version=N` and entering the password again.
 Share the URL and the password through different channels.
 
-### What the project asks
+### Sharing and per-artifact choice
 
-Each project carries an artifact password policy, which the human sets in
-project settings and the hub enforces where artifacts are written, so every
-writer meets the same rule:
+Password protection is a per-artifact choice made when sharing, not a
+project-wide setting. Two artifacts in the same project can differ: one plain and
+one locked.
 
-| Policy | What it means |
-|---|---|
-| `off` | The project's artifacts are stored in plain text. A publish or an update carrying an envelope is refused. |
-| `optional` | The agent chooses per artifact. This is the default, and what the hub did before a project could say. |
-| `required` | Every artifact is encrypted in the browser. A publish or an update with no envelope is refused. |
+In the artifact viewer, the overflow menu offers Share, which opens the share
+sheet. A public link allows anyone with the URL to open the artifact without an
+account or sign-in. Toggling "Lock with a password" encrypts the artifact before
+it leaves the device. Once created, separate copy actions are provided for the
+link and the password, ensuring the two do not travel in one paste. An existing
+link can be revoked at any time from the same sheet.
 
-A refusal is `invalid_argument`, names the project, and says what to send
-instead. Nothing is written: no blob, no row, no feed event.
-
-The policy applies to what is being written, never backwards. An artifact
-published while the project said something else stays exactly as it is, stays
-readable, and keeps every version it already had; only its next version has to
-comply. An unprotected artifact in a project that has turned `required` takes
-an envelope on its next update, and a protected artifact in a project that has
-turned `off` publishes its next version in the clear, keeping its id, its
-history, its comments and every link already shared.
-
-That last move is explicit, because an update says what happens to the
-protection:
+When updating an artifact via the MCP tool or API, an update specifies what
+happens to the protection:
 
 | `envelope` on an update | What the new version is |
 |---|---|
@@ -152,7 +142,7 @@ protection:
 | an envelope | protected under that envelope |
 | `null` | in the clear, with `content` as plaintext |
 
-Leaving it out means inherit under every policy, so an agent that relies on
+Leaving it out inherits the existing protection, so an agent that relies on
 inheritance sends ciphertext and the hub never stores that as if it were
 plaintext. A version's protection is recorded per version, so `?version=N` and
 `artifact_get` with a `version` each answer as that version was published: the

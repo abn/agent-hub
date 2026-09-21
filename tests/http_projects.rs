@@ -184,15 +184,15 @@ async fn a_project_is_renamed_and_keeps_its_id() {
 }
 
 #[tokio::test]
-async fn the_artifact_password_policy_is_set_and_read_back() {
+async fn artifact_password_policy_is_removed_from_projects() {
     let state = state().await;
     projects::create(&state.db, "homelab", "Homelab")
         .await
         .expect("create project");
-    assert_eq!(
-        listed(&state, "homelab").await["artifact_password_policy"],
-        "optional",
-        "a new project keeps today's behaviour"
+    let initial = listed(&state, "homelab").await;
+    assert!(
+        initial.get("artifact_password_policy").is_none(),
+        "listed project no longer carries artifact_password_policy"
     );
 
     let response = call(
@@ -203,31 +203,16 @@ async fn the_artifact_password_policy_is_set_and_read_back() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json_body(response).await["artifact_password_policy"],
-        "required"
+    let body = json_body(response).await;
+    assert!(
+        body.get("artifact_password_policy").is_none(),
+        "patched project does not carry artifact_password_policy"
     );
 
     let project = json_body(call(&state, "GET", "/api/v1/projects/homelab", None).await).await;
-    assert_eq!(project["artifact_password_policy"], "required");
-    assert_eq!(
-        listed(&state, "homelab").await["artifact_password_policy"],
-        "required"
-    );
-
-    let refused = call(
-        &state,
-        "PATCH",
-        "/api/v1/projects/homelab",
-        Some(serde_json::json!({ "artifact_password_policy": "maybe" })),
-    )
-    .await;
-    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(problem_body(refused).await["code"], "invalid_argument");
-    assert_eq!(
-        listed(&state, "homelab").await["artifact_password_policy"],
-        "required",
-        "a refused change writes nothing"
+    assert!(
+        project.get("artifact_password_policy").is_none(),
+        "fetched project does not carry artifact_password_policy"
     );
 }
 
@@ -271,7 +256,6 @@ async fn a_patch_that_names_nothing_changes_nothing() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     assert_eq!(body["display_name"], "Homelab");
-    assert_eq!(body["artifact_password_policy"], "optional");
 
     let empty = call(
         &state,
@@ -312,8 +296,7 @@ async fn an_agents_personal_space_is_settable_though_it_cannot_be_deleted() {
         "PATCH",
         &format!("/api/v1/projects/{space}"),
         Some(serde_json::json!({
-            "display_name": "Laptop scratch",
-            "artifact_password_policy": "required"
+            "display_name": "Laptop scratch"
         })),
     )
     .await;
@@ -324,7 +307,6 @@ async fn an_agents_personal_space_is_settable_though_it_cannot_be_deleted() {
     );
     let body = json_body(response).await;
     assert_eq!(body["display_name"], "Laptop scratch");
-    assert_eq!(body["artifact_password_policy"], "required");
 
     let undeletable = call(&state, "DELETE", &format!("/api/v1/projects/{space}"), None).await;
     assert_eq!(

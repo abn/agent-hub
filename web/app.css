@@ -1013,27 +1013,7 @@ button.empty-link {
   border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2);
   font-family: var(--font-mono); font-size: var(--t-15); overflow-wrap: anywhere;
 }
-.pset-policy { border: 0; padding: 0; margin: 20px 0 0; min-width: 0; }
-.pset-policy legend { padding: 0 0 6px; margin: 0; }
-.pset-options {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2);
-}
-.pset-option {
-  display: flex; gap: var(--s-3); align-items: center; margin: 0;
-  padding: var(--s-3) var(--s-4); min-height: 56px;
-  border-bottom: 1px solid var(--line); cursor: pointer;
-}
-.pset-option:last-child { border-bottom: 0; }
-.pset-option input {
-  flex: none; width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0;
-  accent-color: var(--accent); border-radius: 50%;
-}
-/* The platform draws an unchecked radio for the page's colour scheme, which
-   the theme switch does not change, so the dark theme says so here. */
-[data-theme="dark"] .pset-option input { color-scheme: dark; }
 .pset-field input[aria-invalid="true"] { border-color: var(--danger); }
-.pset-option-name { display: block; font-size: var(--t-15); font-weight: 600; color: var(--ink); }
-.pset-option-note { display: block; font-size: var(--t-12); color: var(--ink-3); }
 .pset h2.section-label { margin: 20px 0 6px; }
 .pset-reserved { font-weight: 500; text-transform: none; letter-spacing: 0; }
 .pset-retention {
@@ -1042,7 +1022,7 @@ button.empty-link {
   font-size: var(--t-13); line-height: 1.5; color: var(--ink-2);
 }
 .pset-error { margin: 0; color: var(--danger); font-size: var(--t-13); }
-.pset-policy .pset-error, .pset-problem { margin-top: var(--s-2); }
+.pset-problem { margin-top: var(--s-2); }
 .pset-actions { display: flex; gap: var(--s-2); margin-top: var(--s-5); }
 .pset-actions .primary { flex: 1; font-weight: 600; }
 .pset-delete { background: transparent; color: var(--danger); }
@@ -2560,3 +2540,344 @@ a.session-back {
   background: var(--surface-2);
   flex: none;
 }
+
+/* component: share-sheet */
+.hub-share-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 90;
+}
+
+.hub-share-backdrop[hidden] {
+  display: none;
+}
+
+.hub-share-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  overflow: hidden;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--s-2));
+}
+
+.hub-share-sheet[hidden] {
+  display: none;
+}
+
+.hub-share-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  margin: 10px auto 12px;
+  flex: none;
+}
+
+.hub-share-header {
+  padding: 0 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+}
+
+.hub-share-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hub-share-subline {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.hub-share-link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 16px;
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+
+.hub-share-url {
+  flex: 1;
+  min-width: 0;
+  font: 500 13px/1.4 var(--font-mono);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hub-share-copy-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+  flex: none;
+}
+
+.hub-share-helper {
+  padding: 0 16px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  flex: none;
+}
+
+.hub-share-pw-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+
+.hub-share-pw-row.is-on {
+  background: var(--action-bg);
+}
+
+.hub-share-pw-icon {
+  margin-top: 2px;
+  color: var(--ink-2);
+  display: grid;
+  place-items: center;
+}
+
+.hub-share-pw-row.is-on .hub-share-pw-icon {
+  color: var(--action);
+}
+
+.hub-share-pw-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hub-share-pw-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hub-share-pw-helper {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.hub-share-pw-row.is-on .hub-share-pw-helper {
+  color: var(--ink);
+}
+
+.hub-share-switch {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hub-share-switch-track {
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.hub-share-switch-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--ink-3);
+}
+
+.hub-share-switch[aria-checked="true"] .hub-share-switch-track {
+  background: var(--action);
+  border-color: var(--action);
+  justify-content: flex-end;
+}
+
+.hub-share-switch[aria-checked="true"] .hub-share-switch-thumb {
+  background: var(--surface);
+}
+
+.hub-share-pw-controls {
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+}
+
+.hub-share-pw-controls[hidden] {
+  display: none;
+}
+
+.hub-share-pw-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+}
+
+.hub-share-pw-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: 500 15px/1 var(--font-mono);
+  color: var(--ink);
+}
+
+.hub-share-pw-toggle {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.hub-share-pw-gen-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hub-share-pw-gen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink);
+  font: 500 13px/1 var(--font-sans);
+  cursor: pointer;
+  flex: none;
+}
+
+.hub-share-cost {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.hub-share-actions {
+  padding: 12px 16px 20px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+}
+
+.hub-share-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.hub-share-status[hidden] {
+  display: none;
+}
+
+.hub-share-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ink-3);
+  flex: none;
+}
+
+.hub-share-primary {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--accent);
+  color: var(--ink-inverse);
+  font: 600 15px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.hub-share-primary.is-revoking {
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+}
+
+.hub-share-copy-pw-btn {
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.hub-share-post-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 20px;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex: none;
+}
+
+.hub-share-post-note[hidden] {
+  display: none;
+}
+
+.hub-viewer-locked {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* end component: share-sheet */
