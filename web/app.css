@@ -3624,6 +3624,16 @@ a.session-back {
   gap: var(--s-3);
   margin-bottom: var(--s-4);
 }
+.access-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+}
+
+.access-form-card p {
+  margin: var(--s-2) 0 0;
+}
 /* end component: access */
 
 /* The comment control for a touch device. Fixed in the corner rather than

@@ -94,6 +94,24 @@ export async function accessScreen(gen) {
         .join("")
     : '<p class="empty">No agents have identified themselves yet.</p>';
 
+  const agentOptions = agents.length
+    ? agents
+        .map(
+          (a) =>
+            `<option value="${esc(a.id)}">${esc(a.display_name && a.display_name !== a.id ? `${a.display_name} (${a.id})` : a.id)}</option>`,
+        )
+        .join("")
+    : '<option value="" disabled>No agents available</option>';
+
+  const projectOptions = projects.length
+    ? projects
+        .map(
+          (p) =>
+            `<option value="${esc(p.id)}">${esc(p.display_name && p.display_name !== p.id ? `${p.display_name} (${p.id})` : p.id)}</option>`,
+        )
+        .join("")
+    : '<option value="" disabled>No projects available</option>';
+
   paint(
     gen,
     `
@@ -135,6 +153,46 @@ export async function accessScreen(gen) {
       <div class="card agents-records">
         ${agentRows}
       </div>
+
+      <div class="access-section-head">
+        <span class="section-label">CREATE AGENT</span>
+        <span class="section-sub">Register an agent identity and allocate its personal space.</span>
+      </div>
+      <form class="card access-form-card" data-action="agent-create">
+        <label for="agent-id">Agent id</label>
+        <input id="agent-id" name="id" required autocomplete="off" placeholder="laptop/claude">
+        <label for="agent-name">Display name</label>
+        <input id="agent-name" name="display_name" required placeholder="Claude on laptop">
+        <p>
+          <button class="primary" type="submit">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 12 5v14 M 5 12h14"/></svg>
+            Create agent
+          </button>
+        </p>
+      </form>
+
+      <div class="access-section-head">
+        <span class="section-label">GRANT PROJECT</span>
+        <span class="section-sub">Grant an agent access to a project.</span>
+      </div>
+      <form class="card access-form-card" data-action="agent-grant">
+        <label for="grant-agent">Agent</label>
+        <select id="grant-agent" name="agent" required>
+          <option value="" disabled selected>Select agent…</option>
+          ${agentOptions}
+        </select>
+        <label for="grant-project">Project</label>
+        <select id="grant-project" name="project" required>
+          <option value="" disabled selected>Select project…</option>
+          ${projectOptions}
+        </select>
+        <p>
+          <button class="primary" type="submit">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 12 5v14 M 5 12h14"/></svg>
+            Grant project
+          </button>
+        </p>
+      </form>
 
       <div class="access-section-head">
         <span class="section-label">REVOKED TOKENS</span>

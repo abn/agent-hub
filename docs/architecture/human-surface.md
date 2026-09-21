@@ -269,8 +269,10 @@ Confidential projects are absent rather than refused. Agents that identified
 themselves are displayed as records with their personal space path, alongside
 controls to reissue or revoke their token and remove project grants under a
 confirmation dialog, and a list of revoked tokens as history. Agent records
-lead nowhere and carry no capability switches. The artifact viewer embeds the
-artifact page:
+lead nowhere and carry no capability switches. The screen provides forms to
+create an agent by id and display name, and to grant an agent access to a
+project under binary assignment without read or write tiers. The artifact
+viewer embeds the artifact page:
 the host shell shows an unlock form for a protected artifact and decrypts in
 the browser, then renders HTML or rendered markdown inside the same sandboxed
 frame. Markdown renders in the page with raw HTML in its source escaped;

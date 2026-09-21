@@ -3,6 +3,13 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, agent creation and project grant forms on access screen
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the restored agent creation and project grant controls on the Access screen
+  (`#/access`). Operators can register new agent identities by id and display
+  name, and grant project access with binary assignment.
+
 ## 2026-09-22, the token is the identity
 
 * **Add**: [ADR 0021](adr/0021-the-token-is-the-identity.md) records the

@@ -9733,6 +9733,47 @@ def check_access_screen(browser, watch: Watch, port: int) -> None:
             if "not supported by the backend" in t:
                 watch.fail(f"access screen displayed apology toast: {t!r}")
 
+        # 10. Create agent control is present and submitting creates an agent
+        watch.enter("access: create agent control creates an agent")
+        create_form = page.locator("main form[data-action='agent-create']")
+        if create_form.count() == 0:
+            watch.fail("create agent control is missing from access screen")
+        else:
+            new_agent_id = "agent-smoke-created"
+            new_agent_name = "Smoke Created Agent"
+            page.fill("main form[data-action='agent-create'] input[name='id']", new_agent_id)
+            page.fill("main form[data-action='agent-create'] input[name='display_name']", new_agent_name)
+            page.click("main form[data-action='agent-create'] button[type='submit']")
+            agent_row_sel = f"main .agent-record-row[data-agent-id='{new_agent_id}']"
+            if not settle(page, f"!!document.querySelector({json.dumps(agent_row_sel)})"):
+                watch.fail("submitting create agent form did not render new agent on screen")
+            agents_after_create = json.loads(harness.request(port, "GET", "/api/v1/agents")).get("agents", [])
+            if not any(a["id"] == new_agent_id for a in agents_after_create):
+                watch.fail(f"created agent {new_agent_id!r} not found in GET /api/v1/agents")
+
+        # 11. Grant project control is present and submitting adds grant
+        watch.enter("access: grant project control adds grant")
+        grant_form = page.locator("main form[data-action='agent-grant']")
+        if grant_form.count() == 0:
+            watch.fail("grant project control is missing from access screen")
+        else:
+            target_agent = "agent-smoke-created"
+            agent_opt_sel = f"main form[data-action='agent-grant'] select[name='agent'] option[value='{target_agent}']"
+            if not settle(page, f"!!document.querySelector({json.dumps(agent_opt_sel)})"):
+                watch.fail(f"newly created agent {target_agent!r} not in grant agent selector")
+            page.select_option("main form[data-action='agent-grant'] select[name='agent']", target_agent)
+            page.select_option("main form[data-action='agent-grant'] select[name='project']", harness.PROJECT_ID)
+            page.click("main form[data-action='agent-grant'] button[type='submit']")
+            grant_btn_sel = f"main .agent-record-row[data-agent-id='{target_agent}'] button[data-action='agent-ungrant'][data-project='{harness.PROJECT_ID}']"
+            if not settle(page, f"!!document.querySelector({json.dumps(grant_btn_sel)})"):
+                watch.fail("submitting grant project form did not render new grant on screen")
+            target_agent_esc = urllib.parse.quote(target_agent, safe="")
+            grants_resp = json.loads(
+                harness.request(port, "GET", f"/api/v1/agents/{target_agent_esc}/grants")
+            ).get("grants", [])
+            if not any(g["project_id"] == harness.PROJECT_ID for g in grants_resp):
+                watch.fail(f"grant on {harness.PROJECT_ID!r} not found in GET /api/v1/agents/{target_agent}/grants")
+
     finally:
         context.close()
     watch.drain_rejections()

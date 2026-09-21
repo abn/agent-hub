@@ -164,6 +164,23 @@ main.addEventListener("submit", (event) => {
     })
       .then(() => (location.hash = "#/feed"))
       .catch(failed);
+  } else if (action === "agent-create") {
+    const payload = {
+      id: String(data.get("id") || "").trim(),
+      display_name: String(data.get("display_name") || "").trim(),
+    };
+    api("/api/v1/agents", { method: "POST", body: JSON.stringify(payload) })
+      .then(() => render())
+      .catch(failed);
+  } else if (action === "agent-grant") {
+    const agent = String(data.get("agent") || "").trim();
+    const project = String(data.get("project") || "").trim();
+    api(`/api/v1/agents/${encodeURIComponent(agent)}/grants`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: project, access: String(data.get("access") || "write") }),
+    })
+      .then(() => render())
+      .catch(failed);
   }
 });
 
