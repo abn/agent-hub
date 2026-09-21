@@ -223,6 +223,15 @@ it are:
   through the optional embedded endpoint (`HUB_TAILNET`), which carries plain
   HTTP inside the tailnet's own tunnel.
 
+A reverse proxy may also mount the hub on a path instead of a dedicated host
+or port, such as `https://host/hub/`, as long as it strips that path before
+forwarding: the hub always serves from its own root and never needs to know a
+prefix exists. The PWA itself normalises a request that reaches it without a
+trailing slash (`/hub`) to one that has it (`/hub/`) before it loads anything
+else, since every asset it loads resolves relative to that address. This
+needs no configuration; there is no `HUB_BASE_PATH` or equivalent, and a proxy
+that does not strip the prefix is not supported.
+
 ## See also
 
 - [Human interface](../design/human-interface.md) - the intended human surface

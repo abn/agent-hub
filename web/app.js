@@ -193,7 +193,9 @@ if (skipLink) {
 window.addEventListener("hashchange", render);
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
+  // Relative to the document, so the worker's default scope lands on the
+  // app root under whatever prefix serves it, not the origin root.
+  navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 installKeys();

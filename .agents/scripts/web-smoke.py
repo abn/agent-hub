@@ -2203,7 +2203,10 @@ def check_artifact(page, watch: Watch, project: str) -> None:
     frames = page.evaluate(
         "(() => [...document.querySelectorAll('main iframe')].map((f) => f.getAttribute('src')))()"
     )
-    if not any("/artifacts/" in (src or "") for src in frames):
+    # Relative to the document ("artifacts/{id}"), not the origin root: a
+    # leading slash would 404 once the app is served behind a path-stripping
+    # proxy, so the attribute carries no leading slash to assert on.
+    if not any("artifacts/" in (src or "") for src in frames):
         watch.fail(f"the viewer embeds no artifact page, frames are {frames}")
     watch.drain_rejections()
 
@@ -3293,10 +3296,11 @@ def check_viewer_route(page, watch: Watch, project: str, artifact: str) -> None:
         watch.fail(f"opening a card did not move the hash: {page.evaluate('location.hash')!r}")
     if not settle(page, "!!document.querySelector('main .hub-viewer')"):
         watch.fail("the viewer did not paint")
+    # Relative to the document, not the origin root: no leading slash.
     if not settle(
         page,
         "(() => [...document.querySelectorAll('main iframe')]"
-        ".some((f) => (f.getAttribute('src') || '').includes('/artifacts/')))()",
+        ".some((f) => (f.getAttribute('src') || '').includes('artifacts/')))()",
     ):
         watch.fail("the viewer embeds no artifact frame")
 

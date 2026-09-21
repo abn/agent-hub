@@ -242,16 +242,34 @@ const VERSION_PLACEHOLDER: &str = "{{version}}";
 const ASSETS_PLACEHOLDER: &str = "{{assets}}";
 const ON_DEMAND_PLACEHOLDER: &str = "{{on_demand}}";
 
+/// A served path in the form the worker's own `cache.addAll`/`cache.add`
+/// resolve correctly: relative to the worker's script URL, which is the app
+/// root under whatever prefix a proxy serves it from. The root path is its
+/// own directory, so it maps to `./`; an empty string would instead resolve
+/// to the worker script itself.
+fn relative_asset_path(path: &str) -> String {
+    match path {
+        "/" => "./".to_string(),
+        _ => path.trim_start_matches('/').to_string(),
+    }
+}
+
 /// The worker source with its version and cache lists filled in. Stamping
 /// once at startup keeps the digest off the request path.
 static STAMPED_WORKER: LazyLock<String> = LazyLock::new(|| {
-    let required: Vec<&str> = asset_paths()
+    let required: Vec<String> = asset_paths()
         .filter(|path| !ON_DEMAND_PATHS.contains(path))
+        .map(relative_asset_path)
+        .collect();
+    let on_demand: Vec<String> = ON_DEMAND_PATHS
+        .iter()
+        .copied()
+        .map(relative_asset_path)
         .collect();
     SERVICE_WORKER
         .replace(VERSION_PLACEHOLDER, &shell_version())
         .replace(ASSETS_PLACEHOLDER, &required.join(","))
-        .replace(ON_DEMAND_PLACEHOLDER, &ON_DEMAND_PATHS.join(","))
+        .replace(ON_DEMAND_PLACEHOLDER, &on_demand.join(","))
 });
 
 /// A digest of what the shell is made of.
@@ -334,10 +352,70 @@ fn respond(body: Body, content_type: &'static str) -> Response {
         // The app is same-origin with the API and loads only its own assets.
         headers.insert(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-            ),
+            HeaderValue::from_str(&SHELL_CSP).expect("the CSP is valid header text"),
         );
     }
     response
 }
+
+/// The shell's own inline script, read out of the embedded markup rather
+/// than duplicated as a literal: the CSP hash that allows it to run has to
+/// track whatever text is actually served, or an edit to one and not the
+/// other silently blocks the shell. It is the only `<script>` tag with no
+/// `src`; every other script on the page loads its own asset and is covered
+/// by `script-src 'self'`.
+fn inline_shell_script() -> &'static str {
+    let html = std::str::from_utf8(shell_html()).expect("index.html is utf-8");
+    let open = "<script>";
+    let start = html.find(open).expect("the shell has an inline script") + open.len();
+    let end = html[start..]
+        .find("</script>")
+        .expect("the inline script is closed")
+        + start;
+    &html[start..end]
+}
+
+fn shell_html() -> &'static [u8] {
+    SHELL_ASSETS
+        .iter()
+        .find(|asset| asset.path == "/")
+        .expect("the asset table serves index.html")
+        .body
+}
+
+/// Standard base64, the only encoding a CSP hash source takes. Written by
+/// hand rather than pulling in a crate for one 32-byte digest.
+fn base64_standard(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            ALPHABET[((n >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            ALPHABET[(n & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// The shell's content security policy, with a hash source admitting exactly
+/// the inline script the shell carries and nothing else inline.
+static SHELL_CSP: LazyLock<String> = LazyLock::new(|| {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(inline_shell_script().as_bytes());
+    let hash = base64_standard(&digest);
+    format!(
+        "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-{hash}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    )
+});

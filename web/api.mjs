@@ -11,7 +11,14 @@ export async function api(path, options = {}) {
   const bearer = token || prefs.token;
   if (bearer) headers.Authorization = "Bearer " + bearer;
   if (init.body) headers["Content-Type"] = "application/json";
-  const response = await fetch(path, Object.assign({}, init, { headers }));
+  // Every caller passes an absolute-looking path ("/api/v1/..."); resolved
+  // relative to the document instead, so it survives a reverse proxy that
+  // mounts the app on a path and strips the prefix before forwarding. The
+  // document is always the app's own top-level page here, normalised to end
+  // in "/" before anything fetches, so this is the app root under whatever
+  // prefix serves it.
+  const url = new URL(path.replace(/^\//, ""), document.baseURI);
+  const response = await fetch(url, Object.assign({}, init, { headers }));
   if (!response.ok) {
     let detail = response.statusText;
     let code = "";

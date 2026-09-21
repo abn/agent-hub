@@ -6,10 +6,24 @@
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#F5F3EE">
   <title>Agent Hub</title>
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/tokens.css">
-  <link rel="stylesheet" href="/app.css">
+  <script>
+    // Every reference below is relative to the document, not the origin
+    // root, so it survives being served under a path prefix by a proxy that
+    // strips the prefix before forwarding. Relative URLs resolve against
+    // the document's own URL, not its directory, so a URL that does not end
+    // in "/" collapses a relative reference to its parent instead of itself.
+    // This is a hash-router app: every real path is the app root, so a path
+    // not ending in "/" always means "add one and reload", never "a page
+    // one level down". Runs before anything below fetches, and only once:
+    // the redirect target already ends in "/", so it never loops.
+    if (!location.pathname.endsWith("/")) {
+      location.replace(location.pathname + "/" + location.search + location.hash);
+    }
+  </script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -52,6 +66,6 @@
       </a>
     </nav>
   </div>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

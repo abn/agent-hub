@@ -67,7 +67,18 @@ async fn serves_the_pwa_shell() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = text(response).await;
     assert!(body.contains("Agent Hub"), "the shell renders");
-    assert!(body.contains("/app.js"), "the shell loads the app");
+    assert!(
+        body.contains("src=\"app.js\""),
+        "the shell loads the app relative to the document, not the origin root"
+    );
+    assert!(
+        !body.contains("src=\"/app.js\""),
+        "an absolute script path 404s once the shell is served behind a path-stripping proxy"
+    );
+    assert!(
+        body.contains("location.pathname.endsWith(\"/\")") && body.contains("location.replace("),
+        "the shell normalises itself to a trailing slash before it loads anything"
+    );
 }
 
 #[tokio::test]
@@ -309,8 +320,19 @@ async fn manifest_lists_png_icons_and_serves_them() {
 
     for icon in pngs {
         let src = icon["src"].as_str().expect("src");
+        // Relative to the manifest's own URL, not the origin root: absolute
+        // would 404 once the shell is served behind a path-stripping proxy.
+        // The manifest itself is served at the app root, so a leading "/"
+        // reaches the same route here as `src` resolved against it would.
+        assert!(
+            !src.starts_with('/'),
+            "{src} is an absolute path and 404s behind a path-stripping proxy"
+        );
         let app = router(state.clone());
-        let response = app.oneshot(get(src, None)).await.expect("request");
+        let response = app
+            .oneshot(get(&format!("/{src}"), None))
+            .await
+            .expect("request");
         assert_eq!(response.status(), StatusCode::OK, "{src} must be served");
         assert_eq!(
             response
@@ -392,6 +414,19 @@ fn stamped_paths<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// The form the worker's own `cache.addAll`/`cache.add` resolve correctly:
+/// relative to the worker's script URL, which is the app root under
+/// whatever prefix a proxy serves it from. Mirrors
+/// `relative_asset_path` in `src/http/web.rs`; kept as a second,
+/// independent implementation here rather than importing it, so a change to
+/// one without the other is what this test is for.
+fn relative_shell_path(path: &str) -> String {
+    match path {
+        "/" => "./".to_string(),
+        _ => path.trim_start_matches('/').to_string(),
+    }
+}
+
 #[tokio::test]
 async fn service_worker_precaches_every_static_route() {
     let state = state().await;
@@ -408,23 +443,40 @@ async fn service_worker_precaches_every_static_route() {
     let body = text(response).await;
     let precached = stamped_paths(&body, "PRECACHE");
     let on_demand = stamped_paths(&body, "ON_DEMAND");
-    for path in SHELL_PATHS {
+    // Every entry is relative (no leading slash, and the root maps to "./"):
+    // cache.addAll resolves each one against the worker's own script URL, so
+    // an absolute path from the origin root would try to cache the wrong
+    // thing entirely once the worker is registered behind a path prefix.
+    for path in precached.iter().chain(on_demand.iter()) {
         assert!(
-            precached.contains(&path) || on_demand.contains(&path),
+            !path.starts_with('/'),
+            "{path} is an absolute path; cache.addAll resolves it against the origin \
+             root instead of the worker's own scope behind a path prefix"
+        );
+    }
+    for path in SHELL_PATHS {
+        let relative = relative_shell_path(path);
+        assert!(
+            precached.contains(&relative.as_str()) || on_demand.contains(&relative.as_str()),
             "{path} is cached, so the offline shell is what the app loads"
         );
     }
     // The on-demand list names paths by string, so a renamed asset would drop
     // out of it silently and become required for the install again.
+    let shell_relative: Vec<String> = SHELL_PATHS
+        .iter()
+        .map(|path| relative_shell_path(path))
+        .collect();
     for path in &on_demand {
         assert!(
-            SHELL_PATHS.contains(path),
+            shell_relative.iter().any(|shell| shell == path),
             "{path} is on demand but is not a path the hub serves"
         );
     }
     for path in ON_DEMAND_PATHS {
+        let relative = relative_shell_path(path);
         assert!(
-            on_demand.contains(&path) && !precached.contains(&path),
+            on_demand.contains(&relative.as_str()) && !precached.contains(&relative.as_str()),
             "{path} does not gate the install: one failed fetch of a large file \
              would otherwise leave the app with no worker at all"
         );
@@ -823,8 +875,9 @@ fn viewer_module_renders_unlocks_and_themes() {
         "mermaid fences become placeholders"
     );
     assert!(
-        VIEWER_JS.contains("/frame-loader.js"),
-        "the viewer references the shared loader instead of inlining one"
+        VIEWER_JS.contains("frame-loader.js") && !VIEWER_JS.contains("\"/frame-loader.js\""),
+        "the viewer references the shared loader by name, resolved against the \
+         document rather than the origin root, instead of inlining one"
     );
     assert!(
         VIEWER_JS.contains("hubFrameHeight")

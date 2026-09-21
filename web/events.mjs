@@ -55,7 +55,10 @@ export async function startStream() {
   }
   streamRunning = true;
   try {
-    const response = await fetch("/api/v1/stream", {
+    // Not routed through api.mjs's api(): the stream never returns JSON and
+    // is read as a raw body, but it needs the same document-relative
+    // resolution so it still reaches the hub under a path prefix.
+    const response = await fetch(new URL("api/v1/stream", document.baseURI), {
       headers: { Authorization: "Bearer " + prefs.token, Accept: "text/event-stream" },
     });
     if (!response.ok || !response.body) throw new Error("stream unavailable");

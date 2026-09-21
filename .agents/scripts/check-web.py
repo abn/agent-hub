@@ -881,8 +881,14 @@ def main() -> int:
         errors.append("web/index.html: no viewport meta")
     if "skip-link" not in index:
         errors.append("web/index.html: no skip link")
-    if "/manifest.webmanifest" not in index:
+    if 'rel="manifest"' not in index or "manifest.webmanifest" not in index:
         errors.append("web/index.html: does not link the manifest")
+    if re.search(r'(?:href|src)="/[^"]', index):
+        errors.append(
+            "web/index.html: an absolute path from the origin root 404s once the shell "
+            "is served behind a path-stripping proxy; every reference must resolve "
+            "against the document instead"
+        )
     if INLINE_HANDLER.search(index):
         errors.append("web/index.html: inline event handlers are not allowed")
 

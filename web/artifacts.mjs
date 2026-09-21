@@ -206,13 +206,15 @@ export function viewerBack() {
 const viewer = { id: null, version: null, kind: null, raw: false };
 
 // The framed page cannot remember a theme (a sandboxed frame has no store),
-// so the viewer names the one it wants in the address.
+// so the viewer names the one it wants in the address. Relative to this
+// document (the app shell), not the origin root, so it still lands on the
+// artifact page under whatever prefix a proxy mounts the app on.
 function frameSrc(id, version, theme) {
   const params = new URLSearchParams();
   if (version) params.set("version", String(version));
   if (theme) params.set("theme", theme);
   const query = params.toString();
-  const address = `/artifacts/${encodeURIComponent(id)}`;
+  const address = `artifacts/${encodeURIComponent(id)}`;
   return query ? `${address}?${query}` : address;
 }
 
@@ -310,7 +312,7 @@ export function toggleViewerTheme() {
     const params = new URLSearchParams();
     if (viewer.version) params.set("version", String(viewer.version));
     params.set("theme", next);
-    src = `/artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
+    src = `artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
   } else {
     src = viewerSource(frame);
   }

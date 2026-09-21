@@ -255,10 +255,12 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
         "the frame keeps scripts but not the origin"
     );
     assert!(
-        body.contains(&format!(
-            "src=\"/artifacts/{id}/frame?version=1&amp;theme=light\""
-        )),
-        "HTML artifacts load through the frame route"
+        body.contains(&format!("src=\"{id}/frame?version=1&amp;theme=light\"")),
+        "HTML artifacts load through the frame route, relative to this page's own URL"
+    );
+    assert!(
+        !body.contains(&format!("src=\"/artifacts/{id}/frame")),
+        "an absolute frame src 404s once the page is served behind a path-stripping proxy"
     );
     assert!(
         !body.contains("public-artifact-body"),
@@ -283,7 +285,10 @@ async fn host_serves_the_reader_shell_without_body_bytes() {
         body.contains(&format!("http://hub.test/artifacts/{id}/og.svg")),
         "the preview image is absolute in the request origin"
     );
-    assert!(body.contains("<script type=\"module\" src=\"/artifact-viewer.mjs\">"));
+    assert!(
+        body.contains("<script type=\"module\" src=\"../artifact-viewer.mjs\">"),
+        "the viewer script loads relative to this page's own URL"
+    );
     assert!(
         !body.contains("<script>"),
         "the shell has no inline scripts"
@@ -433,10 +438,14 @@ async fn host_shell_is_styled_and_sizes_its_frame() {
         .expect("request");
     let body = text_body(response).await;
     assert!(
-        body.contains("<link rel=\"stylesheet\" href=\"/tokens.css\">")
+        body.contains("<link rel=\"stylesheet\" href=\"../tokens.css\">")
             && body.contains("var(--surface)")
             && body.contains("data-theme=\"light\""),
-        "the host chrome reuses the design tokens"
+        "the host chrome reuses the design tokens, relative to this page's own URL"
+    );
+    assert!(
+        !body.contains("href=\"/tokens.css\""),
+        "an absolute stylesheet href 404s once the page is served behind a path-stripping proxy"
     );
     assert!(
         body.contains("min-height:44px"),
@@ -1315,10 +1324,8 @@ async fn host_and_frame_agree_on_versions() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = text_body(response).await;
     assert!(
-        body.contains(&format!(
-            "src=\"/artifacts/{id}/frame?version=1&amp;theme=light\""
-        )),
-        "the host frame source names the pinned version"
+        body.contains(&format!("src=\"{id}/frame?version=1&amp;theme=light\"")),
+        "the host frame source names the pinned version, relative to this page's own URL"
     );
     assert!(body.contains("\"version\":1"));
     assert!(
@@ -1570,12 +1577,12 @@ async fn frame_loads_mermaid_only_when_the_bytes_name_it() {
         .expect("request");
     let plain_body = text_body(response).await;
     assert!(
-        !plain_body.contains("/vendor/mermaid.runtime.js"),
+        !plain_body.contains("vendor/mermaid.runtime.js"),
         "the runtime ships only when the bytes name it"
     );
     assert!(
-        plain_body.contains("<script src=\"/frame-loader.js\">"),
-        "the sizing loader rides along unconditionally"
+        plain_body.contains("<script src=\"../../frame-loader.js\">"),
+        "the sizing loader rides along unconditionally, relative to this page's own URL"
     );
 
     let app = router(state.clone());
@@ -1589,10 +1596,10 @@ async fn frame_loads_mermaid_only_when_the_bytes_name_it() {
         .await
         .expect("request");
     let body = text_body(response).await;
-    assert!(body.contains("<script src=\"/vendor/mermaid.runtime.js\">"));
+    assert!(body.contains("<script src=\"../../vendor/mermaid.runtime.js\">"));
     assert!(
-        body.contains("<script src=\"/frame-loader.js\">"),
-        "the shared loader rides along instead of an inline copy"
+        body.contains("<script src=\"../../frame-loader.js\">"),
+        "the shared loader rides along instead of an inline copy, relative to this page's own URL"
     );
     assert!(body.contains("data-theme=\"dark\""));
 }

@@ -660,8 +660,11 @@ fn reader_shell(
         String::new()
     };
     let frame = if artifact.kind == "html" {
+        // Relative to this page's own URL ("/artifacts/{id}"), not the
+        // origin root: a leading slash here would collapse to the origin
+        // root under a reverse proxy that mounts the hub on a path.
         format!(
-            "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"/artifacts/{}/frame?version={shown}&amp;theme=light\"></iframe>\n",
+            "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"{}/frame?version={shown}&amp;theme=light\"></iframe>\n",
             artifact.id,
         )
     } else {
@@ -797,6 +800,11 @@ const VIEWER_CSS: &str = include_str!("../../web/artifact-shell.css");
 /// The head shared by both shell variants: preview meta tags, the design
 /// tokens reused verbatim, a small chrome layer on those tokens, plus the
 /// vendor and viewer scripts. No inline scripts.
+///
+/// The stylesheet and script paths are relative to this page's own URL
+/// ("/artifacts/{id}"), one segment below the files it shares with the PWA
+/// shell, so "../" reaches them under whatever prefix a proxy mounts the hub
+/// on. A leading slash would collapse to the origin root instead.
 fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> String {
     let title = escape_html(&artifact.title);
     let description = escape_html(&artifact.description);
@@ -813,10 +821,10 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta property=\"og:image\" content=\"{origin}/artifacts/{id}/og.svg{pinned}\">\n\
          <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
-         <link rel=\"stylesheet\" href=\"/tokens.css\">\n\
+         <link rel=\"stylesheet\" href=\"../tokens.css\">\n\
          <style>\n{VIEWER_CSS}</style>\n\
-         <script src=\"/vendor/marked.js\"></script>\n\
-         <script type=\"module\" src=\"/artifact-viewer.mjs\"></script>\n</head>\n",
+         <script src=\"../vendor/marked.js\"></script>\n\
+         <script type=\"module\" src=\"../artifact-viewer.mjs\"></script>\n</head>\n",
         id = artifact.id,
     )
 }
@@ -1021,10 +1029,14 @@ fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
 /// same-origin access. When the bytes mention mermaid, the runtime rides
 /// along; the shared frame loader always does, so the host can size the
 /// frame to its body and diagrams render in the frame theme.
+///
+/// This page is served at "/artifacts/{id}/frame", two segments below the
+/// files it shares with the PWA shell, so "../../" reaches them under
+/// whatever prefix a proxy mounts the hub on.
 fn frame_document(title: &str, content: &str, theme: &str) -> String {
     let title = escape_html(title);
     let mermaid = if bytes_contains_mermaid(content.as_bytes()) {
-        "<script src=\"/vendor/mermaid.runtime.js\"></script>\n".to_string()
+        "<script src=\"../../vendor/mermaid.runtime.js\"></script>\n".to_string()
     } else {
         String::new()
     };
@@ -1035,7 +1047,7 @@ fn frame_document(title: &str, content: &str, theme: &str) -> String {
          <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n\
          <style>html[data-theme=\"light\"]{{color-scheme:light;background:#ffffff;color:#111111}}\
          html[data-theme=\"dark\"]{{color-scheme:dark;background:#111111;color:#eeeeee}}</style>\n\
-         {mermaid}<script src=\"/frame-loader.js\"></script>\n</head>\n<body>\n{content}</body>\n</html>\n"
+         {mermaid}<script src=\"../../frame-loader.js\"></script>\n</head>\n<body>\n{content}</body>\n</html>\n"
     )
 }
 

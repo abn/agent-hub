@@ -97,8 +97,18 @@ function renderMermaidPlaceholders(html) {
 
 // Frame loader tag. The shared file also sizes the frame to its body,
 // which the host cannot measure across the opaque origin.
+//
+// The srcdoc frame has an opaque origin, so a relative src in the markup
+// below would resolve against about:srcdoc, not this document; it has to be
+// computed here and injected absolute. This host page is always one segment
+// below the served files it shares with the shell ("/artifacts/{id}"), so
+// "../" reaches them regardless of what prefix a proxy mounts the app on.
+function frameSrc(name) {
+  return new URL(`../${name}`, document.baseURI).href;
+}
+
 function frameLoader() {
-  return `<script src="/frame-loader.js"></script>`;
+  return `<script src="${frameSrc("frame-loader.js")}"></script>`;
 }
 
 // Mirror of web/tokens.css values for the srcdoc frame: an opaque origin
@@ -156,7 +166,7 @@ function buildSrcdoc({ title, body, theme, withMermaid }) {
     "font-src data:; media-src data: blob:; connect-src 'none'; " +
     "form-action 'none'; base-uri 'none'";
   const loader =
-    (withMermaid ? `<script src="/vendor/mermaid.runtime.js"></script>` : "") +
+    (withMermaid ? `<script src="${frameSrc("vendor/mermaid.runtime.js")}"></script>` : "") +
     frameLoader();
   return (
     `<!doctype html><html lang="en" data-theme="${theme}"><head>` +
@@ -198,8 +208,13 @@ function showMarkdown(frame, meta, source, theme) {
   });
 }
 
+// `frame.src = ...` resolves against this document's own URL, which is
+// always this artifact's own page ("/artifacts/{id}"), so the sibling
+// "frame" route is reached without naming "artifacts" or the id's directory
+// again: a leading slash here would collapse to the origin root under a
+// path prefix, the same defect this whole page exists to avoid.
 function frameUrl(meta, theme) {
-  const base = `/artifacts/${encodeURIComponent(meta.id)}/frame`;
+  const base = `${encodeURIComponent(meta.id)}/frame`;
   const params = new URLSearchParams();
   if (meta.version != null) params.set("version", String(meta.version));
   params.set("theme", theme);

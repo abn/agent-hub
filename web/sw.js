@@ -11,6 +11,18 @@ const PRECACHE = "{{assets}}".split(",");
 const ON_DEMAND = "{{on_demand}}".split(",").filter(Boolean);
 const SHELL = `agent-hub-shell-${VERSION}`;
 
+// The scope is the app root under whatever prefix a proxy serves it from:
+// axum knows nothing of the prefix, so this is the only place the worker
+// learns it, from the URL the browser actually registered it at. Every path
+// PRECACHE and ON_DEMAND carry is already relative to it.
+const SCOPE_PATH = new URL(self.registration.scope).pathname;
+
+// A fetch's pathname, relative to the scope, or null when it falls outside
+// it (a cross-origin request, or one this worker was never asked to serve).
+function relativeToScope(pathname) {
+  return pathname.startsWith(SCOPE_PATH) ? pathname.slice(SCOPE_PATH.length) : null;
+}
+
 // addAll is all or nothing, and a worker whose install fails never activates.
 // The shell is small, so it is required. ON_DEMAND is the large runtime only
 // some pages load: it is tried here, and cached on first use if this misses,
@@ -36,17 +48,14 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (
-    event.request.method !== "GET" ||
-    url.origin !== self.location.origin ||
-    url.pathname.startsWith("/api/")
-  ) {
+  const relative = url.origin === self.location.origin ? relativeToScope(url.pathname) : null;
+  if (event.request.method !== "GET" || relative === null || relative.startsWith("api/")) {
     return;
   }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
-      if (!ON_DEMAND.includes(url.pathname)) return fetch(event.request);
+      if (!ON_DEMAND.includes(relative)) return fetch(event.request);
       return fetch(event.request).then((response) => {
         if (response.ok) {
           const copy = response.clone();
@@ -66,8 +75,8 @@ self.addEventListener("message", (event) => {
   event.waitUntil(
     self.registration.showNotification("Agent Hub", {
       body: `An agent reported new work. ${count} ${items} waiting on you.`,
-      icon: "/icon.svg",
-      badge: "/icon.svg",
+      icon: new URL("icon.svg", self.registration.scope).href,
+      badge: new URL("icon.svg", self.registration.scope).href,
       tag: "agent-hub-waiting",
     })
   );
@@ -75,7 +84,7 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const inbox = self.location.origin + "/#/inbox";
+  const inbox = new URL("#/inbox", self.registration.scope).href;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {

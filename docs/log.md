@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, the PWA serves correctly behind a path-stripping reverse proxy
+
+* **Update**: [Quickstart](usage/quickstart.md) documents that a reverse
+  proxy may mount the hub on a path (`https://host/hub/`) as long as it
+  strips the prefix before forwarding, that the shell normalises a
+  trailing-slash-free entry on its own, and that this needs no
+  configuration: there is no base-path environment variable.
+
 ## 2026-09-21, phone shell layering, mobile settings route, and install icons
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
