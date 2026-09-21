@@ -122,9 +122,10 @@ function frameStyle() {
     `html[data-theme="light"]{color-scheme:light;background:#F5F3EE;color:#1D1C19}` +
     `html[data-theme="dark"]{color-scheme:dark;background:#141311;color:#ECE8E0}` +
     `body{font-family:"Avenir Next","Seravek","Segoe UI Variable Text","Segoe UI",Ubuntu,Cantarell,system-ui,sans-serif;` +
-    `font-size:15px;line-height:1.6;color:#5C584F;max-width:640px;margin:0 auto;padding:1.5rem 1.25rem 4rem}` +
+    `font-size:15px;line-height:1.6;color:#5C584F;max-width:640px;margin:0 auto;padding:18px 1.25rem 4rem}` +
     `html[data-theme="dark"] body{color:#B3ADA2}` +
-    `h1,h2,h3{color:#1D1C19;line-height:1.3;text-wrap:balance}` +
+    `h1{font-size:24px;font-weight:600;letter-spacing:-.01em;margin:0 0 16px}` +
+    `h1,h2,h3{color:#1D1C19;line-height:1.1;text-wrap:balance}` +
     `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#ECE8E0}` +
     `a{color:#2F5FA8}` +
     `html[data-theme="dark"] a{color:#8AAAE8}` +

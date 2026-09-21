@@ -8365,6 +8365,251 @@ def check_artifact_viewer_menus_and_version(
                 watch.fail(f"explicit version row v{oldest_v} does not say 'Current'")
         page.keyboard.press("Escape")
 
+def check_artifact_title_bar(
+    browser, watch: Watch, port: int, project: str
+) -> None:
+    """Artifact title bar:
+    - Chrome drops to 60px: one 44px row plus one 16px meta line.
+    - Prose starts at 104px.
+    - Glyph order: start-a-thread / comments, copy-raw, overflow.
+    - Each glyph carries an accessible name (aria-label).
+    - Version control is the only control on the meta line and opens the version sheet.
+    - Copy-raw raises the toast 'Raw text copied' and does not change the glyph.
+    - Controls meet 44px under coarse pointer (Option A: drawn box stays, hit area grows).
+    - Document title at 24/600 is the largest text on the screen.
+    - Verified at 390px (mobile, coarse pointer) and 1100px (desktop).
+    """
+    watch.enter("artifacts: title bar, glyphs, and compact chrome")
+    artifact_id = harness.seed_versioned_artifact(port, project)
+
+    for width, height, coarse in ((390, 844, True), (1100, 800, False)):
+        context = browser.new_context(
+            viewport={"width": width, "height": height},
+            has_touch=coarse,
+            color_scheme="dark",
+        )
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        )
+        page = context.new_page()
+        try:
+            page.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact_id}", wait_until="load")
+            if not settle(page, "!!document.querySelector('.hub-viewer-bar')"):
+                watch.fail(f"[{width}px] viewer title bar did not render")
+                continue
+
+            # 1. Chrome height: 44px row + 16px meta line = 60px
+            chrome_dims = page.evaluate("""() => {
+                const bar = document.querySelector('.hub-viewer-bar');
+                const meta = document.querySelector('.hub-viewer-meta');
+                if (!bar || !meta) return null;
+                const barBox = bar.getBoundingClientRect();
+                const metaBox = meta.getBoundingClientRect();
+                return {
+                    barHeight: Math.round(barBox.height),
+                    metaHeight: Math.round(metaBox.height),
+                    totalHeight: Math.round(barBox.height + metaBox.height)
+                };
+            }""")
+            if not chrome_dims:
+                watch.fail(f"[{width}px] missing bar or meta line elements")
+                continue
+            if chrome_dims["barHeight"] != 44:
+                watch.fail(f"[{width}px] bar height is {chrome_dims['barHeight']}px, expected 44px")
+            if chrome_dims["metaHeight"] != 16:
+                watch.fail(f"[{width}px] meta line height is {chrome_dims['metaHeight']}px, expected 16px")
+            if chrome_dims["totalHeight"] != 60:
+                watch.fail(f"[{width}px] total chrome height is {chrome_dims['totalHeight']}px, expected 60px")
+
+            # 2. Prose start position at 104px
+            page.wait_for_timeout(300)
+            prose_pos = page.evaluate("""() => {
+                const frame = document.querySelector('#hub-frame');
+                if (!frame) return null;
+                const frameRect = frame.getBoundingClientRect();
+                const doc = frame.contentDocument;
+                if (!doc) return null;
+                const p = doc.querySelector('body > p, body > *:not(h1):not(header):not(script):not(style)');
+                if (!p) return null;
+                const pRect = p.getBoundingClientRect();
+                return Math.round(frameRect.top + pRect.top);
+            }""")
+            if prose_pos is not None and abs(prose_pos - 104) > 2:
+                watch.fail(f"[{width}px] prose starts at {prose_pos}px from top, expected 104px")
+
+            # 3. Glyph order and accessible names
+            glyphs_info = page.evaluate("""() => {
+                const bar = document.querySelector('.hub-viewer-bar');
+                if (!bar) return null;
+                const back = bar.querySelector('.hub-back');
+                const path = bar.querySelector('.hub-viewer-path');
+                const glyphBtns = [...bar.querySelectorAll(':scope > button:not(.hub-back)')];
+                return {
+                    hasBack: !!back,
+                    backLabel: back ? (back.getAttribute('aria-label') || '') : '',
+                    hasPath: !!path,
+                    buttons: glyphBtns.map(b => ({
+                        cls: b.className,
+                        label: b.getAttribute('aria-label') || '',
+                        action: b.dataset.action || '',
+                        tag: b.tagName.toLowerCase()
+                    }))
+                };
+            }""")
+            if not glyphs_info or not glyphs_info["hasBack"] or not glyphs_info["hasPath"]:
+                watch.fail(f"[{width}px] missing back or path in bar: {glyphs_info}")
+                continue
+            if not glyphs_info["backLabel"]:
+                watch.fail(f"[{width}px] back button has no aria-label")
+
+            buttons = glyphs_info["buttons"]
+            if len(buttons) != 3:
+                watch.fail(f"[{width}px] expected exactly 3 glyph buttons in bar, found {len(buttons)}: {buttons}")
+            else:
+                btn0 = buttons[0]
+                if not (btn0["action"] in ("start-thread", "comments-toggle")):
+                    watch.fail(f"[{width}px] first glyph button should be start-thread or comments, found {btn0}")
+                if not btn0["label"]:
+                    watch.fail(f"[{width}px] first glyph button missing aria-label: {btn0}")
+
+                btn1 = buttons[1]
+                if btn1["action"] != "copy-raw":
+                    watch.fail(f"[{width}px] second glyph button should be copy-raw, found {btn1}")
+                if not btn1["label"]:
+                    watch.fail(f"[{width}px] copy-raw glyph button missing aria-label: {btn1}")
+
+                btn2 = buttons[2]
+                if "hub-more" not in btn2["cls"]:
+                    watch.fail(f"[{width}px] third glyph button should be overflow (hub-more), found {btn2}")
+                if not btn2["label"]:
+                    watch.fail(f"[{width}px] overflow glyph button missing aria-label: {btn2}")
+
+            # 4. Version control on meta line is the ONLY control on that line
+            meta_controls = page.evaluate("""() => {
+                const meta = document.querySelector('.hub-viewer-meta');
+                if (!meta) return null;
+                const interactive = [...meta.querySelectorAll('button, a, input, select, [role="button"]')];
+                return interactive.map(el => ({
+                    cls: el.className,
+                    tag: el.tagName.toLowerCase(),
+                    action: el.dataset.action || '',
+                    text: el.textContent.trim()
+                }));
+            }""")
+            if not meta_controls:
+                watch.fail(f"[{width}px] no controls found on meta line")
+            elif len(meta_controls) != 1:
+                watch.fail(f"[{width}px] expected exactly 1 control on meta line, found {len(meta_controls)}: {meta_controls}")
+            elif meta_controls[0]["action"] != "version-toggle":
+                watch.fail(f"[{width}px] meta line control is not version-toggle: {meta_controls[0]}")
+
+            v_toggle = page.locator(".hub-version-toggle")
+            if v_toggle.count() > 0:
+                v_toggle.first.click()
+                page.wait_for_timeout(200)
+                sheet_visible = page.evaluate("() => { const s = document.querySelector('.hub-version-sheet'); return s && !s.hidden && window.getComputedStyle(s).display !== 'none'; }")
+                if not sheet_visible:
+                    watch.fail(f"[{width}px] clicking version toggle did not open version sheet")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(200)
+
+            # 5. Copy-raw functionality: raises toast 'Raw text copied' and does NOT change glyph
+            copy_btn = page.locator('.hub-viewer-bar button[data-action="copy-raw"]')
+            if copy_btn.count() > 0:
+                svg_before = copy_btn.first.inner_html()
+                cls_before = copy_btn.first.get_attribute("class") or ""
+                label_before = copy_btn.first.get_attribute("aria-label") or ""
+                copy_btn.first.click()
+                page.wait_for_timeout(300)
+                toast_text = page.evaluate("() => { const t = document.querySelector('.toast, .toast-text'); return t ? t.textContent : ''; }")
+                if "Raw text copied" not in toast_text:
+                    watch.fail(f"[{width}px] copy-raw did not show 'Raw text copied' toast, saw: {toast_text!r}")
+                svg_after = copy_btn.first.inner_html()
+                cls_after = copy_btn.first.get_attribute("class") or ""
+                label_after = copy_btn.first.get_attribute("aria-label") or ""
+                if svg_before != svg_after or cls_before != cls_after or label_before != label_after:
+                    watch.fail(f"[{width}px] copy-raw changed glyph state on click: {svg_before} vs {svg_after}")
+
+            # 6. Coarse pointer hit targets (under coarse pointer)
+            if coarse:
+                hit_info = page.evaluate("""() => {
+                    const checkHit = (el) => {
+                        const r = el.getBoundingClientRect();
+                        const afterStyle = window.getComputedStyle(el, '::after');
+                        let hitW = r.width;
+                        let hitH = r.height;
+                        if (afterStyle && afterStyle.content && afterStyle.content !== 'none') {
+                            const top = parseFloat(afterStyle.top) || 0;
+                            const bottom = parseFloat(afterStyle.bottom) || 0;
+                            const left = parseFloat(afterStyle.left) || 0;
+                            const right = parseFloat(afterStyle.right) || 0;
+                            hitW = Math.max(hitW, r.width - left - right, parseFloat(afterStyle.width) || 0);
+                            hitH = Math.max(hitH, r.height - top - bottom, parseFloat(afterStyle.height) || 0);
+                        }
+                        return { drawnW: Math.round(r.width), drawnH: Math.round(r.height), hitW: Math.round(hitW), hitH: Math.round(hitH) };
+                    };
+                    const back = document.querySelector('.hub-back');
+                    const glyphs = [...document.querySelectorAll('.hub-btn-glyph')];
+                    const vToggle = document.querySelector('.hub-version-toggle');
+                    return {
+                        back: back ? checkHit(back) : null,
+                        glyphs: glyphs.map(checkHit),
+                        vToggle: vToggle ? checkHit(vToggle) : null
+                    };
+                }""")
+                if hit_info:
+                    if hit_info["back"] and (hit_info["back"]["hitW"] < 43 or hit_info["back"]["hitH"] < 43):
+                        watch.fail(f"back button hit area under 44px: {hit_info['back']}")
+                    for g in hit_info["glyphs"]:
+                        if g["drawnW"] > 38 or g["drawnH"] > 38:
+                            watch.fail(f"glyph button drawn box exceeds 36px: {g}")
+                        if g["hitW"] < 43 or g["hitH"] < 43:
+                            watch.fail(f"glyph button coarse hit area under 44px: {g}")
+                    if hit_info["vToggle"] and (hit_info["vToggle"]["hitW"] < 43 or hit_info["vToggle"]["hitH"] < 43):
+                        watch.fail(f"version toggle coarse hit area under 44px: {hit_info['vToggle']}")
+
+            # 7. Document title is 24/600 and the largest text on the screen
+            title_info = page.evaluate("""() => {
+                const frame = document.querySelector('#hub-frame');
+                if (!frame || !frame.contentDocument) return null;
+                const doc = frame.contentDocument;
+                const h1 = doc.querySelector('h1');
+                if (!h1) return null;
+                const h1Style = window.getComputedStyle(h1);
+                const h1Size = parseFloat(h1Style.fontSize);
+                const h1Weight = h1Style.fontWeight;
+
+                let maxSize = 0;
+                let maxElem = null;
+                const checkElements = (root) => {
+                    const walker = (root.ownerDocument || root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                    while (walker.nextNode()) {
+                        const node = walker.currentNode;
+                        if (node === h1) continue;
+                        if (['SCRIPT', 'STYLE', 'SVG', 'PATH'].includes(node.tagName)) continue;
+                        const text = node.textContent.trim();
+                        if (!text) continue;
+                        const s = window.getComputedStyle(node);
+                        const fs = parseFloat(s.fontSize);
+                        if (fs > maxSize) {
+                            maxSize = fs;
+                            maxElem = { tag: node.tagName, cls: node.className, fs, text: text.slice(0, 30) };
+                        }
+                    }
+                };
+                checkElements(document.body);
+                checkElements(doc.body);
+                return { h1Size, h1Weight, maxSize, maxElem };
+            }""")
+            if title_info:
+                if title_info["h1Size"] != 24:
+                    watch.fail(f"[{width}px] document title font-size is {title_info['h1Size']}px, expected 24px")
+                if title_info["maxSize"] > title_info["h1Size"]:
+                    watch.fail(f"[{width}px] document title ({title_info['h1Size']}px) is not largest text, found {title_info['maxElem']}")
+
+        finally:
+            context.close()
+
     watch.drain_rejections()
 
 
@@ -8595,6 +8840,7 @@ def run() -> int:
                 run_step(watch, check_viewer_theme_control, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_version_list, page, watch, port, project)
                 run_step(watch, check_artifact_viewer_menus_and_version, browser, page, watch, port, project)
+                run_step(watch, check_artifact_title_bar, browser, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)
                 run_step(watch, check_desktop_topbar, browser, watch, port)

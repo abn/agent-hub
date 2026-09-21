@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, compact artifact title bar, glyph set, and viewer geometry
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  compact 60px artifact viewer chrome: a 44px top row holding the back chevron,
+  mono path, and three glyph buttons (start-a-thread or comments with count,
+  copy-raw with toast feedback, and overflow menu), and a 16px meta line below
+  holding author, version control, size, and age. Prose starts at 104px under the
+  24px document title.
+
 ## 2026-09-21, the PWA serves correctly behind a path-stripping reverse proxy
 
 * **Update**: [Quickstart](usage/quickstart.md) documents that a reverse

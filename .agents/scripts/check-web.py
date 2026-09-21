@@ -324,6 +324,13 @@ FLOOR_ALLOWED = {
     ("artifact-viewer.mjs", ".9em"): (r"`body\{[^}`]*`?[^}]*?font-size:(\d+(?:\.\d+)?)px", 0.9),
 }
 
+# A numeral inside a glyph (e.g. comment count inside the comments bubble) is
+# drawn at mono 10px/600, optically centred in the 36px glyph box. The 12px text
+# floor is for UI text and labels, not a numeral rendered inside a glyph.
+GLYPH_NUMERAL_ALLOWANCE = {
+    ("app.css", "10px"): r"\.hub-glyph-count\s*\{[^}]*font-size:\s*10px",
+}
+
 
 def blank_comments(text: str, suffix: str) -> str:
     """The text with its comments blanked, line for line.
@@ -559,6 +566,10 @@ def check_text_floor(errors: list[str]) -> None:
             # An attribute's bare number is in user units, which are px.
             if re.fullmatch(r"[\d.]+", value):
                 value += "px"
+            if (path.name, value) in GLYPH_NUMERAL_ALLOWANCE:
+                rule = GLYPH_NUMERAL_ALLOWANCE[(path.name, value)]
+                if re.search(rule, raw):
+                    continue
             problem = allowed_relative(path, raw, value)
             if problem is None:
                 problem = floor_problem(value, properties, relative_ok=not is_sheet)

@@ -6,7 +6,9 @@ import { api } from "./api.mjs";
 import { commentsPanel, commentsToggle, openCommentsDrawer, startComments } from "./comments.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { relative } from "./time.mjs";
+import { toast } from "./toast.mjs";
 
 const DOC_PATH = "M 6 3h9l4 4v14H6z M 8 12h8 M 8 16h8";
 const LOCK_PATH = "M 7 11V8a5 5 0 0 1 10 0v3 M 5 11h14v10H5z";
@@ -254,6 +256,21 @@ function escText(value) {
     .replace(/>/g, "&gt;");
 }
 
+async function fetchRawText(id, version) {
+  const query = version ? `?version=${version}` : "";
+  const headers = {};
+  const token = localStorage.getItem("hub.token");
+  if (token) headers.Authorization = "Bearer " + token;
+  const res = await fetch(`/api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`, { headers });
+  if (!res.ok) throw new Error("Failed to fetch raw text");
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const json = await res.json();
+    return typeof json === "string" ? json : JSON.stringify(json, null, 2);
+  }
+  return await res.text();
+}
+
 export async function toggleRaw(button) {
   const frame = main.querySelector("#hub-frame");
   const id = frame && frame.dataset.id;
@@ -265,9 +282,7 @@ export async function toggleRaw(button) {
     return;
   }
   try {
-    const query = viewer.version ? `?version=${viewer.version}` : "";
-    const raw = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`);
-    const text = typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+    const text = await fetchRawText(id, viewer.version);
     const doc =
       `<style>body{margin:0;padding:24px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;` +
       `font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}</style>` +
@@ -477,7 +492,7 @@ export async function viewerRoute(params, gen, path) {
   const wrap = document.createElement("div");
   wrap.className = "hub-viewer";
 
-  // Top header (Screen 01): 44px back chevron, mono path, 44px overflow more button
+  // Top header (Screen 01): 44px back chevron, mono path, 3 glyph buttons (36x36 drawn, 44x44 coarse hit)
   const bar = document.createElement("div");
   bar.className = "hub-viewer-bar";
 
@@ -486,39 +501,123 @@ export async function viewerRoute(params, gen, path) {
   back.className = "hub-back";
   back.dataset.action = "viewer-back";
   back.setAttribute("aria-label", "Back to artifacts");
-  back.appendChild(svg("M 15 5l-7 7 7 7", 20, 20, null));
+  back.innerHTML = glyphSvg("chevronBack", { size: 20 });
+  back.addEventListener("click", viewerBack);
 
   const pathEl = document.createElement("div");
   pathEl.className = "hub-viewer-path mono";
   pathEl.textContent = monoPath;
   pathEl.title = monoPath;
 
+  // Glyph button 1: start-a-thread or comments
+  const threadBtn = document.createElement("button");
+  threadBtn.type = "button";
+  if (commentsCount > 0) {
+    threadBtn.className = "hub-btn-glyph hub-comments-btn";
+    threadBtn.dataset.action = "comments-toggle";
+    threadBtn.setAttribute("aria-label", `Comments, ${commentsCount}`);
+    threadBtn.innerHTML = `${glyphSvg("comments", { size: 20 })}<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`;
+  } else {
+    threadBtn.className = "hub-btn-glyph hub-start-thread";
+    threadBtn.dataset.action = "start-thread";
+    threadBtn.setAttribute("aria-label", "Start a thread");
+    threadBtn.innerHTML = glyphSvg("threadNew", { size: 20 });
+  }
+  threadBtn.addEventListener("click", () => {
+    openCommentsDrawer();
+  });
+
+  // Glyph button 2: copy-raw
+  const copyRawBtn = document.createElement("button");
+  copyRawBtn.type = "button";
+  copyRawBtn.className = "hub-btn-glyph hub-copy-raw";
+  copyRawBtn.dataset.action = "copy-raw";
+  copyRawBtn.setAttribute("aria-label", "Copy raw text");
+  copyRawBtn.innerHTML = glyphSvg("copyRaw", { size: 20 });
+
+  const doCopyRaw = async () => {
+    try {
+      const text = await fetchRawText(id, viewer.version);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        }
+      } catch {}
+      toast("Raw text copied");
+    } catch {
+      toast("Failed to copy raw text");
+    }
+  };
+  copyRawBtn.addEventListener("click", doCopyRaw);
+
+  // Glyph button 3: overflow
   const moreBtn = document.createElement("button");
   moreBtn.type = "button";
-  moreBtn.className = "hub-more";
+  moreBtn.className = "hub-btn-glyph hub-more";
   moreBtn.setAttribute("aria-label", "More");
   moreBtn.setAttribute("aria-expanded", "false");
   moreBtn.setAttribute("aria-haspopup", "true");
-  moreBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="12" cy="19" r="1.7"></circle></svg>`;
+  moreBtn.innerHTML = glyphSvg("overflow", { size: 20 });
 
   const overflowMenu = document.createElement("div");
   overflowMenu.className = "hub-overflow-menu";
   overflowMenu.hidden = true;
 
-  const raw = document.createElement("button");
-  raw.type = "button";
-  raw.className = "hub-raw";
-  raw.dataset.action = "viewer-raw";
-  raw.textContent = "Open raw";
-  overflowMenu.appendChild(raw);
+  const menuItems = [
+    { text: "Start a thread", action: "start-thread", run: () => openCommentsDrawer() },
+    { text: "Comments", action: "comments-toggle", run: () => openCommentsDrawer() },
+    { text: "Copy raw", action: "copy-raw", run: doCopyRaw },
+    {
+      text: "Copy path",
+      action: "copy-path",
+      run: async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(monoPath);
+          }
+        } catch {}
+        toast("Path copied");
+      },
+    },
+    {
+      text: "Copy link",
+      action: "copy-link",
+      run: async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(location.href);
+          }
+        } catch {}
+        toast("Link copied");
+      },
+    },
+    {
+      text: "Share",
+      action: "share",
+      run: () => {},
+    },
+    {
+      text: "Open in browser",
+      action: "open-in-browser",
+      run: () => {
+        const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+        window.open(frameSrc(id, viewer.version, opened), "_blank");
+      },
+    },
+  ];
 
-  if (commentsCount === 0) {
-    const startThread = document.createElement("button");
-    startThread.type = "button";
-    startThread.className = "hub-start-thread";
-    startThread.dataset.action = "start-thread";
-    startThread.textContent = "Start a thread";
-    overflowMenu.appendChild(startThread);
+  for (const item of menuItems) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.action = item.action;
+    btn.textContent = item.text;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      overflowMenu.hidden = true;
+      moreBtn.setAttribute("aria-expanded", "false");
+      item.run();
+    });
+    overflowMenu.appendChild(btn);
   }
 
   moreBtn.addEventListener("click", (e) => {
@@ -542,10 +641,10 @@ export async function viewerRoute(params, gen, path) {
     }
   });
 
-  bar.append(back, pathEl, moreBtn, overflowMenu);
-  wrap.appendChild(bar);
+  bar.append(back, pathEl, threadBtn, copyRawBtn, moreBtn);
+  wrap.append(bar, overflowMenu);
 
-  // Document meta line with version pill (Screen 01):
+  // Document meta line with version toggle (Screen 01):
   const metaWrap = document.createElement("div");
   metaWrap.className = "hub-viewer-meta-wrap";
 
@@ -561,11 +660,12 @@ export async function viewerRoute(params, gen, path) {
 
   const versionToggle = document.createElement("button");
   versionToggle.type = "button";
-  versionToggle.className = "hub-version-toggle";
+  versionToggle.className = "hub-version-toggle mono";
   versionToggle.dataset.action = "version-toggle";
   versionToggle.setAttribute("aria-expanded", "false");
   versionToggle.setAttribute("aria-controls", "hub-version-menu");
-  versionToggle.innerHTML = `v${shown} of ${versions.length} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>`;
+  versionToggle.setAttribute("aria-label", `Version ${shown}`);
+  versionToggle.innerHTML = `v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}`;
 
   const dot2 = document.createElement("span");
   dot2.textContent = "·";
@@ -616,10 +716,10 @@ export async function viewerRoute(params, gen, path) {
     strip.className = "hub-comments-strip comments-toggle";
     strip.dataset.action = "comments-toggle";
     strip.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"></path></svg>
+      ${glyphSvg("comments", { size: 16 })}
       <span class="grow" style="text-align:left">Comments</span>
       <span class="mono hub-comments-count">${commentsCount}</span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
+      ${glyphSvg("chevronRight", { size: 16 })}
     `;
     strip.addEventListener("click", () => {
       openCommentsDrawer();
