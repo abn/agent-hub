@@ -6835,14 +6835,21 @@ def check_filter_chips(page, watch: Watch, project: str) -> None:
         " return {"
         "   scrollWidth: document.documentElement.scrollWidth,"
         "   innerWidth: window.innerWidth,"
-        "   chips: chips.map(c => ({"
-        "     text: (c.innerText || c.textContent || '').trim(),"
-        "     kind: c.dataset.kind || '',"
-        "     w: c.getBoundingClientRect().width,"
-        "     h: c.getBoundingClientRect().height,"
-        "     top: Math.round(c.getBoundingClientRect().top),"
-        "     right: Math.round(c.getBoundingClientRect().right)"
-        "   }))"
+        "   chips: chips.map(c => {"
+        "     const cs = getComputedStyle(c);"
+        "     return {"
+        "       text: (c.innerText || c.textContent || '').trim(),"
+        "       kind: c.dataset.kind || '',"
+        "       w: c.getBoundingClientRect().width,"
+        "       h: c.getBoundingClientRect().height,"
+        "       top: Math.round(c.getBoundingClientRect().top),"
+        "       right: Math.round(c.getBoundingClientRect().right),"
+        "       padding: `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`,"
+        "       fontSize: cs.fontSize,"
+        "       fontWeight: cs.fontWeight,"
+        "       fontFamily: cs.fontFamily"
+        "     };"
+        "   })"
         " }; })()"
     )
     if not feed_data or not feed_data["chips"]:
@@ -6896,12 +6903,19 @@ def check_filter_chips(page, watch: Watch, project: str) -> None:
         " return {"
         "   scrollWidth: document.documentElement.scrollWidth,"
         "   innerWidth: window.innerWidth,"
-        "   chips: chips.map(c => ({"
-        "     text: (c.innerText || c.textContent || '').trim(),"
-        "     scope: c.dataset.scope || '',"
-        "     w: c.getBoundingClientRect().width,"
-        "     h: c.getBoundingClientRect().height"
-        "   }))"
+        "   chips: chips.map(c => {"
+        "     const cs = getComputedStyle(c);"
+        "     return {"
+        "       text: (c.innerText || c.textContent || '').trim(),"
+        "       scope: c.dataset.scope || '',"
+        "       w: c.getBoundingClientRect().width,"
+        "       h: c.getBoundingClientRect().height,"
+        "       padding: `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`,"
+        "       fontSize: cs.fontSize,"
+        "       fontWeight: cs.fontWeight,"
+        "       fontFamily: cs.fontFamily"
+        "     };"
+        "   })"
         " }; })()"
     )
     if not search_data or not search_data["chips"]:
@@ -6911,9 +6925,50 @@ def check_filter_chips(page, watch: Watch, project: str) -> None:
         watch.fail(
             f"search screen has horizontal page scroll: scrollWidth {search_data['scrollWidth']} > innerWidth {search_data['innerWidth']}"
         )
+    feed_pressed = feed_data["chips"][0]
+    feed_unpressed = feed_data["chips"][1]
     for chip in search_data["chips"]:
         if not chip["text"] or not chip["text"][0].isupper():
             watch.fail(f"search chip {chip['scope']!r} text {chip['text']!r} does not start uppercase")
+        if abs(chip["h"] - 32) > 1:
+            watch.fail(f"search chip {chip['scope']!r} height is {chip['h']}px, expected 32px")
+        if abs(chip["h"] - feed_pressed["h"]) > 1:
+            watch.fail(f"chip height mismatch: feed is {feed_pressed['h']}px, search is {chip['h']}px")
+        if chip["padding"] != feed_pressed["padding"]:
+            watch.fail(f"chip padding mismatch: feed is {feed_pressed['padding']}, search is {chip['padding']}")
+        if chip["fontSize"] != feed_pressed["fontSize"]:
+            watch.fail(f"chip font-size mismatch: feed is {feed_pressed['fontSize']}, search is {chip['fontSize']}")
+        expected_weight = feed_pressed["fontWeight"] if chip["scope"] == "" else feed_unpressed["fontWeight"]
+        if chip["fontWeight"] != expected_weight:
+            watch.fail(f"chip font-weight mismatch for {chip['scope']!r}: expected {expected_weight}, search is {chip['fontWeight']}")
+        if chip["fontFamily"] != feed_pressed["fontFamily"]:
+            watch.fail(f"chip font-family mismatch: feed is {feed_pressed['fontFamily']}, search is {chip['fontFamily']}")
+
+    page.focus("main .search-scopes button.chip")
+    focused_scopes = [page.evaluate("document.activeElement.dataset.scope")]
+    for _ in range(len(search_data["chips"]) - 1):
+        page.keyboard.press("Tab")
+        focused_scopes.append(page.evaluate("document.activeElement.dataset.scope"))
+    expected_scopes = [c["scope"] for c in search_data["chips"]]
+    if focused_scopes != expected_scopes:
+        watch.fail(f"tabbing through search chips focused {focused_scopes!r}, expected {expected_scopes!r}")
+
+    feed_scope_chip = 'main .search-scopes [data-scope="feed"]'
+    all_scope_chip = 'main .search-scopes [data-scope=""]'
+    page.click(feed_scope_chip)
+    if not settle(
+        page,
+        f"document.querySelector('{feed_scope_chip}')?.getAttribute('aria-pressed') === 'true'"
+        f" && location.hash.includes('type=feed')",
+    ):
+        watch.fail("pressing search feed chip did not set type=feed in route or aria-pressed")
+    page.click(all_scope_chip)
+    if not settle(
+        page,
+        f"document.querySelector('{all_scope_chip}')?.getAttribute('aria-pressed') === 'true'"
+        f" && !location.hash.includes('type=')",
+    ):
+        watch.fail("pressing search all chip did not clear scope in route or restore aria-pressed")
 
     watch.drain_rejections()
 

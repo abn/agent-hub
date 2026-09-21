@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-21, unified chip design across feed and search
+
+* **Update**: [The human surface](architecture/human-surface.md) documents that
+  search scope chips follow the project feed's unified chip treatment: 32px
+  pills (13/500) on a single scrolling row with sentence case labels and an ink
+  fill on the active chip. A pseudo-element provides the 44px tap target floor
+  under a coarse pointer. Search chips display no count when no per-scope count
+  is known prior to running a query.
+
 ## 2026-09-21, compact artifact title bar, glyph set, and viewer geometry
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the

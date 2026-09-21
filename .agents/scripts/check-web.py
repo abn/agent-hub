@@ -291,7 +291,7 @@ def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> N
         errors.append("web/tokens.css: no :focus-visible rule")
     if "prefers-reduced-motion" not in tokens_css:
         errors.append("web/tokens.css: no reduced-motion block")
-    for selector in (r"button,\s*\.button", r"\.chip", r"input,\s*select,\s*textarea"):
+    for selector in (r"button,\s*\.button", r"\.chip::before", r"input,\s*select,\s*textarea"):
         rule = re.search(selector + r"\s*\{([^}]*)\}", app_css)
         if rule is None:
             errors.append(f"web/app.css: no rule found for {selector}")

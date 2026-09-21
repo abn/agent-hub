@@ -123,15 +123,67 @@ h3.group {
   font-size: 12px; font-weight: 600; background: var(--action-bg); color: var(--action);
 }
 /* component: chips */
-/* The design draws a chip at 6px 10px, which is under the tap target, so the
-   drawn padding stays and the box grows to 44px. */
+/* The design draws a chip at 32px, which is under the tap target, so the
+   drawn box stays 32px and the hit area grows to 44px with a pseudo-element. */
 .chip {
-  display: inline-block; min-height: 44px; padding: 6px 10px; border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong); color: var(--ink-2);
-  background: transparent; font-size: var(--t-12); font-weight: 500;
-  white-space: nowrap; cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: none;
+  box-sizing: border-box;
+  position: relative;
 }
-.chip[aria-pressed="true"] { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
+.chip::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  min-height: 44px;
+  height: 44px;
+}
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--ink-inverse);
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: none;
+  display: inline-block;
+}
+.chip[data-kind="question"] .chip-dot {
+  background: var(--k-question);
+}
+.chip[data-kind="approval"] .chip-dot {
+  background: var(--k-approval);
+}
+.chip[data-kind="finished"] .chip-dot {
+  background: var(--k-finished);
+}
+.chip[data-kind="signal"] .chip-dot {
+  background: var(--k-signal);
+}
 /* end component: chips */
 
 /* component: buttons */
@@ -1020,7 +1072,21 @@ button.empty-link {
   border: 0; border-radius: var(--r-2); background: transparent; color: var(--ink-3);
 }
 .search-clear[hidden] { display: none; }
-.search-scopes { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 var(--s-1); }
+.search-scopes {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 0 var(--s-1);
+  scrollbar-width: none;
+}
+.search-scopes::-webkit-scrollbar {
+  display: none;
+}
 /* Holds its line while empty, so the first count does not push the results. */
 .search-line { margin: 0; padding: 0 2px; min-height: 18px; color: var(--ink-3); }
 .search-results .section-label, .search-results > .empty-state, .search-results > .error { margin-top: var(--s-3); }
@@ -1045,13 +1111,22 @@ button.empty-link {
 .search-where { margin-top: 3px; font-size: var(--t-12); color: var(--ink-3); }
 /* end component: search */
 /* component: feed */
-/* The kind filters wrap across lines so every filter is visible without
-   relying on horizontal scrolling. */
+/* The kind filters are a single scrolling row of 32px pills. */
 .feed-chips {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  margin: var(--s-1) 0 0;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  margin: 0;
+  scrollbar-width: none;
 }
-.feed-chips .chip { flex: none; min-width: 44px; text-align: center; }
+.feed-chips::-webkit-scrollbar {
+  display: none;
+}
 .feed-chips + h2.day { margin-top: var(--s-1); }
 .feed-chips ~ h2.day, .feed-fold h2.day { margin-bottom: 6px; }
 /* A day's rows run to the edge of their surface. On a phone the surface runs
@@ -1323,82 +1398,6 @@ button.inbox-quiet[disabled] { background: transparent; border-color: transparen
 .inbox-row [data-action="inbox-read"],
 .inbox-row [data-action="inbox-unread"] {
   color: var(--ink-2);
-}
-
-/* Project feed chips */
-.feed-chips {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 8px;
-  padding: 10px 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  -webkit-overflow-scrolling: touch;
-  margin: 0;
-  scrollbar-width: none;
-}
-.feed-chips::-webkit-scrollbar {
-  display: none;
-}
-.feed-chips .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
-  color: var(--ink-2);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  flex: none;
-  box-sizing: border-box;
-  position: relative;
-}
-.feed-chips .chip::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  transform: translateY(-50%);
-  min-height: 44px;
-  height: 44px;
-}
-.feed-chips .chip[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--ink-inverse);
-  border-color: var(--ink);
-  font-weight: 600;
-}
-.feed-chips .chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  flex: none;
-  display: inline-block;
-}
-.feed-chips .chip[data-kind="question"] .chip-dot {
-  background: var(--k-question);
-}
-.feed-chips .chip[data-kind="approval"] .chip-dot {
-  background: var(--k-approval);
-}
-.feed-chips .chip[data-kind="finished"] .chip-dot {
-  background: var(--k-finished);
-}
-.feed-chips .chip[data-kind="signal"] .chip-dot {
-  background: var(--k-signal);
-}
-.feed-chips .chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* Projects index */
