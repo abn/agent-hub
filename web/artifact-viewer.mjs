@@ -150,6 +150,7 @@ function frameStyle() {
     `html[data-theme="dark"] .hub-callout.warning{border-color:#DDA44E}` +
     `.hub-callout.caution{border-color:#9E3B2B}` +
     `html[data-theme="dark"] .hub-callout.caution{border-color:#E08373}` +
+    `body.has-comments{line-height:1.7}` +
     `</style>`
   );
 }
@@ -390,6 +391,17 @@ function init() {
   // the frame element's own messages are honored, and the height is
   // clamped to a sane band.
   window.addEventListener("message", (event) => {
+    if (event.data && typeof event.data === "object" && event.data.type && event.data.type.startsWith("hub:")) {
+      if (event.source === state.frame?.contentWindow) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(event.data, "*");
+        }
+      } else if (event.source === window.parent) {
+        if (state.frame?.contentWindow) {
+          state.frame.contentWindow.postMessage(event.data, "*");
+        }
+      }
+    }
     if (!state.frame || event.source !== state.frame.contentWindow) return;
     const height = event.data && event.data.hubFrameHeight;
     if (typeof height !== "number" || !isFinite(height)) return;

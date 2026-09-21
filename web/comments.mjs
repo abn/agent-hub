@@ -1,19 +1,28 @@
-// The comments drawer on the artifact viewer. The PWA composes plain
-// comments only; anchored comments posted elsewhere render marker text.
+// Discussion and document comments on artifacts.
+// Highlights in text, phone sheet for threads, list drawer, and desktop margin cards.
 //
-// Everything here is built with createElement and textContent, so no comment
-// body ever reaches innerHTML.
+// All user content is built via createElement and textContent or esc(),
+// so no comment body or quote ever executes as markup.
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { timeNode } from "./time.mjs";
+import { relative } from "./time.mjs";
 
-const commentsDrawer = {
+export const commentsState = {
   artifactId: null,
+  shownVersion: 1,
+  isProtected: false,
   comments: [],
   open: false,
+  activeThreadId: null,
+  composeQuote: null,
+  viewMode: "list", // "list" | "sheet" | "compose"
+  resolvedExpanded: false,
   lastFocus: null,
   elements: null,
+  desktopContainer: null,
   seq: 0,
 };
 
@@ -21,8 +30,7 @@ function commentsBase(id) {
   return `/api/v1/artifacts/${encodeURIComponent(id)}/comments`;
 }
 
-// Marker text for an anchored comment. v1 renders no canvas pins and no
-// quote selection, only this line.
+// Marker text for an anchored comment.
 function anchorMarker(comment) {
   const anchor = comment.anchor;
   if (!anchor || typeof anchor !== "object") return "";
@@ -35,128 +43,159 @@ function anchorMarker(comment) {
 }
 
 function drawerError(message) {
-  const line = commentsDrawer.elements && commentsDrawer.elements.error;
+  const line = commentsState.elements && commentsState.elements.error;
   if (!line) return;
   line.hidden = false;
   line.textContent = message;
 }
 
 function clearDrawerError() {
-  const line = commentsDrawer.elements && commentsDrawer.elements.error;
+  const line = commentsState.elements && commentsState.elements.error;
   if (!line) return;
   line.hidden = true;
   line.textContent = "";
 }
 
-function refreshCommentsToggle() {
-  const els = commentsDrawer.elements;
-  if (!els) return;
-  const open = commentsDrawer.comments.filter((comment) => !comment.done).length;
-  els.badge.hidden = open === 0;
-  els.badge.textContent = String(open);
+export function sendCommentsToFrame() {
+  const frame = document.querySelector("#hub-frame");
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage(
+      {
+        type: "hub:set-comments",
+        comments: commentsState.comments,
+        shownVersion: commentsState.shownVersion,
+        protected: commentsState.isProtected,
+      },
+      "*",
+    );
+  } catch (_) {}
 }
 
-function commentRow(comment) {
-  const item = document.createElement("div");
-  item.className = "comment" + (comment.done ? " done" : "");
-  const head = document.createElement("div");
-  head.className = "comment-head";
-  const author = document.createElement("span");
-  author.className = "comment-author";
-  author.textContent = comment.author;
-  const time = timeNode(comment.created_at);
-  head.append(author, time);
-  const marker = anchorMarker(comment);
-  if (marker) {
-    const anchor = document.createElement("span");
-    anchor.className = "comment-anchor";
-    anchor.textContent = marker;
-    head.appendChild(anchor);
+export function refreshCommentsToggle() {
+  const els = commentsState.elements;
+  const openCount = commentsState.comments.filter((c) => !c.done).length;
+  if (els && els.badge) {
+    els.badge.hidden = openCount === 0;
+    els.badge.textContent = String(openCount);
   }
-  if (comment.done) {
-    const pill = document.createElement("span");
-    pill.className = "pill";
-    pill.textContent = "Done";
-    head.appendChild(pill);
+
+  // Update top bar comments button count
+  const barBtn = document.querySelector(".hub-comments-btn .hub-glyph-count");
+  if (barBtn) {
+    barBtn.textContent = String(openCount);
   }
-  const body = document.createElement("p");
-  body.className = "comment-body";
-  body.textContent = comment.body;
-  const actions = document.createElement("div");
-  actions.className = "comment-actions";
-  const resolve = document.createElement("button");
-  resolve.type = "button";
-  resolve.textContent = comment.done ? "Reopen" : "Resolve";
-  resolve.setAttribute("aria-label", `${comment.done ? "Reopen" : "Resolve"} comment by ${comment.author}`);
-  resolve.addEventListener("click", () => toggleCommentDone(comment));
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "danger";
-  remove.textContent = "Delete";
-  remove.setAttribute("aria-label", `Delete comment by ${comment.author}`);
-  remove.addEventListener("click", () => deleteComment(comment));
-  actions.append(resolve, remove);
-  item.append(head, body, actions);
-  return item;
+
+  // Update strip on mobile
+  const stripCount = document.querySelector(".hub-comments-count");
+  if (stripCount) {
+    stripCount.textContent = String(openCount);
+  }
 }
 
-function renderComments() {
-  const els = commentsDrawer.elements;
-  if (!els) return;
-  els.list.innerHTML = "";
-  if (!commentsDrawer.comments.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No comments yet. Be the first to leave one.";
-    els.list.appendChild(empty);
+export function authorNode(authorText) {
+  const isHuman = authorText === "human" || authorText === "you";
+  const span = document.createElement("span");
+  span.className = "comment-author" + (isHuman ? " human" : " agent mono");
+  if (!isHuman) span.dataset.agent = "true";
+  span.textContent = isHuman ? "you" : authorText;
+  return span;
+}
+
+function quoteBlockNode(comment, shownVersion) {
+  const anchor = comment && comment.anchor;
+  if (!anchor || typeof anchor !== "object") return null;
+
+  const block = document.createElement("div");
+  const isThisVersion = comment.anchor_version === shownVersion;
+  const isDone = comment.done;
+
+  if (isDone) {
+    block.className = "hub-quote-block hairline";
+  } else if (isThisVersion) {
+    block.className = "hub-quote-block tinted";
   } else {
-    for (const comment of commentsDrawer.comments) els.list.appendChild(commentRow(comment));
+    block.className = "hub-quote-block outlined";
   }
-  refreshCommentsToggle();
+
+  const quoteText = document.createElement("div");
+  quoteText.className = "hub-quote-text";
+  if (anchor.mode === "text" && anchor.quote) {
+    quoteText.textContent = `“${anchor.quote}”`;
+  } else if (anchor.mode === "point") {
+    quoteText.textContent = "Pinned";
+  }
+  block.appendChild(quoteText);
+
+  const stamp = document.createElement("div");
+  stamp.className = "hub-quote-stamp mono";
+  if (isDone) {
+    stamp.textContent = `v${comment.anchor_version || shownVersion}`;
+  } else if (isThisVersion) {
+    stamp.textContent = `v${comment.anchor_version} · the version you are reading`;
+  } else {
+    stamp.textContent = `v${comment.anchor_version} · older version`;
+  }
+  block.appendChild(stamp);
+
+  return block;
 }
 
-async function loadComments() {
-  const id = commentsDrawer.artifactId;
-  if (!id || !commentsDrawer.elements) return;
-  const seq = commentsDrawer.seq;
+export async function loadComments() {
+  const id = commentsState.artifactId;
+  if (!id) return;
+  const seq = commentsState.seq;
   try {
     const data = await api(commentsBase(id));
-    if (seq !== commentsDrawer.seq) return;
-    commentsDrawer.comments = data.comments || [];
+    if (seq !== commentsState.seq) return;
+    commentsState.comments = data.comments || [];
     clearDrawerError();
     renderComments();
+    renderDesktopCards();
+    sendCommentsToFrame();
   } catch (error) {
-    if (seq !== commentsDrawer.seq) return;
+    if (seq !== commentsState.seq) return;
     drawerError(error.message);
   }
 }
 
-async function postComment(body) {
-  const id = commentsDrawer.artifactId;
+export async function postComment(body, quote) {
+  const id = commentsState.artifactId;
+  const payload = { body };
+  if (quote && !commentsState.isProtected) {
+    payload.anchor = { mode: "text", quote };
+    payload.anchor_version = commentsState.shownVersion;
+  }
   const created = await api(commentsBase(id), {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify(payload),
   });
-  commentsDrawer.comments.push(created);
+  commentsState.comments.push(created);
   renderComments();
+  renderDesktopCards();
+  sendCommentsToFrame();
+  return created;
 }
 
-async function toggleCommentDone(comment) {
+export async function toggleCommentDone(comment) {
   try {
     const updated = await api(
-      `${commentsBase(commentsDrawer.artifactId)}/${encodeURIComponent(comment.id)}`,
+      `${commentsBase(commentsState.artifactId)}/${encodeURIComponent(comment.id)}`,
       { method: "PATCH", body: JSON.stringify({ done: !comment.done }) },
     );
-    const index = commentsDrawer.comments.findIndex((item) => item.id === comment.id);
-    if (index >= 0) commentsDrawer.comments[index] = updated;
+    const index = commentsState.comments.findIndex((item) => item.id === comment.id);
+    if (index >= 0) commentsState.comments[index] = updated;
     clearDrawerError();
     renderComments();
+    renderDesktopCards();
+    sendCommentsToFrame();
+    return updated;
   } catch (error) {
     drawerError(error.message);
   }
 }
 
-async function deleteComment(comment) {
+export async function deleteComment(comment) {
   const confirmed = await confirmAction({
     title: "Delete this comment?",
     body: `It is removed for everyone who can read the artifact. Written by ${comment.author}.`,
@@ -166,60 +205,734 @@ async function deleteComment(comment) {
   });
   if (!confirmed) return;
   try {
-    await api(`${commentsBase(commentsDrawer.artifactId)}/${encodeURIComponent(comment.id)}`, {
+    await api(`${commentsBase(commentsState.artifactId)}/${encodeURIComponent(comment.id)}`, {
       method: "DELETE",
     });
-    commentsDrawer.comments = commentsDrawer.comments.filter((item) => item.id !== comment.id);
+    commentsState.comments = commentsState.comments.filter((item) => item.id !== comment.id);
     clearDrawerError();
     renderComments();
-    // The row that held focus has gone with the comment. The next comment's
-    // first action is where the reader was; the compose box is the fallback.
-    const els = commentsDrawer.elements;
-    const next = els.list.querySelector(".comment-actions button");
-    (next || els.compose).focus();
+    renderDesktopCards();
+    sendCommentsToFrame();
+    const els = commentsState.elements;
+    if (els) {
+      const next = els.list.querySelector(".comment-actions button");
+      (next || els.compose).focus();
+    }
   } catch (error) {
     drawerError(error.message);
   }
 }
 
-export function openCommentsDrawer() {
-  const els = commentsDrawer.elements;
+function commentRow(comment) {
+  const item = document.createElement("div");
+  item.className = "comment" + (comment.done ? " done" : "");
+  item.dataset.commentId = String(comment.id);
+
+  const head = document.createElement("div");
+  head.className = "comment-head";
+  head.append(authorNode(comment.author), timeNode(comment.created_at));
+
+  const marker = anchorMarker(comment);
+  if (marker) {
+    const anchor = document.createElement("span");
+    anchor.className = "comment-anchor";
+    anchor.textContent = marker;
+    head.appendChild(anchor);
+  }
+
+  if (comment.done) {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = "Done";
+    head.appendChild(pill);
+  }
+
+  // Quote block (3 appearances: tinted, outlined, hairline)
+  const quoteEl = quoteBlockNode(comment, commentsState.shownVersion);
+  if (quoteEl) {
+    item.appendChild(quoteEl);
+  }
+
+  const body = document.createElement("p");
+  body.className = "comment-body";
+  body.textContent = comment.body;
+
+  const actions = document.createElement("div");
+  actions.className = "comment-actions";
+
+  const resolve = document.createElement("button");
+  resolve.type = "button";
+  resolve.textContent = comment.done ? "Reopen" : "Resolve";
+  resolve.setAttribute(
+    "aria-label",
+    `${comment.done ? "Reopen" : "Resolve"} comment by ${comment.author}`,
+  );
+  resolve.addEventListener("click", () => toggleCommentDone(comment));
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "danger";
+  remove.textContent = "Delete";
+  remove.setAttribute("aria-label", `Delete comment by ${comment.author}`);
+  remove.addEventListener("click", () => deleteComment(comment));
+
+  actions.append(resolve, remove);
+  item.append(head, body, actions);
+  return item;
+}
+
+// Render the drawer contents (list view, sheet view, or compose view)
+export function renderComments() {
+  const els = commentsState.elements;
   if (!els) return;
-  commentsDrawer.lastFocus = document.activeElement;
-  commentsDrawer.open = true;
+
+  refreshCommentsToggle();
+
+  if (commentsState.viewMode === "sheet" && commentsState.activeThreadId) {
+    renderPhoneSheet();
+    return;
+  }
+
+  if (commentsState.viewMode === "compose") {
+    renderComposeSheet();
+    return;
+  }
+
+  // List view (Screen 06)
+  renderListView();
+}
+
+function renderListView() {
+  const els = commentsState.elements;
+  if (!els) return;
+
+  els.drawer.className = "comments-drawer hub-drawer-list";
+  els.list.innerHTML = "";
+
+  const heading = els.drawer.querySelector(".comments-drawer-head h2");
+  if (heading) heading.textContent = "Comments";
+
+  if (!commentsState.comments.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No comments yet. Be the first to leave one.";
+    els.list.appendChild(empty);
+    return;
+  }
+
+  const openComments = commentsState.comments
+    .filter((c) => !c.done)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const resolvedComments = commentsState.comments
+    .filter((c) => c.done)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  // Render open comments
+  for (const comment of openComments) {
+    const row = renderListRow(comment);
+    els.list.appendChild(row);
+  }
+
+  // Resolved section footer (Screen 06)
+  if (resolvedComments.length > 0) {
+    const resolvedBar = document.createElement("button");
+    resolvedBar.type = "button";
+    resolvedBar.className = "hub-resolved-toggle";
+    resolvedBar.setAttribute("aria-expanded", String(commentsState.resolvedExpanded));
+    resolvedBar.innerHTML = `
+      ${glyphSvg("resolve", { size: 16 })}
+      <span class="hub-resolved-title grow" style="text-align:left">${resolvedComments.length} resolved</span>
+      ${glyphSvg("chevronDown", { size: 16 })}
+    `;
+    resolvedBar.addEventListener("click", () => {
+      commentsState.resolvedExpanded = !commentsState.resolvedExpanded;
+      renderComments();
+    });
+    els.list.appendChild(resolvedBar);
+
+    if (commentsState.resolvedExpanded) {
+      const resContainer = document.createElement("div");
+      resContainer.className = "hub-resolved-list";
+      for (const comment of resolvedComments) {
+        resContainer.appendChild(renderListRow(comment));
+      }
+      els.list.appendChild(resContainer);
+    }
+  }
+
+  // Helper note
+  const helper = document.createElement("div");
+  helper.className = "hub-comments-helper";
+  helper.textContent =
+    "A comment carries the version it was written against. Highlighted here and in the text means it belongs to the version you are reading; a comment stamped with an older version opens that version to show its quote in place.";
+  els.list.appendChild(helper);
+}
+
+function renderListRow(comment) {
+  const row = document.createElement("div");
+  row.className = "hub-list-comment" + (comment.done ? " done" : "");
+  row.dataset.commentId = String(comment.id);
+
+  // Quote block
+  if (comment.anchor) {
+    const qb = quoteBlockNode(comment, commentsState.shownVersion);
+    if (qb) row.appendChild(qb);
+  }
+
+  const body = document.createElement("p");
+  body.className = "hub-list-body";
+  body.textContent = comment.body;
+  row.appendChild(body);
+
+  const meta = document.createElement("div");
+  meta.className = "hub-list-meta mono";
+
+  const author = authorNode(comment.author);
+  const time = timeNode(comment.created_at);
+  meta.append(author, document.createTextNode(" · "), time);
+
+  if (comment.anchor_version) {
+    const dot = document.createTextNode(" · ");
+    const verSpan = document.createElement("span");
+    verSpan.className = "hub-ver-stamp";
+    verSpan.textContent = `v${comment.anchor_version}`;
+    if (comment.anchor_version === commentsState.shownVersion && !comment.done) {
+      verSpan.className += " current";
+    }
+    meta.append(dot, verSpan);
+
+    if (comment.anchor_version !== commentsState.shownVersion && !comment.done) {
+      const openV = document.createElement("button");
+      openV.type = "button";
+      openV.className = "hub-open-version-btn";
+      openV.textContent = `open v${comment.anchor_version}`;
+      openV.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeCommentsDrawer();
+        const base = `#/artifacts/${encodeURIComponent(commentsState.artifactId)}?version=${comment.anchor_version}`;
+        location.hash = base;
+      });
+      meta.append(document.createTextNode(" · "), openV);
+    }
+  }
+
+  if (comment.done) {
+    const resNote = document.createElement("span");
+    resNote.textContent = " · resolved";
+    meta.appendChild(resNote);
+  }
+
+  row.appendChild(meta);
+
+  // Clicking row opens sheet on phone
+  row.addEventListener("click", () => {
+    openCommentSheet(comment);
+  });
+
+  return row;
+}
+
+// Render phone sheet for a single comment thread (Screen 05)
+function renderPhoneSheet() {
+  const els = commentsState.elements;
+  if (!els) return;
+
+  const comment = commentsState.comments.find((c) => String(c.id) === String(commentsState.activeThreadId));
+  if (!comment) {
+    commentsState.viewMode = "list";
+    renderListView();
+    return;
+  }
+
+  els.drawer.className = "comments-drawer hub-comment-sheet";
+  els.list.innerHTML = "";
+
+  // Grab handle
+  const handle = document.createElement("div");
+  handle.className = "hub-sheet-handle";
+  els.list.appendChild(handle);
+
+  // Sheet header: "Comment" · Resolve · Close
+  const head = document.createElement("div");
+  head.className = "hub-sheet-head";
+
+  const title = document.createElement("span");
+  title.className = "hub-sheet-title";
+  title.textContent = "Comment";
+
+  const resolveBtn = document.createElement("button");
+  resolveBtn.type = "button";
+  resolveBtn.className = "hub-sheet-resolve";
+  resolveBtn.innerHTML = `${glyphSvg("resolve", { size: 14 })}<span>${comment.done ? "Reopen" : "Resolve"}</span>`;
+  resolveBtn.setAttribute("aria-label", `${comment.done ? "Reopen" : "Resolve"} comment`);
+  resolveBtn.addEventListener("click", async () => {
+    await toggleCommentDone(comment);
+    renderPhoneSheet();
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hub-sheet-close";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.innerHTML = glyphSvg("chevronDown", { size: 18 });
+  closeBtn.addEventListener("click", closeCommentsDrawer);
+
+  head.append(title, resolveBtn, closeBtn);
+  els.list.appendChild(head);
+
+  // Quote block
+  const qb = quoteBlockNode(comment, commentsState.shownVersion);
+  if (qb) els.list.appendChild(qb);
+
+  // Thread root
+  const thread = document.createElement("div");
+  thread.className = "hub-sheet-thread";
+
+  const rootItem = document.createElement("div");
+  rootItem.className = "hub-thread-root";
+  const rootMeta = document.createElement("div");
+  rootMeta.className = "hub-thread-meta";
+  rootMeta.append(authorNode(comment.author), timeNode(comment.created_at));
+  const rootBody = document.createElement("p");
+  rootBody.className = "hub-thread-body";
+  rootBody.textContent = comment.body;
+  rootItem.append(rootMeta, rootBody);
+  thread.appendChild(rootItem);
+
+  // Sibling replies quoting same anchor
+  const replies = commentsState.comments.filter(
+    (c) =>
+      c.id !== comment.id &&
+      c.anchor &&
+      comment.anchor &&
+      c.anchor.quote === comment.anchor.quote &&
+      c.anchor_version === comment.anchor_version,
+  );
+  for (const reply of replies) {
+    const repItem = document.createElement("div");
+    repItem.className = "hub-thread-reply";
+    const repMeta = document.createElement("div");
+    repMeta.className = "hub-thread-meta";
+    repMeta.append(authorNode(reply.author), timeNode(reply.created_at));
+    const repBody = document.createElement("p");
+    repBody.className = "hub-thread-body";
+    repBody.textContent = reply.body;
+    repItem.append(repMeta, repBody);
+    thread.appendChild(repItem);
+  }
+  els.list.appendChild(thread);
+
+  // Composer for replies (Screen 05: 40px pill + 40px send)
+  const composer = document.createElement("div");
+  composer.className = "hub-sheet-composer";
+  const replyInput = document.createElement("input");
+  replyInput.type = "text";
+  replyInput.className = "hub-sheet-input";
+  replyInput.placeholder = "Reply";
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.className = "hub-sheet-send";
+  sendBtn.setAttribute("aria-label", "Send reply");
+  sendBtn.innerHTML = glyphSvg("threadNew", { size: 18 });
+
+  const doSendReply = async () => {
+    const text = replyInput.value.trim();
+    if (!text) return;
+    sendBtn.disabled = true;
+    try {
+      await postComment(text, comment.anchor ? comment.anchor.quote : null);
+      replyInput.value = "";
+      renderPhoneSheet();
+    } catch (err) {
+      drawerError(err.message);
+    } finally {
+      sendBtn.disabled = false;
+    }
+  };
+
+  sendBtn.addEventListener("click", doSendReply);
+  replyInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doSendReply();
+    }
+  });
+  composer.append(replyInput, sendBtn);
+  els.list.appendChild(composer);
+
+  // Footer: "Swipe the sheet down to keep reading" · 1 of N
+  const openDocs = commentsState.comments.filter((c) => !c.done && c.anchor_version === commentsState.shownVersion);
+  const curIdx = openDocs.findIndex((c) => String(c.id) === String(comment.id));
+  const footer = document.createElement("div");
+  footer.className = "hub-sheet-footer";
+
+  const swipeText = document.createElement("span");
+  swipeText.textContent = "Swipe the sheet down to keep reading";
+
+  const navWrap = document.createElement("div");
+  navWrap.className = "hub-sheet-nav mono";
+
+  if (openDocs.length > 1 && curIdx >= 0) {
+    const prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.className = "hub-nav-btn";
+    prevBtn.textContent = "‹";
+    prevBtn.setAttribute("aria-label", "Previous comment");
+    prevBtn.addEventListener("click", () => {
+      const nextIdx = (curIdx - 1 + openDocs.length) % openDocs.length;
+      openCommentSheet(openDocs[nextIdx]);
+    });
+
+    const countText = document.createElement("span");
+    countText.textContent = `${curIdx + 1} of ${openDocs.length}`;
+
+    const nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.className = "hub-nav-btn";
+    nextBtn.textContent = "›";
+    nextBtn.setAttribute("aria-label", "Next comment");
+    nextBtn.addEventListener("click", () => {
+      const nextIdx = (curIdx + 1) % openDocs.length;
+      openCommentSheet(openDocs[nextIdx]);
+    });
+
+    navWrap.append(prevBtn, countText, nextBtn);
+  } else if (openDocs.length === 1) {
+    navWrap.textContent = "1 of 1";
+  }
+
+  footer.append(swipeText, navWrap);
+  els.list.appendChild(footer);
+}
+
+// Render compose sheet (opened from text selection or "Start a thread")
+function renderComposeSheet() {
+  const els = commentsState.elements;
+  if (!els) return;
+
+  els.drawer.className = "comments-drawer hub-comment-sheet";
+  els.list.innerHTML = "";
+
+  const handle = document.createElement("div");
+  handle.className = "hub-sheet-handle";
+  els.list.appendChild(handle);
+
+  const head = document.createElement("div");
+  head.className = "hub-sheet-head";
+  const title = document.createElement("span");
+  title.className = "hub-sheet-title";
+  title.textContent = "New Comment";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hub-sheet-close";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.innerHTML = glyphSvg("chevronDown", { size: 18 });
+  closeBtn.addEventListener("click", closeCommentsDrawer);
+  head.append(title, closeBtn);
+  els.list.appendChild(head);
+
+  if (commentsState.composeQuote && !commentsState.isProtected) {
+    const dummy = {
+      anchor: { mode: "text", quote: commentsState.composeQuote },
+      anchor_version: commentsState.shownVersion,
+      done: false,
+    };
+    const qb = quoteBlockNode(dummy, commentsState.shownVersion);
+    if (qb) els.list.appendChild(qb);
+  }
+
+  const form = document.createElement("form");
+  form.className = "comments-compose";
+  const box = document.createElement("textarea");
+  box.id = "comment-body";
+  box.rows = 3;
+  box.maxLength = 2000;
+  box.placeholder = commentsState.composeQuote ? "Write a comment on this text" : "Write a comment";
+
+  const errLine = document.createElement("p");
+  errLine.className = "drawer-error";
+  errLine.hidden = true;
+
+  const postBtn = document.createElement("button");
+  postBtn.type = "submit";
+  postBtn.className = "primary";
+  postBtn.textContent = "Post";
+
+  form.append(box, errLine, postBtn);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = box.value.trim();
+    if (!text) {
+      errLine.hidden = false;
+      errLine.textContent = "Write a comment before posting.";
+      box.focus();
+      return;
+    }
+    errLine.hidden = true;
+    postBtn.disabled = true;
+    try {
+      await postComment(text, commentsState.composeQuote);
+      commentsState.composeQuote = null;
+      closeCommentsDrawer();
+    } catch (err) {
+      errLine.hidden = false;
+      errLine.textContent = err.message;
+    } finally {
+      postBtn.disabled = false;
+    }
+  });
+
+  els.list.appendChild(form);
+  setTimeout(() => box.focus(), 50);
+}
+
+// Desktop Margin Column (Screen 07): from 900px
+export function renderDesktopCards() {
+  const container = document.querySelector(".hub-comments-column");
+  if (!container) return;
+  if (typeof window !== "undefined" && window.innerWidth < 900) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = "";
+
+  const openCount = commentsState.comments.filter((c) => !c.done).length;
+
+  // Header: COMMENTS N
+  const head = document.createElement("div");
+  head.className = "hub-col-head";
+  head.innerHTML = `<span>COMMENTS</span><span class="mono">${openCount}</span>`;
+  container.appendChild(head);
+
+  if (!commentsState.comments.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No comments yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const openThisVer = commentsState.comments
+    .filter((c) => !c.done && c.anchor_version === commentsState.shownVersion)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  const olderVer = commentsState.comments
+    .filter((c) => !c.done && c.anchor_version !== commentsState.shownVersion)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  const resolved = commentsState.comments
+    .filter((c) => c.done)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+  // Render open cards for this version
+  for (const comment of openThisVer) {
+    container.appendChild(renderDesktopCard(comment));
+  }
+
+  // Render older version cards
+  for (const comment of olderVer) {
+    container.appendChild(renderDesktopCard(comment));
+  }
+
+  // Resolved collapsed section
+  if (resolved.length > 0) {
+    const resBar = document.createElement("button");
+    resBar.type = "button";
+    resBar.className = "hub-col-resolved-toggle";
+    resBar.innerHTML = `${glyphSvg("resolve", { size: 14 })}<span>${resolved.length} resolved</span>`;
+    container.appendChild(resBar);
+
+    const resWrap = document.createElement("div");
+    resWrap.className = "hub-col-resolved-list";
+    resWrap.hidden = !commentsState.resolvedExpanded;
+    for (const comment of resolved) {
+      resWrap.appendChild(renderDesktopCard(comment));
+    }
+    container.appendChild(resWrap);
+
+    resBar.addEventListener("click", () => {
+      commentsState.resolvedExpanded = !commentsState.resolvedExpanded;
+      resWrap.hidden = !commentsState.resolvedExpanded;
+    });
+  }
+}
+
+function renderDesktopCard(comment) {
+  const card = document.createElement("div");
+  card.className = "hub-comment-card" + (comment.done ? " resolved" : "");
+  card.dataset.commentId = String(comment.id);
+
+  if (String(comment.id) === String(commentsState.activeThreadId)) {
+    card.classList.add("active");
+  }
+
+  // Tinted or outlined quote
+  if (comment.anchor) {
+    const qb = quoteBlockNode(comment, commentsState.shownVersion);
+    if (qb) card.appendChild(qb);
+  }
+
+  const body = document.createElement("p");
+  body.className = "hub-card-body";
+  body.textContent = comment.body;
+  card.appendChild(body);
+
+  // Meta row: author · time · version; Reply; Resolve
+  const meta = document.createElement("div");
+  meta.className = "hub-card-meta mono";
+
+  const author = authorNode(comment.author);
+  const time = timeNode(comment.created_at);
+  meta.append(author, document.createTextNode(" · "), time);
+
+  if (comment.anchor_version) {
+    const verSpan = document.createElement("span");
+    verSpan.className = "hub-card-ver";
+    verSpan.textContent = `v${comment.anchor_version}`;
+    if (comment.anchor_version === commentsState.shownVersion && !comment.done) {
+      verSpan.className += " current";
+    }
+    meta.append(document.createTextNode(" · "), verSpan);
+  }
+
+  const spacer = document.createElement("span");
+  spacer.className = "grow";
+  meta.appendChild(spacer);
+
+  if (comment.anchor_version !== commentsState.shownVersion && !comment.done) {
+    const openV = document.createElement("button");
+    openV.type = "button";
+    openV.className = "hub-card-open-v";
+    openV.textContent = `Open v${comment.anchor_version}`;
+    openV.addEventListener("click", () => {
+      location.hash = `#/artifacts/${encodeURIComponent(commentsState.artifactId)}?version=${comment.anchor_version}`;
+    });
+    meta.appendChild(openV);
+  } else if (!comment.done) {
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "hub-card-act";
+    replyBtn.textContent = "Reply";
+    replyBtn.addEventListener("click", () => {
+      openCommentSheet(comment);
+    });
+
+    const resolveBtn = document.createElement("button");
+    resolveBtn.type = "button";
+    resolveBtn.className = "hub-card-act";
+    resolveBtn.textContent = "Resolve";
+    resolveBtn.addEventListener("click", () => toggleCommentDone(comment));
+
+    meta.append(replyBtn, resolveBtn);
+  }
+
+  card.appendChild(meta);
+
+  // Hover or focus on card brightens highlight in frame
+  const setCardHover = (active) => {
+    if (active) card.classList.add("active");
+    else if (String(comment.id) !== String(commentsState.activeThreadId)) {
+      card.classList.remove("active");
+    }
+    const frame = document.querySelector("#hub-frame");
+    if (frame && frame.contentWindow) {
+      frame.contentWindow.postMessage(
+        { type: "hub:highlight-comment", commentId: comment.id, active },
+        "*",
+      );
+    }
+  };
+
+  card.addEventListener("mouseenter", () => setCardHover(true));
+  card.addEventListener("mouseleave", () => setCardHover(false));
+  card.addEventListener("focusin", () => setCardHover(true));
+  card.addEventListener("focusout", () => setCardHover(false));
+
+  return card;
+}
+
+export function openCommentsDrawer() {
+  const els = commentsState.elements;
+  if (!els) return;
+  commentsState.lastFocus = document.activeElement;
+  commentsState.open = true;
+  commentsState.viewMode = "list";
   clearDrawerError();
   els.backdrop.hidden = false;
   els.drawer.hidden = false;
   if (els.toggle) els.toggle.setAttribute("aria-expanded", "true");
-  els.close.focus();
+  renderComments();
   loadComments();
 }
 
+export function openCommentSheet(comment) {
+  const els = commentsState.elements;
+  if (!els) return;
+  commentsState.lastFocus = document.activeElement;
+  commentsState.open = true;
+  commentsState.activeThreadId = comment.id;
+  commentsState.viewMode = "sheet";
+  clearDrawerError();
+  els.backdrop.hidden = false;
+  els.drawer.hidden = false;
+  if (els.toggle) els.toggle.setAttribute("aria-expanded", "true");
+  renderComments();
+
+  // Highlight and scroll in frame
+  const frame = document.querySelector("#hub-frame");
+  if (frame && frame.contentWindow) {
+    frame.contentWindow.postMessage(
+      { type: "hub:scroll-to-comment", commentId: comment.id },
+      "*",
+    );
+  }
+}
+
+export function openCompose(quote) {
+  const els = commentsState.elements;
+  if (!els) return;
+  commentsState.lastFocus = document.activeElement;
+  commentsState.open = true;
+  commentsState.composeQuote = quote || null;
+  commentsState.viewMode = "compose";
+  clearDrawerError();
+  els.backdrop.hidden = false;
+  els.drawer.hidden = false;
+  if (els.toggle) els.toggle.setAttribute("aria-expanded", "true");
+  renderComments();
+}
+
 export function closeCommentsDrawer() {
-  const els = commentsDrawer.elements;
-  commentsDrawer.open = false;
+  const els = commentsState.elements;
+  commentsState.open = false;
+  commentsState.viewMode = "list";
+  commentsState.composeQuote = null;
   if (!els) return;
   els.backdrop.hidden = true;
   els.drawer.hidden = true;
   if (els.toggle) els.toggle.setAttribute("aria-expanded", "false");
-  if (commentsDrawer.lastFocus && document.contains(commentsDrawer.lastFocus)) {
-    commentsDrawer.lastFocus.focus();
+  if (commentsState.lastFocus && document.contains(commentsState.lastFocus)) {
+    commentsState.lastFocus.focus();
   }
-  commentsDrawer.lastFocus = null;
+  commentsState.lastFocus = null;
 }
 
-// Point the drawer at another artifact. The sequence number invalidates any
-// load still in flight for the artifact just left.
-export function startComments(id) {
-  commentsDrawer.artifactId = id;
-  commentsDrawer.comments = [];
-  commentsDrawer.open = false;
-  commentsDrawer.lastFocus = null;
-  commentsDrawer.elements = null;
-  commentsDrawer.seq += 1;
+export function startComments(id, shownVersion = 1, isProtected = false) {
+  commentsState.artifactId = id;
+  commentsState.shownVersion = Number(shownVersion) || 1;
+  commentsState.isProtected = !!isProtected;
+  commentsState.comments = [];
+  commentsState.open = false;
+  commentsState.activeThreadId = null;
+  commentsState.composeQuote = null;
+  commentsState.viewMode = "list";
+  commentsState.lastFocus = null;
+  commentsState.elements = null;
+  commentsState.seq += 1;
 }
 
-// The control that opens the drawer, for the viewer's toolbar.
 export function commentsToggle() {
   const toggle = document.createElement("button");
   toggle.type = "button";
@@ -233,25 +946,28 @@ export function commentsToggle() {
   badge.hidden = true;
   toggle.append(toggleLabel, document.createTextNode(" "), badge);
   toggle.addEventListener("click", () => {
-    if (commentsDrawer.open) closeCommentsDrawer();
-    else openCommentsDrawer();
+    if (commentsState.open && commentsState.viewMode === "list") {
+      closeCommentsDrawer();
+    } else {
+      openCommentsDrawer();
+    }
   });
   return { toggle, badge };
 }
 
-// The backdrop and the drawer itself, ready to append. The caller owns where
-// they land in the document.
 export function commentsPanel({ toggle, badge }) {
   const backdrop = document.createElement("div");
   backdrop.className = "drawer-backdrop";
   backdrop.hidden = true;
   backdrop.addEventListener("click", closeCommentsDrawer);
+
   const drawer = document.createElement("aside");
   drawer.className = "comments-drawer";
   drawer.setAttribute("role", "dialog");
   drawer.setAttribute("aria-modal", "true");
   drawer.setAttribute("aria-labelledby", "comments-heading");
   drawer.hidden = true;
+
   const head = document.createElement("div");
   head.className = "comments-drawer-head";
   const heading = document.createElement("h2");
@@ -263,14 +979,18 @@ export function commentsPanel({ toggle, badge }) {
   close.setAttribute("aria-label", "Close comments");
   close.addEventListener("click", closeCommentsDrawer);
   head.append(heading, close);
+
   const error = document.createElement("p");
   error.className = "drawer-error";
   error.setAttribute("role", "alert");
   error.hidden = true;
+
   const list = document.createElement("div");
   list.className = "comments-list";
   list.setAttribute("role", "log");
   list.setAttribute("aria-label", "Comments");
+
+  // Fallback compose form at foot of list
   const form = document.createElement("form");
   form.className = "comments-compose";
   const label = document.createElement("label");
@@ -281,16 +1001,19 @@ export function commentsPanel({ toggle, badge }) {
   box.name = "body";
   box.rows = 3;
   box.maxLength = 2000;
-  box.placeholder = "Write a comment";
+  box.placeholder = "Write a comment before posting.";
+
   const composeError = document.createElement("p");
   composeError.className = "drawer-error";
   composeError.setAttribute("role", "alert");
   composeError.hidden = true;
+
   const post = document.createElement("button");
   post.type = "submit";
   post.className = "primary";
   post.textContent = "Post";
   form.append(label, box, composeError, post);
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const body = box.value.trim();
@@ -303,7 +1026,7 @@ export function commentsPanel({ toggle, badge }) {
     composeError.hidden = true;
     composeError.textContent = "";
     post.disabled = true;
-    postComment(body)
+    postComment(body, null)
       .then(() => {
         box.value = "";
       })
@@ -315,15 +1038,15 @@ export function commentsPanel({ toggle, badge }) {
         post.disabled = false;
       });
   });
+
   drawer.append(head, error, list, form);
+
   drawer.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
       closeCommentsDrawer();
       return;
     }
-    // The drawer promises a modal, so Tab cycles inside it instead of
-    // leaving for the page behind.
     if (event.key !== "Tab") return;
     const focusable = Array.from(
       drawer.querySelectorAll(
@@ -344,9 +1067,35 @@ export function commentsPanel({ toggle, badge }) {
       first.focus();
     }
   });
-  commentsDrawer.elements = { backdrop, drawer, toggle, badge, close, list, error, compose: box };
-  // The first list arrives a tick later, by which time the caller has put the
-  // drawer in the document.
+
+  commentsState.elements = { backdrop, drawer, toggle, badge, close, list, error, compose: box };
   loadComments();
   return { backdrop, drawer };
+}
+
+// Global listener for frame messages
+if (typeof window !== "undefined") {
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "hub:create-comment") {
+      openCompose(data.quote);
+    } else if (data.type === "hub:open-comment") {
+      const comment = commentsState.comments.find(
+        (c) => String(c.id) === String(data.commentId),
+      );
+      if (comment) openCommentSheet(comment);
+    } else if (data.type === "hub:hover-comment") {
+      const card = document.querySelector(
+        `.hub-comment-card[data-comment-id="${data.commentId}"]`,
+      );
+      if (card) {
+        if (data.active) card.classList.add("active");
+        else card.classList.remove("active");
+      }
+    } else if (data.type === "hub:frame-ready") {
+      sendCommentsToFrame();
+    }
+  });
+  window.addEventListener("resize", renderDesktopCards);
 }

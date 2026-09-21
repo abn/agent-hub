@@ -164,10 +164,32 @@ Posting needs write access and returns the comment plus a delete token,
 shown once. Resolving or deleting needs the token or write access; a
 wrong token is refused without saying which part was wrong. A retry with
 the same idempotency key returns the recorded comment without a second
-token. Comments can anchor to a canvas point or quote artifact text; a
-quote is refused on versions the server holds only as ciphertext. The
-human reads and writes comments in the viewer drawer; the public page
-shows the thread read-only, and never on a protected artifact.
+token. The human reads and writes comments in the viewer drawer or desktop
+margin cards; the public page shows the thread read-only, and never on a
+protected artifact.
+
+### Anchors and highlights
+
+A comment may anchor to text or a point on a specific version:
+- `anchor`: `{ mode: "text", quote: "..." }` or `{ mode: "point", x: number, y: number }`.
+- `anchor_version`: the version number the anchor belongs to, defaulting to the current version.
+
+In a commented document, body line-height rises from 1.6 to 1.7. An open comment
+anchored to the version being read highlights its matched quote with a tint and
+a 2px underline; point anchors place a pin glyph in the gutter. Quote matching
+normalises whitespace and case, so minor formatting updates preserve the
+highlight without notice to the reader.
+
+When text changed underneath such that a quote no longer matches, or when reading
+a newer version than the anchor, the comment is not highlighted in the text.
+Selecting the comment or following its "open vX" link loads that historical version
+with the anchor placed in its original context. Re-anchoring across versions is
+dropped by design.
+
+Resolved comments lose their highlight, return the text to regular body prose,
+and collapse behind the resolved toggle. Protected artifacts refuse plain text
+anchors on upload: the server never stores plain text quotes for encrypted
+content.
 
 ## Version history
 

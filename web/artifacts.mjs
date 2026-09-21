@@ -3,7 +3,16 @@
 // own, so reload and the browser's Back both keep the artifact on screen.
 
 import { api } from "./api.mjs";
-import { commentsPanel, commentsToggle, openCommentsDrawer, startComments } from "./comments.mjs";
+import {
+  closeCommentsDrawer,
+  commentsPanel,
+  commentsState,
+  commentsToggle,
+  openCommentsDrawer,
+  openCompose,
+  renderDesktopCards,
+  startComments,
+} from "./comments.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
@@ -711,6 +720,7 @@ export async function viewerRoute(params, gen, path) {
   }
   viewer.version = shown;
   viewer.kind = current.kind;
+  startComments(id, shown, current.protected);
 
   // Mono path: {project} / {slug}
   const projDisplay = projectId || current.project_id || "agent-hub";
@@ -757,15 +767,22 @@ export async function viewerRoute(params, gen, path) {
     threadBtn.dataset.action = "comments-toggle";
     threadBtn.setAttribute("aria-label", `Comments, ${commentsCount}`);
     threadBtn.innerHTML = `${glyphSvg("comments", { size: 20 })}<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`;
+    threadBtn.addEventListener("click", () => {
+      if (commentsState.open && commentsState.viewMode === "list") {
+        closeCommentsDrawer();
+      } else {
+        openCommentsDrawer();
+      }
+    });
   } else {
     threadBtn.className = "hub-btn-glyph hub-start-thread";
     threadBtn.dataset.action = "start-thread";
     threadBtn.setAttribute("aria-label", "Start a thread");
     threadBtn.innerHTML = glyphSvg("threadNew", { size: 20 });
+    threadBtn.addEventListener("click", () => {
+      openCompose(null);
+    });
   }
-  threadBtn.addEventListener("click", () => {
-    openCommentsDrawer();
-  });
 
   // Glyph button 2: copy-raw
   const copyRawBtn = document.createElement("button");
@@ -934,6 +951,13 @@ export async function viewerRoute(params, gen, path) {
   metaWrap.appendChild(metaLine);
   wrap.appendChild(metaWrap);
 
+  // Desktop layout from 900px (Screen 07): 560px prose + 272px comments margin column
+  const content = document.createElement("div");
+  content.className = "hub-viewer-content";
+
+  const docCol = document.createElement("div");
+  docCol.className = "hub-viewer-doc";
+
   // Sandboxed frame: replaces element rather than src on navigation to avoid pushing history
   const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   const frame = document.createElement("iframe");
@@ -944,7 +968,13 @@ export async function viewerRoute(params, gen, path) {
   frame.setAttribute("title", current.title);
   frame.setAttribute("data-theme", opened);
   frame.src = frameSrc(id, viewer.version, opened);
-  wrap.appendChild(frame);
+  docCol.appendChild(frame);
+
+  const commentsCol = document.createElement("div");
+  commentsCol.className = "hub-comments-column";
+
+  content.append(docCol, commentsCol);
+  wrap.appendChild(content);
 
   // Auto-size frame to avoid inner scrollbar
   const onHeight = (event) => {
@@ -988,6 +1018,7 @@ export async function viewerRoute(params, gen, path) {
   main.appendChild(wrap);
   const { backdrop: comBackdrop, drawer: comDrawer } = commentsPanel({ toggle, badge });
   main.append(comBackdrop, comDrawer);
+  renderDesktopCards();
 }
 
 // The old viewer name, kept so a caller that referenced it still resolves.

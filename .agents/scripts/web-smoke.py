@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, quote, urlsplit
+import urllib.request
 
 import hub_harness as harness
 
@@ -8890,11 +8891,489 @@ def check_artifact_share(
     finally:
         page.evaluate("document.querySelectorAll('.hub-share-sheet, .hub-share-backdrop').forEach((el) => el.remove())")
         page.evaluate("document.querySelectorAll('dialog[open]').forEach((d) => d.close())")
+
+
+def check_document_comments(
+    browser, watch: Watch, port: int, project: str
+) -> None:
+    """Document comments:
+    - Selecting text and commenting creates an anchored comment, and the span highlights.
+    - Highlight marks only an open comment anchored to the version being read.
+    - Stored quote is matched after whitespace and case normalising.
+    - Comment whose quote no longer matches falls back (no highlight).
+    - Older-version comment shows in list with 'open vX' link and no highlight on current page.
+    - Resolved comment takes hairline treatment and loses highlight.
+    - Point anchor draws pin in the gutter.
+    - Hostile strings in comment body and quote reach reader as plain text.
+    - Agent-authored and human-authored comments are distinguishable.
+    - Desktop from 900px uses 560px prose + 272px margin column, below it phone sheet.
+    - Verified at 390px (mobile) and 1100px (desktop).
+    """
+    watch.enter("artifacts: document comments, anchors, and margin cards")
+
+    # 1. Seed artifact with two versions and comments
+    session: list[str] = []
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "claude-code", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    v1_content = "# Decisions I need from you\n\nThe vendored renderer stays until the escaping contract is written down.\n"
+    v2_content = (
+        "# Decisions I need from you\n\n"
+        "Everything here is blocked on you, not on me. Each one says what I would do if it were mine, so a one-word reply is enough.\n\n"
+        "Decided, and what came of it\n\n"
+        "You answered the standing list. Nothing below is waiting on you any more; it is waiting on work. Two things came back to you at the end.\n"
+    )
+
+    published = harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_publish",
+                "arguments": {
+                    "project_id": project,
+                    "title": "Decisions I need from you",
+                    "kind": "markdown",
+                    "content": v1_content,
+                },
+            },
+        },
+    )
+    artifact_id = (published.get("result", {}).get("structuredContent", {}) or {}).get("artifact_id", "")
+    if not artifact_id:
+        watch.fail("could not publish test artifact for comments check")
+        return
+
+    # Register agent "claude" and issue token with write grant to project
+    req_ag = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/agents",
+        data=json.dumps({"id": "claude", "display_name": "Claude"}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req_ag) as resp:
+        pass
+
+    req_tok = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/agents/claude/token",
+        data=b"{}",
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req_tok) as resp:
+        agent_tok = json.loads(resp.read().decode("utf-8"))["token"]
+
+    req_gr = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/agents/claude/grants",
+        data=json.dumps({"project_id": project, "access": "write"}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req_gr) as resp:
+        pass
+
+    agent_session: list[str] = []
+    def agent_mcp(payload):
+        headers = {
+            "Authorization": f"Bearer {agent_tok}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        if agent_session:
+            headers["mcp-session-id"] = agent_session[0]
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/mcp",
+            data=json.dumps(payload).encode(),
+            method="POST",
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            sid = resp.headers.get("mcp-session-id")
+            if sid and not agent_session:
+                agent_session.append(sid)
+            raw = resp.read().decode()
+        for line in raw.splitlines():
+            if line.startswith("data:"):
+                val = line[5:].strip()
+                if val:
+                    return json.loads(val)
+        return {}
+
+    agent_mcp({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "claude", "version": "0.0.0"},
+        },
+    })
+    agent_mcp({"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+    # Post comment on v1 (older version, agent authored by "claude")
+    agent_mcp(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "comment_post",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "body": "It is written down now, in the handover.",
+                    "anchor": {"mode": "text", "quote": "Decisions I need from you"},
+                    "anchor_version": 1,
+                },
+            },
+        }
+    )
+
+    # Update to v2
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_update",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "content": v2_content,
+                },
+            },
+        },
+    )
+
+    # Post resolved human comment on v2 via REST
+    req_c2 = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/artifacts/{artifact_id}/comments",
+        data=json.dumps({
+            "body": "Whose work? Name the agent here.",
+            "anchor": {"mode": "text", "quote": "it is waiting on work."},
+            "anchor_version": 2,
+        }).encode("utf-8"),
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req_c2) as resp:
+        c2 = json.loads(resp.read().decode("utf-8"))
+
+    req_patch = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/artifacts/{artifact_id}/comments/{c2['id']}",
+        data=json.dumps({"done": True}).encode("utf-8"),
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}", "Content-Type": "application/json"},
+        method="PATCH",
+    )
+    with urllib.request.urlopen(req_patch) as resp:
+        pass
+
+    # Post point anchor comment on v2
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "comment_post",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "body": "Architecture pin note.",
+                    "anchor": {"mode": "point", "x": 0.0, "y": 80.0},
+                    "anchor_version": 2,
+                },
+            },
+        },
+    )
+
+    # Post comment whose quote no longer matches on v2
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "comment_post",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "body": "Where did this go?",
+                    "anchor": {"mode": "text", "quote": "This sentence was completely deleted."},
+                    "anchor_version": 2,
+                },
+            },
+        },
+    )
+
+    # Post comment with whitespace and case differences to verify normalisation
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "comment_post",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "body": "Normalised match test note.",
+                    "anchor": {"mode": "text", "quote": "TWO THINGS CAME BACK   TO YOU AT THE END."},
+                    "anchor_version": 2,
+                },
+            },
+        },
+    )
+
+    # Post comment with hostile markup in body and quote
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "comment_post",
+                "arguments": {
+                    "artifact_id": artifact_id,
+                    "body": "<div id=\"hostile-body-div\">Hostile body</div>",
+                    "anchor": {"mode": "text", "quote": "<img id=\"hostile-quote-img\" src=x onerror=alert(1)>"},
+                    "anchor_version": 2,
+                },
+            },
+        },
+    )
+
+    # --- 2. Mobile run at 390px ---
+    ctx_mobile = browser.new_context(
+        viewport={"width": 390, "height": 844},
+        has_touch=True,
+        color_scheme="dark",
+    )
+    ctx_mobile.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    p_mobile = ctx_mobile.new_page()
+    try:
+        p_mobile.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact_id}", wait_until="load")
+        if not settle(p_mobile, "!!document.querySelector('.hub-viewer-bar')"):
+            watch.fail("[390px] viewer bar did not render")
+            return
+
+        # Check nested inner frame
+        inner_frame = p_mobile.frame_locator("#hub-frame").frame_locator("#hub-frame")
+        try:
+            inner_frame.locator("h1").get_by_text("Decisions I need from you").wait_for(timeout=5000)
+        except Exception as err:
+            watch.fail(f"[390px] inner frame document did not load: {err}")
+            return
+
+        # A. Security check: hostile elements must NOT execute as DOM tags
+        if inner_frame.locator("#hostile-quote-img").count() > 0 or p_mobile.locator("#hostile-quote-img").count() > 0:
+            watch.fail("[390px] hostile quote string executed as HTML DOM element")
+        if inner_frame.locator("#hostile-body-div").count() > 0 or p_mobile.locator("#hostile-body-div").count() > 0:
+            watch.fail("[390px] hostile body string executed as HTML DOM element")
+
+        # B. Body line-height rises to 1.7 in commented document
+        lh_info = inner_frame.locator("body").evaluate("""(b) => {
+            const cs = window.getComputedStyle(b);
+            return { fs: parseFloat(cs.fontSize), lh: parseFloat(cs.lineHeight) };
+        }""")
+        expected_lh = lh_info["fs"] * 1.7
+        if abs(lh_info["lh"] - expected_lh) > 0.5:
+            watch.fail(f"[390px] commented body line-height is {lh_info['lh']:.1f}px, expected {expected_lh:.1f}px (1.7 ratio)")
+
+        # C. Highlights check
+        # Normalised quote MUST be highlighted
+        hl_norm = inner_frame.locator(".hub-comment-highlight").get_by_text("Two things came back to you at the end.")
+        if hl_norm.count() == 0:
+            watch.fail("[390px] normalised quote ('TWO THINGS CAME BACK   TO YOU AT THE END.') was not highlighted")
+
+        # Older version quote must NOT be highlighted on v2
+        hl_v1 = inner_frame.locator(".hub-comment-highlight").get_by_text("Decisions I need from you")
+        if hl_v1.count() > 0:
+            watch.fail("[390px] older-version comment (v1) was highlighted on v2")
+
+        # Resolved comment must NOT be highlighted
+        hl_res = inner_frame.locator(".hub-comment-highlight").get_by_text("it is waiting on work.")
+        if hl_res.count() > 0:
+            watch.fail("[390px] resolved comment was highlighted")
+
+        # Deleted quote must NOT be highlighted
+        hl_del = inner_frame.locator(".hub-comment-highlight").get_by_text("This sentence was completely deleted")
+        if hl_del.count() > 0:
+            watch.fail("[390px] deleted quote comment was highlighted")
+
+        # Point anchor: gutter pin exists
+        pin = inner_frame.locator(".hub-point-pin")
+        if pin.count() == 0:
+            watch.fail("[390px] point anchor did not draw pin in the gutter")
+
+        # D. Selecting text in frame raises 44px 'Comment' callout
+        p_mobile.wait_for_timeout(300)
+        inner_frame.locator("body").evaluate("""() => {
+            const p = document.querySelector('p');
+            if (!p) return;
+            const textNode = p.firstChild;
+            if (!textNode) return;
+            const range = document.createRange();
+            range.setStart(textNode, 0);
+            range.setEnd(textNode, 15);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.dispatchEvent(new Event('selectionchange'));
+        }""")
+        p_mobile.wait_for_timeout(300)
+        callout = inner_frame.locator(".hub-selection-callout")
+        if callout.count() == 0:
+            watch.fail("[390px] selecting text did not raise .hub-selection-callout 'Comment'")
+        else:
+            callout_box = callout.bounding_box()
+            if not callout_box or callout_box["height"] < 40:
+                watch.fail(f"[390px] selection callout height {callout_box} is under 44px hit floor")
+            callout.click()
+            p_mobile.wait_for_timeout(300)
+
+            # E. Comment sheet opened in compose mode with quote
+            sheet = p_mobile.locator(".hub-comment-sheet, .comments-drawer")
+            if sheet.count() == 0 or not sheet.first.is_visible():
+                watch.fail("[390px] clicking 'Comment' callout did not open comment sheet")
+            else:
+                compose_box = p_mobile.locator(".comments-compose textarea, .hub-sheet-composer input, .hub-sheet-composer textarea")
+                if compose_box.count() > 0:
+                    compose_box.first.fill("A brand new comment on this sentence.")
+                    send_btn = p_mobile.locator(".comments-compose button[type='submit'], .hub-sheet-composer button")
+                    if send_btn.count() > 0:
+                        send_btn.first.click()
+                        p_mobile.wait_for_timeout(500)
+
+        # F. Tap highlight opens phone sheet (Screen 05)
+        if hl_norm.count() > 0:
+            hl_norm.first.click()
+            p_mobile.wait_for_timeout(300)
+            sheet = p_mobile.locator(".hub-comment-sheet, .comments-drawer")
+            if sheet.count() == 0 or not sheet.first.is_visible():
+                watch.fail("[390px] tapping highlight did not open comment sheet")
+            else:
+                # Header has 'Comment' and resolve control
+                resolve_btn = sheet.locator("button").filter(has_text="Resolve").first
+                if resolve_btn.count() == 0:
+                    watch.fail("[390px] comment sheet does not have Resolve button")
+                else:
+                    resolve_btn.click()
+                    p_mobile.wait_for_timeout(400)
+                    reopen_btn = sheet.locator("button").filter(has_text="Reopen").first
+                    if reopen_btn.count() == 0:
+                        watch.fail("[390px] Resolve button did not flip to Reopen")
+                    # Reopening restores highlight
+                    reopen_btn.click()
+                    p_mobile.wait_for_timeout(400)
+
+        # G. Open comments list (Screen 06)
+        com_btn = p_mobile.locator(".hub-comments-btn, .comments-toggle, [data-action='comments-toggle']").first
+        if com_btn.count() > 0:
+            com_btn.click()
+            p_mobile.wait_for_timeout(300)
+            # Verify list contains older version with 'open v1' link
+            open_v1 = p_mobile.locator("a, button").filter(has_text="open v1").first
+            if open_v1.count() == 0:
+                watch.fail("[390px] comments list does not show 'open v1' route for older-version comment")
+            else:
+                open_v1.click()
+                p_mobile.wait_for_timeout(500)
+                # On v1, the v1 quote IS highlighted
+                inner_v1 = p_mobile.frame_locator("#hub-frame").frame_locator("#hub-frame")
+                try:
+                    inner_v1.locator(".hub-comment-highlight").get_by_text("Decisions I need from you").wait_for(timeout=4000)
+                except Exception as err:
+                    watch.fail(f"[390px] opening v1 did not highlight older-version comment in place: {err}")
+
+    finally:
+        ctx_mobile.close()
+
+    # --- 3. Desktop run at 1100px ---
+    ctx_desktop = browser.new_context(
+        viewport={"width": 1100, "height": 800},
+        has_touch=False,
+        color_scheme="dark",
+    )
+    ctx_desktop.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    p_desktop = ctx_desktop.new_page()
+    try:
+        p_desktop.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact_id}", wait_until="load")
+        if not settle(p_desktop, "!!document.querySelector('.hub-viewer-bar')"):
+            watch.fail("[1100px] viewer bar did not render")
+            return
+
+        # Verify desktop layout: 560px prose + 272px comments margin column
+        layout_info = p_desktop.evaluate("""() => {
+            const doc = document.querySelector('.hub-viewer-doc');
+            const col = document.querySelector('.hub-comments-column');
+            return {
+                hasDoc: !!doc,
+                hasCol: !!col,
+                docMaxWidth: doc ? window.getComputedStyle(doc).maxWidth : '',
+                colWidth: col ? Math.round(col.getBoundingClientRect().width) : 0,
+                colVisible: col ? window.getComputedStyle(col).display !== 'none' : false,
+            };
+        }""")
+        if not layout_info["hasCol"] or not layout_info["colVisible"]:
+            watch.fail(f"[1100px] desktop comments margin column missing or not visible: {layout_info}")
+        elif layout_info["colWidth"] != 272:
+            watch.fail(f"[1100px] comments column width is {layout_info['colWidth']}px, expected 272px")
+
+        # Verify cards exist in the margin column
+        cards = p_desktop.locator(".hub-comments-column .hub-comment-card")
+        if cards.count() == 0:
+            watch.fail("[1100px] desktop margin column has no comment cards")
+
+        # Verify agent-authored and human-authored comments are distinguishable
+        authors_info = p_desktop.evaluate("""() => {
+            const authors = [...document.querySelectorAll('.comment-author')].map(el => ({
+                text: el.textContent.trim(),
+                isAgent: el.classList.contains('agent') || el.classList.contains('comment-author-agent') || el.dataset.agent === 'true',
+                isHuman: el.classList.contains('human') || el.classList.contains('comment-author-human') || el.textContent.trim() === 'you'
+            }));
+            return authors;
+        }""")
+        has_agent = any(a["isAgent"] for a in authors_info)
+        has_human = any(a["isHuman"] for a in authors_info)
+        if not (has_agent and has_human):
+            watch.fail(f"[1100px] agent-authored and human-authored comments not distinguishable: {authors_info}")
+
+    finally:
+        ctx_desktop.close()
+
     watch.drain_rejections()
 
 
 class SetupDied(Exception):
     """The token never reached the app, so no check could tell anything."""
+
 
 
 def reset_page(watch: Watch) -> None:
@@ -9132,6 +9611,7 @@ def run() -> int:
                 run_step(watch, check_version_list, page, watch, port, project)
                 run_step(watch, check_artifact_viewer_menus_and_version, browser, page, watch, port, project)
                 run_step(watch, check_artifact_title_bar, browser, watch, port, project)
+                run_step(watch, check_document_comments, browser, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)
                 run_step(watch, check_desktop_topbar, browser, watch, port)

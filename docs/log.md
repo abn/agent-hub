@@ -12,6 +12,19 @@ software release notes and the repository changelog.
   an optional password switch that encrypts before leaving the device, separate
   copy actions for the link and password, and link revocation.
 
+## 2026-09-21, document comments, text anchors, and margin cards
+
+* **Update**: [The human surface](architecture/human-surface.md) and
+  [Artifacts](usage/artifacts.md) document inline document comments: open comments
+  anchored to the version being read highlight quoted text with a tint and 2px
+  underline, point anchors render a gutter pin, and body line-height expands from
+  1.6 to 1.7 in commented documents. Minor formatting differences are absorbed
+  by normalising whitespace and case. Comments on older versions link directly to
+  that version rather than re-anchoring. On mobile, comments render in a bottom
+  sheet for individual threads or a full drawer list with collapsed resolved rows;
+  on desktop from 900px, prose stays at 560px beside a fixed 272px comments
+  margin column with interactive cards.
+
 ## 2026-09-21, unified chip design across feed and search
 
 * **Update**: [The human surface](architecture/human-surface.md) documents that
