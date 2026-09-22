@@ -1699,7 +1699,7 @@ button.empty-link {
 /* The day at a glance: the title and its summary line, the waiting card, the
    newest events across projects, and the storage card, 20px apart as the
    design stacks them. */
-.home { display: flex; flex-direction: column; gap: 20px; }
+.home { display: flex; flex-direction: column; gap: 20px; width: 100%; margin-left: 0; margin-right: auto; }
 .home h1 { line-height: 1.15; margin: 0; }
 /* The status strip's node line, right-aligned over the title as the design
    draws it. From the width the top bar shows at, the top bar says it. */
@@ -1748,6 +1748,32 @@ button.empty-link {
 .home-row .ts { z-index: 1; }
 .home-row .dot-unread { margin-top: 6px; }
 .home-chev { flex: none; display: inline-flex; color: var(--ink-3); }
+.home-actions,
+.home-actions button {
+  display: none;
+}
+@media (min-width: 720px) {
+  .home-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    position: relative;
+    z-index: 1;
+    flex: none;
+  }
+  .home-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: var(--t-13);
+    font-weight: 600;
+  }
+  .home-waiting .home-chev {
+    display: none;
+  }
+}
 /* The storage card is one link to the Storage screen. The bar draws the two
    numbers above it and the line under it says the same share in words. The
    fill is to scale, never widened: under 1% the card draws no bar. */

@@ -4251,6 +4251,126 @@ def check_desktop_storage(browser, watch: Watch, port: int) -> None:
             context.close()
             watch.page.bring_to_front()
             watch.drain_rejections()
+
+
+def check_desktop_home(browser, watch: Watch, port: int) -> None:
+    """Home on desktop: 640px column held left against the rail, with inline actions on waiting rows."""
+    watch.enter("desktop: home layout and inline actions")
+    items = [
+        home_waiting_item(1, 3, kind="approval", summary="Deploy v0.4.2 to nas-01"),
+        home_waiting_item(2, 30, kind="question", summary="Keep the 720px cap on prose?"),
+    ]
+    payload = harness.home_payload(
+        waiting=2,
+        waiting_items=items,
+        recent=[home_event(1, 1), home_event(2, 2)],
+    )
+    for theme in ("light", "dark"):
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme=theme)
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            f"localStorage.setItem('hub.theme', {json.dumps(theme)});"
+        )
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"desktop home ({theme}): uncaught error: {error}"))
+        try:
+            with home_answers(page, payload):
+                page.goto(f"http://127.0.0.1:{port}/#/home", wait_until="load")
+                if not settle(page, "!!document.querySelector('main .home')"):
+                    watch.fail(f"home screen did not render at 1440px ({theme})")
+                    continue
+                layout = page.evaluate("""() => {
+                    const rail = document.querySelector('.rail');
+                    const home = document.querySelector('main .home');
+                    if (!rail || !home) return null;
+                    const rb = rail.getBoundingClientRect();
+                    const hb = home.getBoundingClientRect();
+                    return {
+                        railWidth: rb.width,
+                        railRight: rb.right,
+                        homeWidth: hb.width,
+                        homeLeft: hb.left,
+                        homeRight: hb.right,
+                        offsetFromRail: hb.left - rb.right,
+                        windowWidth: window.innerWidth,
+                    };
+                }""")
+                if not layout:
+                    watch.fail(f"could not measure home layout elements ({theme})")
+                    continue
+                if abs(layout["homeWidth"] - 640) > 1:
+                    watch.fail(f"home width at 1440px is {layout['homeWidth']:.1f}px, expected 640px ({theme})")
+                if layout["offsetFromRail"] > 32:
+                    watch.fail(
+                        f"home content is {layout['offsetFromRail']:.1f}px from rail, not held left against the rail ({theme})"
+                    )
+                if (layout["windowWidth"] - layout["homeRight"]) < 400:
+                    watch.fail(
+                        f"home right margin is {layout['windowWidth'] - layout['homeRight']:.1f}px, expected natural margin (>400px) ({theme})"
+                    )
+
+                buttons = page.evaluate("""() => {
+                    const rows = [...document.querySelectorAll('main .home-waiting .home-row')];
+                    return rows.map((r) => {
+                        const approve = r.querySelector('[data-action="approve"]');
+                        const reply = r.querySelector('[data-action="answer"]');
+                        return {
+                            hasApprove: !!approve && getComputedStyle(approve).display !== 'none',
+                            approveText: approve ? approve.textContent.trim() : '',
+                            hasReply: !!reply && getComputedStyle(reply).display !== 'none',
+                            replyText: reply ? reply.textContent.trim() : '',
+                        };
+                    });
+                }""")
+                if len(buttons) != 2:
+                    watch.fail(f"expected 2 waiting rows with inline actions, found {len(buttons)} ({theme})")
+                else:
+                    if not (buttons[0]["hasApprove"] and buttons[0]["approveText"] == "Approve"):
+                        watch.fail(f"first waiting row (approval) missing visible Approve button: {buttons[0]} ({theme})")
+                    if not (buttons[1]["hasReply"] and buttons[1]["replyText"] == "Reply"):
+                        watch.fail(f"second waiting row (question) missing visible Reply button: {buttons[1]} ({theme})")
+
+                chev_visible = page.evaluate("""() => {
+                    const chevs = [...document.querySelectorAll('main .home-waiting .home-row .home-chev')];
+                    return chevs.some((c) => getComputedStyle(c).display !== 'none');
+                }""")
+                if chev_visible:
+                    watch.fail(f"chevron is visible on waiting rows on desktop ({theme})")
+        finally:
+            context.close()
+            watch.page.bring_to_front()
+            watch.drain_rejections()
+
+    mob_context = browser.new_context(viewport={"width": 390, "height": 844}, color_scheme="light")
+    mob_context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    mob_page = mob_context.new_page()
+    try:
+        with home_answers(mob_page, payload):
+            mob_page.goto(f"http://127.0.0.1:{port}/#/home", wait_until="load")
+            if not settle(mob_page, "!!document.querySelector('main .home')"):
+                watch.fail("home screen did not render at 390px")
+            else:
+                actions_visible = mob_page.evaluate("""() => {
+                    const acts = [...document.querySelectorAll('main .home-waiting .home-actions, main .home-waiting [data-action="approve"], main .home-waiting [data-action="answer"]')];
+                    return acts.some((a) => {
+                        const s = getComputedStyle(a);
+                        return s.display !== 'none' && a.getBoundingClientRect().width > 0;
+                    });
+                }""")
+                if actions_visible:
+                    watch.fail("inline action buttons are visible on mobile (<720px)")
+                chevs_visible = mob_page.evaluate("""() => {
+                    const chevs = [...document.querySelectorAll('main .home-waiting .home-row .home-chev')];
+                    return chevs.length > 0 && chevs.every((c) => getComputedStyle(c).display !== 'none');
+                }""")
+                if not chevs_visible:
+                    watch.fail("chevron is not visible on mobile waiting rows")
+    finally:
+        mob_context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
 # What the detail screen's rows that name a session king are, and what their
 # colours must be. The row's own server word stays `status`; the design's three
 # states are drawn with a dot, a ring and a filled circle.
@@ -11039,6 +11159,7 @@ def run() -> int:
                 run_step(watch, check_desktop_project, browser, watch, port, project)
                 run_step(watch, check_desktop_sessions_four_zones, browser, watch, port)
                 run_step(watch, check_desktop_storage, browser, watch, port)
+                run_step(watch, check_desktop_home, browser, watch, port)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_waiting_items, page, watch)

@@ -3,7 +3,7 @@
 // response, so painting the screen is one request however much it shows.
 
 import { api } from "./api.mjs";
-import { esc, glyph, isOpen, paint, projectName } from "./dom.mjs";
+import { actionFor, esc, glyph, isOpen, paint, projectName } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { SLIVER, SLIVER_WORDS } from "./storage.mjs";
@@ -111,7 +111,8 @@ function unseenIds(recent, unseen) {
 // One row for both cards. The title is the row's link, stretched over the row
 // so the whole of it is the target, and the time stays above it so a press on
 // the time still shows the full stamp rather than following the link.
-function homeRow(event, href, { unseen = false, chevron = false } = {}) {
+function homeRow(event, href, { unseen = false, chevron = false, action = false } = {}) {
+  const act = action ? actionFor(event) : "";
   return `<div class="row home-row${unseen ? " unread" : ""}">
     ${glyph(event.kind)}
     <div class="grow">
@@ -119,6 +120,7 @@ function homeRow(event, href, { unseen = false, chevron = false } = {}) {
       <div class="home-meta">${esc(projectName(event))} · ${esc(event.actor)} · ${timeHTML(event.created_at)}</div>
     </div>
     ${unseen ? '<span class="dot-unread"></span><span class="sr-only">Unread</span>' : ""}
+    ${act ? `<span class="home-actions">${act}</span>` : ""}
     ${chevron ? `<span class="home-chev">${CHEVRON(16)}</span>` : ""}
   </div>`;
 }
@@ -141,7 +143,7 @@ function waitingCard(waiting, items) {
       <h2 id="home-waiting-title">Waiting on you · ${waiting}</h2>
       <a class="home-more" href="#/inbox">Inbox${CHEVRON(12)}</a>
     </div>
-    ${shown.map((item) => homeRow(item, `#/inbox?open=${encodeURIComponent(item.event_id)}`, { chevron: true })).join("")}
+    ${shown.map((item) => homeRow(item, `#/inbox?open=${encodeURIComponent(item.event_id)}`, { chevron: true, action: true })).join("")}
     ${more}
   </section>`;
 }

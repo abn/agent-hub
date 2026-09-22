@@ -3,6 +3,15 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop home layout and inline waiting row actions
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the desktop Home layout: a single 640px measure column held left against
+  the permanent app rail with natural margin filling remaining window width,
+  and inline action buttons (Approve for approvals, Reply for questions)
+  rendered directly on waiting rows at desktop widths.
+
+
 ## 2026-09-22, desktop storage screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
