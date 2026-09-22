@@ -27,6 +27,10 @@ export const GLYPH_PATHS = {
   overflow:
     '<g fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></g>',
   resolve: '<path d="M 5 12l5 5 9-9"/>',
+  // The owner's call, against the designer's: a 40px circle cannot hold a word
+  // legibly, and every keyboard on a phone puts an arrow where this button is.
+  // Three strokes, one motif, nothing inside anything.
+  send: '<path d="M 12 20V5"/><path d="M 6 11l6-6 6 6"/>',
   signOut: '<path d="M 14 5H6v14h8"/><path d="M 13 12h8M 18 9l3 3-3 3"/>',
   trash: '<path d="M 5 7h14M 9 7V5h6v2M 7 7l1 13h8l1-13"/>',
 };

@@ -541,13 +541,16 @@ function renderPhoneSheet() {
   const sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "hub-sheet-send";
-  // A word, not a glyph: the set has no send motif and round 8 declined to add
-  // a twelfth. The word is Post rather than Send because the compose sheet's
-  // primary action is already Post and a reply is the same act against the
-  // same object. One act with two names was the other half of the drawer
-  // defect.
+  // An arrow, not a word. Round 8 declined a send motif and set the word to
+  // Post; the owner overruled that. The button is a 40px circle, which cannot
+  // hold a word legibly, and the arrow is what every phone keyboard puts in
+  // that position. The label still says Post reply, so the act keeps one name.
   sendBtn.setAttribute("aria-label", "Post reply");
-  sendBtn.textContent = "Post";
+  sendBtn.innerHTML = glyphSvg("send", { size: 20 });
+  // Dimmed until there is something to send: an empty reply is refused on
+  // click anyway, and a live button that does nothing is the same lie the
+  // drawer told.
+  sendBtn.disabled = true;
 
   const doSendReply = async () => {
     const text = replyInput.value.trim();
@@ -560,11 +563,14 @@ function renderPhoneSheet() {
     } catch (err) {
       drawerError(err.message);
     } finally {
-      sendBtn.disabled = false;
+      sendBtn.disabled = !replyInput.value.trim();
     }
   };
 
   sendBtn.addEventListener("click", doSendReply);
+  replyInput.addEventListener("input", () => {
+    sendBtn.disabled = !replyInput.value.trim();
+  });
   replyInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();

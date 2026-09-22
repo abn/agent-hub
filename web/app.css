@@ -4747,6 +4747,12 @@ a.session-back {
   flex: none;
 }
 
+.hub-sheet-send:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+  cursor: default;
+}
+
 .hub-sheet-footer {
   display: flex;
   justify-content: space-between;

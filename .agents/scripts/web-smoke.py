@@ -11013,6 +11013,48 @@ def check_document_comments(
             if sheet.count() == 0 or not sheet.first.is_visible():
                 watch.fail("[390px] tapping highlight did not open comment sheet")
             else:
+                # The reply send control is a glyph, dimmed until there is
+                # something to send. A 40px circle cannot hold a word legibly,
+                # and an always-live button says an empty field can be posted.
+                # Both halves are read off the rendered button, not the source.
+                send = sheet.locator(".hub-sheet-send").first
+                if send.count() == 0:
+                    watch.fail("[390px] the reply composer has no send control")
+                else:
+                    if send.locator("svg").count() == 0:
+                        watch.fail(
+                            "[390px] the reply send control draws no glyph:"
+                            f" it reads {send.inner_text()!r}"
+                        )
+                    if send.inner_text().strip():
+                        watch.fail(
+                            "[390px] the reply send control carries the word"
+                            f" {send.inner_text().strip()!r} beside its glyph"
+                        )
+                    if not send.is_disabled():
+                        watch.fail(
+                            "[390px] the reply send control is live with an empty field"
+                        )
+                    reply_box = sheet.locator(".hub-sheet-input").first
+                    reply_box.fill("A reply typed to wake the send control.")
+                    if not settle(
+                        p_mobile,
+                        "!document.querySelector('.hub-sheet-send')?.disabled",
+                        timeout=4000,
+                    ):
+                        watch.fail(
+                            "[390px] the reply send control stayed dimmed after typing"
+                        )
+                    reply_box.fill("")
+                    if not settle(
+                        p_mobile,
+                        "!!document.querySelector('.hub-sheet-send')?.disabled",
+                        timeout=4000,
+                    ):
+                        watch.fail(
+                            "[390px] the reply send control stayed live after clearing the field"
+                        )
+
                 # Header has 'Comment' and resolve control
                 resolve_btn = sheet.locator("button").filter(has_text="Resolve").first
                 if resolve_btn.count() == 0:
