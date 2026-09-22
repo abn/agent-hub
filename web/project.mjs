@@ -14,6 +14,8 @@ import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { settingsLink } from "./project-settings.mjs";
 import { sessionRows, sessionDetailView, wireSessionDetail } from "./sessions.mjs";
+import { formatBytes } from "./storage.mjs";
+import { relative } from "./time.mjs";
 
 const SEGMENTS = ["feed", "artifacts", "sessions"];
 
@@ -354,8 +356,166 @@ export async function projectScreen(params, gen, path) {
       returnSessionFocus(closed);
     }
   } else {
-    paint(gen, `${shell}${await feedSection(id, stats)}`);
+    const feedHTML = await feedSection(id, stats);
+    if (stale(gen)) return;
+    paint(
+      gen,
+      `${shell}<div class="panes panes-project"><div class="pane-stage">${feedHTML}</div><aside class="pane-aside project-aside" aria-label="Project state"></aside></div>`,
+    );
+    const asideHTML = await projectAside(id);
+    if (stale(gen)) return;
+    const asideEl = main.querySelector(".project-aside");
+    if (asideEl) {
+      asideEl.outerHTML = asideHTML;
+    }
   }
+}
+
+export async function projectAside(projectId) {
+  const [sessionsRes, storageRes, artifactsRes] = await Promise.all([
+    api(`/api/v1/sessions?project=${encodeURIComponent(projectId)}`).catch(() => ({ sessions: [] })),
+    api("/api/v1/storage").catch(() => null),
+    api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`).catch(() => ({ artifacts: [] })),
+  ]);
+
+  // 1. RIGHT NOW: active agents and their live sessions
+  const sessions = sessionsRes?.sessions || [];
+  const activeSessions = sessions.filter((s) => s.status === "active" && !s.deleted_at);
+  const activeCount = activeSessions.length;
+  let rightNowBody = "";
+  if (activeSessions.length > 0) {
+    rightNowBody = activeSessions
+      .map((s) => {
+        const dur = relative(s.touched_at || s.created_at);
+        const meta = `${esc(s.id)} · ${esc(dur)}`;
+        return `
+          <div class="aside-row">
+            <span class="aside-status-dot" aria-hidden="true"></span>
+            <span class="aside-agent-name">${esc(s.agent_name)}</span>
+            <span class="aside-session-meta mono">${meta}</span>
+          </div>`;
+      })
+      .join("");
+  } else {
+    rightNowBody = `<div class="aside-empty">No active agents</div>`;
+  }
+
+  const rightNowSection = `
+    <section class="aside-section" aria-label="Right now">
+      <div class="aside-section-head">
+        <span class="aside-section-title">RIGHT NOW</span>
+        <span class="aside-section-meta mono">${activeCount} active</span>
+      </div>
+      ${rightNowBody}
+    </section>`;
+
+  // 2. STORAGE: split (blobs, brains), reclaimable space, and a Prune action
+  const projUsage = storageRes?.projects?.find((p) => p.project_id === projectId);
+  const artifactBytes = projUsage?.artifact_bytes || 0;
+  const sessionBytes = projUsage?.session_bytes || 0;
+  const eventsBytes = (projUsage?.events_bytes || 0) + (projUsage?.kb_bytes || 0);
+  const totalBytes = artifactBytes + sessionBytes + eventsBytes;
+  const prunableBytes = projUsage?.prunable_bytes || 0;
+  const prunableSessions = projUsage?.prunable_sessions || 0;
+
+  const totalFormatted = formatBytes(totalBytes);
+  const artifactFormatted = formatBytes(artifactBytes);
+  const sessionFormatted = formatBytes(sessionBytes);
+  const eventsFormatted = formatBytes(eventsBytes);
+
+  let blobPct = 0;
+  let brainPct = 0;
+  let eventsPct = 0;
+  if (totalBytes > 0) {
+    blobPct = Math.round((artifactBytes / totalBytes) * 100);
+    brainPct = Math.round((sessionBytes / totalBytes) * 100);
+    eventsPct = Math.max(0, 100 - blobPct - brainPct);
+  }
+
+  let reclaimHTML = "";
+  if (prunableBytes > 0 || prunableSessions > 0) {
+    reclaimHTML = `
+      <div class="aside-storage-reclaim">
+        <span class="aside-reclaim-text">${formatBytes(prunableBytes)} reclaimable</span>
+        <button type="button" class="action aside-prune-btn" data-action="aside-prune" data-project="${esc(projectId)}" data-sessions="${prunableSessions}" data-bytes="${prunableBytes}">Prune</button>
+      </div>`;
+  } else {
+    reclaimHTML = `
+      <div class="aside-storage-reclaim">
+        <span class="aside-reclaim-text">-</span>
+      </div>`;
+  }
+
+  const storageSection = `
+    <section class="aside-section" aria-label="Storage">
+      <div class="aside-section-head">
+        <span class="aside-section-title">STORAGE</span>
+        <span class="aside-section-meta mono">${totalFormatted}</span>
+      </div>
+      <div class="aside-storage-body">
+        <div class="aside-storage-bar" aria-hidden="true">
+          <span style="width:${blobPct}%;background:var(--k-artifact)"></span>
+          <span style="width:${brainPct}%;background:var(--k-session)"></span>
+          <span style="width:${eventsPct}%;background:var(--line-strong)"></span>
+        </div>
+        <div class="aside-storage-row">
+          <span class="aside-storage-dot" style="background:var(--k-artifact)" aria-hidden="true"></span>
+          <span class="aside-storage-label">Artifact blobs</span>
+          <span class="aside-storage-size mono">${artifactFormatted}</span>
+        </div>
+        <div class="aside-storage-row">
+          <span class="aside-storage-dot" style="background:var(--k-session)" aria-hidden="true"></span>
+          <span class="aside-storage-label">Session brains</span>
+          <span class="aside-storage-size mono">${sessionFormatted}</span>
+        </div>
+        <div class="aside-storage-row">
+          <span class="aside-storage-dot" style="background:var(--line-strong)" aria-hidden="true"></span>
+          <span class="aside-storage-label">Events and index</span>
+          <span class="aside-storage-size mono">${eventsFormatted}</span>
+        </div>
+        ${reclaimHTML}
+      </div>
+    </section>`;
+
+  // 3. LATEST ARTIFACTS: quick links to recent artifacts
+  const artifacts = artifactsRes?.artifacts || [];
+  const latestArtifacts = artifacts.slice(0, 5);
+  let artifactsBody = "";
+  if (latestArtifacts.length > 0) {
+    artifactsBody = latestArtifacts
+      .map((a) => {
+        const lock = a.protected
+          ? `<span class="aside-lock" aria-label="Encrypted"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"></path></svg></span>`
+          : "";
+        return `
+          <div class="aside-row">
+            ${lock}
+            <span class="aside-artifact-title">
+              <a href="#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projectId)}" class="aside-artifact-link">${esc(a.title)}</a>
+            </span>
+            <span class="aside-artifact-meta mono">v${a.version} · ${formatBytes(a.size_bytes)}</span>
+          </div>`;
+      })
+      .join("");
+  } else {
+    artifactsBody = `<div class="aside-empty">No artifacts yet</div>`;
+  }
+
+  const artifactsSection = `
+    <section class="aside-section" aria-label="Latest artifacts">
+      <div class="aside-section-head">
+        <span class="aside-section-title">LATEST ARTIFACTS</span>
+        <a href="#/projects/${encodeURIComponent(projectId)}/artifacts" class="aside-all-link">All ${artifacts.length}</a>
+      </div>
+      ${artifactsBody}
+    </section>`;
+
+  return `
+    <aside class="pane-aside project-aside" aria-label="Project state">
+      ${rightNowSection}
+      ${storageSection}
+      ${artifactsSection}
+    </aside>`;
 }
 
 // The row selection the keyboard map owns: the project's segments all paint

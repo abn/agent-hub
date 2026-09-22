@@ -36,7 +36,7 @@ import { searchScreen } from "./search.mjs";
 import { endSession, pruneSession, sessionDetail } from "./sessions.mjs";
 import { deleteProject, enableNotifications, settingsScreen, signOut } from "./settings.mjs";
 import { installShell } from "./shell.mjs";
-import { storageScreen } from "./storage.mjs";
+import { pruneProject, storageScreen } from "./storage.mjs";
 import { toast } from "./toast.mjs";
 
 // The legacy per-project addresses feed, sessions and artifacts now live at
@@ -119,6 +119,20 @@ main.addEventListener("click", (event) => {
   if (action === "version-pick") pickVersion(id, button.dataset.version);
   if (action === "viewer-raw") toggleRaw(button);
   if (action === "viewer-theme") toggleViewerTheme();
+  if (action === "aside-toggle") {
+    const panes = main.querySelector(".panes");
+    if (panes) {
+      panes.classList.toggle("aside-open");
+      const open = panes.classList.contains("aside-open");
+      button.setAttribute("aria-expanded", String(open));
+    }
+  }
+  if (action === "aside-prune") {
+    const projId = button.dataset.project || id;
+    const count = Number(button.dataset.sessions || 0);
+    const bytes = Number(button.dataset.bytes || 0);
+    acted(button, pruneProject({ project_id: projId, prunable_sessions: count, prunable_bytes: bytes }));
+  }
   if (action === "project-delete") acted(button, deleteProject(id));
   if (action === "signout") acted(button, signOut());
   if (action === "notification-enable") acted(button, enableNotifications());

@@ -285,7 +285,7 @@ async function commit(path, expected, bytes) {
   });
 }
 
-async function pruneProject(project) {
+export async function pruneProject(project) {
   const id = project.project_id;
   // The listing names what goes. The count and the bytes stay the storage
   // response's, which is what the button already showed.

@@ -59,7 +59,8 @@ export function kindChips(active, counts = {}) {
     .filter(({ kind }) => (counts[kind] ?? 0) > 0)
     .map(({ kind, label }) => chip(kind, label, counts[kind] ?? 0, active.has(kind)))
     .join("");
-  return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", total, active.size === 0)}${chips}</div>`;
+  const asideToggle = `<button type="button" class="aside-toggle" data-action="aside-toggle" aria-expanded="false" aria-label="Toggle details">Details</button>`;
+  return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", total, active.size === 0)}${chips}<span class="feed-chips-spacer"></span>${asideToggle}</div>`;
 }
 
 // The dot is a colour and a shape, so the word sits beside it for a reader
@@ -219,17 +220,22 @@ function feedRow(event, baseline) {
   const unread = event.id > baseline;
   const href = feedDestination(event);
   const summaryText = formatEventSummary(event);
+  const open = isOpen(event);
   const title = href
     ? `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`
     : `<div class="title">${esc(summaryText)}</div>`;
+  const waitingPill = open ? `<span class="pill pill-waiting">Waiting on you</span>` : "";
   return `<div class="row feed-row${unread ? " unread" : ""}">
     ${glyph(event.kind)}
     <div class="grow" data-id="${esc(event.id)}">
-      ${title}
+      <div class="feed-row-title-bar">
+        ${title}
+        ${waitingPill}
+      </div>
       ${decisionNote(event)}
       <div class="meta">${esc(event.actor)} · ${when(event.created_at)}</div>
     </div>
-    ${isOpen(event) ? actionFor(event) : ""}
+    ${open ? actionFor(event) : ""}
     ${unread ? UNREAD : ""}
   </div>`;
 }
@@ -294,7 +300,11 @@ function markSeen(projectId, visit) {
   if (visit.filtered || !newest || newest <= visit.sent) return;
   const painted = () => feedProject(location.hash) === projectId && !!main.querySelector(".feed-chips");
   const send = () => {
-    if (visits.get(projectId) !== visit || !painted() || newest <= visit.sent) return;
+    if (visits.get(projectId) !== visit || newest <= visit.sent) return;
+    if (!painted()) {
+      setTimeout(send, 50);
+      return;
+    }
     if (document.visibilityState !== "visible") {
       document.addEventListener("visibilitychange", send, { once: true });
       return;

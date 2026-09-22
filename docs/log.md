@@ -3,6 +3,14 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop project screen layout, aside, and inline actions
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  desktop project screen layout: a 320px aside at 1280px and above (toggleable
+  from 1100 to 1279px) with three sections (Right now, Storage, and Latest
+  artifacts), and inline Approve and Reply controls on feed rows.
+
+
 ## 2026-09-22, app rail, pane layout zones, and prose measure
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the

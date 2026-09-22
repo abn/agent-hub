@@ -310,5 +310,5 @@ export function installKeys() {
   installed = true;
   document.addEventListener("keydown", onKey);
   main.addEventListener("focusin", onFocusIn);
-  new MutationObserver(repainted).observe(main, { childList: true });
+  new MutationObserver(repainted).observe(main, { childList: true, subtree: true });
 }

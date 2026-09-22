@@ -3705,6 +3705,192 @@ def check_panes_stage_width(browser, watch: Watch, port: int, project: str) -> N
             watch.drain_rejections()
 
 
+def check_desktop_project(browser, watch: Watch, port: int, project: str) -> None:
+    """Project screen renders rail, stage, and 320px aside with live sections and inline actions."""
+    watch.enter("desktop: project screen layout and aside")
+    check_proj = "desktop-project-check"
+    harness.request(port, "POST", "/api/v1/projects", {"id": check_proj, "display_name": "Desktop Project"})
+    session: list[str] = []
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "session_start",
+                "arguments": {
+                    "project_id": check_proj,
+                    "session_name": "live-session",
+                },
+            },
+        },
+    )
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_publish",
+                "arguments": {
+                    "project_id": check_proj,
+                    "title": "desktop-spec.md",
+                    "kind": "markdown",
+                    "content": "# Desktop Spec\nContent here.",
+                },
+            },
+        },
+    )
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "signal_append",
+                "arguments": {
+                    "project_id": check_proj,
+                    "kind": "approval",
+                    "summary": "Deploy desktop layout update",
+                },
+            },
+        },
+    )
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "question_post",
+                "arguments": {
+                    "project_id": check_proj,
+                    "subject": "Keep desktop layout aside?",
+                },
+            },
+        },
+    )
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        "localStorage.setItem('hub.theme', 'light');"
+    )
+    page = context.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/projects/{quote(check_proj)}/feed", wait_until="load")
+        if not settle(
+            page,
+            "!!document.querySelector('main .feed-row, main .row') && !!document.querySelector('aside .aside-section')",
+        ):
+            watch.fail("project feed rows or aside sections not found at 1440px")
+            return
+
+        # 1. 320px aside renders at desktop width (>= 1280px)
+        aside_box = page.evaluate("""() => {
+            const a = document.querySelector('aside[aria-label="Project state"], main .pane-aside, aside.pane');
+            if (!a) return null;
+            const s = getComputedStyle(a);
+            if (s.display === 'none') return null;
+            const rect = a.getBoundingClientRect();
+            return { width: rect.width, text: a.textContent };
+        }""")
+        if not aside_box or abs(aside_box["width"] - 320) > 1.5:
+            watch.fail(
+                f"project aside width is {aside_box['width'] if aside_box else None}px at 1440px, expected 320px"
+            )
+
+        # 2. Aside contains three structured sections: RIGHT NOW, STORAGE, LATEST ARTIFACTS
+        if aside_box:
+            for section in ("RIGHT NOW", "STORAGE", "LATEST ARTIFACTS"):
+                if section not in aside_box["text"]:
+                    watch.fail(f"project aside missing section '{section}': {aside_box['text'][:150]!r}")
+
+        # 3. Inline actions: Approve and Reply controls appear directly on the feed row
+        feed_actions = page.evaluate("""() => {
+            const rows = Array.from(document.querySelectorAll('.feed-row, main .row'));
+            let hasApprove = false;
+            let hasReply = false;
+            for (const r of rows) {
+                const btns = Array.from(r.querySelectorAll('button, .action'));
+                for (const b of btns) {
+                    const txt = b.textContent.trim();
+                    if (txt === "Approve" || b.dataset.action === "approve") {
+                        hasApprove = true;
+                    }
+                    if (txt === "Reply" || b.dataset.action === "answer") {
+                        hasReply = true;
+                    }
+                }
+            }
+            return { hasApprove, hasReply };
+        }""")
+        if not feed_actions["hasApprove"]:
+            watch.fail("inline Approve control missing on project feed row")
+        if not feed_actions["hasReply"]:
+            watch.fail("inline Reply control missing on project feed row")
+
+        # 4. Breakpoint transition: 1200px (1100-1279px toggleable aside)
+        page.set_viewport_size({"width": 1200, "height": 900})
+        if not settle(
+            page,
+            "(() => { const a = document.querySelector('aside[aria-label=\"Project state\"], main .pane-aside, aside.pane'); return !a || getComputedStyle(a).display === 'none'; })()",
+        ):
+            watch.fail("project aside opened as column at 1200px without toggle; must be hidden/toggleable under 1280px")
+
+        # Toggle button opens aside at 1200px
+        toggle_btn = page.locator('[data-action="aside-toggle"]')
+        if toggle_btn.count() > 0:
+            toggle_btn.click()
+            if not settle(
+                page,
+                "(() => { const a = document.querySelector('aside[aria-label=\"Project state\"], main .pane-aside, aside.pane'); return !!a && getComputedStyle(a).display !== 'none' && Math.abs(a.getBoundingClientRect().width - 320) <= 1.5; })()",
+            ):
+                watch.fail("toggle button did not open 320px aside at 1200px")
+            toggle_btn.click()
+            if not settle(
+                page,
+                "(() => { const a = document.querySelector('aside[aria-label=\"Project state\"], main .pane-aside, aside.pane'); return !a || getComputedStyle(a).display === 'none'; })()",
+            ):
+                watch.fail("toggle button did not close aside at 1200px")
+        else:
+            watch.fail("aside toggle button not found at 1200px")
+
+        # 5. Breakpoint transition: 400px (phone: aside hidden)
+        page.set_viewport_size({"width": 400, "height": 844})
+        if not settle(
+            page,
+            "(() => { const a = document.querySelector('aside[aria-label=\"Project state\"], main .pane-aside, aside.pane'); return !a || getComputedStyle(a).display === 'none'; })()",
+        ):
+            watch.fail("project aside visible on mobile phone viewport (< 720px)")
+    finally:
+        context.close()
+        watch.page.bring_to_front()
+        watch.drain_rejections()
+
+
 # What the detail screen's rows that name a session king are, and what their
 # colours must be. The row's own server word stays `status`; the design's three
 # states are drawn with a dot, a ring and a filled circle.
@@ -5130,7 +5316,7 @@ def check_feed_days(page, watch: Watch) -> None:
         watch.fail("the feed painted no feed rows")
         return
     days = page.evaluate(
-        "[...document.querySelectorAll('main > h2.day')].map((h) => { const s ="
+        "[...document.querySelectorAll('main h2.day')].map((h) => { const s ="
         " getComputedStyle(h); return { text: h.textContent.trim(), size: s.fontSize,"
         " weight: s.fontWeight, caps: s.textTransform,"
         " rows: h.nextElementSibling.querySelectorAll('.feed-row').length }; })"
@@ -10349,6 +10535,7 @@ def run() -> int:
                 run_step(watch, check_desktop_rail, browser, watch, port)
                 run_step(watch, check_prose_measure, browser, watch, port)
                 run_step(watch, check_panes_stage_width, browser, watch, port, project)
+                run_step(watch, check_desktop_project, browser, watch, port, project)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_waiting_items, page, watch)
