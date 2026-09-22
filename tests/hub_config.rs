@@ -1,12 +1,13 @@
 //! Resolving the settings that name the hub a client talks to.
 //!
 //! The file and the environment carry the same keys, so the tests cover both
-//! sources, their precedence, and the shapes a hand-written file takes. The
-//! process environment is never touched: resolution takes its lookup as an
-//! argument.
+//! sources, their precedence, and the shapes a TOML config file takes. The
+//! process environment is never touched directly: resolution takes its lookup
+//! as an argument.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use agent_hub::config::{ClientConfig, Config};
 
@@ -14,24 +15,36 @@ mod common;
 
 use common::temp::TempDir;
 
-/// A temp directory holding one config file, removed when the test ends.
+/// A temp directory holding a user config file, removed when the test ends.
 struct TempHome(TempDir);
 
 impl TempHome {
     fn new(tag: &str) -> Self {
         let home = TempDir::new(&format!("config-{tag}"));
-        std::fs::create_dir_all(home.join(".agent-hub")).expect("create temp home");
+        std::fs::create_dir_all(home.join(".config").join("agent-hub")).expect("create temp home");
         Self(home)
     }
 
-    /// Write the default config file and return the home directory.
+    /// Write the default user config.toml and return the home directory.
     fn with_config(self, contents: &str) -> Self {
-        std::fs::write(self.0.join(".agent-hub").join("config"), contents).expect("write config");
+        std::fs::write(
+            self.0.join(".config").join("agent-hub").join("config.toml"),
+            contents,
+        )
+        .expect("write config");
+        self
+    }
+
+    /// Write a legacy env-style config file at ~/.agent-hub/config.
+    fn with_legacy_config(self, contents: &str) -> Self {
+        std::fs::create_dir_all(self.0.join(".agent-hub")).expect("create .agent-hub");
+        std::fs::write(self.0.join(".agent-hub").join("config"), contents)
+            .expect("write legacy config");
         self
     }
 
     fn path(&self) -> PathBuf {
-        self.0.join(".agent-hub").join("config")
+        self.0.join(".config").join("agent-hub").join("config.toml")
     }
 }
 
@@ -45,10 +58,256 @@ fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
 }
 
 #[test]
-fn the_file_supplies_every_key_when_the_environment_is_empty() {
-    let home = TempHome::new("file-only").with_config(
-        "HUB_URL=http://hub.lan:8080\nHUB_TOKEN=file-token\nHUB_AGENT_ID=agent/laptop\n",
+fn a_key_set_only_in_the_system_file_survives_a_user_file_setting_a_different_key() {
+    let system_dir = TempDir::new("system-config");
+    let system_file = system_dir.join("config.toml");
+    std::fs::write(&system_file, "[hub]\ndata_dir = \"/custom/data\"\n").expect("write system");
+
+    let home = TempDir::new("user-home");
+    let user_config_dir = home.join(".config").join("agent-hub");
+    std::fs::create_dir_all(&user_config_dir).expect("create user dir");
+    std::fs::write(
+        user_config_dir.join("config.toml"),
+        "[hub]\nbind = \"127.0.0.1:9090\"\n",
+    )
+    .expect("write user");
+
+    let lookup = env(&[
+        (
+            "AGENT_HUB_SYSTEM_CONFIG",
+            system_file.to_str().expect("utf-8 path"),
+        ),
+        ("HOME", home.to_str().expect("utf-8 path")),
+    ]);
+
+    let config = Config::resolve(&lookup).expect("resolve");
+    assert_eq!(config.data_dir, PathBuf::from("/custom/data"));
+    assert_eq!(config.bind, "127.0.0.1:9090".parse().expect("addr"));
+}
+
+#[test]
+fn user_file_overrides_system_file_key_by_key() {
+    let system_dir = TempDir::new("system-override");
+    let system_file = system_dir.join("config.toml");
+    std::fs::write(
+        &system_file,
+        "[hub]\nbind = \"127.0.0.1:8000\"\ndata_dir = \"/system/data\"\n",
+    )
+    .expect("write system");
+
+    let home = TempHome::new("override").with_config("[hub]\nbind = \"127.0.0.1:9090\"\n");
+    let lookup = env(&[
+        (
+            "AGENT_HUB_SYSTEM_CONFIG",
+            system_file.to_str().expect("utf-8 path"),
+        ),
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+    ]);
+
+    let config = Config::resolve(&lookup).expect("resolve");
+    assert_eq!(
+        config.bind,
+        "127.0.0.1:9090".parse().expect("addr"),
+        "user file overrides bind"
     );
+    assert_eq!(
+        config.data_dir,
+        PathBuf::from("/system/data"),
+        "system file data_dir survives"
+    );
+}
+
+#[test]
+fn environment_beats_user_and_system_file_for_every_key() {
+    let system_dir = TempDir::new("system-env");
+    let system_file = system_dir.join("config.toml");
+    std::fs::write(
+        &system_file,
+        "[hub]\nbind = \"127.0.0.1:8000\"\ndata_dir = \"/system/data\"\n",
+    )
+    .expect("write system");
+
+    let home = TempHome::new("env-beats").with_config("[hub]\nbind = \"127.0.0.1:9000\"\n");
+    let lookup = env(&[
+        (
+            "AGENT_HUB_SYSTEM_CONFIG",
+            system_file.to_str().expect("utf-8 path"),
+        ),
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_BIND", "127.0.0.1:9999"),
+    ]);
+
+    let config = Config::resolve(&lookup).expect("resolve");
+    assert_eq!(
+        config.bind,
+        "127.0.0.1:9999".parse().expect("addr"),
+        "environment beats both files"
+    );
+    assert_eq!(
+        config.data_dir,
+        PathBuf::from("/system/data"),
+        "system data_dir survives"
+    );
+}
+
+#[test]
+fn empty_environment_variable_does_not_shadow_file_value() {
+    let home = TempHome::new("empty-env").with_config("[client]\nurl = \"http://file.lan:8080\"\n");
+    let lookup = env(&[
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_URL", ""),
+    ]);
+
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    assert_eq!(config.url.as_deref(), Some("http://file.lan:8080"));
+}
+
+#[test]
+fn empty_toml_value_does_not_shadow_system_value() {
+    let system_dir = TempDir::new("empty-toml-sys");
+    let system_file = system_dir.join("config.toml");
+    std::fs::write(&system_file, "[hub]\ndata_dir = \"/system/data\"\n").expect("write system");
+
+    let home = TempHome::new("empty-toml-user").with_config("[hub]\ndata_dir = \"\"\n");
+    let lookup = env(&[
+        (
+            "AGENT_HUB_SYSTEM_CONFIG",
+            system_file.to_str().expect("utf-8 path"),
+        ),
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+    ]);
+
+    let config = Config::resolve(&lookup).expect("resolve");
+    assert_eq!(
+        config.data_dir,
+        PathBuf::from("/system/data"),
+        "empty user value does not shadow system value"
+    );
+}
+
+#[test]
+fn hub_config_replaces_both_levels() {
+    let system_dir = TempDir::new("hub-cfg-sys");
+    let system_file = system_dir.join("config.toml");
+    std::fs::write(&system_file, "[hub]\ndata_dir = \"/system/data\"\n").expect("write system");
+
+    let home = TempHome::new("hub-cfg-user").with_config("[hub]\nnode_name = \"user-node\"\n");
+
+    let custom_dir = TempDir::new("hub-cfg-custom");
+    let custom_file = custom_dir.join("custom.toml");
+    std::fs::write(
+        &custom_file,
+        "[hub]\nbind = \"127.0.0.1:7777\"\nnode_name = \"custom-node\"\n",
+    )
+    .expect("write custom");
+
+    let lookup = env(&[
+        (
+            "AGENT_HUB_SYSTEM_CONFIG",
+            system_file.to_str().expect("utf-8 path"),
+        ),
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_CONFIG", custom_file.to_str().expect("utf-8 path")),
+    ]);
+
+    let config = Config::resolve(&lookup).expect("resolve");
+    assert_eq!(config.bind, "127.0.0.1:7777".parse().expect("addr"));
+    assert_eq!(config.node_name.as_deref(), Some("custom-node"));
+    assert_eq!(
+        config.data_dir,
+        PathBuf::from("./data"),
+        "system file data_dir is not read"
+    );
+}
+
+#[test]
+fn xdg_user_file_shadows_fallback_user_file() {
+    let home = TempDir::new("shadow-home");
+    let xdg_dir = home.join(".config").join("agent-hub");
+    std::fs::create_dir_all(&xdg_dir).expect("create xdg dir");
+    std::fs::write(
+        xdg_dir.join("config.toml"),
+        "[client]\nurl = \"http://xdg.lan:8080\"\n",
+    )
+    .expect("write xdg config");
+
+    let fallback_dir = home.join(".agent-hub");
+    std::fs::create_dir_all(&fallback_dir).expect("create fallback dir");
+    std::fs::write(
+        fallback_dir.join("config.toml"),
+        "[client]\nurl = \"http://fallback.lan:8080\"\n",
+    )
+    .expect("write fallback config");
+
+    let lookup = env(&[("HOME", home.to_str().expect("utf-8 path"))]);
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    assert_eq!(config.url.as_deref(), Some("http://xdg.lan:8080"));
+}
+
+#[test]
+fn fallback_user_file_is_read_when_no_xdg_file_exists() {
+    let home = TempDir::new("fallback-home");
+    let fallback_dir = home.join(".agent-hub");
+    std::fs::create_dir_all(&fallback_dir).expect("create fallback dir");
+    std::fs::write(
+        fallback_dir.join("config.toml"),
+        "[client]\nurl = \"http://fallback.lan:8080\"\n",
+    )
+    .expect("write fallback config");
+
+    let lookup = env(&[("HOME", home.to_str().expect("utf-8 path"))]);
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    assert_eq!(config.url.as_deref(), Some("http://fallback.lan:8080"));
+}
+
+#[test]
+fn client_key_under_hub_table_is_unknown_and_warns() {
+    let home = TempHome::new("wrong-table").with_config("[hub]\nurl = \"http://hub.lan:8080\"\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    assert_eq!(
+        config.url, None,
+        "a client key under [hub] is ignored, not applied"
+    );
+}
+
+#[test]
+fn unknown_table_warns_and_continues() {
+    let home = TempHome::new("unknown-table").with_config(concat!(
+        "[custom_section]\n",
+        "some_setting = true\n\n",
+        "[client]\n",
+        "url = \"http://hub.lan:8080\"\n"
+    ));
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    assert_eq!(config.url.as_deref(), Some("http://hub.lan:8080"));
+}
+
+#[test]
+fn unparseable_toml_fails_startup_naming_file_and_line() {
+    let home = TempHome::new("bad-toml").with_config("[client\nurl = 123\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let err = ClientConfig::resolve(&lookup).expect_err("bad TOML must fail");
+    let message = err.to_string();
+    assert!(
+        message.contains(&home.path().display().to_string()),
+        "names the file: {message}"
+    );
+    assert!(message.contains("line"), "names the line number: {message}");
+}
+
+#[test]
+fn the_file_supplies_every_key_when_the_environment_is_empty() {
+    let home = TempHome::new("file-only").with_config(concat!(
+        "[client]\n",
+        "url = \"http://hub.lan:8080\"\n",
+        "token = \"file-token\"\n",
+        "agent_id = \"agent/laptop\"\n",
+    ));
     let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
 
     let config = ClientConfig::resolve(&lookup).expect("resolve");
@@ -77,8 +336,11 @@ fn the_environment_supplies_every_key_with_no_file() {
 
 #[test]
 fn the_environment_wins_over_the_file_key_by_key() {
-    let home =
-        TempHome::new("both").with_config("HUB_URL=http://file.lan:8080\nHUB_TOKEN=file-token\n");
+    let home = TempHome::new("both").with_config(concat!(
+        "[client]\n",
+        "url = \"http://file.lan:8080\"\n",
+        "token = \"file-token\"\n",
+    ));
     let lookup = env(&[
         ("HOME", home.0.to_str().expect("utf-8 path")),
         ("HUB_TOKEN", "env-token"),
@@ -86,38 +348,9 @@ fn the_environment_wins_over_the_file_key_by_key() {
 
     let config = ClientConfig::resolve(&lookup).expect("resolve");
 
-    // Each key resolves on its own, so an override of one keeps the others.
     assert_eq!(config.url.as_deref(), Some("http://file.lan:8080"));
     assert_eq!(config.token.as_deref(), Some("env-token"));
     assert_eq!(config.agent_id, None);
-}
-
-#[test]
-fn comments_blank_lines_and_quotes_are_read_the_way_a_shell_reads_them() {
-    let home = TempHome::new("shapes").with_config(concat!(
-        "# the hub on the landing\n",
-        "\n",
-        "  HUB_URL = \"http://hub.lan:8080\"  \n",
-        "HUB_TOKEN='quoted token'\n",
-        "  # trailing comment line\n",
-    ));
-    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
-
-    let config = ClientConfig::resolve(&lookup).expect("resolve");
-
-    assert_eq!(config.url.as_deref(), Some("http://hub.lan:8080"));
-    assert_eq!(config.token.as_deref(), Some("quoted token"));
-}
-
-#[test]
-fn an_unknown_key_is_ignored_rather_than_refused() {
-    let home = TempHome::new("unknown")
-        .with_config("HUB_FUTURE_SETTING=whatever\nHUB_URL=http://hub.lan:8080\n");
-    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
-
-    let config = ClientConfig::resolve(&lookup).expect("resolve");
-
-    assert_eq!(config.url.as_deref(), Some("http://hub.lan:8080"));
 }
 
 #[test]
@@ -131,52 +364,163 @@ fn a_missing_file_is_not_an_error() {
 }
 
 #[test]
-fn hub_config_names_another_file() {
-    let home = TempHome::new("hub-config").with_config("HUB_URL=http://default.lan:8080\n");
-    let other = home.0.join("other-config");
-    std::fs::write(&other, "HUB_URL=http://other.lan:8080\n").expect("write other config");
-    let lookup = env(&[
-        ("HOME", home.0.to_str().expect("utf-8 path")),
-        ("HUB_CONFIG", other.to_str().expect("utf-8 path")),
-    ]);
+fn migration_creates_config_toml_once_with_mode_0600_and_is_noop_on_second_run() {
+    let home = TempHome::new("migrate").with_legacy_config(concat!(
+        "# old agent config\n",
+        "HUB_URL=http://legacy.lan:8080\n",
+        "HUB_TOKEN=\"legacy-token-secret-1234567890\"\n",
+        "HUB_AGENT_ID=legacy-agent\n",
+        "HUB_TIMEOUT=45\n",
+    ));
 
-    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    let migrated_file = home.0.join(".agent-hub").join("config.toml");
+    assert!(
+        !migrated_file.exists(),
+        "target does not exist before first run"
+    );
 
-    assert_eq!(config.url.as_deref(), Some("http://other.lan:8080"));
-}
-
-#[test]
-fn a_line_that_is_not_a_key_value_pair_names_its_line_number() {
-    let home = TempHome::new("bad-line")
-        .with_config("HUB_URL=http://hub.lan:8080\nthis is not a setting\n");
     let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
 
-    let err = ClientConfig::resolve(&lookup).expect_err("an unparseable line is refused");
-    let message = err.to_string();
+    // First run triggers migration:
+    let config = ClientConfig::resolve(&lookup).expect("resolve triggers migration");
+    assert_eq!(config.url.as_deref(), Some("http://legacy.lan:8080"));
+    assert_eq!(
+        config.token.as_deref(),
+        Some("legacy-token-secret-1234567890")
+    );
+    assert_eq!(config.agent_id.as_deref(), Some("legacy-agent"));
+    assert_eq!(config.timeout, std::time::Duration::from_secs(45));
 
+    assert!(migrated_file.is_file(), "config.toml was created");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&migrated_file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "migrated file has mode 0600");
+    }
+
+    // Old file was preserved:
+    let old_file = home.0.join(".agent-hub").join("config");
+    assert!(old_file.is_file(), "old file was not deleted");
+
+    // Second run: no-op, reads config.toml directly:
+    let config2 = ClientConfig::resolve(&lookup).expect("second run succeeds");
+    assert_eq!(config2.url.as_deref(), Some("http://legacy.lan:8080"));
+}
+
+#[test]
+fn config_command_prints_both_spellings_and_masks_token() {
+    let home = TempHome::new("cli-config").with_config(concat!(
+        "[client]\n",
+        "url = \"http://hub.lan:8080\"\n",
+        "token = \"tok_1234567890abcdef123456789012\"\n",
+        "[hub]\n",
+        "bind = \"127.0.0.1:47318\"\n",
+        "admin_token = \"adm_secret1234567890abcdef12345678\"\n"
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .arg("config")
+        .env("HOME", home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", home.0.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", home.0.join("absent-system.toml"))
+        .output()
+        .expect("run agent-hub config");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Both spellings on each line:
     assert!(
-        message.contains("line 2"),
-        "the message names the line to fix, got {message:?}"
+        stdout.contains("[hub] bind") && stdout.contains("HUB_BIND"),
+        "prints both spellings for bind: {stdout}"
     );
     assert!(
-        message.contains(&home.path().display().to_string()),
-        "the message names the file to fix, got {message:?}"
+        stdout.contains("[client] url") && stdout.contains("HUB_URL"),
+        "prints both spellings for url: {stdout}"
+    );
+
+    // Token masking:
+    assert!(
+        stdout.contains("tok_... (32 chars)"),
+        "client token is masked: {stdout}"
+    );
+    assert!(
+        stdout.contains("adm_... (34 chars)"),
+        "admin token is masked: {stdout}"
+    );
+
+    // Secret token is never printed in full:
+    assert!(
+        !stdout.contains("tok_1234567890abcdef123456789012"),
+        "token never printed in full: {stdout}"
+    );
+    assert!(
+        !stdout.contains("adm_secret1234567890abcdef12345678"),
+        "admin token never printed in full: {stdout}"
     );
 }
 
 #[test]
-fn no_home_and_no_hub_config_resolves_to_nothing_set() {
-    let lookup = env(&[]);
+fn config_path_command_reports_file_states() {
+    let home = TempHome::new("cli-path").with_config("[client]\nurl = \"http://hub.lan:8080\"\n");
 
-    let config = ClientConfig::resolve(&lookup).expect("resolve");
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .args(["config", "--path"])
+        .env("HOME", home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", home.0.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", home.0.join("absent-system.toml"))
+        .output()
+        .expect("run agent-hub config --path");
 
-    assert_eq!(config, ClientConfig::default());
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("system"), "lists system level: {stdout}");
+    assert!(stdout.contains("user"), "lists user level: {stdout}");
+    assert!(stdout.contains("found"), "reports found state: {stdout}");
+}
+
+#[test]
+fn config_check_command_validates_configuration() {
+    let home =
+        TempHome::new("cli-check-ok").with_config("[client]\nurl = \"http://hub.lan:8080\"\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .args(["config", "--check"])
+        .env("HOME", home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", home.0.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", home.0.join("absent-system.toml"))
+        .output()
+        .expect("run agent-hub config --check");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+
+    // Invalid config should fail with non-zero exit code:
+    let bad_home =
+        TempHome::new("cli-check-bad").with_config("[client]\ntimeout = \"not-a-number\"\n");
+    let bad_output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .args(["config", "--check"])
+        .env("HOME", bad_home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", bad_home.0.join(".config"))
+        .env(
+            "AGENT_HUB_SYSTEM_CONFIG",
+            bad_home.0.join("absent-system.toml"),
+        )
+        .output()
+        .expect("run agent-hub config --check");
+
+    assert_eq!(bad_output.status.code(), Some(78), "{bad_output:?}");
 }
 
 #[cfg(unix)]
 #[test]
 fn a_file_others_can_read_warns_when_it_holds_a_token() {
-    let path = Path::new(".agent-hub/config");
+    let path = Path::new(".agent-hub/config.toml");
 
     let warning = agent_hub::config::config_permissions_warning(path, 0o644, true)
         .expect("a group and world readable token file warns");
@@ -186,7 +530,7 @@ fn a_file_others_can_read_warns_when_it_holds_a_token() {
         "the warning says how to fix it, got {warning:?}"
     );
     assert!(
-        warning.contains("config"),
+        warning.contains("config.toml"),
         "the warning names the file, got {warning:?}"
     );
 }
@@ -194,7 +538,7 @@ fn a_file_others_can_read_warns_when_it_holds_a_token() {
 #[cfg(unix)]
 #[test]
 fn an_owner_only_file_and_a_tokenless_file_do_not_warn() {
-    let path = Path::new(".agent-hub/config");
+    let path = Path::new(".agent-hub/config.toml");
 
     assert_eq!(
         agent_hub::config::config_permissions_warning(path, 0o600, true),

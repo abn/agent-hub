@@ -93,9 +93,7 @@ fn error_object(code: &str, message: &str) -> Value {
 /// Open one MCP session on the hub and keep it until the caller drops it.
 pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient, ()>, Failure> {
     let url = config.url.as_deref().ok_or_else(|| {
-        Failure::Config(
-            "no hub URL configured; set HUB_URL or write it to ~/.agent-hub/config".to_string(),
-        )
+        Failure::Config("no hub URL configured; set HUB_URL or write it to config.toml".to_string())
     })?;
     let endpoint = format!("{}/mcp", url.trim_end_matches('/'));
     let mut transport_config = StreamableHttpClientTransportConfig::with_uri(endpoint.as_str());

@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-22, unified TOML configuration and inspect commands
+
+* **Update**: [Quickstart](usage/quickstart.md) documents layered TOML
+  configuration (`config.toml`) shared by hub and client across system and
+  user locations, overridden by environment variables, and the `agent-hub config`
+  inspection commands (`--path`, `--check`).
+
 ## 2026-09-22, trust removal and confidential projects
 
 * **Update**: [ADR 0021](adr/0021-the-token-is-the-identity.md) moves to

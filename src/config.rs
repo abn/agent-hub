@@ -1,15 +1,31 @@
-//! Process configuration, read from the environment.
+//! Process and client configuration, read from config files and the environment.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::limits::InboxCaps;
 
+/// Keys the client table carries.
+pub const CLIENT_KEYS: &[&str] = &["url", "token", "agent_id", "project", "timeout"];
+
+/// Keys the hub table carries.
+pub const HUB_KEYS: &[&str] = &[
+    "bind",
+    "data_dir",
+    "admin_token",
+    "node_name",
+    "public_url",
+    "active_window_secs",
+    "inbox_action_per_agent",
+    "inbox_action_per_project",
+    "tailnet",
+    "tailnet_port",
+    "tailnet_control_url",
+];
+
 /// The settings that name the hub a client reaches.
-///
-/// The same keys come from the environment or from an env-style file, so
-/// a hook can export them or source the file and get the same behaviour.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientConfig {
     /// Base URL of a running hub, such as `http://hub.lan:8080`.
@@ -20,28 +36,14 @@ pub struct ClientConfig {
     pub agent_id: Option<String>,
     /// The project the knowledge-base shorthands act on, when no flag names one.
     pub project: Option<String>,
-    /// How long one call may take, handshake to answer. A hook that waits on a
-    /// stalled hub forever stalls the harness that ran it.
+    /// How long one call may take, handshake to answer.
     pub timeout: std::time::Duration,
 }
 
-/// The default for `HUB_TIMEOUT`. Long enough for a large artifact on a slow
-/// link, short enough that a hung hub is noticed.
+/// The default for `HUB_TIMEOUT`.
 const CLIENT_TIMEOUT_SECS: f64 = 120.0;
 
-/// Keys the config file carries. Anything else is a setting this build does
-/// not know, so it is ignored rather than refused.
-const CLIENT_KEYS: [&str; 5] = [
-    "HUB_URL",
-    "HUB_TOKEN",
-    "HUB_AGENT_ID",
-    "HUB_PROJECT",
-    "HUB_TIMEOUT",
-];
-
 impl Default for ClientConfig {
-    /// Nothing set, with the default time limit: a derived default would make
-    /// the limit zero, which no call can meet.
     fn default() -> Self {
         Self {
             url: None,
@@ -54,30 +56,23 @@ impl Default for ClientConfig {
 }
 
 impl ClientConfig {
-    /// Read the settings from the process environment and the config file.
+    /// Read the settings from the process environment and config files.
     pub fn from_env() -> Result<Self> {
         Self::resolve(&|key| std::env::var(key).ok())
     }
 
-    /// Resolve the settings from an environment lookup and the config file.
-    ///
-    /// The lookup is an argument so the precedence rule is testable without
-    /// mutating the process environment. The environment wins over the file,
-    /// key by key, so a per-invocation override needs no edit.
+    /// Resolve the settings from an environment lookup and layered config files.
     pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
-        let file = match client_config_path(env) {
-            Some(path) => read_client_config(&path)?,
-            None => Vec::new(),
-        };
-        let pick = |key: &str| {
-            present(env(key)).or_else(|| {
-                file.iter()
-                    .rev()
-                    .find(|(name, _)| name == key)
-                    .and_then(|(_, value)| present(Some(value.clone())))
-            })
-        };
-        let timeout = match pick("HUB_TIMEOUT") {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+
+        let url = Setting::resolved(env, "client", "url", &files, None).value;
+        let token = Setting::resolved(env, "client", "token", &files, None).value;
+        let agent_id = Setting::resolved(env, "client", "agent_id", &files, None).value;
+        let project = Setting::resolved(env, "client", "project", &files, None).value;
+
+        let timeout_str = Setting::resolved(env, "client", "timeout", &files, Some("120")).value;
+        let timeout = match timeout_str {
             None => CLIENT_TIMEOUT_SECS,
             Some(value) => match value.parse::<f64>() {
                 Ok(seconds) if seconds.is_finite() && seconds > 0.0 => seconds,
@@ -88,80 +83,20 @@ impl ClientConfig {
                 }
             },
         };
+
         Ok(Self {
-            url: pick("HUB_URL"),
-            token: pick("HUB_TOKEN"),
-            agent_id: pick("HUB_AGENT_ID"),
-            project: pick("HUB_PROJECT"),
+            url,
+            token,
+            agent_id,
+            project,
             timeout: std::time::Duration::from_secs_f64(timeout),
         })
     }
 }
 
-/// An empty value is the same as an unset one, so a blanked variable does not
-/// shadow the file with nothing.
-fn present(value: Option<String>) -> Option<String> {
-    value.filter(|value| !value.is_empty())
-}
-
-/// The config file this client reads: `HUB_CONFIG`, or `~/.agent-hub/config`.
-///
-/// The home directory comes from `HOME`, which every supported platform sets;
-/// resolving it any other way would mean a dependency for one path join.
-fn client_config_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    if let Some(path) = present(env("HUB_CONFIG")) {
-        return Some(PathBuf::from(path));
-    }
-    present(env("HOME")).map(|home| PathBuf::from(home).join(".agent-hub").join("config"))
-}
-
-/// Read and parse the config file, if it is there.
-///
-/// A missing file is not an error: the environment alone is a complete
-/// configuration, and the embedded stdio mode needs neither.
-fn read_client_config(path: &Path) -> Result<Vec<(String, String)>> {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => {
-            return Err(Error::Config(format!(
-                "{} could not be read: {err}",
-                path.display()
-            )));
-        }
-    };
-    let entries = parse_client_config(&contents, path)?;
-    warn_on_permissions(path, &entries);
-    Ok(entries)
-}
-
-/// Parse env-style `KEY=value` lines.
-///
-/// Blank lines and `#` comments are skipped, surrounding quotes are stripped,
-/// and nothing is interpolated: the file holds three scalars, so a shell-like
-/// expansion would be surprise, not convenience.
-fn parse_client_config(contents: &str, path: &Path) -> Result<Vec<(String, String)>> {
-    let mut entries = Vec::new();
-    for (index, line) in contents.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(Error::Config(format!(
-                "{}: line {} is not a KEY=value setting, a comment, or blank",
-                path.display(),
-                index + 1
-            )));
-        };
-        let key = key.trim().to_string();
-        if !CLIENT_KEYS.contains(&key.as_str()) {
-            tracing::debug!(key, path = %path.display(), "ignoring an unknown config key");
-            continue;
-        }
-        entries.push((key, unquote(value.trim()).to_string()));
-    }
-    Ok(entries)
+/// An empty value is the same as an unset one.
+pub fn present(value: Option<String>) -> Option<String> {
+    value.filter(|val| !val.is_empty())
 }
 
 /// Strip one layer of matching surrounding quotes.
@@ -177,46 +112,31 @@ fn unquote(value: &str) -> &str {
     value
 }
 
-/// Tell the operator when a file holding a token is readable by others.
-///
-/// A warning, never a refusal: refusing would break a working setup on a
-/// machine the operator already controls.
-fn warn_on_permissions(path: &Path, entries: &[(String, String)]) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let has_token = entries.iter().any(|(key, _)| key == "HUB_TOKEN");
-        let Ok(metadata) = std::fs::metadata(path) else {
-            return;
-        };
-        if let Some(warning) =
-            config_permissions_warning(path, metadata.permissions().mode(), has_token)
-        {
-            // Written straight to stderr rather than through tracing: the
-            // warning has to reach an operator who set no log filter, and
-            // stdout is the protocol or the hook's JSON.
-            eprintln!("agent-hub: {warning}");
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, entries);
-    }
+/// Escape string for TOML serialization during migration.
+fn escape_toml_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
-/// The warning a config file's mode earns, if any.
-///
-/// Takes the mode rather than reading it, so the rule is testable without
-/// a file whose permissions a test harness may not be able to set.
+/// Tell the operator when a file holding a token is readable by others.
 #[cfg(unix)]
 pub fn config_permissions_warning(path: &Path, mode: u32, has_token: bool) -> Option<String> {
     (has_token && mode & 0o077 != 0).then(|| {
         format!(
-            "{} holds HUB_TOKEN and is readable beyond its owner; chmod 600 it",
-            path.display()
+            "{} (mode {:04o}) holds a token and is readable beyond its owner; chmod 600 it",
+            path.display(),
+            mode & 0o7777
         )
     })
+}
+
+#[cfg(not(unix))]
+pub fn config_permissions_warning(_path: &Path, _mode: u32, _has_token: bool) -> Option<String> {
+    None
 }
 
 /// Everything the process needs to start.
@@ -227,7 +147,6 @@ pub struct Config {
     /// Address the HTTP API and PWA bind to.
     pub bind: SocketAddr,
     /// External origin the hub is reached at, when the operator set one.
-    /// Overrides every request-derived origin in a served document.
     pub public_url: Option<String>,
     /// Optional admin token for the control surface.
     pub admin_token: Option<String>,
@@ -240,24 +159,10 @@ pub struct Config {
     pub node_name: Option<String>,
 }
 
-/// The default for `HUB_ACTIVE_WINDOW_SECS`. Long enough that an agent
-/// thinking between tool calls does not blink out of the count, short enough
-/// that a fleet gone quiet shows as quiet.
 const ACTIVE_WINDOW_SECS: u64 = 900;
-
-/// The largest window the setting accepts, thirty days.
-///
-/// An agent whose last call was a month ago is not at work by any reading, so
-/// nothing above this is a window an operator meant. The ceiling is also what
-/// keeps the value one a date can be stepped back by: the subtraction in
-/// [`Config::active_since`] would otherwise be handed a span no calendar
-/// covers.
 const ACTIVE_WINDOW_SECS_MAX: u64 = 30 * 24 * 60 * 60;
 
 /// The embedded tailnet endpoint configuration.
-///
-/// The endpoint is addressed by tailnet IP, since the library has no tailnet
-/// name resolution, and is off unless `HUB_TAILNET` is set.
 #[derive(Debug, Clone, Default)]
 pub struct Tailnet {
     /// A Tailscale auth key. Present when the endpoint is enabled.
@@ -266,8 +171,7 @@ pub struct Tailnet {
     pub port: u16,
     /// Directory holding the device key state, under the data directory.
     pub state_dir: PathBuf,
-    /// Optional control server URL, for a self-hosted control plane. The
-    /// library's public control plane is used when this is unset.
+    /// Optional control server URL, for a self-hosted control plane.
     pub control_url: Option<url::Url>,
 }
 
@@ -279,30 +183,37 @@ impl Tailnet {
 }
 
 impl Config {
-    /// Read configuration from the environment, falling back to safe defaults.
+    /// Read configuration from environment and config files.
     pub fn from_env() -> Result<Self> {
-        let data_dir = std::env::var("HUB_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("./data"));
+        Self::resolve(&|key| std::env::var(key).ok())
+    }
 
-        let bind: SocketAddr = std::env::var("HUB_BIND")
-            .unwrap_or_else(|_| "127.0.0.1:8080".to_string())
+    /// Resolve configuration from environment lookup and layered config files.
+    pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+
+        let data_dir_str = Setting::resolved(env, "hub", "data_dir", &files, Some("./data"))
+            .value
+            .unwrap_or_else(|| "./data".to_string());
+        let data_dir = PathBuf::from(data_dir_str);
+
+        let bind_str = Setting::resolved(env, "hub", "bind", &files, Some("127.0.0.1:8080"))
+            .value
+            .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+        let bind: SocketAddr = bind_str
             .parse()
             .map_err(|err| Error::Config(format!("HUB_BIND is not a socket address: {err}")))?;
 
-        // Validated here, not at the first request, so a typo fails startup
-        // instead of shipping a wrong origin into a policy and a served skill.
-        let public_url = match std::env::var("HUB_PUBLIC_URL") {
-            Ok(value) if !value.trim().is_empty() => Some(Self::parse_public_url(value.trim())?),
+        let public_url = match Setting::resolved(env, "hub", "public_url", &files, None).value {
+            Some(value) if !value.trim().is_empty() => Some(Self::parse_public_url(value.trim())?),
             _ => None,
         };
 
-        let admin_token = std::env::var("HUB_ADMIN_TOKEN")
-            .ok()
+        let admin_token = Setting::resolved(env, "hub", "admin_token", &files, None)
+            .value
             .filter(|token| !token.is_empty());
 
-        // The control surface fails closed without a token, so an exposed bind
-        // would be dead. Require the token off loopback; only warn locally.
         if admin_token.is_none() {
             if !bind.ip().is_loopback() {
                 return Err(Error::Config(
@@ -314,18 +225,18 @@ impl Config {
             );
         }
 
-        let inbox_caps = InboxCaps::parse(
-            std::env::var("HUB_INBOX_ACTION_PER_AGENT").ok().as_deref(),
-            std::env::var("HUB_INBOX_ACTION_PER_PROJECT")
-                .ok()
-                .as_deref(),
-        )?;
+        let inbox_agent =
+            Setting::resolved(env, "hub", "inbox_action_per_agent", &files, Some("100")).value;
+        let inbox_project =
+            Setting::resolved(env, "hub", "inbox_action_per_project", &files, Some("1000")).value;
+        let inbox_caps = InboxCaps::parse(inbox_agent.as_deref(), inbox_project.as_deref())?;
 
-        let active_window =
-            Self::parse_active_window(std::env::var("HUB_ACTIVE_WINDOW_SECS").ok().as_deref())?;
+        let active_window_str =
+            Setting::resolved(env, "hub", "active_window_secs", &files, Some("900")).value;
+        let active_window = Self::parse_active_window(active_window_str.as_deref())?;
 
-        let node_name = std::env::var("HUB_NODE_NAME")
-            .ok()
+        let node_name = Setting::resolved(env, "hub", "node_name", &files, None)
+            .value
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
 
@@ -341,9 +252,6 @@ impl Config {
     }
 
     /// Read the window an agent stays counted as active for.
-    ///
-    /// Takes the value rather than reading it, so the rule is testable without
-    /// mutating the process environment under the other tests.
     pub fn parse_active_window(value: Option<&str>) -> Result<std::time::Duration> {
         let secs = match value.map(str::trim).filter(|value| !value.is_empty()) {
             None => ACTIVE_WINDOW_SECS,
@@ -360,11 +268,6 @@ impl Config {
     }
 
     /// The instant a session must have been touched since to count as active.
-    ///
-    /// The parser bounds the window, so the subtraction is in range; it is
-    /// still done checked. A read surface that panicked over a timestamp would
-    /// take Home down on every request, and a configuration this cannot
-    /// express is better served by counting nobody than by a dead screen.
     pub fn active_since(&self) -> String {
         let now = time::OffsetDateTime::now_utc();
         let window = time::Duration::try_from(self.active_window).unwrap_or(time::Duration::MAX);
@@ -381,11 +284,6 @@ impl Config {
     }
 
     /// Normalise the operator's external origin.
-    ///
-    /// The value is spliced into a content policy and into served documents,
-    /// so it has to be a bare `http` or `https` origin: a host, an optional
-    /// port, and nothing else. The parsed origin drops a default port and a
-    /// trailing slash, so every call site names the same string.
     pub fn parse_public_url(value: &str) -> Result<String> {
         let url: url::Url = value
             .parse()
@@ -415,9 +313,6 @@ impl Config {
             )));
         }
         let origin = url.origin().ascii_serialization();
-        // The origin is written into a content policy and into markup exactly
-        // as a request host is, so it is held to the same characters. A stray
-        // `;` or quote would otherwise break the frame policy silently.
         let authority = origin.split_once("://").map_or("", |(_, rest)| rest);
         if !crate::http::origin::is_safe_host(authority) {
             return Err(Error::Config(format!(
@@ -427,45 +322,63 @@ impl Config {
         Ok(origin)
     }
 
-    /// Whether a tailnet auth key is configured, so the process should opt into
-    /// the embedded tailnet's experimental guard before starting.
+    /// Whether a tailnet auth key is configured.
     pub fn tailnet_requested(&self) -> bool {
-        std::env::var("HUB_TAILNET").is_ok_and(|key| !key.is_empty())
+        self.tailnet_requested_with(&|key| std::env::var(key).ok())
+    }
+
+    pub fn tailnet_requested_with(&self, env: &dyn Fn(&str) -> Option<String>) -> bool {
+        let loaded = load_layered_configs(env).unwrap_or_default();
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+        Setting::resolved(env, "hub", "tailnet", &files, None)
+            .value
+            .is_some_and(|key| !key.is_empty())
     }
 
     /// Read the optional embedded tailnet endpoint configuration.
-    ///
-    /// Kept out of [`Config`] so the common configuration stays small and a
-    /// build without the feature does not carry it.
     pub fn tailnet_from_env(&self) -> Result<Tailnet> {
-        let port = match std::env::var("HUB_TAILNET_PORT") {
-            Ok(value) => value
-                .parse()
+        self.tailnet_resolve(&|key| std::env::var(key).ok())
+    }
+
+    pub fn tailnet_resolve(&self, env: &dyn Fn(&str) -> Option<String>) -> Result<Tailnet> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+
+        let auth_key = Setting::resolved(env, "hub", "tailnet", &files, None)
+            .value
+            .filter(|key| !key.is_empty());
+
+        let port_str = Setting::resolved(env, "hub", "tailnet_port", &files, Some("8080")).value;
+        let port = match port_str {
+            Some(value) => value
+                .parse::<u16>()
                 .map_err(|_| Error::Config(format!("HUB_TAILNET_PORT is not a port: {value}")))?,
-            Err(_) => 8080,
+            None => 8080,
         };
-        // Validated here, not in the spawned endpoint task, so a typo fails
-        // startup instead of leaving a dead endpoint behind a healthy hub.
-        let control_url = match std::env::var("HUB_TAILNET_CONTROL_URL") {
-            Ok(value) if !value.is_empty() => Some(value.parse().map_err(|err| {
+
+        let control_url_str =
+            Setting::resolved(env, "hub", "tailnet_control_url", &files, None).value;
+        let control_url = match control_url_str {
+            Some(value) if !value.is_empty() => Some(value.parse().map_err(|err| {
                 Error::Config(format!("HUB_TAILNET_CONTROL_URL is not a URL: {err}"))
             })?),
             _ => None,
         };
+
         let tailnet = Tailnet {
-            auth_key: std::env::var("HUB_TAILNET")
-                .ok()
-                .filter(|key| !key.is_empty()),
+            auth_key,
             port,
             state_dir: self.data_dir.join("tailnet"),
             control_url,
         };
+
         if tailnet.enabled() && !cfg!(feature = "tailnet") {
             return Err(Error::Config(
                 "HUB_TAILNET is set but the binary was built without the tailnet feature"
                     .to_string(),
             ));
         }
+
         Ok(tailnet)
     }
 
@@ -480,9 +393,6 @@ impl Config {
     }
 
     /// Directory holding one knowledge base file per project.
-    ///
-    /// A sibling of the sessions directory, not a file inside it, so a session
-    /// prune cannot reach a knowledge base by construction.
     pub fn knowledge_dir(&self) -> PathBuf {
         crate::brain::knowledge_dir(&self.data_dir)
     }
@@ -491,4 +401,607 @@ impl Config {
     pub fn artifacts_dir(&self) -> PathBuf {
         self.data_dir.join("artifacts")
     }
+}
+
+/// A parsed TOML configuration file.
+#[derive(Debug, Clone, Default)]
+pub struct ParsedConfigFile {
+    pub path: PathBuf,
+    pub hub: HashMap<String, String>,
+    pub client: HashMap<String, String>,
+}
+
+/// Load and parse a config file, warning on unknown keys/tables and mode.
+pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(Error::Config(format!(
+                "{} could not be read: {err}",
+                path.display()
+            )));
+        }
+    };
+
+    let table = match contents.parse::<toml::Table>() {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(Error::Config(format!("{}: {err}", path.display())));
+        }
+    };
+
+    let mut parsed = ParsedConfigFile {
+        path: path.to_path_buf(),
+        hub: HashMap::new(),
+        client: HashMap::new(),
+    };
+
+    for (key, value) in &table {
+        if key == "hub" {
+            let Some(subtable) = value.as_table() else {
+                return Err(Error::Config(format!(
+                    "{}: [hub] must be a table",
+                    path.display()
+                )));
+            };
+            for (k, v) in subtable {
+                if !HUB_KEYS.contains(&k.as_str()) {
+                    eprintln!(
+                        "agent-hub: {}: unknown key '{k}' under '[hub]'",
+                        path.display()
+                    );
+                    continue;
+                }
+                let val_str = extract_value(path, "hub", k, v)?;
+                if let Some(val) = val_str {
+                    parsed.hub.insert(k.clone(), val);
+                }
+            }
+        } else if key == "client" {
+            let Some(subtable) = value.as_table() else {
+                return Err(Error::Config(format!(
+                    "{}: [client] must be a table",
+                    path.display()
+                )));
+            };
+            for (k, v) in subtable {
+                if !CLIENT_KEYS.contains(&k.as_str()) {
+                    eprintln!(
+                        "agent-hub: {}: unknown key '{k}' under '[client]'",
+                        path.display()
+                    );
+                    continue;
+                }
+                let val_str = extract_value(path, "client", k, v)?;
+                if let Some(val) = val_str {
+                    parsed.client.insert(k.clone(), val);
+                }
+            }
+        } else if value.is_table() {
+            eprintln!("agent-hub: {}: unknown table '[{key}]'", path.display());
+        } else {
+            eprintln!("agent-hub: {}: unknown key '{key}'", path.display());
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let has_token =
+            parsed.client.contains_key("token") || parsed.hub.contains_key("admin_token");
+        if let Ok(metadata) = std::fs::metadata(path)
+            && let Some(warning) =
+                config_permissions_warning(path, metadata.permissions().mode(), has_token)
+        {
+            eprintln!("agent-hub: {warning}");
+        }
+    }
+
+    Ok(Some(parsed))
+}
+
+fn extract_value(
+    path: &Path,
+    table: &str,
+    key: &str,
+    value: &toml::Value,
+) -> Result<Option<String>> {
+    match (table, key) {
+        ("client", "timeout") => match value {
+            toml::Value::Integer(i) if *i > 0 => Ok(Some(i.to_string())),
+            toml::Value::Float(f) if f.is_finite() && *f > 0.0 => Ok(Some(f.to_string())),
+            _ => Err(Error::Config(format!(
+                "{}: [{table}] timeout must be a number of seconds above zero",
+                path.display()
+            ))),
+        },
+        (
+            "hub",
+            "active_window_secs"
+            | "inbox_action_per_agent"
+            | "inbox_action_per_project"
+            | "tailnet_port",
+        ) => match value {
+            toml::Value::Integer(i) => Ok(Some(i.to_string())),
+            _ => Err(Error::Config(format!(
+                "{}: [{table}] {key} must be an integer",
+                path.display()
+            ))),
+        },
+        _ => match value {
+            toml::Value::String(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(trimmed.to_string()))
+                }
+            }
+            _ => Err(Error::Config(format!(
+                "{}: [{table}] {key} must be a string",
+                path.display()
+            ))),
+        },
+    }
+}
+
+/// Where a setting resolved from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingSource {
+    Environment,
+    File(PathBuf),
+    Default,
+}
+
+/// A resolved configuration setting.
+#[derive(Debug, Clone)]
+pub struct Setting {
+    pub value: Option<String>,
+    pub source: SettingSource,
+}
+
+impl Setting {
+    pub fn resolved(
+        env: &dyn Fn(&str) -> Option<String>,
+        table: &str,
+        key: &str,
+        files: &[&ParsedConfigFile],
+        default_val: Option<&str>,
+    ) -> Self {
+        let env_var = format!("HUB_{}", key.to_ascii_uppercase());
+        if let Some(val) = present(env(&env_var)) {
+            return Self {
+                value: Some(val),
+                source: SettingSource::Environment,
+            };
+        }
+
+        for file in files {
+            let map = match table {
+                "hub" => &file.hub,
+                "client" => &file.client,
+                _ => continue,
+            };
+            if let Some(val) = map.get(key)
+                && let Some(val) = present(Some(val.clone()))
+            {
+                return Self {
+                    value: Some(val),
+                    source: SettingSource::File(file.path.clone()),
+                };
+            }
+        }
+
+        Self {
+            value: default_val.map(str::to_string),
+            source: SettingSource::Default,
+        }
+    }
+}
+
+/// Resolve candidate paths for config files.
+pub fn resolve_paths(
+    env: &dyn Fn(&str) -> Option<String>,
+) -> (Option<PathBuf>, PathBuf, Vec<PathBuf>) {
+    let hub_config = present(env("HUB_CONFIG")).map(PathBuf::from);
+
+    let system_path = present(env("AGENT_HUB_SYSTEM_CONFIG"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/etc/agent-hub/config.toml"));
+
+    let mut user_candidates = Vec::new();
+    if let Some(xdg) = present(env("XDG_CONFIG_HOME")) {
+        user_candidates.push(PathBuf::from(xdg).join("agent-hub").join("config.toml"));
+    } else if let Some(home) = present(env("HOME")) {
+        user_candidates.push(
+            PathBuf::from(&home)
+                .join(".config")
+                .join("agent-hub")
+                .join("config.toml"),
+        );
+    }
+    if let Some(home) = present(env("HOME")) {
+        user_candidates.push(PathBuf::from(home).join(".agent-hub").join("config.toml"));
+    }
+
+    (hub_config, system_path, user_candidates)
+}
+
+/// Check if migration from old env-style `~/.agent-hub/config` is needed.
+pub fn check_and_perform_migration(
+    env: &dyn Fn(&str) -> Option<String>,
+    user_candidates: &[PathBuf],
+) {
+    let Some(home) = present(env("HOME")) else {
+        return;
+    };
+    let old_path = PathBuf::from(&home).join(".agent-hub").join("config");
+    if !old_path.is_file() {
+        return;
+    }
+    if user_candidates.iter().any(|p| p.is_file()) {
+        return;
+    }
+
+    let target_path = PathBuf::from(home).join(".agent-hub").join("config.toml");
+    if let Err(err) = migrate_legacy_config(&old_path, &target_path) {
+        eprintln!(
+            "agent-hub: warning: could not migrate {} to {}: {err}",
+            old_path.display(),
+            target_path.display()
+        );
+    }
+}
+
+fn migrate_legacy_config(old_path: &Path, new_path: &Path) -> Result<()> {
+    let contents = std::fs::read_to_string(old_path).map_err(|err| {
+        Error::Config(format!("{}: could not be read: {err}", old_path.display()))
+    })?;
+
+    let mut client_entries = Vec::new();
+    let mut hub_entries = Vec::new();
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once('=') {
+            let k = k.trim();
+            let v = unquote(v.trim());
+            let lower = k.strip_prefix("HUB_").unwrap_or(k).to_ascii_lowercase();
+            if HUB_KEYS.contains(&lower.as_str()) {
+                hub_entries.push((lower, v.to_string()));
+            } else {
+                client_entries.push((lower, v.to_string()));
+            }
+        }
+    }
+
+    let mut toml_out = String::new();
+    if !client_entries.is_empty() {
+        toml_out.push_str("[client]\n");
+        for (k, v) in client_entries {
+            if k == "timeout"
+                && let Ok(num) = v.parse::<f64>()
+            {
+                toml_out.push_str(&format!("{k} = {num}\n"));
+                continue;
+            }
+            toml_out.push_str(&format!("{k} = \"{}\"\n", escape_toml_string(&v)));
+        }
+        toml_out.push('\n');
+    }
+    if !hub_entries.is_empty() {
+        toml_out.push_str("[hub]\n");
+        for (k, v) in hub_entries {
+            if matches!(
+                k.as_str(),
+                "active_window_secs"
+                    | "inbox_action_per_agent"
+                    | "inbox_action_per_project"
+                    | "tailnet_port"
+            ) && let Ok(num) = v.parse::<i64>()
+            {
+                toml_out.push_str(&format!("{k} = {num}\n"));
+                continue;
+            }
+            toml_out.push_str(&format!("{k} = \"{}\"\n", escape_toml_string(&v)));
+        }
+    }
+
+    if let Some(parent) = new_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            Error::Config(format!(
+                "{}: could not create directory: {err}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    std::fs::write(new_path, toml_out)
+        .map_err(|err| Error::Config(format!("{}: could not write: {err}", new_path.display())))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(new_path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    eprintln!(
+        "agent-hub: migrated {} to {}",
+        old_path.display(),
+        new_path.display()
+    );
+
+    Ok(())
+}
+
+/// Load configuration files in layer order (user first, then system; or HUB_CONFIG alone).
+pub fn load_layered_configs(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ParsedConfigFile>> {
+    let (hub_config, system_path, user_candidates) = resolve_paths(env);
+    check_and_perform_migration(env, &user_candidates);
+
+    if let Some(path) = hub_config {
+        if let Some(parsed) = load_config_file(&path)? {
+            return Ok(vec![parsed]);
+        }
+        return Ok(Vec::new());
+    }
+
+    let mut loaded = Vec::new();
+    if let Some(user_path) = user_candidates.iter().find(|p| p.is_file())
+        && let Some(parsed) = load_config_file(user_path)?
+    {
+        loaded.push(parsed);
+    }
+    if system_path.is_file()
+        && let Some(parsed) = load_config_file(&system_path)?
+    {
+        loaded.push(parsed);
+    }
+
+    Ok(loaded)
+}
+
+/// Format token securely: first 4 chars + length, never in full.
+pub fn mask_token(token: &str) -> String {
+    let char_count = token.chars().count();
+    let prefix: String = token.chars().take(4).collect();
+    let unit = if char_count == 1 { "char" } else { "chars" };
+    format!("{prefix}... ({char_count} {unit})")
+}
+
+fn format_source(source: &SettingSource, home: Option<&str>) -> String {
+    match source {
+        SettingSource::Environment => "environment".to_string(),
+        SettingSource::Default => "default".to_string(),
+        SettingSource::File(path) => {
+            let path_str = path.display().to_string();
+            if let Some(home) = home
+                && let Some(rest) = path_str.strip_prefix(home)
+            {
+                return format!("~{rest}");
+            }
+            path_str
+        }
+    }
+}
+
+fn format_path_display(path: &Path, home: Option<&str>) -> String {
+    let path_str = path.display().to_string();
+    if let Some(home) = home
+        && let Some(rest) = path_str.strip_prefix(home)
+    {
+        return format!("~{rest}");
+    }
+    path_str
+}
+
+pub struct ConfigReportRow {
+    pub col1: String,
+    pub env_var: String,
+    pub value: String,
+    pub source: String,
+}
+
+pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ConfigReportRow>> {
+    let loaded = load_layered_configs(env)?;
+    let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+    let home = present(env("HOME"));
+
+    let defs: Vec<(&str, &str, &str, Option<&str>, bool)> = vec![
+        ("hub", "bind", "HUB_BIND", Some("127.0.0.1:8080"), false),
+        ("hub", "data_dir", "HUB_DATA_DIR", Some("./data"), false),
+        ("hub", "admin_token", "HUB_ADMIN_TOKEN", None, true),
+        ("hub", "node_name", "HUB_NODE_NAME", None, false),
+        ("hub", "public_url", "HUB_PUBLIC_URL", None, false),
+        (
+            "hub",
+            "active_window_secs",
+            "HUB_ACTIVE_WINDOW_SECS",
+            Some("900"),
+            false,
+        ),
+        (
+            "hub",
+            "inbox_action_per_agent",
+            "HUB_INBOX_ACTION_PER_AGENT",
+            Some("100"),
+            false,
+        ),
+        (
+            "hub",
+            "inbox_action_per_project",
+            "HUB_INBOX_ACTION_PER_PROJECT",
+            Some("1000"),
+            false,
+        ),
+        ("hub", "tailnet", "HUB_TAILNET", None, true),
+        (
+            "hub",
+            "tailnet_port",
+            "HUB_TAILNET_PORT",
+            Some("8080"),
+            false,
+        ),
+        (
+            "hub",
+            "tailnet_control_url",
+            "HUB_TAILNET_CONTROL_URL",
+            None,
+            false,
+        ),
+        ("client", "url", "HUB_URL", None, false),
+        ("client", "token", "HUB_TOKEN", None, true),
+        ("client", "agent_id", "HUB_AGENT_ID", None, false),
+        ("client", "project", "HUB_PROJECT", None, false),
+        ("client", "timeout", "HUB_TIMEOUT", Some("120"), false),
+    ];
+
+    let mut rows = Vec::new();
+    for (table, key, env_var, default_val, is_secret) in defs {
+        let setting = Setting::resolved(env, table, key, &files, default_val);
+        let value_display = match setting.value {
+            None => "(unset)".to_string(),
+            Some(val) if is_secret => mask_token(&val),
+            Some(val) => val,
+        };
+        let source_display = format_source(&setting.source, home.as_deref());
+        rows.push(ConfigReportRow {
+            col1: format!("[{table}] {key}"),
+            env_var: env_var.to_string(),
+            value: value_display,
+            source: source_display,
+        });
+    }
+
+    Ok(rows)
+}
+
+/// Print the report of every setting, its value, and where it came from.
+pub fn print_config(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+    let rows = generate_config_rows(env)?;
+    let w1 = rows.iter().map(|r| r.col1.len()).max().unwrap_or(18) + 2;
+    let w2 = rows.iter().map(|r| r.env_var.len()).max().unwrap_or(28) + 2;
+    let w3 = rows.iter().map(|r| r.value.len()).max().unwrap_or(20) + 2;
+
+    for row in rows {
+        println!(
+            "{:<w1$}{:<w2$}{:<w3$}{}",
+            row.col1, row.env_var, row.value, row.source
+        );
+    }
+    Ok(())
+}
+
+/// Print the configuration files that would be read, found or not.
+pub fn print_config_paths(env: &dyn Fn(&str) -> Option<String>) {
+    let (hub_config, system_path, user_candidates) = resolve_paths(env);
+    check_and_perform_migration(env, &user_candidates);
+
+    let home = present(env("HOME"));
+    let mut rows: Vec<(&str, String, &str)> = Vec::new();
+
+    if let Some(path) = hub_config {
+        let status = if path.is_file() { "found" } else { "not found" };
+        rows.push((
+            "custom",
+            format_path_display(&path, home.as_deref()),
+            status,
+        ));
+        rows.push((
+            "system",
+            format_path_display(&system_path, home.as_deref()),
+            "not read (replaced by HUB_CONFIG)",
+        ));
+        for cand in &user_candidates {
+            rows.push((
+                "user",
+                format_path_display(cand, home.as_deref()),
+                "not read (replaced by HUB_CONFIG)",
+            ));
+        }
+    } else {
+        let status = if system_path.is_file() {
+            "found"
+        } else {
+            "not found"
+        };
+        rows.push((
+            "system",
+            format_path_display(&system_path, home.as_deref()),
+            status,
+        ));
+
+        let cand1 = user_candidates.first();
+        let cand2 = user_candidates.get(1);
+
+        if let Some(c1) = cand1 {
+            if c1.is_file() {
+                rows.push(("user", format_path_display(c1, home.as_deref()), "found"));
+                if let Some(c2) = cand2 {
+                    rows.push((
+                        "user",
+                        format_path_display(c2, home.as_deref()),
+                        "not read (shadowed)",
+                    ));
+                }
+            } else if let Some(c2) = cand2 {
+                if c2.is_file() {
+                    rows.push((
+                        "user",
+                        format_path_display(c1, home.as_deref()),
+                        "not found",
+                    ));
+                    rows.push(("user", format_path_display(c2, home.as_deref()), "found"));
+                } else {
+                    rows.push((
+                        "user",
+                        format_path_display(c1, home.as_deref()),
+                        "not found",
+                    ));
+                    rows.push((
+                        "user",
+                        format_path_display(c2, home.as_deref()),
+                        "not found",
+                    ));
+                }
+            } else {
+                rows.push((
+                    "user",
+                    format_path_display(c1, home.as_deref()),
+                    "not found",
+                ));
+            }
+        }
+    }
+
+    let w_path = rows.iter().map(|(_, p, _)| p.len()).max().unwrap_or(36) + 2;
+    for (level, path, status) in rows {
+        println!("{:<8}{:<w_path$}{}", level, path, status);
+    }
+}
+
+/// Validate process and client configuration, exiting with error if invalid.
+pub fn validate_configuration(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+    let (hub_config, system_path, user_candidates) = resolve_paths(env);
+    check_and_perform_migration(env, &user_candidates);
+
+    if let Some(path) = &hub_config {
+        let _ = load_config_file(path)?;
+    } else {
+        if system_path.is_file() {
+            let _ = load_config_file(&system_path)?;
+        }
+        if let Some(user_path) = user_candidates.iter().find(|p| p.is_file()) {
+            let _ = load_config_file(user_path)?;
+        }
+    }
+
+    Config::resolve(env)?;
+    ClientConfig::resolve(env)?;
+
+    Ok(())
 }

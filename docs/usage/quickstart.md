@@ -32,22 +32,27 @@ cargo build --release --locked
 
 ## Configure
 
-The binary reads its configuration from the environment.
+The binary reads its configuration from `config.toml` (system
+`/etc/agent-hub/config.toml` layered with user
+`$XDG_CONFIG_HOME/agent-hub/config.toml`, else
+`~/.config/agent-hub/config.toml`, fallback `~/.agent-hub/config.toml`, or
+named by `HUB_CONFIG`), overridden by environment variables. The inspect
+command (`agent-hub config`, `--path`, `--check`) reports the active settings,
+search paths, and validation status.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
-| `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the `hub listening` log line names it |
-| `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
-| `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
-| `HUB_AGENT_ID` | `local` | Actor label recorded for the embedded stdio admin process; advisory against a running hub, which takes the identity from the token |
-| `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
-| `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
-| `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
-| `HUB_NODE_NAME` | the host name | Name the human sees for this node; set it when the host name is a generated container id |
-| `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
-| `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
-| `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
+| Key (`[hub]`) | Variable | Default | Purpose |
+|---|---|---|---|
+| `data_dir` | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
+| `bind` | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the `hub listening` log line names it |
+| `public_url` | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
+| `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
+| `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
+| `inbox_action_per_agent` | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
+| `inbox_action_per_project` | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
+| `node_name` | `HUB_NODE_NAME` | the host name | Name the human sees for this node; set it when the host name is a generated container id |
+| `tailnet` | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
+| `tailnet_port` | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
+| `tailnet_control_url` | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
 
 Without `HUB_PUBLIC_URL` the hub reads its own address off each request: the
 forwarded scheme and host, then the request host, then the bind. Set it when a
@@ -125,16 +130,17 @@ under Settings or through the agent routes; see the
 ## Reach the hub from a client machine
 
 The same binary is the client. It reads its settings from the environment
-first and then from `~/.agent-hub/config`, an env-style file with the same
-names that a shell can source; `HUB_CONFIG` names another file, a missing file
-is not an error, and a file holding a token that others can read warns on
-stderr and still works.
+first and then from `config.toml` (`~/.config/agent-hub/config.toml` or
+`~/.agent-hub/config.toml`, layered over `/etc/agent-hub/config.toml`);
+`HUB_CONFIG` names another file, a missing file is not an error, and a file
+holding a token that others can read warns on stderr and still works.
 
-```
-HUB_URL=http://hub.lan:8080
-HUB_TOKEN=...
-HUB_AGENT_ID=my-agent
-HUB_PROJECT=homelab
+```toml
+[client]
+url = "http://hub.lan:8080"
+token = "..."
+agent_id = "my-agent"
+project = "homelab"
 ```
 
 A harness that speaks only stdio MCP runs the proxy, which forwards every

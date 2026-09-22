@@ -10,9 +10,16 @@ usage:
   agent-hub call <tool> [json]   call one tool and print its JSON result
   agent-hub tools                list the hub's tools
   agent-hub kb <command>         read and write the project knowledge base
+  agent-hub config [flags]       inspect and validate configuration
 
-The hub is named by HUB_URL, HUB_TOKEN and HUB_AGENT_ID, in the environment
-or in ~/.agent-hub/config (HUB_CONFIG names another file).
+The hub is configured by config.toml and environment variables.
+";
+
+const CONFIG_USAGE: &str = "\
+usage:
+  agent-hub config            show every setting, its value, and where it came from
+  agent-hub config --path     print the files that would be read, found or not
+  agent-hub config --check    parse and validate, exit non-zero on a problem
 ";
 
 #[cfg(feature = "client")]
@@ -46,6 +53,7 @@ fn main() -> ExitCode {
         Some("call") => call(&args[1..]),
         Some("tools") => tools(),
         Some("kb") => kb(&args[1..]),
+        Some("config") => config_cmd(&args[1..]),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -55,6 +63,44 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("agent-hub: unknown subcommand '{other}'");
             eprint!("{USAGE}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn config_cmd(args: &[String]) -> ExitCode {
+    let env_lookup = |key: &str| std::env::var(key).ok();
+    if args.len() > 1 {
+        eprintln!("agent-hub config: unexpected argument '{}'", args[1]);
+        eprint!("{CONFIG_USAGE}");
+        return ExitCode::from(2);
+    }
+    match args.first().map(String::as_str) {
+        None => match agent_hub::config::print_config(&env_lookup) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("agent-hub: {err}");
+                ExitCode::from(78)
+            }
+        },
+        Some("--path") => {
+            agent_hub::config::print_config_paths(&env_lookup);
+            ExitCode::SUCCESS
+        }
+        Some("--check") => match agent_hub::config::validate_configuration(&env_lookup) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("agent-hub: {err}");
+                ExitCode::from(78)
+            }
+        },
+        Some("--help" | "-h") => {
+            print!("{CONFIG_USAGE}");
+            ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!("agent-hub config: unknown option '{other}'");
+            eprint!("{CONFIG_USAGE}");
             ExitCode::from(2)
         }
     }

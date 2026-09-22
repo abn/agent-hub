@@ -133,7 +133,7 @@ fn arguments_the_hub_rejects_are_a_failure_not_a_result() {
 fn the_config_file_names_the_hub_when_the_environment_does_not() {
     let hub = Hub::start("call-config");
     hub.write_config(&format!(
-        "# the hub on the landing\nHUB_URL={}\nHUB_TOKEN=\"{}\"\n",
+        "# the hub on the landing\n[client]\nurl = \"{}\"\ntoken = \"{}\"\n",
         hub.url(),
         hub.agent_token
     ));

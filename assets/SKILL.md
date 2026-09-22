@@ -84,14 +84,15 @@ HUB_URL={{base_url}} HUB_TOKEN=<agent token> agent-hub mcp
 ```
 
 The settings are read from the environment first and then from
-`~/.agent-hub/config`, which is an env-style file a shell can also source.
-`HUB_CONFIG` names another file. A file holding a token that others can read
-warns and still works.
+`config.toml` (`~/.config/agent-hub/config.toml` or `~/.agent-hub/config.toml`,
+layered over `/etc/agent-hub/config.toml`). `HUB_CONFIG` names another file.
+A file holding a token that others can read warns and still works.
 
-```
-HUB_URL={{base_url}}
-HUB_TOKEN=...
-HUB_AGENT_ID=my-agent
+```toml
+[client]
+url = "{{base_url}}"
+token = "..."
+agent_id = "my-agent"
 ```
 
 With no `HUB_URL` configured, `agent-hub mcp` still serves the local data
