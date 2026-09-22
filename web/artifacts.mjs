@@ -37,319 +37,125 @@ function formatBytes(bytes) {
   return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function cardMeta(artifact) {
-  const age = artifact.created_at || artifact.updated_at ? relative(Date.parse(artifact.created_at || artifact.updated_at)) : "";
-  const actor = artifact.actor || "agent";
-  const enc = artifact.protected ? " · encrypted" : "";
-  return `${actor} · v${artifact.version} · ${formatBytes(artifact.size_bytes)} · ${age}${enc}`;
-}
-
-const previewCache = new Map();
-
-// What a card shows of a document it has not opened.
-//
-// This was the first five lines of the raw text, which for an HTML artifact
-// is doctype, html, head and a placeholder title: the same five lines in
-// every HTML document ever written, so a gallery of them was twelve
-// identical grey boxes. Markdown was fine, which is why it went unseen.
-//
-// The result is only ever written with textContent, never as markup.
-export function previewSnippet(text) {
-  if (!/^\s*<(!doctype|html)\b/i.test(text)) {
-    return text.split("\n").slice(0, 5).join("\n").slice(0, 200);
-  }
-  const body = text
-    .replace(/<head\b[\s\S]*?<\/head>/gi, " ")
-    // noscript and template are the trap here. A page that renders itself with
-    // JavaScript carries a "please enable JavaScript" block as its only static
-    // prose, so stripping tags alone surfaced that on every card: still the
-    // same words everywhere, just a longer set of them.
-    .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  // A page whose words all live in script tags leaves nothing. Say so rather
-  // than drawing an empty box that looks like a failed load.
-  return body ? body.slice(0, 200) : "A web page";
-}
-let activeGrouping = "day";
-let activeView = "cards";
-
-export function artifactCard(artifact) {
-  const enc = artifact.protected ? " encrypted" : " plain";
-  const age = artifact.created_at || artifact.updated_at ? relative(Date.parse(artifact.created_at || artifact.updated_at)) : "";
-  const actor = artifact.actor || "agent";
-  const encLabel = artifact.protected ? " · encrypted" : "";
-
-  let previewContent = "";
-  if (artifact.protected) {
-    previewContent = `<span class="artifact-preview-lock" aria-hidden="true">${cardGlyph(true)}</span>`;
-  } else {
-    const cachedSnippet = previewCache.get(artifact.id) || (artifact.description ? artifact.description.slice(0, 200) : "");
-    // Two marks, one shown at a time by width. The source snippet is a
-    // desktop affordance: at 390px it filled two thirds of every card, was
-    // too small to read, and left three artifacts on a screen. The phone
-    // gets the glyph and a row it can scan. The inline `display:none` that
-    // used to hide the glyph is gone, because an inline style cannot be
-    // answered by a media query.
-    previewContent = `
-      <span class="artifact-preview-text mono" aria-hidden="true" data-preview-id="${esc(artifact.id)}">${esc(cachedSnippet)}</span>
-      <svg class="doc artifact-preview-glyph" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${DOC_PATH}"></path></svg>
-    `;
-  }
-
-  const commentCount = artifact.comments_count || 0;
-  const commentsBadge = commentCount > 0 ? `<span class="artifact-comments" aria-label="${commentCount} comments"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14v10H9l-4 4z"></path></svg>${commentCount}</span>` : "";
-
-  return `<button type="button" class="artifact-card artifact-row" data-action="artifact-open" data-id="${esc(artifact.id)}">
-    <span class="artifact-preview${enc}" aria-hidden="true">${previewContent}</span>
-    <span class="artifact-body">
-      <span class="artifact-title">${esc(artifact.title)}</span>
-      <span class="artifact-meta mono">${esc(actor)} · <span class="mono">v${artifact.version} · ${formatBytes(artifact.size_bytes)}</span> · ${age}${encLabel}</span>
-      ${commentsBadge}
-    </span>
-    <svg class="artifact-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
-  </button>`;
-}
-
-function renderArtifactsTable(artifacts) {
-  const rows = artifacts.map((a) => {
-    const age = a.created_at || a.updated_at ? relative(Date.parse(a.created_at || a.updated_at)) : "";
-    const encBadge = a.protected ? ` · <span class="hub-lock-pill">encrypted</span>` : "";
-    return `<tr class="artifact-card artifact-table-row" data-action="artifact-open" data-id="${esc(a.id)}" tabindex="0">
-      <td>
-        <div class="artifact-table-title">
-          ${a.protected ? `<svg class="lock" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="${LOCK_PATH}"></path></svg>` : `<svg class="doc" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="${DOC_PATH}"></path></svg>`}
-          <span>${esc(a.title)}</span>
-        </div>
-      </td>
-      <td class="mono">v${a.version}</td>
-      <td class="mono">${formatBytes(a.size_bytes)}</td>
-      <td class="mono">${age}${encBadge}</td>
-    </tr>`;
-  }).join("");
-
-  return `
-    <div class="hub-artifacts-table-wrap">
-      <table class="hub-artifacts-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Version</th>
-            <th>Size</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function groupDayKey(dateStr) {
-  if (!dateStr) return "TODAY";
-  const d = new Date(dateStr);
-  const now = new Date();
-  const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  if (isToday) return "TODAY";
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday = d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate();
-  if (isYesterday) return "YESTERDAY";
-  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
-}
-
-function groupArtifacts(artifacts, mode) {
-  const groups = new Map();
-  for (const artifact of artifacts) {
-    let key;
-    if (mode === "agent") {
-      key = (artifact.actor || "AGENT").toUpperCase();
-    } else if (mode === "kind") {
-      key = (artifact.kind || "DOCUMENT").toUpperCase();
-    } else {
-      key = groupDayKey(artifact.created_at || artifact.updated_at);
-    }
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(artifact);
-  }
-  return [...groups.entries()].map(([title, items]) => ({ title, items }));
-}
-
-// The gallery the project view's Artifacts segment paints. Grouped list by day, agent, or kind.
-export async function gallerySection(projectId) {
-  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
-  if (!artifacts || !artifacts.length) return emptyStateHTML(EMPTY_COPY.artifacts);
-
-  const totalBytes = artifacts.reduce((acc, a) => acc + (Number(a.size_bytes) || 0), 0);
-  const totalVersions = artifacts.reduce((acc, a) => acc + (Number(a.version) || 1), 0);
-  const groups = groupArtifacts(artifacts, activeGrouping);
-
-  const pillLabel = activeGrouping === "agent" ? "Agent" : activeGrouping === "kind" ? "Kind" : "Date";
-
-  // Pre-fetch previews for plain artifacts asynchronously
-  for (const a of artifacts) {
-    if (!a.protected && !previewCache.has(a.id)) {
-      fetchRawText(a.id).then((text) => {
-        if (!text) return;
-        const snippet = previewSnippet(text);
-        previewCache.set(a.id, snippet);
-        const el = document.querySelector(`.artifact-preview-text[data-preview-id="${a.id}"]`);
-        if (el) el.textContent = snippet;
-      }).catch(() => {});
-    }
-  }
-
-  // The table is a desktop view and its switch is not drawn below 900px. A
-  // reader who chose it on a wide window and then narrowed would otherwise be
-  // left in a view with no way out of it.
-  const wide = typeof window === "undefined" || window.innerWidth >= 900;
-  let contentHTML = "";
-  if (activeView === "table" && wide) {
-    contentHTML = renderArtifactsTable(artifacts);
-  } else {
-    contentHTML = groups
-      .map(
-        (g) =>
-          `<div class="hub-group-header mono">${esc(g.title)} · ${g.items.length}</div>
-           <div class="hub-artifacts-grid gallery">${g.items.map(artifactCard).join("")}</div>`
-      )
-      .join("");
-  }
-
-  const versionsText = `${totalVersions} ${totalVersions === 1 ? "version" : "versions"}`;
-  const artifactsText = `${artifacts.length} ${artifacts.length === 1 ? "artifact" : "artifacts"}`;
-
-  return `
-    <div class="hub-artifacts-summary">
-      <div class="hub-group-wrap">
-        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
-        <span class="hub-group-pill pill">${pillLabel}</span>
-        <div class="hub-group-menu" id="hub-group-menu" hidden>
-          <button type="button" data-group="day"${activeGrouping === "day" ? ' class="active" aria-current="true"' : ""}>Date</button>
-          <button type="button" data-group="agent"${activeGrouping === "agent" ? ' class="active" aria-current="true"' : ""}>Agent</button>
-          <button type="button" data-group="kind"${activeGrouping === "kind" ? ' class="active" aria-current="true"' : ""}>Kind</button>
-        </div>
-      </div>
-      <span class="hub-summary-divider"></span>
-      <div role="group" aria-label="View" class="hub-view-segment">
-        <button type="button" class="hub-view-btn cards${activeView === "cards" ? " active" : ""}" aria-pressed="${activeView === "cards"}" data-view="cards">Cards</button>
-        <button type="button" class="hub-view-btn table${activeView === "table" ? " active" : ""}" aria-pressed="${activeView === "table"}" data-view="table">Table</button>
-      </div>
-      <div class="grow"></div>
-      <span class="hub-artifacts-counts mono">${artifactsText} · ${versionsText} · ${formatBytes(totalBytes)}</span>
-    </div>
-    <div class="hub-artifacts-list">
-      ${contentHTML}
-    </div>
-  `;
-}
-
-// Global click listener for group menu in gallery and start-thread in viewer
-document.addEventListener("click", (e) => {
-  const toggleBtn = e.target.closest('[data-action="artifact-group-toggle"]');
-  if (toggleBtn) {
-    const menu = document.getElementById("hub-group-menu");
-    if (menu) {
-      const open = menu.hidden;
-      menu.hidden = !open;
-      toggleBtn.setAttribute("aria-expanded", String(open));
-    }
-    return;
-  }
-  const viewBtn = e.target.closest(".hub-view-btn[data-view]");
-  if (viewBtn) {
-    activeView = viewBtn.dataset.view;
-    const parts = location.hash.replace(/^#/, "").split("/");
-    const projectId = parts[2] || "";
-    if (projectId) {
-      gallerySection(projectId).then((html) => {
-        const summary = main.querySelector(".hub-artifacts-summary");
-        const list = main.querySelector(".hub-artifacts-list");
-        if (summary && list) {
-          const temp = document.createElement("div");
-          temp.innerHTML = html;
-          const newSummary = temp.querySelector(".hub-artifacts-summary");
-          const newList = temp.querySelector(".hub-artifacts-list");
-          if (newSummary) summary.replaceWith(newSummary);
-          if (newList) list.replaceWith(newList);
-        }
-      });
-    }
-    return;
-  }
-  const tableRow = e.target.closest(".artifact-table-row[data-id]");
-  if (tableRow && !e.target.closest("button, a")) {
-    openArtifact(tableRow.dataset.id);
-    return;
-  }
-  const groupOpt = e.target.closest("#hub-group-menu button");
-  if (groupOpt && groupOpt.dataset.group) {
-    activeGrouping = groupOpt.dataset.group;
-    const parts = location.hash.replace(/^#/, "").split("/");
-    const projectId = parts[2] || "";
-    if (projectId) {
-      gallerySection(projectId).then((html) => {
-        const summary = main.querySelector(".hub-artifacts-summary");
-        const list = main.querySelector(".hub-artifacts-list");
-        if (summary && list) {
-          const temp = document.createElement("div");
-          temp.innerHTML = html;
-          const newSummary = temp.querySelector(".hub-artifacts-summary");
-          const newList = temp.querySelector(".hub-artifacts-list");
-          if (newSummary) summary.replaceWith(newSummary);
-          if (newList) list.replaceWith(newList);
-        }
-      });
-    }
-    return;
-  }
-  const startThread = e.target.closest('[data-action="start-thread"]');
-  if (startThread) {
-    const menu = main.querySelector(".hub-overflow-menu");
-    if (menu) menu.hidden = true;
-    const more = main.querySelector(".hub-more");
-    if (more) more.setAttribute("aria-expanded", "false");
-    openCommentsDrawer();
-    return;
-  }
-  const menu = document.getElementById("hub-group-menu");
-  if (menu && !menu.hidden && !e.target.closest(".hub-group-wrap")) {
-    menu.hidden = true;
-    const toggle = document.getElementById("hub-group-toggle");
-    if (toggle) toggle.setAttribute("aria-expanded", "false");
-  }
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  const menu = document.getElementById("hub-group-menu");
-  if (menu && !menu.hidden) {
-    e.stopPropagation();
-    menu.hidden = true;
-    const toggle = document.getElementById("hub-group-toggle");
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.focus();
-    }
-  }
-});
-
-// The legacy gallery address still works: it now points at the project's
-// Artifacts segment.
 export async function artifactsScreen(selected, gen) {
   if (selected) location.hash = `#/projects/${encodeURIComponent(selected)}/artifacts`;
+}
+
+// The artifact read in the stage. The index lists, the stage shows the
+// document: the title and its provenance in the header, the breadcrumb and the
+// document controls in the control row, the sandboxed page in the body. The
+// document is the hub's own frame route, so the app never renders agent HTML
+// in its own origin.
+export async function artifactStage(id, projectId) {
+  let versions = [];
+  try {
+    const listed = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
+    versions = listed.versions || [];
+  } catch {
+    return null;
+  }
+  const newest = (versions.length && versions[versions.length - 1].version) || 1;
+  const current = versions.find((v) => v.version === newest) || versions[0];
+  if (!current) return null;
+
+  let commentsCount = 0;
+  try {
+    const list = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
+    commentsCount = Array.isArray(list) ? list.length : Array.isArray(list?.comments) ? list.comments.length : 0;
+  } catch {}
+
+  const project = projectId || current.project_id || "";
+  const slug =
+    (current.title || "artifact")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
+
+  const comments = commentsCount
+    ? `<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`
+    : "";
+  const actions = `
+    <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-label="${
+      commentsCount ? `Comments, ${commentsCount}` : "Start a thread"
+    }">${glyphSvg("comments", { size: 18 })}${comments}</button>
+    <button type="button" class="hub-btn-glyph" aria-label="More">${glyphSvg("overflow", { size: 18 })}</button>`;
+
+  const copyGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+  const rawGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-4 5 4 5"></path><path d="M15 7l4 5-4 5"></path></svg>`;
+
+  const controls = `
+    <span class="shell-meta mono" title="${esc(`${project} / artifacts / ${slug}`)}">${esc(
+      `${project} / artifacts / ${slug}`,
+    )}</span>
+    <div class="grow"></div>
+    <button type="button" class="hub-btn-glyph" data-action="copy-path" data-path="${esc(
+      `${project} / artifacts / ${slug}`,
+    )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
+    <button type="button" class="hub-btn-glyph hub-version-toggle mono" data-action="stage-version" aria-haspopup="true" aria-expanded="false">v${newest} of ${versions.length}</button>
+    <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}" aria-label="Copy raw">${rawGlyph}</button>`;
+
+  const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  // The artifact's own host page. It carries the document and, for a protected
+  // artifact, the gate and the client-side decryptor, so the app never renders
+  // agent bytes in its own origin.
+  const body = `<div class="hub-viewer-doc"><iframe id="hub-frame" sandbox="allow-scripts" title="${esc(
+    current.title || slug,
+  )}" src="${esc(frameSrc(id, newest, theme))}"></iframe></div>`;
+
+  return {
+    title: slug,
+    meta: `${current.actor || "agent"} · v${newest} of ${versions.length} · ${formatBytes(
+      current.size_bytes,
+    )} · ${relative(Date.parse(current.created_at))}`,
+    actions,
+    controls,
+    body,
+    commentsCount,
+    version: newest,
+    protected: Boolean(current.protected),
+  };
+}
+
+// The stage's own wiring: the frame reports its height so it never scrolls
+// inside itself, the copy controls confirm in place, and the comments control
+// opens the thread for the version on screen.
+export function wireArtifactStage(root, id, info) {
+  const frame = root.querySelector("#hub-frame");
+  if (frame) {
+    const onHeight = (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const h = event.data && event.data.hubFrameHeight;
+      if (typeof h !== "number" || !isFinite(h)) return;
+      frame.style.height = `${Math.max(Math.round(h), 200)}px`;
+    };
+    window.addEventListener("message", onHeight);
+  }
+  if (info) startComments(id, info.version, info.protected);
+  for (const btn of root.querySelectorAll('[data-action="copy-path"]')) {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.path);
+      } catch {}
+      toast("Path copied");
+    });
+  }
+  for (const btn of root.querySelectorAll('[data-action="copy-raw"]')) {
+    btn.addEventListener("click", async () => {
+      try {
+        const text = await fetchRawText(btn.dataset.id, Number(btn.dataset.version));
+        await navigator.clipboard.writeText(text);
+        toast("Raw text copied");
+      } catch {
+        toast("Failed to copy raw text");
+      }
+    });
+  }
 }
 
 // The artifacts index in the one shell: one row per artifact, the same shape
 // as every other list, with the fixed glyph column so every title starts at
 // the same x. The document itself is read in the stage.
-export async function artifactIndex(projectId) {
+export async function artifactIndex(projectId, selectedId = "") {
   const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
   if (!artifacts || !artifacts.length) {
     return { rows: `<div class="shell-body-pad"><p class="empty">No artifacts yet.</p></div>`, artifacts: [] };
@@ -359,14 +165,17 @@ export async function artifactIndex(projectId) {
       const comments = a.comments_count
         ? ` · ${a.comments_count} comment${a.comments_count === 1 ? "" : "s"}`
         : "";
-      const href = `#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projectId)}`;
+      const href = `#/projects/${encodeURIComponent(projectId)}/artifacts?artifact=${encodeURIComponent(a.id)}`;
       const lock = a.protected
         ? `<span class="sr-only">Encrypted</span>`
         : "";
-      return `<div class="row artifact-row" data-id="${esc(a.id)}">
+      const selected = a.id === selectedId;
+      return `<div class="row artifact-row${selected ? " selected" : ""}" data-id="${esc(a.id)}">
         <span class="row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
         <div class="grow">
-          <a class="title" href="${esc(href)}">${esc(a.title || "artifact")}${lock}</a>
+          <a class="title" href="${esc(href)}"${
+            selected ? ' aria-current="true"' : ""
+          }>${esc(a.title || "artifact")}${lock}</a>
           <div class="meta mono">v${a.version || 1} · ${formatBytes(a.size_bytes)}${comments}</div>
         </div>
       </div>`;

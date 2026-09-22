@@ -5,7 +5,7 @@
 // gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
-import { artifactIndex, gallerySection } from "./artifacts.mjs";
+import { artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import {
@@ -16,7 +16,6 @@ import {
   formatEventSummary,
   setFeedSelection,
 } from "./feed.mjs";
-import { glyphSvg } from "./glyphs.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
@@ -95,7 +94,6 @@ function shellIndexControls(placeholder) {
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
       <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
     </div>
-    <button type="button" class="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
   </div>`;
 }
 
@@ -432,24 +430,46 @@ async function feedShell(id, segment, stats, params) {
   });
 }
 
-async function artifactsShell(id, segment, stats) {
-  const { rows, artifacts } = await artifactIndex(id);
+async function artifactsShell(id, segment, stats, params) {
+  const selected = params?.get?.("artifact") || "";
+  const { rows, artifacts } = await artifactIndex(id, selected);
   const totalBytes = artifacts.reduce((sum, a) => sum + (Number(a.size_bytes) || 0), 0);
   const versions = artifacts.reduce((sum, a) => sum + (Number(a.version) || 1), 0);
-  const meta = `${count(artifacts.length, "artifact", "artifacts")} · ${count(
+  const listMeta = `${count(artifacts.length, "artifact", "artifacts")} · ${count(
     versions,
     "version",
     "versions",
   )} · ${formatBytes(totalBytes)}`;
-  return shellHTML({
-    segment,
-    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
-    indexControls: shellIndexControls("Filter artifacts"),
-    indexBody: rows,
-    stageHead: shellStageHead("Artifacts", meta),
-    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / artifacts</span></div>`,
-    stageBody: `<div class="shell-pad">${await gallerySection(id)}</div>`,
-  });
+  const backHref = `#/projects/${encodeURIComponent(id)}/artifacts`;
+
+  let stageHead = shellStageHead("Artifacts", listMeta);
+  let stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / artifacts</span></div>`;
+  let stageBody = `<div class="shell-pad"><p class="empty">Select an artifact from the list.</p></div>`;
+  let info = null;
+
+  if (selected) {
+    info = await artifactStage(selected, id);
+    if (info) {
+      stageHead = shellStageHead(info.title, info.meta, info.actions, backHref);
+      stageControls = `<div class="shell-controls">${info.controls}</div>`;
+      stageBody = info.body;
+    }
+  }
+
+  return {
+    html: shellHTML({
+      segment,
+      indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexControls: shellIndexControls("Filter artifacts"),
+      indexBody: rows,
+      stageHead,
+      stageControls,
+      stageBody,
+      hasSelection: Boolean(selected && info),
+    }),
+    info,
+    selected,
+  };
 }
 
 async function sessionsShell(id, segment, stats, params) {
@@ -539,13 +559,20 @@ export async function projectScreen(params, gen, path) {
   if (stale(gen)) return;
 
   let shell;
-  if (segment === "artifacts") shell = await artifactsShell(id, segment, stats);
-  else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params);
+  let artifactInfo = null;
+  let artifactId = "";
+  if (segment === "artifacts") {
+    const built = await artifactsShell(id, segment, stats, params);
+    shell = built.html;
+    artifactInfo = built.info;
+    artifactId = built.selected;
+  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params);
   else shell = await feedShell(id, segment, stats, params);
   if (stale(gen)) return;
 
   paint(gen, shell);
   installShellLayout(main);
+  if (artifactInfo) wireArtifactStage(main, artifactId, artifactInfo);
   wireProjectHeader(project, stats, footprint);
 }
 // The row selection the keyboard map owns: the project's segments all paint
