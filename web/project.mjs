@@ -123,7 +123,7 @@ function sessionsTwoPane(current, listHTML, sessions, selectedSession, detailHTM
   const detail = selectedSession
     ? (detailHTML || `<p class="empty">Loading session…</p>`)
     : `<p class="empty">No sessions yet.</p>`;
-  const paneClass = hasSelection ? "panes has-selection" : "panes";
+  const paneClass = hasSelection ? "panes panes-sessions has-selection" : "panes panes-sessions";
   return `<div class="${paneClass}"><div class="pane-list">${listHTML}</div><div class="pane-detail">${detail}</div></div>`;
 }
 

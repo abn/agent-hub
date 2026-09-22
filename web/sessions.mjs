@@ -39,6 +39,7 @@ export function sessionRow(s, current, isSelected = false) {
   const size = s.brain_bytes != null ? fmtBytes(s.brain_bytes) : "";
   const owner = esc(s.owner ?? s.agent ?? "");
   const statusWord = esc(s.status || "");
+  const truncatedId = truncateMiddle(s.id);
   const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)}`;
 
   const href = `#/session?project=${encodeURIComponent(current)}&id=${encodeURIComponent(s.id)}`;
@@ -47,7 +48,7 @@ export function sessionRow(s, current, isSelected = false) {
     ${dot}
     <a class="session-link stretched-link" href="${href}" aria-label="Open session ${esc(s.session_name)}, ${statusWord}">
       <span class="grow">
-        <span class="title ${isPruned ? "pruned" : ""}">${esc(s.session_name)}</span>
+        <span class="title ${isPruned ? "pruned" : ""}"><span class="session-id mono">${truncatedId}</span> <span class="sep">·</span> ${esc(s.session_name)}</span>
         <span class="meta">${metaText}</span>
       </span>
       <span class="session-size mono">${size}</span>
@@ -69,7 +70,10 @@ export async function sessionRows(current, selectedId = null) {
   if (active.length > 0) {
     const activeRows = active.map((s) => sessionRow(s, current, s.id === selectedId)).join("");
     activeSection = `
-      <div class="session-group-header">ACTIVE · ${active.length}</div>
+      <div class="session-group-header active-header">
+        <span>ACTIVE · ${active.length}</span>
+        <span class="group-header-divider" aria-hidden="true"></span>
+      </div>
       <div class="session-group active-group">
         ${activeRows}
       </div>
@@ -79,12 +83,12 @@ export async function sessionRows(current, selectedId = null) {
   let endedSection = "";
   if (ended.length > 0) {
     const endedRows = ended.map((s) => sessionRow(s, current, s.id === selectedId)).join("");
-    const pruneAllLabel = prunableBytes > 0
-      ? `Prune all · <span class="mono">${fmtBytes(prunableBytes)}</span>`
-      : "Prune all";
+    const sizePart = fmtBytes(prunableBytes);
+    const pruneAllLabel = `Prune all · <span class="mono">${sizePart}</span>`;
     endedSection = `
       <div class="session-group-header ended-header">
         <span>ENDED · ${ended.length}</span>
+        <span class="group-header-divider" aria-hidden="true"></span>
         <button type="button" class="prune-all-btn" data-action="prune-all" data-project="${esc(current)}">${pruneAllLabel}</button>
       </div>
       <div class="session-group ended-group">
@@ -93,12 +97,24 @@ export async function sessionRows(current, selectedId = null) {
     `;
   }
 
+  const totalSessions = sessions.length;
+  const totalBytes = sessions.reduce((sum, s) => sum + (s.brain_bytes || 0), 0);
+  const indexHead = sessions.length > 0
+    ? `<div class="session-index-head">
+        <div class="session-index-head-row">
+          <span class="session-index-head-title">Sessions</span>
+          <span class="session-index-head-stats mono">${totalSessions} · ${fmtBytes(totalBytes)}</span>
+        </div>
+        <div class="session-index-head-project mono">${esc(current)}</div>
+      </div>`
+    : "";
+
   const footerNote = sessions.length > 0
     ? `<div class="sessions-footer-note">Pruning frees the brain of an ended session. Feed events and artifacts are never touched.</div>`
     : "";
 
   const content = (activeSection || endedSection)
-    ? `<div class="sessions-list">${activeSection}${endedSection}${footerNote}</div>`
+    ? `<div class="sessions-list">${indexHead}${activeSection}${endedSection}${footerNote}</div>`
     : `<p class="empty">No sessions yet.</p>`;
 
   return { sessions, card: `<div class="sessions-card-wrap">${content}</div>` };
@@ -126,15 +142,12 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
   const truncatedId = truncateMiddle(session.id);
 
   const file = typeof location !== "undefined" ? new URLSearchParams(location.hash.split("?")[1] || "").get("file") : null;
-  const openFile = file
-    ? `<div class="open-file row"><span class="mono">${esc(file)}</span><span class="meta">Content stays behind the agent surface; this names the entry opened.</span></div>`
-    : "";
 
   const lineage = session.lineage
     ? `<div class="lineage">${lineageLine(session.lineage)}</div>`
     : "";
   const handoff = session.handoff
-    ? `<div class="meta handoff">${esc(session.handoff)}</div>`
+    ? `<div class="session-handoff-note meta handoff">${esc(session.handoff)}</div>`
     : "";
 
   const lastEvent = session.last_event
@@ -153,6 +166,36 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
     ? `Session ended ${relative(session.last_activity ?? session.created_at)}. Brain and logs can be pruned.`
     : "Pruning becomes available once the session has ended.";
 
+  let fileViewerHTML = "";
+  if (file) {
+    const matching = (fsEntries || []).concat(kvEntries || []).find((e) => e.path === file);
+    const sizeStr = matching?.size_bytes != null ? fmtBytes(matching.size_bytes) : "";
+    const displayPath = file.startsWith("brain/") ? file : `brain${file.startsWith("/") ? "" : "/"}${file}`;
+    fileViewerHTML = `
+      <div class="session-file-header">
+        <span class="session-file-path mono" title="${esc(displayPath)}">${esc(displayPath)}</span>
+        ${sizeStr ? `<span class="session-file-size mono">${sizeStr}</span>` : ""}
+        <button type="button" class="session-file-copy" data-action="copy-file-path" data-path="${esc(file)}">Copy path</button>
+      </div>
+      <div class="session-file-body">
+        <div class="open-file row"><span class="mono">${esc(file)}</span><span class="meta">Content stays behind the agent surface; this names the entry opened.</span></div>
+      </div>
+    `;
+  } else {
+    fileViewerHTML = `
+      <div class="session-file-header">
+        <span class="session-file-path mono">brain/</span>
+        <span class="session-file-size mono">No file open</span>
+      </div>
+      <div class="session-file-body session-file-empty">
+        <p class="empty-hint meta">Select a file from the brain tree to view.</p>
+      </div>
+    `;
+  }
+
+  const brainFilesCount = fsEntries ? fsEntries.length : 0;
+  const brainFootnote = `${brainFilesCount} files · ${brainSize} · written by ${esc(session.owner ?? session.agent ?? "agent")}`;
+
   return `
     <div class="session-detail-view" data-session-id="${esc(session.id)}">
       <div class="session-back-bar">
@@ -161,26 +204,45 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
           <span>Sessions</span>
         </a>
       </div>
-      ${handoff}
-      ${lineage}
-      <div class="session-detail-title-block">
-        <h1>${esc(session.session_name)}</h1>
-        <div class="meta">${esc(session.owner ?? session.agent)} · <span class="session-status ${statusClass}">${esc(session.status)}</span> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
-        <button type="button" class="session-copy-id" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">
-          <span>${truncatedId}</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5h10"></path></svg>
-        </button>
-      </div>
-      ${openFile}
-      <div class="brain-header-line">
-        <span class="brain-label mono">brain/ · ${brainSize} · ${totalItems} items</span>
-        <span class="brain-size-col mono">size</span>
-      </div>
-      ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}
-      ${lastEvent}
-      <div class="session-actions-footer">
-        ${primaryButton}
-        <p class="action-helper-sentence action-helper-note">${helperNote}</p>
+
+      <header class="session-detail-header">
+        <div class="session-header-main">
+          <div class="session-detail-title-block">
+            <div class="session-title-line">
+              <h1>${esc(session.session_name)}</h1>
+              <span class="session-status ${statusClass}"><span class="state-dot" style="${session.status === 'active' ? 'background: var(--ok)' : ''}"></span>${esc(session.status)}</span>
+            </div>
+            <div class="meta">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
+            ${handoff}
+            ${lineage}
+          </div>
+        </div>
+        <div class="session-header-side">
+          <button type="button" class="session-copy-id" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">
+            <span>${truncatedId}</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5h10"></path></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="session-stage-body">
+        <div class="session-tree-pane" role="region" aria-label="Brain tree">
+          <div class="brain-header-line">
+            <span class="brain-label mono">brain/ · ${brainSize} · ${totalItems} items</span>
+            <span class="brain-size-col mono">size</span>
+          </div>
+          ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}
+          <div class="tree-pane-footnote mono">${brainFootnote}</div>
+          ${lastEvent}
+          <div class="session-actions-footer">
+            ${primaryButton}
+            <p class="action-helper-sentence action-helper-note">${helperNote}</p>
+          </div>
+        </div>
+
+        <div class="session-file-viewer" role="region" aria-label="File viewer">
+          ${fileViewerHTML}
+        </div>
       </div>
     </div>
   `;
@@ -196,7 +258,13 @@ export function wireSessionDetail(container, current, sessionId) {
     wireTreeKeyboard(tree, io);
     tree.addEventListener("openfile", (event) => {
       const path = event.detail?.node?.dataset?.path;
-      if (path) location.hash = `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(path)}`;
+      if (path) {
+        if (location.hash.startsWith("#/session?")) {
+          location.hash = `#/session?project=${encodeURIComponent(current)}&id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(path)}`;
+        } else {
+          location.hash = `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(path)}`;
+        }
+      }
     });
   }
 }
@@ -349,6 +417,18 @@ if (typeof document !== "undefined") {
     if (pruneAllBtn) {
       const project = pruneAllBtn.dataset.project;
       await pruneAllEnded(project);
+      return;
+    }
+
+    const copyFileBtn = event.target.closest?.('[data-action="copy-file-path"]');
+    if (copyFileBtn) {
+      const path = copyFileBtn.dataset.path;
+      if (path) {
+        try {
+          await navigator.clipboard.writeText(path);
+        } catch {}
+        toast("Copied file path.");
+      }
       return;
     }
   });

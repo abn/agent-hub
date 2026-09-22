@@ -3891,6 +3891,108 @@ def check_desktop_project(browser, watch: Watch, port: int, project: str) -> Non
         watch.drain_rejections()
 
 
+def check_desktop_sessions_four_zones(browser, watch: Watch, port: int) -> None:
+    """Sessions screen has 4 zones at desktop width (rail, index 340px, tree 300px, file viewer),
+    visible handoff note in header, and 'Prune all' on ended group header."""
+    watch.enter("desktop: sessions 4 zones layout, handoff note, and prune all")
+    for theme in ("light", "dark"):
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            color_scheme=theme,
+            permissions=["clipboard-read", "clipboard-write"],
+        )
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            f"localStorage.setItem('hub.theme', '{theme}');"
+        )
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"desktop sessions four zones: uncaught error: {error}"))
+        try:
+            listing = json.loads(harness.request(watch.port, "GET", f"/api/v1/sessions?project={quote(harness.LINEAGE_PROJECT)}"))
+            pickup = [s for s in listing.get("sessions", []) if s.get("session_name") == "pickup"]
+            pickup_id = pickup[0]["id"] if pickup else ""
+            route = f"#/projects/{quote(harness.LINEAGE_PROJECT)}/sessions"
+            if pickup_id:
+                route += f"?id={quote(pickup_id)}"
+            page.goto(f"http://127.0.0.1:{port}/{route}", wait_until="load")
+            if not settle(page, "!!document.querySelector('main .session-row') && !!document.querySelector('header.session-detail-header')"):
+                watch.fail(f"sessions list did not render at 1440px in {theme}")
+                continue
+
+            zones = page.evaluate("""() => {
+                const rail = document.querySelector('.rail');
+                const index = document.querySelector('main .pane-list, main .pane-index');
+                const tree = document.querySelector('main .session-tree-pane, main [role="tree"]');
+                const viewer = document.querySelector('main .session-file-viewer, main .pane-file');
+                const railRect = rail ? rail.getBoundingClientRect() : null;
+                const indexRect = index ? index.getBoundingClientRect() : null;
+                const treeRect = tree ? tree.getBoundingClientRect() : null;
+                const viewerRect = viewer ? viewer.getBoundingClientRect() : null;
+                return {
+                    rail: rail && getComputedStyle(rail).display !== 'none' ? railRect.width : 0,
+                    index: index && getComputedStyle(index).display !== 'none' ? indexRect.width : 0,
+                    tree: tree && getComputedStyle(tree).display !== 'none' ? treeRect.width : 0,
+                    viewer: viewer && getComputedStyle(viewer).display !== 'none' ? viewerRect.width : 0,
+                };
+            }""")
+
+            if abs(zones["rail"] - 200) > 1.5:
+                watch.fail(f"rail width is {zones['rail']:.1f}px, expected 200px at 1440px in {theme}")
+            if abs(zones["index"] - 340) > 1.5:
+                watch.fail(f"session index width is {zones['index']:.1f}px, expected 340px at 1440px in {theme}")
+            if abs(zones["tree"] - 300) > 1.5:
+                watch.fail(f"brain tree width is {zones['tree']:.1f}px, expected 300px at 1440px in {theme}")
+            if zones["viewer"] < 100:
+                watch.fail(f"file viewer width is {zones['viewer']:.1f}px, expected > 100px at 1440px in {theme}")
+
+            # Handoff note in header
+            handoff = page.evaluate("""() => {
+                const note = document.querySelector('header.session-detail-header .session-handoff-note, header .handoff, main header .meta.handoff');
+                if (!note) return null;
+                const style = getComputedStyle(note);
+                if (style.display === 'none' || style.visibility === 'hidden') return null;
+                return {
+                    text: note.textContent.trim(),
+                    inHeader: !!note.closest('header'),
+                    inDisclosure: !!note.closest('details'),
+                };
+            }""")
+            if not handoff:
+                watch.fail(f"handoff note is missing or hidden in header at 1440px in {theme}")
+            elif not handoff["inHeader"]:
+                watch.fail(f"handoff note is not in header at 1440px in {theme}")
+            elif handoff["inDisclosure"]:
+                watch.fail(f"handoff note is hidden behind a disclosure (details element) in {theme}")
+            elif harness.LINEAGE_HANDOFF not in handoff["text"]:
+                watch.fail(f"handoff note text {handoff['text']!r} does not contain {harness.LINEAGE_HANDOFF!r} in {theme}")
+
+            # Prune all on ended group header
+            prune_all = page.evaluate("""() => {
+                const endedHdr = document.querySelector('main .session-group-header.ended-header');
+                if (!endedHdr) return null;
+                const btn = endedHdr.querySelector('[data-action="prune-all"], button, a');
+                return {
+                    headerText: endedHdr.textContent.trim(),
+                    btnText: btn ? btn.textContent.trim() : '',
+                    hasBtn: !!btn,
+                };
+            }""")
+            if not prune_all or not prune_all["hasBtn"]:
+                watch.fail(f"ENDED group header has no 'Prune all' control in {theme}: {prune_all}")
+            elif "prune all" not in prune_all["btnText"].lower():
+                watch.fail(f"control on ENDED header is {prune_all['btnText']!r}, expected 'Prune all' in {theme}")
+
+            # Session rows keep 44px
+            row_h = page.evaluate("document.querySelector('main .session-row')?.getBoundingClientRect()?.height || 0")
+            if abs(row_h - 44) > 1.5:
+                watch.fail(f"session row height is {row_h:.1f}px, expected 44px in {theme}")
+
+        finally:
+            context.close()
+            watch.page.bring_to_front()
+            watch.drain_rejections()
+
+
 # What the detail screen's rows that name a session king are, and what their
 # colours must be. The row's own server word stays `status`; the design's three
 # states are drawn with a dot, a ring and a filled circle.
@@ -10536,6 +10638,7 @@ def run() -> int:
                 run_step(watch, check_prose_measure, browser, watch, port)
                 run_step(watch, check_panes_stage_width, browser, watch, port, project)
                 run_step(watch, check_desktop_project, browser, watch, port, project)
+                run_step(watch, check_desktop_sessions_four_zones, browser, watch, port)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_waiting_items, page, watch)

@@ -3,6 +3,17 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop four-zone layout for sessions and brain file viewer
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  desktop four-zone layout for Sessions: the navigation rail, 340px session
+  index, 300px brain tree pane, and dedicated file viewer in the stage. Session
+  rows maintain a 44px height with two-line layout showing id and working name,
+  the ended group header carries prune all with size, handoff notes display
+  directly in the detail header, and brain tree items render full file names
+  without truncation.
+
+
 ## 2026-09-22, desktop project screen layout, aside, and inline actions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
