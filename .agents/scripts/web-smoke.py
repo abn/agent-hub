@@ -9779,6 +9779,146 @@ def run_step(watch: Watch, fn, *args, **kwargs) -> bool:
     return False
 
 
+
+def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -> None:
+    """A selection on a touch device raises one fixed button, clear of the tab bar.
+
+    The control this replaces was drawn 50px above the selection, which is
+    exactly where Android puts Copy, Select all, Share and Read aloud. The
+    native menu is browser chrome and always wins, so the hub's own control sat
+    underneath it. Nothing in the markup said so, and nothing could: the defect
+    was that two things wanted the same coordinates.
+
+    So this measures. It asks whether the button is on screen, whether it is
+    above the tab bar rather than behind it, and whether tapping it carries the
+    selected text into the composer. A check that only asked whether the button
+    existed would have passed on the control this one replaces.
+    """
+    watch.enter("artifacts: the comment button on touch")
+    artifact = harness.seed_versioned_artifact(port, project)
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True, color_scheme="light"
+    )
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact}", wait_until="load")
+        if not settle(page, "!!document.querySelector('main iframe')"):
+            watch.fail("the viewer never painted for the comment button check")
+            return
+        if page.locator(".hub-comment-fab").count() != 0:
+            watch.fail("the comment button is on screen with nothing selected")
+
+        # Select inside the innermost frame, which is where the prose is.
+        viewer = page.frame_locator("main iframe")
+        quote = viewer.locator("#hub-frame").evaluate(
+            "el => { const d = el.contentDocument; const p = d.querySelector('h1, p');"
+            " const r = d.createRange(); r.selectNodeContents(p);"
+            " const s = d.defaultView.getSelection(); s.removeAllRanges(); s.addRange(r);"
+            " d.dispatchEvent(new Event('selectionchange')); return p.textContent.trim(); }"
+        )
+        if not settle(page, "!!document.querySelector('.hub-comment-fab')"):
+            watch.fail("selecting text on a touch device raised no comment button")
+            return
+
+        # Clear of the tab bar, not behind it. Measured, because the whole
+        # defect was one fixed thing sitting under another.
+        boxes = page.evaluate(
+            "() => { const b = document.querySelector('.hub-comment-fab').getBoundingClientRect();"
+            " const t = document.querySelector('.tabbar').getBoundingClientRect();"
+            " const s = getComputedStyle(document.querySelector('.hub-comment-fab'));"
+            " return { bTop: b.top, bBottom: b.bottom, bRight: b.right, bHeight: b.height,"
+            "   tTop: t.top, width: window.innerWidth, pos: s.position, z: s.zIndex,"
+            "   label: document.querySelector('.hub-comment-fab').getAttribute('aria-label'),"
+            "   text: document.querySelector('.hub-comment-fab').innerText.trim() }; }"
+        )
+        if boxes["pos"] != "fixed":
+            watch.fail(f"the comment button is {boxes['pos']}, not fixed")
+        if boxes["bBottom"] > boxes["tTop"]:
+            watch.fail(
+                f"the comment button's bottom is {boxes['bBottom']:.0f}px, below the tab bar's"
+                f" top at {boxes['tTop']:.0f}px, so it sits behind the bar"
+            )
+        if boxes["bHeight"] + 0.5 < 48:
+            watch.fail(f"the comment button is {boxes['bHeight']:.0f}px tall, under the drawn 48")
+        if boxes["width"] - boxes["bRight"] > 24:
+            watch.fail(
+                f"the comment button is {boxes['width'] - boxes['bRight']:.0f}px from the right"
+                " edge, so it is not in the corner the thumb is aiming at"
+            )
+        if int(boxes["z"] or 0) <= 20:
+            watch.fail(f"the comment button stacks at {boxes['z']}, at or under the tab bar's 20")
+        if "Comment" not in (boxes["text"] or ""):
+            watch.fail(f"the comment button carries no word, only a glyph: {boxes['text']!r}")
+        if not (boxes["label"] or "").strip():
+            watch.fail("the comment button has no accessible name")
+
+        # The point of the control: the words reach the composer.
+        page.locator(".hub-comment-fab").click()
+        if not settle(page, "!!document.querySelector('.comments-compose')"):
+            watch.fail("tapping the comment button did not open the composer")
+            return
+        carried = page.evaluate(
+            "() => (document.querySelector('.comments-compose') || {}).innerText || ''"
+        )
+        head = (quote or "")[:18]
+        if head and head not in carried:
+            watch.fail(
+                f"the composer did not carry the selected text: wanted {head!r} in {carried[:120]!r}"
+            )
+        if page.locator(".hub-comment-fab").count() != 0:
+            watch.fail("the comment button stayed on screen after the composer opened")
+    finally:
+        context.close()
+    watch.drain_rejections()
+
+
+def check_comment_button_is_touch_only(browser, watch: Watch, port: int, project: str) -> None:
+    """A mouse keeps the callout beside the selection and never sees the button.
+
+    Exactly one of the two exists at a time. Without this, adding the button
+    for touch would quietly give a desktop reader both.
+    """
+    watch.enter("artifacts: the comment button is touch only")
+    artifact = harness.seed_versioned_artifact(port, project)
+    context = browser.new_context(
+        viewport={"width": 1100, "height": 800}, has_touch=False, color_scheme="light"
+    )
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact}", wait_until="load")
+        if not settle(page, "!!document.querySelector('main iframe')"):
+            watch.fail("the viewer never painted for the fine-pointer check")
+            return
+        viewer = page.frame_locator("main iframe")
+        viewer.locator("#hub-frame").evaluate(
+            "el => { const d = el.contentDocument; const p = d.querySelector('h1, p');"
+            " const r = d.createRange(); r.selectNodeContents(p);"
+            " const s = d.defaultView.getSelection(); s.removeAllRanges(); s.addRange(r);"
+            " d.dispatchEvent(new Event('selectionchange')); }"
+        )
+        # Waited on the callout, not on a clock: it is the thing a fine
+        # pointer is supposed to get, so its arrival is the moment the
+        # selection has been processed and the button's absence means
+        # something. A timer here would pass while the app was still thinking.
+        inner = viewer.frame_locator("#hub-frame")
+        try:
+            inner.locator(".hub-selection-callout").wait_for(timeout=5000)
+        except Exception as error:
+            watch.fail(f"a fine pointer got no callout beside the selection: {error}")
+            return
+        if page.locator(".hub-comment-fab").count() != 0:
+            watch.fail("a fine pointer got the touch comment button as well as the callout")
+    finally:
+        context.close()
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -9973,6 +10113,8 @@ def run() -> int:
                 run_step(watch, check_artifact_viewer_menus_and_version, browser, page, watch, port, project)
                 run_step(watch, check_artifact_title_bar, browser, watch, port, project)
                 run_step(watch, check_document_comments, browser, watch, port, project)
+                run_step(watch, check_touch_comment_button, browser, watch, port, project)
+                run_step(watch, check_comment_button_is_touch_only, browser, watch, port, project)
                 run_step(watch, check_empty_project, page, watch, port)
                 run_step(watch, check_desktop_two_pane, browser, watch, port, project)
                 run_step(watch, check_desktop_topbar, browser, watch, port)
