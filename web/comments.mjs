@@ -288,6 +288,15 @@ export function renderComments() {
 
   refreshCommentsToggle();
 
+  // The drawer's own compose form sits below the list and is part of its
+  // fixed structure, so it was on screen in every view, including the two
+  // that build a composer of their own. That put two textareas and two Post
+  // buttons in front of the reader with no way to tell which one was about
+  // the sentence they had selected. It belongs to the list and shows there.
+  if (els.composeForm) {
+    els.composeForm.hidden = commentsState.viewMode !== "list";
+  }
+
   if (commentsState.viewMode === "sheet" && commentsState.activeThreadId) {
     renderPhoneSheet();
     return;
@@ -1000,10 +1009,13 @@ export function commentsPanel({ toggle, badge }) {
   const form = document.createElement("form");
   form.className = "comments-compose";
   const label = document.createElement("label");
-  label.setAttribute("for", "comment-body");
+  // Its own id. The compose view's textarea is also `comment-body`, and two
+  // elements answering to one id is why the label reached whichever the
+  // document found first.
+  label.setAttribute("for", "comment-body-list");
   label.textContent = "New comment";
   const box = document.createElement("textarea");
-  box.id = "comment-body";
+  box.id = "comment-body-list";
   box.name = "body";
   box.rows = 3;
   box.maxLength = 2000;
@@ -1074,7 +1086,9 @@ export function commentsPanel({ toggle, badge }) {
     }
   });
 
-  commentsState.elements = { backdrop, drawer, toggle, badge, close, list, error, compose: box };
+  commentsState.elements = {
+    backdrop, drawer, toggle, badge, close, list, error, compose: box, composeForm: form,
+  };
   loadComments();
   return { backdrop, drawer };
 }

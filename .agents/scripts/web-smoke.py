@@ -9889,6 +9889,30 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
             watch.fail(
                 f"the composer opened without the selection attached: placeholder {placeholder!r}"
             )
+        # One composer, not two. The drawer carries its own form below the
+        # list as part of its fixed structure, so the compose view used to
+        # arrive on top of it: two textareas, two Post buttons, and no way to
+        # tell which one was about the selected sentence. Counted on screen
+        # rather than in the markup, because both were in the markup by
+        # design and only one of them was ever meant to be visible.
+        boxes = page.evaluate(
+            "() => Array.from(document.querySelectorAll('.comments-drawer textarea'))"
+            ".filter((el) => el.offsetParent !== null).length"
+        )
+        if boxes != 1:
+            watch.fail(f"the comment drawer shows {boxes} comment boxes at once, expected 1")
+        posts = page.evaluate(
+            "() => Array.from(document.querySelectorAll('.comments-drawer button'))"
+            ".filter((el) => el.offsetParent !== null"
+            " && /post/i.test(el.textContent || '')).length"
+        )
+        if posts != 1:
+            watch.fail(f"the comment drawer shows {posts} Post buttons at once, expected 1")
+        dupes = page.evaluate(
+            "() => document.querySelectorAll('#comment-body').length"
+        )
+        if dupes != 1:
+            watch.fail(f"{dupes} elements answer to the id comment-body")
         if page.locator(".hub-comment-fab").count() != 0:
             watch.fail("the comment button stayed on screen after the composer opened")
 
@@ -9956,6 +9980,44 @@ def check_comment_button_is_touch_only(browser, watch: Watch, port: int, project
             watch.fail("a fine pointer got the touch comment button as well as the callout")
     finally:
         context.close()
+    watch.drain_rejections()
+
+
+
+# Anything carrying the hidden attribute and still occupying the screen. An
+# author `display` beats the browser's own `[hidden] { display: none }`, so a
+# control the script believes it has hidden stays where it was. It has cost
+# this project four separate defects: two menus that would not close, an empty
+# artifact frame holding 60vh of nothing, and two comment boxes at once.
+# Asked of the rendered page, because the markup says hidden in every one of
+# those cases.
+STILL_SHOWING = (
+    "() => Array.from(document.querySelectorAll('[hidden]'))"
+    " .filter((el) => el.getClientRects().length > 0)"
+    " .map((el) => el.tagName.toLowerCase() + '.' + (el.className || '').toString().trim()"
+    "   .split(/\\s+/).slice(0, 2).join('.'))"
+    " .slice(0, 6)"
+)
+
+
+def check_hidden_is_hidden(page, watch: Watch) -> None:
+    """Nothing the app has hidden is still on screen, on any screen."""
+    watch.enter("shell: hidden means hidden")
+    for route, ready in (
+        ("#/home", "main .home"),
+        ("#/inbox", "main .inbox-item, main .empty-title"),
+        ("#/projects", "main a[href*='/feed']"),
+        ("#/search", "main #q"),
+        ("#/storage", "main h1"),
+        ("#/settings", "main h1"),
+    ):
+        page.evaluate(f"location.hash = {json.dumps(route)}")
+        if not settle(page, f"!!document.querySelector({json.dumps(ready)})"):
+            watch.fail(f"{route} did not settle for the hidden sweep")
+            continue
+        showing = page.evaluate(STILL_SHOWING)
+        if showing:
+            watch.fail(f"{route} draws elements it has marked hidden: {showing}")
     watch.drain_rejections()
 
 
@@ -10152,6 +10214,7 @@ def run() -> int:
                 run_step(watch, check_version_list, page, watch, port, project)
                 run_step(watch, check_artifact_viewer_menus_and_version, browser, page, watch, port, project)
                 run_step(watch, check_artifact_title_bar, browser, watch, port, project)
+                run_step(watch, check_hidden_is_hidden, page, watch)
                 run_step(watch, check_document_comments, browser, watch, port, project)
                 run_step(watch, check_touch_comment_button, browser, watch, port, project)
                 run_step(watch, check_comment_button_is_touch_only, browser, watch, port, project)
