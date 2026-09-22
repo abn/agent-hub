@@ -57,14 +57,16 @@ if (tabBadge && "MutationObserver" in window) {
   });
 }
 
-// Personal spaces have owner_agent set or follow personal space naming.
-// By owner ruling, personal spaces NEVER appear in the rail.
+// A personal space is a project an agent owns, and `owner_agent` is what says
+// so: the hub sets it, and deleting a project refuses on it. By owner ruling
+// these never appear in the rail.
+//
+// Deliberately not a name test as well. Matching `space-` or a "(personal)"
+// suffix adds nothing the field does not already say, and takes away an
+// ordinary project that happens to be called `space-invaders`: it would
+// vanish from the reader's navigation with nothing on screen to say why.
 function isPersonalSpace(p) {
-  return Boolean(
-    p.owner_agent ||
-      p.id.startsWith("space-") ||
-      (p.display_name && p.display_name.endsWith(" (personal)")),
-  );
+  return Boolean(p.owner_agent);
 }
 
 // Render regular projects into the rail's PROJECTS list.

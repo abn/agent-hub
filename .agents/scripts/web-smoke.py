@@ -3732,6 +3732,34 @@ def check_desktop_rail(browser, watch: Watch, port: int) -> None:
         if not settle(page, "!!document.querySelector('.rail')"):
             watch.fail("the app rail is missing")
             return
+
+        # An agent's personal space stays out of the rail, and `owner_agent` is
+        # the only thing that decides it. The filter also tested the id and the
+        # display name for a moment, which would have taken an ordinary project
+        # called `space-invaders` out of the reader's navigation with nothing on
+        # screen to say why. Seeded here so the rail has to tell the two apart
+        # by the field rather than by how they are spelled.
+        ordinary = harness.request(
+            port,
+            "POST",
+            "/api/v1/projects",
+            body={"id": "space-invaders", "display_name": "Arcade (personal)"},
+        )
+        if ordinary is not None:
+            page.reload(wait_until="load")
+            if not settle(page, "!!document.querySelector('.rail')"):
+                watch.fail("the rail did not come back after seeding a project")
+                return
+            listed = settle(
+                page,
+                "Array.from(document.querySelectorAll('.rail a, .rail button'))"
+                ".some((el) => /Arcade/.test(el.textContent || ''))",
+            )
+            if not listed:
+                watch.fail(
+                    "an ordinary project named like a personal space is missing from the"
+                    " rail, so the rail is reading the name rather than owner_agent"
+                )
         # At 1100px, rail must be 200px wide and tabbar hidden
         rail_box = page.evaluate(
             "(() => { const r = document.querySelector('.rail'); return r ? r.getBoundingClientRect() : null; })()"
@@ -7853,8 +7881,22 @@ def check_desktop_shell(browser, watch: Watch, port: int) -> None:
         # ring the right size around the wrong thing is still wrong.
         for route in ("#/inbox", "#/search", "#/storage", "#/settings", "#/home"):
             page.evaluate(f"location.hash = {json.dumps(route)}")
-            if not settle(page, f"location.hash.startsWith({json.dumps(route)}) && !!document.querySelector('main h1')"):
-                watch.fail(f"{route} did not settle after the route change")
+            # Waited on focus, not on the heading existing. The router moves
+            # focus once the screen's own work finishes, so a heading that is
+            # already in the page is not the same moment: a screen that got
+            # slower left a window where the h1 was there and focus had not
+            # moved yet, and this check read it. Waiting for the thing the
+            # assertion reads closes that without softening it, because a
+            # focus that never lands still fails here.
+            if not settle(
+                page,
+                f"location.hash.startsWith({json.dumps(route)})"
+                " && !!document.querySelector('main h1')"
+                " && document.activeElement === document.querySelector('main h1')",
+            ):
+                watch.fail(
+                    f"{route}: focus never reached the screen's own heading"
+                )
                 return
             landed = page.evaluate(
                 "() => {"

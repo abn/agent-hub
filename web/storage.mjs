@@ -662,14 +662,21 @@ export async function storageScreen(gen) {
   paint(gen, '<div class="storage"></div>');
   if (stale(gen)) return;
   const root = main.querySelector(".storage");
+  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
 
   // The hub store is never empty, so nothing stored means projects hold nothing.
+  //
+  // The heading goes in before that check rather than after it. A screen with
+  // nothing on it is still a screen the reader arrived at, and the router
+  // moves focus to a heading to announce it; with the empty state returning
+  // first there was no heading to move to, so arriving at an empty Storage
+  // announced nothing and left focus on the region.
   if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
+    root.appendChild(isDesktop ? desktopHead(usage) : head(usage));
     root.appendChild(emptyState(EMPTY_COPY.storage));
     return;
   }
 
-  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
     await renderDesktop(root, usage);
   } else {
