@@ -3,6 +3,18 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, the token is the identity
+
+* **Add**: [ADR 0021](adr/0021-the-token-is-the-identity.md) records the
+  identity model the hub is moving to: a token names who is calling rather
+  than which agent, a declared agent name sets attribution only, every call
+  authenticates, ordinary projects are open to any token, and a confidential
+  project is reached by grant and is absent to everyone else. Trust is removed
+  rather than reinterpreted, and grants are binary.
+* **Note**: the record is `proposed`, not `stable`. The interface already has
+  no trust; the API, the policy and the served skill still carry it, and the
+  divergence is listed in the record itself. It exists because the decision
+  lived only in conversation, which is how the two halves came apart.
 ## 2026-09-21, share sheet and per-artifact password choice
 
 * **Update**: [Artifacts](usage/artifacts.md) and [The human surface](architecture/human-surface.md)

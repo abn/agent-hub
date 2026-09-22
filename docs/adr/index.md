@@ -29,3 +29,4 @@ consequences, and is not edited after the fact except to mark it superseded.
   CLI
 * [0020](0020-sessions-belong-to-their-agent.md) - Sessions belong to their
   agent
+* [0021](0021-the-token-is-the-identity.md) - The token is the identity
