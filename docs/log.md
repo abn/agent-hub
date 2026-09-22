@@ -3,6 +3,17 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop artifacts list grid and three-pane viewer
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the desktop artifacts list and viewer layout. The gallery presents a 5-up card
+  grid at desktop widths with 9px unselectable preview ornaments, a lock tile
+  for encrypted artifacts, a Group trigger button with value pill, and a Cards
+  and Table view segment. The viewer redraws into a three-pane desktop shell with
+  a 280px index column, a 640px document measure, and a 320px comments margin
+  column. Resolved comment threads carry a check glyph and the word Resolved.
+
+
 ## 2026-09-22, desktop four-zone layout for sessions and brain file viewer
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the

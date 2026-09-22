@@ -44,22 +44,76 @@ function cardMeta(artifact) {
   return `${actor} · v${artifact.version} · ${formatBytes(artifact.size_bytes)} · ${age}${enc}`;
 }
 
+const previewCache = new Map();
+let activeGrouping = "day";
+let activeView = "cards";
+
 export function artifactCard(artifact) {
   const enc = artifact.protected ? " encrypted" : " plain";
   const age = artifact.created_at || artifact.updated_at ? relative(Date.parse(artifact.created_at || artifact.updated_at)) : "";
   const actor = artifact.actor || "agent";
   const encLabel = artifact.protected ? " · encrypted" : "";
+
+  let previewContent = "";
+  if (artifact.protected) {
+    previewContent = `<span class="artifact-preview-lock" aria-hidden="true">${cardGlyph(true)}</span>`;
+  } else {
+    const cachedSnippet = previewCache.get(artifact.id) || (artifact.description ? artifact.description.slice(0, 200) : "");
+    previewContent = `
+      <span class="artifact-preview-text mono" aria-hidden="true" data-preview-id="${esc(artifact.id)}">${esc(cachedSnippet)}</span>
+      <svg class="doc" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="${DOC_PATH}"></path></svg>
+    `;
+  }
+
+  const commentCount = artifact.comments_count || 0;
+  const commentsBadge = commentCount > 0 ? `<span class="artifact-comments" aria-label="${commentCount} comments"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14v10H9l-4 4z"></path></svg>${commentCount}</span>` : "";
+
   return `<button type="button" class="artifact-card artifact-row" data-action="artifact-open" data-id="${esc(artifact.id)}">
-    <span class="artifact-preview${enc}">${cardGlyph(artifact.protected)}</span>
+    <span class="artifact-preview${enc}" aria-hidden="true">${previewContent}</span>
     <span class="artifact-body">
       <span class="artifact-title">${esc(artifact.title)}</span>
       <span class="artifact-meta mono">${esc(actor)} · <span class="mono">v${artifact.version} · ${formatBytes(artifact.size_bytes)}</span> · ${age}${encLabel}</span>
+      ${commentsBadge}
     </span>
     <svg class="artifact-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
   </button>`;
 }
 
-let activeGrouping = "day";
+function renderArtifactsTable(artifacts) {
+  const rows = artifacts.map((a) => {
+    const age = a.created_at || a.updated_at ? relative(Date.parse(a.created_at || a.updated_at)) : "";
+    const encBadge = a.protected ? ` · <span class="hub-lock-pill">encrypted</span>` : "";
+    return `<tr class="artifact-card artifact-table-row" data-action="artifact-open" data-id="${esc(a.id)}" tabindex="0">
+      <td>
+        <div class="artifact-table-title">
+          ${a.protected ? `<svg class="lock" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="${LOCK_PATH}"></path></svg>` : `<svg class="doc" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="${DOC_PATH}"></path></svg>`}
+          <span>${esc(a.title)}</span>
+        </div>
+      </td>
+      <td class="mono">v${a.version}</td>
+      <td class="mono">${formatBytes(a.size_bytes)}</td>
+      <td class="mono">${age}${encBadge}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div class="hub-artifacts-table-wrap">
+      <table class="hub-artifacts-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Version</th>
+            <th>Size</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
 
 function groupDayKey(dateStr) {
   if (!dateStr) return "TODAY";
@@ -98,32 +152,61 @@ export async function gallerySection(projectId) {
   if (!artifacts || !artifacts.length) return emptyStateHTML(EMPTY_COPY.artifacts);
 
   const totalBytes = artifacts.reduce((acc, a) => acc + (Number(a.size_bytes) || 0), 0);
+  const totalVersions = artifacts.reduce((acc, a) => acc + (Number(a.version) || 1), 0);
   const groups = groupArtifacts(artifacts, activeGrouping);
 
-  const modeLabel = activeGrouping === "agent" ? "Agent" : activeGrouping === "kind" ? "Kind" : "Day";
+  const pillLabel = activeGrouping === "agent" ? "by agent" : activeGrouping === "kind" ? "by kind" : "by date";
 
-  const groupSections = groups
-    .map(
-      (g) =>
-        `<div class="hub-group-header">${esc(g.title)} · ${g.items.length}</div>
-         <div class="hub-group-items">${g.items.map(artifactCard).join("")}</div>`
-    )
-    .join("");
+  // Pre-fetch previews for plain artifacts asynchronously
+  for (const a of artifacts) {
+    if (!a.protected && !previewCache.has(a.id)) {
+      fetchRawText(a.id).then((text) => {
+        if (!text) return;
+        const snippet = text.split("\n").slice(0, 5).join("\n").slice(0, 200);
+        previewCache.set(a.id, snippet);
+        const el = document.querySelector(`.artifact-preview-text[data-preview-id="${a.id}"]`);
+        if (el) el.textContent = snippet;
+      }).catch(() => {});
+    }
+  }
+
+  let contentHTML = "";
+  if (activeView === "table") {
+    contentHTML = renderArtifactsTable(artifacts);
+  } else {
+    contentHTML = groups
+      .map(
+        (g) =>
+          `<div class="hub-group-header mono">${esc(g.title)} · ${g.items.length}</div>
+           <div class="hub-artifacts-grid gallery">${g.items.map(artifactCard).join("")}</div>`
+      )
+      .join("");
+  }
+
+  const versionsText = `${totalVersions} ${totalVersions === 1 ? "version" : "versions"}`;
+  const artifactsText = `${artifacts.length} ${artifacts.length === 1 ? "artifact" : "artifacts"}`;
 
   return `
     <div class="hub-artifacts-summary">
-      <span class="mono">${artifacts.length} artifacts · ${formatBytes(totalBytes)}</span>
       <div class="hub-group-wrap">
-        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">${modeLabel}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+        <span class="hub-group-pill pill">${pillLabel}</span>
         <div class="hub-group-menu" id="hub-group-menu" hidden>
           <button type="button" data-group="day"${activeGrouping === "day" ? ' class="active" aria-current="true"' : ""}>Day</button>
           <button type="button" data-group="agent"${activeGrouping === "agent" ? ' class="active" aria-current="true"' : ""}>Agent</button>
           <button type="button" data-group="kind"${activeGrouping === "kind" ? ' class="active" aria-current="true"' : ""}>Kind</button>
         </div>
       </div>
+      <span class="hub-summary-divider"></span>
+      <div role="group" aria-label="View" class="hub-view-segment">
+        <button type="button" class="hub-view-btn cards${activeView === "cards" ? " active" : ""}" aria-pressed="${activeView === "cards"}" data-view="cards">Cards</button>
+        <button type="button" class="hub-view-btn table${activeView === "table" ? " active" : ""}" aria-pressed="${activeView === "table"}" data-view="table">Table</button>
+      </div>
+      <div class="grow"></div>
+      <span class="hub-artifacts-counts mono">${artifactsText} · ${versionsText} · ${formatBytes(totalBytes)}</span>
     </div>
-    <div class="gallery hub-artifacts-list">
-      ${groupSections}
+    <div class="hub-artifacts-list">
+      ${contentHTML}
     </div>
   `;
 }
@@ -138,6 +221,32 @@ document.addEventListener("click", (e) => {
       menu.hidden = !open;
       toggleBtn.setAttribute("aria-expanded", String(open));
     }
+    return;
+  }
+  const viewBtn = e.target.closest(".hub-view-btn[data-view]");
+  if (viewBtn) {
+    activeView = viewBtn.dataset.view;
+    const parts = location.hash.replace(/^#/, "").split("/");
+    const projectId = parts[2] || "";
+    if (projectId) {
+      gallerySection(projectId).then((html) => {
+        const summary = main.querySelector(".hub-artifacts-summary");
+        const list = main.querySelector(".hub-artifacts-list");
+        if (summary && list) {
+          const temp = document.createElement("div");
+          temp.innerHTML = html;
+          const newSummary = temp.querySelector(".hub-artifacts-summary");
+          const newList = temp.querySelector(".hub-artifacts-list");
+          if (newSummary) summary.replaceWith(newSummary);
+          if (newList) list.replaceWith(newList);
+        }
+      });
+    }
+    return;
+  }
+  const tableRow = e.target.closest(".artifact-table-row[data-id]");
+  if (tableRow && !e.target.closest("button, a")) {
+    openArtifact(tableRow.dataset.id);
     return;
   }
   const groupOpt = e.target.closest("#hub-group-menu button");
@@ -206,16 +315,12 @@ export function openArtifact(id) {
 }
 
 export function viewerBack() {
-  if (window.history.length > 1) {
-    window.history.back();
-    return;
-  }
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const project = params.get("project");
+  const project = params.get("project") || viewer.project;
   location.hash = project ? `#/projects/${encodeURIComponent(project)}/artifacts` : "#/projects";
 }
 
-const viewer = { id: null, version: null, kind: null, raw: false };
+const viewer = { id: null, version: null, kind: null, raw: false, project: null };
 
 // The framed page cannot remember a theme (a sandboxed frame has no store),
 // so the viewer names the one it wants in the address. Relative to this
@@ -724,6 +829,7 @@ export async function viewerRoute(params, gen, path) {
 
   // Mono path: {project} / {slug}
   const projDisplay = projectId || current.project_id || "agent-hub";
+  viewer.project = projDisplay;
   const slug = (current.title || "artifact")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -738,9 +844,66 @@ export async function viewerRoute(params, gen, path) {
   } catch {}
   if (stale(gen)) return;
 
+  let projectArtifacts = [];
+  try {
+    const listRes = await api(`/api/v1/projects/${encodeURIComponent(projDisplay)}/artifacts`);
+    projectArtifacts = listRes.artifacts || [];
+  } catch {}
+  if (!projectArtifacts.length) {
+    projectArtifacts = [current];
+  }
+  if (stale(gen)) return;
+
   main.innerHTML = "";
   const wrap = document.createElement("div");
-  wrap.className = "hub-viewer";
+  wrap.className = "hub-viewer panes panes-artifacts has-selection";
+
+  // Left index column: 280px for reading runs of artifacts
+  const indexCol = document.createElement("aside");
+  indexCol.className = "pane-index hub-viewer-index";
+  indexCol.setAttribute("aria-label", "Artifacts index");
+
+  const indexHead = document.createElement("div");
+  indexHead.className = "hub-viewer-index-head";
+  const indexTitle = document.createElement("span");
+  indexTitle.className = "hub-viewer-index-title";
+  indexTitle.textContent = "Artifacts";
+  const indexCount = document.createElement("span");
+  indexCount.className = "mono hub-viewer-index-count";
+  indexCount.textContent = String(projectArtifacts.length);
+  indexHead.append(indexTitle, indexCount);
+  indexCol.appendChild(indexHead);
+
+  const indexList = document.createElement("div");
+  indexList.className = "hub-viewer-index-list";
+
+  for (const a of projectArtifacts) {
+    const isCurrent = a.id === id;
+    const item = document.createElement("a");
+    item.href = `#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projDisplay)}`;
+    item.className = "hub-viewer-index-item" + (isCurrent ? " active" : "");
+    if (isCurrent) item.setAttribute("aria-current", "page");
+
+    const tRow = document.createElement("span");
+    tRow.className = "hub-viewer-index-item-title";
+    if (a.protected) {
+      const lockIcon = document.createElement("span");
+      lockIcon.innerHTML = cardGlyph(true);
+      tRow.appendChild(lockIcon);
+    }
+    const tText = document.createElement("span");
+    tText.textContent = a.title || "artifact";
+    tRow.appendChild(tText);
+
+    const mRow = document.createElement("span");
+    mRow.className = "hub-viewer-index-item-meta mono";
+    const commentsInfo = a.comments_count ? ` · ${a.comments_count} comment${a.comments_count === 1 ? "" : "s"}` : "";
+    mRow.textContent = `v${a.version || 1} · ${formatBytes(a.size_bytes)}${commentsInfo}`;
+
+    item.append(tRow, mRow);
+    indexList.appendChild(item);
+  }
+  indexCol.appendChild(indexList);
 
   // Top header (Screen 01): 44px back chevron, mono path, 3 glyph buttons (36x36 drawn, 44x44 coarse hit)
   const bar = document.createElement("div");
@@ -903,7 +1066,6 @@ export async function viewerRoute(params, gen, path) {
   });
 
   bar.append(back, pathEl, threadBtn, copyRawBtn, moreBtn);
-  wrap.append(bar, overflowMenu);
 
   // Document meta line with version toggle (Screen 01):
   const metaWrap = document.createElement("div");
@@ -951,9 +1113,11 @@ export async function viewerRoute(params, gen, path) {
     metaLine.append(actorSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
   }
   metaWrap.appendChild(metaLine);
-  wrap.appendChild(metaWrap);
 
-  // Desktop layout from 900px (Screen 07): 560px prose + 272px comments margin column
+  // Center Stage: 640px document
+  const stageCol = document.createElement("div");
+  stageCol.className = "pane-stage hub-viewer-stage";
+
   const content = document.createElement("div");
   content.className = "hub-viewer-content";
 
@@ -972,11 +1136,43 @@ export async function viewerRoute(params, gen, path) {
   frame.src = frameSrc(id, viewer.version, opened);
   docCol.appendChild(frame);
 
-  const commentsCol = document.createElement("div");
-  commentsCol.className = "hub-comments-column";
+  content.appendChild(docCol);
+  stageCol.append(bar, overflowMenu, metaWrap, content);
 
-  content.append(docCol, commentsCol);
-  wrap.appendChild(content);
+  // Right Comments Column (Aside): 320px
+  const commentsCol = document.createElement("aside");
+  commentsCol.className = "pane-aside hub-comments-column";
+  commentsCol.setAttribute("aria-label", "Comments");
+
+  const commentsHead = document.createElement("div");
+  commentsHead.className = "hub-comments-head";
+  const cTitle = document.createElement("span");
+  cTitle.className = "hub-comments-head-title";
+  cTitle.textContent = "Comments";
+  const cMeta = document.createElement("span");
+  cMeta.className = "mono hub-comments-head-meta";
+  cMeta.textContent = `${commentsCount} · v${shown}`;
+  const cAdd = document.createElement("button");
+  cAdd.type = "button";
+  cAdd.className = "hub-comments-head-add";
+  cAdd.dataset.action = "start-thread";
+  cAdd.setAttribute("aria-label", "New thread");
+  cAdd.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12"></path></svg>`;
+  cAdd.addEventListener("click", () => openCompose(null));
+
+  commentsHead.append(cTitle, cMeta, cAdd);
+
+  const cardsList = document.createElement("div");
+  cardsList.className = "hub-comments-cards-list";
+
+  const commentsFooter = document.createElement("div");
+  commentsFooter.className = "hub-comments-footer";
+  const cHelper = document.createElement("div");
+  cHelper.className = "hub-comments-helper";
+  cHelper.textContent = "Select text to comment on it";
+  commentsFooter.appendChild(cHelper);
+
+  commentsCol.append(commentsHead, cardsList, commentsFooter);
 
   // Auto-size frame to avoid inner scrollbar
   const onHeight = (event) => {
@@ -987,10 +1183,10 @@ export async function viewerRoute(params, gen, path) {
   };
   window.addEventListener("message", onHeight);
 
-  // Comments footer strip (Screen 01) when thread exists
+  // Comments footer strip (Screen 01) when thread exists on mobile
   const { toggle, badge } = commentsToggle();
   toggle.style.display = "none";
-  wrap.appendChild(toggle);
+  stageCol.appendChild(toggle);
   if (commentsCount > 0) {
     const strip = document.createElement("button");
     strip.type = "button";
@@ -1005,21 +1201,25 @@ export async function viewerRoute(params, gen, path) {
     strip.addEventListener("click", () => {
       openCommentsDrawer();
     });
-    wrap.appendChild(strip);
+    stageCol.appendChild(strip);
   }
 
   // Version sheet (Screen 02)
   const { backdrop, sheet } = buildVersionSheet(id, versions, shown, projectId);
-  wrap.append(backdrop, sheet);
+  stageCol.append(backdrop, sheet);
 
   // Share sheet (Screens 08 & 09)
   const share = buildShareSheet(id, current, shown, moreBtn);
   openShareSheet = share.openSheet;
-  wrap.append(share.backdrop, share.sheet);
+  stageCol.append(share.backdrop, share.sheet);
 
+  wrap.append(indexCol, stageCol, commentsCol);
   main.appendChild(wrap);
+
   const { backdrop: comBackdrop, drawer: comDrawer } = commentsPanel({ toggle, badge });
   main.append(comBackdrop, comDrawer);
+
+  commentsState.desktopContainer = cardsList;
   renderDesktopCards();
 }
 

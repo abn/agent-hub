@@ -119,7 +119,7 @@ function quoteBlockNode(comment, shownVersion) {
   }
 
   const quoteText = document.createElement("div");
-  quoteText.className = "hub-quote-text";
+  quoteText.className = "hub-quote-text mono";
   if (anchor.mode === "text" && anchor.quote) {
     quoteText.textContent = `“${anchor.quote}”`;
   } else if (anchor.mode === "point") {
@@ -704,22 +704,26 @@ function renderComposeSheet() {
 
 // Desktop Margin Column (Screen 07): from 900px
 export function renderDesktopCards() {
-  const container = document.querySelector(".hub-comments-column");
+  const container =
+    document.querySelector(".hub-comments-cards-list") ||
+    commentsState.desktopContainer ||
+    document.querySelector(".hub-comments-column");
   if (!container) return;
   if (typeof window !== "undefined" && window.innerWidth < 900) {
     container.innerHTML = "";
     return;
   }
-
   container.innerHTML = "";
 
   const openCount = commentsState.comments.filter((c) => !c.done).length;
 
-  // Header: COMMENTS N
-  const head = document.createElement("div");
-  head.className = "hub-col-head";
-  head.innerHTML = `<span>COMMENTS</span><span class="mono">${openCount}</span>`;
-  container.appendChild(head);
+  // Header if not already present in column head
+  if (!container.closest(".hub-comments-column")?.querySelector(".hub-comments-head")) {
+    const head = document.createElement("div");
+    head.className = "hub-col-head";
+    head.innerHTML = `<span>COMMENTS</span><span class="mono">${openCount}</span>`;
+    container.appendChild(head);
+  }
 
   if (!commentsState.comments.length) {
     const empty = document.createElement("p");
@@ -756,7 +760,7 @@ export function renderDesktopCards() {
     const resBar = document.createElement("button");
     resBar.type = "button";
     resBar.className = "hub-col-resolved-toggle";
-    resBar.innerHTML = `${glyphSvg("resolve", { size: 14 })}<span>${resolved.length} resolved</span>`;
+    resBar.innerHTML = `<svg class="resolved-glyph" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Resolved"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span>Resolved · ${resolved.length}</span>`;
     container.appendChild(resBar);
 
     const resWrap = document.createElement("div");
@@ -783,8 +787,15 @@ function renderDesktopCard(comment) {
     card.classList.add("active");
   }
 
-  // Tinted or outlined quote
-  if (comment.anchor) {
+  // Resolved thread carries check glyph and the word Resolved (never dimming alone)
+  if (comment.done) {
+    const resHead = document.createElement("div");
+    resHead.className = "hub-card-resolved-head mono";
+    const quoteLabel = comment.anchor && comment.anchor.quote ? ` · “${comment.anchor.quote}”` : "";
+    resHead.innerHTML = `<svg class="resolved-glyph" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Resolved"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span class="hub-card-resolved-text">Resolved${quoteLabel}</span>`;
+    card.appendChild(resHead);
+  } else if (comment.anchor) {
+    // Tinted or outlined quote for open threads
     const qb = quoteBlockNode(comment, commentsState.shownVersion);
     if (qb) card.appendChild(qb);
   }

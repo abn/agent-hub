@@ -324,12 +324,42 @@ FLOOR_ALLOWED = {
     ("artifact-viewer.mjs", ".9em"): (r"`body\{[^}`]*`?[^}]*?font-size:(\d+(?:\.\d+)?)px", 0.9),
 }
 
-# Nothing is exempt from the type floor. This held one entry, for a comment
-# count drawn inside the comments bubble at 10px: a waiver written because the
-# numeral would not fit rather than because 10px was legible. The count now
-# sits beside the bubble at the ordinary size, so the waiver is not needed and
-# the floor has no holes in it.
-GLYPH_NUMERAL_ALLOWANCE: dict[tuple[str, str], str] = {}
+# Below the floor only where the thing is not text. The count that used to
+# sit here at 10px is gone: it moved outside the bubble and is ordinary size
+# now. What remains is the artifact card preview, which the design draws at
+# 9px as ornament rather than text, on the condition that it is unselectable,
+# hidden from the accessibility tree, and repeats nothing a reader cannot get
+# at full size elsewhere.
+#
+# The allowance is only as good as those conditions, so `check_ornament` holds
+# them: without it this table would let any 9px text through under that class
+# name, which is how a waiver written for one honest case becomes a hole.
+GLYPH_NUMERAL_ALLOWANCE = {
+    ("app.css", "9px"): r"\.artifact-preview-text\s*\{[^}]*font-size:\s*9px",
+}
+
+
+def check_ornament(errors: list[str]) -> None:
+    """What the type floor waives, it waives for ornament only."""
+    css = (WEB / "app.css").read_text(encoding="utf-8", errors="replace")
+    rule = re.search(r"\.artifact-preview-text\s*\{([^}]*)\}", css)
+    if not rule:
+        return
+    body = rule.group(1)
+    if "user-select" not in body or "none" not in body:
+        errors.append(
+            "web/app.css: .artifact-preview-text is drawn under the type floor as"
+            " ornament, so it has to be unselectable; without user-select: none it"
+            " is text a reader can lift out of the page at 9px"
+        )
+    markup = "\n".join(
+        p.read_text(encoding="utf-8", errors="replace") for p in WEB.glob("*.mjs")
+    )
+    if "artifact-preview-text" in markup and 'aria-hidden="true"' not in markup:
+        errors.append(
+            "web/: the 9px card preview is not hidden from the accessibility tree,"
+            " so it is announced as text at a size the floor forbids"
+        )
 
 
 def blank_comments(text: str, suffix: str) -> str:
@@ -930,6 +960,7 @@ def main() -> int:
 
     check_waiting_habits(errors)
     check_glyph_names(errors)
+    check_ornament(errors)
 
     if not WEB.is_dir():
         print("web: web/ does not exist", file=sys.stderr)

@@ -9350,6 +9350,128 @@ def check_artifact_share(
         page.evaluate("document.querySelectorAll('dialog[open]').forEach((d) => d.close())")
 
 
+def check_desktop_artifacts(
+    browser, watch: Watch, port: int, project: str, plain_id: str, protected_id: str
+) -> None:
+    """Desktop artifacts list and viewer layout (drawings 09-12):
+    - 5-up card grid at desktop widths with 9px unselectable aria-hidden previews.
+    - Encrypted artifacts show lock tile, never ciphertext.
+    - Viewer: 280px index, 640px document, 320px comments column beside sentence.
+    """
+    watch.enter("artifacts: desktop 5-up grid and viewer layout")
+    ctx = browser.new_context(
+        viewport={"width": 1440, "height": 900},
+        has_touch=False,
+        color_scheme="dark",
+    )
+    ctx.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = ctx.new_page()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/projects/{quote(project)}/artifacts", wait_until="load")
+        if not settle(page, "!!document.querySelector('main .artifact-card')"):
+            watch.fail("[desktop-artifacts] gallery cards did not render")
+            return
+
+        grid_info = page.evaluate("""() => {
+            const grid = document.querySelector('.hub-artifacts-grid, .gallery.hub-artifacts-list, .gallery');
+            if (!grid) return { hasGrid: false };
+            const cs = window.getComputedStyle(grid);
+            const cols = cs.gridTemplateColumns ? cs.gridTemplateColumns.trim().split(/\\s+/).length : 0;
+            return {
+                hasGrid: true,
+                display: cs.display,
+                cols: cols,
+            };
+        }""")
+        if not grid_info.get("hasGrid"):
+            watch.fail("[desktop-artifacts] gallery grid container not found")
+        elif grid_info.get("cols") != 5:
+            watch.fail(f"[desktop-artifacts] expected 5-up card grid at desktop, got {grid_info.get('cols')} columns (display={grid_info.get('display')})")
+
+        preview_info = page.evaluate("""(args) => {
+            const plain = document.querySelector(`.artifact-card[data-id="${args.plain_id}"]`);
+            const locked = document.querySelector(`.artifact-card[data-id="${args.protected_id}"]`);
+            if (!plain || !locked) return { foundBoth: false };
+
+            const plainPreview = plain.querySelector('.artifact-preview');
+            const lockedPreview = locked.querySelector('.artifact-preview');
+            if (!plainPreview || !lockedPreview) return { foundPreviews: false };
+
+            const hasLockGlyph = !!lockedPreview.querySelector('svg.lock, svg[aria-label="Encrypted"]');
+            const hasCiphertext = lockedPreview.textContent.includes('ciphertext') || lockedPreview.textContent.includes('salt');
+
+            const textEl = plainPreview.querySelector('.artifact-preview-text') || plainPreview;
+            const textCs = window.getComputedStyle(textEl);
+            const userSelect = textCs.userSelect || textCs.webkitUserSelect;
+            const ariaHidden = textEl.getAttribute('aria-hidden') === 'true' || plainPreview.getAttribute('aria-hidden') === 'true';
+            const fontSize = parseFloat(textCs.fontSize);
+
+            return {
+                foundBoth: true,
+                foundPreviews: true,
+                userSelect: userSelect,
+                ariaHidden: ariaHidden,
+                fontSize: fontSize,
+                hasLockGlyph: hasLockGlyph,
+                hasCiphertext: hasCiphertext,
+            };
+        }""", {"plain_id": plain_id, "protected_id": protected_id})
+
+        if not preview_info.get("foundBoth"):
+            watch.fail("[desktop-artifacts] plain or locked artifact card not found in gallery")
+        elif not preview_info.get("foundPreviews"):
+            watch.fail("[desktop-artifacts] preview element missing on card")
+        else:
+            if not preview_info.get("ariaHidden"):
+                watch.fail("[desktop-artifacts] plain preview must be aria-hidden ornament")
+            if preview_info.get("userSelect") != "none":
+                watch.fail(f"[desktop-artifacts] plain preview must be unselectable (user-select: none), got {preview_info.get('userSelect')}")
+            if preview_info.get("hasCiphertext"):
+                watch.fail("[desktop-artifacts] encrypted card must never show ciphertext")
+            if not preview_info.get("hasLockGlyph"):
+                watch.fail("[desktop-artifacts] encrypted card must show lock tile")
+
+        # 3. Check Viewer at 1440px: 280px index, 640px document, 320px comments column
+        page.goto(f"http://127.0.0.1:{port}/#/artifacts/{quote(plain_id)}?project={quote(project)}", wait_until="load")
+        if not settle(page, "!!document.querySelector('.hub-viewer')"):
+            watch.fail("[desktop-artifacts] viewer did not render")
+            return
+
+        viewer_layout = page.evaluate("""() => {
+            const indexCol = document.querySelector('.hub-viewer-index, .pane-index');
+            const docCol = document.querySelector('.hub-viewer-doc, article');
+            const commentsCol = document.querySelector('.hub-comments-column, aside.pane-aside, aside[aria-label="Comments"]');
+
+            const indexWidth = indexCol ? Math.round(indexCol.getBoundingClientRect().width) : 0;
+            const docWidth = docCol ? Math.round(docCol.getBoundingClientRect().width) : 0;
+            const docMaxWidth = docCol ? window.getComputedStyle(docCol).maxWidth : '';
+            const commentsWidth = commentsCol ? Math.round(commentsCol.getBoundingClientRect().width) : 0;
+
+            return {
+                hasIndex: !!indexCol,
+                indexWidth: indexWidth,
+                hasDoc: !!docCol,
+                docWidth: docWidth,
+                docMaxWidth: docMaxWidth,
+                hasComments: !!commentsCol,
+                commentsWidth: commentsWidth,
+            };
+        }""")
+
+        if not viewer_layout.get("hasIndex") or viewer_layout.get("indexWidth") != 280:
+            watch.fail(f"[desktop-artifacts] viewer index width is {viewer_layout.get('indexWidth')}px, expected 280px")
+        if not viewer_layout.get("hasDoc") or (viewer_layout.get("docMaxWidth") != "640px" and viewer_layout.get("docWidth") != 640):
+            watch.fail(f"[desktop-artifacts] viewer document width is {viewer_layout.get('docWidth')}px (max-width={viewer_layout.get('docMaxWidth')}), expected 640px")
+        if not viewer_layout.get("hasComments") or viewer_layout.get("commentsWidth") != 320:
+            watch.fail(f"[desktop-artifacts] viewer comments column width is {viewer_layout.get('commentsWidth')}px, expected 320px")
+
+    finally:
+        ctx.close()
+    watch.drain_rejections()
+
+
 def check_document_comments(
     browser, watch: Watch, port: int, project: str
 ) -> None:
@@ -9780,9 +9902,9 @@ def check_document_comments(
     finally:
         ctx_mobile.close()
 
-    # --- 3. Desktop run at 1100px ---
+    # --- 3. Desktop run at 1440px ---
     ctx_desktop = browser.new_context(
-        viewport={"width": 1100, "height": 800},
+        viewport={"width": 1440, "height": 900},
         has_touch=False,
         color_scheme="dark",
     )
@@ -9793,25 +9915,33 @@ def check_document_comments(
     try:
         p_desktop.goto(f"http://127.0.0.1:{port}/#/artifacts/{artifact_id}", wait_until="load")
         if not settle(p_desktop, "!!document.querySelector('.hub-viewer-bar')"):
-            watch.fail("[1100px] viewer bar did not render")
+            watch.fail("[1440px] viewer bar did not render")
             return
 
-        # Verify desktop layout: 560px prose + 272px comments margin column
+        # Verify desktop layout: 280px index + 640px prose + 320px comments margin column
         layout_info = p_desktop.evaluate("""() => {
+            const index = document.querySelector('.hub-viewer-index, .pane-index');
             const doc = document.querySelector('.hub-viewer-doc');
             const col = document.querySelector('.hub-comments-column');
             return {
+                hasIndex: !!index,
+                indexWidth: index ? Math.round(index.getBoundingClientRect().width) : 0,
                 hasDoc: !!doc,
                 hasCol: !!col,
+                docWidth: doc ? Math.round(doc.getBoundingClientRect().width) : 0,
                 docMaxWidth: doc ? window.getComputedStyle(doc).maxWidth : '',
                 colWidth: col ? Math.round(col.getBoundingClientRect().width) : 0,
                 colVisible: col ? window.getComputedStyle(col).display !== 'none' : false,
             };
         }""")
+        if not layout_info["hasIndex"] or layout_info["indexWidth"] != 280:
+            watch.fail(f"[1440px] desktop index width is {layout_info['indexWidth']}px, expected 280px")
+        if not layout_info["hasDoc"] or (layout_info["docMaxWidth"] != "640px" and layout_info["docWidth"] != 640):
+            watch.fail(f"[1440px] desktop document width is {layout_info['docWidth']}px (max-width={layout_info['docMaxWidth']}), expected 640px")
         if not layout_info["hasCol"] or not layout_info["colVisible"]:
-            watch.fail(f"[1100px] desktop comments margin column missing or not visible: {layout_info}")
-        elif layout_info["colWidth"] != 272:
-            watch.fail(f"[1100px] comments column width is {layout_info['colWidth']}px, expected 272px")
+            watch.fail(f"[1440px] desktop comments margin column missing or not visible: {layout_info}")
+        elif layout_info["colWidth"] != 320:
+            watch.fail(f"[1440px] comments column width is {layout_info['colWidth']}px, expected 320px")
 
         # Verify cards exist in the margin column
         cards = p_desktop.locator(".hub-comments-column .hub-comment-card")
@@ -10564,6 +10694,16 @@ def run() -> int:
                     check_artifact_share,
                     browser,
                     page,
+                    watch,
+                    port,
+                    project,
+                    seeded["artifact_id"],
+                    seeded["protected_id"],
+                )
+                run_step(
+                    watch,
+                    check_desktop_artifacts,
+                    browser,
                     watch,
                     port,
                     project,
