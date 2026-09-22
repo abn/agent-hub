@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-22, settings gear relocated to home and project creation sheet
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  relocating the Settings gear control from the Projects header to the Home
+  header at phone viewports (< 720px), replacing the Projects header gear with
+  a 36px New project button, introducing a dedicated Projects empty state with
+  a 48px primary action, and adding the responsive project creation sheet and
+  modal with live slug derivation and conflict resolution.
+
 ## 2026-09-22, grouped settings layout, segmented controls, and alert states
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

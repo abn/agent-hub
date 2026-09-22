@@ -3343,27 +3343,180 @@ def check_mobile_tabbar(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
-def check_phone_settings(page, watch: Watch) -> None:
-    """Settings is reachable on a phone from Home without visiting a project."""
-    watch.enter("shell: settings reachable on a phone")
+def check_phone_settings(browser, page, watch: Watch, port: int) -> None:
+    """Settings is reachable on a phone from Home, gear removed from Projects, New creates projects."""
+    watch.enter("shell: settings gear on Home phone header")
     goto(page, "#/home", home_title())
+    home_gear = page.locator('main header a.home-gear[href="#/settings"][aria-label="Settings"]')
+    if not home_gear.count() or not home_gear.first.is_visible():
+        watch.fail("Home header offers no visible settings gear at phone width (<720px)")
+        watch.drain_rejections()
+        return
+
+    box = home_gear.first.bounding_box()
+    if not box or box["width"] < 44 or box["height"] < 44:
+        watch.fail(f"Home phone settings gear hit area is {box!r}, expected >= 44x44")
+
+    # Assert gear is absent on desktop Home header (>= 720px)
+    desktop_context = browser.new_context(viewport={"width": 1100, "height": 800})
+    desktop_context.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+    desktop_page = desktop_context.new_page()
+    try:
+        desktop_page.goto(f"http://127.0.0.1:{port}/#/home", wait_until="load")
+        if not settle(desktop_page, "location.hash === '#/home' && !!document.querySelector('main .home')"):
+            watch.fail("desktop page did not paint #/home")
+        d_gear = desktop_page.locator('main header a.home-gear')
+        if d_gear.count() and d_gear.first.is_visible():
+            watch.fail("Home header settings gear is visible on desktop (>=720px), expected rail foot only")
+    finally:
+        desktop_context.close()
+
+    # Home phone gear navigates to Settings
+    home_gear.first.click()
+    if not settle(page, "location.hash === '#/settings' && !!document.querySelector('main form[data-action=\"prefs\"]')"):
+        watch.fail(f"clicking Home settings gear did not navigate to #/settings: {page.evaluate('location.hash')}")
+        watch.drain_rejections()
+        return
+    if heading(page) != "Settings":
+        watch.fail(f"landed on heading {heading(page)!r}, expected 'Settings'")
+
+    # Navigate to Projects
+    watch.enter("projects: gear removed and New button present")
     page.click('.tabbar a[href="#/projects"]')
     if not settle(page, "location.hash === '#/projects' && !!document.querySelector('main .projects-screen')"):
         watch.fail(f"clicking Projects tab did not paint #/projects: {page.evaluate('location.hash')}")
         watch.drain_rejections()
         return
-    gear = page.locator('main a[href="#/settings"][aria-label="Settings"], main a.projects-gear')
-    if not gear.count():
-        watch.fail("the projects screen offers no settings control for a phone")
+
+    # Gear must be removed from Projects header
+    proj_gear = page.locator('main .projects-head a.projects-gear, main .projects-head a[href="#/settings"][aria-label="Settings"]')
+    if proj_gear.count() and proj_gear.first.is_visible():
+        watch.fail("Projects header still carries a settings gear control")
+
+    # New button in Projects header
+    new_btn = page.locator('main .projects-head .projects-new')
+    if not new_btn.count() or not new_btn.first.is_visible():
+        watch.fail("Projects header has no visible New button")
         watch.drain_rejections()
         return
-    gear.first.click()
-    if not settle(page, "location.hash === '#/settings' && !!document.querySelector('main form[data-action=\"prefs\"]')"):
-        watch.fail(f"clicking settings did not navigate to #/settings: {page.evaluate('location.hash')}")
+    btn_text = new_btn.first.text_content().strip()
+    if "New" not in btn_text:
+        watch.fail(f"Projects New button text is {btn_text!r}, expected 'New'")
+    btn_box = new_btn.first.bounding_box()
+    if not btn_box or abs(btn_box["height"] - 36) > 3:
+        watch.fail(f"Projects New button height is {btn_box['height'] if btn_box else 0}px, expected 36px")
+
+    # New button opens create sheet
+    watch.enter("projects: New opens create sheet")
+    new_btn.first.click()
+    if not settle(page, "!!document.querySelector('dialog.project-create-dialog[open]')"):
+        watch.fail("clicking New did not open project create sheet")
         watch.drain_rejections()
         return
-    if heading(page) != "Settings":
-        watch.fail(f"landed on heading {heading(page)!r}, expected 'Settings'")
+
+    focused_id = page.evaluate("document.activeElement ? document.activeElement.id : ''")
+    if focused_id != "project-create-name":
+        watch.fail(f"create dialog opened with focus on {focused_id!r}, expected 'project-create-name'")
+
+    # Typing name derives slug live with /p/ prefix
+    watch.enter("projects: derive live slug")
+    page.fill("#project-create-name", "Demo Project")
+    slug_row_text = page.locator(".project-create-slug-row").first.text_content()
+    if "/p/" not in slug_row_text or "demo-project" not in slug_row_text:
+        watch.fail(f"slug row does not show '/p/' and 'demo-project': {slug_row_text!r}")
+
+    # Edit button unlocks slug editing
+    watch.enter("projects: Edit button unlocks slug editing")
+    slug_input = page.locator("#project-create-slug-input")
+    if slug_input.is_visible():
+        watch.fail("slug input is visible before Edit is clicked")
+    page.click(".project-create-edit-btn")
+    if not slug_input.is_visible():
+        watch.fail("clicking Edit did not reveal slug input")
+
+    # Taken slug suggestion
+    watch.enter("projects: taken slug suggestion")
+    page.fill("#project-create-slug-input", harness.PROJECT_ID)
+    armed, watch.armed = watch.armed, False
+    try:
+        page.click(".project-create-submit")
+        if not settle(page, "!!document.querySelector('.project-create-slug-row.taken, .project-create-taken-text:not([style*=\"display: none\"])')"):
+            watch.fail("taken slug was not caught on the slug row")
+    finally:
+        watch.armed = armed
+    taken_text = page.locator(".project-create-slug-row").first.text_content()
+    if "taken" not in taken_text or "try" not in taken_text:
+        watch.fail(f"taken slug row text does not contain 'taken' and 'try': {taken_text!r}")
+    if not page.is_enabled(".project-create-submit"):
+        watch.fail("primary Create button was disabled when slug is taken")
+
+    # One tap fix: click suggestion button
+    page.click(".project-create-suggest-btn")
+    suggested_val = page.evaluate("document.querySelector('#project-create-slug-input').value")
+    if harness.PROJECT_ID not in suggested_val or suggested_val == harness.PROJECT_ID:
+        watch.fail(f"clicking suggestion did not update slug input: {suggested_val!r}")
+
+    # Submitting creates project and navigates to it
+    watch.enter("projects: create and navigate")
+    created_id = f"smoke-proj-{int(time.time())}"
+    try:
+        page.fill("#project-create-name", "Smoke Auto Proj")
+        page.fill("#project-create-slug-input", created_id)
+        page.click(".project-create-submit")
+        if not settle(page, f"location.hash === '#/projects/{created_id}/feed' && !document.querySelector('dialog.project-create-dialog[open]')"):
+            watch.fail(f"submitting create did not navigate to #/projects/{created_id}/feed: {page.evaluate('location.hash')}")
+    finally:
+        try:
+            harness.request(port, "DELETE", f"/api/v1/projects/{created_id}")
+        except Exception:
+            pass
+
+    # Assert Projects empty state
+    watch.enter("projects: empty state")
+    def mock_empty_projects(route):
+        if route.request.method == "GET":
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"projects": []}))
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/projects", mock_empty_projects)
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/projects", wait_until="load")
+        if not settle(page, "!!document.querySelector('main .projects-empty')"):
+            watch.fail("projects empty state container not found")
+        else:
+            empty_title = page.locator(".projects-empty-title")
+            if not empty_title.count() or "No projects yet" not in empty_title.text_content():
+                watch.fail(f"empty title does not say 'No projects yet': {empty_title.text_content() if empty_title.count() else ''!r}")
+            title_font = page.evaluate("window.getComputedStyle(document.querySelector('.projects-empty-title')).fontSize")
+            if title_font != "19px":
+                watch.fail(f"projects empty title font size is {title_font!r}, expected '19px'")
+            empty_body = page.locator(".projects-empty-body").text_content()
+            if "A project is a folder your agents can read and write" not in empty_body:
+                watch.fail(f"empty state body text incorrect: {empty_body!r}")
+            empty_note = page.locator(".projects-empty-note").text_content()
+            if "Agents can also create one themselves on their first write" not in empty_note:
+                watch.fail(f"empty state note text incorrect: {empty_note!r}")
+            empty_btn = page.locator(".projects-empty-btn")
+            if not empty_btn.count():
+                watch.fail("projects empty state has no primary 'New project' button")
+            else:
+                btn_text = empty_btn.text_content().strip()
+                if "New project" not in btn_text:
+                    watch.fail(f"empty state button text was {btn_text!r}, expected 'New project'")
+                btn_box = empty_btn.bounding_box()
+                if not btn_box or abs(btn_box["height"] - 48) > 2:
+                    watch.fail(f"empty state button height is {btn_box['height'] if btn_box else 0}px, expected 48px")
+                # Click empty state button to open create sheet
+                empty_btn.click()
+                if not settle(page, "!!document.querySelector('dialog.project-create-dialog[open]')"):
+                    watch.fail("clicking empty state button did not open create sheet")
+                page.click('dialog.project-create-dialog .project-create-close, dialog.project-create-dialog [data-action="cancel"]')
+                if not settle(page, "!document.querySelector('dialog.project-create-dialog[open]')"):
+                    watch.fail("closing dialog from empty state failed")
+    finally:
+        page.unroute("**/api/v1/projects", mock_empty_projects)
+
     watch.drain_rejections()
 
 
@@ -11652,7 +11805,7 @@ def run() -> int:
                 run_step(watch, check_public_gate, port, context, project, seeded["protected_id"])
                 run_step(watch, check_shell_tabs, page, watch)
                 run_step(watch, check_mobile_tabbar, page, watch, project)
-                run_step(watch, check_phone_settings, page, watch)
+                run_step(watch, check_phone_settings, browser, page, watch, port)
                 run_step(watch, check_settings_groups, browser, page, watch, port)
                 run_step(watch, check_install_manifest, page, watch)
                 run_step(watch, check_artifact_link, page, watch, project)

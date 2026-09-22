@@ -6,6 +6,7 @@
 
 import { api } from "./api.mjs";
 import { gallerySection } from "./artifacts.mjs";
+import { openCreateProjectDialog } from "./dialog.mjs";
 import { esc, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { feedSection } from "./feed.mjs";
@@ -105,6 +106,12 @@ function returnSessionFocus(id) {
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
+    const newBtn = event.target.closest?.('[data-action="new-project"]');
+    if (newBtn) {
+      event.preventDefault();
+      openCreateProjectDialog();
+      return;
+    }
     const link = event.target.closest?.(".session-link, .session-row a");
     if (link) {
       const href = link.getAttribute("href") || "";
@@ -269,10 +276,9 @@ async function projectsIndexScreen(gen, projects) {
           <div class="projects-meta">${countWord} · <span class="mono">${totalFootprint}</span></div>
         </div>
         <div class="projects-acts">
-          <a href="#/settings" class="projects-new">New</a>
-          <a href="#/settings" class="projects-gear" aria-label="Settings">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
-          </a>
+          <button type="button" class="projects-new" data-action="new-project">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New
+          </button>
         </div>
       </div>
       <div class="projects-list">
@@ -296,11 +302,26 @@ export async function projectScreen(params, gen, path) {
   if (!projects.length) {
     paint(
       gen,
-      `<h1>Projects</h1>${emptyStateHTML({
-        screen: "projects",
-        title: "No projects yet.",
-        body: "Create one in Settings to give agents a home.",
-      })}`,
+      `<div class="projects-screen">
+        <div class="projects-head">
+          <div>
+            <h1 class="projects-title">Projects</h1>
+          </div>
+          <div class="projects-acts">
+            <button type="button" class="projects-new" data-action="new-project">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New
+            </button>
+          </div>
+        </div>
+        <div class="projects-empty">
+          <h2 class="projects-empty-title">No projects yet</h2>
+          <p class="projects-empty-body">A project is a folder your agents can read and write, plus the threads and artifacts that come out of it.</p>
+          <button type="button" class="projects-empty-btn" data-action="new-project">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New project
+          </button>
+          <div class="projects-empty-note">Agents can also create one themselves on their first write, and it appears here.</div>
+        </div>
+      </div>`,
     );
     return;
   }

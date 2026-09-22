@@ -226,9 +226,14 @@ export async function home(gen) {
   paint(
     gen,
     `<div class="home">
-      <header>
+      <header class="home-head">
         ${nodeLine(data.node)}
-        <h1>${esc(greeting())}</h1>
+        <div class="home-title-row">
+          <h1>${esc(greeting())}</h1>
+          <a href="#/settings" class="home-gear" aria-label="Settings">
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
+          </a>
+        </div>
         <p class="home-summary">${summaryLine(data)}</p>
       </header>
       ${

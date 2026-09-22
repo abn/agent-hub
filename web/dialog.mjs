@@ -16,7 +16,8 @@
 // commit the hub refuses leaves the dialog open with the words in the field
 // and the refusal beside it.
 
-import { main } from "./dom.mjs";
+import { api } from "./api.mjs";
+import { esc, main } from "./dom.mjs";
 
 let sequence = 0;
 let openDialog = null;
@@ -246,6 +247,234 @@ export function confirmAction({
           main.focus({ preventScroll: true });
         }
         resolve(committed);
+      },
+      { once: true },
+    );
+  });
+}
+
+export function slugify(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function suggestSlug(slug) {
+  const match = String(slug || "").match(/^(.*?)-(\d+)$/);
+  if (match) {
+    const base = match[1];
+    const num = parseInt(match[2], 10) + 1;
+    return `${base}-${num}`;
+  }
+  return `${slug || "project"}-2`;
+}
+
+export function openCreateProjectDialog({ onCreated } = {}) {
+  if (openDialog || document.querySelector("dialog[open]")) return Promise.resolve(null);
+
+  const opener = document.activeElement;
+  const dialog = document.createElement("dialog");
+  dialog.className = "project-create-dialog";
+  sequence += 1;
+  const titleId = `project-create-title-${sequence}`;
+  dialog.setAttribute("aria-labelledby", titleId);
+
+  dialog.innerHTML = `
+    <form class="project-create-form" method="dialog">
+      <div class="project-create-handle" aria-hidden="true"></div>
+      <div class="project-create-head">
+        <h2 id="${titleId}" class="project-create-title">New project</h2>
+        <button type="button" class="project-create-close" aria-label="Cancel" data-action="cancel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+        </button>
+      </div>
+      <div class="project-create-body">
+        <label for="project-create-name" class="project-create-label">Name</label>
+        <input id="project-create-name" class="project-create-name" name="name" type="text" autocomplete="off" required placeholder="">
+        <div class="project-create-slug-row">
+          <span class="project-create-slug-path mono">
+            <span class="project-create-slug-prefix">/p/</span><span class="project-create-slug-val"></span>
+          </span>
+          <input id="project-create-slug-input" class="project-create-slug-input mono" name="slug" type="text" autocomplete="off" aria-label="Project slug" style="display: none;">
+          <span class="project-create-taken-text mono" style="display: none;"></span>
+          <button type="button" class="project-create-edit-btn" data-action="edit-slug">Edit</button>
+        </div>
+        <div class="project-create-slug-hint">The address agents use. Lower case, numbers and hyphens; it cannot change once an agent has written to the project.</div>
+        <p class="project-create-error" role="alert" style="display: none;"></p>
+      </div>
+      <div class="project-create-foot">
+        <div class="project-create-actions">
+          <button type="button" class="project-create-cancel" data-action="cancel">Cancel</button>
+          <button type="submit" class="project-create-submit">Create project</button>
+        </div>
+        <div class="project-create-subline">Opens the project. Nothing is shared until you share an artifact.</div>
+      </div>
+    </form>
+  `;
+
+  const form = dialog.querySelector("form");
+  const nameInput = dialog.querySelector("#project-create-name");
+  const slugRow = dialog.querySelector(".project-create-slug-row");
+  const slugPath = dialog.querySelector(".project-create-slug-path");
+  const slugVal = dialog.querySelector(".project-create-slug-val");
+  const slugInput = dialog.querySelector("#project-create-slug-input");
+  const takenText = dialog.querySelector(".project-create-taken-text");
+  const editBtn = dialog.querySelector(".project-create-edit-btn");
+  const errorEl = dialog.querySelector(".project-create-error");
+  const submitBtn = dialog.querySelector(".project-create-submit");
+
+  let slugEdited = false;
+  let currentSlug = "";
+  let takenSuggestion = "";
+
+  const renderSlug = () => {
+    errorEl.style.display = "none";
+    if (takenSuggestion) {
+      slugRow.classList.add("taken");
+      slugPath.style.display = "none";
+      slugInput.style.display = "none";
+      editBtn.style.display = "none";
+      takenText.style.display = "inline";
+      takenText.innerHTML = `${esc(currentSlug)} is taken - try <button type="button" class="project-create-suggest-btn" data-action="use-suggest">${esc(takenSuggestion)}</button>`;
+    } else {
+      slugRow.classList.remove("taken");
+      takenText.style.display = "none";
+      if (slugEdited) {
+        slugPath.style.display = "none";
+        slugInput.style.display = "inline-block";
+        editBtn.style.display = "none";
+        slugInput.value = currentSlug;
+      } else {
+        slugPath.style.display = "inline";
+        slugInput.style.display = "none";
+        editBtn.style.display = "inline-flex";
+        slugVal.textContent = currentSlug;
+      }
+    }
+  };
+
+  nameInput.addEventListener("input", () => {
+    if (!slugEdited) {
+      currentSlug = slugify(nameInput.value);
+    }
+    takenSuggestion = "";
+    renderSlug();
+  });
+
+  editBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    slugEdited = true;
+    takenSuggestion = "";
+    renderSlug();
+    slugInput.focus();
+    slugInput.select();
+  });
+
+  slugInput.addEventListener("input", () => {
+    slugEdited = true;
+    currentSlug = slugify(slugInput.value);
+    takenSuggestion = "";
+  });
+
+  slugRow.addEventListener("click", (e) => {
+    const suggestBtn = e.target.closest?.('[data-action="use-suggest"], .project-create-suggest-btn');
+    if (suggestBtn && takenSuggestion) {
+      e.preventDefault();
+      currentSlug = takenSuggestion;
+      slugInput.value = currentSlug;
+      takenSuggestion = "";
+      renderSlug();
+      if (slugEdited) {
+        slugInput.focus();
+      }
+    }
+  });
+
+  const closeDialog = () => {
+    dialog.close("cancel");
+  };
+
+  dialog.querySelectorAll('[data-action="cancel"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeDialog();
+    });
+  });
+
+  let busy = false;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+
+    if (takenSuggestion) {
+      currentSlug = takenSuggestion;
+      slugInput.value = currentSlug;
+      takenSuggestion = "";
+      renderSlug();
+    }
+
+    const name = nameInput.value.trim();
+    const slug = (slugEdited ? slugInput.value : currentSlug).trim();
+    if (!name || !slug) return;
+
+    busy = true;
+    form.setAttribute("aria-busy", "true");
+    errorEl.style.display = "none";
+    try {
+      const created = await api("/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify({ id: slug, display_name: name }),
+      });
+      busy = false;
+      dialog.close("created");
+      if (onCreated) onCreated(created);
+      location.hash = `#/projects/${encodeURIComponent(slug)}/feed`;
+    } catch (err) {
+      busy = false;
+      form.removeAttribute("aria-busy");
+      const isConflict = err.status === 409 || String(err.message || "").toLowerCase().includes("already exists");
+      if (isConflict) {
+        takenSuggestion = suggestSlug(slug);
+        renderSlug();
+      } else {
+        errorEl.textContent = err.message || "Failed to create project";
+        errorEl.style.display = "block";
+      }
+    }
+  });
+
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      const ring = [...dialog.querySelectorAll('input:not([style*="display: none"]), button:not([style*="display: none"]):not([disabled])')];
+      if (!ring.length) return;
+      const edge = e.shiftKey ? ring[0] : ring[ring.length - 1];
+      if (document.activeElement !== edge) return;
+      e.preventDefault();
+      (e.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+    }
+  });
+
+  document.body.appendChild(dialog);
+  openDialog = dialog;
+  document.documentElement.classList.add("has-dialog");
+  dialog.showModal();
+  nameInput.focus();
+
+  return new Promise((resolve) => {
+    dialog.addEventListener(
+      "close",
+      () => {
+        openDialog = null;
+        document.documentElement.classList.remove("has-dialog");
+        dialog.remove();
+        if (opener instanceof HTMLElement && opener.isConnected) {
+          opener.focus({ preventScroll: true });
+        } else if (!document.activeElement || document.activeElement === document.body) {
+          main.focus({ preventScroll: true });
+        }
+        resolve(dialog.returnValue === "created");
       },
       { once: true },
     );
