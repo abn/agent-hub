@@ -177,7 +177,19 @@ export function shellHTML({
   stageBody,
   aside = "",
   hasSelection = false,
+  noIndex = false,
 }) {
+  // A screen with no index is rail and stage only: a short form is not a list
+  // of items opened one at a time.
+  if (noIndex) {
+    return `<div class="shell shell-no-index"${segment ? ` data-segment="${esc(segment)}"` : ""}>
+      <div class="shell-stage">
+        ${stageHead}
+        ${stageControls}
+        <div class="shell-body">${stageBody}</div>
+      </div>
+    </div>`;
+  }
   return `<div class="shell${hasSelection ? " has-selection" : ""}"${
     segment ? ` data-segment="${esc(segment)}"` : ""
   }>

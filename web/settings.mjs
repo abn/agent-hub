@@ -5,8 +5,10 @@ import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
+import { usedOfCapacity } from "./home.mjs";
 import { applyPrefs, prefs, savePrefs, saveToken } from "./prefs.mjs";
 import { render } from "./router.mjs";
+import { shellHTML, shellStageHead } from "./shell-layout.mjs";import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -44,245 +46,173 @@ export async function enableNotifications() {
   render();
 }
 
-function checkGlyph() {
-  return glyphSvg("resolve", { size: 13, strokeWidth: 2.2, className: "settings-check" });
-}
-
 function switchControl(id, labelId, checked, action = "", extra = "") {
   return `<button type="button" id="${esc(id)}" role="switch" aria-labelledby="${esc(labelId)}" aria-checked="${checked ? "true" : "false"}" class="settings-switch ${checked ? "on" : "off"}"${action ? ` data-action="${esc(action)}"` : ""}${extra}>
     <span class="settings-switch-track"><span class="settings-switch-thumb"></span></span>
   </button>`;
 }
 
+const THEME_GLYPHS = {
+  system:
+    '<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="1.5"></rect><path d="M8 20h8M12 17v3"></path></svg>',
+  light:
+    '<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"></path></svg>',
+  dark:
+    '<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"></path></svg>',
+};
+
+function themeSegment(value, current) {
+  const labels = { system: "Follow the system", light: "Light", dark: "Dark" };
+  return `<button type="button" class="settings-segment settings-glyph-seg" data-theme-val="${value}" aria-pressed="${
+    current === value
+  }" aria-label="${labels[value]}">${THEME_GLYPHS[value]}</button>`;
+}
+
+// The alerts section is the design's one row while notifications are on: a
+// switch and one line saying what it covers. The permission states stay,
+// because a browser that refuses or cannot ask needs somewhere to say so.
 function alertsContent() {
   const state = notificationState();
   if (state === "unsupported") {
     return `
-      <div class="settings-row row alerts-info-row">
+      <div class="settings-row row">
         <span class="alerts-glyph unsupported" aria-hidden="true">${glyphSvg("bellStruck", { size: 20 })}</span>
-        <div class="alerts-body">
-          <div class="title">Not available here</div>
-          <div class="meta helper">This browser does not support notifications. The inbox still shows everything.</div>
+        <div class="grow">
+          <div class="title">Waiting on you</div>
+          <div class="meta">This browser cannot notify. The inbox still shows everything.</div>
         </div>
-      </div>
-    `;
+      </div>`;
   }
-
   if (state === "blocked") {
     return `
-      <div class="settings-row row alerts-blocked-row">
-        <div class="alerts-info-line">
-          <span class="alerts-glyph blocked" aria-hidden="true">${glyphSvg("bellStruck", { size: 20 })}</span>
-          <div class="alerts-body">
-            <div class="title">Blocked in this browser</div>
-            <div class="meta helper">We cannot ask again - the browser only asks once. Allow notifications for this site in your browser's site settings, then check again.</div>
-          </div>
+      <div class="settings-row row">
+        <span class="alerts-glyph blocked" aria-hidden="true">${glyphSvg("bellStruck", { size: 20 })}</span>
+        <div class="grow">
+          <div class="title">Waiting on you</div>
+          <div class="meta">Blocked in this browser. Allow notifications for this site, then check again.</div>
         </div>
-        <div class="alerts-act-line">
-          <button type="button" class="hairline settings-btn-36" data-action="check-alerts">Check again</button>
-        </div>
-        <div class="meta footnote">The Inbox still shows everything. Notifications only change when you hear about it.</div>
-      </div>
-    `;
+        <button type="button" class="hairline settings-btn-36" data-action="check-alerts">Check again</button>
+      </div>`;
   }
-
   if (state === "granted") {
-    const masterOn = readAlertPref("master", "on") === "on";
-    const waitingOn = readAlertPref("waiting", "on") === "on";
-    const questionsOn = readAlertPref("questions", "on") === "on";
-    const finishedOn = readAlertPref("finished", "on") === "on";
-
+    const on = readAlertPref("master", "on") === "on";
     return `
       <div class="settings-row row switch-row">
         <div class="grow">
-          <div class="title" id="alerts-master-label">On for this browser</div>
-          <div class="meta helper">Only while the tab is closed or in the background</div>
+          <div class="title" id="alerts-master-label">Waiting on you</div>
+          <div class="meta">Approvals and questions only</div>
         </div>
-        ${switchControl("alerts-master", "alerts-master-label", masterOn, "toggle-alert-master")}
-      </div>
-      <div class="settings-row row switch-row settings-kind-row">
-        <div class="grow">
-          <div class="title" id="alert-waiting-label">Waiting on you</div>
-        </div>
-        ${switchControl("alert-waiting", "alert-waiting-label", waitingOn && masterOn, "toggle-alert-kind", ' data-kind="waiting"')}
-      </div>
-      <div class="settings-row row switch-row settings-kind-row">
-        <div class="grow">
-          <div class="title" id="alert-questions-label">Questions from an agent</div>
-        </div>
-        ${switchControl("alert-questions", "alert-questions-label", questionsOn && masterOn, "toggle-alert-kind", ' data-kind="questions"')}
-      </div>
-      <div class="settings-row row switch-row settings-kind-row">
-        <div class="grow">
-          <div class="title" id="alert-finished-label">Finished work</div>
-        </div>
-        ${switchControl("alert-finished", "alert-finished-label", finishedOn && masterOn, "toggle-alert-kind", ' data-kind="finished"')}
-      </div>
-    `;
+        ${switchControl("alerts-master", "alerts-master-label", on, "toggle-alert-master")}
+      </div>`;
   }
-
-  // State 1: default (Not asked yet)
   return `
-    <div class="settings-row row alerts-off-row">
-      <div class="alerts-info-line">
-        <span class="alerts-glyph" aria-hidden="true">${glyphSvg("bell", { size: 20 })}</span>
-        <div class="alerts-body">
-          <div class="title">Notifications are off</div>
-          <div class="meta helper">Your browser will ask first. Nothing is sent until you pick which kinds.</div>
-        </div>
+    <div class="settings-row row">
+      <span class="alerts-glyph" aria-hidden="true">${glyphSvg("bell", { size: 20 })}</span>
+      <div class="grow">
+        <div class="title">Waiting on you</div>
+        <div class="meta">Your browser will ask first. Nothing is sent until you turn it on.</div>
       </div>
-      <div class="alerts-act-line">
-        <button type="button" class="primary settings-btn-44" data-action="notification-enable">Turn on notifications</button>
-      </div>
-    </div>
-  `;
+      <button type="button" class="primary settings-btn-44" data-action="notification-enable">Turn on</button>
+    </div>`;
 }
 
-export async function settingsScreen(gen) {
-  let agents = [];
-  try {
-    const res = await api("/api/v1/agents");
-    agents = res.agents || [];
-  } catch {}
+const NAV_CHEVRON = `<span class="settings-nav-chevron" aria-hidden="true">${glyphSvg("chevronRight", { size: 16 })}</span>`;
 
-  const agentCount = agents.length;
-  const agentText = agentCount === 1 ? "1 agent" : `${agentCount} agents`;
+export async function settingsScreen(gen) {
+  const [agentsRes, storage] = await Promise.all([
+    api("/api/v1/agents").catch(() => ({ agents: [] })),
+    api("/api/v1/storage").catch(() => null),
+  ]);
+  const agents = agentsRes.agents || [];
   let latestSeen = null;
   for (const a of agents) {
-    if (a.last_seen_at) {
-      if (!latestSeen || a.last_seen_at > latestSeen) {
-        latestSeen = a.last_seen_at;
-      }
-    }
+    if (a.last_seen_at && (!latestSeen || a.last_seen_at > latestSeen)) latestSeen = a.last_seen_at;
   }
-  const lastCallText = latestSeen ? `last call ${relative(latestSeen)}` : "";
-  const tokenStateLine = `1 live token · ${agentText}${lastCallText ? ` · ${lastCallText}` : ""}`;
+  const agentCount = agents.length;
+  const agentText = `${agentCount} ${agentCount === 1 ? "agent" : "agents"}${
+    latestSeen ? ` · last call ${relative(latestSeen)}` : ""
+  }`;
 
   const currentTheme = prefs.theme || "system";
-  const currentDensity = prefs.density || "comfortable";
+  const densityCompact = (prefs.density || "comfortable") === "compact";
   const shortcutsOn = prefs.shortcuts === "on";
 
-  paint(
-    gen,
-    `
+  const used = storage?.used_bytes ?? 0;
+  const capacity = storage?.capacity_bytes ?? 0;
+  const storageValue = capacity ? usedOfCapacity(used, capacity) : formatBytes(used);
+  const dataPath = storage?.data_path || "";
+  const nodeLine = storage?.node ? `${storage.node.host} · ${storage.node.mode}` : "";
+
+  const form = `
     <form class="settings" data-action="prefs" onsubmit="event.preventDefault();">
-      <header class="settings-header">
-        <div class="settings-header-top">
-          <a class="settings-back-btn" href="#/home" aria-label="Back">
-            ${glyphSvg("chevronBack", { size: 20 })}
-          </a>
-          <h1 class="settings-title">Settings</h1>
-        </div>
-        <div class="settings-subline">Everything here describes you or this browser. Projects are created and deleted on Projects.</div>
-      </header>
-
-      <!-- Group 1: Appearance -->
-      <section class="settings-group" aria-labelledby="group-appearance">
-        <div class="settings-group-label" id="group-appearance">APPEARANCE</div>
+      <section class="settings-group">
+        <div class="settings-group-label">APPEARANCE</div>
         <div class="settings-group-card">
-          <!-- Theme -->
-          <div class="settings-row row settings-row-stacked">
-            <div class="settings-row-label">
-              <div class="title" id="label-theme">Theme</div>
-            </div>
-            <div class="settings-control">
-              <div class="settings-segmented" role="group" aria-label="Theme">
-                <button type="button" class="settings-segment" role="button" aria-pressed="${currentTheme === "system"}" data-theme-val="system">
-                  ${currentTheme === "system" ? checkGlyph() : ""}
-                  <span>System</span>
-                </button>
-                <button type="button" class="settings-segment" role="button" aria-pressed="${currentTheme === "light"}" data-theme-val="light">
-                  ${currentTheme === "light" ? checkGlyph() : ""}
-                  <span>Light</span>
-                </button>
-                <button type="button" class="settings-segment" role="button" aria-pressed="${currentTheme === "dark"}" data-theme-val="dark">
-                  ${currentTheme === "dark" ? checkGlyph() : ""}
-                  <span>Dark</span>
-                </button>
-              </div>
+          <div class="settings-row row">
+            <div class="grow"><div class="title" id="label-theme">Theme</div></div>
+            <div class="settings-segmented settings-theme-seg" role="group" aria-label="Theme">
+              ${themeSegment("system", currentTheme)}
+              ${themeSegment("light", currentTheme)}
+              ${themeSegment("dark", currentTheme)}
             </div>
           </div>
-
-          <!-- Density -->
-          <div class="settings-row row settings-row-stacked">
-            <div class="settings-row-label">
-              <div class="title" id="label-density">Density</div>
-              <div class="meta helper density-helper">
-                <span class="coarse-only">Compact takes list rows to 40px. Hit areas stay 44px on touch either way.</span>
-                <span class="fine-only">Compact takes list rows to 36px. Hit areas stay 44px either way.</span>
-              </div>
-            </div>
-            <div class="settings-control">
-              <div class="settings-segmented" role="group" aria-label="Density">
-                <button type="button" class="settings-segment" role="button" aria-pressed="${currentDensity === "comfortable"}" data-density-val="comfortable">
-                  ${currentDensity === "comfortable" ? checkGlyph() : ""}
-                  <span class="density-label">Comfortable <span class="density-consequence coarse-only">· 48px rows</span><span class="density-consequence fine-only">· 44px rows</span></span>
-                </button>
-                <button type="button" class="settings-segment" role="button" aria-pressed="${currentDensity === "compact"}" data-density-val="compact">
-                  ${currentDensity === "compact" ? checkGlyph() : ""}
-                  <span class="density-label">Compact <span class="density-consequence coarse-only">· 40px</span><span class="density-consequence fine-only">· 36px</span></span>
-                </button>
-              </div>
-            </div>
+          <div class="settings-row row switch-row">
+            <div class="grow"><div class="title" id="density-label">Compact rows</div></div>
+            ${switchControl("density", "density-label", densityCompact, "toggle-density")}
           </div>
-
-          <!-- Single-key shortcuts -->
           <div class="settings-row row switch-row">
             <div class="grow">
-              <label class="title" id="shortcuts-label" for="shortcuts">Single-key shortcuts</label>
-              <div class="meta helper"><code>j</code>, <code>k</code>, <code>e</code>, <code>r</code> act with no modifier, suspended while a text field has focus.</div>
+              <div class="title" id="shortcuts-label">Single-key shortcuts</div>
+              <div class="meta">j, k, e, r act with no modifier, suspended while a text field has focus.</div>
             </div>
             ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
           </div>
         </div>
       </section>
 
-      <!-- Group 2: Alerts -->
-      <section class="settings-group" aria-labelledby="group-alerts">
-        <div class="settings-group-label" id="group-alerts">ALERTS</div>
-        <div class="settings-group-card alerts-group-card">
-          ${alertsContent()}
-        </div>
+      <section class="settings-group">
+        <div class="settings-group-label">ALERTS</div>
+        <div class="settings-group-card alerts-group-card">${alertsContent()}</div>
       </section>
 
-      <!-- Group 3: Access -->
-      <section class="settings-group" aria-labelledby="group-access">
-        <div class="settings-group-label" id="group-access">ACCESS</div>
+      <section class="settings-group">
+        <div class="settings-group-label">THIS HUB</div>
         <div class="settings-group-card">
-          <a class="settings-row settings-nav-row row" href="#/access">
-            <span class="settings-nav-glyph" aria-hidden="true">${glyphSvg("idCard", { size: 17 })}</span>
+          <a class="settings-row settings-nav-row row" href="#/storage">
             <div class="grow">
-              <div class="title">Tokens and callers</div>
-              <div class="meta">${esc(tokenStateLine)}</div>
+              <div class="title">Storage</div>
+              <div class="meta mono">${esc(storageValue)}</div>
             </div>
-            <span class="settings-nav-chevron" aria-hidden="true">${glyphSvg("chevronRight", { size: 16 })}</span>
+            ${NAV_CHEVRON}
           </a>
-        </div>
-      </section>
-
-      <!-- Group 4: This browser -->
-      <section class="settings-group" aria-labelledby="group-this-browser">
-        <div class="settings-group-label" id="group-this-browser">THIS BROWSER</div>
-        <div class="settings-group-card">
-          <div class="settings-row this-browser-info-row row">
-            <div class="title">This browser is holding the access token</div>
-            <div class="meta helper">Signing out forgets it here and nowhere else. Other browsers, and every agent, are unaffected.</div>
-          </div>
-          <div class="settings-row this-browser-act-row row">
-            <div class="grow"></div>
-            <button type="button" class="settings-signout-btn hairline" data-action="signout">
-              ${glyphSvg("signOut", { size: 16 })}
-              <span>Sign out</span>
-            </button>
+          <a class="settings-row settings-nav-row row" href="#/access">
+            <div class="grow">
+              <div class="title">Agents &amp; tokens</div>
+              <div class="meta">${esc(agentText)}</div>
+            </div>
+            ${NAV_CHEVRON}
+          </a>
+          <div class="settings-row row">
+            <div class="grow">
+              <div class="title">This browser</div>
+              <div class="meta">Holding the access token. Signing out forgets it here and nowhere else.</div>
+            </div>
+            <button type="button" class="settings-signout-btn hairline" data-action="signout">Sign out</button>
           </div>
         </div>
       </section>
 
-      <footer class="settings-footer mono">
-        Agent Hub 0.4.2 · build 8f21c6
-      </footer>
-    </form>
-    `,
+      <footer class="settings-footer mono">${esc(dataPath)}${nodeLine ? ` · ${esc(nodeLine)}` : ""}</footer>
+    </form>`;
+
+  paint(
+    gen,
+    shellHTML({
+      noIndex: true,
+      stageHead: shellStageHead("Settings", nodeLine),
+      stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(dataPath)}</span></div>`,
+      stageBody: `<div class="shell-pad settings-pad">${form}</div>`,
+    }),
   );
 
   setupSettingsEvents();
@@ -303,39 +233,23 @@ function setupSettingsEvents() {
       const group = themeBtn.closest(".settings-segmented");
       if (group) {
         group.querySelectorAll("button[data-theme-val]").forEach((b) => {
-          const isSelected = b.dataset.themeVal === val;
-          b.setAttribute("aria-pressed", isSelected ? "true" : "false");
-          const existingCheck = b.querySelector(".settings-check");
-          if (isSelected && !existingCheck) {
-            b.insertAdjacentHTML("afterbegin", checkGlyph());
-          } else if (!isSelected && existingCheck) {
-            existingCheck.remove();
-          }
+          b.setAttribute("aria-pressed", b.dataset.themeVal === val ? "true" : "false");
         });
       }
       return;
     }
 
-    // Density segment click
-    const densityBtn = event.target.closest("button[data-density-val]");
+    // Compact rows switch
+    const densityBtn = event.target.closest("[data-action='toggle-density']");
     if (densityBtn) {
       event.preventDefault();
-      const val = densityBtn.dataset.densityVal;
-      savePrefs({ theme: prefs.theme, density: val, shortcuts: prefs.shortcuts });
+      const next = (prefs.density || "comfortable") === "compact" ? "comfortable" : "compact";
+      savePrefs({ theme: prefs.theme, density: next, shortcuts: prefs.shortcuts });
       applyPrefs();
-      const group = densityBtn.closest(".settings-segmented");
-      if (group) {
-        group.querySelectorAll("button[data-density-val]").forEach((b) => {
-          const isSelected = b.dataset.densityVal === val;
-          b.setAttribute("aria-pressed", isSelected ? "true" : "false");
-          const existingCheck = b.querySelector(".settings-check");
-          if (isSelected && !existingCheck) {
-            b.insertAdjacentHTML("afterbegin", checkGlyph());
-          } else if (!isSelected && existingCheck) {
-            existingCheck.remove();
-          }
-        });
-      }
+      const on = next === "compact";
+      densityBtn.setAttribute("aria-checked", String(on));
+      densityBtn.classList.toggle("on", on);
+      densityBtn.classList.toggle("off", !on);
       return;
     }
 

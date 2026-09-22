@@ -6626,7 +6626,7 @@ dialog.dialog-project-delete {
 
 @media (max-width: 1099px) {
   .shell.has-selection .shell-index { display: none; }
-  .shell:not(.has-selection) .shell-stage { display: none; }
+  .shell:not(.has-selection):not(.shell-no-index) .shell-stage { display: none; }
 }
 
 @media (min-width: 1100px) {
@@ -6785,3 +6785,25 @@ dialog.dialog-project-delete {
 }
 .shell-index .inbox-top { display: none; }
 .shell-index .inbox-screen { display: block; }
+
+/* Settings is the one screen with no index: rail and stage, a 640px form. */
+.settings-pad { padding: 24px 16px 48px; }
+.settings-pad .settings { max-width: 640px; }
+.settings-theme-seg { display: inline-flex; flex: none; gap: 2px; padding: 2px; background: var(--bg); border-radius: var(--r-1); }
+.settings-glyph-seg {
+  width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.settings-glyph-seg[aria-pressed="true"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
