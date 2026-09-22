@@ -4150,6 +4150,107 @@ def check_desktop_sessions_four_zones(browser, watch: Watch, port: int) -> None:
             watch.drain_rejections()
 
 
+def check_desktop_storage(browser, watch: Watch, port: int) -> None:
+    """The desktop storage screen renders 4 summary tiles and a multi-column table."""
+    watch.enter("desktop storage: tiles, multi-column table, and reclaimable dash")
+    for width, theme in ((1440, "dark"), (1100, "light")):
+        context = browser.new_context(
+            viewport={"width": width, "height": 844},
+            color_scheme=theme,
+        )
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+            f"localStorage.setItem('hub.theme', {json.dumps(theme)});"
+        )
+        page = context.new_page()
+        try:
+            page.goto(f"http://127.0.0.1:{port}/#/storage", wait_until="load")
+            if not settle(page, "!!document.querySelector('.storage-table')"):
+                watch.fail(f"[{width}px {theme}] storage screen does not draw .storage-table")
+                return
+
+            # 1. No index, no aside
+            if page.evaluate("!!document.querySelector('.pane-index, .pane-aside, aside.pane')"):
+                watch.fail(f"[{width}px {theme}] storage screen must not draw index or aside panes")
+
+            # 2. 4 summary tiles at the top
+            tiles = page.evaluate(
+                """() => [...document.querySelectorAll('.storage-tile')].map(t => ({
+                    label: t.querySelector('.storage-tile-label')?.textContent.trim() || '',
+                    val: t.querySelector('.storage-tile-val')?.textContent.trim() || '',
+                }))"""
+            )
+            if len(tiles) != 4:
+                watch.fail(f"[{width}px {theme}] expected 4 summary tiles, found {len(tiles)}")
+            tile_labels = [t["label"] for t in tiles]
+            for wanted_label in ("ON DISK", "ARTIFACT BLOBS", "SESSION BRAINS", "RECLAIMABLE"):
+                if wanted_label not in tile_labels:
+                    watch.fail(f"[{width}px {theme}] summary tiles missing {wanted_label!r}: {tile_labels}")
+
+            # 3. Multi-column table replacing drill-down on desktop
+            headers = page.evaluate(
+                """() => [...document.querySelectorAll('.storage-table th')].map(th => th.textContent.trim())"""
+            )
+            for col in ("PROJECT", "SHARE", "TOTAL", "BLOBS", "BRAINS", "RECLAIMABLE", "LAST WRITE"):
+                if col not in headers:
+                    watch.fail(f"[{width}px {theme}] storage table missing column {col!r}: {headers}")
+
+            # Table must render in a multi-column layout with width >= 640px
+            table_box = page.evaluate("(() => { const el = document.querySelector('.storage-table'); return el ? el.getBoundingClientRect() : null; })()")
+            if not table_box or table_box["width"] < 640:
+                watch.fail(f"[{width}px {theme}] table width is {table_box['width'] if table_box else None}, expected >= 640px")
+
+            # 4. Table rows: share proportion bar, total, blobs, brains, reclaimable, last write, Prune
+            rows = page.evaluate(
+                """() => [...document.querySelectorAll('.storage-table tbody tr.storage-table-row')].map(tr => ({
+                    project: tr.dataset.project,
+                    name: tr.querySelector('.storage-proj-link')?.textContent.trim() || '',
+                    has_share_bar: !!tr.querySelector('.storage-share-bar'),
+                    total: tr.querySelector('.cell-total')?.textContent.trim() || '',
+                    blobs: tr.querySelector('.cell-blobs')?.textContent.trim() || '',
+                    brains: tr.querySelector('.cell-brains')?.textContent.trim() || '',
+                    reclaimable: tr.querySelector('.cell-reclaimable')?.textContent.trim() || '',
+                    last_write: tr.querySelector('.cell-lastwrite')?.textContent.trim() || '',
+                    has_prune: !!tr.querySelector('button.storage-prune'),
+                }))"""
+            )
+            if not rows:
+                watch.fail(f"[{width}px {theme}] storage table has no rows in tbody")
+                return
+
+            saw_dash = False
+            saw_reclaimable_bytes = False
+            for r in rows:
+                if not r["has_share_bar"]:
+                    watch.fail(f"[{width}px {theme}] row for {r['project']} missing share proportion bar")
+                if r["reclaimable"] == "\u2014":
+                    saw_dash = True
+                    if r["has_prune"]:
+                        watch.fail(f"[{width}px {theme}] row for {r['project']} has no reclaimable bytes but offers Prune")
+                else:
+                    saw_reclaimable_bytes = True
+                    if "0 B" in r["reclaimable"]:
+                        watch.fail(f"[{width}px {theme}] row for {r['project']} displayed '0 B' instead of em dash for zero reclaimable")
+                    if not r["has_prune"]:
+                        watch.fail(f"[{width}px {theme}] row for {r['project']} has reclaimable bytes ({r['reclaimable']}) but no Prune button")
+
+            if not saw_dash:
+                watch.fail(f"[{width}px {theme}] expected at least one project row with dash ('\\u2014') for reclaimable")
+
+            # 5. Free space on volume is NOT drawn at all
+            page_text = page.evaluate("document.querySelector('main').textContent")
+            if "free" in page_text.lower() and "free space on the volume is not shown" not in page_text.lower():
+                watch.fail(f"[{width}px {theme}] volume free space was drawn on desktop storage screen")
+
+            # 6. Footnote states free space is not shown
+            footnote = page.evaluate("document.querySelector('.storage-footnote')?.textContent.trim() || ''")
+            if "A dash is a project with no ended sessions" not in footnote or "Free space on the volume is not shown" not in footnote:
+                watch.fail(f"[{width}px {theme}] storage footnote missing or incorrect: {footnote!r}")
+
+        finally:
+            context.close()
+            watch.page.bring_to_front()
+            watch.drain_rejections()
 # What the detail screen's rows that name a session king are, and what their
 # colours must be. The row's own server word stays `status`; the design's three
 # states are drawn with a dot, a ring and a filled circle.
@@ -10937,6 +11038,7 @@ def run() -> int:
                 run_step(watch, check_panes_stage_width, browser, watch, port, project)
                 run_step(watch, check_desktop_project, browser, watch, port, project)
                 run_step(watch, check_desktop_sessions_four_zones, browser, watch, port)
+                run_step(watch, check_desktop_storage, browser, watch, port)
                 # Late: Home carries the newest ten events, and these seed two more.
                 run_step(watch, check_home_dashboard, page, watch, port)
                 run_step(watch, check_home_waiting_items, page, watch)

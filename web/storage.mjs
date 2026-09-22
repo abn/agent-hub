@@ -7,6 +7,7 @@ import { main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
+import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // The order the bar stacks its segments in and the legend lists them in. The
@@ -343,19 +344,279 @@ async function pruneAll(usage, holding) {
   await commit("/api/v1/storage/sessions", count, usage.prunable.bytes);
 }
 
-export async function storageScreen(gen) {
-  const usage = await api("/api/v1/storage");
-  paint(gen, '<div class="storage"></div>');
-  if (stale(gen)) return;
-  const root = main.querySelector(".storage");
-  root.appendChild(head(usage));
-  // The hub's own store is never empty, so "nothing stored" is the projects
-  // holding nothing: no brain, no artifact, no knowledge base, and no events
-  // of their own, which `total_bytes` does not count.
-  if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
-    root.appendChild(emptyState(EMPTY_COPY.storage));
-    return;
+function desktopHead(usage) {
+  const head = el("div", "storage-head");
+  const textWrap = el("div", "storage-head-text");
+  const title = el("h1", "", "Storage");
+  const now = new Date();
+  const readTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const desc = el("p", "storage-desc");
+  const pathText = usage.data_path || "/var/agent-hub";
+  desc.append(
+    "Everything on disk under ",
+    el("span", "mono", pathText),
+    `, read at ${readTime}. Pruning removes ended session brains; artifact blobs are removed only with their project.`,
+  );
+  textWrap.append(title, desc);
+  const remeasure = el("button", "btn storage-remeasure", "Re-measure");
+  remeasure.type = "button";
+  remeasure.addEventListener("click", () => render());
+  head.append(textWrap, remeasure);
+  return head;
+}
+
+function summaryTiles(usage) {
+  const tiles = el("div", "storage-tiles");
+
+  // Tile 1: ON DISK
+  const t1 = el("section", "card storage-tile");
+  t1.setAttribute("aria-label", "On disk");
+  t1.append(
+    el("span", "storage-tile-label", "ON DISK"),
+    el("span", "storage-tile-val mono", formatBytes(usage.used_bytes)),
+    el("span", "storage-tile-sub", `across ${usage.projects.length} projects`),
+  );
+
+  // Tile 2: ARTIFACT BLOBS
+  const t2 = el("section", "card storage-tile");
+  t2.setAttribute("aria-label", "Artifact blobs");
+  const blobProjects = usage.projects.filter((p) => (p.artifact_bytes || 0) > 0).length;
+  t2.append(
+    el("span", "storage-tile-label", "ARTIFACT BLOBS"),
+    el("span", "storage-tile-val mono", formatBytes(usage.by_kind?.artifacts ?? 0)),
+    el(
+      "span",
+      "storage-tile-sub",
+      `${blobProjects} ${blobProjects === 1 ? "project" : "projects"} holding blobs`,
+    ),
+  );
+
+  // Tile 3: SESSION BRAINS
+  const t3 = el("section", "card storage-tile");
+  t3.setAttribute("aria-label", "Session brains");
+  const prunableCount = usage.prunable?.sessions || 0;
+  t3.append(
+    el("span", "storage-tile-label", "SESSION BRAINS"),
+    el("span", "storage-tile-val mono", formatBytes(usage.by_kind?.sessions ?? 0)),
+    el(
+      "span",
+      "storage-tile-sub",
+      prunableCount > 0 ? `${prunableCount} ended` : "no ended sessions",
+    ),
+  );
+
+  // Tile 4: RECLAIMABLE
+  const t4 = el("section", "card storage-tile reclaimable");
+  t4.setAttribute("aria-label", "Reclaimable");
+  const foot4 = el("div", "storage-tile-foot");
+  foot4.appendChild(
+    el(
+      "span",
+      "storage-tile-sub",
+      prunableCount > 0
+        ? `${prunableCount} ended session ${prunableCount === 1 ? "brain" : "brains"}`
+        : "no ended session brains",
+    ),
+  );
+  if (prunableCount > 0) {
+    const pruneAllBtn = el("button", "btn storage-prune-all-btn storage-review", "Prune all");
+    pruneAllBtn.type = "button";
+    const holding = usage.projects.filter((p) => p.prunable_sessions > 0);
+    pruneAllBtn.addEventListener("click", () => pruneAll(usage, holding));
+    foot4.appendChild(pruneAllBtn);
   }
+  t4.append(
+    el("span", "storage-tile-label", "RECLAIMABLE"),
+    el("span", "storage-tile-val mono", formatBytes(usage.prunable?.bytes ?? 0)),
+    foot4,
+  );
+
+  tiles.append(t1, t2, t3, t4);
+  return tiles;
+}
+
+function desktopTable(usage, statsList) {
+  const wrap = el("div", "storage-table-wrap");
+  const table = el("table", "storage-table");
+
+  const thead = el("thead");
+  const trHead = el("tr");
+  const thCols = [
+    ["PROJECT", "th-project"],
+    ["SHARE", "th-share"],
+    ["TOTAL", "th-total num"],
+    ["BLOBS", "th-blobs num"],
+    ["BRAINS", "th-brains num"],
+    ["RECLAIMABLE", "th-reclaimable num"],
+    ["LAST WRITE", "th-lastwrite num"],
+    ["", "th-action"],
+  ];
+  for (const [title, className] of thCols) {
+    const th = el("th", className);
+    th.setAttribute("scope", "col");
+    if (title) th.textContent = title;
+    else th.appendChild(el("span", "sr-only", "Actions"));
+    trHead.appendChild(th);
+  }
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+
+  const tbody = el("tbody");
+  let sumTotal = 0;
+  let sumBlobs = 0;
+  let sumBrains = 0;
+  let sumReclaimable = 0;
+
+  usage.projects.forEach((project, index) => {
+    const total = totalOf(project);
+    sumTotal += total;
+    sumBlobs += project.artifact_bytes || 0;
+    sumBrains += project.session_bytes || 0;
+    const prunableBytes = project.prunable_bytes || 0;
+    const prunableSessions = project.prunable_sessions || 0;
+    if (prunableSessions > 0) sumReclaimable += prunableBytes;
+
+    const row = el("tr", "storage-row storage-table-row");
+    row.dataset.project = project.project_id;
+    row.tabIndex = 0;
+
+    // 1. PROJECT
+    const tdProject = el("td", "cell-project");
+    const isLive = (statsList[index]?.agents_active || 0) > 0;
+    const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
+    dot.setAttribute("aria-hidden", "true");
+    const link = el("a", "storage-proj-link", projectName(project));
+    link.href = projectHref(project);
+    tdProject.append(dot, link);
+    row.appendChild(tdProject);
+
+    // 2. SHARE
+    const tdShare = el("td", "cell-share");
+    const blobBytes = project.artifact_bytes || 0;
+    const brainBytes = project.session_bytes || 0;
+    const shareBar = el("div", "storage-share-bar");
+    shareBar.setAttribute("role", "img");
+    shareBar.setAttribute(
+      "aria-label",
+      `Share: ${formatBytes(blobBytes)} blobs, ${formatBytes(brainBytes)} brains of ${formatBytes(total)} total`,
+    );
+    if (total > 0) {
+      if (blobBytes > 0) {
+        const segBlobs = el("span", "storage-share-seg blobs");
+        segBlobs.style.width = `${Math.min(100, (blobBytes / total) * 100)}%`;
+        segBlobs.setAttribute("title", `Blobs: ${formatBytes(blobBytes)}`);
+        shareBar.appendChild(segBlobs);
+      }
+      if (brainBytes > 0) {
+        const segBrains = el("span", "storage-share-seg brains");
+        segBrains.style.width = `${Math.min(100, (brainBytes / total) * 100)}%`;
+        segBrains.setAttribute("title", `Brains: ${formatBytes(brainBytes)}`);
+        shareBar.appendChild(segBrains);
+      }
+    }
+    tdShare.appendChild(shareBar);
+    row.appendChild(tdShare);
+
+    // 3. TOTAL
+    const tdTotal = el("td", "cell-total num");
+    tdTotal.appendChild(el("span", "mono bold", formatBytes(total)));
+    row.appendChild(tdTotal);
+
+    // 4. BLOBS
+    const tdBlobs = el("td", "cell-blobs num");
+    tdBlobs.appendChild(el("span", "mono", formatBytes(blobBytes)));
+    row.appendChild(tdBlobs);
+
+    // 5. BRAINS
+    const tdBrains = el("td", "cell-brains num");
+    tdBrains.appendChild(el("span", "mono", formatBytes(brainBytes)));
+    row.appendChild(tdBrains);
+
+    // 6. RECLAIMABLE
+    const tdReclaimable = el("td", "cell-reclaimable num");
+    if (prunableSessions > 0 && prunableBytes > 0) {
+      tdReclaimable.appendChild(el("span", "mono action bold", formatBytes(prunableBytes)));
+    } else {
+      tdReclaimable.appendChild(el("span", "dash", "\u2014"));
+    }
+    row.appendChild(tdReclaimable);
+
+    // 7. LAST WRITE
+    const tdLastWrite = el("td", "cell-lastwrite num");
+    if (project.last_write) {
+      const timeNode = el("time", "ts", relative(project.last_write));
+      timeNode.setAttribute("datetime", project.last_write);
+      tdLastWrite.appendChild(timeNode);
+    } else {
+      tdLastWrite.appendChild(el("span", "dash", "\u2014"));
+    }
+    row.appendChild(tdLastWrite);
+
+    // 8. ACTION
+    const tdAction = el("td", "cell-action");
+    if (prunableSessions > 0 && prunableBytes > 0) {
+      const pruneBtn = el("button", "btn storage-prune", "Prune");
+      pruneBtn.type = "button";
+      pruneBtn.dataset.id = project.project_id;
+      pruneBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pruneProject(project);
+      });
+      tdAction.appendChild(pruneBtn);
+    }
+    row.appendChild(tdAction);
+
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+
+  // tfoot (Totals row)
+  const tfoot = el("tfoot");
+  const trFoot = el("tr", "storage-totals-row");
+  const tfProject = el("td", "cell-project");
+  tfProject.appendChild(
+    el("span", "totals-label", `${usage.projects.length} ${usage.projects.length === 1 ? "project" : "projects"}`),
+  );
+  trFoot.appendChild(tfProject);
+  trFoot.appendChild(el("td", "cell-share"));
+
+  const tfTotal = el("td", "cell-total num");
+  tfTotal.appendChild(el("span", "mono bold", formatBytes(sumTotal)));
+  trFoot.appendChild(tfTotal);
+
+  const tfBlobs = el("td", "cell-blobs num");
+  tfBlobs.appendChild(el("span", "mono", formatBytes(usage.by_kind?.artifacts ?? sumBlobs)));
+  trFoot.appendChild(tfBlobs);
+
+  const tfBrains = el("td", "cell-brains num");
+  tfBrains.appendChild(el("span", "mono", formatBytes(usage.by_kind?.sessions ?? sumBrains)));
+  trFoot.appendChild(tfBrains);
+
+  const tfReclaimable = el("td", "cell-reclaimable num");
+  tfReclaimable.appendChild(el("span", "mono action bold", formatBytes(usage.prunable?.bytes ?? sumReclaimable)));
+  trFoot.appendChild(tfReclaimable);
+
+  trFoot.appendChild(el("td", "cell-lastwrite"));
+  trFoot.appendChild(el("td", "cell-action"));
+  tfoot.appendChild(trFoot);
+  table.appendChild(tfoot);
+
+  wrap.appendChild(table);
+
+  const container = document.createDocumentFragment();
+  container.append(wrap);
+  container.appendChild(
+    el(
+      "p",
+      "storage-footnote mono",
+      "A dash is a project with no ended sessions. Free space on the volume is not shown \u2014 the hub cannot read it.",
+    ),
+  );
+  return container;
+}
+
+function renderMobile(root, usage) {
+  root.appendChild(head(usage));
   root.appendChild(summary(usage));
   const byProject = el("section", "storage-by");
   const label = el("h2", "section-label", "By project");
@@ -368,4 +629,50 @@ export async function storageScreen(gen) {
   byProject.append(label, list);
   if (idle.length) byProject.appendChild(idleFold(idle));
   root.append(byProject, pruneAllCard(usage));
+}
+
+async function renderDesktop(root, usage) {
+  root.classList.add("storage-desktop-view");
+  root.appendChild(desktopHead(usage));
+  root.appendChild(summaryTiles(usage));
+
+  let statsList = [];
+  try {
+    statsList = await Promise.all(
+      usage.projects.map((p) =>
+        api(`/api/v1/projects/${encodeURIComponent(p.project_id)}/stats`).catch(() => null),
+      ),
+    );
+  } catch {}
+
+  root.appendChild(desktopTable(usage, statsList));
+}
+
+if (typeof window !== "undefined" && window.matchMedia) {
+  const mq = window.matchMedia("(min-width: 720px)");
+  if (mq.addEventListener) {
+    mq.addEventListener("change", () => {
+      if (location.hash.startsWith("#/storage")) render();
+    });
+  }
+}
+
+export async function storageScreen(gen) {
+  const usage = await api("/api/v1/storage");
+  paint(gen, '<div class="storage"></div>');
+  if (stale(gen)) return;
+  const root = main.querySelector(".storage");
+
+  // The hub store is never empty, so nothing stored means projects hold nothing.
+  if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
+    root.appendChild(emptyState(EMPTY_COPY.storage));
+    return;
+  }
+
+  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
+  if (isDesktop) {
+    await renderDesktop(root, usage);
+  } else {
+    renderMobile(root, usage);
+  }
 }

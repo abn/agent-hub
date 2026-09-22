@@ -3,6 +3,18 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop storage screen
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  desktop Storage screen layout from 720px: four summary tiles across the top
+  (On Disk, Artifact Blobs, Session Brains, and Reclaimable with a Prune all action)
+  followed by a full-width multi-column table replacing mobile drill-down cards.
+  The table details per-project usage across Share, Total, Blobs, Brains,
+  Reclaimable, Last Write, and Prune. Projects with no ended sessions show a dash
+  for reclaimable space rather than 0 B, Prune buttons appear solely on rows with
+  reclaimable bytes, and free host disk space is omitted with an explanatory footnote.
+
+
 ## 2026-09-22, desktop search layout, preview stage, and match highlighting
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the

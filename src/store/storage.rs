@@ -26,6 +26,8 @@ pub struct ProjectUsage {
     /// knowledge base is outside session life and is never counted here.
     pub prunable_sessions: i64,
     pub prunable_bytes: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_write: Option<String>,
 }
 
 /// Bytes on the data volume by what holds them, which is the stacked bar the
@@ -129,6 +131,7 @@ pub async fn usage_from(
                 kb_bytes: 0,
                 prunable_sessions: 0,
                 prunable_bytes: 0,
+                last_write: None,
             });
         }
     };
@@ -221,6 +224,42 @@ pub async fn usage_from(
             entry.events_bytes = *bytes;
         }
     }
+
+    // The most recent event timestamp per project.
+    let mut last_writes = conn
+        .query(
+            "SELECT project_id, MAX(created_at) FROM events GROUP BY project_id",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = last_writes.next().await.map_err(engine)? {
+        let project_id = text(row.get_value(0).map_err(engine)?);
+        let at = text(row.get_value(1).map_err(engine)?);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
+            entry.last_write = Some(at);
+        }
+    }
+    drop(last_writes);
+
+    // Any session activity newer than the latest event timestamp.
+    let mut session_activity = conn
+        .query(
+            "SELECT project_id, MAX(last_activity) FROM sessions WHERE deleted_at IS NULL GROUP BY project_id",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = session_activity.next().await.map_err(engine)? {
+        let project_id = text(row.get_value(0).map_err(engine)?);
+        let at = text(row.get_value(1).map_err(engine)?);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id)
+            && entry.last_write.as_ref().is_none_or(|prev| &at > prev)
+        {
+            entry.last_write = Some(at);
+        }
+    }
+    drop(session_activity);
 
     // A knowledge base is never pruned, so it appears here and never in what
     // the human can reclaim. Every project is listed, one that holds nothing
