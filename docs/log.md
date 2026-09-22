@@ -3,6 +3,17 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, desktop search layout, preview stage, and match highlighting
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  desktop Search layout from 1100px: a 420px results index beside a preview
+  stage, allowing readers to preview search results without opening. Match
+  highlighting marks the active match with `--accent-bg` and a 1px accent ring,
+  and others with background alone, paired with a match counter and step
+  controls in the stage header. Scope pills include an interactive dismissible
+  project filter chip, and result groups remain in a unified list.
+
+
 ## 2026-09-22, desktop artifacts list grid and three-pane viewer
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

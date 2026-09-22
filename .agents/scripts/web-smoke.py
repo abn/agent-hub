@@ -1875,6 +1875,163 @@ def check_search_hit_fields(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+def check_search_desktop(browser, watch: Watch, port: int, project: str) -> None:
+    """Desktop search layout: rail · 420px results index · preview stage."""
+    watch.enter("search: desktop layout and preview stage")
+    for theme in ("light", "dark"):
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            color_scheme=theme,
+        )
+        context.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        )
+        page = context.new_page()
+        page.on("pageerror", lambda error: watch.fail(f"desktop search uncaught error: {error}"))
+        try:
+            page.goto(f"http://127.0.0.1:{port}/#/search?q={quote(harness.SEARCH_GROUPS_TERM)}", wait_until="load")
+            if not settle(page, "document.querySelectorAll('main .search-row').length > 0"):
+                watch.fail(f"[{theme}] search did not paint results on desktop")
+                return
+
+            # 1. Assert 420px results index beside preview stage at desktop widths
+            layout = page.evaluate("""() => {
+                const index = document.querySelector('main .pane-index');
+                const stage = document.querySelector('main .pane-stage');
+                if (!index || !stage) return null;
+                const ir = index.getBoundingClientRect();
+                const sr = stage.getBoundingClientRect();
+                const csIndex = window.getComputedStyle(index);
+                const csStage = window.getComputedStyle(stage);
+                return {
+                    indexWidth: ir.width,
+                    indexVisible: csIndex.display !== 'none',
+                    stageWidth: sr.width,
+                    stageVisible: csStage.display !== 'none',
+                    indexRight: ir.right,
+                    stageLeft: sr.left,
+                };
+            }""")
+            if not layout:
+                watch.fail(f"[{theme}] desktop search is missing .pane-index or .pane-stage")
+                return
+            if not (layout["indexVisible"] and layout["stageVisible"]):
+                watch.fail(f"[{theme}] both panes must be visible on desktop: {layout}")
+                return
+            if abs(layout["indexWidth"] - 420) > 1.5:
+                watch.fail(f"[{theme}] results index width is {layout['indexWidth']:.1f}px, expected 420px")
+                return
+            if layout["stageWidth"] < 640:
+                watch.fail(f"[{theme}] preview stage width is {layout['stageWidth']:.1f}px, expected at least 640px")
+                return
+            if abs(layout["indexRight"] - layout["stageLeft"]) > 2:
+                watch.fail(f"[{theme}] results index and preview stage are not adjacent: right={layout['indexRight']}, left={layout['stageLeft']}")
+                return
+
+            # 2. Assert match counter and active match styling
+            counter = page.evaluate("() => document.querySelector('main .pane-stage .search-match-counter')?.textContent?.trim() || ''")
+            match = re.match(r"^match 1 of (\d+)$", counter)
+            if not match:
+                watch.fail(f"[{theme}] match counter reads {counter!r}, expected 'match 1 of N'")
+                return
+            total_matches = int(match.group(1))
+            if total_matches < 1:
+                watch.fail(f"[{theme}] expected at least 1 match in preview, got {total_matches}")
+                return
+
+            match_styles = page.evaluate("""() => {
+                const active = document.querySelector('main .pane-stage .search-match.active');
+                const others = [...document.querySelectorAll('main .pane-stage .search-match:not(.active)')];
+                if (!active) return null;
+                const getStyle = (el) => {
+                    const cs = window.getComputedStyle(el);
+                    return {
+                        bg: cs.backgroundColor,
+                        boxShadow: cs.boxShadow,
+                    };
+                };
+                return {
+                    active: getStyle(active),
+                    others: others.map(getStyle)
+                };
+            }""")
+            if not match_styles:
+                watch.fail(f"[{theme}] no active match element found in preview stage")
+                return
+            if "1px" not in match_styles["active"]["boxShadow"] and "rgb" not in match_styles["active"]["boxShadow"]:
+                watch.fail(f"[{theme}] active match does not carry 1px accent ring: {match_styles['active']['boxShadow']!r}")
+                return
+            for other in match_styles["others"]:
+                if other["boxShadow"] != "none":
+                    watch.fail(f"[{theme}] non-active match carries box-shadow: {other['boxShadow']!r}")
+                    return
+
+            # Step to next match if multiple matches exist
+            if total_matches > 1:
+                page.click('main .pane-stage button[aria-label="Next match"]')
+                if not settle(
+                    page,
+                    "document.querySelector('main .pane-stage .search-match-counter')?.textContent?.trim() === 'match 2 of "
+                    + str(total_matches)
+                    + "'",
+                ):
+                    watch.fail(f"[{theme}] stepping to next match did not update counter to 'match 2 of {total_matches}'")
+                    return
+
+                stepped_styles = page.evaluate("""() => {
+                    const active = document.querySelector('main .pane-stage .search-match.active');
+                    if (!active) return null;
+                    return window.getComputedStyle(active).boxShadow;
+                }""")
+                if not stepped_styles or ("1px" not in stepped_styles and "rgb" not in stepped_styles):
+                    watch.fail(f"[{theme}] second match does not carry 1px ring after stepping")
+                    return
+
+            # 3. Deciding without opening: selecting another result previews it immediately
+            rows_count = page.evaluate("() => document.querySelectorAll('main .search-row').length")
+            if rows_count > 1:
+                first_path = page.evaluate("() => document.querySelector('main .pane-stage .search-stage-path')?.textContent?.trim() || ''")
+                page.click("main .search-row[data-index='1']")
+                if not settle(
+                    page,
+                    f"(() => {{"
+                    f"  const p = document.querySelector('main .pane-stage .search-stage-path')?.textContent?.trim() || '';"
+                    f"  return p && p !== {json.dumps(first_path)};"
+                    f"}})()"
+                ):
+                    watch.fail(f"[{theme}] selecting second search row did not update preview stage path")
+                    return
+                current_hash = page.evaluate("() => location.hash")
+                if not current_hash.startswith("#/search"):
+                    watch.fail(f"[{theme}] selecting a row navigated away: {current_hash}")
+                    return
+
+        finally:
+            context.close()
+
+    # 4. Project filter chip dismiss test
+    desk_context = browser.new_context(viewport={"width": 1440, "height": 900})
+    desk_context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    desk_page = desk_context.new_page()
+    try:
+        desk_page.goto(f"http://127.0.0.1:{port}/#/search?q={quote(harness.SEARCH_GROUPS_TERM)}&project={quote(project)}", wait_until="load")
+        if not settle(desk_page, "!!document.querySelector('main .search-project-chip')"):
+            watch.fail("project filter chip did not render when project param present")
+            return
+        chip_text = desk_page.evaluate("() => document.querySelector('main .search-project-chip')?.textContent?.trim() || ''")
+        if project not in chip_text:
+            watch.fail(f"project filter chip says {chip_text!r}, expected to contain {project!r}")
+            return
+        desk_page.click("main .search-project-chip")
+        if not settle(desk_page, "!location.hash.includes('project=') && !document.querySelector('main .search-project-chip')"):
+            watch.fail("dismissing project filter chip did not clear project from route or remove chip")
+            return
+    finally:
+        desk_context.close()
+
+
 def check_agent_markup_is_text(page, watch: Watch) -> None:
     """One shared helper escapes every screen, so its loss must not pass quietly."""
     watch.enter("home: agent markup")
@@ -10670,6 +10827,7 @@ def run() -> int:
                 run_step(watch, check_search_is_text, page, watch)
                 run_step(watch, check_search_rows_take_keys, page, watch)
                 run_step(watch, check_search_hit_fields, page, watch)
+                run_step(watch, check_search_desktop, browser, watch, port, project)
                 run_step(watch, check_toast_leaves_a_writer_alone, page, watch, project)
                 run_step(watch, check_answer, page, watch, project)
                 run_step(watch, check_inbox_groups, page, watch, project)

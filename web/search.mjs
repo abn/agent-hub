@@ -222,13 +222,14 @@ function resultsNode(state) {
 // was typed: the hub keeps a balanced phrase as a phrase and drops whatever
 // else the index would read as syntax, so nothing typed here is refused. Only
 // an empty field is not sent.
-async function find(term, type) {
+async function find(term, type, project) {
   const trimmed = (term ?? "").trim();
   const state = { term: trimmed, data: { count: 0, truncated: false, groups: [] }, line: "", error: "" };
   if (!trimmed) return state;
   const scope = type ? `&type=${encodeURIComponent(type)}` : "";
+  const proj = project ? `&project=${encodeURIComponent(project)}` : "";
   try {
-    state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}`);
+    state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}${proj}`);
     state.line = resultsLine(state.data);
   } catch (error) {
     state.error = error.message;
@@ -236,25 +237,163 @@ async function find(term, type) {
   return state;
 }
 
-function routeFor(term, type) {
+function routeFor(term, type, project) {
   const params = new URLSearchParams();
   if (term) params.set("q", term);
   if (type) params.set("type", type);
+  if (project) params.set("project", project);
   const query = params.toString();
   return query ? `#/search?${query}` : "#/search";
+}
+
+export function previewHighlighted(text, words) {
+  const str = String(text ?? "");
+  const frag = document.createDocumentFragment();
+  if (!words.length || !str) {
+    frag.append(str);
+    return frag;
+  }
+  const needle = [...words]
+    .sort((a, b) => b.length - a.length)
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])(${needle})`, "giu");
+  let at = 0;
+  for (let match = pattern.exec(str); match; match = pattern.exec(str)) {
+    const start = match.index + match[1].length;
+    const len = match[2].length;
+    frag.append(str.slice(at, start));
+    const m = el("mark", "search-match", str.slice(start, start + len));
+    frag.append(m);
+    at = start + len;
+    pattern.lastIndex = start + len;
+  }
+  frag.append(str.slice(at));
+  return frag;
+}
+
+function previewPath(hit) {
+  const p = projectName(hit) || hit.project_id;
+  const fam = FAMILIES[hit.kind] ? FAMILIES[hit.kind].label.toLowerCase() : (hit.kind || "feed");
+  const name = hit.title || hit.session_name || hit.ref_id || "untitled";
+  return `${p} / ${fam} / ${name}`;
+}
+
+function renderPreview(stagePane, hit, words) {
+  stagePane.innerHTML = "";
+  if (!hit) {
+    const empty = el("div", "search-preview-empty", "Select a result to preview.");
+    stagePane.appendChild(empty);
+    return;
+  }
+
+  const head = el("div", "search-stage-head");
+  const path = el("span", "search-stage-path", previewPath(hit));
+  const counter = el("span", "search-match-counter", "");
+
+  const prevBtn = el("button", "search-step-btn");
+  prevBtn.type = "button";
+  prevBtn.setAttribute("aria-label", "Previous match");
+  prevBtn.appendChild(icon(14, "M 18 15 l -6 -6 -6 6"));
+
+  const nextBtn = el("button", "search-step-btn");
+  nextBtn.type = "button";
+  nextBtn.setAttribute("aria-label", "Next match");
+  nextBtn.appendChild(icon(14, "M 6 9 l 6 6 6 -6"));
+
+  const href = destination(hit);
+  const openBtn = el(href ? "a" : "button", "button primary search-open-btn", "Open");
+  if (href) openBtn.href = href;
+
+  head.append(path, counter, prevBtn, nextBtn, openBtn);
+
+  const content = el("div", "search-stage-content");
+  const article = el("article", "search-preview-article prose");
+
+  const titleText = hit.title || hit.ref_id || hit.session_name || "Untitled";
+  const title = el("h2", "search-preview-title");
+  title.appendChild(previewHighlighted(titleText, words));
+
+  const metaText = whereLine(hit);
+  const meta = el("div", "search-preview-meta mono", metaText);
+
+  const body = el("div", "search-preview-body");
+  if (hit.snippet) {
+    const p = el("p", "");
+    p.appendChild(previewHighlighted(hit.snippet, words));
+    body.appendChild(p);
+  }
+
+  article.append(title, meta, body);
+  content.appendChild(article);
+  stagePane.append(head, content);
+
+  const matchElements = [...article.querySelectorAll(".search-match")];
+  const totalMatches = matchElements.length;
+  let activeIndex = 0;
+
+  function updateMatch(idx) {
+    if (totalMatches === 0) {
+      counter.textContent = "0 matches";
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      return;
+    }
+    prevBtn.disabled = false;
+    nextBtn.disabled = false;
+    activeIndex = (idx + totalMatches) % totalMatches;
+    counter.textContent = `match ${activeIndex + 1} of ${totalMatches}`;
+    matchElements.forEach((m, i) => {
+      if (i === activeIndex) {
+        m.classList.add("active");
+        m.setAttribute("aria-current", "true");
+      } else {
+        m.classList.remove("active");
+        m.removeAttribute("aria-current");
+      }
+    });
+    matchElements[activeIndex].scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  prevBtn.addEventListener("click", () => updateMatch(activeIndex - 1));
+  nextBtn.addEventListener("click", () => updateMatch(activeIndex + 1));
+
+  updateMatch(0);
+
+  if (hit.kind === "artifact" && hit.ref_id) {
+    api(`/api/v1/artifacts/${encodeURIComponent(hit.ref_id)}?project=${encodeURIComponent(hit.project_id)}`)
+      .then((art) => {
+        if (!art || !art.content || stagePane.querySelector(".search-stage-path")?.textContent !== previewPath(hit)) return;
+        body.innerHTML = "";
+        const lines = String(art.content).split(/\n+/);
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const p = el("p", "");
+          p.appendChild(previewHighlighted(line, words));
+          body.appendChild(p);
+        }
+        const updatedMatches = [...article.querySelectorAll(".search-match")];
+        if (updatedMatches.length) {
+          matchElements.length = 0;
+          matchElements.push(...updatedMatches);
+          updateMatch(0);
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 export async function searchScreen(term, gen) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const asScope = SCOPES.find((scope) => scope.type === params.get("type"));
   let type = asScope ? asScope.type : "";
-  // The first paint carries the results with the heading, so a route that
-  // names a query arrives whole.
+  let project = params.get("project") || "";
+
   asked += 1;
-  const first = await find((term || "").trim(), type);
+  const first = await find((term || "").trim(), type, project);
   if (stale(gen)) return;
 
-  const title = el("h1", "", "Search");
+  const title = el("h1", "search-title", "Search");
   const form = el("form", "search-form");
   form.setAttribute("role", "search");
   const label = el("label", "sr-only", "Search the feed, artifacts and session brains");
@@ -291,40 +430,144 @@ export async function searchScreen(term, gen) {
     scopes.appendChild(chip);
   }
 
-  // A live region that is on the page before its text changes, so the count is
-  // read out after each query without focus leaving the field.
+  function renderProjectChip() {
+    scopes.querySelector(".search-scope-divider")?.remove();
+    scopes.querySelector(".search-project-chip")?.remove();
+    if (!project) return;
+    const divider = el("span", "search-scope-divider");
+    divider.setAttribute("aria-hidden", "true");
+    const pChip = el("button", "chip search-project-chip");
+    pChip.type = "button";
+    pChip.setAttribute("aria-label", `Remove filter: project ${project}`);
+    const textSpan = el("span", "", `in ${project}`);
+    const closeIcon = icon(12, "M 6 6l12 12 M 18 6L6 18");
+    pChip.append(textSpan, closeIcon);
+    pChip.addEventListener("click", () => {
+      project = "";
+      renderProjectChip();
+      run();
+    });
+    scopes.append(divider, pChip);
+  }
+  renderProjectChip();
+
   const line = el("p", "search-line mono", first.line);
   line.setAttribute("role", "status");
   line.setAttribute("aria-live", "polite");
-  let results = resultsNode(first);
 
-  function show(state) {
-    line.textContent = state.line;
-    const next = resultsNode(state);
-    // Replaced as a child of the region, which is what the keyboard map
-    // watches to find the new rows.
-    results.replaceWith(next);
-    results = next;
+  const header = el("div", "search-header");
+  header.append(title, form, scopes, line);
+
+  const panes = el("div", "panes panes-search");
+  const indexPane = el("div", "pane-index search-index");
+  const stagePane = el("div", "pane-stage search-stage");
+  panes.append(indexPane, stagePane);
+
+  const layout = el("div", "search-layout");
+  layout.append(header, panes);
+
+  let selectedHitIndex = 0;
+  let allHits = [];
+
+  function selectHit(idx, focus = false) {
+    if (!allHits.length) {
+      renderPreview(stagePane, null, []);
+      return;
+    }
+    selectedHitIndex = Math.max(0, Math.min(allHits.length - 1, idx));
+    const rows = [...indexPane.querySelectorAll(".search-row")];
+    rows.forEach((row, i) => {
+      const isCur = i === selectedHitIndex;
+      row.classList.toggle("is-selected", isCur);
+      if (isCur) {
+        row.setAttribute("aria-current", "page");
+        row.tabIndex = 0;
+        if (focus) row.focus();
+      } else {
+        row.removeAttribute("aria-current");
+        row.tabIndex = -1;
+      }
+    });
+    const currentWords = terms(input.value);
+    renderPreview(stagePane, allHits[selectedHitIndex], currentWords);
   }
+
+  function updateResults(state) {
+    line.textContent = state.line;
+    const nextResults = resultsNode(state);
+    indexPane.innerHTML = "";
+    indexPane.appendChild(nextResults);
+
+    allHits = (state.data?.groups || []).flatMap((g) => g.hits);
+    const rows = [...indexPane.querySelectorAll(".search-row")];
+    rows.forEach((row, i) => {
+      const isDesktop = window.innerWidth >= 1100;
+      row.dataset.index = String(i);
+      if (i === 0) {
+        row.tabIndex = 0;
+        if (isDesktop) {
+          row.classList.add("is-selected");
+          row.setAttribute("aria-current", "page");
+        }
+      } else {
+        row.tabIndex = -1;
+      }
+    });
+
+    if (allHits.length > 0) {
+      selectedHitIndex = 0;
+      renderPreview(stagePane, allHits[0], terms(state.term));
+    } else {
+      renderPreview(stagePane, null, []);
+    }
+  }
+
+  updateResults(first);
+
+  let clickedWasSelected = false;
+
+  indexPane.addEventListener("pointerdown", (event) => {
+    const row = event.target.closest(".search-row");
+    if (!row) return;
+    const idx = parseInt(row.dataset.index, 10);
+    clickedWasSelected = idx === selectedHitIndex;
+  });
+
+  indexPane.addEventListener("click", (event) => {
+    const row = event.target.closest(".search-row");
+    if (!row) return;
+    const idx = parseInt(row.dataset.index, 10);
+    if (isNaN(idx)) return;
+    const isDesktop = window.innerWidth >= 1100;
+    if (isDesktop && event.detail > 0) {
+      if (clickedWasSelected) {
+        return;
+      }
+      event.preventDefault();
+      selectHit(idx, true);
+    }
+  });
+
+  indexPane.addEventListener("focusin", (event) => {
+    const row = event.target.closest(".search-row");
+    if (!row) return;
+    const idx = parseInt(row.dataset.index, 10);
+    if (!isNaN(idx) && idx !== selectedHitIndex) {
+      selectHit(idx, false);
+    }
+  });
 
   let timer = 0;
   async function run() {
     clearTimeout(timer);
-    // A keystroke's timer can outlive the screen. The route then belongs to
-    // whichever screen replaced this one.
-    // The next screen may still be fetching, with this one on the page until
-    // it paints, so the route is asked as well as the page.
     if (!line.isConnected || !location.hash.startsWith("#/search")) return;
     const typed = input.value.trim();
     clear.hidden = !input.value;
-    // Replaced rather than pushed: Back leaves the screen instead of walking
-    // through every letter, and a reload or a return lands on this query.
-    // The entry keeps whatever state it carries: only its address changes.
-    history.replaceState(history.state, "", routeFor(typed, type));
+    history.replaceState(history.state, "", routeFor(typed, type, project));
     const mine = ++asked;
-    const state = await find(typed, type);
+    const state = await find(typed, type, project);
     if (mine !== asked || !line.isConnected) return;
-    show(state);
+    updateResults(state);
   }
 
   input.addEventListener("input", () => {
@@ -346,11 +589,11 @@ export async function searchScreen(term, gen) {
     const chip = event.target.closest("button[data-scope]");
     if (!chip) return;
     type = chip.dataset.scope;
-    for (const other of scopes.children) {
+    for (const other of scopes.querySelectorAll("button[data-scope]")) {
       other.setAttribute("aria-pressed", String(other === chip));
     }
     run();
   });
 
-  main.replaceChildren(title, form, scopes, line, results);
+  main.replaceChildren(layout);
 }
