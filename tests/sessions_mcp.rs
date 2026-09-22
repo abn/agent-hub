@@ -6,7 +6,6 @@
 
 use std::path::PathBuf;
 
-use agent_hub::principal::Trust;
 use agent_hub::store::{identity, projects};
 use serde_json::{Value, json};
 
@@ -118,24 +117,31 @@ struct Fleet {
 
 impl Fleet {
     async fn new(tag: &str, agents: &[&str]) -> Self {
-        let trusted: Vec<(&str, Trust)> = agents
-            .iter()
-            .map(|agent| (*agent, Trust::Trusted))
-            .collect();
-        Self::with_trust(tag, &trusted).await
+        Self::with_confidential(tag, agents, false).await
     }
 
-    async fn with_trust(tag: &str, agents: &[(&str, Trust)]) -> Self {
+    async fn with_confidential(tag: &str, agents: &[&str], confidential: bool) -> Self {
         let dir = TempDir::new(tag);
         let db = common::store::open(&dir).await;
-        projects::create(&db, PROJECT, "Homelab")
-            .await
-            .expect("create project");
+        if confidential {
+            projects::create_with_confidential(&db, PROJECT, "Homelab", true)
+                .await
+                .expect("create confidential project");
+        } else {
+            projects::create(&db, PROJECT, "Homelab")
+                .await
+                .expect("create project");
+        }
         let mut tokens = Vec::new();
-        for (agent, trust) in agents {
-            identity::create_agent(&db, agent, agent, *trust)
+        for (idx, agent) in agents.iter().enumerate() {
+            identity::create_agent(&db, agent, agent)
                 .await
                 .expect("create agent");
+            if confidential && idx == 0 {
+                identity::add_grant(&db, agent, PROJECT, "read")
+                    .await
+                    .expect("add grant");
+            }
             tokens.push(
                 identity::issue_token(&db, agent)
                     .await
@@ -841,22 +847,15 @@ async fn a_listing_summarises_a_long_handoff_note() {
 
 #[tokio::test]
 async fn a_confined_agent_lists_only_the_sessions_it_may_read() {
-    let fleet = Fleet::with_trust(
-        "confined-listing",
-        &[
-            ("agent-one", Trust::Trusted),
-            ("stranger", Trust::Untrusted),
-        ],
-    )
-    .await;
+    let fleet =
+        Fleet::with_confidential("confined-listing", &["agent-one", "stranger"], true).await;
 
     fleet.agent(0).call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "shared-work"}),
     );
 
-    // An untrusted agent reaches its own space and nothing else, so the
-    // listing it gets back is the one it may read.
+    // An agent without a grant on a confidential project sees none of its sessions.
     let listed = fleet.agent(1).call("session_list", json!({}));
     assert_eq!(
         listed["sessions"].as_array().expect("sessions").len(),

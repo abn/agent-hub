@@ -4,6 +4,7 @@ use agent_hub::app::AppState;
 use agent_hub::http::router;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::projects;
+use axum::body::to_bytes;
 use axum::http::StatusCode;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -23,8 +24,18 @@ async fn call(
     uri: &str,
     body: Option<Value>,
 ) -> axum::response::Response {
+    call_with_auth(state, method, uri, Some("Bearer token"), body).await
+}
+
+async fn call_with_auth(
+    state: &AppState,
+    method: &str,
+    uri: &str,
+    auth: Option<&str>,
+    body: Option<Value>,
+) -> axum::response::Response {
     router(state.clone())
-        .oneshot(request(method, uri, Some("Bearer token"), body))
+        .oneshot(request(method, uri, auth, body))
         .await
         .expect("request")
 }
@@ -281,14 +292,9 @@ async fn a_patch_that_names_nothing_changes_nothing() {
 #[tokio::test]
 async fn an_agents_personal_space_is_settable_though_it_cannot_be_deleted() {
     let state = state().await;
-    let agent = agent_hub::store::identity::create_agent(
-        &state.db,
-        "laptop",
-        "Laptop",
-        agent_hub::principal::Trust::Trusted,
-    )
-    .await
-    .expect("create agent");
+    let agent = agent_hub::store::identity::create_agent(&state.db, "laptop", "Laptop")
+        .await
+        .expect("create agent");
     let space = agent.personal_project_id;
 
     let response = call(
@@ -438,4 +444,209 @@ async fn project_stats_report_threads_agents_written_and_disk_bytes() {
     assert_eq!(body["threads"], 2);
     assert_eq!(body["agents_written"], 2);
     assert!(body["disk_bytes"].is_number());
+}
+
+#[tokio::test]
+async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identical_to_404() {
+    let state = state().await;
+    let agent = agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+        .await
+        .expect("create agent");
+    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+        .await
+        .expect("issue token")
+        .token;
+    let agent_auth = format!("Bearer {token}");
+
+    // Create an open project
+    let res = call(
+        &state,
+        "POST",
+        "/api/v1/projects",
+        Some(serde_json::json!({
+            "id": "open-work",
+            "display_name": "Open Work"
+        })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let open_proj = json_body(res).await;
+    assert_eq!(open_proj["confidential"], false);
+
+    // Create a confidential project
+    let res = call(
+        &state,
+        "POST",
+        "/api/v1/projects",
+        Some(serde_json::json!({
+            "id": "secret-work",
+            "display_name": "Secret Work",
+            "confidential": true
+        })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let secret_proj = json_body(res).await;
+    assert_eq!(secret_proj["confidential"], true);
+
+    // Admin lists projects: sees open-work and secret-work
+    let res = call(&state, "GET", "/api/v1/projects", None).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let admin_list = json_body(res).await;
+    let admin_ids: Vec<&str> = admin_list["projects"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert!(admin_ids.contains(&"open-work"));
+    assert!(admin_ids.contains(&"secret-work"));
+
+    // Agent lists projects: sees open-work and its own space, but NOT secret-work
+    let res = call_with_auth(&state, "GET", "/api/v1/projects", Some(&agent_auth), None).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let agent_list = json_body(res).await;
+    let agent_ids: Vec<&str> = agent_list["projects"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert!(agent_ids.contains(&"open-work"));
+    assert!(agent_ids.contains(&agent.personal_project_id.as_str()));
+    assert!(
+        !agent_ids.contains(&"secret-work"),
+        "confidential project must be absent from agent listing"
+    );
+
+    // Direct read of nonexistent project:
+    let res_ghost = call_with_auth(
+        &state,
+        "GET",
+        "/api/v1/projects/nonexistent",
+        Some(&agent_auth),
+        None,
+    )
+    .await;
+    assert_eq!(res_ghost.status(), StatusCode::NOT_FOUND);
+    let ghost_headers = res_ghost.headers().clone();
+    let ghost_bytes = to_bytes(res_ghost.into_body(), usize::MAX)
+        .await
+        .expect("ghost bytes");
+
+    // Direct read of confidential project by agent without grant:
+    // It must return what a nonexistent project returns with identical 404 problem details
+    let res_secret = call_with_auth(
+        &state,
+        "GET",
+        "/api/v1/projects/secret-work",
+        Some(&agent_auth),
+        None,
+    )
+    .await;
+    assert_eq!(res_secret.status(), StatusCode::NOT_FOUND);
+    let secret_headers = res_secret.headers().clone();
+    let secret_bytes = to_bytes(res_secret.into_body(), usize::MAX)
+        .await
+        .expect("secret bytes");
+
+    assert_eq!(
+        secret_headers.get("content-type"),
+        ghost_headers.get("content-type")
+    );
+    let ghost_json: serde_json::Value = serde_json::from_slice(&ghost_bytes).expect("ghost json");
+    let secret_json: serde_json::Value =
+        serde_json::from_slice(&secret_bytes).expect("secret json");
+    assert_eq!(ghost_json["code"], "not_found");
+    assert_eq!(secret_json["code"], "not_found");
+    assert_eq!(ghost_json["detail"], "project nonexistent not found");
+    assert_eq!(secret_json["detail"], "project secret-work not found");
+
+    // To verify byte-for-byte exactness against the same URI when nonexistent:
+    // Query a nonexistent project with the exact same id "secret-work" on another clean state
+    let clean_state = common::state::open("http-projects-clean").await;
+    let clean_agent =
+        agent_hub::store::identity::create_agent(&clean_state.db, "agent-one", "Agent One")
+            .await
+            .expect("clean agent");
+    let clean_token = agent_hub::store::identity::issue_token(&clean_state.db, &clean_agent.id)
+        .await
+        .expect("clean token")
+        .token;
+    let clean_auth = format!("Bearer {clean_token}");
+    let res_clean_ghost = call_with_auth(
+        &clean_state,
+        "GET",
+        "/api/v1/projects/secret-work",
+        Some(&clean_auth),
+        None,
+    )
+    .await;
+    let clean_ghost_bytes = to_bytes(res_clean_ghost.into_body(), usize::MAX)
+        .await
+        .expect("clean ghost bytes");
+    assert_eq!(
+        secret_bytes, clean_ghost_bytes,
+        "direct read of a confidential project without grant must be byte-for-byte identical to a nonexistent project"
+    );
+
+    // Explicit grant gives agent access:
+    agent_hub::store::identity::add_grant(&state.db, "agent-one", "secret-work", "read")
+        .await
+        .expect("grant");
+
+    // Now agent listing contains secret-work
+    let res = call_with_auth(&state, "GET", "/api/v1/projects", Some(&agent_auth), None).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let agent_list = json_body(res).await;
+    let agent_ids: Vec<&str> = agent_list["projects"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert!(agent_ids.contains(&"secret-work"));
+
+    // Direct read succeeds with 200 OK
+    let res = call_with_auth(
+        &state,
+        "GET",
+        "/api/v1/projects/secret-work",
+        Some(&agent_auth),
+        None,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let proj = json_body(res).await;
+    assert_eq!(proj["id"], "secret-work");
+    assert_eq!(proj["confidential"], true);
+
+    // Revoking grant makes it absent again
+    agent_hub::store::identity::remove_grant(&state.db, "agent-one", "secret-work")
+        .await
+        .expect("revoke");
+
+    let res = call_with_auth(&state, "GET", "/api/v1/projects", Some(&agent_auth), None).await;
+    let agent_list = json_body(res).await;
+    let agent_ids: Vec<&str> = agent_list["projects"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|p| p["id"].as_str().expect("id"))
+        .collect();
+    assert!(!agent_ids.contains(&"secret-work"));
+
+    let res = call_with_auth(
+        &state,
+        "GET",
+        "/api/v1/projects/secret-work",
+        Some(&agent_auth),
+        None,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let revoked_bytes = to_bytes(res.into_body(), usize::MAX)
+        .await
+        .expect("revoked bytes");
+    assert_eq!(revoked_bytes, clean_ghost_bytes);
 }

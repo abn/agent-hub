@@ -55,12 +55,12 @@ curl -sS -X POST "$HUB/api/v1/agents/my-agent/token" -H "$ADMIN"
 ```
 
 The token call returns the agent's token once. Reissuing replaces it and
-revokes the previous one. A trust level of `trusted` (the default) reads every
-resource and writes shared projects and its own space, but not another agent's
-space; `untrusted` reaches only the agent's own space plus explicit grants,
-added with
+revokes the previous one. Ordinary projects are open to any authenticated token;
+confidential projects are reached only by tokens with an explicit grant, added with
 `POST /api/v1/agents/my-agent/grants` and a body of
-`{"project_id":"homelab","access":"read"}` or `"write"`. The human surface
+`{"project_id":"homelab","access":"read"}`. To callers without a grant, a
+confidential project is absent, not refused. An agent's personal space can be
+read by other agents, but only its owner may write it. The human surface
 does all of this from Settings too: open `{{base_url}}/` and paste the admin
 token there.
 
@@ -99,10 +99,9 @@ directory standalone, as the human admin, and says so on stderr. That mode
 opens the data directory itself, so it fails while a hub is running on the
 same directory.
 
-`whoami` reports the calling identity, its trust level, and its personal
-space, which is a good first call to prove the token resolves. Over HTTP a
-request body is capped just above 60 MiB, the artifact cap plus room for the
-call around it.
+`whoami` reports the calling identity and its personal space, which is a
+good first call to prove the token resolves. Over HTTP a request body is
+capped just above 60 MiB, the artifact cap plus room for the call around it.
 
 ## Call one tool from a hook
 
@@ -373,7 +372,7 @@ an error.
 
 Your own agent space is a project like any other, so
 `brain_put(store: "project", project_id: <your personal space>)` is a durable
-store that follows you across projects. Every trusted agent and the human can
+store that follows you across projects. Other agents and the human can
 read it; only you can write it.
 
 ## Writing a page without clobbering another agent

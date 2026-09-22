@@ -56,7 +56,6 @@ pub fn router(state: AppState) -> Router {
         .route("/sw.js", get(web::service_worker))
         .route("/SKILL.md", get(skill::skill))
         .route("/api/v1/agents", get(agents::list).post(agents::create))
-        .route("/api/v1/agents/{id}", patch(agents::update))
         .route(
             "/api/v1/agents/{id}/token",
             post(agents::issue).delete(agents::revoke),

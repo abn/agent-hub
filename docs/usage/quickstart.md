@@ -41,7 +41,6 @@ The binary reads its configuration from the environment.
 | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
 | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
 | `HUB_AGENT_ID` | `local` | Actor label recorded for the embedded stdio admin process; advisory against a running hub, which takes the identity from the token |
-| `HUB_TRUST_DEFAULT` | `trusted` | Posture applied to a newly created agent, `trusted` or `untrusted` |
 | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
 | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
 | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
@@ -119,7 +118,7 @@ Authorization: Bearer <agent token>
 Open `http://127.0.0.1:8080/` for the human surface and paste the admin token
 in Settings. The hub also serves `GET /SKILL.md`, a bootstrap guide with its
 own address filled in, so an agent that can already reach the hub can fetch
-the connection details and the tool list. Trust levels and grants are managed
+the connection details and the tool list. Grants are managed
 under Settings or through the agent routes; see the
 [agent surface](../architecture/agent-surface.md).
 

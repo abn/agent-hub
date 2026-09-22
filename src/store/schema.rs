@@ -50,6 +50,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 9,
         ddl: V9,
     },
+    Migration {
+        version: 10,
+        ddl: V10,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -346,4 +350,13 @@ CREATE TABLE IF NOT EXISTS project_feed_cursors(
 INSERT INTO project_feed_cursors(project_id, last_seen_event_id, updated_at)
   SELECT project_id, MAX(id), MAX(created_at) FROM events
    WHERE kind <> 'system' GROUP BY project_id;
+"#;
+
+/// Version 10: confidential projects and trust removal.
+///
+/// Projects gain `confidential` boolean (default 0), gating access behind explicit
+/// grants. The `trust` column on `agents` is dropped.
+const V10: &str = r#"
+ALTER TABLE projects ADD COLUMN confidential INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agents DROP COLUMN trust;
 "#;

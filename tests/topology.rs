@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use agent_hub::app::AppState;
 use agent_hub::brain::BrainStore;
 use agent_hub::http::router;
-use agent_hub::principal::Trust;
 use agent_hub::store::{identity, migrate, open_engine, prune, sessions};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -47,7 +46,7 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     // commit as soon as the server starts.
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
-    let agent = identity::create_agent(&db, "probe", "Probe", Trust::Untrusted)
+    let agent = identity::create_agent(&db, "probe", "Probe")
         .await
         .expect("create agent");
     let agent_token = identity::issue_token(&db, &agent.id)
@@ -108,8 +107,11 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     assert!(admin_body.contains("serverInfo"));
     let (status, agent_body) = mcp_initialize(port, &agent_token);
     assert_eq!(status, 200, "an agent token reaches MCP: {agent_body}");
-    let (status, _) = request(port, "GET", "/api/v1/projects", Some(&agent_token), "");
-    assert_eq!(status, 401, "an agent token is rejected on REST");
+    let (status, _) = request(port, "GET", "/api/v1/agents", Some(&agent_token), "");
+    assert_eq!(
+        status, 401,
+        "an agent token is rejected on REST admin control surface"
+    );
 
     // The sweeper runs in this process: the aged tombstone commits and the
     // brain file is removed.

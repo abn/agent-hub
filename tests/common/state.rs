@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use agent_hub::app::AppState;
-use agent_hub::config::{Config, TrustDefault};
+use agent_hub::config::Config;
 use agent_hub::limits::InboxCaps;
 
 use super::temp::TempDir;
@@ -14,17 +14,16 @@ use super::temp::TempDir;
 /// `Bearer token`.
 pub const ADMIN_TOKEN: &str = "token";
 
-/// The configuration most tests run under: an admin token, trusted agents, no
-/// inbox caps, and a bind address nothing listens on, since the router is
-/// driven in process. A test about one setting changes that setting with
-/// [`open_with`], so what it is about stays on the page.
+/// The configuration most tests run under: an admin token, no inbox caps, and
+/// a bind address nothing listens on, since the router is driven in process.
+/// A test about one setting changes that setting with [`open_with`], so what
+/// it is about stays on the page.
 pub fn config(data_dir: &Path) -> Config {
     Config {
         data_dir: data_dir.to_path_buf(),
         bind: "127.0.0.1:0".parse().expect("socket address"),
         public_url: None,
         admin_token: Some(ADMIN_TOKEN.to_string()),
-        trust_default: TrustDefault::Trusted,
         inbox_caps: InboxCaps::disabled(),
         active_window: Duration::from_secs(900),
         node_name: None,

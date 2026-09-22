@@ -450,14 +450,9 @@ async fn the_human_reassigns_an_active_session() {
     let session = sessions::start(&db, "proj", "stuck", "agent-one")
         .await
         .expect("start");
-    agent_hub::store::identity::create_agent(
-        &db,
-        "agent-two",
-        "Agent two",
-        agent_hub::principal::Trust::Trusted,
-    )
-    .await
-    .expect("create the agent the session moves to");
+    agent_hub::store::identity::create_agent(&db, "agent-two", "Agent two")
+        .await
+        .expect("create the agent the session moves to");
 
     let moved = sessions::reassign(&db, &session.id, "agent-two", "human")
         .await

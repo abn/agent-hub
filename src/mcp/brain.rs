@@ -1301,7 +1301,7 @@ struct BrainPromoteParams {
 mod tests {
     use super::*;
     use crate::app::AppState;
-    use crate::config::{Config, TrustDefault};
+    use crate::config::Config;
 
     async fn state(tag: &str) -> AppState {
         let nanos = std::time::SystemTime::now()
@@ -1318,7 +1318,6 @@ mod tests {
             bind: "127.0.0.1:0".parse().expect("socket address"),
             public_url: None,
             admin_token: Some("token".to_string()),
-            trust_default: TrustDefault::Trusted,
             inbox_caps: crate::limits::InboxCaps::disabled(),
             active_window: std::time::Duration::from_secs(900),
             node_name: None,

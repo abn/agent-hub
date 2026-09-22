@@ -3,6 +3,18 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+
+## 2026-09-22, trust removal and confidential projects
+
+* **Update**: [ADR 0021](adr/0021-the-token-is-the-identity.md) moves to
+  stable as trust is removed from the principal, policy, API, and schema.
+  Authenticated agents read and write all ordinary projects, and confidential
+  projects are completely absent without an explicit grant.
+* **Update**: [Data model](architecture/data-model.md),
+  [Quickstart](usage/quickstart.md), and [Overview](overview.md) remove
+  `HUB_TRUST_DEFAULT` and trust levels from agent records, and document
+  confidential projects.
+
 ## 2026-09-22, project deletion overflow menu and typed confirmation manifest
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

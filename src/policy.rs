@@ -1,15 +1,14 @@
 //! Authorization policy: what a principal may read and write.
 //!
 //! One seam the tools call before touching a project. The human admin reaches
-//! everything. A trusted agent reads everything and writes human-owned
-//! (shared) projects and its own, but not another agent's personal space. An
-//! untrusted agent reaches only its own space and the projects it is granted,
-//! at the granted level.
+//! everything. An authenticated agent reads and writes every project that is not
+//! confidential, but not another agent's personal space. A confidential project
+//! requires an explicit grant.
 
 use turso::{Database, Value};
 
 use crate::error::{Error, ErrorCode, Result};
-use crate::principal::{Principal, Trust};
+use crate::principal::Principal;
 use crate::store::{engine, projects};
 
 /// The access a caller asks for.
@@ -24,7 +23,7 @@ pub enum Access {
 /// Which projects a principal may reach at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Visibility {
-    /// Every project: the admin and trusted agents.
+    /// Every project: the admin.
     All,
     /// Only these projects.
     Only(Vec<String>),
@@ -58,47 +57,38 @@ pub async fn authorize(
         denied()
     })?;
 
-    let allowed = match principal.trust {
-        Trust::Trusted => match access {
-            Access::Read => true,
-            // Trusted writes shared projects and its own, never another
-            // agent's personal space.
-            Access::Write => {
-                project.owner_agent.is_none()
-                    || owned_by(&project.owner_agent, principal.agent_id.as_deref())
-            }
-        },
-        // Grants open a project to an untrusted agent. A trusted agent already
-        // reaches shared projects, so grants are the untrusted path.
-        Trust::Untrusted => {
-            if owned_by(&project.owner_agent, principal.agent_id.as_deref()) {
-                true
-            } else {
-                match principal.agent_id.as_deref() {
-                    Some(agent_id) => {
-                        match grant_access(db, agent_id, project_id).await?.as_deref() {
-                            Some("write") => true,
-                            Some("read") => access == Access::Read,
-                            _ => false,
-                        }
-                    }
-                    None => false,
-                }
-            }
-        }
-    };
-
-    if allowed {
-        Ok(())
-    } else {
+    // Ownership rule: writing to another agent's personal space is never allowed.
+    if access == Access::Write
+        && project.owner_agent.is_some()
+        && !owned_by(&project.owner_agent, principal.agent_id.as_deref())
+    {
         tracing::debug!(
             actor = %principal.actor,
             project = %project_id,
             ?access,
-            "forbidden"
+            "cannot write another agent's personal space"
         );
-        Err(denied())
+        return Err(denied());
     }
+
+    // Confidentiality rule: access to a confidential project requires an explicit grant.
+    if project.confidential {
+        let has_grant = match principal.agent_id.as_deref() {
+            Some(agent_id) => crate::store::identity::has_grant(db, agent_id, project_id).await?,
+            None => false,
+        };
+        if !has_grant {
+            tracing::debug!(
+                actor = %principal.actor,
+                project = %project_id,
+                ?access,
+                "confidential project without grant"
+            );
+            return Err(denied());
+        }
+    }
+
+    Ok(())
 }
 
 /// The one denial a non-admin caller sees, shared by every non-admin refusal
@@ -117,26 +107,33 @@ pub fn conceal(principal: &Principal, error: Error) -> Error {
     denied()
 }
 
-/// The projects a principal may reach. The admin and trusted agents see every
-/// project; an untrusted agent sees its personal space and its grants.
+/// The projects a principal may reach. The admin sees every project;
+/// an agent sees every non-confidential project plus any confidential project
+/// it has been granted.
 pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibility> {
-    if principal.is_admin || principal.trust == Trust::Trusted {
+    if principal.is_admin {
         return Ok(Visibility::All);
     }
-    let Some(agent_id) = principal.agent_id.as_deref() else {
-        return Ok(Visibility::Only(Vec::new()));
-    };
     let conn = crate::store::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT id FROM projects WHERE owner_agent = ?1
-             UNION
-             SELECT project_id FROM grants WHERE agent_id = ?1
-             ORDER BY 1",
-            [agent_id],
-        )
-        .await
-        .map_err(engine)?;
+    let mut rows = match principal.agent_id.as_deref() {
+        Some(agent_id) => conn
+            .query(
+                "SELECT id FROM projects WHERE confidential = 0
+                 UNION
+                 SELECT project_id FROM grants WHERE agent_id = ?1
+                 ORDER BY 1",
+                [agent_id],
+            )
+            .await
+            .map_err(engine)?,
+        None => conn
+            .query(
+                "SELECT id FROM projects WHERE confidential = 0 ORDER BY 1",
+                (),
+            )
+            .await
+            .map_err(engine)?,
+    };
     let mut ids = Vec::new();
     while let Some(row) = rows.next().await.map_err(engine)? {
         if let Value::Text(id) = row.get_value(0).map_err(engine)? {
@@ -144,27 +141,6 @@ pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibili
         }
     }
     Ok(Visibility::Only(ids))
-}
-
-/// The access level of an agent's grant on a project, if any.
-async fn grant_access(db: &Database, agent_id: &str, project_id: &str) -> Result<Option<String>> {
-    let conn = crate::store::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT access FROM grants WHERE agent_id = ?1 AND project_id = ?2",
-            [agent_id, project_id],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => match row.get_value(0).map_err(engine)? {
-            Value::Text(access) => Ok(Some(access)),
-            other => Err(Error::Engine(format!(
-                "expected text in a grant column, found {other:?}"
-            ))),
-        },
-        None => Ok(None),
-    }
 }
 
 /// Whether a project owner column matches a caller's agent id. A `NULL` owner

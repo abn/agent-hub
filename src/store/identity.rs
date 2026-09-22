@@ -1,15 +1,13 @@
 //! Agent identities, tokens, and grants.
 //!
-//! An agent is a stable id with a trust level and a personal space, a project
-//! it owns. A token's plaintext is returned once and only its hash is stored,
-//! so a leaked database does not yield usable tokens. A grant opens one project
-//! to one agent with read or write access.
+//! An agent is a stable id with a personal space, a project it owns. A token's
+//! plaintext is returned once and only its hash is stored, so a leaked database
+//! does not yield usable tokens. A grant opens one project to one agent.
 
 use serde::Serialize;
 use turso::{Database, Row, Value};
 
 use crate::error::{Error, Result};
-use crate::principal::Trust;
 use crate::store::events::{self, NewEvent};
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -25,8 +23,6 @@ pub struct Agent {
     pub id: String,
     /// Human-readable name.
     pub display_name: String,
-    /// Trust level.
-    pub trust: Trust,
     /// The agent's private project.
     pub personal_project_id: String,
     /// When the agent was created.
@@ -63,51 +59,15 @@ pub fn hash_token(token: &str) -> String {
     hex(&Sha256::digest(token.as_bytes()))
 }
 
-/// The database and wire form of a trust level.
-pub fn trust_str(trust: Trust) -> &'static str {
-    match trust {
-        Trust::Trusted => "trusted",
-        Trust::Untrusted => "untrusted",
-    }
-}
-
-/// Parse a trust level from a caller, such as a request body.
-pub fn parse_trust(text: &str) -> Result<Trust> {
-    match text {
-        "trusted" => Ok(Trust::Trusted),
-        "untrusted" => Ok(Trust::Untrusted),
-        other => Err(Error::InvalidArgument(format!(
-            "unknown trust level '{other}'"
-        ))),
-    }
-}
-
-/// Parse a trust level read from a stored row. A value the hub did not write
-/// is an internal fault, not caller error.
-fn trust_from_db(text: &str) -> Result<Trust> {
-    parse_trust(text).map_err(|_| Error::Engine(format!("stored trust '{text}' is not recognised")))
-}
-
-/// The wire form of a trust level. Trust lives beside the principal; the
-/// lowercase word is its storage and API form.
-impl Serialize for Trust {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(trust_str(*self))
-    }
-}
-
-/// Resolve a token hash to its agent id and trust level.
+/// Resolve a token hash to its agent id.
 ///
 /// A revoked token never resolves. The token and agent last-seen timestamps
 /// are refreshed at most once per window.
-pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(String, Trust)>> {
+pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<String>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT a.id, a.trust, a.last_seen_at, t.last_used_at
+            "SELECT a.id, a.last_seen_at, t.last_used_at
              FROM agent_tokens t
              JOIN agents a ON a.id = t.agent_id
              WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
@@ -119,13 +79,12 @@ pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(St
         return Ok(None);
     };
     let agent_id = text(&row, 0)?;
-    let trust = trust_from_db(&text(&row, 1)?)?;
-    let agent_seen = text_at(&row, 2)?;
-    let token_used = text_at(&row, 3)?;
+    let agent_seen = text_at(&row, 1)?;
+    let token_used = text_at(&row, 2)?;
     drop(rows);
 
     touch(&conn, token_hash, &agent_id, token_used, agent_seen).await?;
-    Ok(Some((agent_id, trust)))
+    Ok(Some(agent_id))
 }
 
 /// Refresh the last-seen timestamps, but only when stale, so a read does not
@@ -168,7 +127,7 @@ pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, trust, personal_project_id, created_at, last_seen_at
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at
              FROM agents ORDER BY created_at ASC",
             (),
         )
@@ -186,7 +145,7 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, trust, personal_project_id, created_at, last_seen_at
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at
              FROM agents WHERE id = ?1",
             [id],
         )
@@ -199,12 +158,7 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
 }
 
 /// Create an agent and its personal space as one unit.
-pub async fn create_agent(
-    db: &Database,
-    id: &str,
-    display_name: &str,
-    trust: Trust,
-) -> Result<Agent> {
+pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
     validate_agent_id(id)?;
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
@@ -227,12 +181,11 @@ pub async fn create_agent(
         return Err(Error::Conflict(format!("agent {id} already exists")));
     }
     tx.execute(
-        "INSERT INTO agents(id, display_name, trust, personal_project_id, created_at, last_seen_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at)
+         VALUES (?1, ?2, ?3, ?4, NULL)",
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
-            Value::Text(trust_str(trust).to_string()),
             Value::Text(personal_project_id.clone()),
             Value::Text(created_at.clone()),
         ],
@@ -245,6 +198,7 @@ pub async fn create_agent(
         &personal_display_name,
         Some(id),
         &created_at,
+        false,
     )
     .await?;
     audit(
@@ -254,7 +208,6 @@ pub async fn create_agent(
         serde_json::json!({
             "action": "agent_created",
             "agent_id": id,
-            "trust": trust_str(trust),
         }),
     )
     .await?;
@@ -263,60 +216,23 @@ pub async fn create_agent(
     Ok(Agent {
         id: id.to_string(),
         display_name: display_name.to_string(),
-        trust,
         personal_project_id,
         created_at,
         last_seen_at: None,
     })
 }
 
-/// Change an agent's trust level.
-pub async fn set_trust(db: &Database, id: &str, trust: Trust) -> Result<Agent> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
-    let mut rows = tx
+/// Whether an agent holds a grant on a project.
+pub async fn has_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<bool> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
         .query(
-            "SELECT trust, personal_project_id FROM agents WHERE id = ?1",
-            vec![Value::Text(id.to_string())],
+            "SELECT 1 FROM grants WHERE agent_id = ?1 AND project_id = ?2",
+            [agent_id, project_id],
         )
         .await
         .map_err(engine)?;
-    let Some(row) = rows.next().await.map_err(engine)? else {
-        drop(rows);
-        tx.rollback().await.map_err(engine)?;
-        return Err(Error::NotFound(format!("agent {id} not found")));
-    };
-    let from = text(&row, 0)?;
-    let personal_project_id = text(&row, 1)?;
-    drop(rows);
-    tx.execute(
-        "UPDATE agents SET trust = ?1 WHERE id = ?2",
-        vec![
-            Value::Text(trust_str(trust).to_string()),
-            Value::Text(id.to_string()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
-    audit(
-        &tx,
-        &personal_project_id,
-        format!("agent {id} trust set to {}", trust_str(trust)),
-        serde_json::json!({
-            "action": "trust_changed",
-            "agent_id": id,
-            "from": from,
-            "to": trust_str(trust),
-        }),
-    )
-    .await?;
-    tx.commit().await.map_err(engine)?;
-    get_agent(db, id)
-        .await?
-        .ok_or_else(|| Error::NotFound(format!("agent {id} not found")))
+    Ok(rows.next().await.map_err(engine)?.is_some())
 }
 
 /// Issue the agent's token, replacing any it already has.
@@ -626,10 +542,9 @@ fn agent_from_row(row: &Row) -> Result<Agent> {
     Ok(Agent {
         id: text(row, 0)?,
         display_name: text(row, 1)?,
-        trust: trust_from_db(&text(row, 2)?)?,
-        personal_project_id: text(row, 3)?,
-        created_at: text(row, 4)?,
-        last_seen_at: text_at(row, 5)?,
+        personal_project_id: text(row, 2)?,
+        created_at: text(row, 3)?,
+        last_seen_at: text_at(row, 4)?,
     })
 }
 

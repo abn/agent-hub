@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use agent_hub::principal::Trust;
 use agent_hub::store::{identity, projects, sessions};
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -48,7 +47,7 @@ impl Hub {
 
     /// An agent that is not the admin, granted write on one project.
     async fn agent(&self, id: &str, project_id: &str) -> String {
-        identity::create_agent(&self.state.db, id, id, Trust::Untrusted)
+        identity::create_agent(&self.state.db, id, id)
             .await
             .expect("create agent");
         identity::add_grant(&self.state.db, id, project_id, "write")

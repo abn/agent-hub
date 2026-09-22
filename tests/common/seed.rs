@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use agent_hub::principal::Trust;
 use agent_hub::store::{identity, projects};
 
 /// Run a future to completion on a runtime of its own, for a test that is not
@@ -32,8 +31,8 @@ pub fn seed_project(data_dir: &Path, id: &str) {
 }
 
 /// Create an agent and return a token for it.
-pub async fn agent_token(db: &turso::Database, id: &str, name: &str, trust: Trust) -> String {
-    identity::create_agent(db, id, name, trust)
+pub async fn agent_token(db: &turso::Database, id: &str, name: &str) -> String {
+    identity::create_agent(db, id, name)
         .await
         .expect("create agent");
     identity::issue_token(db, id)

@@ -1,4 +1,4 @@
-//! Who is calling: a resolved identity and its trust level.
+//! Who is calling: a resolved identity.
 //!
 //! The `actor` on every event comes from here, never from the request body.
 //! The stdio transport is local trust; the HTTP transports must present a
@@ -13,20 +13,11 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::store::identity;
 
-/// Trust level of a principal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Trust {
-    Trusted,
-    Untrusted,
-}
-
 /// A resolved caller.
 #[derive(Debug, Clone)]
 pub struct Principal {
     /// The identity recorded as the actor on events.
     pub actor: String,
-    /// Whether the caller is trusted.
-    pub trust: Trust,
     /// The agent id, when the caller is an agent rather than the human admin.
     pub agent_id: Option<String>,
     /// Whether the caller is the human admin.
@@ -61,7 +52,6 @@ impl Auth {
     pub fn local(&self) -> Principal {
         Principal {
             actor: self.local_actor.clone(),
-            trust: Trust::Trusted,
             agent_id: None,
             is_admin: true,
         }
@@ -73,7 +63,6 @@ impl Auth {
             (Some(expected), Some(presented)) if constant_time_eq(expected, presented) => {
                 Some(Principal {
                     actor: "human".to_string(),
-                    trust: Trust::Trusted,
                     agent_id: None,
                     is_admin: true,
                 })
@@ -96,9 +85,8 @@ impl Auth {
             .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
         let hash = identity::hash_token(presented);
         match identity::resolve_token(db, &hash).await? {
-            Some((agent_id, trust)) => Ok(Principal {
+            Some(agent_id) => Ok(Principal {
                 actor: agent_id.clone(),
-                trust,
                 agent_id: Some(agent_id),
                 is_admin: false,
             }),

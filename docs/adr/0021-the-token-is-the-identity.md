@@ -3,7 +3,7 @@ type: Decision Record
 title: The token is the identity, and trust is removed
 description: A token names who is calling rather than which agent, every call authenticates, ordinary projects are open to any token, and a confidential project is reached by grant and is absent to everyone else.
 tags: [adr, identity, tokens, authorization, confidential]
-status: proposed
+status: stable
 ---
 
 # 0021. The token is the identity
@@ -88,25 +88,6 @@ crossed with an ownership rule.
 A personal space stays its owner's own. That is an ownership rule, not a trust
 one, and it survives unchanged.
 
-**The removal is not done, and the hub is currently inconsistent.** At the
-time of writing the interface has no trust: round 4's access screen removed it
-from the surface. The API has not followed. `src/principal.rs` still defines
-`Trust`, `src/policy.rs` still branches on it, `POST /api/v1/agents` still
-accepts a `trust` field, `HUB_TRUST_DEFAULT` still exists, and the skill
-served at `/SKILL.md` still teaches agents about `trusted` and `untrusted`
-callers and `read` versus `write` grants. An agent onboarding today is taught
-a model the product has decided against.
-
-That inconsistency is the reason this record exists. The decision was taken in
-conversation and recorded in a hub artifact, which is not somewhere a new
-session or a new agent reads, so the surface moved and the API did not. Until
-the code catches up, this document is what the target is, and the divergence
-above is the work.
-
-Confidential projects have no column yet either. Round 4's access screen draws
-the empty state honestly rather than listing ordinary projects as though they
-were confidential.
-
 **What this gives up.** Sharing one token across several agents means the hub
 cannot tell them apart for authorization, and does not try to: attribution
 still separates them by name, and a fleet that wants separate reach takes
@@ -116,8 +97,6 @@ returns as a grant attribute rather than as a revived ladder.
 
 ## Status
 
-Proposed. The decision is settled with the owner; the code has not caught up,
-and the divergence is listed above. Move this to `stable` when `Trust` is gone
-from `src/principal.rs`, `src/policy.rs` and the agent API, when the
-confidential flag exists, and when `assets/SKILL.md` describes this model
-rather than the ladder.
+Stable. Shipped: `Trust` is gone from `src/principal.rs`, `src/policy.rs` and
+the agent API, the `confidential` flag exists on projects, and `assets/SKILL.md`
+teaches this model.

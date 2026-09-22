@@ -458,14 +458,9 @@ async fn the_human_reassigns_a_session_over_the_control_surface() {
     let session = sessions::start(&state.db, "proj", "stuck", "agent-one")
         .await
         .expect("start");
-    agent_hub::store::identity::create_agent(
-        &state.db,
-        "agent-two",
-        "Agent two",
-        agent_hub::principal::Trust::Trusted,
-    )
-    .await
-    .expect("create the agent the session moves to");
+    agent_hub::store::identity::create_agent(&state.db, "agent-two", "Agent two")
+        .await
+        .expect("create the agent the session moves to");
 
     // An owner no token resolves to could never resume, end or write the
     // session again, so a name that is not an agent is refused.

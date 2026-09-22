@@ -23,7 +23,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::app::AppState;
 use crate::config::Config;
 use crate::error::{Error, ErrorCode};
-use crate::principal::{Principal, Trust};
+use crate::principal::Principal;
 
 mod artifacts;
 mod brain;
@@ -79,7 +79,6 @@ impl HubServer {
             .cloned()
             .unwrap_or_else(|| Principal {
                 actor: "unknown".to_string(),
-                trust: Trust::Untrusted,
                 agent_id: None,
                 is_admin: false,
             })

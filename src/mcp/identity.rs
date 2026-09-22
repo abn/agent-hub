@@ -8,7 +8,6 @@ use rmcp::service::RequestContext;
 use rmcp::{RoleServer, tool, tool_router};
 use serde_json::json;
 
-use crate::principal::Trust;
 use crate::store::identity;
 
 use super::{HubServer, to_error_data};
@@ -21,10 +20,6 @@ impl HubServer {
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let trust = match principal.trust {
-            Trust::Trusted => "trusted",
-            Trust::Untrusted => "untrusted",
-        };
         let personal_project = match principal.agent_id.as_deref() {
             Some(agent_id) => identity::get_agent(&self.state.db, agent_id)
                 .await
@@ -34,7 +29,6 @@ impl HubServer {
         };
         Ok(CallToolResult::structured(json!({
             "actor": principal.actor,
-            "trust": trust,
             "admin": principal.is_admin,
             "personal_project": personal_project,
         })))

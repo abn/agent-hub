@@ -431,7 +431,7 @@ def seed(port: int) -> dict[str, str]:
         port,
         "POST",
         "/api/v1/agents",
-        {"id": AGENT_ID, "display_name": AGENT_NAME, "trust": "trusted"},
+        {"id": AGENT_ID, "display_name": AGENT_NAME},
     )
     # A second project whose session was picked up from another, so the
     # surface can render a forked lineage and a handoff note. Seeded first so

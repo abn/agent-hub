@@ -1,9 +1,8 @@
-//! Trust enforcement over MCP: an agent reaches what its trust and grants
-//! allow, and the actor is the authenticated identity.
+//! Identity enforcement over MCP: an agent reaches open projects and what its
+//! grants allow, and the actor is the authenticated identity.
 
 use std::path::Path;
 
-use agent_hub::principal::Trust;
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::comments;
 use agent_hub::store::events::{self, NewEvent};
@@ -85,22 +84,28 @@ fn signal(project_id: &str, summary: &str) -> NewEvent {
 }
 
 #[tokio::test]
-async fn an_agent_reaches_only_what_its_trust_allows() {
-    let data_dir = TempDir::new("trust");
+async fn an_agent_reaches_open_projects_and_confidential_projects_require_grant() {
+    let data_dir = TempDir::new("mcp-identity-confinement");
 
     let db = open_engine(&data_dir.join("hub.db"))
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let strict = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    identity::create_agent(&db, "trust", "Trust", Trust::Trusted)
+    identity::create_agent(&db, "trust", "Trust")
         .await
         .expect("create trust");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared project");
+    projects::create_with_confidential(&db, "confidential", "Confidential", true)
+        .await
+        .expect("confidential project");
+    identity::add_grant(&db, "trust", "confidential", "read")
+        .await
+        .expect("grant for trust");
     let strict_token = identity::issue_token(&db, "strict")
         .await
         .expect("strict token")
@@ -109,6 +114,14 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         .await
         .expect("trust token")
         .token;
+    events::append(
+        &db,
+        "human",
+        None,
+        signal("confidential", "needle in confidential"),
+    )
+    .await
+    .expect("confidential event");
     events::append(&db, "human", None, signal("shared", "needle in shared"))
         .await
         .expect("shared event");
@@ -135,7 +148,7 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
     );
     assert_eq!(
         own.status, 200,
-        "an untrusted agent writes its own space: {}",
+        "an agent writes its own space: {}",
         own.raw
     );
     assert!(!own.raw.contains("forbidden"), "{}", own.raw);
@@ -152,16 +165,43 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         own_feed.raw
     );
 
+    // Open shared project is writable and readable by any authenticated agent
+    let shared_write = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "signal_append",
+        json!({"project_id": "shared", "kind": "signal", "summary": "from strict"}),
+    );
+    assert_eq!(
+        shared_write.status, 200,
+        "an authenticated agent can write an open project: {}",
+        shared_write.raw
+    );
+    let shared_feed = call(
+        port,
+        &strict_token,
+        &strict_session,
+        "feed_read",
+        json!({"project_id": "shared"}),
+    );
+    assert!(
+        shared_feed.raw.contains("from strict"),
+        "the write lands in the shared project: {}",
+        shared_feed.raw
+    );
+
+    // Confidential project without a grant is forbidden
     let stranger = call(
         port,
         &strict_token,
         &strict_session,
         "signal_append",
-        json!({"project_id": "shared", "kind": "signal", "summary": "not mine"}),
+        json!({"project_id": "confidential", "kind": "signal", "summary": "not mine"}),
     );
     assert!(
         stranger.raw.contains("forbidden"),
-        "an untrusted agent cannot write a shared project: {}",
+        "an agent without grant cannot write a confidential project: {}",
         stranger.raw
     );
 
@@ -170,11 +210,11 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         &strict_token,
         &strict_session,
         "feed_read",
-        json!({"project_id": "shared"}),
+        json!({"project_id": "confidential"}),
     );
     assert!(
         read.raw.contains("forbidden"),
-        "an untrusted agent cannot read a shared project: {}",
+        "an agent without grant cannot read a confidential project: {}",
         read.raw
     );
 
@@ -201,10 +241,10 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         missing.raw
     );
 
-    // The denied existing project and the missing one must be indistinguishable.
+    // The denied confidential project and the missing one must be indistinguishable.
     assert!(
         read.raw.contains("not found or not permitted"),
-        "a denied project carries the same message as a missing one: {}",
+        "a denied confidential project carries the same message as a missing one: {}",
         read.raw
     );
     assert!(
@@ -237,6 +277,11 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         "whoami reports the personal space: {}",
         me.raw
     );
+    assert!(
+        !me.raw.contains("\"trust\""),
+        "whoami does not contain trust: {}",
+        me.raw
+    );
 
     let scoped = call(
         port,
@@ -247,32 +292,37 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
     );
     assert!(
         scoped.raw.contains("needle in personal"),
-        "a scoped search finds its own content: {}",
+        "search finds its own content: {}",
         scoped.raw
     );
     assert!(
-        !scoped.raw.contains("needle in shared"),
-        "a scoped search does not leak another project: {}",
+        scoped.raw.contains("needle in shared"),
+        "search finds open project content: {}",
+        scoped.raw
+    );
+    assert!(
+        !scoped.raw.contains("needle in confidential"),
+        "search does not leak confidential project without grant: {}",
         scoped.raw
     );
 
     let trust_session = initialize(port, &trust_token);
-    let shared_read = call(
+    let confidential_read = call(
         port,
         &trust_token,
         &trust_session,
         "feed_read",
-        json!({"project_id": "shared"}),
+        json!({"project_id": "confidential"}),
     );
     assert_eq!(
-        shared_read.status, 200,
-        "a trusted agent reads a shared project: {}",
-        shared_read.raw
+        confidential_read.status, 200,
+        "an agent with a grant reads confidential project: {}",
+        confidential_read.raw
     );
     assert!(
-        shared_read.raw.contains("needle in shared"),
-        "the shared event is visible: {}",
-        shared_read.raw
+        confidential_read.raw.contains("needle in confidential"),
+        "the confidential event is visible: {}",
+        confidential_read.raw
     );
 
     let write = call(
@@ -283,7 +333,7 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         json!({
             "project_id": "shared",
             "kind": "signal",
-            "summary": "trusted write",
+            "summary": "authenticated write",
             "actor": "attacker",
             "agent": "attacker",
         }),
@@ -297,7 +347,7 @@ async fn an_agent_reaches_only_what_its_trust_allows() {
         json!({"project_id": "shared"}),
     );
     assert!(
-        after.raw.contains("trusted write"),
+        after.raw.contains("authenticated write"),
         "the event is on the feed: {}",
         after.raw
     );
@@ -324,12 +374,12 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let strict = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    projects::create(&db, "shared", "Shared")
+    projects::create_with_confidential(&db, "vault", "Vault", true)
         .await
-        .expect("shared project");
+        .expect("vault project");
     let strict_token = identity::issue_token(&db, "strict")
         .await
         .expect("strict token")
@@ -339,7 +389,7 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
         &data_dir,
         NewArtifact {
             actor: "human",
-            project_id: "shared",
+            project_id: "vault",
             title: "Shared notes",
             description: "",
             favicon: "",
@@ -464,12 +514,12 @@ async fn comment_mutations_are_concealed_from_strangers() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let _strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let _strict = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    projects::create(&db, "shared", "Shared")
+    projects::create_with_confidential(&db, "vault", "Vault", true)
         .await
-        .expect("shared project");
+        .expect("vault project");
     let strict_token = identity::issue_token(&db, "strict")
         .await
         .expect("strict token")
@@ -479,7 +529,7 @@ async fn comment_mutations_are_concealed_from_strangers() {
         &data_dir,
         NewArtifact {
             actor: "human",
-            project_id: "shared",
+            project_id: "vault",
             title: "Shared notes",
             description: "",
             favicon: "",
@@ -569,10 +619,10 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let watched = identity::create_agent(&db, "watched", "Watched", Trust::Untrusted)
+    let watched = identity::create_agent(&db, "watched", "Watched")
         .await
         .expect("create watched");
-    identity::create_agent(&db, "watcher", "Watcher", Trust::Trusted)
+    identity::create_agent(&db, "watcher", "Watcher")
         .await
         .expect("create watcher");
     let watcher_token = identity::issue_token(&db, "watcher")
@@ -663,18 +713,27 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    identity::create_agent(&db, "one", "One", Trust::Trusted)
+    identity::create_agent(&db, "one", "One")
         .await
         .expect("create one");
-    identity::create_agent(&db, "two", "Two", Trust::Trusted)
+    identity::create_agent(&db, "two", "Two")
         .await
         .expect("create two");
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let strict = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared project");
+    projects::create_with_confidential(&db, "secret", "Secret", true)
+        .await
+        .expect("secret project");
+    identity::add_grant(&db, "one", "secret", "write")
+        .await
+        .expect("grant one");
+    identity::add_grant(&db, "two", "secret", "write")
+        .await
+        .expect("grant two");
     let one_token = identity::issue_token(&db, "one")
         .await
         .expect("token")
@@ -700,7 +759,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         &one_token,
         &one,
         "session_start",
-        json!({"project_id": "shared", "session_name": "first"}),
+        json!({"project_id": "secret", "session_name": "first"}),
     );
     let written = call(
         port,
@@ -725,7 +784,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         &two_token,
         &two,
         "session_start",
-        json!({"project_id": "shared", "session_name": "second"}),
+        json!({"project_id": "secret", "session_name": "second"}),
     );
     let read = call(
         port,
@@ -756,7 +815,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         rewritten.raw
     );
 
-    // An untrusted agent with no grant reaches neither, and the refusal is the
+    // An agent without a grant on a confidential project reaches neither, and the refusal is the
     // one that does not say whether the project is there.
     let strict_session = initialize(port, &strict_token);
     for call_result in [
@@ -765,7 +824,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
             &strict_token,
             &strict_session,
             "brain_get",
-            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "shared"}),
+            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "secret"}),
         ),
         call(
             port,
@@ -776,7 +835,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
                 "path": "/fs/runbook.md",
                 "content": "mine now",
                 "store": "project",
-                "project_id": "shared",
+                "project_id": "secret",
             }),
         ),
         call(
@@ -784,14 +843,14 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
             &strict_token,
             &strict_session,
             "brain_list",
-            json!({"store": "project", "project_id": "shared"}),
+            json!({"store": "project", "project_id": "secret"}),
         ),
         call(
             port,
             &strict_token,
             &strict_session,
             "brain_delete",
-            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "shared"}),
+            json!({"path": "/fs/runbook.md", "store": "project", "project_id": "secret"}),
         ),
         call(
             port,
@@ -899,21 +958,27 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    identity::create_agent(&db, "one", "One", Trust::Trusted)
+    identity::create_agent(&db, "one", "One")
         .await
         .expect("create one");
-    identity::create_agent(&db, "two", "Two", Trust::Trusted)
+    identity::create_agent(&db, "two", "Two")
         .await
         .expect("create two");
-    identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    identity::create_agent(&db, "holder", "Holder", Trust::Untrusted)
+    identity::create_agent(&db, "holder", "Holder")
         .await
         .expect("create holder");
-    projects::create(&db, "shared", "Shared")
+    projects::create_with_confidential(&db, "shared", "Shared", true)
         .await
-        .expect("shared project");
+        .expect("confidential shared project");
+    identity::add_grant(&db, "one", "shared", "write")
+        .await
+        .expect("write grant");
+    identity::add_grant(&db, "two", "shared", "read")
+        .await
+        .expect("read grant");
     identity::add_grant(&db, "holder", "shared", "read")
         .await
         .expect("read grant");
@@ -1117,11 +1182,11 @@ async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let strict = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create strict");
     let own = strict.personal_project_id.clone();
-    projects::create(&db, "hidden-vault", "Secret Plans")
+    projects::create_with_confidential(&db, "hidden-vault", "Secret Plans", true)
         .await
         .expect("hidden project");
     let token = identity::issue_token(&db, "strict")

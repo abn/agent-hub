@@ -22,6 +22,8 @@ pub struct Project {
     /// screen showing many projects learns it once: the rail used to ask for
     /// each project separately, on every navigation.
     pub agents_active: i64,
+    /// Whether the project is confidential and hidden without a grant.
+    pub confidential: bool,
 }
 
 /// The fields of a project the human may change after creation.
@@ -31,6 +33,7 @@ pub struct Project {
 #[derive(Debug, Clone, Default)]
 pub struct ProjectChanges<'a> {
     pub display_name: Option<&'a str>,
+    pub confidential: Option<bool>,
 }
 
 /// List projects, oldest first.
@@ -38,7 +41,7 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at
+            "SELECT id, display_name, owner_agent, created_at, confidential
              FROM projects ORDER BY created_at ASC",
             (),
         )
@@ -63,6 +66,27 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
             .map_or(0, |(_, count)| *count);
     }
     Ok(projects)
+}
+
+/// List projects visible to the given principal, oldest first.
+pub async fn list_visible(
+    db: &Database,
+    active_since: &str,
+    principal: &crate::principal::Principal,
+) -> Result<Vec<Project>> {
+    let all = list(db, active_since).await?;
+    if principal.is_admin {
+        return Ok(all);
+    }
+    let visible = crate::policy::visibility(db, principal).await?;
+    let filtered = match visible.as_filter() {
+        None => all,
+        Some(allowed) => all
+            .into_iter()
+            .filter(|p| allowed.contains(&p.id))
+            .collect(),
+    };
+    Ok(filtered)
 }
 
 /// The display names of the projects named, by id, in one read.
@@ -108,6 +132,16 @@ pub(crate) async fn display_names(
 
 /// Create a project. The id is a slug, immutable after creation.
 pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Project> {
+    create_with_confidential(db, id, display_name, false).await
+}
+
+/// Create a project with an explicit confidential posture.
+pub async fn create_with_confidential(
+    db: &Database,
+    id: &str,
+    display_name: &str,
+    confidential: bool,
+) -> Result<Project> {
     validate_id(id)?;
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
@@ -129,7 +163,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
     if rows.next().await.map_err(engine)?.is_some() {
         return Err(Error::Conflict(format!("project {id} already exists")));
     }
-    insert_owned(&tx, id, display_name, None, &created_at).await?;
+    insert_owned(&tx, id, display_name, None, &created_at, confidential).await?;
     tx.commit().await.map_err(engine)?;
 
     Ok(Project {
@@ -139,6 +173,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
         created_at,
         unseen_events: 0,
         agents_active: 0,
+        confidential,
     })
 }
 
@@ -178,6 +213,10 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
         params.push(Value::Text(display_name.to_string()));
         sets.push(format!("display_name = ?{}", params.len()));
     }
+    if let Some(confidential) = changes.confidential {
+        params.push(Value::Integer(if confidential { 1 } else { 0 }));
+        sets.push(format!("confidential = ?{}", params.len()));
+    }
     if !sets.is_empty() {
         params.push(Value::Text(id.to_string()));
         let sql = format!(
@@ -204,15 +243,17 @@ pub(crate) async fn insert_owned(
     display_name: &str,
     owner_agent: Option<&str>,
     created_at: &str,
+    confidential: bool,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings)
-         VALUES (?1, ?2, ?3, ?4, NULL, NULL)",
+        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings, confidential)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)",
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
             owner_agent.map_or(Value::Null, |agent| Value::Text(agent.to_string())),
             Value::Text(created_at.to_string()),
+            Value::Integer(if confidential { 1 } else { 0 }),
         ],
     )
     .await
@@ -339,7 +380,7 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at
+            "SELECT id, display_name, owner_agent, created_at, confidential
              FROM projects WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
@@ -506,6 +547,10 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         Value::Text(value) => Some(value),
         _ => None,
     };
+    let confidential = match row.get_value(4).map_err(engine)? {
+        Value::Integer(value) => value != 0,
+        _ => false,
+    };
     Ok(Project {
         id: text(0)?,
         display_name: text(1)?,
@@ -515,7 +560,23 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         // one query rather than one query per row.
         unseen_events: 0,
         agents_active: 0,
+        confidential,
     })
+}
+
+/// Set a project's confidential posture.
+pub async fn set_confidential(db: &Database, id: &str, confidential: bool) -> Result<()> {
+    let conn = super::connect(db)?;
+    conn.execute(
+        "UPDATE projects SET confidential = ?1 WHERE id = ?2",
+        vec![
+            Value::Integer(if confidential { 1 } else { 0 }),
+            Value::Text(id.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
 }
 
 fn validate_display_name(display_name: &str) -> Result<()> {

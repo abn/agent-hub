@@ -24,6 +24,9 @@ pub struct NewProject {
     pub id: String,
     /// The display name.
     pub display_name: String,
+    /// Whether the project is confidential.
+    #[serde(default)]
+    pub confidential: bool,
 }
 
 /// `GET /api/v1/projects`
@@ -31,12 +34,13 @@ pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ProjectList>, Problem> {
-    state
+    let principal = state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    let projects = projects::list(&state.db, &state.config.active_since())
+    let projects = projects::list_visible(&state.db, &state.config.active_since(), &principal)
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(ProjectList { projects }))
@@ -48,16 +52,22 @@ pub async fn create(
     headers: HeaderMap,
     body: std::result::Result<Json<NewProject>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<Project>, Problem> {
-    state
+    let _principal = state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
     let payload = json_body(body, "project body must be JSON with id and display_name")?;
 
-    let project = projects::create(&state.db, &payload.id, &payload.display_name)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let project = projects::create_with_confidential(
+        &state.db,
+        &payload.id,
+        &payload.display_name,
+        payload.confidential,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(project))
 }
 
@@ -72,6 +82,8 @@ pub struct ProjectPatch {
     pub id: Option<String>,
     #[serde(default)]
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub confidential: Option<bool>,
 }
 
 /// `GET /api/v1/projects/{id}`
@@ -82,20 +94,39 @@ pub async fn get(
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<Project>, Problem> {
-    state
+    let principal = state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    projects::get(&state.db, &id)
+    let project = projects::get(&state.db, &id)
         .await
-        .map_err(|err| Problem::from_error(&err))?
-        .map(Json)
-        .ok_or_else(|| {
-            Problem::from_error(&crate::error::Error::NotFound(format!(
-                "project {id} not found"
-            )))
-        })
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let visible = match (&project, principal.is_admin) {
+        (Some(_), true) => true,
+        (Some(p), false) => {
+            if !p.confidential {
+                true
+            } else if let Some(agent_id) = principal.agent_id.as_deref() {
+                crate::store::identity::has_grant(&state.db, agent_id, &p.id)
+                    .await
+                    .map_err(|err| Problem::from_error(&err))?
+            } else {
+                false
+            }
+        }
+        (None, _) => false,
+    };
+
+    if visible {
+        Ok(Json(project.unwrap()))
+    } else {
+        Err(Problem::from_error(&crate::error::Error::NotFound(
+            format!("project {id} not found"),
+        )))
+    }
 }
 
 /// `PATCH /api/v1/projects/{id}`
@@ -127,8 +158,9 @@ pub async fn update(
 
     let changes = projects::ProjectChanges {
         display_name: payload.display_name.as_deref(),
+        confidential: payload.confidential,
     };
-    let changed = changes.display_name.is_some();
+    let changed = changes.display_name.is_some() || changes.confidential.is_some();
 
     let project = projects::update(&state.db, &id, changes)
         .await
@@ -148,16 +180,33 @@ pub async fn stats(
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<projects::ProjectStats>, Problem> {
-    state
+    let principal = state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    if projects::get(&state.db, &id)
+    let project = projects::get(&state.db, &id)
         .await
-        .map_err(|err| Problem::from_error(&err))?
-        .is_none()
-    {
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let visible = match (&project, principal.is_admin) {
+        (Some(_), true) => true,
+        (Some(p), false) => {
+            if !p.confidential {
+                true
+            } else if let Some(agent_id) = principal.agent_id.as_deref() {
+                crate::store::identity::has_grant(&state.db, agent_id, &p.id)
+                    .await
+                    .map_err(|err| Problem::from_error(&err))?
+            } else {
+                false
+            }
+        }
+        (None, _) => false,
+    };
+
+    if !visible {
         return Err(Problem::from_error(&crate::error::Error::NotFound(
             format!("project {id} not found"),
         )));

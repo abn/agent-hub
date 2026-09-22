@@ -1,6 +1,5 @@
 //! The agents control surface: admin-gated lifecycle over REST.
 
-use agent_hub::config::TrustDefault;
 use agent_hub::http::router;
 use agent_hub::store::projects;
 use axum::body::Body;
@@ -12,15 +11,8 @@ mod common;
 use common::http::{json_body, json_request};
 use common::state::TestState;
 
-async fn state_with(trust_default: TrustDefault) -> TestState {
-    common::state::open_with("agents", |config| {
-        config.trust_default = trust_default;
-    })
-    .await
-}
-
 async fn state() -> TestState {
-    state_with(TrustDefault::Trusted).await
+    common::state::open("agents").await
 }
 
 fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
@@ -105,20 +97,6 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
 
     let response = app
         .clone()
-        .oneshot(json_request(
-            "PATCH",
-            "/api/v1/agents/worker",
-            auth,
-            r#"{"trust":"untrusted"}"#,
-        ))
-        .await
-        .expect("patch");
-    assert_eq!(response.status(), StatusCode::OK);
-    let updated = json_body(response).await;
-    assert_eq!(updated["trust"], "untrusted");
-
-    let response = app
-        .clone()
         .oneshot(request("POST", "/api/v1/agents/worker/token", auth))
         .await
         .expect("issue token");
@@ -180,24 +158,6 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
 }
 
 #[tokio::test]
-async fn a_new_agent_follows_the_strict_default() {
-    let state = state_with(TrustDefault::Untrusted).await;
-    let app = router(state.clone());
-    let response = app
-        .oneshot(json_request(
-            "POST",
-            "/api/v1/agents",
-            Some("Bearer token"),
-            r#"{"id":"worker","display_name":"Worker"}"#,
-        ))
-        .await
-        .expect("create");
-    assert_eq!(response.status(), StatusCode::CREATED);
-    let agent = json_body(response).await;
-    assert_eq!(agent["trust"], "untrusted");
-}
-
-#[tokio::test]
 async fn the_agents_surface_maps_store_errors() {
     let state = state().await;
     projects::create(&state.db, "proj", "Project")
@@ -242,18 +202,6 @@ async fn the_agents_surface_maps_store_errors() {
     let response = app
         .clone()
         .oneshot(json_request(
-            "PATCH",
-            "/api/v1/agents/ghost",
-            auth,
-            r#"{"trust":"trusted"}"#,
-        ))
-        .await
-        .expect("patch unknown");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-    let response = app
-        .clone()
-        .oneshot(json_request(
             "POST",
             "/api/v1/agents/worker/grants",
             auth,
@@ -268,4 +216,45 @@ async fn the_agents_surface_maps_store_errors() {
         .await
         .expect("grants for an unknown agent");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn create_agent_rejects_trust_field_and_patch_route_is_removed() {
+    let state = state().await;
+    let app = router(state.clone());
+    let auth = Some("Bearer token");
+
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/agents",
+            auth,
+            r#"{"id":"worker","display_name":"Worker","trust":"trusted"}"#,
+        ))
+        .await
+        .expect("create");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = common::http::problem_body(response).await;
+    assert_eq!(problem["code"], "invalid_argument");
+    let detail = problem["detail"].as_str().expect("detail string");
+    assert!(
+        detail.contains("trust"),
+        "problem details must name the unknown trust field, got: {detail}"
+    );
+
+    let response = app
+        .oneshot(json_request(
+            "PATCH",
+            "/api/v1/agents/worker",
+            auth,
+            r#"{"trust":"untrusted"}"#,
+        ))
+        .await
+        .expect("patch");
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "PATCH /api/v1/agents/{{id}} route must be removed"
+    );
 }

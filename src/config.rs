@@ -219,13 +219,6 @@ pub fn config_permissions_warning(path: &Path, mode: u32, has_token: bool) -> Op
     })
 }
 
-/// The default trust posture a new agent is created with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrustDefault {
-    Trusted,
-    Untrusted,
-}
-
 /// Everything the process needs to start.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -238,8 +231,6 @@ pub struct Config {
     pub public_url: Option<String>,
     /// Optional admin token for the control surface.
     pub admin_token: Option<String>,
-    /// Posture applied to a newly created agent.
-    pub trust_default: TrustDefault,
     /// Ceilings on the open action items an agent may leave on the human.
     pub inbox_caps: InboxCaps,
     /// How long after its last tool call a session still counts its owner as
@@ -323,16 +314,6 @@ impl Config {
             );
         }
 
-        let trust_default = match std::env::var("HUB_TRUST_DEFAULT").as_deref() {
-            Ok("untrusted") => TrustDefault::Untrusted,
-            Ok("trusted") | Err(_) => TrustDefault::Trusted,
-            Ok(other) => {
-                return Err(Error::Config(format!(
-                    "HUB_TRUST_DEFAULT must be 'trusted' or 'untrusted', got '{other}'"
-                )));
-            }
-        };
-
         let inbox_caps = InboxCaps::parse(
             std::env::var("HUB_INBOX_ACTION_PER_AGENT").ok().as_deref(),
             std::env::var("HUB_INBOX_ACTION_PER_PROJECT")
@@ -353,7 +334,6 @@ impl Config {
             bind,
             public_url,
             admin_token,
-            trust_default,
             inbox_caps,
             active_window,
             node_name,

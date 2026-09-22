@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use agent_hub::config::{Config, Tailnet, TrustDefault};
+use agent_hub::config::{Config, Tailnet};
 
 mod common;
 
@@ -63,7 +63,6 @@ fn config() -> Config {
         bind: "127.0.0.1:0".parse::<SocketAddr>().expect("address"),
         public_url: None,
         admin_token: Some("token".to_string()),
-        trust_default: TrustDefault::Trusted,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
         active_window: std::time::Duration::from_secs(900),
         node_name: None,

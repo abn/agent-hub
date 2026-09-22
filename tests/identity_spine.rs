@@ -4,9 +4,9 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use agent_hub::config::{Config, TrustDefault};
+use agent_hub::config::Config;
 use agent_hub::error::ErrorCode;
-use agent_hub::principal::{Auth, Trust};
+use agent_hub::principal::Auth;
 use agent_hub::store::migrate;
 use agent_hub::store::open_engine;
 
@@ -16,13 +16,12 @@ use common::temp::TempDir;
 
 const ADMIN_TOKEN: &str = "admin-secret";
 
-fn config(trust_default: TrustDefault) -> Config {
+fn config() -> Config {
     Config {
         data_dir: PathBuf::from("./unused"),
         bind: "127.0.0.1:0".parse::<SocketAddr>().expect("address"),
         public_url: None,
         admin_token: Some(ADMIN_TOKEN.to_string()),
-        trust_default,
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
         active_window: std::time::Duration::from_secs(900),
         node_name: None,
@@ -31,13 +30,12 @@ fn config(trust_default: TrustDefault) -> Config {
 
 #[test]
 fn require_admin_accepts_only_the_admin_token() {
-    let auth = Auth::from_config(&config(TrustDefault::Trusted));
+    let auth = Auth::from_config(&config());
 
     let admin = auth.require_admin(Some(ADMIN_TOKEN)).expect("admin");
     assert_eq!(admin.actor, "human");
     assert!(admin.is_admin);
     assert!(admin.agent_id.is_none());
-    assert_eq!(admin.trust, Trust::Trusted);
 
     let denied = auth
         .require_admin(Some("not-the-admin-token"))
@@ -51,10 +49,8 @@ fn require_admin_accepts_only_the_admin_token() {
 #[test]
 fn local_stdio_is_the_human_admin() {
     // The local transport is a process the operator launched, so it is the
-    // admin regardless of the trust posture; only token transports resolve
-    // through the identity store.
-    let local = Auth::from_config(&config(TrustDefault::Untrusted)).local();
-    assert_eq!(local.trust, Trust::Trusted);
+    // admin; only token transports resolve through the identity store.
+    let local = Auth::from_config(&config()).local();
     assert!(local.is_admin, "stdio is the operator's local bridge");
     assert!(local.agent_id.is_none());
 }
@@ -64,7 +60,7 @@ async fn resolve_agent_accepts_admin_and_rejects_unknown_tokens() {
     let dir = TempDir::new("identity-spine");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
-    let auth = Auth::from_config(&config(TrustDefault::Trusted));
+    let auth = Auth::from_config(&config());
 
     let admin = auth
         .resolve_agent(&db, Some(ADMIN_TOKEN))

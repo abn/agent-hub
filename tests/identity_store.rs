@@ -2,7 +2,6 @@
 //! grants.
 
 use agent_hub::error::ErrorCode;
-use agent_hub::principal::Trust;
 use agent_hub::store::{identity, projects};
 
 mod common;
@@ -29,11 +28,10 @@ async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
 #[tokio::test]
 async fn create_agent_creates_its_personal_space() {
     let db = fresh("identity-create").await;
-    let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop", Trust::Trusted)
+    let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop")
         .await
         .expect("create");
 
-    assert_eq!(agent.trust, Trust::Trusted);
     assert!(agent.personal_project_id.starts_with("space-"));
 
     let space = projects::get(&db, &agent.personal_project_id)
@@ -48,14 +46,13 @@ async fn create_agent_creates_its_personal_space() {
 }
 
 #[tokio::test]
-async fn create_agent_keeps_the_given_trust_and_rejects_a_duplicate() {
-    let db = fresh("identity-trust").await;
-    let agent = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+async fn create_agent_rejects_a_duplicate() {
+    let db = fresh("identity-duplicate").await;
+    let _agent = identity::create_agent(&db, "strict", "Strict")
         .await
         .expect("create");
-    assert_eq!(agent.trust, Trust::Untrusted);
 
-    let duplicate = identity::create_agent(&db, "strict", "Other", Trust::Trusted)
+    let duplicate = identity::create_agent(&db, "strict", "Other")
         .await
         .expect_err("duplicate id");
     assert_eq!(duplicate.code(), ErrorCode::Conflict);
@@ -64,7 +61,7 @@ async fn create_agent_keeps_the_given_trust_and_rejects_a_duplicate() {
 #[tokio::test]
 async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
     let db = fresh("identity-tokens").await;
-    let agent = identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
+    let agent = identity::create_agent(&db, "worker", "Worker")
         .await
         .expect("create");
 
@@ -77,8 +74,7 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
         .await
         .expect("resolve")
         .expect("a live token resolves");
-    assert_eq!(resolved.0, "worker");
-    assert_eq!(resolved.1, Trust::Untrusted);
+    assert_eq!(resolved, "worker");
 
     let second = identity::issue_token(&db, &agent.id)
         .await
@@ -134,16 +130,28 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
 #[tokio::test]
 async fn grants_are_upserted_and_removed() {
     let db = fresh("identity-grants").await;
-    identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
+    identity::create_agent(&db, "worker", "Worker")
         .await
         .expect("create");
     projects::create(&db, "proj", "Project")
         .await
         .expect("project");
 
+    assert!(
+        !identity::has_grant(&db, "worker", "proj")
+            .await
+            .expect("has_grant")
+    );
+
     identity::add_grant(&db, "worker", "proj", "read")
         .await
         .expect("grant read");
+    assert!(
+        identity::has_grant(&db, "worker", "proj")
+            .await
+            .expect("has_grant")
+    );
+
     let grants = identity::list_grants(&db, "worker").await.expect("list");
     assert_eq!(grants.len(), 1);
     assert_eq!(grants[0].access, "read");
@@ -168,6 +176,11 @@ async fn grants_are_upserted_and_removed() {
         .await
         .expect("remove");
     assert!(
+        !identity::has_grant(&db, "worker", "proj")
+            .await
+            .expect("has_grant")
+    );
+    assert!(
         identity::list_grants(&db, "worker")
             .await
             .expect("list")
@@ -180,41 +193,15 @@ async fn grants_are_upserted_and_removed() {
 }
 
 #[tokio::test]
-async fn set_trust_changes_the_level() {
-    let db = fresh("identity-set-trust").await;
-    identity::create_agent(&db, "worker", "Worker", Trust::Trusted)
-        .await
-        .expect("create");
-
-    let updated = identity::set_trust(&db, "worker", Trust::Untrusted)
-        .await
-        .expect("set trust");
-    assert_eq!(updated.trust, Trust::Untrusted);
-    assert_eq!(
-        identity::get_agent(&db, "worker")
-            .await
-            .expect("get")
-            .expect("exists")
-            .trust,
-        Trust::Untrusted
-    );
-
-    let missing = identity::set_trust(&db, "ghost", Trust::Trusted)
-        .await
-        .expect_err("no such agent");
-    assert_eq!(missing.code(), ErrorCode::NotFound);
-}
-
-#[tokio::test]
 async fn agent_ids_and_names_are_validated() {
     let db = fresh("identity-validate").await;
 
-    let empty_id = identity::create_agent(&db, "  ", "Worker", Trust::Trusted)
+    let empty_id = identity::create_agent(&db, "  ", "Worker")
         .await
         .expect_err("empty id");
     assert_eq!(empty_id.code(), ErrorCode::InvalidArgument);
 
-    let empty_name = identity::create_agent(&db, "worker", "", Trust::Trusted)
+    let empty_name = identity::create_agent(&db, "worker", "")
         .await
         .expect_err("empty name");
     assert_eq!(empty_name.code(), ErrorCode::InvalidArgument);
@@ -223,10 +210,10 @@ async fn agent_ids_and_names_are_validated() {
 #[tokio::test]
 async fn two_agents_get_distinct_spaces() {
     let db = fresh("identity-spaces").await;
-    let first = identity::create_agent(&db, "a", "A", Trust::Trusted)
+    let first = identity::create_agent(&db, "a", "A")
         .await
         .expect("create a");
-    let second = identity::create_agent(&db, "b", "B", Trust::Trusted)
+    let second = identity::create_agent(&db, "b", "B")
         .await
         .expect("create b");
     assert_ne!(first.personal_project_id, second.personal_project_id);
@@ -235,7 +222,7 @@ async fn two_agents_get_distinct_spaces() {
 #[tokio::test]
 async fn a_grant_needs_a_real_project_and_agent() {
     let db = fresh("identity-grant-missing").await;
-    identity::create_agent(&db, "worker", "Worker", Trust::Untrusted)
+    identity::create_agent(&db, "worker", "Worker")
         .await
         .expect("create");
 

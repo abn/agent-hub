@@ -697,14 +697,9 @@ async fn storage_rows_and_home_events_name_their_project_as_the_projects_list_do
     agent_hub::store::projects::create(&state.db, "homelab", "Home Lab")
         .await
         .expect("project");
-    let agent = agent_hub::store::identity::create_agent(
-        &state.db,
-        "scout",
-        "Scout",
-        agent_hub::principal::Trust::Untrusted,
-    )
-    .await
-    .expect("agent");
+    let agent = agent_hub::store::identity::create_agent(&state.db, "scout", "Scout")
+        .await
+        .expect("agent");
     let personal = agent.personal_project_id.clone();
     for project in ["homelab", personal.as_str()] {
         let session = sessions::start(&state.db, project, "run", "scout")

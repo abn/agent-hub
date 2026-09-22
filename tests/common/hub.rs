@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use agent_hub::principal::Trust;
 use agent_hub::store::projects;
 use serde_json::Value;
 
@@ -134,7 +133,7 @@ fn seed(dir: &TempDir) -> String {
         projects::create(&db, PROJECT, "Homelab")
             .await
             .expect("create project");
-        seed::agent_token(&db, AGENT, "My Agent", Trust::Trusted).await
+        seed::agent_token(&db, AGENT, "My Agent").await
     })
 }
 

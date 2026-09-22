@@ -560,7 +560,7 @@ async fn signal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, TrustDefault};
+    use crate::config::Config;
     use crate::store::events::{FeedQuery, read_feed};
 
     /// A directory under the build tree, removed when the test ends. Unit
@@ -587,7 +587,6 @@ mod tests {
             bind: "127.0.0.1:0".parse().expect("socket address"),
             public_url: None,
             admin_token: Some("token".to_string()),
-            trust_default: TrustDefault::Trusted,
             inbox_caps: crate::limits::InboxCaps::disabled(),
             active_window: std::time::Duration::from_secs(900),
             node_name: None,

@@ -20,7 +20,7 @@ inbox, which is global.
 
 | Table | Holds |
 |---|---|
-| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
+| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
 | `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
 | `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, and the blob path. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
@@ -28,9 +28,9 @@ inbox, which is global.
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
 | `project_feed_cursors` | One row per project: the newest feed event the human has seen there, and when it was recorded. There is one human operator, so the project is the key. |
 | `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
-| `agents` | Agent identity, display name, trust level (`trusted` or `untrusted`), and the id of the agent's personal space. |
+| `agents` | Agent identity, display name, and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
-| `grants` | An agent, a project, and read or write access, for opening a project to an untrusted agent. |
+| `grants` | An agent, a project, and read or write access, for granting access to a confidential project. |
 | `search_docs` | The search corpus: one row per indexed document (feed, artifact, session brain path, or knowledge base page) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable
@@ -90,17 +90,16 @@ backlog the human cannot clear in one gesture. A project created afterwards has
 no cursor, and its first events are new, which is the same rule read forward.
 
 Identity is a first-class table rather than a field on a token, so the server
-sets the `actor` on every event and a request cannot forge another agent. The
-trust model and grants are described in [agent identity and
-trust](../adr/0012-agent-identity-and-trust.md). An agent holds one token at a
-time. Multiple live tokens per agent is to be evaluated: it is not being built
-and is not refused, but would need tracking per-token device or client labels
-and last-used timestamps.
+sets the `actor` on every event and a request cannot forge another agent. The identity model and grants are described in [the token is the identity,
+and trust is removed](../adr/0021-the-token-is-the-identity.md). An agent holds
+one token at a time. Multiple live tokens per agent is to be evaluated: it is
+not being built and is not refused, but would need tracking per-token device or
+client labels and last-used timestamps.
 
-Identity changes are audited. Creating an agent, changing its trust, issuing or
-revoking its token, and adding or removing a grant each append a `system` event
-to the affected project's feed, in the same transaction as the change, so a
-change and its record cannot diverge. Agent-scoped changes land in the agent's
+Identity changes are audited. Creating an agent, issuing or revoking its token,
+and adding or removing a grant each append a `system` event to the affected
+project's feed, in the same transaction as the change, so a change and its
+record cannot diverge. Agent-scoped changes land in the agent's
 personal space; a grant lands in the project it opens. The trail is the human's
 to read: a `system` event is left out of the search corpus, and an agent's feed
 read never returns one, whatever kinds it asks for. The admin reads it through

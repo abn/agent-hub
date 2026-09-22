@@ -1,7 +1,6 @@
 //! Identity changes are audited as system events in the affected project.
 
 use agent_hub::error::ErrorCode;
-use agent_hub::principal::Trust;
 use agent_hub::store::events::{self, Event, FeedQuery};
 use agent_hub::store::{identity, inbox, projects};
 
@@ -41,13 +40,10 @@ async fn identity_changes_emit_system_events() {
     projects::create(&db, "proj", "Project")
         .await
         .expect("project");
-    let agent = identity::create_agent(&db, "worker", "Worker", Trust::Trusted)
+    let agent = identity::create_agent(&db, "worker", "Worker")
         .await
         .expect("create");
 
-    identity::set_trust(&db, "worker", Trust::Untrusted)
-        .await
-        .expect("set trust");
     identity::issue_token(&db, "worker").await.expect("issue");
     identity::revoke_token(&db, "worker").await.expect("revoke");
     identity::add_grant(&db, "worker", "proj", "read")
@@ -59,12 +55,7 @@ async fn identity_changes_emit_system_events() {
 
     let personal = system_events(&db, &agent.personal_project_id).await;
     let personal_actions = actions(&personal);
-    for expected in [
-        "agent_created",
-        "trust_changed",
-        "token_issued",
-        "token_revoked",
-    ] {
+    for expected in ["agent_created", "token_issued", "token_revoked"] {
         assert!(
             personal_actions.iter().any(|action| action == expected),
             "missing {expected} in the agent's space: {personal_actions:?}"
@@ -95,7 +86,7 @@ async fn identity_changes_emit_system_events() {
 async fn reserved_agent_ids_are_rejected() {
     let db = fresh("identity-reserved").await;
     for id in ["human", "local"] {
-        let err = identity::create_agent(&db, id, "Name", Trust::Trusted)
+        let err = identity::create_agent(&db, id, "Name")
             .await
             .expect_err("reserved id");
         assert_eq!(err.code(), ErrorCode::InvalidArgument);

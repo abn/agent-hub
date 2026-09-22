@@ -11,11 +11,9 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
-use crate::config::TrustDefault;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, json_body};
-use crate::principal::Trust;
 use crate::store::identity::{self, Agent, Grant, IssuedToken};
 
 /// The agents on the hub.
@@ -26,20 +24,12 @@ pub struct AgentList {
 
 /// A new agent to create.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateAgent {
     /// Stable identity, also the recorded actor.
     pub id: String,
     /// Human-readable name.
     pub display_name: String,
-    /// Trust level; defaults to the deployment posture.
-    #[serde(default)]
-    pub trust: Option<String>,
-}
-
-/// A trust change.
-#[derive(Debug, Deserialize)]
-pub struct UpdateAgent {
-    pub trust: String,
 }
 
 /// A new grant.
@@ -64,14 +54,6 @@ fn admin(state: &AppState, headers: &HeaderMap) -> std::result::Result<(), Probl
         .map_err(|err| Problem::from_error(&err))
 }
 
-/// The trust a new agent gets when the request does not name one.
-fn configured_trust(state: &AppState) -> Trust {
-    match state.config.trust_default {
-        TrustDefault::Trusted => Trust::Trusted,
-        TrustDefault::Untrusted => Trust::Untrusted,
-    }
-}
-
 /// `GET /api/v1/agents`
 pub async fn list(
     State(state): State<AppState>,
@@ -92,30 +74,10 @@ pub async fn create(
 ) -> std::result::Result<(StatusCode, Json<Agent>), Problem> {
     admin(&state, &headers)?;
     let request = json_body(payload, "agent body must be valid JSON")?;
-    let trust = match request.trust.as_deref() {
-        Some(text) => identity::parse_trust(text).map_err(|err| Problem::from_error(&err))?,
-        None => configured_trust(&state),
-    };
-    let agent = identity::create_agent(&state.db, &request.id, &request.display_name, trust)
+    let agent = identity::create_agent(&state.db, &request.id, &request.display_name)
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok((StatusCode::CREATED, Json(agent)))
-}
-
-/// `PATCH /api/v1/agents/{id}`
-pub async fn update(
-    State(state): State<AppState>,
-    ProblemPath(id): ProblemPath<String>,
-    headers: HeaderMap,
-    payload: std::result::Result<Json<UpdateAgent>, JsonRejection>,
-) -> std::result::Result<Json<Agent>, Problem> {
-    admin(&state, &headers)?;
-    let request = json_body(payload, "agent body must be valid JSON")?;
-    let trust = identity::parse_trust(&request.trust).map_err(|err| Problem::from_error(&err))?;
-    let agent = identity::set_trust(&state.db, &id, trust)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
-    Ok(Json(agent))
 }
 
 /// `POST /api/v1/agents/{id}/token`: reissue, invalidating the previous token.

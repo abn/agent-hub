@@ -1,8 +1,8 @@
-//! The authorization policy: admin, trusted, untrusted, and grants.
+//! The authorization policy: admin, authenticated agents, confidential projects, and grants.
 
 use agent_hub::error::ErrorCode;
 use agent_hub::policy::{Access, Visibility, authorize, visibility};
-use agent_hub::principal::{Principal, Trust};
+use agent_hub::principal::Principal;
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::search::{self, SearchQuery};
 use agent_hub::store::{identity, inbox, projects};
@@ -23,10 +23,9 @@ fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
     }
 }
 
-fn principal(actor: &str, agent_id: &str, trust: Trust) -> Principal {
+fn principal(actor: &str, agent_id: &str) -> Principal {
     Principal {
         actor: actor.to_string(),
-        trust,
         agent_id: Some(agent_id.to_string()),
         is_admin: false,
     }
@@ -35,7 +34,6 @@ fn principal(actor: &str, agent_id: &str, trust: Trust) -> Principal {
 fn admin() -> Principal {
     Principal {
         actor: "human".to_string(),
-        trust: Trust::Trusted,
         agent_id: None,
         is_admin: true,
     }
@@ -57,19 +55,24 @@ async fn forbidden(
 #[tokio::test]
 async fn the_admin_reaches_everything() {
     let db = fresh("policy-admin").await;
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let agent = identity::create_agent(&db, "agent", "Agent")
         .await
         .expect("create");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared");
+    projects::create_with_confidential(&db, "secret", "Secret", true)
+        .await
+        .expect("secret");
 
     let admin = admin();
     for (project, access) in [
         ("shared", Access::Read),
         ("shared", Access::Write),
-        (&strict.personal_project_id, Access::Read),
-        (&strict.personal_project_id, Access::Write),
+        ("secret", Access::Read),
+        ("secret", Access::Write),
+        (&agent.personal_project_id, Access::Read),
+        (&agent.personal_project_id, Access::Write),
     ] {
         authorize(&db, &admin, project, access)
             .await
@@ -78,18 +81,18 @@ async fn the_admin_reaches_everything() {
 }
 
 #[tokio::test]
-async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
-    let db = fresh("policy-trusted").await;
-    let trust = identity::create_agent(&db, "trust", "Trust", Trust::Trusted)
+async fn an_authenticated_agent_reads_and_writes_open_projects_and_own_space() {
+    let db = fresh("policy-open").await;
+    let me = identity::create_agent(&db, "me", "Me")
         .await
-        .expect("create trust");
-    let other = identity::create_agent(&db, "other", "Other", Trust::Trusted)
+        .expect("create me");
+    let other = identity::create_agent(&db, "other", "Other")
         .await
         .expect("create other");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared");
-    let who = principal("trust", "trust", Trust::Trusted);
+    let who = principal("me", "me");
 
     authorize(&db, &who, "shared", Access::Read)
         .await
@@ -97,7 +100,7 @@ async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
     authorize(&db, &who, "shared", Access::Write)
         .await
         .expect("write shared");
-    authorize(&db, &who, &trust.personal_project_id, Access::Write)
+    authorize(&db, &who, &me.personal_project_id, Access::Write)
         .await
         .expect("write own space");
     authorize(&db, &who, &other.personal_project_id, Access::Read)
@@ -105,7 +108,7 @@ async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
         .expect("read another space");
     assert!(
         forbidden(&db, &who, &other.personal_project_id, Access::Write).await,
-        "a trusted agent must not write another agent's space"
+        "an agent must not write another agent's space"
     );
 
     let missing = authorize(&db, &who, "ghost", Access::Read)
@@ -119,46 +122,34 @@ async fn a_trusted_agent_reads_all_and_writes_shared_and_own() {
 }
 
 #[tokio::test]
-async fn an_untrusted_agent_is_confined_to_its_space_and_grants() {
-    let db = fresh("policy-untrusted").await;
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+async fn a_confidential_project_requires_an_explicit_grant() {
+    let db = fresh("policy-confidential").await;
+    let _agent = identity::create_agent(&db, "agent", "Agent")
         .await
-        .expect("create strict");
-    let other = identity::create_agent(&db, "other", "Other", Trust::Trusted)
+        .expect("create agent");
+    projects::create_with_confidential(&db, "secret", "Secret", true)
         .await
-        .expect("create other");
-    projects::create(&db, "shared", "Shared")
-        .await
-        .expect("shared");
-    projects::create(&db, "granted", "Granted")
-        .await
-        .expect("granted");
-    let who = principal("strict", "strict", Trust::Untrusted);
+        .expect("secret");
+    let who = principal("agent", "agent");
 
-    authorize(&db, &who, &strict.personal_project_id, Access::Write)
-        .await
-        .expect("its own space");
-    assert!(forbidden(&db, &who, "shared", Access::Read).await);
-    assert!(forbidden(&db, &who, "shared", Access::Write).await);
-    assert!(forbidden(&db, &who, &other.personal_project_id, Access::Read).await);
+    assert!(forbidden(&db, &who, "secret", Access::Read).await);
+    assert!(forbidden(&db, &who, "secret", Access::Write).await);
 
-    identity::add_grant(&db, "strict", "granted", "read")
+    identity::add_grant(&db, "agent", "secret", "read")
         .await
-        .expect("read grant");
-    authorize(&db, &who, "granted", Access::Read)
+        .expect("add grant");
+    authorize(&db, &who, "secret", Access::Read)
         .await
         .expect("granted read");
-    assert!(
-        forbidden(&db, &who, "granted", Access::Write).await,
-        "a read grant does not permit writes"
-    );
-
-    identity::add_grant(&db, "strict", "granted", "write")
-        .await
-        .expect("write grant");
-    authorize(&db, &who, "granted", Access::Write)
+    authorize(&db, &who, "secret", Access::Write)
         .await
         .expect("granted write");
+
+    identity::remove_grant(&db, "agent", "secret")
+        .await
+        .expect("revoke grant");
+    assert!(forbidden(&db, &who, "secret", Access::Read).await);
+    assert!(forbidden(&db, &who, "secret", Access::Write).await);
 }
 
 #[tokio::test]
@@ -311,49 +302,49 @@ async fn visibility_lists_the_reachable_projects() {
     }
 
     let db = fresh("policy-visibility").await;
-    let strict = identity::create_agent(&db, "strict", "Strict", Trust::Untrusted)
+    let agent = identity::create_agent(&db, "agent", "Agent")
         .await
         .expect("create");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared");
-    projects::create(&db, "granted", "Granted")
+    projects::create_with_confidential(&db, "secret", "Secret", true)
         .await
-        .expect("granted");
+        .expect("secret");
 
     assert_eq!(
         visibility(&db, &admin()).await.expect("admin"),
         Visibility::All
     );
-    assert_eq!(
-        visibility(&db, &principal("trust", "trust", Trust::Trusted))
-            .await
-            .expect("trusted"),
-        Visibility::All
-    );
 
-    let only = visibility(&db, &principal("strict", "strict", Trust::Untrusted))
-        .await
-        .expect("untrusted");
-    assert_eq!(
-        only,
-        Visibility::Only(vec![strict.personal_project_id.clone()])
-    );
-
-    identity::add_grant(&db, "strict", "granted", "read")
-        .await
-        .expect("grant");
-    let only = visibility(&db, &principal("strict", "strict", Trust::Untrusted))
-        .await
-        .expect("untrusted");
-    match only {
+    let who = principal("agent", "agent");
+    let visible = visibility(&db, &who).await.expect("agent");
+    match visible {
         Visibility::Only(mut ids) => {
             ids.sort();
-            let mut expected = vec![strict.personal_project_id.clone(), "granted".to_string()];
+            let mut expected = vec![agent.personal_project_id.clone(), "shared".to_string()];
             expected.sort();
             assert_eq!(ids, expected);
         }
-        Visibility::All => panic!("an untrusted agent must not see everything"),
+        Visibility::All => panic!("agent should not see confidential project"),
+    }
+
+    identity::add_grant(&db, "agent", "secret", "read")
+        .await
+        .expect("grant");
+    let visible = visibility(&db, &who).await.expect("agent");
+    match visible {
+        Visibility::Only(mut ids) => {
+            ids.sort();
+            let mut expected = vec![
+                agent.personal_project_id.clone(),
+                "shared".to_string(),
+                "secret".to_string(),
+            ];
+            expected.sort();
+            assert_eq!(ids, expected);
+        }
+        Visibility::All => panic!("agent with grant should still see Only filtered list"),
     }
 }
 

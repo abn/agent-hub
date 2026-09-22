@@ -1,7 +1,6 @@
 //! HTTP project deletion: cascade, admin gating, and the personal-space guard.
 
 use agent_hub::http::router;
-use agent_hub::principal::Trust;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, projects, sessions};
@@ -120,7 +119,7 @@ async fn delete_project_cascades_its_data() {
         .data_dir
         .join(format!("artifacts/homelab/{}/v2.md", artifact.id));
 
-    let agent = identity::create_agent(&state.db, "laptop", "Laptop", Trust::Trusted)
+    let agent = identity::create_agent(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
     identity::add_grant(&state.db, "laptop", "homelab", "read")
@@ -331,7 +330,7 @@ async fn delete_leaves_other_projects_untouched() {
 #[tokio::test]
 async fn delete_refuses_a_personal_space() {
     let state = state().await;
-    let agent = identity::create_agent(&state.db, "laptop", "Laptop", Trust::Trusted)
+    let agent = identity::create_agent(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
 

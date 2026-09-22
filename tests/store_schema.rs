@@ -28,10 +28,10 @@ async fn migrate_creates_schema_and_search_index() {
     let dir = TempDir::new("store-schema");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let again = migrate(&db).await.expect("migrate again");
-    assert_eq!(again, 9, "migrations are forward only and apply once");
+    assert_eq!(again, 10, "migrations are forward only and apply once");
 
     let conn = db.connect().expect("connect");
 
@@ -127,7 +127,7 @@ async fn migrate_creates_schema_and_search_index() {
 
     for id in ["a", "b"] {
         conn.execute(
-            "INSERT INTO agents(id, display_name, trust, created_at) VALUES (?1, ?1, 'trusted', '2026-09-16T00:00:00Z')",
+            "INSERT INTO agents(id, display_name, created_at) VALUES (?1, ?1, '2026-09-16T00:00:00Z')",
             [id],
         )
         .await
@@ -217,7 +217,7 @@ async fn migration_four_backfills_version_history() {
     .expect("insert artifact");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let mut rows = conn
         .query(
@@ -325,7 +325,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let mut rows = conn
         .query(
@@ -514,7 +514,7 @@ async fn migration_eight_names_the_session_each_lifecycle_event_belongs_to() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let mut rows = conn
         .query("SELECT id, session_id FROM events ORDER BY id", ())
@@ -602,7 +602,7 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
     .expect("insert event");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let mut rows = conn
         .query(
@@ -718,7 +718,7 @@ async fn migration_six_clears_indexed_audit_events() {
     }
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     let mut rows = conn
         .query("SELECT doc_id FROM search_docs ORDER BY doc_id", ())
@@ -791,7 +791,7 @@ async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
     .expect("insert project");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 9);
+    assert_eq!(version, 10);
 
     // The human had already read the feed: that is what it was for. Nothing is
     // unseen until something new arrives.
@@ -833,6 +833,70 @@ async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
             .await
             .expect("count"),
         0
+    );
+
+    drop(conn);
+    drop(db);
+}
+
+#[tokio::test]
+async fn migration_ten_adds_confidential_and_drops_trust() {
+    let dir = TempDir::new("store-schema-v10");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    // A version-9 database where agents had trust and projects lacked confidential.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 10) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj-legacy', 'Legacy Project', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+    conn.execute(
+        "INSERT INTO agents(id, display_name, trust, created_at) VALUES ('a1', 'A1', 'trusted', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert agent");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, 10);
+
+    // Existing project defaults to confidential = 0 (false).
+    let mut rows = conn
+        .query(
+            "SELECT confidential FROM projects WHERE id = 'proj-legacy'",
+            (),
+        )
+        .await
+        .expect("query projects");
+    let row = rows.next().await.expect("row").expect("project exists");
+    assert_eq!(row.get::<i64>(0).expect("confidential"), 0);
+    drop(rows);
+
+    // The trust column in agents is dropped.
+    let trust_query = conn.query("SELECT trust FROM agents", ()).await;
+    assert!(
+        trust_query.is_err(),
+        "trust column on agents must be dropped in migration 10"
     );
 
     drop(conn);
