@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/smoke web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -90,10 +90,11 @@ endef
 web/a11y: build ## Run the headless accessibility audit
 	$(call browser_check,web/a11y,.agents/scripts/a11y.py)
 
-# The behavioural smoke run: every route painted, every write landing, in a
-# real browser. Nothing else executes the app's own JavaScript.
-web/smoke: build ## Run the headless smoke pass over the PWA
-	$(call browser_check,web/smoke,.agents/scripts/web-smoke.py)
+# The behavioural invariants: race conditions, request counts, crypto gates,
+# text escaping and single-decision guarantees. Nothing here depends on
+# screen layout or geometry.
+web/invariants: build ## Run the behavioral invariant checks
+	$(call browser_check,web/invariants,.agents/scripts/invariants.py)
 
 # A reverse proxy that mounts the hub on a path strips the prefix before
 # forwarding, so the hub never sees it; only the client-side references have
@@ -111,7 +112,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/smoke web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
