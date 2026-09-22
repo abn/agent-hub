@@ -20,7 +20,13 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { sessionRows, sessionDetailView } from "./sessions.mjs";
-import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
+import {
+  installShellLayout,
+  shellHTML,
+  shellIndexControls,
+  shellMobileBar,
+  shellStageHead,
+} from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
@@ -352,7 +358,7 @@ async function projectsIndexScreen(gen, projects) {
   paint(gen, html);
 }
 
-async function feedShell(id, segment, stats, params) {
+async function feedShell(id, segment, stats, params, mobileBar = "") {
   const selected = params?.get?.("event") || "";
   setFeedSelection(selected);
   const indexBody = await feedSection(id, stats, { chips: false });
@@ -362,7 +368,7 @@ async function feedShell(id, segment, stats, params) {
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
-    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
     indexControls: shellIndexControls("Filter events"),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -374,7 +380,7 @@ async function feedShell(id, segment, stats, params) {
   });
 }
 
-async function artifactsShell(id, segment, stats, params) {
+async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   const selected = params?.get?.("artifact") || "";
   const { rows, artifacts } = await artifactIndex(id, selected);
   const totalBytes = artifacts.reduce((sum, a) => sum + (Number(a.size_bytes) || 0), 0);
@@ -403,7 +409,7 @@ async function artifactsShell(id, segment, stats, params) {
   return {
     html: shellHTML({
       segment,
-      indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
       indexControls: shellIndexControls("Filter artifacts"),
       indexBody: rows,
       stageHead,
@@ -416,7 +422,7 @@ async function artifactsShell(id, segment, stats, params) {
   };
 }
 
-async function sessionsShell(id, segment, stats, params) {
+async function sessionsShell(id, segment, stats, params, mobileBar = "") {
   const selectedId = params?.get?.("id") || params?.get?.("session") || "";
   const { sessions, card } = await sessionRows(id, selectedId);
   const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
@@ -430,7 +436,7 @@ async function sessionsShell(id, segment, stats, params) {
     : "";
   return shellHTML({
     segment,
-    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
     indexControls: shellIndexControls("Filter sessions"),
     indexBody: card,
     stageHead: shellStageHead(selectedSession?.name || "Sessions", meta, "", `#/projects/${encodeURIComponent(id)}/sessions`),
@@ -502,16 +508,24 @@ export async function projectScreen(params, gen, path) {
   const footprint = await projectFootprint(id);
   if (stale(gen)) return;
 
+  const agentsText =
+    stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "";
+  const mobileBar = shellMobileBar(
+    project.display_name || id,
+    [agentsText, footprint].filter(Boolean).join(" · "),
+    "#/projects",
+  );
+
   let shell;
   let artifactInfo = null;
   let artifactId = "";
   if (segment === "artifacts") {
-    const built = await artifactsShell(id, segment, stats, params);
+    const built = await artifactsShell(id, segment, stats, params, mobileBar);
     shell = built.html;
     artifactInfo = built.info;
     artifactId = built.selected;
-  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params);
-  else shell = await feedShell(id, segment, stats, params);
+  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params, mobileBar);
+  else shell = await feedShell(id, segment, stats, params, mobileBar);
   if (stale(gen)) return;
 
   paint(gen, shell);

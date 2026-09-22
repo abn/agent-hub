@@ -6741,6 +6741,26 @@ dialog.dialog-project-delete {
 @media (min-width: 1100px) {
   .shell-stage .shell-leading { display: none; }
 }
+/* The 48px leading slot every phone bar starts with: a back chevron when
+   there is somewhere to go back to, an empty slot otherwise, so the title
+   starts at the same x on every screen. */
+.shell-slot { display: none; width: 48px; flex: none; align-items: center; justify-content: center; color: var(--ink); text-decoration: none; min-height: 44px; }
+.shell-mobilebar { display: none; }
+@media (max-width: 1099px) {
+  .shell-slot { display: flex; margin-left: 0; margin-right: -10px; }
+  .shell-head:has(.shell-slot) { padding-left: 0; }
+  .shell-mobilebar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 52px;
+    flex: none;
+    box-sizing: border-box;
+    padding: 0 16px 0 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+}
 .shell-head .shell-leading {
   color: var(--ink);
   text-decoration: none;

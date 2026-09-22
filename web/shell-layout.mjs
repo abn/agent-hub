@@ -211,8 +211,8 @@ export function shellHTML({
 
 export function shellStageHead(title, meta, actions = "", backHref = "") {
   const leading = backHref
-    ? `<a class="shell-leading" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
-    : "";
+    ? `<a class="shell-slot shell-back" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
+    : `<span class="shell-slot" aria-hidden="true"></span>`;
   return `<div class="shell-head">
     ${leading}
     <div class="shell-title">
@@ -220,6 +220,22 @@ export function shellStageHead(title, meta, actions = "", backHref = "") {
       ${meta ? `<span class="shell-meta">${esc(meta)}</span>` : ""}
     </div>
     ${actions}
+  </div>`;
+}
+
+// The bar a phone screen carries above its list: the 48px leading slot, then
+// the screen's own name and its meta. The title starts at the same x on every
+// screen, whether or not there is somewhere to go back to.
+export function shellMobileBar(title, meta = "", backHref = "") {
+  const leading = backHref
+    ? `<a class="shell-slot shell-back" href="${esc(backHref)}" aria-label="Back">${BACK_CHEVRON}</a>`
+    : `<span class="shell-slot" aria-hidden="true"></span>`;
+  return `<div class="shell-mobilebar">
+    ${leading}
+    <div class="shell-title">
+      <span class="shell-title-line">${esc(title)}</span>
+      ${meta ? `<span class="shell-meta">${esc(meta)}</span>` : ""}
+    </div>
   </div>`;
 }
 

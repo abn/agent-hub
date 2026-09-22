@@ -453,6 +453,7 @@ export async function inbox(gen) {
   lastOpen = opened ? opened.event_id : "";
 
   const indexHead = `<div class="shell-head">
+      <span class="shell-slot" aria-hidden="true"></span>
       <div class="shell-title"><h1 class="shell-title-line">Inbox</h1></div>
       <button type="button" class="inbox-filter" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread only</button>
       <button type="button" class="inbox-quiet" data-action="inbox-read-all"${unread.items.length ? "" : " disabled"}>Mark all read</button>
