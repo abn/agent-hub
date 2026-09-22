@@ -9329,21 +9329,28 @@ def check_document_comments(
             sel.addRange(range);
             document.dispatchEvent(new Event('selectionchange'));
         }""")
-        p_mobile.wait_for_timeout(300)
-        callout = inner_frame.locator(".hub-selection-callout")
-        if callout.count() == 0:
-            watch.fail("[390px] selecting text did not raise .hub-selection-callout 'Comment'")
-        else:
-            callout_box = callout.bounding_box()
-            if not callout_box or callout_box["height"] < 40:
-                watch.fail(f"[390px] selection callout height {callout_box} is under 44px hit floor")
-            callout.click()
+        # This context is a touch device, and a touch device no longer gets a
+        # callout beside the selection: that space is the platform's own menu,
+        # which always paints over it. The shell raises a fixed button
+        # instead, and `check_touch_comment_button` owns that behaviour. Here
+        # the callout's absence is the assertion, so the old control cannot
+        # quietly come back and be unreachable again.
+        fab = p_mobile.locator(".hub-comment-fab")
+        if not settle(p_mobile, "!!document.querySelector('.hub-comment-fab')"):
+            watch.fail("[390px] selecting text raised no comment button in the shell")
+        if inner_frame.locator(".hub-selection-callout").count() != 0:
+            watch.fail(
+                "[390px] a callout was drawn beside the selection on a touch device,"
+                " where the platform's own menu covers it"
+            )
+        if fab.count():
+            fab.click()
             p_mobile.wait_for_timeout(300)
 
             # E. Comment sheet opened in compose mode with quote
             sheet = p_mobile.locator(".hub-comment-sheet, .comments-drawer")
             if sheet.count() == 0 or not sheet.first.is_visible():
-                watch.fail("[390px] clicking 'Comment' callout did not open comment sheet")
+                watch.fail("[390px] the comment button did not open the comment sheet")
             else:
                 compose_box = p_mobile.locator(".comments-compose textarea, .hub-sheet-composer input, .hub-sheet-composer textarea")
                 if compose_box.count() > 0:
@@ -9812,12 +9819,15 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
             watch.fail("the comment button is on screen with nothing selected")
 
         # Select inside the innermost frame, which is where the prose is.
-        viewer = page.frame_locator("main iframe")
-        quote = viewer.locator("#hub-frame").evaluate(
-            "el => { const d = el.contentDocument; const p = d.querySelector('h1, p');"
+        inner = page.frame_locator("main iframe").frame_locator("#hub-frame")
+        quote = inner.locator("body").evaluate(
+            "(body) => { const d = body.ownerDocument;"
+            " const p = d.querySelector('h1, p'); if (!p) return '';"
             " const r = d.createRange(); r.selectNodeContents(p);"
-            " const s = d.defaultView.getSelection(); s.removeAllRanges(); s.addRange(r);"
-            " d.dispatchEvent(new Event('selectionchange')); return p.textContent.trim(); }"
+            " const s = d.defaultView.getSelection();"
+            " s.removeAllRanges(); s.addRange(r);"
+            " d.dispatchEvent(new Event('selectionchange'));"
+            " return (p.textContent || '').trim(); }"
         )
         if not settle(page, "!!document.querySelector('.hub-comment-fab')"):
             watch.fail("selecting text on a touch device raised no comment button")
@@ -9860,16 +9870,44 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
         if not settle(page, "!!document.querySelector('.comments-compose')"):
             watch.fail("tapping the comment button did not open the composer")
             return
+        # The quote is rendered as a block in the drawer, above the form, and
+        # the form's placeholder changes to say the comment is about it. Both
+        # come from the same stored quote, so either alone would pass with the
+        # other broken.
         carried = page.evaluate(
-            "() => (document.querySelector('.comments-compose') || {}).innerText || ''"
+            "() => (document.querySelector('.comments-drawer') || {}).innerText || ''"
         )
         head = (quote or "")[:18]
         if head and head not in carried:
             watch.fail(
-                f"the composer did not carry the selected text: wanted {head!r} in {carried[:120]!r}"
+                f"the drawer did not carry the selected text: wanted {head!r} in {carried[:160]!r}"
+            )
+        placeholder = page.evaluate(
+            "() => (document.getElementById('comment-body') || {}).placeholder || ''"
+        )
+        if placeholder != "Write a comment on this text":
+            watch.fail(
+                f"the composer opened without the selection attached: placeholder {placeholder!r}"
             )
         if page.locator(".hub-comment-fab").count() != 0:
             watch.fail("the comment button stayed on screen after the composer opened")
+
+        # It is fixed to the body, outside what the router repaints, so a route
+        # change does not take it away on its own. A button left over an
+        # unrelated screen is worse than one that never arrived.
+        inner.locator("body").evaluate(
+            "(body) => { const d = body.ownerDocument;"
+            " const p = d.querySelector('h1, p');"
+            " const r = d.createRange(); r.selectNodeContents(p);"
+            " const s = d.defaultView.getSelection();"
+            " s.removeAllRanges(); s.addRange(r);"
+            " d.dispatchEvent(new Event('selectionchange')); }"
+        )
+        if not settle(page, "!!document.querySelector('.hub-comment-fab')"):
+            watch.fail("the comment button did not come back for a second selection")
+        page.evaluate("location.hash = '#/search'")
+        if not settle(page, "!document.querySelector('.hub-comment-fab')"):
+            watch.fail("the comment button followed the reader off the artifact screen")
     finally:
         context.close()
     watch.drain_rejections()
@@ -9895,18 +9933,20 @@ def check_comment_button_is_touch_only(browser, watch: Watch, port: int, project
         if not settle(page, "!!document.querySelector('main iframe')"):
             watch.fail("the viewer never painted for the fine-pointer check")
             return
-        viewer = page.frame_locator("main iframe")
-        viewer.locator("#hub-frame").evaluate(
-            "el => { const d = el.contentDocument; const p = d.querySelector('h1, p');"
+        inner = page.frame_locator("main iframe").frame_locator("#hub-frame")
+        inner.locator("body").evaluate(
+            "(body) => { const d = body.ownerDocument;"
+            " const p = d.querySelector('h1, p'); if (!p) return '';"
             " const r = d.createRange(); r.selectNodeContents(p);"
-            " const s = d.defaultView.getSelection(); s.removeAllRanges(); s.addRange(r);"
-            " d.dispatchEvent(new Event('selectionchange')); }"
+            " const s = d.defaultView.getSelection();"
+            " s.removeAllRanges(); s.addRange(r);"
+            " d.dispatchEvent(new Event('selectionchange'));"
+            " return (p.textContent || '').trim(); }"
         )
         # Waited on the callout, not on a clock: it is the thing a fine
         # pointer is supposed to get, so its arrival is the moment the
         # selection has been processed and the button's absence means
         # something. A timer here would pass while the app was still thinking.
-        inner = viewer.frame_locator("#hub-frame")
         try:
             inner.locator(".hub-selection-callout").wait_for(timeout=5000)
         except Exception as error:

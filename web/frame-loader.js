@@ -299,6 +299,13 @@ function handleSelection() {
   if (isProtected) {
     return;
   }
+  // Under a coarse pointer the shell raises a fixed button instead. Drawing a
+  // callout beside the selection here would put it exactly where Android
+  // renders Copy, Select all, Share and Read aloud, which is browser chrome
+  // and always paints on top, so the control was there and unreachable.
+  if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) {
+    return;
+  }
 
   var range = sel.getRangeAt(0);
   var rect = range.getBoundingClientRect();
@@ -316,7 +323,7 @@ function handleSelection() {
   callout.style.top = top + "px";
   callout.style.left = left + "px";
 
-  callout.addEventListener("mousedown", function (e) {
+  callout.addEventListener("pointerdown", function (e) {
     e.preventDefault();
     e.stopPropagation();
     notifyParent({ type: "hub:create-comment", quote: text });

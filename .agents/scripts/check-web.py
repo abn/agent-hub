@@ -895,10 +895,41 @@ def check_waiting_habits(errors: list[str]) -> None:
         )
 
 
+
+def check_glyph_names(errors: list[str]) -> None:
+    """Every glyph the app asks for is one the set actually has.
+
+    `glyphSvg` returns an empty string for a name it does not know, so a
+    retired or mistyped glyph renders a button with nothing in it. Nothing
+    errors, nothing logs, and a control that has an accessible name and no
+    visible mark looks like a spacing bug. Retiring `threadNew` in round 7
+    would have done exactly that to the reply button.
+    """
+    table = WEB / "glyphs.mjs"
+    if not table.is_file():
+        errors.append("web/glyphs.mjs is missing, so glyph names cannot be checked")
+        return
+    known = set(re.findall(r"^  ([A-Za-z]+):", table.read_text(encoding="utf-8"), re.M))
+    if not known:
+        errors.append("web/glyphs.mjs declares no glyphs, so the table is not being read")
+        return
+    for path in sorted(WEB.glob("*.mjs")):
+        if path.name == "glyphs.mjs":
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            for name in re.findall(r"glyphSvg\(\s*[\"']([A-Za-z]+)[\"']", line):
+                if name not in known:
+                    errors.append(
+                        f"{path}:{number}: asks for the glyph {name!r}, which web/glyphs.mjs"
+                        " does not have; it would render an empty control"
+                    )
+
 def main() -> int:
     errors: list[str] = []
 
     check_waiting_habits(errors)
+    check_glyph_names(errors)
 
     if not WEB.is_dir():
         print("web: web/ does not exist", file=sys.stderr)

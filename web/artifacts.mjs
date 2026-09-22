@@ -759,30 +759,33 @@ export async function viewerRoute(params, gen, path) {
   pathEl.textContent = monoPath;
   pathEl.title = monoPath;
 
-  // Glyph button 1: start-a-thread or comments
+  // One control in two states, not two controls. A bubble with a plus and a
+  // bubble with a count were never on screen together, so the set carried two
+  // glyphs for one place; the bubble alone is the empty state and the numeral
+  // beside it is the full one. What the control does still differs, because
+  // there is nothing to open until a thread exists.
   const threadBtn = document.createElement("button");
   threadBtn.type = "button";
-  if (commentsCount > 0) {
-    threadBtn.className = "hub-btn-glyph hub-comments-btn";
-    threadBtn.dataset.action = "comments-toggle";
-    threadBtn.setAttribute("aria-label", `Comments, ${commentsCount}`);
-    threadBtn.innerHTML = `${glyphSvg("comments", { size: 20 })}<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`;
-    threadBtn.addEventListener("click", () => {
-      if (commentsState.open && commentsState.viewMode === "list") {
-        closeCommentsDrawer();
-      } else {
-        openCommentsDrawer();
-      }
-    });
-  } else {
-    threadBtn.className = "hub-btn-glyph hub-start-thread";
-    threadBtn.dataset.action = "start-thread";
-    threadBtn.setAttribute("aria-label", "Start a thread");
-    threadBtn.innerHTML = glyphSvg("threadNew", { size: 20 });
-    threadBtn.addEventListener("click", () => {
+  const hasThreads = commentsCount > 0;
+  threadBtn.className = hasThreads
+    ? "hub-btn-glyph hub-comments-btn"
+    : "hub-btn-glyph hub-start-thread";
+  threadBtn.dataset.action = hasThreads ? "comments-toggle" : "start-thread";
+  threadBtn.setAttribute("aria-label", hasThreads ? `Comments, ${commentsCount}` : "Start a thread");
+  threadBtn.innerHTML =
+    glyphSvg("comments", { size: 20 }) +
+    (hasThreads
+      ? `<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`
+      : "");
+  threadBtn.addEventListener("click", () => {
+    if (!hasThreads) {
       openCompose(null);
-    });
-  }
+    } else if (commentsState.open && commentsState.viewMode === "list") {
+      closeCommentsDrawer();
+    } else {
+      openCommentsDrawer();
+    }
+  });
 
   // Glyph button 2: copy-raw
   const copyRawBtn = document.createElement("button");

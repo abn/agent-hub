@@ -3614,3 +3614,24 @@ a.session-back {
   margin-bottom: var(--s-4);
 }
 /* end component: access */
+
+/* The comment control for a touch device. Fixed in the corner rather than
+   beside the selection: on Android the space above a selection is the
+   platform's own menu, which is browser chrome and always wins, so the
+   control that lived there was present and unreachable. Stacking runs
+   document 0, tab bar 20, this 30, toast 40, sheets and dialogs 50. */
+.hub-comment-fab {
+  position: fixed; right: var(--s-4); z-index: 30;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  min-height: 48px; padding: 0 var(--s-4) 0 14px;
+  border: 0; border-radius: var(--r-pill);
+  background: var(--accent); color: var(--ink-inverse);
+  font: inherit; font-size: var(--t-15); font-weight: 600;
+  box-shadow: var(--shadow-2); cursor: pointer;
+}
+.hub-comment-fab:active { transform: translateY(1px); box-shadow: var(--shadow-1); filter: brightness(.94); }
+.hub-comment-fab-glyph { display: inline-flex; }
+/* Only a coarse pointer gets it. A mouse keeps the callout beside the
+   selection, which has no native menu to fight and is a shorter trip. */
+@media (pointer: fine) { .hub-comment-fab { display: none; } }

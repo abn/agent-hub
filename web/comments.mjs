@@ -532,8 +532,14 @@ function renderPhoneSheet() {
   const sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "hub-sheet-send";
+  // Carried the new-thread glyph, which was retired with round 7: it and the
+  // comments bubble were one control in two states, and neither of those
+  // states is "send". The set has no send glyph and inventing one here would
+  // put a drawing in the product that nobody drew, so the button says the
+  // word. That is the same reasoning the design gives for the comment button
+  // carrying "Comment" rather than a lone glyph.
   sendBtn.setAttribute("aria-label", "Send reply");
-  sendBtn.innerHTML = glyphSvg("threadNew", { size: 18 });
+  sendBtn.textContent = "Send";
 
   const doSendReply = async () => {
     const text = replyInput.value.trim();
@@ -1073,12 +1079,92 @@ export function commentsPanel({ toggle, badge }) {
   return { backdrop, drawer };
 }
 
+
+// The comment control for a touch device: one fixed button in the corner the
+// thumb is already near, rather than a callout beside the selection. The
+// space beside a selection belongs to the platform's own menu on Android, and
+// the hub cannot win it, so it stops asking for it.
+//
+// It lives here, in the shell, because the artifact is two frames down and
+// each of them is sized to its own content: nothing inside either can be
+// fixed to a viewport that scrolls. The frame posts the selection out, and
+// this is what hears it.
+let selectionFab = null;
+
+// The button lives on the body, outside the region the router repaints, so
+// nothing about a route change removes it on its own. Leaving an artifact
+// with text still selected would carry a fixed button onto the next screen,
+// where it sits over content that has nothing to comment on.
+if (typeof window !== "undefined") {
+  window.addEventListener("hashchange", () => removeSelectionButton());
+}
+
+function removeSelectionButton() {
+  if (selectionFab) {
+    selectionFab.remove();
+    selectionFab = null;
+  }
+}
+
+function selectionButton(quote) {
+  const wanted = typeof quote === "string" ? quote.trim() : "";
+  if (!wanted) {
+    removeSelectionButton();
+    return;
+  }
+  const coarse =
+    typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+  if (!coarse) return;
+  if (selectionFab) {
+    selectionFab.dataset.quote = wanted;
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "hub-comment-fab";
+  button.dataset.quote = wanted;
+  // The word as well as the glyph. A lone glyph arriving unannounced in a
+  // corner is a generic compose button; the word says what it will do in the
+  // half second it is on screen before a thumb reaches it.
+  button.setAttribute("aria-label", "Comment on selected text");
+  button.append(glyphNode(), labelNode());
+  // pointerdown, never mousedown: a touch-drag selection never fires mouse
+  // events, so the control that used to be here could not be pressed even
+  // when nothing covered it. preventDefault keeps the selection alive through
+  // the press, which is what the quote is taken from.
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const text = button.dataset.quote || "";
+    removeSelectionButton();
+    openCompose(text);
+  });
+  document.body.appendChild(button);
+  selectionFab = button;
+}
+
+function glyphNode() {
+  const holder = document.createElement("span");
+  holder.className = "hub-comment-fab-glyph";
+  holder.innerHTML = glyphSvg("comments", { size: 20, strokeWidth: 1.8 });
+  return holder;
+}
+
+function labelNode() {
+  const label = document.createElement("span");
+  label.textContent = "Comment";
+  return label;
+}
+
+
 // Global listener for frame messages
 if (typeof window !== "undefined") {
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || typeof data !== "object") return;
-    if (data.type === "hub:create-comment") {
+    if (data.type === "hub:selection-change") {
+      selectionButton(data.quote);
+    } else if (data.type === "hub:create-comment") {
+      removeSelectionButton();
       openCompose(data.quote);
     } else if (data.type === "hub:open-comment") {
       const comment = commentsState.comments.find(
