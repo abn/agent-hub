@@ -7,8 +7,8 @@ import { confirmAction } from "./dialog.mjs";
 import { actionFor, esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
-import { twoPane } from "./project.mjs";
 import { render } from "./router.mjs";
+import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
 import { fullStamp, relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -452,12 +452,11 @@ export async function inbox(gen) {
   const closed = opened ? "" : lastOpen;
   lastOpen = opened ? opened.event_id : "";
 
-  const wide = window.matchMedia(DESKTOP).matches;
-  const top = `<div class="inbox-top">
-      <h1>Inbox</h1>
+  const indexHead = `<div class="shell-head">
+      <div class="shell-title"><h1 class="shell-title-line">Inbox</h1></div>
       <button type="button" class="inbox-filter" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread only</button>
       <button type="button" class="inbox-quiet" data-action="inbox-read-all"${unread.items.length ? "" : " disabled"}>Mark all read</button>
-    </div>${syncLine()}`;
+    </div>`;
   const sections =
     (waiting.length ? group("waiting", "Waiting on you", waiting.length, actorGroups(waiting, state)) : "") +
     snoozedSection(snoozed, state) +
@@ -472,13 +471,33 @@ export async function inbox(gen) {
   const clear = sections
     ? ""
     : emptyStateHTML(EMPTY_COPY.inbox, {}, state.unreadOnly ? { href: address({ open: "" }) } : null);
-  const list = `<div class="inbox-screen">${top}${sections}${clear}${earlier(earlierItems, state)}</div>`;
+  const indexBody = `${syncLine()}${sections}${clear}${earlier(earlierItems, state)}`;
 
-  // On a phone a card takes the screen and Back returns to the list. On the
-  // desktop the list keeps its pane and the card sits beside it.
-  if (opened && !wide) paint(gen, `<div class="inbox-screen"><h1 class="sr-only">Inbox</h1>${detail(opened, state)}</div>`);
-  else paint(gen, twoPane(list, opened ? detail(opened, state) : ""));
+  // Same shell as a project: the index lists the queue, the stage is the item.
+  // On a phone the shell shows one zone at a time.
+  const shell = shellHTML({
+    indexHead,
+    indexControls: shellIndexControls("Filter inbox"),
+    indexBody,
+    stageHead: opened
+      ? shellStageHead(
+          opened.summary,
+          `${projectName(opened)} · ${opened.actor} · ${relative(opened.updated_at)}`,
+          "",
+          address({ ...state, open: "" }),
+        )
+      : shellStageHead("Inbox", ""),
+    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(
+      opened ? `${projectName(opened)} / inbox / ${opened.kind}` : "no item selected",
+    )}</span></div>`,
+    stageBody: opened
+      ? detail(opened, state)
+      : `<div class="shell-pad"><p class="empty">Select an item from the list.</p></div>`,
+    hasSelection: Boolean(opened),
+  });
+  paint(gen, shell);
   if (stale(gen)) return;
+  installShellLayout(main);
   drawSync();
   mountReply(state);
   atTop();

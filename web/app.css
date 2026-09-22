@@ -6776,3 +6776,12 @@ dialog.dialog-project-delete {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The inbox in the shell: the list is the index, the item is the stage. The
+   stage owns the head, so the card's own back link is only needed on a phone,
+   where the shell shows one zone at a time. */
+@media (min-width: 1100px) {
+  .shell-stage .inbox-back { display: none; }
+}
+.shell-index .inbox-top { display: none; }
+.shell-index .inbox-screen { display: block; }

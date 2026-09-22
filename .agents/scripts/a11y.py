@@ -110,7 +110,7 @@ AUDITED = {
 # the walk itself, so those two arrive whatever the hub says.
 EXPECTED = {
     "home": "main .home .home-summary",
-    "inbox": "main .inbox-screen .inbox-item",
+    "inbox": "main .shell-index .inbox-item",
     "projects": "main .projects-screen .project-row",
     INBOX_DETAIL: "main .inbox-detail .item-title",
     "feed": "main .shell-index .feed-day .feed-row",

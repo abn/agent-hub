@@ -7,6 +7,8 @@
 // the pointer and the keyboard alike, because a rule that holds on a drag and
 // not on an arrow key is not a rule.
 
+import { esc } from "./dom.mjs";
+
 const DEFAULTS = { index: 300, aside: 320 };
 const MIN = { index: 260, aside: 288 };
 const MAX = { index: 480, aside: 440 };
@@ -158,6 +160,64 @@ export function toggleAside(button) {
   const open = aside.hidden;
   aside.hidden = !open;
   button.setAttribute("aria-pressed", String(open));
+}
+
+const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
+
+// The reserved chrome is the rule, so the shell draws both rows whether or not
+// a screen has anything for the second one. On a phone the shell shows one
+// zone at a time: the index, or the stage with a way back to the list.
+export function shellHTML({
+  segment,
+  indexHead,
+  indexControls,
+  indexBody,
+  stageHead,
+  stageControls,
+  stageBody,
+  aside = "",
+  hasSelection = false,
+}) {
+  return `<div class="shell${hasSelection ? " has-selection" : ""}"${
+    segment ? ` data-segment="${esc(segment)}"` : ""
+  }>
+    <div class="shell-index">
+      ${indexHead}
+      ${indexControls}
+      <div class="shell-body" id="ah-index" role="tabpanel" tabindex="-1">${indexBody}</div>
+    </div>
+    <div class="shell-split" data-split="index" role="separator" aria-orientation="vertical" aria-label="Resize list" tabindex="0"></div>
+    <div class="shell-stage">
+      ${stageHead}
+      ${stageControls}
+      <div class="shell-body">${stageBody}</div>
+    </div>
+    <div class="shell-split" data-split="aside" role="separator" aria-orientation="vertical" aria-label="Resize panel" tabindex="0"></div>
+    <div class="shell-aside"${aside ? "" : " hidden"}>${aside}</div>
+  </div>`;
+}
+
+export function shellStageHead(title, meta, actions = "", backHref = "") {
+  const leading = backHref
+    ? `<a class="shell-leading" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
+    : "";
+  return `<div class="shell-head">
+    ${leading}
+    <div class="shell-title">
+      <h1 class="shell-title-line">${esc(title)}</h1>
+      ${meta ? `<span class="shell-meta">${esc(meta)}</span>` : ""}
+    </div>
+    ${actions}
+  </div>`;
+}
+
+export function shellIndexControls(placeholder) {
+  return `<div class="shell-controls">
+    <div class="shell-filter">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
+      <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
+    </div>
+  </div>`;
 }
 
 // The index filter: a pill field that filters the list in place. It replaces

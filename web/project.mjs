@@ -20,7 +20,7 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
 import { sessionRows, sessionDetailView } from "./sessions.mjs";
-import { installShellLayout } from "./shell-layout.mjs";
+import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
@@ -85,62 +85,6 @@ function segSwitcher(id, segment, stats) {
     ${tab("feed", "Feed", null)}
     ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
     ${tab("sessions", "Sessions", stats?.sessions ?? null)}
-  </div>`;
-}
-
-function shellIndexControls(placeholder) {
-  return `<div class="shell-controls">
-    <div class="shell-filter">
-      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
-      <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
-    </div>
-  </div>`;
-}
-
-function shellStageHead(title, meta, actions = "", backHref = "") {
-  const leading = backHref
-    ? `<a class="shell-leading" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
-    : "";
-  return `<div class="shell-head">
-    ${leading}
-    <div class="shell-title">
-      <h1 class="shell-title-line">${esc(title)}</h1>
-      ${meta ? `<span class="shell-meta">${esc(meta)}</span>` : ""}
-    </div>
-    ${actions}
-  </div>`;
-}
-
-const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
-
-// The reserved chrome is the rule, so the shell draws both rows whether or not
-// a screen has anything for the second one. On a phone the shell shows one
-// zone at a time: the index, or the stage with a way back to the list.
-function shellHTML({
-  segment,
-  indexHead,
-  indexControls,
-  indexBody,
-  stageHead,
-  stageControls,
-  stageBody,
-  aside = "",
-  hasSelection = false,
-}) {
-  return `<div class="shell${hasSelection ? " has-selection" : ""}" data-segment="${esc(segment)}">
-    <div class="shell-index">
-      ${indexHead}
-      ${indexControls}
-      <div class="shell-body" id="ah-index" role="tabpanel" aria-labelledby="ah-tab-${esc(segment)}" tabindex="-1">${indexBody}</div>
-    </div>
-    <div class="shell-split" data-split="index" role="separator" aria-orientation="vertical" aria-label="Resize list" tabindex="0"></div>
-    <div class="shell-stage">
-      ${stageHead}
-      ${stageControls}
-      <div class="shell-body">${stageBody}</div>
-    </div>
-    <div class="shell-split" data-split="aside" role="separator" aria-orientation="vertical" aria-label="Resize panel" tabindex="0"></div>
-    <div class="shell-aside"${aside ? "" : " hidden"}>${aside}</div>
   </div>`;
 }
 
