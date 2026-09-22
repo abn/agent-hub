@@ -1082,7 +1082,7 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 .comment.done .comment-body { text-decoration: line-through; color: var(--ink-3); }
 .comment-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .comments-compose {
-  display: flex; flex-direction: column; gap: var(--s-2);
+  display: block;
   padding: var(--s-3) var(--s-4); border-top: 1px solid var(--line);
 }
 /* An author display beats the browser's own [hidden] rule, so a form the
@@ -4639,7 +4639,20 @@ a.session-back {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: 0 var(--s-2) var(--s-2) var(--s-4);
+  padding: 0 var(--s-2) var(--s-2) var(--s-2);
+  flex: none;
+}
+
+/* The way out of a thread that is not the way out of the drawer. */
+.hub-sheet-back {
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
   flex: none;
 }
 
@@ -4713,30 +4726,82 @@ a.session-back {
   color: var(--ink-2);
 }
 
+/* component: composer. One box for both the new comment and the reply. The
+   send control sits inside the field, which is where a phone keyboard puts
+   it and what keeps the box one object rather than a field and a button that
+   happen to be adjacent. */
 .hub-sheet-composer {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: 10px 12px 10px 16px;
+  padding: 10px 12px;
   border-top: 1px solid var(--line);
   background: var(--surface);
   flex: none;
 }
 
-.hub-sheet-input {
-  flex: 1;
-  min-height: 40px;
-  padding: 0 12px;
+.hub-composer-field {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-pill);
+  border-radius: var(--r-3);
   background: var(--bg);
-  color: var(--ink);
-  font-size: var(--t-15);
+  padding: 4px;
+  /* The send control is a 44px touch target and it lives inside this box, so
+     the box cannot be shorter than the target plus its inset. */
+  min-height: 52px;
+  box-sizing: border-box;
 }
 
+.hub-composer-field textarea {
+  flex: 1;
+  min-height: 42px;
+  max-height: 132px;
+  /* Room for the send control, which overlaps this box. */
+  padding: 10px 52px 10px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-15);
+  line-height: 1.4;
+  resize: none;
+  overflow-y: hidden;
+}
+
+.hub-composer-field textarea:focus {
+  outline: none;
+}
+
+.hub-composer-field:focus-within {
+  border-color: var(--accent);
+}
+
+.hub-composer-label {
+  display: block;
+  font-size: var(--t-13);
+  color: var(--ink-2);
+  margin-bottom: 6px;
+}
+
+.hub-sheet-composer .hub-composer-label {
+  /* The reply box says Reply in its placeholder; a heading above it would be
+     the same word twice. Still read aloud. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hub-composer-send,
 .hub-sheet-send {
-  width: 40px;
-  height: 40px;
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border: none;
@@ -4747,6 +4812,7 @@ a.session-back {
   flex: none;
 }
 
+.hub-composer-send:disabled,
 .hub-sheet-send:disabled {
   background: var(--surface-2);
   color: var(--ink-3);

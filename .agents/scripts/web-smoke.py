@@ -11000,10 +11000,29 @@ def check_document_comments(
                 compose_box = p_mobile.locator(".comments-compose textarea, .hub-sheet-composer input, .hub-sheet-composer textarea")
                 if compose_box.count() > 0:
                     compose_box.first.fill("A brand new comment on this sentence.")
-                    send_btn = p_mobile.locator(".comments-compose button[type='submit'], .hub-sheet-composer button")
-                    if send_btn.count() > 0:
+                    # The send control, by its class. It was matched on
+                    # type='submit' and is a plain button now, so the old
+                    # selector found nothing, the comment was never posted and
+                    # the sheet stayed over the document -- which surfaced as
+                    # the next click timing out on a highlight it could not
+                    # reach, thirty seconds later and nowhere near the cause.
+                    send_btn = p_mobile.locator(
+                        ".comments-compose .hub-composer-send,"
+                        " .hub-sheet-composer .hub-composer-send"
+                    )
+                    if send_btn.count() == 0:
+                        watch.fail("[390px] the composer has no send control to post with")
+                    else:
                         send_btn.first.click()
-                        p_mobile.wait_for_timeout(500)
+                        if not settle(
+                            p_mobile,
+                            # The drawer keeps a hidden composer of its own,
+                            # so existence proves nothing here. Visibility does.
+                            "!Array.from(document.querySelectorAll('.comments-compose'))"
+                            ".some((el) => el.offsetParent !== null)",
+                            timeout=5000,
+                        ):
+                            watch.fail("[390px] posting a comment left the composer open")
 
         # F. Tap highlight opens phone sheet (Screen 05)
         if hl_norm.count() > 0:
@@ -11013,6 +11032,8 @@ def check_document_comments(
             if sheet.count() == 0 or not sheet.first.is_visible():
                 watch.fail("[390px] tapping highlight did not open comment sheet")
             else:
+                check_composer(p_mobile, watch, ".hub-sheet-composer", "reply")
+
                 # The reply send control is a glyph, dimmed until there is
                 # something to send. A 40px circle cannot hold a word legibly,
                 # and an always-live button says an empty field can be posted.
@@ -11035,7 +11056,7 @@ def check_document_comments(
                         watch.fail(
                             "[390px] the reply send control is live with an empty field"
                         )
-                    reply_box = sheet.locator(".hub-sheet-input").first
+                    reply_box = sheet.locator(".hub-sheet-composer textarea").first
                     reply_box.fill("A reply typed to wake the send control.")
                     if not settle(
                         p_mobile,
@@ -11072,6 +11093,7 @@ def check_document_comments(
                         if not settle(p_mobile, "!!document.querySelector('.hub-sheet-resolve span')?.textContent?.includes('Resolve')", timeout=4000):
                             watch.fail("[390px] Reopen button did not flip back to Resolve")
 
+
         # G. Open comments list (Screen 06)
         com_btn = p_mobile.locator(".hub-comments-btn, .comments-toggle, [data-action='comments-toggle']").first
         if com_btn.count() > 0:
@@ -11090,6 +11112,12 @@ def check_document_comments(
                     inner_v1.locator(".hub-comment-highlight").get_by_text("Decisions I need from you").wait_for(timeout=4000)
                 except Exception as err:
                     watch.fail(f"[390px] opening v1 did not highlight older-version comment in place: {err}")
+
+        # Last in the mobile pass on purpose. It leaves a thread and lands on
+        # the comment list, and the comments toggle means "close" from the
+        # list and "show the list" from a thread, so anything after it would
+        # be reading a different drawer than it was written against.
+        check_sheet_close_and_back(p_mobile, watch)
 
     finally:
         ctx_mobile.close()
@@ -11538,7 +11566,11 @@ def run_step(watch: Watch, fn, *args, **kwargs) -> bool:
         fn(*args, **kwargs)
         return True
     except PlaywrightTimeoutError as err:
-        what = f"timed out: {str(err).splitlines()[0] if str(err) else 'timeout exceeded'}"
+        import traceback as _tb
+        where = "".join(_tb.format_exc()).strip().splitlines()
+        spot = [l.strip() for l in where if "web-smoke.py" in l][-1:] or ["?"]
+        what = (f"timed out: {str(err).splitlines()[0] if str(err) else 'timeout exceeded'}"
+                f" [at {spot[0]}]")
     except Exception as err:
         what = f"died with {type(err).__name__}: {str(err).splitlines()[0] if str(err) else ''}"
     watch.fail(
@@ -11547,6 +11579,146 @@ def run_step(watch: Watch, fn, *args, **kwargs) -> bool:
     reset_page(watch)
     return False
 
+
+def check_composer(page, watch: Watch, selector: str, what: str) -> None:
+    """One composer shape, with the send control inside the field.
+
+    The list drawer had a labelled textarea over a full-width Post button and
+    the reply row had a pill beside a circle, so the same act was drawn two
+    ways in one sheet. Both are now the same box with the send control inside
+    it, and both grow with the text to a cap.
+
+    Measured off the rendered boxes. A rule saying `position: absolute` proves
+    nothing; a send button whose edges fall inside the field's does.
+    """
+    box = page.locator(f"{selector} .hub-composer-field").first
+    send = page.locator(f"{selector} .hub-composer-send").first
+    area = page.locator(f"{selector} textarea").first
+    for name, node in (("field", box), ("send control", send), ("textarea", area)):
+        if node.count() == 0:
+            watch.fail(f"[390px] the {what} composer has no {name}")
+            return
+
+    field, button, text = box.bounding_box(), send.bounding_box(), area.bounding_box()
+    if not field or not button or not text:
+        watch.fail(f"[390px] the {what} composer draws nothing with a box")
+        return
+    # Against the TEXTAREA, not against the field. The first version of this
+    # compared the button with the field it is a child of, which is true
+    # whatever the layout does, and a mutation moving the control back out
+    # beside the text passed it. Inside means overlapping the text box.
+    overlaps = (
+        button["x"] < text["x"] + text["width"]
+        and button["x"] + button["width"] > text["x"]
+        and button["y"] < text["y"] + text["height"]
+        and button["y"] + button["height"] > text["y"]
+    )
+    if not overlaps:
+        watch.fail(
+            f"[390px] the {what} send control sits beside the text rather than"
+            f" inside it: button {button} against textarea {text}"
+        )
+    if not (
+        button["x"] >= field["x"] - 1
+        and button["x"] + button["width"] <= field["x"] + field["width"] + 1
+    ):
+        watch.fail(
+            f"[390px] the {what} send control escapes its field:"
+            f" button {button} against field {field}"
+        )
+
+    # Grows with the text, and stops.
+    area.fill("one line")
+    one = area.bounding_box()["height"]
+    area.fill("\n".join(f"line {n} of a long comment that keeps going" for n in range(12)))
+    if not settle(
+        page,
+        f"document.querySelector('{selector} textarea').getBoundingClientRect().height > {one + 4}",
+        timeout=3000,
+    ):
+        watch.fail(
+            f"[390px] the {what} composer did not grow with the text:"
+            f" still {one}px at twelve lines"
+        )
+    grown = area.bounding_box()["height"]
+    if grown > 200:
+        watch.fail(
+            f"[390px] the {what} composer grew to {grown}px with no cap;"
+            " it has to stop and scroll"
+        )
+    area.fill("")
+
+
+def check_sheet_close_and_back(page, watch: Watch) -> None:
+    """A thread can be left without losing the list, and close is an x.
+
+    Reaching a thread was a one-way door: close dismissed the whole drawer and
+    the platform's back gesture left the artifact entirely, so the only route
+    from a thread back to the other comments was to reopen everything.
+    """
+    # Open a thread if we are not in one. This runs last in the pass, after
+    # other checks have moved the drawer around, so it sets up its own state
+    # rather than inheriting whatever the previous one left.
+    if page.locator(".hub-comment-sheet").count() == 0:
+        toggle = page.locator(
+            ".hub-comments-btn, .comments-toggle, [data-action='comments-toggle']"
+        ).first
+        if toggle.count() == 0:
+            watch.fail("[390px] no comments toggle to open the drawer with")
+            return
+        toggle.click()
+        if not settle(
+            page,
+            "!!document.querySelector('.hub-list-comment, .comments-list .comment')",
+            timeout=5000,
+        ):
+            watch.fail("[390px] the comments toggle did not show the comment list")
+            return
+        page.locator(".hub-list-comment, .comments-list .comment").first.click()
+        if not settle(page, "!!document.querySelector('.hub-comment-sheet')", timeout=5000):
+            watch.fail("[390px] tapping a comment in the list did not open its thread")
+            return
+
+    # Every close control, not the first one. The drawer header and the sheet
+    # both carry this class, `.first` found the header's, and a mutation that
+    # put a chevron back on the sheet's passed: the check was reading a
+    # control nobody had touched. "An x everywhere" has to be measured
+    # everywhere.
+    closes = page.locator(".hub-comment-sheet .hub-sheet-close, .comments-drawer .hub-sheet-close")
+    if closes.count() == 0:
+        watch.fail("[390px] the comment sheet has no close control")
+    for index in range(closes.count()):
+        one = closes.nth(index)
+        drawing = one.inner_html()
+        label = one.get_attribute("aria-label") or f"#{index}"
+        if "<svg" not in drawing:
+            watch.fail(
+                f"[390px] the close control {label!r} draws no glyph: {drawing[:80]}"
+            )
+            continue
+        # The x is two crossing strokes. A chevron is one.
+        if drawing.count("<path") < 2:
+            watch.fail(
+                f"[390px] the close control {label!r} is not an x;"
+                f" it draws {drawing.count('<path')} path(s)"
+            )
+
+    back = page.locator(".hub-comment-sheet .hub-sheet-back").first
+    if back.count() == 0:
+        watch.fail("[390px] a comment thread has no way back to the comment list")
+        return
+    back.click()
+    if not settle(
+        page,
+        "!!document.querySelector('.comments-drawer') &&"
+        " !document.querySelector('.comments-drawer').hidden &&"
+        " !document.querySelector('.hub-comment-sheet')",
+        timeout=4000,
+    ):
+        watch.fail(
+            "[390px] going back from a thread did not return to the comment list"
+            " with the drawer still open"
+        )
 
 
 def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -> None:
@@ -11646,6 +11818,9 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
         if not settle(page, "!!document.querySelector('.comments-compose')"):
             watch.fail("tapping the comment button did not open the composer")
             return
+        # The same shape as the reply composer, checked the same way. Two
+        # drawings of one act in one sheet was the defect.
+        check_composer(page, watch, ".comments-compose", "new comment")
         # The quote is rendered as a block in the drawer, above the form, and
         # the form's placeholder changes to say the comment is about it. Both
         # come from the same stored quote, so either alone would pass with the
@@ -11677,10 +11852,13 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
         )
         if boxes != 1:
             watch.fail(f"the comment drawer shows {boxes} comment boxes at once, expected 1")
+        # By accessible name, not text. The send control is a glyph now, so a
+        # textContent match counts zero and reports the opposite of the truth:
+        # it would pass with every composer on screen at once.
         posts = page.evaluate(
             "() => Array.from(document.querySelectorAll('.comments-drawer button'))"
             ".filter((el) => el.offsetParent !== null"
-            " && /post/i.test(el.textContent || '')).length"
+            " && /post/i.test(el.textContent || el.getAttribute('aria-label') || '')).length"
         )
         if posts != 1:
             watch.fail(f"the comment drawer shows {posts} Post buttons at once, expected 1")

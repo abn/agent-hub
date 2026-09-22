@@ -6,6 +6,10 @@ export const GLYPH_PATHS = {
   bellStruck:
     '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
+  // Two crossing strokes. Close was a word in one place and a down chevron
+  // in two others, and a chevron says the sheet goes somewhere rather than
+  // away.
+  close: '<path d="M 6 6l12 12"/><path d="M 18 6L6 18"/>',
   chevronDown: '<path d="M 6 9l6 6 6-6"/>',
   chevronRight: '<path d="M 9 5l7 7-7 7"/>',
   // Round 8: corners to 2, tail 3 deep on a 12 body with its base pulled

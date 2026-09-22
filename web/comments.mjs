@@ -223,6 +223,69 @@ export async function deleteComment(comment) {
   }
 }
 
+// The one composer. Before this there were two: a labelled textarea over a
+// full-width Post button in the list drawer, and a pill beside a circle in
+// the reply row. Same act, two drawings, one sheet.
+//
+// The send control lives inside the field rather than beside it, which is
+// where a phone keyboard puts it and what keeps the box one object. The
+// field grows with the text and then stops; `GROW_CAP` is a holding value
+// until the designer sets one.
+const GROW_CAP = 132;
+
+function composer({ id, label, placeholder, className, onSend }) {
+  const wrap = document.createElement("div");
+  wrap.className = className;
+
+  const field = document.createElement("div");
+  field.className = "hub-composer-field";
+
+  const name = document.createElement("label");
+  name.className = "hub-composer-label";
+  name.setAttribute("for", id);
+  name.textContent = label;
+
+  const box = document.createElement("textarea");
+  box.id = id;
+  box.name = "body";
+  box.rows = 1;
+  box.maxLength = 2000;
+  box.placeholder = placeholder;
+
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "hub-composer-send hub-sheet-send";
+  send.setAttribute("aria-label", "Post");
+  send.innerHTML = glyphSvg("send", { size: 20 });
+  send.disabled = true;
+
+  const grow = () => {
+    // Measure from nothing. Growing from the current height only ever grows,
+    // so deleting a paragraph would leave the box the size the paragraph
+    // made it.
+    box.style.height = "auto";
+    const wanted = Math.max(Math.min(box.scrollHeight, GROW_CAP), 42);
+    box.style.height = `${wanted}px`;
+    box.style.overflowY = box.scrollHeight > GROW_CAP ? "auto" : "hidden";
+    send.disabled = !box.value.trim();
+  };
+
+  box.addEventListener("input", grow);
+  send.addEventListener("click", () => onSend(box, send, grow));
+  box.addEventListener("keydown", (event) => {
+    // Enter sends, shift-Enter opens a line. A box that grows needs a way to
+    // use the room it offers.
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      onSend(box, send, grow);
+    }
+  });
+
+  field.append(box, send);
+  wrap.append(name, field);
+  return { wrap, box, send, grow };
+}
+
 function commentRow(comment) {
   const item = document.createElement("div");
   item.className = "comment" + (comment.done ? " done" : "");
@@ -465,6 +528,22 @@ function renderPhoneSheet() {
   const head = document.createElement("div");
   head.className = "hub-sheet-head";
 
+  // A thread was a one-way door: close took the whole drawer and the
+  // platform's back gesture left the artifact, so the only route from one
+  // comment to the others was to dismiss everything and start again.
+  const backBtn = document.createElement("button");
+  backBtn.type = "button";
+  backBtn.className = "hub-sheet-back";
+  backBtn.setAttribute("aria-label", "Back to all comments");
+  backBtn.innerHTML = glyphSvg("chevronBack", { size: 18 });
+  backBtn.addEventListener("click", () => {
+    commentsState.activeThreadId = null;
+    commentsState.viewMode = "list";
+    renderListView();
+    const first = els.list.querySelector(".hub-list-comment, .comment");
+    (first || els.drawer).focus();
+  });
+
   const title = document.createElement("span");
   title.className = "hub-sheet-title";
   title.textContent = "Comment";
@@ -483,10 +562,10 @@ function renderPhoneSheet() {
   closeBtn.type = "button";
   closeBtn.className = "hub-sheet-close";
   closeBtn.setAttribute("aria-label", "Close");
-  closeBtn.innerHTML = glyphSvg("chevronDown", { size: 18 });
+  closeBtn.innerHTML = glyphSvg("close", { size: 18 });
   closeBtn.addEventListener("click", closeCommentsDrawer);
 
-  head.append(title, resolveBtn, closeBtn);
+  head.append(backBtn, title, resolveBtn, closeBtn);
   els.list.appendChild(head);
 
   // Quote block
@@ -531,54 +610,28 @@ function renderPhoneSheet() {
   }
   els.list.appendChild(thread);
 
-  // Composer for replies (Screen 05: 40px pill + 40px send)
-  const composer = document.createElement("div");
-  composer.className = "hub-sheet-composer";
-  const replyInput = document.createElement("input");
-  replyInput.type = "text";
-  replyInput.className = "hub-sheet-input";
-  replyInput.placeholder = "Reply";
-  const sendBtn = document.createElement("button");
-  sendBtn.type = "button";
-  sendBtn.className = "hub-sheet-send";
-  // An arrow, not a word. Round 8 declined a send motif and set the word to
-  // Post; the owner overruled that. The button is a 40px circle, which cannot
-  // hold a word legibly, and the arrow is what every phone keyboard puts in
-  // that position. The label still says Post reply, so the act keeps one name.
-  sendBtn.setAttribute("aria-label", "Post reply");
-  sendBtn.innerHTML = glyphSvg("send", { size: 20 });
-  // Dimmed until there is something to send: an empty reply is refused on
-  // click anyway, and a live button that does nothing is the same lie the
-  // drawer told.
-  sendBtn.disabled = true;
-
-  const doSendReply = async () => {
-    const text = replyInput.value.trim();
-    if (!text) return;
-    sendBtn.disabled = true;
-    try {
-      await postComment(text, comment.anchor ? comment.anchor.quote : null);
-      replyInput.value = "";
-      renderPhoneSheet();
-    } catch (err) {
-      drawerError(err.message);
-    } finally {
-      sendBtn.disabled = !replyInput.value.trim();
-    }
-  };
-
-  sendBtn.addEventListener("click", doSendReply);
-  replyInput.addEventListener("input", () => {
-    sendBtn.disabled = !replyInput.value.trim();
+  // Composer for replies. The same object as the new-comment one: the field
+  // carries its own send control and grows with the text.
+  const reply = composer({
+    id: "comment-reply",
+    label: "Reply",
+    placeholder: "Reply",
+    className: "hub-sheet-composer",
+    onSend: async (box, send, grow) => {
+      const text = box.value.trim();
+      if (!text) return;
+      send.disabled = true;
+      try {
+        await postComment(text, comment.anchor ? comment.anchor.quote : null);
+        box.value = "";
+        renderPhoneSheet();
+      } catch (err) {
+        drawerError(err.message);
+        grow();
+      }
+    },
   });
-  replyInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      doSendReply();
-    }
-  });
-  composer.append(replyInput, sendBtn);
-  els.list.appendChild(composer);
+  els.list.appendChild(reply.wrap);
 
   // Footer: "Swipe the sheet down to keep reading" · 1 of N
   const openDocs = commentsState.comments.filter((c) => !c.done && c.anchor_version === commentsState.shownVersion);
@@ -647,7 +700,7 @@ function renderComposeSheet() {
   closeBtn.type = "button";
   closeBtn.className = "hub-sheet-close";
   closeBtn.setAttribute("aria-label", "Close");
-  closeBtn.innerHTML = glyphSvg("chevronDown", { size: 18 });
+  closeBtn.innerHTML = glyphSvg("close", { size: 18 });
   closeBtn.addEventListener("click", closeCommentsDrawer);
   head.append(title, closeBtn);
   els.list.appendChild(head);
@@ -662,49 +715,43 @@ function renderComposeSheet() {
     if (qb) els.list.appendChild(qb);
   }
 
-  const form = document.createElement("form");
-  form.className = "comments-compose";
-  const box = document.createElement("textarea");
-  box.id = "comment-body";
-  box.rows = 3;
-  box.maxLength = 2000;
-  box.placeholder = commentsState.composeQuote ? "Write a comment on this text" : "Write a comment";
-
   const errLine = document.createElement("p");
   errLine.className = "drawer-error";
   errLine.hidden = true;
 
-  const postBtn = document.createElement("button");
-  postBtn.type = "submit";
-  postBtn.className = "primary";
-  postBtn.textContent = "Post";
-
-  form.append(box, errLine, postBtn);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = box.value.trim();
-    if (!text) {
-      errLine.hidden = false;
-      errLine.textContent = "Write a comment before posting.";
-      box.focus();
-      return;
-    }
-    errLine.hidden = true;
-    postBtn.disabled = true;
-    try {
-      await postComment(text, commentsState.composeQuote);
-      commentsState.composeQuote = null;
-      closeCommentsDrawer();
-    } catch (err) {
-      errLine.hidden = false;
-      errLine.textContent = err.message;
-    } finally {
-      postBtn.disabled = false;
-    }
+  const made = composer({
+    id: "comment-body",
+    label: "New comment",
+    placeholder: commentsState.composeQuote
+      ? "Write a comment on this text"
+      : "Write a comment",
+    className: "comments-compose",
+    onSend: async (box, send, grow) => {
+      const text = box.value.trim();
+      if (!text) {
+        errLine.hidden = false;
+        errLine.textContent = "Write a comment before posting.";
+        box.focus();
+        return;
+      }
+      errLine.hidden = true;
+      send.disabled = true;
+      try {
+        await postComment(text, commentsState.composeQuote);
+        commentsState.composeQuote = null;
+        closeCommentsDrawer();
+      } catch (err) {
+        errLine.hidden = false;
+        errLine.textContent = err.message;
+        grow();
+      }
+    },
   });
+  const form = made.wrap;
+  form.insertBefore(errLine, form.querySelector(".hub-composer-field"));
 
   els.list.appendChild(form);
-  setTimeout(() => box.focus(), 50);
+  setTimeout(() => made.box.focus(), 50);
 }
 
 // Desktop Margin Column (Screen 07): from 900px
@@ -1006,7 +1053,8 @@ export function commentsPanel({ toggle, badge }) {
   heading.textContent = "Comments";
   const close = document.createElement("button");
   close.type = "button";
-  close.textContent = "Close";
+  close.className = "hub-sheet-close";
+  close.innerHTML = glyphSvg("close", { size: 18 });
   close.setAttribute("aria-label", "Close comments");
   close.addEventListener("click", closeCommentsDrawer);
   head.append(heading, close);
@@ -1021,57 +1069,43 @@ export function commentsPanel({ toggle, badge }) {
   list.setAttribute("role", "log");
   list.setAttribute("aria-label", "Comments");
 
-  // Fallback compose form at foot of list
-  const form = document.createElement("form");
-  form.className = "comments-compose";
-  const label = document.createElement("label");
-  // Its own id. The compose view's textarea is also `comment-body`, and two
-  // elements answering to one id is why the label reached whichever the
-  // document found first.
-  label.setAttribute("for", "comment-body-list");
-  label.textContent = "New comment";
-  const box = document.createElement("textarea");
-  box.id = "comment-body-list";
-  box.name = "body";
-  box.rows = 3;
-  box.maxLength = 2000;
-  box.placeholder = "Write a comment before posting.";
-
   const composeError = document.createElement("p");
   composeError.className = "drawer-error";
   composeError.setAttribute("role", "alert");
   composeError.hidden = true;
 
-  const post = document.createElement("button");
-  post.type = "submit";
-  post.className = "primary";
-  post.textContent = "Post";
-  form.append(label, box, composeError, post);
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const body = box.value.trim();
-    if (!body) {
-      composeError.hidden = false;
-      composeError.textContent = "Write a comment before posting.";
-      box.focus();
-      return;
-    }
-    composeError.hidden = true;
-    composeError.textContent = "";
-    post.disabled = true;
-    postComment(body, null)
-      .then(() => {
-        box.value = "";
-      })
-      .catch((err) => {
+  // Its own id. The compose view's textarea is also `comment-body`, and two
+  // elements answering to one id is why the label reached whichever the
+  // document found first.
+  const made = composer({
+    id: "comment-body-list",
+    label: "New comment",
+    placeholder: "Write a comment before posting.",
+    className: "comments-compose",
+    onSend: (box, send, grow) => {
+      const body = box.value.trim();
+      if (!body) {
         composeError.hidden = false;
-        composeError.textContent = err.message;
-      })
-      .finally(() => {
-        post.disabled = false;
-      });
+        composeError.textContent = "Write a comment before posting.";
+        box.focus();
+        return;
+      }
+      composeError.hidden = true;
+      composeError.textContent = "";
+      send.disabled = true;
+      postComment(body, null)
+        .then(() => {
+          box.value = "";
+        })
+        .catch((err) => {
+          composeError.hidden = false;
+          composeError.textContent = err.message;
+        })
+        .finally(grow);
+    },
   });
+  const form = made.wrap;
+  form.insertBefore(composeError, form.querySelector(".hub-composer-field"));
 
   drawer.append(head, error, list, form);
 
@@ -1103,7 +1137,7 @@ export function commentsPanel({ toggle, badge }) {
   });
 
   commentsState.elements = {
-    backdrop, drawer, toggle, badge, close, list, error, compose: box, composeForm: form,
+    backdrop, drawer, toggle, badge, close, list, error, compose: made.box, composeForm: form,
   };
   loadComments();
   return { backdrop, drawer };
