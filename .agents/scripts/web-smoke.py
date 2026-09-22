@@ -10797,6 +10797,20 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
             watch.fail("selecting text on a touch device raised no comment button")
             return
 
+        # Measured at rest. The button arrives over 120ms from 8px below its
+        # final position, so geometry read while that is running is the
+        # geometry of a button still moving: it overlaps the tab bar for the
+        # length of the animation and then does not. Waiting for the animation
+        # to finish is the difference between measuring where the control sits
+        # and where it was passing through.
+        if not settle(
+            page,
+            "(() => { const el = document.querySelector('.hub-comment-fab');"
+            " return !!el && el.getAnimations().every((a) => a.playState === 'finished'); })()",
+        ):
+            watch.fail("the comment button never settled into place")
+            return
+
         # Clear of the tab bar, not behind it. Measured, because the whole
         # defect was one fixed thing sitting under another.
         boxes = page.evaluate(
@@ -10877,7 +10891,11 @@ def check_touch_comment_button(browser, watch: Watch, port: int, project: str) -
         )
         if dupes != 1:
             watch.fail(f"{dupes} elements answer to the id comment-body")
-        if page.locator(".hub-comment-fab").count() != 0:
+        # It leaves over 90ms and is removed when the fade finishes, so this
+        # waits rather than looking once: the element is legitimately still
+        # there for a moment, and a check that reads too early would fail on
+        # correct behaviour.
+        if not settle(page, "!document.querySelector('.hub-comment-fab')"):
             watch.fail("the comment button stayed on screen after the composer opened")
 
         # It is fixed to the body, outside what the router repaints, so a route

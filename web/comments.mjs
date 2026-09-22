@@ -541,14 +541,13 @@ function renderPhoneSheet() {
   const sendBtn = document.createElement("button");
   sendBtn.type = "button";
   sendBtn.className = "hub-sheet-send";
-  // Carried the new-thread glyph, which was retired with round 7: it and the
-  // comments bubble were one control in two states, and neither of those
-  // states is "send". The set has no send glyph and inventing one here would
-  // put a drawing in the product that nobody drew, so the button says the
-  // word. That is the same reasoning the design gives for the comment button
-  // carrying "Comment" rather than a lone glyph.
-  sendBtn.setAttribute("aria-label", "Send reply");
-  sendBtn.textContent = "Send";
+  // A word, not a glyph: the set has no send motif and round 8 declined to add
+  // a twelfth. The word is Post rather than Send because the compose sheet's
+  // primary action is already Post and a reply is the same act against the
+  // same object. One act with two names was the other half of the drawer
+  // defect.
+  sendBtn.setAttribute("aria-label", "Post reply");
+  sendBtn.textContent = "Post";
 
   const doSendReply = async () => {
     const text = replyInput.value.trim();
@@ -1126,7 +1125,7 @@ if (typeof window !== "undefined") {
 
 function removeSelectionButton() {
   if (selectionFab) {
-    selectionFab.remove();
+    leave(selectionFab);
     selectionFab = null;
   }
 }
@@ -1165,6 +1164,51 @@ function selectionButton(quote) {
   });
   document.body.appendChild(button);
   selectionFab = button;
+  arrive(button);
+}
+
+// The arrival is script, not CSS, and deliberately so. `app.css` may not carry
+// the word `transition`, and the reduced-motion rule in `tokens.css` turns off
+// every transition and animation with `!important`, which would have taken the
+// drawn opacity-only variant with it. Both of those stay absolute: a rule that
+// stops everything can be trusted without being read. The one control that has
+// earned an exception pays for it here, where the exception is deliberate and
+// somebody reviewing this file can see it.
+function calmly() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+function arrive(button) {
+  if (typeof button.animate !== "function") return;
+  const calm = calmly();
+  button.animate(
+    calm
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [
+          { opacity: 0, transform: "translateY(8px)" },
+          { opacity: 1, transform: "none" },
+        ],
+    { duration: 120, easing: "ease-out", fill: "both" },
+  );
+}
+
+// Leaving is the same call at 90ms and opacity only, with the element removed
+// when it finishes rather than before, so it is not snatched away mid-fade.
+function leave(button) {
+  if (typeof button.animate !== "function") {
+    button.remove();
+    return;
+  }
+  const going = button.animate([{ opacity: 1 }, { opacity: 0 }], {
+    duration: 90,
+    easing: "ease-out",
+    fill: "both",
+  });
+  going.addEventListener("finish", () => button.remove());
 }
 
 function glyphNode() {

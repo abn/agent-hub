@@ -7,7 +7,11 @@ export const GLYPH_PATHS = {
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
   chevronDown: '<path d="M 6 9l6 6 6-6"/>',
   chevronRight: '<path d="M 9 5l7 7-7 7"/>',
-  comments: '<path d="M 4 5h16v11H9l-5 4z"/>',
+  // Round 8: corners to 2, tail 3 deep on a 12 body with its base pulled
+  // inboard to x=8. A hard rectangle with a tail at the corner read as a flag
+  // at 20px on a phone, which is where it had to work and had never been seen.
+  comments:
+    '<path d="M 5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>',
   copyRaw: '<path d="M 9 7l-4 5 4 5"/><path d="M 15 7l4 5-4 5"/>',
   key: '<circle cx="8" cy="12" r="4"/><path d="M 12 12h9M 18 12v4"/>',
   link: '<path d="M 10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M 14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/>',
