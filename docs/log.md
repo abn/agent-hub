@@ -3,6 +3,18 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+
+## 2026-09-22, radius hierarchy, fixed trigger labels, and glyph additions
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the interface radius hierarchy and trigger conventions: containers are
+  rounder than what they contain, pills are reserved for values rather than
+  doors, and dropdown or action triggers use regular button radius with a fixed
+  label, a chevron indicator, and a value chip. The Access row in Settings
+  renders the 17px ID card glyph instead of the key glyph. Additional glyphs
+  for ID card, sign-out, trash, bell, bell-off, and check are added to the
+  icon system.
+
 ## 2026-09-22, desktop home layout and inline waiting row actions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

@@ -228,9 +228,14 @@ export async function agentsSection() {
 
   return `
     <div class="card access-card">
-      <h2>Access</h2>
-      <p class="meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</p>
-      <p><a class="button" href="#/access">Manage access</a></p>
+      <div class="row access-row">
+        <span class="access-glyph">${glyphSvg("idCard", { size: 17 })}</span>
+        <div class="grow">
+          <div class="title">Access</div>
+          <div class="meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</div>
+        </div>
+      </div>
+      <p><a class="button access-link" href="#/access">${glyphSvg("idCard", { size: 17 })} Manage access</a></p>
       <div class="meta" style="margin-top: var(--s-3); margin-bottom: var(--s-1);">Agents that identified themselves:</div>
       ${agentRows || '<p class="empty">No agents yet.</p>'}
     </div>

@@ -283,7 +283,8 @@ so reload and the browser Back keep the artifact on screen.
 | Connect | At `#/connect`, the screen that asks for the access token. A screen the hub refuses to paint sends the reader here, carrying the route it interrupted, so a token entered is followed by the screen they were going to rather than the start. A refused write is not a refused screen: it says so where it was pressed and leaves the reader where they are. The route it carries is followed only when it is one route of this app, and never this screen itself. One password field with a "Show token" control, a hidden username field so a password manager stores the pair, and the copy names where the token comes from. On desktop the card is vertically centred in the available space. The token is checked against the hub before it is kept, so a token the hub refuses never becomes the one every later screen sends. A refusal shows the hub's own words in a live region beside the field, keeps what was typed and returns focus to it, and stores nothing. A browser that refuses to store the token says so rather than asking again on the next load with no explanation. Settings has no field of its own; it links here to change a token. Its sections catch their own refusals, so Settings stays reachable without a token and the way back in is one link away. |
 | Project settings | Reached from the gear in a project's header, at `#/projects/<id>/settings`. The name is an editable field; the slug is shown in mono as text, not as a field, because it is read-only after creation. Save stays disabled until something differs from the hub's copy and sends only what differs. A blank name is caught on the screen, and a name the hub refuses is reported beside that control with the hub's own reason while the form keeps what was typed. Leaving with edits pending asks first, in the confirmation dialog. Retention is a reserved card that says automatic pruning is not in v1 and links to Storage; it carries no control. Delete project opens the same confirmation the global Settings list uses, and is not offered for an agent's personal space. |
 
-Access management lives on its own screen reached from Settings (`#/access`).
+Access management lives on its own screen reached from Settings (`#/access`),
+linked from an Access row carrying the 17px ID-card glyph.
 It displays the admin token with a copy control, stating that it originates from
 startup configuration and changes on restart with a different `HUB_ADMIN_TOKEN`.
 Confidential projects are absent rather than refused. Agents that identified
@@ -393,6 +394,18 @@ dismiss control and Esc beside it, and so do the Inbox row swipes and its pull
 to refresh. The edge swipe back, the tab swipe and swipes on feed rows are
 intended design, not yet shipped. See the
 [human interface](../design/human-interface.md) for the tokens and rules.
+
+Component radius follows visual hierarchy: a container is rounder than what it
+contains, and a child touching the container's edge is square. A pill is a value
+rather than a door: `--r-pill` represents tokens, filter chips, counts, and
+status pills, whereas any control that opens a surface (a menu, sheet, or
+popover) is an `--r-1` button with a caret glyph. A trigger's label is a fixed
+word (such as "Group") rather than its current value, with the selected value
+displayed beside the trigger as a pill chip so that changing selections never
+resizes the control or shifts adjacent layout. The shared glyph set provides
+17px to 20px inline SVG line icons for actions and identity, including the
+ID-card glyph for Access navigation, the chevron down caret, trash, sign-out,
+bell, bell-off, and check glyphs.
 
 ## Auth
 

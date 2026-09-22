@@ -9014,18 +9014,63 @@ def check_artifact_viewer_redraw(browser, page, watch: Watch, port: int, project
     if toggle.count() < 1:
         watch.fail("no grouping control found")
         return
-    initial_text = toggle.first.inner_text().strip()
+
+    # Check radius: computed border-radius matches --r-1 (6px), not --r-pill
+    toggle_style = page.evaluate("""() => {
+        const el = document.querySelector('.hub-group-toggle');
+        const root = document.documentElement;
+        const rootStyle = window.getComputedStyle(root);
+        const r1 = rootStyle.getPropertyValue('--r-1').trim();
+        const rPill = rootStyle.getPropertyValue('--r-pill').trim();
+        const radius = window.getComputedStyle(el).borderRadius;
+        return { radius, r1, rPill };
+    }""")
+    if toggle_style["radius"] != "6px" and toggle_style["radius"] != toggle_style["r1"]:
+        watch.fail(f"group toggle border-radius is {toggle_style['radius']}, expected --r-1 (6px), not --r-pill")
+
+    # Check trigger label is fixed ("Group") with a value chip beside it
+    toggle_info = page.evaluate("""() => {
+        const toggle = document.querySelector('.hub-group-toggle');
+        const pill = document.querySelector('.hub-group-wrap .hub-group-pill, .hub-artifacts-summary .hub-group-pill');
+        const caret = toggle ? toggle.querySelector('svg') : null;
+        return {
+            fullText: toggle ? toggle.textContent.trim() : null,
+            hasCaret: !!caret,
+            pillText: pill ? pill.textContent.trim() : null,
+            pillBeside: !!(toggle && pill && toggle.parentElement === pill.parentElement),
+        };
+    }""")
+    if toggle_info["fullText"] != "Group":
+        watch.fail(f"group toggle label is {toggle_info['fullText']!r}, expected fixed 'Group'")
+    if not toggle_info["hasCaret"]:
+        watch.fail("group toggle is missing caret icon")
+    if not toggle_info["pillBeside"] or not toggle_info["pillText"]:
+        watch.fail(f"group toggle has no value pill beside it: {toggle_info}")
+
     toggle.first.click()
-    page.wait_for_timeout(300)
+    if not settle(page, "!!document.querySelector('.hub-group-menu:not([hidden])')"):
+        watch.fail("group menu did not open on toggle click")
+        return
     agent_option = page.locator('.hub-group-menu button[data-group="agent"]')
     if agent_option.count() > 0:
         agent_option.first.click()
-        page.wait_for_timeout(300)
+        if not settle(page, "!!document.querySelector('.hub-group-menu[hidden]')"):
+            watch.fail("group menu did not close after selecting agent")
         new_headers = page.evaluate(
             "(() => [...document.querySelectorAll('.hub-group-header')].map((h) => h.textContent.trim()))()"
         )
         if new_headers == headers and len(headers) > 1:
             watch.fail("changing grouping mode did not change headers")
+        after_info = page.evaluate("""() => {
+            const toggle = document.querySelector('.hub-group-toggle');
+            const pill = document.querySelector('.hub-group-wrap .hub-group-pill, .hub-artifacts-summary .hub-group-pill');
+            return {
+                fullText: toggle ? toggle.textContent.trim() : null,
+                pillText: pill ? pill.textContent.trim() : null,
+            };
+        }""")
+        if after_info["fullText"] != "Group":
+            watch.fail(f"changing grouping changed toggle label to {after_info['fullText']!r}, expected fixed 'Group'")
 
     # Check back affordance in list: 44px chevron, no underlined chrome links
     back_btn = page.locator('button[data-action="projects-index"], .hub-back')
@@ -10521,6 +10566,32 @@ def check_access_screen(browser, watch: Watch, port: int) -> None:
         settings_text = page.evaluate("document.body.innerText.toLowerCase()")
         if "trust" in settings_text:
             watch.fail("the served interface on #/settings contains the word 'trust'")
+
+        # Assert idCard glyph is rendered for Access
+        watch.enter("access: idCard glyph on access row")
+        access_glyph = page.evaluate("""() => {
+            const card = document.querySelector('.access-card, .access-row, a[href="#/access"]');
+            if (!card) return { found: false };
+            const svgs = [...card.querySelectorAll('svg')];
+            const idCard = svgs.find((s) => s.innerHTML.includes('rx="2.2"'));
+            const key = svgs.find((s) => s.innerHTML.includes('18 12v4'));
+            return {
+                found: true,
+                hasIdCard: !!idCard,
+                hasKey: !!key,
+                width: idCard ? idCard.getAttribute('width') : null,
+                height: idCard ? idCard.getAttribute('height') : null,
+            };
+        }""")
+        if not access_glyph["found"]:
+            watch.fail("access row/card not found on settings screen")
+        elif not access_glyph["hasIdCard"]:
+            watch.fail("the Access row does not render the idCard glyph")
+        elif access_glyph["hasKey"]:
+            watch.fail("the Access row renders the key glyph instead of idCard")
+        elif access_glyph["width"] != "17" or access_glyph["height"] != "17":
+            watch.fail(f"the Access idCard glyph is {access_glyph['width']}x{access_glyph['height']}, expected 17x17")
+
         page.evaluate("location.hash = '#/access'")
         if not settle(page, "!!document.querySelector('main .access-screen')"):
             watch.fail("navigating back to #/access did not render access screen")

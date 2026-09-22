@@ -5173,6 +5173,19 @@ a.session-back {
 .access-form-card p {
   margin: var(--s-2) 0 0;
 }
+
+.access-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.access-glyph {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-2);
+  flex: none;
+}
 /* end component: access */
 
 /* The comment control for a touch device. Fixed in the corner rather than

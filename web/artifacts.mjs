@@ -155,7 +155,7 @@ export async function gallerySection(projectId) {
   const totalVersions = artifacts.reduce((acc, a) => acc + (Number(a.version) || 1), 0);
   const groups = groupArtifacts(artifacts, activeGrouping);
 
-  const pillLabel = activeGrouping === "agent" ? "by agent" : activeGrouping === "kind" ? "by kind" : "by date";
+  const pillLabel = activeGrouping === "agent" ? "Agent" : activeGrouping === "kind" ? "Kind" : "Date";
 
   // Pre-fetch previews for plain artifacts asynchronously
   for (const a of artifacts) {
@@ -189,10 +189,10 @@ export async function gallerySection(projectId) {
   return `
     <div class="hub-artifacts-summary">
       <div class="hub-group-wrap">
-        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+        <button type="button" class="hub-group-toggle" id="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
         <span class="hub-group-pill pill">${pillLabel}</span>
         <div class="hub-group-menu" id="hub-group-menu" hidden>
-          <button type="button" data-group="day"${activeGrouping === "day" ? ' class="active" aria-current="true"' : ""}>Day</button>
+          <button type="button" data-group="day"${activeGrouping === "day" ? ' class="active" aria-current="true"' : ""}>Date</button>
           <button type="button" data-group="agent"${activeGrouping === "agent" ? ' class="active" aria-current="true"' : ""}>Agent</button>
           <button type="button" data-group="kind"${activeGrouping === "kind" ? ' class="active" aria-current="true"' : ""}>Kind</button>
         </div>
