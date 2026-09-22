@@ -6827,3 +6827,21 @@ dialog.dialog-project-delete {
   color: var(--ink);
   box-shadow: var(--shadow-1);
 }
+
+/* Search in the one shell: the results are the index, the preview the stage. */
+.shell-head .search-title { margin: 0; font-size: var(--t-15); font-weight: 600; }
+.shell-head .search-line {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--t-12);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shell-head .search-form { flex: 1; min-width: 120px; }
+.shell-index .shell-head .shell-title { flex: 0 1 auto; }
+.shell-head .search-field { height: 32px; border-radius: var(--r-pill); }
+.shell-head .search-field input { height: 32px; font-size: var(--t-13); }
+.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
+.shell-stage .search-stage { height: 100%; }

@@ -3,6 +3,7 @@
 // agent wrote reaches the screen as a text node.
 
 import { api } from "./api.mjs";
+import { installShellLayout } from "./shell-layout.mjs";
 import { glyph, main, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
@@ -455,16 +456,32 @@ export async function searchScreen(term, gen) {
   line.setAttribute("role", "status");
   line.setAttribute("aria-live", "polite");
 
-  const header = el("div", "search-header");
-  header.append(title, form, scopes, line);
+  // The one shell: the results are the index, the preview is the stage.
+  const indexHead = el("div", "shell-head");
+  const headTitle = el("div", "shell-title");
+  title.classList.add("shell-title-line");
+  headTitle.append(title, line);
+  indexHead.append(el("span", "shell-slot"), headTitle, form);
 
-  const panes = el("div", "panes panes-search");
-  const indexPane = el("div", "pane-index search-index");
-  const stagePane = el("div", "pane-stage search-stage");
-  panes.append(indexPane, stagePane);
+  const indexControls = el("div", "shell-controls");
+  indexControls.append(scopes);
 
-  const layout = el("div", "search-layout");
-  layout.append(header, panes);
+  const indexBody = el("div", "shell-body");
+  const indexCol = el("div", "shell-index");
+  indexCol.append(indexHead, indexControls, indexBody);
+  // The results container keeps the name the rest of the screen uses for it.
+  const indexPane = indexBody;
+
+  const stagePane = el("div", "shell-stage");
+  const split = el("div", "shell-split");
+  split.setAttribute("data-split", "index");
+  split.setAttribute("role", "separator");
+  split.setAttribute("aria-orientation", "vertical");
+  split.setAttribute("aria-label", "Resize list");
+  split.tabIndex = 0;
+
+  const layout = el("div", "shell");
+  layout.append(indexCol, split, stagePane);
 
   let selectedHitIndex = 0;
   let allHits = [];
@@ -520,6 +537,9 @@ export async function searchScreen(term, gen) {
     } else {
       renderPreview(stagePane, null, []);
     }
+    // The preview is a desktop pane. A phone shows the results and opens the
+    // hit where it lives, so the shell keeps its index.
+    layout.classList.toggle("has-selection", allHits.length > 0 && window.innerWidth >= 1100);
   }
 
   updateResults(first);
@@ -596,4 +616,5 @@ export async function searchScreen(term, gen) {
   });
 
   main.replaceChildren(layout);
+  installShellLayout(main);
 }
