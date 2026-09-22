@@ -346,6 +346,35 @@ export async function artifactsScreen(selected, gen) {
   if (selected) location.hash = `#/projects/${encodeURIComponent(selected)}/artifacts`;
 }
 
+// The artifacts index in the one shell: one row per artifact, the same shape
+// as every other list, with the fixed glyph column so every title starts at
+// the same x. The document itself is read in the stage.
+export async function artifactIndex(projectId) {
+  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
+  if (!artifacts || !artifacts.length) {
+    return { rows: `<div class="shell-body-pad"><p class="empty">No artifacts yet.</p></div>`, artifacts: [] };
+  }
+  const rows = artifacts
+    .map((a) => {
+      const comments = a.comments_count
+        ? ` · ${a.comments_count} comment${a.comments_count === 1 ? "" : "s"}`
+        : "";
+      const href = `#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projectId)}`;
+      const lock = a.protected
+        ? `<span class="sr-only">Encrypted</span>`
+        : "";
+      return `<div class="row artifact-row" data-id="${esc(a.id)}">
+        <span class="row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
+        <div class="grow">
+          <a class="title" href="${esc(href)}">${esc(a.title || "artifact")}${lock}</a>
+          <div class="meta mono">v${a.version || 1} · ${formatBytes(a.size_bytes)}${comments}</div>
+        </div>
+      </div>`;
+    })
+    .join("");
+  return { rows, artifacts };
+}
+
 export function openArtifact(id) {
   const parts = location.hash.replace(/^#/, "").split("/");
   const project = parts[1] === "projects" ? parts[2] : "";

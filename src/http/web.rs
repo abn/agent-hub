@@ -49,6 +49,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/shell-layout.mjs",
+        body: include_bytes!("../../web/shell-layout.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/time.mjs",
         body: include_bytes!("../../web/time.mjs"),
         content_type: "text/javascript; charset=utf-8",

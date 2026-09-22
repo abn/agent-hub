@@ -26,6 +26,13 @@ const RECENT = ["Today", "Yesterday"];
 // filter across. They are view state, not a saved preference.
 const projectFilters = new Map();
 
+// The event the shell's stage is showing, so the index can mark its row. The
+// shell sets it before it renders the list.
+let selectedEvent = "";
+export function setFeedSelection(id) {
+  selectedEvent = id || "";
+}
+
 // What one stay on a project's feed holds. The baseline is the read cursor as
 // it stood on arrival: the hub's cursor moves as soon as the feed is seen, and
 // marking against the moving one would wipe the dots on the next repaint.
@@ -83,7 +90,7 @@ function decisionNote(event) {
 // Where a feed event leads, when it names an entity the app can show.
 // An artifact event opens that artifact in the viewer in its project.
 // Kinds without a destination or deleted artifacts return no address.
-function feedDestination(event) {
+export function feedDestination(event) {
   if (
     event.kind === "artifact" &&
     event.payload &&
@@ -216,18 +223,20 @@ function collapsedArtifactRow(item, baseline) {
 
 // The feed's own row. Event ids sort by age, which is how the hub compares
 // them to the cursor too, so an id above the baseline is an unseen event.
-function feedRow(event, baseline) {
+// A row opens the event in the stage; the artifact or session it is about is
+// reached from the stage's own card, so the row is a door to the item and not
+// straight past it.
+function feedRow(event, baseline, selected = false) {
   const unread = event.id > baseline;
-  const href = feedDestination(event);
+  const project = event.project_id || "";
+  const href = `#/projects/${encodeURIComponent(project)}/feed?event=${encodeURIComponent(event.id)}`;
   const summaryText = formatEventSummary(event);
   const open = isOpen(event);
-  const title = href
-    ? `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`
-    : `<div class="title">${esc(summaryText)}</div>`;
+  const title = `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`;
   const waitingPill = open ? `<span class="pill pill-waiting">Waiting on you</span>` : "";
-  return `<div class="row feed-row${unread ? " unread" : ""}">
+  return `<div class="row feed-row${unread ? " unread" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
     ${glyph(event.kind)}
-    <div class="grow" data-id="${esc(event.id)}">
+    <div class="grow">
       <div class="feed-row-title-bar">
         ${title}
         ${waitingPill}
@@ -235,18 +244,21 @@ function feedRow(event, baseline) {
       ${decisionNote(event)}
       <div class="meta">${esc(event.actor)} · ${when(event.created_at)}</div>
     </div>
-    ${open ? actionFor(event) : ""}
     ${unread ? UNREAD : ""}
   </div>`;
 }
 
-function dayGroups(groups, baseline) {
+function dayGroups(groups, baseline, selectedId = "") {
   return groups
     .map(
       (group) =>
         `<h2 class="day">${esc(group.label)}</h2>
          <div class="card feed-day">${collapseDayEvents(group.events)
-           .map((item) => (item.collapsed ? collapsedArtifactRow(item, baseline) : feedRow(item, baseline)))
+           .map((item) =>
+             item.collapsed
+               ? collapsedArtifactRow(item, baseline)
+               : feedRow(item, baseline, item.id === selectedId),
+           )
            .join("")}</div>`,
     )
     .join("");
@@ -325,7 +337,10 @@ function markSeen(projectId, visit) {
 // The chip row and the day-grouped events, or the empty state. `stats` is the
 // project's counts when the caller already holds them. The feed's empty state
 // names the project, so the id (the slug) is what fills its copy.
-export async function feedSection(current, stats = null) {
+//
+// `chips` is false when the caller draws its own control row (the one shell
+// folds the kind filter into the Group menu), so the rows are returned alone.
+export async function feedSection(current, stats = null, { chips = true } = {}) {
   const active = activeKinds(current);
   // The kind filter runs in the query, before the limit, so a chip finds
   // the newest events of its kind rather than only those inside a fetched
@@ -372,11 +387,87 @@ export async function feedSection(current, stats = null) {
         }
       : EMPTY_COPY.feed;
     const where = { action: "feed-copy-setup", id: current };
-    return `${kindChips(active, counts)}${emptyStateHTML(copy, { project: current }, where)}`;
+    const body = emptyStateHTML(copy, { project: current }, where);
+    return chips ? `${kindChips(active, counts)}${body}` : body;
   }
   markSeen(current, visit);
   const recent = byDay(visit.events).filter((group) => RECENT.includes(group.label));
-  return `${kindChips(active, counts)}${dayGroups(recent, visit.baseline)}${foldHTML(current, visit)}`;
+  const body = `${dayGroups(recent, visit.baseline, selectedEvent)}${foldHTML(current, visit)}`;
+  return chips ? `${kindChips(active, counts)}${body}` : body;
+}
+
+// The events the last index render holds, for the stage that shows one of
+// them. The shell reads the list it just painted rather than refetching.
+export function feedVisit(projectId) {
+  return visits.get(projectId) || null;
+}
+
+// One event by id, from the held visit. An event that has scrolled out of the
+// loaded page is not found; the stage then says so rather than inventing it.
+export function feedEvent(projectId, eventId) {
+  const visit = visits.get(projectId);
+  if (!visit || !eventId) return null;
+  return visit.events.find((event) => event.id === eventId) || null;
+}
+
+const KIND_WORD = {
+  signal: "Update",
+  finished: "Finished",
+  question: "Question",
+  answer: "Answer",
+  approval: "Approval",
+  artifact: "Artifact",
+  session: "Session",
+};
+
+// What a feed event is, when it is opened in the stage: the kind, whether it
+// still waits on the reader, its words, the verbs it offers, and a card naming
+// the thing it is about. The feed stops being a wall you scroll and becomes a
+// list you open, which is what the artifact view already was.
+export function eventStage(event, projectId) {
+  if (!event) {
+    return `<div class="shell-prose"><p class="empty">Select an event from the list.</p></div>`;
+  }
+  const open = isOpen(event);
+  const word = KIND_WORD[event.kind] || event.kind;
+  const title = formatEventSummary(event);
+  const body = typeof event.payload?.body === "string" ? event.payload.body.trim() : "";
+  const dest = feedDestination(event);
+  const sessionId = event.kind === "session" ? event.payload?.session_id : null;
+  let pointsAt = "";
+  if (dest) {
+    pointsAt = pointsCard("Artifact", event.payload?.title || "Open artifact", dest);
+  } else if (sessionId) {
+    pointsAt = pointsCard(
+      "Session",
+      sessionId,
+      `#/projects/${encodeURIComponent(projectId)}/sessions?id=${encodeURIComponent(sessionId)}`,
+    );
+  }
+  return `
+    <article class="shell-prose feed-stage">
+      <div class="feed-stage-pills">
+        <span class="pill" data-kind="${esc(event.kind)}">${esc(word)}</span>
+        ${open ? `<span class="pill pill-waiting">Waiting on you</span>` : ""}
+      </div>
+      <h2 class="feed-stage-title">${esc(title)}</h2>
+      <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
+      ${body ? `<p class="feed-stage-body">${esc(body)}</p>` : ""}
+      <div class="feed-stage-actions">${actionFor(event)}</div>
+      ${pointsAt}
+    </article>`;
+}
+
+function pointsCard(label, name, href) {
+  return `
+    <section class="points-card" aria-label="Points at">
+      <div class="points-head mono">POINTS AT</div>
+      <a class="points-row" href="${esc(href)}">
+        <span class="sr-only">${esc(label)}: </span>
+        <span class="points-name">${esc(name)}</span>
+        <span class="points-chev" aria-hidden="true">${CHEVRON}</span>
+      </a>
+    </section>`;
 }
 
 // The kind chips are per project. The toggle keeps focus on the chip it

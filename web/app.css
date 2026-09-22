@@ -6491,3 +6491,260 @@ dialog.dialog-project-delete {
   }
 }
 /* end component: project-delete */
+
+/* component: shell (the one shell) */
+/* One shell for feed, artifacts, sessions and the inbox: rail, index, stage,
+   aside. Every pane reserves a 52px header and a 40px control row, in that
+   order, so content starts at the same y whether or not a pane has anything
+   to put there. The stage is what is left and never goes under 560. */
+.shell { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.shell-index,
+.shell-stage,
+.shell-aside { min-width: 0; box-sizing: border-box; }
+.shell-head {
+  height: 52px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.shell-head .shell-leading {
+  width: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin-left: -12px;
+}
+.shell-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shell-title h1,
+.shell-title .shell-title-line {
+  margin: 0;
+  font-size: var(--t-15);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-title .shell-meta {
+  font-family: var(--font-mono);
+  font-size: var(--t-12);
+  font-weight: 500;
+  color: var(--ink-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-controls {
+  height: 40px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.shell-stage > .shell-controls { padding: 0 16px; }
+.shell-body { flex: 1; min-height: 0; overflow-y: auto; }
+.shell-split { display: none; }
+.shell-aside { display: none; }
+
+/* The segmented switcher lives in the index header, so the stage's top edge
+   never moves between sections. */
+.shell-seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border-radius: var(--r-1);
+  min-width: 0;
+}
+.shell-seg a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: var(--t-13);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.shell-seg a .shell-seg-count { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
+.shell-seg a[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-1); }
+.shell-seg a[aria-selected="true"] .shell-seg-count { color: var(--ink-2); }
+
+/* The list filter: a pill field in the control row, filtering in place. */
+.shell-filter {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.shell-filter svg {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.shell-filter input {
+  width: 100%;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 10px 0 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--t-13);
+}
+.shell-filter input::placeholder { color: var(--ink-3); }
+.shell-count {
+  padding: 10px 16px 2px;
+  font-family: var(--font-mono);
+  font-size: var(--t-12);
+  color: var(--ink-3);
+}
+
+@media (max-width: 1099px) {
+  .shell.has-selection .shell-index { display: none; }
+  .shell:not(.has-selection) .shell-stage { display: none; }
+}
+
+@media (min-width: 1100px) {
+  main:has(.shell) { padding: 0; overflow: hidden; height: 100vh; }
+  .shell {
+    flex-direction: row;
+    align-items: stretch;
+    height: 100%;
+    overflow: hidden;
+  }
+  .shell-index {
+    flex: 0 0 var(--w-index, 300px);
+    width: var(--w-index, 300px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .shell-stage {
+    flex: 1 1 auto;
+    min-width: 560px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .shell-split {
+    display: block;
+    flex: 0 0 5px;
+    width: 5px;
+    align-self: stretch;
+    cursor: col-resize;
+    background: linear-gradient(to right, transparent 2px, var(--line) 2px, var(--line) 3px, transparent 3px);
+    touch-action: none;
+  }
+  .shell-split:hover,
+  .shell-split:focus-visible {
+    background: linear-gradient(to right, transparent 1px, var(--accent) 1px, var(--accent) 4px, transparent 4px);
+  }
+  .shell-split:focus-visible { outline: none; box-shadow: none; }
+  .shell-aside {
+    flex: 0 0 var(--w-aside, 320px);
+    width: var(--w-aside, 320px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .shell-aside[hidden] { display: none; }
+  body.is-resizing { cursor: col-resize; user-select: none; }
+  .shell-prose { max-width: 640px; }
+}
+/* end component: shell */
+
+/* component: shell content (feed stage, points at, index rows) */
+.shell-pad { padding: 16px; }
+.shell-body-pad { padding: 16px; }
+.row-glyph {
+  width: 20px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+}
+.row.selected { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+
+.feed-stage { padding: 20px 16px 40px; }
+.feed-stage-pills { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.feed-stage-title { margin: 0 0 6px; font-size: var(--t-22); font-weight: 600; line-height: 1.25; }
+.feed-stage-body { margin: 14px 0 0; font-size: var(--t-15); line-height: 1.55; color: var(--ink-2); }
+.feed-stage-actions { margin-top: 16px; display: flex; gap: 8px; }
+
+.points-card {
+  margin-top: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  overflow: hidden;
+  background: var(--surface);
+}
+.points-head {
+  padding: 8px 12px;
+  font-size: var(--t-12);
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+}
+.points-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.points-row:hover { background: var(--surface-2); }
+.points-name { flex: 1; min-width: 0; font-size: var(--t-15); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.points-chev { color: var(--ink-3); display: flex; }
+
+.pill[data-kind="signal"] { background: var(--k-signal-bg); color: var(--k-signal); }
+.pill[data-kind="finished"] { background: var(--k-finished-bg); color: var(--k-finished); }
+.pill[data-kind="question"] { background: var(--k-question-bg); color: var(--k-question); }
+.pill[data-kind="answer"] { background: var(--k-question-bg); color: var(--k-question); }
+.pill[data-kind="approval"] { background: var(--k-approval-bg); color: var(--k-approval); }
+.pill[data-kind="artifact"] { background: var(--k-artifact-bg); color: var(--k-artifact); }
+.pill[data-kind="session"] { background: var(--k-session-bg); color: var(--k-session); }
+/* end component: shell content */
+
+/* The stage carries a back control only where the shell shows one zone at a
+   time. On the desktop both zones are visible, so there is nowhere to go
+   back to and the slot stays empty. */
+@media (min-width: 1100px) {
+  .shell-stage .shell-leading { display: none; }
+}
+.shell-head .shell-leading {
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: var(--r-1);
+  min-height: 44px;
+  justify-content: center;
+}

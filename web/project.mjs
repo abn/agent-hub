@@ -1,21 +1,27 @@
-// The project view: the header, the segmented Feed / Artifacts / Sessions
-// tabs, and the segment content each tab owns. Every segment is its own
-// address, so reload and the browser's Back both land where the reader was.
-// The kind-chip filter, the session rows and the gallery are rendered by the
-// modules that own them; this module composes them inside the segmented shell.
+// The project view in the one shell: an index that lists the current
+// section, a stage that shows the selected item, and the section switcher in
+// the index header. Every segment is its own address, so reload and the
+// browser's Back both land where the reader was. The session rows and the
+// gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
-import { gallerySection } from "./artifacts.mjs";
+import { artifactIndex, gallerySection } from "./artifacts.mjs";
 import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
-import { emptyStateHTML } from "./empty.mjs";
-import { feedSection } from "./feed.mjs";
+import {
+  eventStage,
+  feedEvent,
+  feedSection,
+  feedVisit,
+  formatEventSummary,
+  setFeedSelection,
+} from "./feed.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
-import { settingsLink } from "./project-settings.mjs";
-import { sessionRows, sessionDetailView, wireSessionDetail } from "./sessions.mjs";
+import { sessionRows, sessionDetailView } from "./sessions.mjs";
+import { installShellLayout } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
@@ -65,49 +71,82 @@ async function projectFootprint(projectId) {
   }
 }
 
-function header(project, stats, footprint) {
-  const agents = stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "";
-  const used = footprint ? ` · <span class="mono">${footprint}</span>` : "";
-  const detail = agents || footprint ? `<p class="proj-stats">${agents}${used}</p>` : "";
-  const hasDelete = !project.owner_agent;
-  return `
-    <div class="proj-head">
-      <button type="button" class="proj-back" data-action="project-back" aria-label="Back to projects">
-        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>
-      </button>
-      <div class="grow">
-        <h1>${esc(project.display_name)}</h1>
-        ${detail}
-      </div>
-      ${settingsLink(project.id)}
-      <div class="proj-overflow-wrap">
-        <button type="button" class="proj-overflow-btn" aria-label="More" aria-haspopup="true" aria-expanded="false" aria-controls="proj-overflow-menu">
-          ${glyphSvg("overflow", { size: 20 })}
-        </button>
-        <div id="proj-overflow-menu" class="hub-overflow-menu proj-overflow-menu" role="menu" hidden>
-          <a href="#/projects/${esc(encodeURIComponent(project.id))}/settings" class="proj-menu-item" role="menuitem">Project settings</a>
-          <button type="button" class="proj-menu-item" role="menuitem" data-action="copy-project-path">Copy path</button>
-          ${hasDelete ? `
-          <div class="proj-menu-divider" role="separator"></div>
-          <button type="button" class="proj-menu-item proj-menu-delete" role="menuitem" data-action="delete-project">
-            ${glyphSvg("trash", { size: 17 })}
-            <span>Delete project</span>
-          </button>` : ""}
-        </div>
-      </div>
-    </div>`;
+// The one shell. Feed, artifacts and sessions are the same four zones: an
+// index that lists, a stage that shows the selected item, and an aside only
+// where something is read against the stage. The section switcher lives in
+// the index header, so the stage's top edge never moves between sections.
+
+function segSwitcher(id, segment, stats) {
+  const count = (n) => (n == null ? "" : `<span class="shell-seg-count">${n}</span>`);
+  const tab = (seg, label, n) =>
+    `<a href="#/projects/${encodeURIComponent(id)}/${seg}" role="tab" id="ah-tab-${seg}" aria-controls="ah-index" aria-selected="${
+      segment === seg
+    }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
+  return `<div class="shell-seg" role="tablist" aria-label="Project sections">
+    ${tab("feed", "Feed", null)}
+    ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
+    ${tab("sessions", "Sessions", stats?.sessions ?? null)}
+  </div>`;
 }
 
-function tabs(current, segment, stats) {
-  const artifactCount = stats && stats.artifacts != null ? ` · ${stats.artifacts}` : "";
-  const sessionCount = stats && stats.sessions != null ? ` · ${stats.sessions}` : "";
-  return `
-    <div class="seg" role="group" aria-label="Project sections">
-      <a href="#/projects/${encodeURIComponent(current)}/feed"${segment === "feed" ? ' aria-current="page"' : ""}>Feed</a>
-      <a href="#/projects/${encodeURIComponent(current)}/artifacts"${segment === "artifacts" ? ' aria-current="page"' : ""}>Artifacts${artifactCount}</a>
-      <a href="#/projects/${encodeURIComponent(current)}/sessions"${segment === "sessions" ? ' aria-current="page"' : ""}>Sessions${sessionCount}</a>
-    </div>`;
+function shellIndexControls(placeholder) {
+  return `<div class="shell-controls">
+    <div class="shell-filter">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
+      <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
+    </div>
+    <button type="button" class="hub-group-toggle" data-action="artifact-group-toggle" aria-haspopup="true" aria-expanded="false">Group${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
+  </div>`;
 }
+
+function shellStageHead(title, meta, actions = "", backHref = "") {
+  const leading = backHref
+    ? `<a class="shell-leading" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
+    : "";
+  return `<div class="shell-head">
+    ${leading}
+    <div class="shell-title">
+      <h1 class="shell-title-line">${esc(title)}</h1>
+      ${meta ? `<span class="shell-meta">${esc(meta)}</span>` : ""}
+    </div>
+    ${actions}
+  </div>`;
+}
+
+const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
+
+// The reserved chrome is the rule, so the shell draws both rows whether or not
+// a screen has anything for the second one. On a phone the shell shows one
+// zone at a time: the index, or the stage with a way back to the list.
+function shellHTML({
+  segment,
+  indexHead,
+  indexControls,
+  indexBody,
+  stageHead,
+  stageControls,
+  stageBody,
+  aside = "",
+  hasSelection = false,
+}) {
+  return `<div class="shell${hasSelection ? " has-selection" : ""}" data-segment="${esc(segment)}">
+    <div class="shell-index">
+      ${indexHead}
+      ${indexControls}
+      <div class="shell-body" id="ah-index" role="tabpanel" aria-labelledby="ah-tab-${esc(segment)}" tabindex="-1">${indexBody}</div>
+    </div>
+    <div class="shell-split" data-split="index" role="separator" aria-orientation="vertical" aria-label="Resize list" tabindex="0"></div>
+    <div class="shell-stage">
+      ${stageHead}
+      ${stageControls}
+      <div class="shell-body">${stageBody}</div>
+    </div>
+    <div class="shell-split" data-split="aside" role="separator" aria-orientation="vertical" aria-label="Resize panel" tabindex="0"></div>
+    <div class="shell-aside"${aside ? "" : " hidden"}>${aside}</div>
+  </div>`;
+}
+
+const FEED_GLYPH = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>`;
 
 let lastOpenSession = "";
 
@@ -212,18 +251,6 @@ function wireProjectHeader(project, stats, footprint) {
       }
     });
   }
-}
-
-// The sessions segment on desktop: the list in the 420px pane and the session
-
-// detail in the other. On a phone the detail pane is hidden by media query and
-// the card replaces the list when opened, returning focus to the row when closed.
-function sessionsTwoPane(current, listHTML, sessions, selectedSession, detailHTML, hasSelection) {
-  const detail = selectedSession
-    ? (detailHTML || `<p class="empty">Loading session…</p>`)
-    : `<p class="empty">No sessions yet.</p>`;
-  const paneClass = hasSelection ? "panes panes-sessions has-selection" : "panes panes-sessions";
-  return `<div class="${paneClass}"><div class="pane-list">${listHTML}</div><div class="pane-detail">${detail}</div></div>`;
 }
 
 async function projectsIndexScreen(gen, projects) {
@@ -383,6 +410,72 @@ async function projectsIndexScreen(gen, projects) {
   paint(gen, html);
 }
 
+async function feedShell(id, segment, stats, params) {
+  const selected = params?.get?.("event") || "";
+  setFeedSelection(selected);
+  const indexBody = await feedSection(id, stats, { chips: false });
+  const held = feedVisit(id);
+  const event = feedEvent(id, selected) || held?.events?.[0] || null;
+  const title = event ? formatEventSummary(event) : "Feed";
+  const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
+  return shellHTML({
+    segment,
+    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexControls: shellIndexControls("Filter events"),
+    indexBody,
+    stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
+    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(
+      event ? `${id} / feed / ${event.kind}` : id,
+    )}</span></div>`,
+    stageBody: eventStage(event, id),
+    hasSelection: Boolean(selected),
+  });
+}
+
+async function artifactsShell(id, segment, stats) {
+  const { rows, artifacts } = await artifactIndex(id);
+  const totalBytes = artifacts.reduce((sum, a) => sum + (Number(a.size_bytes) || 0), 0);
+  const versions = artifacts.reduce((sum, a) => sum + (Number(a.version) || 1), 0);
+  const meta = `${count(artifacts.length, "artifact", "artifacts")} · ${count(
+    versions,
+    "version",
+    "versions",
+  )} · ${formatBytes(totalBytes)}`;
+  return shellHTML({
+    segment,
+    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexControls: shellIndexControls("Filter artifacts"),
+    indexBody: rows,
+    stageHead: shellStageHead("Artifacts", meta),
+    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / artifacts</span></div>`,
+    stageBody: `<div class="shell-pad">${await gallerySection(id)}</div>`,
+  });
+}
+
+async function sessionsShell(id, segment, stats, params) {
+  const selectedId = params?.get?.("id") || params?.get?.("session") || "";
+  const { sessions, card } = await sessionRows(id, selectedId);
+  const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
+  const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
+  let detailHTML = "";
+  if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id);
+  const meta = selectedSession
+    ? `${selectedSession.agent_name} · ${count(selectedSession.events || 0, "event", "events")} · ${formatBytes(
+        selectedSession.size_bytes || 0,
+      )}`
+    : "";
+  return shellHTML({
+    segment,
+    indexHead: `<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexControls: shellIndexControls("Filter sessions"),
+    indexBody: card,
+    stageHead: shellStageHead(selectedSession?.name || "Sessions", meta, "", `#/projects/${encodeURIComponent(id)}/sessions`),
+    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(activeSessionId || id)}</span></div>`,
+    stageBody: detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`,
+    hasSelection: Boolean(selectedId),
+  });
+}
+
 export async function projectScreen(params, gen, path) {
   const parts = (path || "").split("/");
   let seg = parts[3];
@@ -445,195 +538,16 @@ export async function projectScreen(params, gen, path) {
   const footprint = await projectFootprint(id);
   if (stale(gen)) return;
 
-  const shell = `${header(project, stats, footprint)}${tabs(id, segment, stats)}`;
-  if (segment === "artifacts") {
-    paint(gen, `${shell}${await gallerySection(id)}`);
-    wireProjectHeader(project, stats, footprint);
-  } else if (segment === "sessions") {
-    const selectedId = params?.get?.("id") || params?.get?.("session");
-    const { sessions, card } = await sessionRows(id, selectedId);
-    if (stale(gen)) return;
-    const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
-    const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
-    let detailHTML = "";
-    if (selectedSession) {
-      detailHTML = await sessionDetailView(id, selectedSession.id, gen);
-    }
-    if (stale(gen)) return;
-    paint(gen, `${shell}${sessionsTwoPane(id, card, sessions, selectedSession, detailHTML, !!selectedId)}`);
-    wireProjectHeader(project, stats, footprint);
-    if (selectedSession) {
-      wireSessionDetail(main.querySelector(".pane-detail") || main, id, selectedSession.id);
-    }
-    if (lastOpenSession) {
-      const closed = lastOpenSession;
-      lastOpenSession = "";
-      returnSessionFocus(closed);
-    }
-  } else {
-    const feedHTML = await feedSection(id, stats);
-    if (stale(gen)) return;
-    paint(
-      gen,
-      `${shell}<div class="panes panes-project"><div class="pane-stage">${feedHTML}</div><aside class="pane-aside project-aside" aria-label="Project state"></aside></div>`,
-    );
-    wireProjectHeader(project, stats, footprint);
-    const asideHTML = await projectAside(id);
-    if (stale(gen)) return;
-    const asideEl = main.querySelector(".project-aside");
-    if (asideEl) {
-      asideEl.outerHTML = asideHTML;
-    }
-  }
+  let shell;
+  if (segment === "artifacts") shell = await artifactsShell(id, segment, stats);
+  else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params);
+  else shell = await feedShell(id, segment, stats, params);
+  if (stale(gen)) return;
+
+  paint(gen, shell);
+  installShellLayout(main);
+  wireProjectHeader(project, stats, footprint);
 }
-
-export async function projectAside(projectId) {
-  const [sessionsRes, storageRes, artifactsRes] = await Promise.all([
-    api(`/api/v1/sessions?project=${encodeURIComponent(projectId)}`).catch(() => ({ sessions: [] })),
-    api("/api/v1/storage").catch(() => null),
-    api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`).catch(() => ({ artifacts: [] })),
-  ]);
-
-  // 1. RIGHT NOW: active agents and their live sessions
-  const sessions = sessionsRes?.sessions || [];
-  const activeSessions = sessions.filter((s) => s.status === "active" && !s.deleted_at);
-  const activeCount = activeSessions.length;
-  let rightNowBody = "";
-  if (activeSessions.length > 0) {
-    rightNowBody = activeSessions
-      .map((s) => {
-        const dur = relative(s.touched_at || s.created_at);
-        const meta = `${esc(s.id)} · ${esc(dur)}`;
-        return `
-          <div class="aside-row">
-            <span class="aside-status-dot" aria-hidden="true"></span>
-            <span class="aside-agent-name">${esc(s.agent_name)}</span>
-            <span class="aside-session-meta mono">${meta}</span>
-          </div>`;
-      })
-      .join("");
-  } else {
-    rightNowBody = `<div class="aside-empty">No active agents</div>`;
-  }
-
-  const rightNowSection = `
-    <section class="aside-section" aria-label="Right now">
-      <div class="aside-section-head">
-        <span class="aside-section-title">RIGHT NOW</span>
-        <span class="aside-section-meta mono">${activeCount} active</span>
-      </div>
-      ${rightNowBody}
-    </section>`;
-
-  // 2. STORAGE: split (blobs, brains), reclaimable space, and a Prune action
-  const projUsage = storageRes?.projects?.find((p) => p.project_id === projectId);
-  const artifactBytes = projUsage?.artifact_bytes || 0;
-  const sessionBytes = projUsage?.session_bytes || 0;
-  const eventsBytes = (projUsage?.events_bytes || 0) + (projUsage?.kb_bytes || 0);
-  const totalBytes = artifactBytes + sessionBytes + eventsBytes;
-  const prunableBytes = projUsage?.prunable_bytes || 0;
-  const prunableSessions = projUsage?.prunable_sessions || 0;
-
-  const totalFormatted = formatBytes(totalBytes);
-  const artifactFormatted = formatBytes(artifactBytes);
-  const sessionFormatted = formatBytes(sessionBytes);
-  const eventsFormatted = formatBytes(eventsBytes);
-
-  let blobPct = 0;
-  let brainPct = 0;
-  let eventsPct = 0;
-  if (totalBytes > 0) {
-    blobPct = Math.round((artifactBytes / totalBytes) * 100);
-    brainPct = Math.round((sessionBytes / totalBytes) * 100);
-    eventsPct = Math.max(0, 100 - blobPct - brainPct);
-  }
-
-  let reclaimHTML = "";
-  if (prunableBytes > 0 || prunableSessions > 0) {
-    reclaimHTML = `
-      <div class="aside-storage-reclaim">
-        <span class="aside-reclaim-text">${formatBytes(prunableBytes)} reclaimable</span>
-        <button type="button" class="action aside-prune-btn" data-action="aside-prune" data-project="${esc(projectId)}" data-sessions="${prunableSessions}" data-bytes="${prunableBytes}">Prune</button>
-      </div>`;
-  } else {
-    reclaimHTML = `
-      <div class="aside-storage-reclaim">
-        <span class="aside-reclaim-text">-</span>
-      </div>`;
-  }
-
-  const storageSection = `
-    <section class="aside-section" aria-label="Storage">
-      <div class="aside-section-head">
-        <span class="aside-section-title">STORAGE</span>
-        <span class="aside-section-meta mono">${totalFormatted}</span>
-      </div>
-      <div class="aside-storage-body">
-        <div class="aside-storage-bar" aria-hidden="true">
-          <span style="width:${blobPct}%;background:var(--k-artifact)"></span>
-          <span style="width:${brainPct}%;background:var(--k-session)"></span>
-          <span style="width:${eventsPct}%;background:var(--line-strong)"></span>
-        </div>
-        <div class="aside-storage-row">
-          <span class="aside-storage-dot" style="background:var(--k-artifact)" aria-hidden="true"></span>
-          <span class="aside-storage-label">Artifact blobs</span>
-          <span class="aside-storage-size mono">${artifactFormatted}</span>
-        </div>
-        <div class="aside-storage-row">
-          <span class="aside-storage-dot" style="background:var(--k-session)" aria-hidden="true"></span>
-          <span class="aside-storage-label">Session brains</span>
-          <span class="aside-storage-size mono">${sessionFormatted}</span>
-        </div>
-        <div class="aside-storage-row">
-          <span class="aside-storage-dot" style="background:var(--line-strong)" aria-hidden="true"></span>
-          <span class="aside-storage-label">Events and index</span>
-          <span class="aside-storage-size mono">${eventsFormatted}</span>
-        </div>
-        ${reclaimHTML}
-      </div>
-    </section>`;
-
-  // 3. LATEST ARTIFACTS: quick links to recent artifacts
-  const artifacts = artifactsRes?.artifacts || [];
-  const latestArtifacts = artifacts.slice(0, 5);
-  let artifactsBody = "";
-  if (latestArtifacts.length > 0) {
-    artifactsBody = latestArtifacts
-      .map((a) => {
-        const lock = a.protected
-          ? `<span class="aside-lock" aria-label="Encrypted"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"></path></svg></span>`
-          : "";
-        return `
-          <div class="aside-row">
-            ${lock}
-            <span class="aside-artifact-title">
-              <a href="#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projectId)}" class="aside-artifact-link">${esc(a.title)}</a>
-            </span>
-            <span class="aside-artifact-meta mono">v${a.version} · ${formatBytes(a.size_bytes)}</span>
-          </div>`;
-      })
-      .join("");
-  } else {
-    artifactsBody = `<div class="aside-empty">No artifacts yet</div>`;
-  }
-
-  const artifactsSection = `
-    <section class="aside-section" aria-label="Latest artifacts">
-      <div class="aside-section-head">
-        <span class="aside-section-title">LATEST ARTIFACTS</span>
-        <a href="#/projects/${encodeURIComponent(projectId)}/artifacts" class="aside-all-link">All ${artifacts.length}</a>
-      </div>
-      ${artifactsBody}
-    </section>`;
-
-  return `
-    <aside class="pane-aside project-aside" aria-label="Project state">
-      ${rightNowSection}
-      ${storageSection}
-      ${artifactsSection}
-    </aside>`;
-}
-
 // The row selection the keyboard map owns: the project's segments all paint
 // `.row`s, so a reader walking the feed, the gallery or the list gets the map.
 registerScreen("projects", { rows: ".row" });
