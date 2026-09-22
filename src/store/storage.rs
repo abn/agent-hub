@@ -28,6 +28,11 @@ pub struct ProjectUsage {
     pub prunable_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_write: Option<String>,
+    /// Distinct agents with a live session in this project. Carried here so
+    /// the storage screen can mark a project live without asking once per
+    /// project: it used to make one request per row before it could draw the
+    /// table, which on this hub is six round trips for six booleans.
+    pub agents_active: i64,
 }
 
 /// Bytes on the data volume by what holds them, which is the stacked bar the
@@ -103,10 +108,17 @@ pub struct EventBytes {
 
 /// Compute storage usage from artifact sizes, session brain file sizes, and
 /// knowledge base file sizes, with the volume the data directory sits on.
-pub async fn usage(db: &Database, data_dir: &Path, host: &str) -> Result<StorageUsage> {
-    Ok(usage_from(db, data_dir, host, EventBytes::default())
-        .await?
-        .0)
+pub async fn usage(
+    db: &Database,
+    data_dir: &Path,
+    host: &str,
+    active_since: &str,
+) -> Result<StorageUsage> {
+    Ok(
+        usage_from(db, data_dir, host, active_since, EventBytes::default())
+            .await?
+            .0,
+    )
 }
 
 /// The same report, weighing only the events above what `weighed` already
@@ -115,6 +127,7 @@ pub async fn usage_from(
     db: &Database,
     data_dir: &Path,
     host: &str,
+    active_since: &str,
     mut weighed: EventBytes,
 ) -> Result<(StorageUsage, EventBytes)> {
     let conn = super::connect(db)?;
@@ -132,6 +145,7 @@ pub async fn usage_from(
                 prunable_sessions: 0,
                 prunable_bytes: 0,
                 last_write: None,
+                agents_active: 0,
             });
         }
     };
@@ -241,6 +255,30 @@ pub async fn usage_from(
         }
     }
     drop(last_writes);
+
+    // Live agents per project, in one query rather than one per row.
+    let mut live = conn
+        .query(
+            "SELECT project_id, COUNT(DISTINCT agent) FROM sessions
+             WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1
+             GROUP BY project_id",
+            vec![Value::Text(active_since.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = live.next().await.map_err(engine)? {
+        let project_id = text(row.get_value(0).map_err(engine)?);
+        let count = row
+            .get_value(1)
+            .map_err(engine)?
+            .as_integer()
+            .copied()
+            .unwrap_or(0);
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
+            entry.agents_active = count;
+        }
+    }
+    drop(live);
 
     // Any session activity newer than the latest event timestamp.
     let mut session_activity = conn
@@ -487,6 +525,7 @@ impl StatsCache {
         db: &Database,
         data_dir: &Path,
         host: &str,
+        active_since: &str,
         generation: u64,
     ) -> Result<StorageUsage> {
         if let Some(cached) = self.fresh(generation) {
@@ -506,6 +545,7 @@ impl StatsCache {
             db,
             data_dir,
             host,
+            active_since,
             weighed.map(|(_, weighed)| weighed).unwrap_or_default(),
         )
         .await?;

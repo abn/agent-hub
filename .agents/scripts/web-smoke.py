@@ -4178,6 +4178,48 @@ def check_desktop_sessions_four_zones(browser, watch: Watch, port: int) -> None:
             watch.drain_rejections()
 
 
+def check_storage_asks_once(browser, watch: Watch, port: int) -> None:
+    """Storage draws from one request, not one per project.
+
+    It used to ask `/stats` for every project before it could append the
+    table, purely to learn which rows had a live agent. On a hub with a
+    handful of projects that is a handful of round trips during which the
+    screen holds a heading and nothing else, and it was wide enough that the
+    route-focus check lost its own race inside it three separate times.
+
+    Counted from the browser rather than asserted from the source, because the
+    defect was the number of requests, not the shape of the code.
+    """
+    watch.enter("storage: one request, not one per project")
+    context = browser.new_context(viewport={"width": 1100, "height": 844}, color_scheme="light")
+    context.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page = context.new_page()
+    seen: list[str] = []
+    page.on("request", lambda r: seen.append(r.url))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/#/storage", wait_until="load")
+        if not settle(page, "!!document.querySelector('main h1')"):
+            watch.fail("storage never painted for the request count")
+            return
+        # Checked, because the count below is only meaningful once the screen
+        # has finished drawing: a timeout here would mean the requests had not
+        # been made yet rather than that they were never made.
+        if not settle(page, "!!document.querySelector('.storage-table, main .empty-title')"):
+            watch.fail("storage never finished drawing, so its request count means nothing")
+            return
+        stats = [u for u in seen if "/stats" in u]
+        if stats:
+            watch.fail(
+                f"storage made {len(stats)} per-project stats requests before drawing:"
+                f" {[u.split('/api/v1')[-1] for u in stats[:4]]}"
+            )
+    finally:
+        context.close()
+    watch.drain_rejections()
+
+
 def check_desktop_storage(browser, watch: Watch, port: int) -> None:
     """The desktop storage screen renders 4 summary tiles and a multi-column table."""
     watch.enter("desktop storage: tiles, multi-column table, and reclaimable dash")
@@ -11218,6 +11260,7 @@ def run() -> int:
                 run_step(watch, check_panes_stage_width, browser, watch, port, project)
                 run_step(watch, check_desktop_project, browser, watch, port, project)
                 run_step(watch, check_desktop_sessions_four_zones, browser, watch, port)
+                run_step(watch, check_storage_asks_once, browser, watch, port)
                 run_step(watch, check_desktop_storage, browser, watch, port)
                 run_step(watch, check_desktop_home, browser, watch, port)
                 # Late: Home carries the newest ten events, and these seed two more.

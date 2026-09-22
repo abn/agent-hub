@@ -169,7 +169,13 @@ pub async fn home(
     // does not restat the data directory on every poll.
     let usage = state
         .stats
-        .usage(&state.db, &state.data_dir, &state.host, state.generation())
+        .usage(
+            &state.db,
+            &state.data_dir,
+            &state.host,
+            &state.config.active_since(),
+            state.generation(),
+        )
         .await
         .map_err(|err| Problem::from_error(&err))?;
     let summary = home_store::home(

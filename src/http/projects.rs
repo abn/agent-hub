@@ -36,7 +36,7 @@ pub async fn list(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let projects = projects::list(&state.db)
+    let projects = projects::list(&state.db, &state.config.active_since())
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(ProjectList { projects }))

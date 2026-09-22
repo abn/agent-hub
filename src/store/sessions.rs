@@ -684,6 +684,38 @@ pub async fn agents_active(db: &Database, since: &str, project_id: Option<&str>)
     crate::store::events::count_on(&conn, &sql, params).await
 }
 
+/// Live agents per project, in one grouped query.
+///
+/// The per-project form of [`agents_active`], for a listing that would
+/// otherwise call that once per row.
+pub async fn agents_active_by_project(db: &Database, since: &str) -> Result<Vec<(String, i64)>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT project_id, COUNT(DISTINCT agent) FROM sessions
+             WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1
+             GROUP BY project_id",
+            vec![Value::Text(since.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let id = match row.get_value(0).map_err(engine)? {
+            Value::Text(text) => text,
+            _ => continue,
+        };
+        let count = row
+            .get_value(1)
+            .map_err(engine)?
+            .as_integer()
+            .copied()
+            .unwrap_or(0);
+        out.push((id, count));
+    }
+    Ok(out)
+}
+
 /// Fetch one session by id.
 pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
     let conn = super::connect(db)?;

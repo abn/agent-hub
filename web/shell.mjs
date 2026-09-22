@@ -76,11 +76,12 @@ export async function renderRailProjects() {
     const { projects } = await api("/api/v1/projects");
     const regular = (projects || []).filter((p) => !isPersonalSpace(p));
 
-    const statsList = await Promise.all(
-      regular.map((p) =>
-        api(`/api/v1/projects/${encodeURIComponent(p.id)}/stats`).catch(() => null),
-      ),
-    );
+    // The live dot rides on the listing this already fetched. It used to ask
+    // `/stats` once per project for the same boolean, and the rail is on every
+    // screen at this width, so that cost was paid on every navigation. Reading
+    // it from the storage payload instead would have been worse: that endpoint
+    // walks the data directory for byte totals, which is a great deal of work
+    // for one dot.
 
     let waitingItems = [];
     try {
@@ -103,8 +104,7 @@ export async function renderRailProjects() {
 
     for (let i = 0; i < regular.length; i++) {
       const p = regular[i];
-      const stats = statsList[i];
-      const isLive = (stats?.agents_active || 0) > 0;
+      const isLive = (p.agents_active || 0) > 0;
       const waiting = waitingMap.get(p.id) || 0;
       const isCurrent = currentHash.startsWith(`/projects/${encodeURIComponent(p.id)}`);
 

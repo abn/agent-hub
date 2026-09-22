@@ -18,6 +18,10 @@ pub struct Project {
     pub created_at: String,
     /// Feed events newer than the human's last-seen cursor on this project.
     pub unseen_events: i64,
+    /// Distinct agents with a live session here. Carried on the listing so a
+    /// screen showing many projects learns it once: the rail used to ask for
+    /// each project separately, on every navigation.
+    pub agents_active: i64,
 }
 
 /// The fields of a project the human may change after creation.
@@ -30,7 +34,7 @@ pub struct ProjectChanges<'a> {
 }
 
 /// List projects, oldest first.
-pub async fn list(db: &Database) -> Result<Vec<Project>> {
+pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
@@ -47,11 +51,16 @@ pub async fn list(db: &Database) -> Result<Vec<Project>> {
 
     // One grouped count for the whole listing rather than one per project.
     let unseen = crate::store::events::unseen_counts(db).await?;
+    let live = crate::store::sessions::agents_active_by_project(db, active_since).await?;
     for project in &mut projects {
         project.unseen_events = unseen
             .iter()
             .find(|row| row.project_id == project.id)
             .map_or(0, |row| row.events);
+        project.agents_active = live
+            .iter()
+            .find(|(id, _)| id == &project.id)
+            .map_or(0, |(_, count)| *count);
     }
     Ok(projects)
 }
@@ -129,6 +138,7 @@ pub async fn create(db: &Database, id: &str, display_name: &str) -> Result<Proje
         owner_agent: None,
         created_at,
         unseen_events: 0,
+        agents_active: 0,
     })
 }
 
@@ -427,9 +437,10 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         display_name: text(1)?,
         owner_agent,
         created_at: text(3)?,
-        // Filled by the caller, which counts every project it returns in one
-        // query rather than one query per row.
+        // Both filled by the caller, which counts every project it returns in
+        // one query rather than one query per row.
         unseen_events: 0,
+        agents_active: 0,
     })
 }
 

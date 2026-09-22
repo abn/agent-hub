@@ -435,7 +435,7 @@ function summaryTiles(usage) {
   return tiles;
 }
 
-function desktopTable(usage, statsList) {
+function desktopTable(usage) {
   const wrap = el("div", "storage-table-wrap");
   const table = el("table", "storage-table");
 
@@ -482,7 +482,7 @@ function desktopTable(usage, statsList) {
 
     // 1. PROJECT
     const tdProject = el("td", "cell-project");
-    const isLive = (statsList[index]?.agents_active || 0) > 0;
+    const isLive = (project.agents_active || 0) > 0;
     const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
     dot.setAttribute("aria-hidden", "true");
     const link = el("a", "storage-proj-link", projectName(project));
@@ -636,16 +636,12 @@ async function renderDesktop(root, usage) {
   root.appendChild(desktopHead(usage));
   root.appendChild(summaryTiles(usage));
 
-  let statsList = [];
-  try {
-    statsList = await Promise.all(
-      usage.projects.map((p) =>
-        api(`/api/v1/projects/${encodeURIComponent(p.project_id)}/stats`).catch(() => null),
-      ),
-    );
-  } catch {}
-
-  root.appendChild(desktopTable(usage, statsList));
+  // No second round of requests. This asked `/stats` once per project purely
+  // to learn whether each one had a live agent, so a hub with six projects
+  // made six calls before the table could be drawn, and the screen sat with a
+  // heading and nothing under it for as long as that took. The count travels
+  // with the usage payload now, in one grouped query.
+  root.appendChild(desktopTable(usage));
 }
 
 if (typeof window !== "undefined" && window.matchMedia) {

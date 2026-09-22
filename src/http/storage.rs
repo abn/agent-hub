@@ -135,7 +135,13 @@ pub async fn usage(
 
     let usage = state
         .stats
-        .usage(&state.db, &state.data_dir, &state.host, state.generation())
+        .usage(
+            &state.db,
+            &state.data_dir,
+            &state.host,
+            &state.config.active_since(),
+            state.generation(),
+        )
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(usage))
