@@ -45,6 +45,31 @@ function cardMeta(artifact) {
 }
 
 const previewCache = new Map();
+
+// What a card shows of a document it has not opened.
+//
+// This was the first five lines of the raw text, which for an HTML artifact
+// is doctype, html, head and a placeholder title: the same five lines in
+// every HTML document ever written, so a gallery of them was twelve
+// identical grey boxes. Markdown was fine, which is why it went unseen.
+//
+// The result is only ever written with textContent, never as markup.
+export function previewSnippet(text) {
+  if (!/^\s*<(!doctype|html)\b/i.test(text)) {
+    return text.split("\n").slice(0, 5).join("\n").slice(0, 200);
+  }
+  const body = text
+    .replace(/<head\b[\s\S]*?<\/head>/gi, " ")
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // A page whose words all live in script tags leaves nothing. Say so rather
+  // than drawing an empty box that looks like a failed load.
+  return body ? body.slice(0, 200) : "A web page";
+}
 let activeGrouping = "day";
 let activeView = "cards";
 
@@ -162,7 +187,7 @@ export async function gallerySection(projectId) {
     if (!a.protected && !previewCache.has(a.id)) {
       fetchRawText(a.id).then((text) => {
         if (!text) return;
-        const snippet = text.split("\n").slice(0, 5).join("\n").slice(0, 200);
+        const snippet = previewSnippet(text);
         previewCache.set(a.id, snippet);
         const el = document.querySelector(`.artifact-preview-text[data-preview-id="${a.id}"]`);
         if (el) el.textContent = snippet;

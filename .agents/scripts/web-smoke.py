@@ -3963,6 +3963,57 @@ def check_artifact_gallery(page, watch: Watch, project: str) -> None:
             watch.fail(f"the card meta is {card['meta']!r}, missing v{artifact['version']}")
         if " bytes" in card["meta"] or "B · " not in card["meta"]:
             watch.fail(f"the card meta is {card['meta']!r}, not a formatted size with a time")
+
+    # Previews are fetched after the cards paint, so reading them straight
+    # away gets empty strings from every card. A comparison across empties is
+    # vacuously fine, which is how the first version of the check below passed
+    # against the very defect it was written for.
+    if not settle(
+        page,
+        "[...document.querySelectorAll('main .artifact-preview-text')]"
+        ".filter((el) => (el.textContent || '').trim()).length >= 2",
+        timeout=8000,
+    ):
+        watch.fail("the gallery cards never filled in their previews")
+
+    # Everything above reads textContent, which is there whether or not a
+    # reader can see it. The card's title was squeezed to nought pixels wide
+    # by a full-bleed preview and every assertion here still passed.
+    drawn = page.evaluate(
+        "(() => [...document.querySelectorAll('main .artifact-card')].map((c) => {"
+        " const t = c.querySelector('.artifact-title');"
+        " const p = c.querySelector('.artifact-preview-text');"
+        " const tr = t && t.getBoundingClientRect();"
+        " const cr = c.getBoundingClientRect();"
+        " return { id: c.getAttribute('data-id'),"
+        "   title: t ? (t.textContent || '').slice(0, 40) : null,"
+        "   titleWidth: tr ? Math.round(tr.width) : 0,"
+        "   cardWidth: Math.round(cr.width),"
+        "   preview: p ? (p.textContent || '').trim().slice(0, 120) : null }; }))()"
+    )
+    for card in drawn:
+        if card["title"] is None:
+            watch.fail(f"the card for {card['id']!r} draws no title element")
+        elif card["titleWidth"] < 40:
+            watch.fail(
+                f"the card title {card['title']!r} is {card['titleWidth']}px wide"
+                f" in a {card['cardWidth']}px card, so nothing of it can be read"
+            )
+
+    # A preview that is the same on every card tells a reader nothing. The
+    # first five lines of an HTML document are the same five lines in every
+    # HTML document.
+    previews = [c["preview"] for c in drawn if c["preview"]]
+    if len(previews) < 2:
+        watch.fail(
+            f"only {len(previews)} card(s) carry a preview, so nothing here"
+            " compares them"
+        )
+    elif len(set(previews)) < len(previews):
+        same = next(p for p in previews if previews.count(p) > 1)
+        watch.fail(
+            f"{previews.count(same)} card previews read the same: {same!r}"
+        )
     watch.drain_rejections()
 
 

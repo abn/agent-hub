@@ -3314,6 +3314,18 @@ a.session-back {
   cursor: pointer;
 }
 
+/* The card markup carries `artifact-row` as well, and `.artifact-card.artifact-row`
+   sets `flex-direction: row` with the same specificity as the rule above and
+   later in the file, so it won. The preview is full-bleed and 88px tall,
+   which in a row left the title nought pixels wide: the text was in the DOM,
+   every string assertion passed, and the screen showed twelve identical grey
+   boxes with no titles. Named here because a third rule for the same element
+   is how it happened. */
+.hub-artifacts-grid .artifact-card.artifact-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .hub-artifacts-grid .artifact-card:hover {
   background: var(--surface-2);
   border-color: var(--line-strong);

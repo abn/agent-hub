@@ -178,6 +178,37 @@ def seed_versioned_artifact(port: int, project_id: str) -> str:
             },
         },
     )
+    # Two HTML artifacts, because the card preview defect only shows with more
+    # than one: it read the first five lines of the raw text, which for any
+    # HTML document is doctype, html, head and a placeholder title. A gallery
+    # of them was identical grey boxes. Every fixture here was markdown, so
+    # nothing could see it. The two differ only below the boilerplate.
+    for number, (title, heading) in enumerate(
+        (("Report page", "Quarterly report"), ("Status page", "Pipeline status")), start=4
+    ):
+        mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": number,
+                "method": "tools/call",
+                "params": {
+                    "name": "artifact_publish",
+                    "arguments": {
+                        "project_id": project_id,
+                        "title": title,
+                        "kind": "html",
+                        "content": (
+                            "<!DOCTYPE html>\n<html>\n\n<head>\n"
+                            "  <title>Loading...</title>\n</head>\n"
+                            f"<body><h1>{heading}</h1>"
+                            "<script>var a = 1 < 2;</script></body>\n</html>\n"
+                        ),
+                    },
+                },
+            },
+        )
     return artifact_id
 
 
