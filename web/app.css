@@ -2194,8 +2194,16 @@ a.session-back {
   flex: none;
 }
 
+/* With something to count the control carries a numeral and steps darker,
+   which is round 4's rule that the bar goes darker when an artifact has
+   comments, now carried by a number rather than a change of shape. */
 .hub-btn-glyph.hub-comments-btn {
   color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding: 0 6px;
 }
 
 .hub-btn-glyph:focus-visible {
@@ -2211,14 +2219,13 @@ a.session-back {
   }
 }
 
+/* Beside the bubble, not inside it. Drawn within the glyph it had to shrink
+   to 10px to fit, which is under this project's own 12px floor and read as a
+   smudge on a phone; the floor check carried a waiver naming this one rule.
+   Outside, it is ordinary text at the ordinary size and the waiver is gone. */
 .hub-glyph-count {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  right: 2px;
-  text-align: center;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--t-13);
   font-weight: 600;
   line-height: 1;
   pointer-events: none;

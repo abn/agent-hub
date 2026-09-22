@@ -324,12 +324,12 @@ FLOOR_ALLOWED = {
     ("artifact-viewer.mjs", ".9em"): (r"`body\{[^}`]*`?[^}]*?font-size:(\d+(?:\.\d+)?)px", 0.9),
 }
 
-# A numeral inside a glyph (e.g. comment count inside the comments bubble) is
-# drawn at mono 10px/600, optically centred in the 36px glyph box. The 12px text
-# floor is for UI text and labels, not a numeral rendered inside a glyph.
-GLYPH_NUMERAL_ALLOWANCE = {
-    ("app.css", "10px"): r"\.hub-glyph-count\s*\{[^}]*font-size:\s*10px",
-}
+# Nothing is exempt from the type floor. This held one entry, for a comment
+# count drawn inside the comments bubble at 10px: a waiver written because the
+# numeral would not fit rather than because 10px was legible. The count now
+# sits beside the bubble at the ordinary size, so the waiver is not needed and
+# the floor has no holes in it.
+GLYPH_NUMERAL_ALLOWANCE: dict[tuple[str, str], str] = {}
 
 
 def blank_comments(text: str, suffix: str) -> str:
