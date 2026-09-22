@@ -7,6 +7,8 @@ export const GLYPH_PATHS = {
   bell: '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 10 19a2 2 0 0 0 4 0"/>',
   bellOff:
     '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
+  bellStruck:
+    '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
   check: '<path d="M 5 13l4 4 10-10"/>',
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
   chevronDown: '<path d="M 6 9l6 6 6-6"/>',

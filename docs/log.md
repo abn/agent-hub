@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-22, grouped settings layout, segmented controls, and alert states
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the Settings screen organized into four groups (Appearance, Alerts, Access,
+  This browser) with seven controls total and no sub-pages except Access.
+  Appearance provides segmented controls for Theme and Density with pointer-derived
+  consequence copy, and a switch for single-key shortcuts. Alerts renders four
+  states (Not asked yet, Granted with master switch and kind toggles, Blocked,
+  or Unsupported). This browser documents local token retention and forgets it
+  locally upon signing out without affecting other browsers or agents, with an
+  ink Sign out action behind confirmation. On mobile (390px) groups stack
+  vertically with 12px mono uppercase labels; on desktop (1100px) groups render
+  in a two-column layout with 132px label column and 560px cards.
+
 ## 2026-09-22, radius hierarchy, fixed trigger labels, and glyph additions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

@@ -304,11 +304,13 @@ def set_token(page, watch: Watch) -> None:
 def check_theme(page, watch: Watch) -> None:
     watch.enter("settings: theme")
     page.evaluate("location.hash = '#/settings'")
-    page.wait_for_timeout(400)
+    if not settle(page, "!!document.querySelector('[role=\"group\"][aria-label=\"Theme\"]')"):
+        watch.fail("settings theme segmented control missing")
+        return
     before = page.evaluate("document.documentElement.dataset.theme")
-    page.select_option("#theme", "dark")
-    page.click('form[data-action="prefs"] button[type="submit"]')
-    page.wait_for_timeout(400)
+    page.click('[role="group"][aria-label="Theme"] button[data-theme-val="dark"]')
+    if not settle(page, "document.documentElement.dataset.theme === 'dark'"):
+        watch.fail("clicking dark theme segment did not update document theme")
     after = page.evaluate("document.documentElement.dataset.theme")
     if before != "light" or after != "dark":
         watch.fail(f"the theme control went from {before!r} to {after!r}")
@@ -322,10 +324,13 @@ def check_system_theme(page, watch: Watch) -> None:
     """
     watch.enter("settings: system theme")
     page.evaluate("location.hash = '#/settings'")
-    settle(page, "!!document.getElementById('theme')")
-    page.select_option("#theme", "system")
-    page.click('form[data-action="prefs"] button[type="submit"]')
-    settle(page, "localStorage.getItem('hub.theme') === 'system'")
+    if not settle(page, "!!document.querySelector('[role=\"group\"][aria-label=\"Theme\"]')"):
+        watch.fail("settings theme segmented control missing")
+        return
+    page.click('[role="group"][aria-label="Theme"] button[data-theme-val="system"]')
+    if not settle(page, "localStorage.getItem('hub.theme') === 'system'"):
+        watch.fail("clicking system theme did not store system in localStorage")
+        return
     page.emulate_media(color_scheme="dark")
     if not settle(page, "document.documentElement.dataset.theme === 'dark'"):
         found = page.evaluate("document.documentElement.dataset.theme")
@@ -337,13 +342,13 @@ def check_system_theme(page, watch: Watch) -> None:
         watch.fail(f"the system turned light and the open app stayed {found!r}")
     if bar == page.evaluate("document.querySelector('meta[name=\"theme-color\"]').content"):
         watch.fail(f"the installed app's own bar stayed {bar!r} through both")
-    page.select_option("#theme", "light")
-    page.click('form[data-action="prefs"] button[type="submit"]')
-    settle(page, "localStorage.getItem('hub.theme') === 'light'")
+    page.click('[role="group"][aria-label="Theme"] button[data-theme-val="light"]')
+    if not settle(page, "localStorage.getItem('hub.theme') === 'light'"):
+        watch.fail("clicking light theme did not store light in localStorage")
+        return
     page.emulate_media(color_scheme="dark")
-    page.wait_for_timeout(500)
-    chosen = page.evaluate("document.documentElement.dataset.theme")
-    if chosen != "light":
+    if not settle(page, "document.documentElement.dataset.theme === 'light'"):
+        chosen = page.evaluate("document.documentElement.dataset.theme")
         watch.fail(f"a chosen theme followed the system anyway, to {chosen!r}")
     page.emulate_media(color_scheme="light")
     watch.drain_rejections()
@@ -2693,8 +2698,20 @@ def check_forced_colours_ring(page, watch: Watch) -> None:
             if ring and ring["kind"] == "a row":
                 break
 
+        goto(page, "#/search", "Search")
+        if not settle(page, "!!document.getElementById('q')"):
+            watch.fail("the search screen painted no field for the tab ring to reach")
+        page.evaluate("document.activeElement.blur()")
+        for _ in range(25):
+            page.keyboard.press("Tab")
+            ring = page.evaluate(FOCUS_RING)
+            if ring and ring["kind"]:
+                found.setdefault(ring["kind"], ring)
+            if ring and ring["kind"] == "a field":
+                break
+
         goto(page, "#/settings", "Settings")
-        page.click('[data-action="project-delete"]')
+        page.click('[data-action="signout"]')
         page.wait_for_selector("dialog.dialog[open]")
         page.keyboard.press("Tab")
         found["a dialog button"] = page.evaluate(FOCUS_RING)
@@ -2720,8 +2737,11 @@ def check_forced_colours_ring(page, watch: Watch) -> None:
 def set_shortcuts(page, value: str) -> None:
     """Turn the single-key shortcuts on or off the way the reader does."""
     goto(page, "#/settings", "Settings")
-    page.select_option("#shortcuts", value)
-    page.click('form[data-action="prefs"] button[type="submit"]')
+    if not settle(page, "!!document.querySelector('#shortcuts[role=\"switch\"]')"):
+        return
+    current = page.evaluate("document.querySelector('#shortcuts').getAttribute('aria-checked') === 'true' ? 'on' : 'off'")
+    if current != value:
+        page.click("#shortcuts")
     settle(page, f"localStorage.getItem('hub.shortcuts') === {value!r}")
 
 
@@ -2742,8 +2762,8 @@ def check_shortcuts_can_be_turned_off(page, watch: Watch) -> None:
         "(() => { const field = document.getElementById('shortcuts');"
         " const label = document.querySelector('label[for=\"shortcuts\"]');"
         " return { label: label && label.textContent.trim(),"
-        " beside: !!(label && field.closest('form') === label.closest('form')"
-        "  && field.closest('form').querySelector('#theme')) }; })()"
+        " beside: !!(label && field.closest('.settings-group') === label.closest('.settings-group')"
+        "  && field.closest('.settings-group').querySelector('[role=\"group\"][aria-label=\"Theme\"]')) }; })()"
     )
     if not labelled["label"] or not labelled["beside"]:
         watch.fail(f"the shortcuts control reads {labelled}, not a labelled field beside the theme")
@@ -3345,6 +3365,324 @@ def check_phone_settings(page, watch: Watch) -> None:
     if heading(page) != "Settings":
         watch.fail(f"landed on heading {heading(page)!r}, expected 'Settings'")
     watch.drain_rejections()
+
+
+def check_settings_groups(browser, page, watch: Watch, port: int) -> None:
+    """Settings is four groups: Appearance, Alerts, Access, This browser.
+
+    Assert 4 groups rendered at 390px and 1100px.
+    Assert Appearance segmented controls (Theme, Density with pointer copy, Shortcuts).
+    Assert Alerts states and This browser verbatim copy.
+    Assert Sign out row is ink, not danger.
+    """
+    watch.enter("settings: four groups at 390px")
+    mobile_ctx = None
+    desktop_ctx = None
+    try:
+        # 1. Mobile at 390px with coarse pointer (touch)
+        mobile_ctx = browser.new_context(
+            viewport={"width": 390, "height": 844},
+            has_touch=True,
+            color_scheme="light",
+        )
+        mobile_ctx.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+        m_page = mobile_ctx.new_page()
+        m_page.goto(f"http://127.0.0.1:{port}/#/settings", wait_until="load")
+        if not settle(m_page, "document.querySelectorAll('.settings-group').length === 4"):
+            count = m_page.evaluate("document.querySelectorAll('.settings-group').length")
+            watch.fail(f"Settings at 390px does not render four groups, found {count}")
+            return
+
+        # Check group labels at 390px
+        labels = m_page.evaluate(
+            "[...document.querySelectorAll('.settings-group-label')].map((el) => el.textContent.trim())"
+        )
+        expected_labels = ["APPEARANCE", "ALERTS", "ACCESS", "THIS BROWSER"]
+        if labels != expected_labels:
+            watch.fail(f"Settings group labels are {labels!r}, expected {expected_labels!r}")
+
+        # Check group label styling (mono, uppercase, 8px above card)
+        label_style = m_page.evaluate(
+            "(() => { const l = document.querySelector('.settings-group-label');"
+            " const s = window.getComputedStyle(l);"
+            " return { mono: s.fontFamily.includes('mono'), size: s.fontSize, mb: s.marginBottom }; })()"
+        )
+        if not label_style["mono"] or label_style["size"] != "12px" or label_style["mb"] != "8px":
+            watch.fail(f"Settings group label styles at 390px read {label_style}")
+
+        # Check group card styling (--surface, 1px line, --r-2, overflow: hidden)
+        card_style = m_page.evaluate(
+            "(() => { const c = document.querySelector('.settings-group-card');"
+            " const s = window.getComputedStyle(c);"
+            " return { radius: s.borderRadius, overflow: s.overflow, border: s.borderWidth }; })()"
+        )
+        if card_style["radius"] != "12px" or card_style["overflow"] != "hidden" or card_style["border"] != "1px":
+            watch.fail(f"Settings group card styles read {card_style}")
+
+        # Content padding: 16px 16px 12px, gap: 18px
+        cont_style = m_page.evaluate(
+            "(() => { const c = document.querySelector('.settings');"
+            " const s = window.getComputedStyle(c);"
+            " return { pad: `${s.paddingTop} ${s.paddingRight} ${s.paddingBottom} ${s.paddingLeft}`, gap: s.gap || s.rowGap }; })()"
+        )
+        if cont_style["pad"] != "16px 16px 12px 16px" or cont_style["gap"] != "18px":
+            watch.fail(f"Settings container styles at 390px read {cont_style}")
+
+        # Footer: Agent Hub 0.4.2 · build ..., mono 12px
+        footer_style = m_page.evaluate(
+            "(() => { const f = document.querySelector('.settings-footer');"
+            " const s = window.getComputedStyle(f);"
+            " return { text: f.textContent.trim(), mono: s.fontFamily.includes('mono'), size: s.fontSize }; })()"
+        )
+        if "Agent Hub 0.4.2" not in footer_style["text"] or not footer_style["mono"] or footer_style["size"] != "12px":
+            watch.fail(f"Settings footer reads {footer_style}")
+
+        # Check coarse pointer copy consequence on mobile: 48px rows / 40px
+        watch.enter("settings: density coarse pointer copy")
+        coarse_copy = m_page.evaluate(
+            "(() => { const segs = [...document.querySelectorAll('[role=\"group\"][aria-label=\"Density\"] .settings-segment')];"
+            " const helper = document.querySelector('.density-helper');"
+            " return { segs: segs.map((s) => s.innerText.trim()), helper: helper ? helper.innerText.trim() : '' }; })()"
+        )
+        if not any("48px rows" in s for s in coarse_copy["segs"]):
+            watch.fail(f"coarse pointer density segments missing '48px rows': {coarse_copy['segs']!r}")
+        if not any("40px" in s for s in coarse_copy["segs"]):
+            watch.fail(f"coarse pointer density segments missing '40px': {coarse_copy['segs']!r}")
+        if "Compact takes list rows to 40px" not in coarse_copy["helper"]:
+            watch.fail(f"coarse pointer density helper missing 'Compact takes list rows to 40px': {coarse_copy['helper']!r}")
+
+        # 2. Desktop at 1100px with fine pointer (mouse)
+        watch.enter("settings: four groups at 1100px")
+        desktop_ctx = browser.new_context(
+            viewport={"width": 1100, "height": 800},
+            has_touch=False,
+            color_scheme="light",
+        )
+        desktop_ctx.add_init_script(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
+        d_page = desktop_ctx.new_page()
+        d_page.goto(f"http://127.0.0.1:{port}/#/settings", wait_until="load")
+        if not settle(d_page, "document.querySelectorAll('.settings-group').length === 4"):
+            watch.fail("Settings at 1100px does not render four groups")
+            return
+
+        # Desktop page title: "Settings" 28/600; sub-line 13px --ink-3
+        title_style = d_page.evaluate(
+            "(() => { const h = document.querySelector('.settings-title');"
+            " const sub = document.querySelector('.settings-subline');"
+            " const sh = window.getComputedStyle(h);"
+            " const ss = window.getComputedStyle(sub);"
+            " return { title: h.textContent.trim(), size: sh.fontSize, weight: sh.fontWeight,"
+            "  sub: sub.textContent.trim(), subSize: ss.fontSize }; })()"
+        )
+        if title_style["title"] != "Settings" or title_style["size"] != "28px" or title_style["weight"] != "600":
+            watch.fail(f"Desktop settings title style reads {title_style}")
+        expected_sub = "Everything here describes you or this browser. Projects are created and deleted on Projects."
+        if expected_sub not in title_style["sub"] or title_style["subSize"] != "13px":
+            watch.fail(f"Desktop settings subline reads {title_style}")
+
+        # Desktop group grid: 132px minmax(0, 560px), gap: 20px, labels padding-top: 12px
+        grid_style = d_page.evaluate(
+            "(() => { const g = document.querySelector('.settings-group');"
+            " const l = document.querySelector('.settings-group-label');"
+            " const sg = window.getComputedStyle(g);"
+            " const sl = window.getComputedStyle(l);"
+            " return { display: sg.display, cols: sg.gridTemplateColumns, gap: sg.gap || sg.rowGap, pt: sl.paddingTop }; })()"
+        )
+        if grid_style["display"] != "grid" or "132px" not in grid_style["cols"] or grid_style["gap"] != "20px" or grid_style["pt"] != "12px":
+            watch.fail(f"Desktop settings group grid styles read {grid_style}")
+
+        # Content padding: 28px 32px 40px, max-width: 704px
+        d_cont_style = d_page.evaluate(
+            "(() => { const c = document.querySelector('.settings');"
+            " const s = window.getComputedStyle(c);"
+            " return { pad: `${s.paddingTop} ${s.paddingRight} ${s.paddingBottom} ${s.paddingLeft}`, mw: s.maxWidth }; })()"
+        )
+        if d_cont_style["pad"] != "28px 32px 40px 32px" or d_cont_style["mw"] != "704px":
+            watch.fail(f"Desktop settings container styles read {d_cont_style}")
+
+        # No settings rail!
+        if d_page.evaluate("!!document.querySelector('.settings-rail')"):
+            watch.fail("Desktop settings rendered prohibited settings rail")
+
+        # Wide row: label left (14/600), padding: 14px 16px
+        row_style = d_page.evaluate(
+            "(() => { const r = document.querySelector('.settings-row');"
+            " const t = r.querySelector('.title');"
+            " const sr = window.getComputedStyle(r);"
+            " const st = window.getComputedStyle(t);"
+            " return { pad: `${sr.paddingTop} ${sr.paddingRight} ${sr.paddingBottom} ${sr.paddingLeft}`, size: st.fontSize, weight: st.fontWeight }; })()"
+        )
+        if row_style["pad"] != "14px 16px 14px 16px" or row_style["size"] != "14px" or row_style["weight"] != "600":
+            watch.fail(f"Desktop wide row styles read {row_style}")
+
+        # Check fine pointer copy consequence on desktop: 44px rows / 36px
+        watch.enter("settings: density fine pointer copy")
+        fine_copy = d_page.evaluate(
+            "(() => { const segs = [...document.querySelectorAll('[role=\"group\"][aria-label=\"Density\"] .settings-segment')];"
+            " const helper = document.querySelector('.density-helper');"
+            " return { segs: segs.map((s) => s.innerText.trim()), helper: helper ? helper.innerText.trim() : '' }; })()"
+        )
+        if not any("44px rows" in s for s in fine_copy["segs"]):
+            watch.fail(f"fine pointer density segments missing '44px rows': {fine_copy['segs']!r}")
+        if not any("36px" in s for s in fine_copy["segs"]):
+            watch.fail(f"fine pointer density segments missing '36px': {fine_copy['segs']!r}")
+        if "Compact takes list rows to 36px" not in fine_copy["helper"]:
+            watch.fail(f"fine pointer density helper missing 'Compact takes list rows to 36px': {fine_copy['helper']!r}")
+
+        # 3. Appearance Segmented Controls checks
+        watch.enter("settings: appearance segmented controls")
+        theme_segs = d_page.evaluate(
+            "(() => { const g = document.querySelector('[role=\"group\"][aria-label=\"Theme\"]');"
+            " const segs = [...g.querySelectorAll('.settings-segment')];"
+            " return segs.map((s) => ({ val: s.dataset.themeVal, pressed: s.getAttribute('aria-pressed'), check: !!s.querySelector('.settings-check') })); })()"
+        )
+        if len(theme_segs) != 3:
+            watch.fail(f"theme segmented control has {len(theme_segs)} segments, expected 3")
+        selected_theme = [s for s in theme_segs if s["pressed"] == "true"]
+        if len(selected_theme) != 1 or not selected_theme[0]["check"]:
+            watch.fail(f"selected theme segment has no check glyph: {selected_theme}")
+
+        # Shortcuts switch: off state has 1px line-strong track and ink-3 knob
+        watch.enter("settings: shortcuts switch styles")
+        shortcuts_el = d_page.locator("#shortcuts")
+        is_checked = shortcuts_el.get_attribute("aria-checked") == "true"
+        if is_checked:
+            shortcuts_el.click()
+            if not settle(d_page, "document.querySelector('#shortcuts').getAttribute('aria-checked') === 'false'"):
+                watch.fail("clicking shortcuts did not toggle off")
+                return
+        off_styles = d_page.evaluate(
+            "(() => { const tr = document.querySelector('#shortcuts .settings-switch-track');"
+            " const th = document.querySelector('#shortcuts .settings-switch-thumb');"
+            " const str = window.getComputedStyle(tr);"
+            " const sth = window.getComputedStyle(th);"
+            " return { bw: str.borderWidth, bg: str.backgroundColor, knobBg: sth.backgroundColor }; })()"
+        )
+        if off_styles["bw"] != "1px":
+            watch.fail(f"off switch track border width is {off_styles['bw']}, expected 1px")
+        # Toggle back on
+        shortcuts_el.click()
+        if not settle(d_page, "document.querySelector('#shortcuts').getAttribute('aria-checked') === 'true'"):
+            watch.fail("clicking shortcuts did not toggle back on")
+            return
+
+        # 4. Alerts: Four States
+        watch.enter("settings: alerts four states")
+        # State 1: default (Not asked yet)
+        d_page.evaluate(
+            "(() => { window.Notification = { permission: 'default', requestPermission: async () => 'default' };"
+            " window.navigator.serviceWorker = {};"
+            " location.hash = '#/home'; location.hash = '#/settings'; })()"
+        )
+        if not settle(d_page, "!!document.querySelector('.alerts-off-row')"):
+            watch.fail("State 1 (not asked) alert card not rendered")
+            return
+        state1_text = d_page.evaluate("document.querySelector('.alerts-off-row').innerText")
+        if "Notifications are off" not in state1_text:
+            watch.fail("State 1 missing 'Notifications are off'")
+        if "Your browser will ask first. Nothing is sent until you pick which kinds." not in state1_text:
+            watch.fail("State 1 missing helper copy")
+        if not d_page.evaluate("!!document.querySelector('.alerts-off-row button[data-action=\"notification-enable\"]')"):
+            watch.fail("State 1 missing 44px 'Turn on notifications' button")
+
+        # State 2: granted
+        d_page.evaluate(
+            "(() => { window.Notification = { permission: 'granted' }; window.navigator.serviceWorker = {};"
+            " location.hash = '#/home'; location.hash = '#/settings'; })()"
+        )
+        if not settle(d_page, "!!document.querySelector('#alerts-master')"):
+            watch.fail("State 2 (granted) alert card not rendered")
+            return
+        state2_text = d_page.evaluate("document.querySelector('.alerts-group-card').innerText")
+        if "On for this browser" not in state2_text:
+            watch.fail("State 2 missing 'On for this browser'")
+        if "Only while the tab is closed or in the background" not in state2_text:
+            watch.fail("State 2 missing helper")
+        for kind in ("Waiting on you", "Questions from an agent", "Finished work"):
+            if kind not in state2_text:
+                watch.fail(f"State 2 missing kind row {kind!r}")
+        kind_switches = d_page.evaluate("document.querySelectorAll('.settings-kind-row .settings-switch').length")
+        if kind_switches != 3:
+            watch.fail(f"State 2 expected 3 kind switches, found {kind_switches}")
+
+        # State 3: blocked
+        d_page.evaluate(
+            "(() => { window.Notification = { permission: 'denied' }; window.navigator.serviceWorker = {};"
+            " location.hash = '#/home'; location.hash = '#/settings'; })()"
+        )
+        if not settle(d_page, "!!document.querySelector('.alerts-blocked-row')"):
+            watch.fail("State 3 (blocked) alert card not rendered")
+            return
+        state3_text = d_page.evaluate("document.querySelector('.alerts-blocked-row').innerText")
+        if "Blocked in this browser" not in state3_text:
+            watch.fail("State 3 missing 'Blocked in this browser'")
+        if "We cannot ask again" not in state3_text:
+            watch.fail("State 3 missing helper copy")
+        if not d_page.evaluate("!!document.querySelector('.alerts-blocked-row button[data-action=\"check-alerts\"]')"):
+            watch.fail("State 3 missing 'Check again' button")
+        if "The Inbox still shows everything. Notifications only change when you hear about it." not in state3_text:
+            watch.fail("State 3 missing footnote copy")
+
+        # State 4: unsupported
+        d_page.evaluate(
+            "(() => { delete window.Notification;"
+            " location.hash = '#/home'; location.hash = '#/settings'; })()"
+        )
+        if not settle(d_page, "!!document.querySelector('.alerts-info-row')"):
+            watch.fail("State 4 (unsupported) alert card not rendered")
+            return
+        state4_text = d_page.evaluate("document.querySelector('.alerts-info-row').innerText")
+        if "Not available here" not in state4_text:
+            watch.fail("State 4 missing 'Not available here'")
+        # Ensure State 4 has no controls at all
+        state4_controls = d_page.evaluate("document.querySelectorAll('.alerts-group-card button, .alerts-group-card input').length")
+        if state4_controls != 0:
+            watch.fail(f"State 4 rendered {state4_controls} controls, expected none")
+
+        # 5. Access Row
+        watch.enter("settings: access row")
+        # Restore Notification for normal page
+        d_page.evaluate(
+            "(() => { window.Notification = { permission: 'default' }; window.navigator.serviceWorker = {};"
+            " location.hash = '#/home'; location.hash = '#/settings'; })()"
+        )
+        d_page.evaluate("location.hash = '#/settings'")
+        if not settle(d_page, "!!document.querySelector('.settings-nav-row[href=\"#/access\"]')"):
+            watch.fail("Access row missing link to #/access")
+            return
+        access_text = d_page.evaluate("document.querySelector('.settings-nav-row').innerText")
+        if "Tokens and callers" not in access_text:
+            watch.fail(f"Access row missing 'Tokens and callers': {access_text!r}")
+        if not d_page.evaluate("!!document.querySelector('.settings-nav-row .settings-nav-glyph svg')"):
+            watch.fail("Access row missing ID card glyph")
+
+        # 6. This Browser: Verbatim copy & ink sign out
+        watch.enter("settings: this browser verbatim copy and ink sign out")
+        this_browser_text = d_page.evaluate("document.querySelector('.this-browser-info-row').innerText")
+        if "This browser is holding the access token" not in this_browser_text:
+            watch.fail("This browser group missing verbatim text 'This browser is holding the access token'")
+        if "Signing out forgets it here and nowhere else. Other browsers, and every agent, are unaffected." not in this_browser_text:
+            watch.fail("This browser group missing verbatim text 'Signing out forgets it here and nowhere else. Other browsers, and every agent, are unaffected.'")
+        for bad_word in ("since", "session"):
+            if bad_word in this_browser_text.lower():
+                watch.fail(f"This browser section contains prohibited wording {bad_word!r}")
+
+        signout_btn = d_page.locator("main [data-action='signout']")
+        if signout_btn.count() == 0:
+            watch.fail("sign out button missing")
+            return
+        is_danger = d_page.evaluate("document.querySelector('main [data-action=\"signout\"]').classList.contains('danger')")
+        if is_danger:
+            watch.fail("sign out control carries danger class, expected ink")
+        btn_has_glyph = d_page.evaluate("!!document.querySelector('main [data-action=\"signout\"] svg')")
+        if not btn_has_glyph:
+            watch.fail("sign out button missing signOut glyph")
+    finally:
+        if mobile_ctx:
+            mobile_ctx.close()
+        if desktop_ctx:
+            desktop_ctx.close()
+        watch.drain_rejections()
 
 
 def check_install_manifest(page, watch: Watch) -> None:
@@ -7546,24 +7884,29 @@ def check_sign_out(browser, watch: Watch, port: int) -> None:
         watch.enter("settings: one way in, and it is not here")
         if page.evaluate("!!document.querySelector('main form[data-action=\"prefs\"] #token')"):
             watch.fail("Settings still takes a token in a field that never checks it")
-        change = page.evaluate(
-            "(document.querySelector('main .settings-token-state a[href=\"#/connect\"]')"
-            " || { getAttribute() { return null; } }).getAttribute('href')"
-        )
-        if change != "#/connect":
-            watch.fail("Settings says a token is held but offers no way to change it")
+        info_text = page.evaluate("document.querySelector('main .this-browser-info-row')?.textContent || ''")
+        if "This browser is holding the access token" not in info_text:
+            watch.fail("This browser group missing verbatim text 'This browser is holding the access token'")
+        if "Signing out forgets it here and nowhere else. Other browsers, and every agent, are unaffected." not in info_text:
+            watch.fail("This browser group missing verbatim text 'Signing out forgets it here and nowhere else. Other browsers, and every agent, are unaffected.'")
+        for bad_word in ("since", "session"):
+            if bad_word in info_text.lower():
+                watch.fail(f"This browser section contains prohibited wording {bad_word!r}")
+
+        signout_danger = page.evaluate("document.querySelector('main [data-action=\"signout\"]').classList.contains('danger')")
+        if signout_danger:
+            watch.fail("sign out control carries danger class, expected ink")
 
         # Saving a preference must not take the token with it: the field that
         # used to carry it is gone, and a form that sends nothing for it would
         # otherwise sign the reader out for changing a theme.
-        page.select_option('main form[data-action="prefs"] #density', "compact")
-        page.click('main form[data-action="prefs"] button[type="submit"]')
-        page.wait_for_timeout(400)
+        page.click('[role="group"][aria-label="Density"] button[data-density-val="compact"]')
+        if not settle(page, "localStorage.getItem('hub.density') === 'compact'"):
+            watch.fail("saving a preference on Settings did not save the preference")
+            return
         if page.evaluate("localStorage.getItem('hub.token')") != harness.ADMIN_TOKEN:
             watch.fail("saving a preference on Settings threw the token away")
             return
-        if page.evaluate("localStorage.getItem('hub.density')") != "compact":
-            watch.fail("saving a preference on Settings did not save the preference")
 
         watch.enter("settings: sign out")
         page.click('main [data-action="signout"]')
@@ -11175,7 +11518,7 @@ def run() -> int:
                         "Search",
                         [harness.FINISHED_SUMMARY],
                     ),
-                    ("settings", "#/settings", "Settings", [harness.AGENT_NAME]),
+                    ("settings", "#/settings", "Settings", ["APPEARANCE"]),
                     (
                         "projects",
                         f"#/projects/{quote(project)}/settings",
@@ -11310,6 +11653,7 @@ def run() -> int:
                 run_step(watch, check_shell_tabs, page, watch)
                 run_step(watch, check_mobile_tabbar, page, watch, project)
                 run_step(watch, check_phone_settings, page, watch)
+                run_step(watch, check_settings_groups, browser, page, watch, port)
                 run_step(watch, check_install_manifest, page, watch)
                 run_step(watch, check_artifact_link, page, watch, project)
                 run_step(watch, check_segmented_tabs, page, watch, project)
