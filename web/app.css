@@ -541,7 +541,11 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
   display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-3);
   padding: var(--s-3) 0;
 }
-.artifact-card {
+/* Not the table rows. They are `<tr class="artifact-card artifact-table-row">`,
+   and `display: flex` on a row throws away the table layout: every cell became
+   a full-width band under the one before it, so the four column headers lined
+   up with nothing. It has looked like that since the table view shipped. */
+.artifact-card:not(.artifact-table-row) {
   display: flex; flex-direction: column; align-items: stretch;
   padding: 0; min-height: 0; min-width: 0; overflow: hidden;
   border: 1px solid var(--line); border-radius: var(--r-2); text-align: left;
@@ -3298,7 +3302,7 @@ a.session-back {
   }
 }
 
-.hub-artifacts-grid .artifact-card {
+.hub-artifacts-grid .artifact-card:not(.artifact-table-row) {
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -3321,20 +3325,23 @@ a.session-back {
    every string assertion passed, and the screen showed twelve identical grey
    boxes with no titles. Named here because a third rule for the same element
    is how it happened. */
-.hub-artifacts-grid .artifact-card.artifact-row {
+.hub-artifacts-grid .artifact-card.artifact-row:not(.artifact-table-row) {
   flex-direction: column;
   align-items: stretch;
 }
 
-.hub-artifacts-grid .artifact-card:hover {
+.hub-artifacts-grid .artifact-card:not(.artifact-table-row):hover {
   background: var(--surface-2);
   border-color: var(--line-strong);
 }
 
-.hub-artifacts-grid .artifact-card:focus-visible {
+.hub-artifacts-grid .artifact-card:not(.artifact-table-row):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* The glyph is the desktop card's fallback and the phone row's only mark. */
+.artifact-preview-glyph { display: none; }
 
 .hub-artifacts-grid .artifact-preview {
   height: 88px;
@@ -3422,6 +3429,82 @@ a.session-back {
   min-height: 44px;
   cursor: pointer;
   text-align: left;
+}
+
+/* Below the desktop breakpoint the gallery is a list, not a wall of cards.
+   The desktop card is an 88px source-code banner over a title: at 390px that
+   is two thirds of the card given to text too small to read, and three
+   artifacts on a screen. Here the row is a title and its meta beside a glyph,
+   so a phone can scan twelve of them.
+
+   This block sits after every `.hub-artifacts-grid` rule above on purpose. A
+   media query adds no specificity, so placed before them it lost every tie
+   and changed nothing but the parts nothing else set. */
+@media (max-width: 899px) {
+  .hub-artifacts-grid {
+    gap: 0;
+  }
+
+  .hub-artifacts-grid .artifact-card:not(.artifact-table-row),
+  .hub-artifacts-grid .artifact-card.artifact-row:not(.artifact-table-row) {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--s-3);
+    padding: 0 var(--s-3);
+    min-height: 64px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+  }
+
+  .hub-artifacts-grid .artifact-preview,
+  .hub-artifacts-grid .artifact-preview.encrypted,
+  .hub-artifacts-grid .artifact-preview-lock {
+    height: 40px;
+    width: 40px;
+    flex: none;
+    border-radius: var(--r-1);
+    display: grid;
+    place-items: center;
+  }
+
+  /* The snippet is a desktop mark. It stays in the DOM so the desktop
+     prefetch still has somewhere to write, and is not drawn here. */
+  .hub-artifacts-grid .artifact-preview-text {
+    display: none;
+  }
+
+  .hub-artifacts-grid .artifact-preview-glyph {
+    display: block;
+    color: var(--ink-3);
+  }
+
+  .hub-artifacts-grid .artifact-body {
+    flex: 1;
+    min-width: 0;
+    padding: var(--s-2) 0;
+  }
+
+  .hub-artifacts-grid .artifact-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hub-artifacts-grid .artifact-chevron {
+    display: block;
+    flex: none;
+    color: var(--ink-3);
+  }
+
+  /* The table is a desktop view. At 390px its four columns are cut off at the
+     right edge and there is nowhere for them to go; the stacked form is design
+     round 10's and is not built yet. Until it is, the phone is not offered a
+     switch it cannot use. */
+  .hub-view-segment,
+  .hub-summary-divider {
+    display: none;
+  }
 }
 
 /* Table view */

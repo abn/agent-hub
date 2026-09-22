@@ -60,7 +60,11 @@ export function previewSnippet(text) {
   }
   const body = text
     .replace(/<head\b[\s\S]*?<\/head>/gi, " ")
-    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ")
+    // noscript and template are the trap here. A page that renders itself with
+    // JavaScript carries a "please enable JavaScript" block as its only static
+    // prose, so stripping tags alone surfaced that on every card: still the
+    // same words everywhere, just a longer set of them.
+    .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
@@ -84,9 +88,15 @@ export function artifactCard(artifact) {
     previewContent = `<span class="artifact-preview-lock" aria-hidden="true">${cardGlyph(true)}</span>`;
   } else {
     const cachedSnippet = previewCache.get(artifact.id) || (artifact.description ? artifact.description.slice(0, 200) : "");
+    // Two marks, one shown at a time by width. The source snippet is a
+    // desktop affordance: at 390px it filled two thirds of every card, was
+    // too small to read, and left three artifacts on a screen. The phone
+    // gets the glyph and a row it can scan. The inline `display:none` that
+    // used to hide the glyph is gone, because an inline style cannot be
+    // answered by a media query.
     previewContent = `
       <span class="artifact-preview-text mono" aria-hidden="true" data-preview-id="${esc(artifact.id)}">${esc(cachedSnippet)}</span>
-      <svg class="doc" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="${DOC_PATH}"></path></svg>
+      <svg class="doc artifact-preview-glyph" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${DOC_PATH}"></path></svg>
     `;
   }
 
@@ -195,8 +205,12 @@ export async function gallerySection(projectId) {
     }
   }
 
+  // The table is a desktop view and its switch is not drawn below 900px. A
+  // reader who chose it on a wide window and then narrowed would otherwise be
+  // left in a view with no way out of it.
+  const wide = typeof window === "undefined" || window.innerWidth >= 900;
   let contentHTML = "";
-  if (activeView === "table") {
+  if (activeView === "table" && wide) {
     contentHTML = renderArtifactsTable(artifacts);
   } else {
     contentHTML = groups

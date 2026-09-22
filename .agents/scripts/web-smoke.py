@@ -3931,6 +3931,124 @@ def check_segmented_tabs(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_artifacts_by_width(browser, watch: Watch, port: int, project: str) -> None:
+    """A phone gets the phone list; a desktop gets the grid and a real table.
+
+    Every rule for the desktop gallery and the desktop table shipped with no
+    media query at all, so a 390px phone was served the five-up card grid and
+    the desktop table. The table was never a table there either: the row
+    carries `artifact-card`, the grid rule sets `display: flex` on it, and a
+    `<tr>` laid out as a flex box has no columns, so every cell was a full
+    width band and the header widths lined up with nothing.
+
+    Both halves are read off the rendered page: what the phone draws, and
+    whether the desktop table's cells sit side by side.
+    """
+    watch.enter("artifacts: the phone does not get the desktop gallery")
+    for width, height, phone in ((390, 844, True), (1280, 900, False)):
+        ctx = browser.new_context(
+            viewport={"width": width, "height": height},
+            device_scale_factor=3 if phone else 1,
+            is_mobile=phone,
+            has_touch=phone,
+        )
+        ctx.add_init_script(
+            f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+        )
+        page = ctx.new_page()
+        try:
+            page.goto(
+                f"http://127.0.0.1:{port}/#/projects/{quote(project)}/artifacts",
+                wait_until="load",
+            )
+            if not settle(page, "!!document.querySelector('main .artifact-card')"):
+                watch.fail(f"[{width}px] the artifacts screen painted no rows")
+                continue
+
+            toggle = page.evaluate(
+                "() => { const t = document.querySelector('.hub-view-segment');"
+                " return t && t.offsetParent !== null; }"
+            )
+            if phone and toggle:
+                watch.fail(
+                    "[390px] the Cards/Table switch is offered on a phone, where"
+                    " the table cannot be read"
+                )
+            if not phone and not toggle:
+                watch.fail("[1280px] the Cards/Table switch is missing on a desktop")
+
+            if phone:
+                # The phone row is a row: preview, then text beside it, one
+                # line tall enough to touch. A full-bleed preview banner means
+                # the desktop card got through.
+                shape = page.evaluate(
+                    "() => { const c = document.querySelector('main .artifact-card');"
+                    " const p = c.querySelector('.artifact-preview');"
+                    " const t = c.querySelector('.artifact-title');"
+                    " const cr = c.getBoundingClientRect();"
+                    " return { card: Math.round(cr.width), height: Math.round(cr.height),"
+                    "   preview: p ? Math.round(p.getBoundingClientRect().width) : 0,"
+                    "   title: t ? Math.round(t.getBoundingClientRect().width) : 0 }; }"
+                )
+                if shape["preview"] > shape["card"] * 0.6:
+                    watch.fail(
+                        f"[390px] the row's preview is {shape['preview']}px of a"
+                        f" {shape['card']}px row, which is the desktop card's"
+                        " full-bleed banner, not a phone row"
+                    )
+                if shape["title"] < 40:
+                    watch.fail(
+                        f"[390px] the row title is {shape['title']}px wide, so"
+                        " nothing of it can be read"
+                    )
+                continue
+
+            # Desktop: the table is a table.
+            table_btn = page.locator(".hub-view-btn.table").first
+            if table_btn.count() == 0:
+                watch.fail("[1280px] no Table view to switch to")
+                continue
+            table_btn.click()
+            if not settle(page, "!!document.querySelector('.artifact-table-row')"):
+                watch.fail("[1280px] the Table view painted no rows")
+                continue
+            cells = page.evaluate(
+                "() => [...document.querySelector('.artifact-table-row')"
+                ".querySelectorAll('td')].map((td) => { const r = td.getBoundingClientRect();"
+                " return { x: Math.round(r.x), y: Math.round(r.y),"
+                "   w: Math.round(r.width) }; })"
+            )
+            if len(cells) < 2:
+                watch.fail(f"[1280px] the table row has {len(cells)} cell(s)")
+                continue
+            tops = {c["y"] for c in cells}
+            if len(tops) > 1:
+                watch.fail(
+                    f"[1280px] the table's cells are stacked, not in columns:"
+                    f" tops {sorted(tops)}"
+                )
+            if len({c["x"] for c in cells}) < len(cells):
+                watch.fail(
+                    f"[1280px] the table's cells share a left edge, so there are"
+                    f" no columns: {cells}"
+                )
+            roles = page.evaluate(
+                "() => { const t = document.querySelector('.hub-artifacts-table');"
+                " const r = document.querySelector('.artifact-table-row');"
+                " const d = r && r.querySelector('td');"
+                " const of = (el) => el ? getComputedStyle(el).display : null;"
+                " return { table: of(t), row: of(r), cell: of(d) }; }"
+            )
+            if roles["row"] not in ("table-row",):
+                watch.fail(
+                    f"[1280px] the table row is laid out as {roles['row']!r},"
+                    " which strips its row and cell semantics"
+                )
+        finally:
+            ctx.close()
+    watch.drain_rejections()
+
+
 def check_artifact_gallery(page, watch: Watch, project: str) -> None:
     """The gallery draws cards with a preview tile and real version, size and age."""
     watch.enter("artifacts: gallery cards")
@@ -12229,6 +12347,7 @@ def run() -> int:
                 run_step(watch, check_artifact_link, page, watch, project)
                 run_step(watch, check_segmented_tabs, page, watch, project)
                 run_step(watch, check_artifact_gallery, page, watch, project)
+                run_step(watch, check_artifacts_by_width, browser, watch, port, project)
                 run_step(watch, check_viewer_route, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_viewer_back_button, page, watch, project, seeded["artifact_id"])
                 run_step(watch, check_viewer_theme_control, page, watch, project, seeded["artifact_id"])
