@@ -388,6 +388,7 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
             kind: "markdown",
             content: b"quiet",
             envelope: None,
+            session_id: None,
         },
         None,
     )

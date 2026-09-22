@@ -35,6 +35,7 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let session_id = self.session_in(&params.project_id).await;
         let artifact = artifacts::publish(
             &self.state.db,
             &self.state.data_dir,
@@ -48,6 +49,7 @@ impl HubServer {
                 kind: &params.kind,
                 content: params.content.as_bytes(),
                 envelope: params.envelope,
+                session_id: session_id.as_deref(),
             },
             params.idempotency_key.as_deref(),
         )
@@ -79,6 +81,7 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let session_id = self.session_in(&existing.project_id).await;
         let artifact = artifacts::update(
             &self.state.db,
             &self.state.data_dir,
@@ -94,6 +97,7 @@ impl HubServer {
                 base_version: params.base_version,
                 force: params.force,
                 label: params.label.as_ref().map(|opt| opt.as_deref()),
+                session_id: session_id.as_deref(),
             },
             params.idempotency_key.as_deref(),
         )
@@ -229,7 +233,8 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
-        let listed = artifacts::list(&self.state.db, &params.project_id)
+        let session_id = params.session.as_deref().or(params.session_id.as_deref());
+        let listed = artifacts::list_with_session(&self.state.db, &params.project_id, session_id)
             .await
             .map_err(to_error_data)?;
 
@@ -252,6 +257,10 @@ struct ArtifactPublishParams {
     label: Option<String>,
     #[serde(default)]
     envelope: Option<serde_json::Value>,
+    /// Any supplied session_id is ignored to prevent forgery; lineage comes from principal.
+    #[serde(default)]
+    #[allow(dead_code)]
+    session_id: Option<String>,
     /// Optional idempotency key, so a retried publish returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
@@ -317,4 +326,8 @@ struct ArtifactDeleteParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactListParams {
     project_id: String,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
 }

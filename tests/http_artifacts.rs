@@ -94,6 +94,7 @@ async fn publish_public(state: &AppState, project_id: &str, title: &str, content
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -127,6 +128,7 @@ async fn publish_protected(
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -311,6 +313,7 @@ async fn host_inlines_rendered_markdown_safely() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -368,6 +371,7 @@ async fn host_leaves_the_mermaid_runtime_to_the_frame() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -403,6 +407,7 @@ async fn host_shows_the_title_for_markdown_without_a_heading() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -540,6 +545,7 @@ async fn the_viewer_page_carries_its_rules_and_nothing_authored_reaches_the_styl
                 description: STYLE_BREAKOUT,
                 favicon: "",
                 label: Some(STYLE_BREAKOUT),
+                session_id: None,
             },
             None,
         )
@@ -621,6 +627,7 @@ async fn host_escapes_authored_metadata_and_envelopes() {
             description: "</script><script>alert(2)</script>",
             favicon: "star",
             label: Some("\"><img src=x onerror=alert(3)>"),
+            session_id: None,
         },
         None,
     )
@@ -676,6 +683,7 @@ async fn host_escapes_authored_metadata_and_envelopes() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -980,6 +988,7 @@ async fn publish_versioned(state: &AppState) -> String {
             description: "A report",
             favicon: "star",
             label: Some("v1"),
+            session_id: None,
         },
         None,
     )
@@ -997,6 +1006,7 @@ async fn publish_versioned(state: &AppState) -> String {
             base_version: None,
             force: false,
             label: Some(Some("v2")),
+            session_id: None,
         },
         None,
     )
@@ -1416,6 +1426,7 @@ async fn version_picker_shows_index_with_comment_never_prose_alone() {
             description: "A report",
             favicon: "star",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1434,6 +1445,7 @@ async fn version_picker_shows_index_with_comment_never_prose_alone() {
             base_version: None,
             force: false,
             label: Some(Some("the standing list, answered")),
+            session_id: None,
         },
         None,
     )
@@ -1620,6 +1632,7 @@ async fn frame_refuses_markdown_with_invalid_argument() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1716,6 +1729,7 @@ async fn og_card_is_a_static_svg_with_escaped_values() {
             description: "Quarterly \"numbers\" <b>bold</b>",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1876,6 +1890,7 @@ async fn cleared_label_serves_null_over_rest() {
             base_version: None,
             force: false,
             label: Some(Some("labeled")),
+            session_id: None,
         },
         None,
     )
@@ -1894,6 +1909,7 @@ async fn cleared_label_serves_null_over_rest() {
             base_version: None,
             force: false,
             label: Some(None),
+            session_id: None,
         },
         None,
     )

@@ -31,6 +31,7 @@ async fn publish(state: &AppState, title: &str, content: &[u8]) -> String {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -59,6 +60,7 @@ async fn publish_protected(state: &AppState, title: &str, content: &[u8]) -> Str
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -499,6 +501,7 @@ async fn host_filters_comments_by_shown_version() {
             base_version: None,
             force: false,
             label: None,
+            session_id: None,
         },
         None,
     )

@@ -99,10 +99,12 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
+        let session_id = params.session.or(params.session_id);
         let mut query = FeedQuery {
             since: params.since,
             before: params.before,
             kinds: params.kinds,
+            session_id,
             // The hub's record of itself belongs to the human. A trusted agent
             // reads every project, which would otherwise hand it the fleet's
             // identity history.
@@ -143,6 +145,10 @@ struct SignalAppendParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FeedReadParams {
     project_id: String,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
     #[serde(default)]
     since: Option<String>,
     #[serde(default)]

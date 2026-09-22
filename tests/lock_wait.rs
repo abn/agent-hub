@@ -53,6 +53,7 @@ async fn concurrent_same_key_publishes_serialize() {
                     description: "",
                     favicon: "",
                     label: None,
+                    session_id: None,
                 },
                 Some("pub-key"),
             )

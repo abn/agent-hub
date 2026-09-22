@@ -57,6 +57,7 @@ async fn delete_project_cascades_its_data() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )

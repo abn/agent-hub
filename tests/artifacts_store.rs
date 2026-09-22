@@ -23,6 +23,7 @@ fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
         kind: "html",
         content,
         envelope: None,
+        session_id: None,
     }
 }
 
@@ -185,6 +186,7 @@ async fn a_protected_artifact_is_not_searchable_by_body() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -367,6 +369,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
             base_version: Some(999),
             force: false,
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -389,6 +392,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
             base_version: Some(999),
             force: true,
             label: Some(Some("forced")),
+            session_id: None,
         },
         None,
     )
@@ -408,6 +412,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
             base_version: Some(2),
             force: false,
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -439,6 +444,7 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
             base_version: None,
             force: false,
             label: Some(Some("v2")),
+            session_id: None,
         },
         None,
     )
@@ -690,6 +696,7 @@ async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
             actor: "agent-one",
             project_id: "proj",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -717,6 +724,7 @@ async fn a_conflicting_update_leaves_no_blob_behind() {
             base_version: Some(999),
             force: false,
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1229,6 +1237,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
             base_version: None,
             force: false,
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1248,6 +1257,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
             base_version: None,
             force: false,
             label: Some(Some("v2")),
+            session_id: None,
         },
         None,
     )
@@ -1267,6 +1277,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
             base_version: None,
             force: false,
             label: Some(None),
+            session_id: None,
         },
         None,
     )
@@ -1286,6 +1297,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
             base_version: None,
             force: false,
             label: Some(Some("v5")),
+            session_id: None,
         },
         None,
     )
@@ -1304,6 +1316,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
             base_version: None,
             force: false,
             label: Some(Some("")),
+            session_id: None,
         },
         None,
     )

@@ -73,6 +73,39 @@ pub async fn read(
     }))
 }
 
+/// `GET /api/v1/feed`
+///
+/// Query parameters are `session`, `since`, `before`, `limit`, and repeatable `kinds`.
+/// A valid bearer token is required; the resolved principal is not recorded
+/// on a read.
+pub async fn read_global(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    RawQuery(raw): RawQuery,
+) -> std::result::Result<Json<FeedPage>, Problem> {
+    let token = bearer_token(&headers);
+    state
+        .auth
+        .require_admin(token.as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let mut query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
+    if query.kinds.is_none() {
+        query.kinds = Some(events::human_kinds());
+    }
+
+    let page = events::read_global_feed(&state.db, &query)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(FeedPage {
+        events: page.events,
+        next_since: page.next_since,
+        next_before: page.next_before,
+        last_seen: None,
+    }))
+}
+
 /// `POST /api/v1/projects/{id}/feed/seen`
 ///
 /// A valid bearer token is required. The cursor moves up to the given event
@@ -117,12 +150,14 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
     let mut since = None;
     let mut before = None;
     let mut limit = None;
+    let mut session_id = None;
     let mut kinds: Vec<String> = Vec::new();
 
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
         match key.as_ref() {
             "since" => since = Some(value.into_owned()),
             "before" => before = Some(value.into_owned()),
+            "session" | "session_id" => session_id = Some(value.into_owned()),
             "limit" => {
                 limit = Some(value.parse::<i64>().map_err(|_| {
                     Error::InvalidArgument(format!("limit must be an integer, got '{value}'"))
@@ -149,6 +184,7 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         before,
         limit: limit.unwrap_or(FEED_LIMIT_DEFAULT),
         kinds: if kinds.is_empty() { None } else { Some(kinds) },
+        session_id,
         // The route is admin-only, and the audit screen reads the trail here.
         include_audit: true,
     })

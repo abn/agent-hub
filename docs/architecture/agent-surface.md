@@ -45,7 +45,7 @@ tokens.
 | `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. With `from`, it picks up another agent's session. |
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
-| `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
+| `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. |
 | `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
@@ -54,7 +54,7 @@ tokens.
 | `artifact_update` | Publish a new version of an existing artifact. |
 | `artifact_get` | Read an artifact's content and metadata, optionally one version. |
 | `artifact_versions` | List an artifact's immutable version history. |
-| `artifact_list` | List a project's artifacts. |
+| `artifact_list` | List a project's artifacts, optionally filtered by session. |
 | `artifact_delete` | Delete an artifact, its history, and its index row. |
 | `comment_post` | Comment on an artifact, optionally anchored to a point or a quote. |
 | `comment_list` | List an artifact's comments. |

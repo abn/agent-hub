@@ -398,6 +398,7 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
             kind: "markdown",
             content: b"first",
             envelope: None,
+            session_id: None,
         },
         None,
     )

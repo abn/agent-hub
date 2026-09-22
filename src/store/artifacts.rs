@@ -37,6 +37,7 @@ pub const LABEL_BYTES_MAX: usize = 60;
 pub struct Artifact {
     pub id: String,
     pub project_id: String,
+    pub session_id: Option<String>,
     pub title: String,
     pub description: String,
     pub favicon: String,
@@ -79,6 +80,7 @@ pub struct NewArtifact<'a> {
     pub content: &'a [u8],
     /// The encryption envelope when the artifact is protected.
     pub envelope: Option<serde_json::Value>,
+    pub session_id: Option<&'a str>,
 }
 
 /// What a new version does with the artifact's protection.
@@ -121,6 +123,8 @@ pub struct UpdateOptions<'a> {
     /// Absent keeps the current label; an explicit null or empty string clears
     /// it; a string sets a new label.
     pub label: Option<Option<&'a str>>,
+    /// The session performing the update, when one is in scope.
+    pub session_id: Option<&'a str>,
 }
 
 /// What the metadata transaction did with the blob written before it opened.
@@ -179,6 +183,7 @@ pub async fn publish(
     let published = Artifact {
         id: id.clone(),
         project_id: artifact.project_id.to_string(),
+        session_id: artifact.session_id.map(str::to_string),
         title: title.clone(),
         description: description.clone(),
         favicon: favicon.clone(),
@@ -205,8 +210,8 @@ pub async fn publish(
             return Ok(Written::Dropped(replay(&tx, &entry, None).await?));
         }
         tx.execute(
-            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11)",
+            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11, ?12)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(artifact.project_id.to_string()),
@@ -219,6 +224,7 @@ pub async fn publish(
                 Value::Text(rel.clone()),
                 Value::Integer(artifact.content.len() as i64),
                 Value::Text(created_at.clone()),
+                optional_text(artifact.session_id),
             ],
         )
         .await
@@ -246,7 +252,7 @@ pub async fn publish(
                 project_id: artifact.project_id,
                 kind: "artifact",
                 ref_id: &id,
-                session_id: None,
+                session_id: artifact.session_id,
                 title: Some(&title),
                 body: searchable_body(artifact.content, protected),
                 updated_at: &created_at,
@@ -264,6 +270,7 @@ pub async fn publish(
             1,
             protected,
             label.as_deref(),
+            artifact.session_id,
         )
         .await?;
         if let Some(key) = idempotency_key {
@@ -426,7 +433,7 @@ pub async fn update(
                 project_id: &existing.project_id,
                 kind: "artifact",
                 ref_id: artifact_id,
-                session_id: None,
+                session_id: opts.session_id,
                 title: Some(&existing.title),
                 body: searchable_body(content, protected),
                 updated_at: &updated_at,
@@ -444,6 +451,7 @@ pub async fn update(
             version,
             protected,
             label.as_deref(),
+            opts.session_id,
         )
         .await?;
         if let Some(key) = idempotency_key {
@@ -462,6 +470,7 @@ pub async fn update(
         Ok(Written::Kept(Artifact {
             id: artifact_id.to_string(),
             project_id: existing.project_id,
+            session_id: existing.session_id,
             title: existing.title,
             description: existing.description,
             favicon: existing.favicon,
@@ -570,6 +579,7 @@ pub async fn delete(
         existing.version,
         existing.protected,
         existing.label.as_deref(),
+        None,
     )
     .await?;
     tx.commit().await.map_err(engine)?;
@@ -618,7 +628,8 @@ pub async fn get_at_version(
         .query(
             "SELECT a.project_id,
                     v.title, v.description, v.favicon, v.kind, v.label,
-                    v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path
+                    v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path,
+                    a.session_id
              FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
              WHERE v.artifact_id = ?1 AND v.version = ?2",
             vec![
@@ -652,11 +663,13 @@ pub async fn get_at_version(
     let size_bytes = int_at(&row, 8)?;
     let created_at = required_text(&row, 9)?;
     let path = required_text(&row, 10)?;
+    let session_id = text_at(&row, 11)?;
     let bytes = blob::read(data_dir, &path)?;
     Ok((
         Artifact {
             id: artifact_id.to_string(),
             project_id,
+            session_id,
             title,
             description,
             favicon,
@@ -710,14 +723,57 @@ pub async fn read_blob(data_dir: &Path, artifact: &Artifact) -> Result<Vec<u8>> 
     blob::read(data_dir, &artifact.path)
 }
 
-/// List a project's artifacts, most recently updated first.
-pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
+/// List a project's artifacts, optionally filtered by session, most recently updated first.
+pub async fn list_with_session(
+    db: &Database,
+    project_id: &str,
+    session_id: Option<&str>,
+) -> Result<Vec<Artifact>> {
+    if let Some(sid) = session_id {
+        let is_valid = match crate::store::sessions::get(db, sid).await? {
+            Some(s) => s.deleted_at.is_none(),
+            None => false,
+        };
+        if !is_valid {
+            return Ok(Vec::new());
+        }
+    }
+    let conn = super::connect(db)?;
+    let (sql, params) = match session_id {
+        Some(sid) => (
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+             FROM artifacts WHERE project_id = ?1 AND session_id = ?2 ORDER BY updated_at DESC",
+            vec![Value::Text(project_id.to_string()), Value::Text(sid.to_string())],
+        ),
+        None => (
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+             FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
+            vec![Value::Text(project_id.to_string())],
+        ),
+    };
+    let mut rows = conn.query(sql, params).await.map_err(engine)?;
+    let mut artifacts = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        artifacts.push(artifact_from_row(&row)?);
+    }
+    Ok(artifacts)
+}
+
+/// List artifacts across all projects for a specific session.
+pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Artifact>> {
+    let is_valid = match crate::store::sessions::get(db, session_id).await? {
+        Some(s) => s.deleted_at.is_none(),
+        None => false,
+    };
+    if !is_valid {
+        return Ok(Vec::new());
+    }
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
-             FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
-            vec![Value::Text(project_id.to_string())],
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+             FROM artifacts WHERE session_id = ?1 ORDER BY updated_at DESC",
+            vec![Value::Text(session_id.to_string())],
         )
         .await
         .map_err(engine)?;
@@ -728,6 +784,11 @@ pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
     Ok(artifacts)
 }
 
+/// List a project's artifacts, most recently updated first.
+pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Artifact>> {
+    list_with_session(db, project_id, None).await
+}
+
 async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
     let conn = super::connect(db)?;
     row_on(&conn, artifact_id).await
@@ -736,7 +797,7 @@ async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
 async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
              FROM artifacts WHERE id = ?1",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -799,6 +860,7 @@ async fn append_event(
     version: i64,
     protected: bool,
     label: Option<&str>,
+    session_id: Option<&str>,
 ) -> Result<String> {
     events::append_in_tx(
         tx,
@@ -819,7 +881,7 @@ async fn append_event(
             })),
             needs_action: false,
             thread_id: None,
-            session_id: None,
+            session_id: session_id.map(str::to_string),
         },
     )
     .await
@@ -957,6 +1019,7 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         created_at: required_text(row, 10)?,
         updated_at: required_text(row, 11)?,
         path: required_text(row, 12)?,
+        session_id: text_at(row, 13)?,
     })
 }
 

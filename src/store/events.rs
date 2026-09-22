@@ -62,6 +62,8 @@ pub struct FeedQuery {
     pub limit: i64,
     /// Restrict to these kinds.
     pub kinds: Option<Vec<String>>,
+    /// Restrict to this session.
+    pub session_id: Option<String>,
     /// Opt in to the hub's own audit events. This is a confinement rather
     /// than a filter: it defaults to false, so a query that leaves it unset
     /// never sees the audit trail, whatever kinds it names.
@@ -75,6 +77,7 @@ impl Default for FeedQuery {
             before: None,
             limit: FEED_LIMIT_DEFAULT,
             kinds: None,
+            session_id: None,
             include_audit: false,
         }
     }
@@ -548,17 +551,40 @@ pub struct FeedPage {
     pub next_before: Option<String>,
 }
 
-/// Read a page of the feed.
-pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Result<FeedPage> {
+/// Read a page of the feed, optionally scoped to a project.
+pub async fn read_feed_scoped(
+    db: &Database,
+    project_id: Option<&str>,
+    query: &FeedQuery,
+) -> Result<FeedPage> {
     let conn = super::connect(db)?;
     let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
     let mut sql = String::from(
         "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
-         FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.project_id = ?1",
+         FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE 1=1",
     );
-    let mut params: Vec<Value> = vec![Value::Text(project_id.to_string())];
+    let mut params: Vec<Value> = Vec::new();
 
+    if let Some(project_id) = project_id {
+        params.push(Value::Text(project_id.to_string()));
+        sql.push_str(&format!(" AND e.project_id = ?{}", params.len()));
+    }
+    if let Some(session_id) = &query.session_id {
+        let is_valid = match crate::store::sessions::get(db, session_id).await? {
+            Some(s) => s.deleted_at.is_none(),
+            None => false,
+        };
+        if !is_valid {
+            return Ok(FeedPage {
+                events: Vec::new(),
+                next_since: None,
+                next_before: None,
+            });
+        }
+        params.push(Value::Text(session_id.clone()));
+        sql.push_str(&format!(" AND e.session_id = ?{}", params.len()));
+    }
     if let Some(kinds) = query.kinds.as_ref().filter(|kinds| !kinds.is_empty()) {
         let mut placeholders = Vec::with_capacity(kinds.len());
         for kind in kinds {
@@ -619,6 +645,16 @@ pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Re
         next_since,
         next_before,
     })
+}
+
+/// Read a page of one project's feed.
+pub async fn read_feed(db: &Database, project_id: &str, query: &FeedQuery) -> Result<FeedPage> {
+    read_feed_scoped(db, Some(project_id), query).await
+}
+
+/// Read a page of the feed across all projects.
+pub async fn read_global_feed(db: &Database, query: &FeedQuery) -> Result<FeedPage> {
+    read_feed_scoped(db, None, query).await
 }
 
 fn validate_kind(kind: &str) -> Result<()> {

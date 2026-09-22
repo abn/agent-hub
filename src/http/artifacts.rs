@@ -36,22 +36,65 @@ pub struct ArtifactList {
     pub artifacts: Vec<Artifact>,
 }
 
-/// `GET /api/v1/projects/{id}/artifacts`
+/// Query parameters for listing artifacts.
+#[derive(Debug, Default, Deserialize)]
+pub struct ArtifactListQuery {
+    /// Filter to artifacts published during this session.
+    pub session: Option<String>,
+    /// Alias for `session`.
+    pub session_id: Option<String>,
+}
+
+impl ArtifactListQuery {
+    fn session_filter(&self) -> Option<&str> {
+        self.session.as_deref().or(self.session_id.as_deref())
+    }
+}
+
+/// `GET /api/v1/artifacts`
 ///
-/// A valid bearer token is required.
-pub async fn list(
+/// A valid bearer token is required. Filtered by `?session=<id>`.
+pub async fn list_session(
     State(state): State<AppState>,
-    ProblemPath(project_id): ProblemPath<String>,
     headers: HeaderMap,
+    ProblemQuery(query): ProblemQuery<ArtifactListQuery>,
 ) -> std::result::Result<Json<ArtifactList>, Problem> {
     state
         .auth
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let artifacts = artifact_store::list(&state.db, &project_id)
-        .await
+    let artifacts = match query.session_filter() {
+        Some(session_id) => artifact_store::list_for_session(&state.db, session_id).await,
+        None => {
+            return Err(Problem::from_error(&Error::InvalidArgument(
+                "session query parameter is required".to_string(),
+            )));
+        }
+    }
+    .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(Json(ArtifactList { artifacts }))
+}
+
+/// `GET /api/v1/projects/{id}/artifacts`
+///
+/// A valid bearer token is required. Optionally filtered by `?session=<id>`.
+pub async fn list(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+    ProblemQuery(query): ProblemQuery<ArtifactListQuery>,
+) -> std::result::Result<Json<ArtifactList>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
+
+    let artifacts =
+        artifact_store::list_with_session(&state.db, &project_id, query.session_filter())
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(ArtifactList { artifacts }))
 }

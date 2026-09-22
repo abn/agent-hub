@@ -397,6 +397,7 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
             kind: "markdown",
             content: b"# notes",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -415,6 +416,7 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
             kind: "markdown",
             content: b"# mine",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -537,6 +539,7 @@ async fn comment_mutations_are_concealed_from_strangers() {
             kind: "markdown",
             content: b"# notes",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -1220,6 +1223,7 @@ async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
             kind: "markdown",
             content: b"needle",
             envelope: None,
+            session_id: None,
         },
         None,
     )

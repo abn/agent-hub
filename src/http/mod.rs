@@ -73,6 +73,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/enrol/status", get(enrol::status))
         .route("/api/v1/enrol/{id}/approve", post(enrol::approve))
         .route("/api/v1/enrol/{id}/refuse", post(enrol::refuse))
+        .route("/api/v1/artifacts", get(artifacts::list_session))
         .route(
             "/api/v1/artifacts/{id}",
             get(artifacts::content).delete(artifacts::destroy),
@@ -87,6 +88,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/artifacts/{id}/comments/{comment_id}",
             patch(artifacts::comment_resolve).delete(artifacts::comment_remove),
         )
+        .route("/api/v1/feed", get(feed::read_global))
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))
         .route("/api/v1/inbox/read-all", post(inbox::read_all))

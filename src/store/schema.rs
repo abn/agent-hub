@@ -58,6 +58,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 11,
         ddl: V11,
     },
+    Migration {
+        version: 12,
+        ddl: V12,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -375,4 +379,13 @@ ALTER TABLE agents ADD COLUMN enrol_note TEXT;
 ALTER TABLE agents ADD COLUMN enrol_source TEXT;
 CREATE INDEX IF NOT EXISTS agents_pending_source
   ON agents(enrol_source) WHERE state = 'pending';
+"#;
+
+/// Version 12: an artifact records the session it was written during.
+///
+/// Rows written before this migration keep NULL. The index supports listing
+/// artifacts for a session without scanning the project.
+const V12: &str = r#"
+ALTER TABLE artifacts ADD COLUMN session_id TEXT;
+CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 "#;

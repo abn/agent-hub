@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-22, session lineage for artifacts and feed
+
+* **Update**: [The agent surface](architecture/agent-surface.md), [Data
+  model](architecture/data-model.md), and [Artifacts](usage/artifacts.md)
+  document session lineage on artifacts and session filtering across feed and
+  artifacts. Artifact publish and update record the caller session derived from
+  the authenticated principal, with callers unable to forge lineage. Feed and
+  artifact listings support optional session filtering via REST routes and MCP
+  tools (`feed_read`, `artifact_list`), returning empty results when querying
+  an unknown or pruned session. Artifact search documents are preserved during
+  session pruning.
+
 ## 2026-09-23, agent self-enrolment and pending token refusal indistinguishability
 
 * **Update**: [The agent surface](architecture/agent-surface.md) documents

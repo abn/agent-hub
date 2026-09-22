@@ -150,6 +150,7 @@ async fn storage_usage_sums_every_stored_version() {
             kind: "html",
             content: b"12345",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -754,6 +755,7 @@ async fn serves_artifact_content_for_the_viewer() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -800,6 +802,7 @@ async fn serves_artifact_content_for_the_viewer() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1099,6 +1102,7 @@ async fn public_artifact_page_loads_for_the_embed() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1143,6 +1147,7 @@ async fn comments_store_round_trip_behind_the_drawer() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
@@ -1270,6 +1275,7 @@ async fn protected_artifact_serves_the_locked_host_shell() {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )

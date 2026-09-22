@@ -108,6 +108,27 @@ async fn migrate_creates_schema_and_search_index() {
     assert!(meta.next().await.expect("row").is_none());
     drop(meta);
 
+    // Migration 12 adds session_id to artifacts and an index over it.
+    let mut artifact_session = conn
+        .query("SELECT session_id FROM artifacts LIMIT 1", ())
+        .await
+        .expect("artifacts.session_id exists");
+    assert!(artifact_session.next().await.expect("row").is_none());
+    drop(artifact_session);
+
+    let mut artifact_session_index = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'artifacts_session'",
+            (),
+        )
+        .await
+        .expect("index query");
+    assert!(
+        artifact_session_index.next().await.expect("row").is_some(),
+        "missing artifacts_session index"
+    );
+    drop(artifact_session_index);
+
     // Migration 5 adds discussion plus the idempotency column recording it.
     let mut comments = conn
         .query(
@@ -892,7 +913,7 @@ async fn migration_ten_adds_confidential_and_drops_trust() {
     .expect("insert agent");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 11, "every pending migration is applied");
+    assert_eq!(version, latest(), "every pending migration is applied");
 
     let mut rows = conn
         .query(
@@ -947,7 +968,7 @@ async fn migration_eleven_adds_enrolment_columns_and_index() {
     .expect("insert agent");
 
     let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, 11);
+    assert_eq!(version, latest());
 
     let mut rows = conn
         .query(
@@ -977,4 +998,75 @@ async fn migration_eleven_adds_enrolment_columns_and_index() {
         idx.next().await.expect("row").is_some(),
         "missing agents_pending_source index"
     );
+}
+
+#[tokio::test]
+async fn migration_twelve_adds_session_id_to_artifacts() {
+    let dir = TempDir::new("store-schema-v12");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 12) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-22T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+
+    // An artifact written before this migration has no session column to set.
+    conn.execute(
+        "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at)
+         VALUES ('art-1', 'proj', 'Older Artifact', '', '', NULL, 'markdown', 1, NULL, 'proj/art-1/1.md', 10, '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert older artifact");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    // The artifact that predates the migration keeps a null session.
+    let mut rows = conn
+        .query(
+            "SELECT id, session_id FROM artifacts WHERE id = 'art-1'",
+            (),
+        )
+        .await
+        .expect("query artifacts");
+    let row = rows.next().await.expect("row").expect("row present");
+    assert_eq!(row.get::<String>(0).expect("id"), "art-1");
+    assert!(row.get::<Option<String>>(1).expect("session_id").is_none());
+
+    let mut idx = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'artifacts_session'",
+            (),
+        )
+        .await
+        .expect("index query");
+    assert!(
+        idx.next().await.expect("row").is_some(),
+        "artifacts_session index exists"
+    );
+
+    drop(conn);
+    drop(db);
 }

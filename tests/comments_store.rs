@@ -24,6 +24,7 @@ async fn publish(db: &turso::Database, dir: &std::path::Path) -> String {
             kind: "html",
             content: b"<h1>body</h1>",
             envelope: None,
+            session_id: None,
         },
         None,
     )
@@ -481,6 +482,7 @@ async fn deleting_an_artifact_or_project_drops_its_comments() {
             kind: "html",
             content: b"<h1>body</h1>",
             envelope: None,
+            session_id: None,
         },
         None,
     )

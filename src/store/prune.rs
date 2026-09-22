@@ -264,7 +264,7 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     .await
     .map_err(engine)?;
     tx.execute(
-        "DELETE FROM search_docs WHERE session_id = ?1",
+        "DELETE FROM search_docs WHERE type = 'brain' AND session_id = ?1",
         vec![Value::Text(session_id.to_string())],
     )
     .await

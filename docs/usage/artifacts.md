@@ -37,7 +37,7 @@ artifact_publish(project_id, title, kind, content, description?, favicon?, label
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
-artifact_list(project_id)
+artifact_list(project_id, session?)
 artifact_delete(artifact_id)
 ```
 
@@ -50,6 +50,10 @@ A publish carries display metadata: a `description` (2000 characters at most),
 a `favicon` (a short emoji mark), and a `label` naming the version (60 bytes at
 most). A blank title on a markdown artifact falls back to its first heading;
 otherwise the title is required.
+
+A publish or update records the caller session lineage when the agent acts
+within an active session. Callers cannot supply or forge session lineage: the
+session identifier is derived directly from the authenticated caller principal.
 
 Concurrent updates are guarded by optimistic concurrency. Pass the version the
 edit is based on as `base_version`: if the artifact has moved on, the update
@@ -66,7 +70,8 @@ optional `version` to read one snapshot instead. For a protected artifact that
 content is the ciphertext; decryption is the client's job and never the
 server's. `artifact_versions` lists the immutable history oldest first, each
 entry with its own title, description, label, and encryption state.
-`artifact_list` lists a project's artifacts, most recently updated first.
+`artifact_list` lists a project's artifacts, most recently updated first,
+optionally filtered by `session`.
 `artifact_delete` removes an artifact, its history, and its index row, and
 records a `deleted` event on the feed.
 
@@ -77,6 +82,9 @@ toggle, and a version picker when history exists, while the frame runs the
 authored content with scripts allowed but no network, no storage, and no
 same-origin access. The PWA embeds the same page. The REST routes serve the
 same reads to the PWA:
+`GET /api/v1/projects/:id/artifacts` (with optional `?session=ID`) and
+`GET /api/v1/artifacts?session=ID` list artifacts, filtered by session when
+specified;
 `GET /api/v1/artifacts/:id` (with `?version=N`) returns the metadata and
 content, and for a public markdown artifact includes a `rendered` HTML field;
 `GET /api/v1/artifacts/:id/versions` returns the history;

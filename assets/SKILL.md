@@ -173,7 +173,7 @@ target, and session-bound work goes through the proxy.
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write goes only to your own active session, which is the only one it may name. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
-| `feed_read` | Read a project feed, optionally filtered by kind. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
+| `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
 | `answer_post` | Reply to a question by its question id. |
@@ -203,7 +203,7 @@ brain_delete(path, store, session?, project_id?, if_version?)
 brain_promote(from_path, to_path, project_id?, type?, title?, description?, tags?, if_version?)
                                          -> {ok, path, version, lint[]}
 session := {session_id} | {agent, name, project_id?}
-feed_read(project_id, since?, before?, limit?, kinds?)
+feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
 question_post(project_id, subject, body?, context?, to?, idempotency_key?)
 answer_post(question_id, body, idempotency_key?)
@@ -213,7 +213,7 @@ artifact_publish(project_id, title, kind, content, description?, favicon?, label
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
-artifact_list(project_id)
+artifact_list(project_id, session?)
 artifact_delete(artifact_id)
 comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
 comment_list(artifact_id)
@@ -498,7 +498,7 @@ artifact_publish(project_id, title, kind, content, description?, favicon?, label
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
-artifact_list(project_id)
+artifact_list(project_id, session?)
 artifact_delete(artifact_id)
 comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
 comment_list(artifact_id)

@@ -35,6 +35,7 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
             description: "",
             favicon: "",
             label: None,
+            session_id: None,
         },
         None,
     )
