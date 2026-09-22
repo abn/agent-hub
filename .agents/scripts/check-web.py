@@ -943,17 +943,45 @@ def check_glyph_names(errors: list[str]) -> None:
     if not known:
         errors.append("web/glyphs.mjs declares no glyphs, so the table is not being read")
         return
+    asked: set[str] = set()
     for path in sorted(WEB.glob("*.mjs")):
         if path.name == "glyphs.mjs":
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for number, line in enumerate(text.splitlines(), start=1):
             for name in re.findall(r"glyphSvg\(\s*[\"']([A-Za-z]+)[\"']", line):
+                asked.add(name)
                 if name not in known:
                     errors.append(
                         f"{path}:{number}: asks for the glyph {name!r}, which web/glyphs.mjs"
                         " does not have; it would render an empty control"
                     )
+
+    # And the other direction. A glyph nothing draws is how the set grew from
+    # eleven to nineteen without anyone looking at it, and how `bellOff` and
+    # `bellStruck` came to hold byte-identical paths: one was never drawn, so
+    # nothing ever put the two side by side. The set is a design decision with
+    # a rule behind it, and an entry no screen uses is not covered by it.
+    for name in sorted(known - asked):
+        errors.append(
+            f"web/glyphs.mjs: the glyph {name!r} is declared and nothing draws it;"
+            " retire it or draw it, because an unused entry is one no review sees"
+        )
+
+    # Two names for one drawing is two entries in the set and one motif in the
+    # app. The reader learns a distinction the interface does not make.
+    by_path: dict[str, list[str]] = {}
+    for name, drawing in re.findall(
+        r"^  ([A-Za-z]+):\s*\n?\s*'(.*?)',$", table.read_text(encoding="utf-8"), re.M | re.S
+    ):
+        by_path.setdefault(drawing.strip(), []).append(name)
+    for drawing, names in sorted(by_path.items()):
+        if len(names) > 1:
+            errors.append(
+                f"web/glyphs.mjs: {' and '.join(repr(n) for n in sorted(names))} are the"
+                " same drawing under different names; keep one"
+            )
+
 
 def main() -> int:
     errors: list[str] = []

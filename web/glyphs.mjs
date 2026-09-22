@@ -2,14 +2,9 @@
 // Glyphs are inline SVG strings with currentColor, aria-hidden, space after 'M'.
 
 export const GLYPH_PATHS = {
-  anchorPin:
-    '<path d="M 12 21s6-6.2 6-10.2a6 6 0 0 0-12 0C6 14.8 12 21 12 21z"/><circle cx="12" cy="10.5" r="2"/>',
   bell: '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 10 19a2 2 0 0 0 4 0"/>',
-  bellOff:
-    '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
   bellStruck:
     '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
-  check: '<path d="M 5 13l4 4 10-10"/>',
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
   chevronDown: '<path d="M 6 9l6 6 6-6"/>',
   chevronRight: '<path d="M 9 5l7 7-7 7"/>',
