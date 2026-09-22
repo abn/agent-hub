@@ -18,6 +18,8 @@
 
 import { api } from "./api.mjs";
 import { esc, main } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
+import { formatBytes } from "./storage.mjs";
 
 let sequence = 0;
 let openDialog = null;
@@ -478,5 +480,197 @@ export function openCreateProjectDialog({ onCreated } = {}) {
       },
       { once: true },
     );
+  });
+}
+
+// The dedicated typed-confirmation dialog for project deletion.
+// Width: 330px, manifest block of up to 4 counts, consequences sentence,
+// confirmation slug input, Cancel and Delete actions.
+export function confirmProjectDelete({ project, stats = null, footprint = "" }) {
+  if (openDialog) return Promise.resolve(false);
+
+  const opener = document.activeElement;
+  const el = document.createElement("dialog");
+  el.className = "dialog dialog-project-delete";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-modal", "true");
+  sequence += 1;
+  const titleId = `dialog-del-title-${sequence}`;
+  el.setAttribute("aria-labelledby", titleId);
+
+  const content = document.createElement("div");
+  content.className = "dialog-del-content";
+
+  const title = document.createElement("h2");
+  title.className = "dialog-del-title";
+  title.id = titleId;
+  title.textContent = `Delete ${project.display_name}?`;
+  content.appendChild(title);
+
+  const body = document.createElement("p");
+  body.className = "dialog-del-body";
+  body.textContent = "This deletes the project and everything in it.";
+  content.appendChild(body);
+
+  const manifestRows = [];
+  if (stats) {
+    if (stats.artifacts > 0) {
+      manifestRows.push({ label: "Artifacts", value: String(stats.artifacts) });
+    }
+    if (stats.threads > 0) {
+      manifestRows.push({ label: "Threads", value: String(stats.threads) });
+    }
+    const diskBytes = stats.disk_bytes ?? stats.files_on_disk_bytes;
+    if (diskBytes != null && diskBytes > 0) {
+      manifestRows.push({ label: "Files on disk", value: formatBytes(diskBytes) });
+    } else if (footprint && footprint !== "0 B") {
+      manifestRows.push({ label: "Files on disk", value: footprint });
+    }
+    if (stats.agents_written > 0) {
+      manifestRows.push({ label: "Agents that have written here", value: String(stats.agents_written) });
+    }
+  }
+
+  if (manifestRows.length > 0) {
+    const manifest = document.createElement("div");
+    manifest.className = "dialog-del-manifest";
+    for (const row of manifestRows) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "dialog-del-row";
+      const lbl = document.createElement("span");
+      lbl.textContent = row.label;
+      const val = document.createElement("span");
+      val.className = "mono";
+      val.textContent = row.value;
+      rowEl.append(lbl, val);
+      manifest.appendChild(rowEl);
+    }
+    content.appendChild(manifest);
+  }
+
+  const consequence = document.createElement("p");
+  consequence.className = "dialog-del-consequence";
+  const strong = document.createElement("strong");
+  strong.textContent = "There is no undo and no restore. ";
+  consequence.appendChild(strong);
+  consequence.appendChild(document.createTextNode("Agents writing to "));
+  const slugSpan = document.createElement("span");
+  slugSpan.className = "mono";
+  slugSpan.textContent = `/p/${project.id}`;
+  consequence.appendChild(slugSpan);
+  consequence.appendChild(document.createTextNode(" will start getting errors."));
+  content.appendChild(consequence);
+
+  const fieldWrap = document.createElement("div");
+  fieldWrap.className = "dialog-del-field-wrap";
+  const inputId = `del-slug-input-${sequence}`;
+  const label = document.createElement("label");
+  label.htmlFor = inputId;
+  label.className = "dialog-del-label";
+  label.append(
+    document.createTextNode("Type "),
+    (() => {
+      const s = document.createElement("span");
+      s.className = "mono";
+      s.textContent = project.id;
+      return s;
+    })(),
+    document.createTextNode(" to confirm"),
+  );
+  const input = document.createElement("input");
+  input.id = inputId;
+  input.className = "dialog-del-input mono";
+  input.type = "text";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  fieldWrap.append(label, input);
+  content.appendChild(fieldWrap);
+
+  el.appendChild(content);
+
+  const actions = document.createElement("div");
+  actions.className = "dialog-del-actions";
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "dialog-del-cancel";
+  cancel.textContent = "Cancel";
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "dialog-del-btn";
+  delBtn.disabled = true;
+  delBtn.setAttribute("aria-disabled", "true");
+  delBtn.innerHTML = `${glyphSvg("trash", { size: 16 })}<span>Delete</span>`;
+
+  actions.append(cancel, delBtn);
+  el.appendChild(actions);
+
+  document.body.appendChild(el);
+  openDialog = el;
+  document.documentElement.classList.add("has-dialog");
+  el.showModal();
+  input.focus();
+
+  input.addEventListener("input", () => {
+    const matches = input.value.trim() === project.id;
+    delBtn.disabled = !matches;
+    if (matches) {
+      delBtn.removeAttribute("aria-disabled");
+    } else {
+      delBtn.setAttribute("aria-disabled", "true");
+    }
+  });
+
+  return new Promise((resolve) => {
+    let closed = false;
+    const finish = (committed) => {
+      if (closed) return;
+      closed = true;
+      openDialog = null;
+      document.documentElement.classList.remove("has-dialog");
+      el.remove();
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus({ preventScroll: true });
+      } else if (!document.activeElement || document.activeElement === document.body) {
+        main.focus({ preventScroll: true });
+      }
+      resolve(committed);
+    };
+
+    cancel.addEventListener("click", () => finish(false));
+    delBtn.addEventListener("click", () => {
+      if (!delBtn.disabled) finish(true);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (!delBtn.disabled) finish(true);
+      }
+    });
+
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finish(false);
+      } else if (e.key === "Tab") {
+        const ring = [input, cancel, delBtn];
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    });
+
+    el.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      finish(false);
+    });
   });
 }

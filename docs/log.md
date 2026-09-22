@@ -3,6 +3,14 @@
 This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
+## 2026-09-22, project deletion overflow menu and typed confirmation manifest
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  the project deletion flow: an overflow menu in the project header with
+  Project settings, Copy path, and Delete project (excluded on personal
+  spaces), a dedicated 330px modal dialog featuring an impact manifest with
+  counts for Artifacts, Threads, Files on disk, and Agents that have written,
+  and slug-matching typed confirmation before execution.
 
 ## 2026-09-22, settings gear relocated to home and project creation sheet
 

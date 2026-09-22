@@ -373,3 +373,69 @@ async fn a_patch_that_writes_nothing_does_not_wake_the_clients() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_ne!(state.generation(), quiet, "a real change is");
 }
+
+#[tokio::test]
+async fn project_stats_report_threads_agents_written_and_disk_bytes() {
+    let state = state().await;
+    projects::create(&state.db, "homelab", "Homelab")
+        .await
+        .expect("create project");
+
+    let q1 = events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "homelab".to_string(),
+            kind: "question".to_string(),
+            summary: "event one".to_string(),
+            payload: None,
+            needs_action: true,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+
+    events::append(
+        &state.db,
+        "agent-two",
+        None,
+        NewEvent {
+            project_id: "homelab".to_string(),
+            kind: "question".to_string(),
+            summary: "event two".to_string(),
+            payload: None,
+            needs_action: true,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+
+    events::append(
+        &state.db,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "homelab".to_string(),
+            kind: "answer".to_string(),
+            summary: "event three".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: Some(q1),
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+
+    let response = call(&state, "GET", "/api/v1/projects/homelab/stats", None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["threads"], 2);
+    assert_eq!(body["agents_written"], 2);
+    assert!(body["disk_bytes"].is_number());
+}

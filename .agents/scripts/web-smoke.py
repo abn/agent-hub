@@ -6286,7 +6286,154 @@ def project_settings_steps(page, watch: Watch, port: int, path: str, patches: li
         watch.armed = armed
 
 
+def check_project_delete(page, watch: Watch, port: int) -> None:
+    """Project deletion: personal space invariant, overflow menu, typed confirmation dialog, and toast without undo."""
+    watch.enter("project delete")
+
+    # 1. Personal space has NO Delete item in overflow menu
+    projects = json.loads(harness.request(port, "GET", "/api/v1/projects"))["projects"]
+    personal = next((p for p in projects if p.get("owner_agent")), None)
+    if not personal:
+        harness.request(port, "POST", "/api/v1/agents", {"id": "del-agent", "display_name": "Delete Test Agent"})
+        projects = json.loads(harness.request(port, "GET", "/api/v1/projects"))["projects"]
+        personal = next((p for p in projects if p.get("owner_agent")), None)
+
+    if not personal:
+        watch.fail("failed to find or create an agent personal space")
+        return
+
+    goto(page, f"#/projects/{quote(personal['id'])}/feed", personal["display_name"])
+    page.wait_for_selector("main .proj-overflow-btn")
+    page.click("main .proj-overflow-btn")
+    if not settle(page, "!document.querySelector('main .proj-overflow-menu').hidden"):
+        watch.fail("personal space overflow menu did not open")
+    del_item = page.locator("main .proj-menu-delete")
+    if del_item.count() != 0:
+        watch.fail(f"personal space {personal['id']!r} overflow menu contains a Delete item")
+    page.keyboard.press("Escape")
+    if not settle(page, "document.querySelector('main .proj-overflow-menu').hidden"):
+        watch.fail("personal space overflow menu did not close on Escape")
+
+    # 2. Regular project has Delete project item with trash glyph
+    proj_id = "test-delete-proj"
+    proj_name = "Delete Me Project"
+    harness.request(port, "POST", "/api/v1/projects", {"id": proj_id, "display_name": proj_name})
+    harness.seed_versioned_artifact(port, proj_id)
+    mcp_sess: list[str] = []
+    harness.mcp_call(
+        port,
+        mcp_sess,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, mcp_sess, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    harness.mcp_call(
+        port,
+        mcp_sess,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "question_post",
+                "arguments": {
+                    "project_id": proj_id,
+                    "subject": "Need input?",
+                },
+            },
+        },
+    )
+
+
+
+    goto(page, f"#/projects/{proj_id}/feed", proj_name)
+    page.wait_for_selector("main .proj-overflow-btn")
+    page.click("main .proj-overflow-btn")
+    if not settle(page, "!document.querySelector('main .proj-overflow-menu').hidden"):
+        watch.fail("regular project overflow menu did not open")
+
+    del_item = page.locator("main .proj-menu-delete")
+    if del_item.count() != 1:
+        watch.fail("regular project overflow menu missing Delete project item")
+    elif "Delete project" not in del_item.inner_text():
+        watch.fail(f"Delete item text is {del_item.inner_text()!r}, expected 'Delete project'")
+    elif del_item.locator("svg").count() != 1:
+        watch.fail("Delete item missing trash glyph svg")
+
+    # 3. Custom typed confirmation dialog: 330px width, 4 counts, consequences sentence
+    del_item.click()
+    page.wait_for_selector("dialog.dialog-project-delete[open]")
+    dialog = page.locator("dialog.dialog-project-delete[open]")
+    box = dialog.bounding_box()
+    if not box or round(box["width"]) != 330:
+        watch.fail(f"dialog width is {box['width'] if box else None!r}, expected 330px")
+
+    manifest_rows = page.locator("dialog.dialog-project-delete .dialog-del-row")
+    if manifest_rows.count() != 4:
+        watch.fail(f"manifest showing {manifest_rows.count()} rows, expected 4")
+    rows_text = manifest_rows.all_inner_texts()
+    for label in ["Artifacts", "Threads", "Files on disk", "Agents that have written here"]:
+        if not any(label in r for r in rows_text):
+            watch.fail(f"manifest missing row for {label!r}: {rows_text}")
+
+    consequence = page.locator("dialog.dialog-project-delete .dialog-del-consequence").inner_text()
+    expected_consequence = (
+        f"There is no undo and no restore. Agents writing to /p/{proj_id} will start getting errors."
+    )
+    if consequence.strip() != expected_consequence:
+        watch.fail(f"consequences text {consequence!r} did not match expected {expected_consequence!r}")
+
+    # 4. Focus starts on text field, Delete disabled until exact slug
+    focused = page.evaluate("document.activeElement?.className || ''")
+    if "dialog-del-input" not in focused:
+        watch.fail(f"focus started on {focused!r}, expected text field")
+
+    del_btn = page.locator("dialog.dialog-project-delete .dialog-del-btn")
+    if not page.is_disabled("dialog.dialog-project-delete .dialog-del-btn"):
+        watch.fail("Delete button is enabled before typing slug")
+    if del_btn.get_attribute("aria-disabled") != "true":
+        watch.fail("Delete button missing aria-disabled='true'")
+
+    page.fill("dialog.dialog-project-delete .dialog-del-input", proj_id[:-1])
+    if not page.is_disabled("dialog.dialog-project-delete .dialog-del-btn"):
+        watch.fail("Delete button enabled with partial slug")
+
+    page.fill("dialog.dialog-project-delete .dialog-del-input", proj_id)
+    if page.is_disabled("dialog.dialog-project-delete .dialog-del-btn"):
+        watch.fail("Delete button stayed disabled when slug matched exactly")
+    if del_btn.get_attribute("aria-disabled") is not None:
+        watch.fail("Delete button still has aria-disabled after typing exact slug")
+
+    # 5. Deletion works and toast has no Undo
+    del_btn.click()
+    page.wait_for_selector("dialog.dialog-project-delete", state="detached")
+    if not settle(
+        page,
+        "[...document.querySelectorAll('.toast-text')].some((t) => t.textContent === 'Project deleted.')",
+    ):
+        watch.fail("deleting raised no 'Project deleted.' toast")
+    if page.locator(".toast-undo").count() != 0:
+        watch.fail("toast for project deletion carries an Undo button")
+    if not settle(page, "location.hash === '#/projects'"):
+        watch.fail(f"after delete, reader landed at {page.evaluate('location.hash')!r}, expected '#/projects'")
+    if not settle(page, f"!document.querySelector('.project-row[data-id=\"{proj_id}\"]')"):
+        watch.fail(f"deleted project {proj_id!r} is still in projects list")
+
+    listed = json.loads(harness.request(port, "GET", "/api/v1/projects"))["projects"]
+    if any(p["id"] == proj_id for p in listed):
+        watch.fail(f"deleted project {proj_id!r} still returned by backend")
+
+
 def name_problem(page) -> dict:
+
     """What the Name field says is wrong with it, through its own ARIA."""
     return page.evaluate(
         "(() => { const i = document.querySelector(" + json.dumps(PSET_NAME) + ");"
@@ -11838,6 +11985,7 @@ def run() -> int:
                 run_step(watch, check_home_storage_scale, page, watch)
                 run_step(watch, check_home_quiet, page, watch)
                 run_step(watch, check_project_settings, page, watch, port)
+                run_step(watch, check_project_delete, page, watch, port)
                 run_step(watch, check_settings_guard_history, page, watch, project)
                 run_step(watch, check_feed_screen, browser, watch, port)
                 run_step(watch, check_feed_long_today, browser, watch, port)

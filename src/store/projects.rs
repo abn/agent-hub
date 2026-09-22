@@ -220,7 +220,6 @@ pub(crate) async fn insert_owned(
     Ok(())
 }
 
-/// Fetch one project.
 /// The counts a project header and its tab row show.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ProjectStats {
@@ -234,17 +233,82 @@ pub struct ProjectStats {
     pub kb_pages: i64,
     /// Agents with a session in this project touched inside the active window.
     pub agents_active: i64,
+    /// Distinct non-null threads across events in this project.
+    pub threads: i64,
+    /// Distinct non-null actors across events in this project.
+    pub agents_written: i64,
+    /// Total bytes on disk for this project (artifacts, session brains, knowledge base).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_bytes: Option<i64>,
+    /// Total bytes on disk for this project (alias).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_on_disk_bytes: Option<i64>,
+}
+
+async fn disk_bytes_for_project(
+    conn: &turso::Connection,
+    data_dir: &Path,
+    id: &str,
+) -> Result<i64> {
+    let mut artifacts = conn
+        .query(
+            "SELECT COALESCE(SUM(v.size_bytes), 0)
+             FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
+             WHERE a.project_id = ?1",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let artifact_bytes = match artifacts.next().await.map_err(engine)? {
+        Some(row) => match row.get_value(0).map_err(engine)? {
+            Value::Integer(b) => b,
+            _ => 0,
+        },
+        None => 0,
+    };
+    drop(artifacts);
+
+    let mut sessions = conn
+        .query(
+            "SELECT brain_path FROM sessions WHERE project_id = ?1 AND deleted_at IS NULL",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let mut session_bytes = 0i64;
+    while let Some(row) = sessions.next().await.map_err(engine)? {
+        if let Value::Text(brain_path) = row.get_value(0).map_err(engine)? {
+            session_bytes += crate::brain::file_bytes(&data_dir.join(&brain_path));
+        }
+    }
+    drop(sessions);
+
+    let kb_file = crate::brain::knowledge_dir(data_dir)
+        .join(id)
+        .join(format!("{}.db", crate::brain::KNOWLEDGE_FILE));
+    let kb_bytes = crate::brain::file_bytes(&kb_file);
+
+    Ok(artifact_bytes + session_bytes + kb_bytes)
 }
 
 /// Count what a project holds.
 ///
 /// Five indexed counts, no walk and nothing per row: a project tab row costs
 /// one request whatever the project holds.
-pub async fn stats(db: &Database, id: &str, active_since: &str) -> Result<ProjectStats> {
+pub async fn stats(
+    db: &Database,
+    data_dir: Option<&Path>,
+    id: &str,
+    active_since: &str,
+) -> Result<ProjectStats> {
     let conn = super::connect(db)?;
     let project = Value::Text(id.to_string());
     let count =
         async |sql: &str| crate::store::events::count_on(&conn, sql, vec![project.clone()]).await;
+    let disk_bytes = match data_dir {
+        Some(dir) => disk_bytes_for_project(&conn, dir, id).await.ok(),
+        None => None,
+    };
     Ok(ProjectStats {
         project_id: id.to_string(),
         events: crate::store::events::count_for_project(db, id).await?,
@@ -258,6 +322,16 @@ pub async fn stats(db: &Database, id: &str, active_since: &str) -> Result<Projec
         kb_pages: count("SELECT COUNT(*) FROM search_docs WHERE project_id = ?1 AND type = 'kb'")
             .await?,
         agents_active: crate::store::sessions::agents_active(db, active_since, Some(id)).await?,
+        threads: count(
+            "SELECT COUNT(DISTINCT thread_id) FROM events WHERE project_id = ?1 AND thread_id IS NOT NULL",
+        )
+        .await?,
+        agents_written: count(
+            "SELECT COUNT(DISTINCT actor) FROM events WHERE project_id = ?1 AND actor IS NOT NULL",
+        )
+        .await?,
+        disk_bytes,
+        files_on_disk_bytes: disk_bytes,
     })
 }
 

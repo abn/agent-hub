@@ -163,9 +163,14 @@ pub async fn stats(
         )));
     }
 
-    let stats = projects::stats(&state.db, &id, &state.config.active_since())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let stats = projects::stats(
+        &state.db,
+        Some(&state.data_dir),
+        &id,
+        &state.config.active_since(),
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(stats))
 }
 

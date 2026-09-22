@@ -6,10 +6,11 @@
 
 import { api } from "./api.mjs";
 import { gallerySection } from "./artifacts.mjs";
-import { openCreateProjectDialog } from "./dialog.mjs";
-import { esc, paint, stale } from "./dom.mjs";
+import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
+import { esc, main, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { feedSection } from "./feed.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
@@ -17,6 +18,8 @@ import { settingsLink } from "./project-settings.mjs";
 import { sessionRows, sessionDetailView, wireSessionDetail } from "./sessions.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
+import { toast } from "./toast.mjs";
+
 
 const SEGMENTS = ["feed", "artifacts", "sessions"];
 
@@ -66,6 +69,7 @@ function header(project, stats, footprint) {
   const agents = stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "";
   const used = footprint ? ` · <span class="mono">${footprint}</span>` : "";
   const detail = agents || footprint ? `<p class="proj-stats">${agents}${used}</p>` : "";
+  const hasDelete = !project.owner_agent;
   return `
     <div class="proj-head">
       <button type="button" class="proj-back" data-action="project-back" aria-label="Back to projects">
@@ -76,6 +80,21 @@ function header(project, stats, footprint) {
         ${detail}
       </div>
       ${settingsLink(project.id)}
+      <div class="proj-overflow-wrap">
+        <button type="button" class="proj-overflow-btn" aria-label="More" aria-haspopup="true" aria-expanded="false" aria-controls="proj-overflow-menu">
+          ${glyphSvg("overflow", { size: 20 })}
+        </button>
+        <div id="proj-overflow-menu" class="hub-overflow-menu proj-overflow-menu" role="menu" hidden>
+          <a href="#/projects/${esc(encodeURIComponent(project.id))}/settings" class="proj-menu-item" role="menuitem">Project settings</a>
+          <button type="button" class="proj-menu-item" role="menuitem" data-action="copy-project-path">Copy path</button>
+          ${hasDelete ? `
+          <div class="proj-menu-divider" role="separator"></div>
+          <button type="button" class="proj-menu-item proj-menu-delete" role="menuitem" data-action="delete-project">
+            ${glyphSvg("trash", { size: 17 })}
+            <span>Delete project</span>
+          </button>` : ""}
+        </div>
+      </div>
     </div>`;
 }
 
@@ -120,10 +139,83 @@ if (typeof document !== "undefined") {
         lastOpenSession = decodeURIComponent(match[1]);
       }
     }
+    if (!event.target.closest(".proj-overflow-wrap")) {
+      const menus = document.querySelectorAll(".proj-overflow-menu:not([hidden])");
+      for (const m of menus) {
+        m.hidden = true;
+        const b = m.closest(".proj-overflow-wrap")?.querySelector(".proj-overflow-btn");
+        if (b) b.setAttribute("aria-expanded", "false");
+      }
+    }
   });
 }
 
+function wireProjectHeader(project, stats, footprint) {
+  const wrap = main.querySelector(".proj-overflow-wrap");
+  if (!wrap) return;
+  const btn = wrap.querySelector(".proj-overflow-btn");
+  const menu = wrap.querySelector(".proj-overflow-menu");
+  if (!btn || !menu) return;
+
+  const close = () => {
+    menu.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      const first = menu.querySelector("button, a");
+      if (first) first.focus();
+    }
+  });
+
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+      btn.focus();
+    }
+  });
+
+  const copyBtn = menu.querySelector('button[data-action="copy-project-path"]');
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      close();
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(`/p/${project.id}`);
+        }
+      } catch {}
+      toast("Path copied");
+    });
+  }
+
+  const deleteBtn = menu.querySelector('button[data-action="delete-project"]');
+  if (deleteBtn) {
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      close();
+      const confirmed = await confirmProjectDelete({ project, stats, footprint });
+      if (confirmed) {
+        try {
+          await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+          location.hash = "#/projects";
+          toast("Project deleted.");
+        } catch (err) {
+          toast(`Deletion failed: ${err.message}`);
+        }
+      }
+    });
+  }
+}
+
 // The sessions segment on desktop: the list in the 420px pane and the session
+
 // detail in the other. On a phone the detail pane is hidden by media query and
 // the card replaces the list when opened, returning focus to the row when closed.
 function sessionsTwoPane(current, listHTML, sessions, selectedSession, detailHTML, hasSelection) {
@@ -356,6 +448,7 @@ export async function projectScreen(params, gen, path) {
   const shell = `${header(project, stats, footprint)}${tabs(id, segment, stats)}`;
   if (segment === "artifacts") {
     paint(gen, `${shell}${await gallerySection(id)}`);
+    wireProjectHeader(project, stats, footprint);
   } else if (segment === "sessions") {
     const selectedId = params?.get?.("id") || params?.get?.("session");
     const { sessions, card } = await sessionRows(id, selectedId);
@@ -368,6 +461,7 @@ export async function projectScreen(params, gen, path) {
     }
     if (stale(gen)) return;
     paint(gen, `${shell}${sessionsTwoPane(id, card, sessions, selectedSession, detailHTML, !!selectedId)}`);
+    wireProjectHeader(project, stats, footprint);
     if (selectedSession) {
       wireSessionDetail(main.querySelector(".pane-detail") || main, id, selectedSession.id);
     }
@@ -383,6 +477,7 @@ export async function projectScreen(params, gen, path) {
       gen,
       `${shell}<div class="panes panes-project"><div class="pane-stage">${feedHTML}</div><aside class="pane-aside project-aside" aria-label="Project state"></aside></div>`,
     );
+    wireProjectHeader(project, stats, footprint);
     const asideHTML = await projectAside(id);
     if (stale(gen)) return;
     const asideEl = main.querySelector(".project-aside");
