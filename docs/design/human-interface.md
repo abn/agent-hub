@@ -75,15 +75,18 @@ the name, the read-only slug, the artifact password policy, the reserved
 retention card, Save and Delete project; agent and access management ships as
 a section of the global Settings screen rather than under Project settings.
 Mobile is primary with a four-tab bar of labelled icons (Home, Inbox,
-Projects, Search); desktop swaps in a 52px top bar with the wordmark, the
-three nav links (Inbox carrying the same badge), an inline search field with
-a slash hint, the node line and a gear to Settings. A project is its own
-address: the feed, the artifact gallery and the sessions list sit under the
-project as segmented tabs, each with its own route, and each section is the
-same project view. The artifact viewer is itself a route, so reload and the
-browser's Back keep the artifact on screen. A desktop list plus detail layout
-is a layout primitive screens opt into; Sessions is the first to use it, with
-a 420px list beside a detail pane.
+Projects, Search); desktop carries a permanent 200px app rail with Home,
+Inbox, Search, the project list, and Storage and Settings at its foot. A
+project is its own address: the feed, the artifact gallery and the sessions
+list sit under the project as segmented tabs, each with its own route, and
+each section is the same project view. The artifact viewer is itself a route,
+so reload and the browser's Back keep the artifact on screen. A desktop list
+plus detail layout is a layout primitive screens opt into; Sessions is the
+first to use it, with a 420px list beside a detail pane.
+
+The design contract the interface is being brought to, including the one
+shell the sections converge on, lives in `DESIGN.md` at the repository root.
+This page records what ships; that file records what is designed.
 
 ## Interaction rules
 

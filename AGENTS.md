@@ -64,6 +64,24 @@ shipped behaviour.
 - **Accessibility is a build gate.** WCAG AA in both themes, a 12px UI text
   floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
   meaning carried by colour alone. Reduced motion is honoured.
+- **The frame does not move.** Every pane reserves a 52px header and a 40px
+  control row, in that order, whether or not it has content for them. One
+  gutter per pane, a fixed glyph column in every list, and prose left-aligned
+  and capped at 640. Panes change width; the reader's place does not.
+- **One surface per thing.** An object is read in one place at a time: the
+  aside on a fine pointer, one sheet on a coarse pointer. No code path mounts
+  both, and there is no comment modal on the desktop.
+- **An aside exists only where something is read against the stage** (anchored
+  comments, a brain `kv` value). Correspondence, a feed or inbox thread, is the
+  stage. An index exists only where items are opened one at a time; Settings
+  has none.
+- **A copy control is a glyph on the row that owns the string**, never a text
+  button and never floating over content. Words belong in menus. `--danger` is
+  reserved for deletion.
+- **`DESIGN.md` is the design contract.** It states the rules, the tokens and
+  the build gates the interface is held to, and records where the build
+  deviates from the designer's handoff and why. A UI change that departs from
+  it changes `DESIGN.md` in the same commit, or it is not done.
 - **No internal process leaks.** Committed files and assets never reference
   internal process or tracking identifiers, task or ticket numbers, agent-work
   references, milestone identifiers, or scratch paths. Internal and agent-work

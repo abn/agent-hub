@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-22, the design contract is written down
+
+* **Add**: `DESIGN.md` at the repository root states the design contract for
+  the human surface: tokens and the one documented deviation, the type scale
+  and the 12px floor, the twelve glyphs, the one shell (rail, index, stage,
+  aside) and the rule that the frame does not move, the components, the
+  screens, the interaction and keyboard rules, the alert hierarchy, the copy
+  voice, and the twelve build gates. It records where the build deviates from
+  the designer's handoff and why.
+* **Update**: [Human interface](design/human-interface.md) corrects its
+  desktop description to the app rail that ships and points at `DESIGN.md`
+  for the designed shell.
+
 ## 2026-09-22, session lineage for artifacts and feed
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Data
@@ -42,7 +55,6 @@ software release notes and the repository changelog.
   [Quickstart](usage/quickstart.md), and [Overview](overview.md) remove
   `HUB_TRUST_DEFAULT` and trust levels from agent records, and document
   confidential projects.
-
 ## 2026-09-22, project deletion overflow menu and typed confirmation manifest
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
