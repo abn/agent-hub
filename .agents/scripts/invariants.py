@@ -1316,7 +1316,10 @@ def check_session_detail_single_title(page, watch: Watch, project: str, session_
 def check_brain_kv_in_aside_not_stage(page, watch: Watch, project: str, session_id: str) -> None:
     watch.enter("brain: kv key is read in the aside and not in stage")
     goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Fkv%2Flast-run", harness.SESSION_NAME)
-    page.wait_for_timeout(300)
+    try:
+        page.wait_for_selector(".shell-aside:not([hidden])", timeout=5000)
+    except Exception:
+        pass
     aside = page.locator(".shell-aside")
     if aside.count() == 0 or aside.get_attribute("hidden") is not None:
         watch.fail("aside is hidden or missing for kv key")
@@ -1363,7 +1366,10 @@ def check_brain_entry_missing_and_dir_words(page, watch: Watch, project: str, se
     armed, watch.armed = watch.armed, False
     try:
         page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Fkv%2Fmissing-key'")
-        page.wait_for_timeout(400)
+        try:
+            page.wait_for_selector(".shell-aside:not([hidden])", timeout=5000)
+        except Exception:
+            pass
         aside = page.locator(".shell-aside")
         if aside.count() == 0 or aside.get_attribute("hidden") is not None:
             watch.fail("aside is hidden or missing for non-existent path")
@@ -1371,7 +1377,10 @@ def check_brain_entry_missing_and_dir_words(page, watch: Watch, project: str, se
             watch.fail(f"aside does not state missing entry in words: '{aside.inner_text()}'")
 
         page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Ffs%2Fnotes'")
-        page.wait_for_timeout(400)
+        try:
+            page.wait_for_selector(".shell-aside:not([hidden])", timeout=5000)
+        except Exception:
+            pass
         aside = page.locator(".shell-aside")
         if aside.count() == 0 or aside.get_attribute("hidden") is not None:
             watch.fail("aside is hidden or missing for directory path")
@@ -1749,6 +1758,90 @@ def check_no_admin_token_on_screen(page, watch: Watch) -> None:
     if has_token_attr:
         watch.fail(f"an element carries the admin token prefix {token_prefix!r} in an attribute")
 
+def check_inbox_and_search_phone(page, watch: Watch, port: int, project: str) -> None:
+    # 1. Inbox tools row holds filter + Unread chip, no sync line.
+    watch.enter("inbox: phone tools row holds filter and unread chip without sync line")
+    one_off_event(port, project, "finished", "phone unread row check")
+    goto(page, "#/inbox", "Inbox")
+    page.wait_for_timeout(300)
+    tools = page.locator(".shell-controls")
+    filter_input = tools.locator("[data-index-filter]")
+    if filter_input.count() == 0:
+        watch.fail("inbox tools row has no filter field")
+    unread_chip = tools.locator('.chip:has-text("Unread")')
+    if unread_chip.count() == 0:
+        watch.fail("inbox tools row has no Unread chip")
+    if tools.locator(".inbox-sync").count() > 0:
+        watch.fail("inbox tools row unexpectedly carries sync line on phone")
+
+    # 2. No list in inbox is a boxed card
+    watch.enter("inbox: rows are flat, not a boxed card")
+    if page.locator(".inbox-rows.card, .inbox-group.card, .shell-index .card").count() > 0:
+        watch.fail("inbox list is rendered inside a boxed card")
+
+    # 3. Unread mark carries dot AND 600 weight
+    watch.enter("inbox: unread mark carries dot and 600 font weight")
+    unread_row = page.locator(".inbox-row.is-unread")
+    if unread_row.count() == 0:
+        watch.fail("no unread row found in inbox")
+    else:
+        first_unread = unread_row.first
+        if first_unread.locator(".dot-unread").count() == 0:
+            watch.fail("unread row has no unread dot")
+        title_weight = first_unread.locator(".title").evaluate(
+            "el => window.getComputedStyle(el).fontWeight"
+        )
+        if title_weight not in ("600", "bold"):
+            watch.fail(f"unread row title does not have 600 weight: '{title_weight}'")
+
+    # 4. Search scope chips scroll horizontally, do not wrap at 390 and 360
+    watch.enter("search: scope chips scroll horizontally and do not wrap in tools row")
+    goto(page, f"#/search?q={quote(harness.SEARCH_TERM)}", "Search")
+    page.wait_for_timeout(300)
+    for width in [390, 360]:
+        page.set_viewport_size({"width": width, "height": 800})
+        page.wait_for_timeout(100)
+        wrapped = page.evaluate(
+            "(() => { const row = document.querySelector('.shell-controls'); if (!row) return [];"
+            " const bad = [];"
+            " row.querySelectorAll('span, button, a, div, input').forEach((el) => {"
+            "   if (el.children.length === 0 && el.textContent.trim()) {"
+            "     const rects = el.getClientRects();"
+            "     if (rects.length > 1) bad.push(el.textContent.trim());"
+            "   }"
+            " });"
+            " return bad; })()"
+        )
+        if wrapped:
+            watch.fail(f"search tools row at {width}px wraps text: {wrapped}")
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    # 5. Search hit renders title once with <mark>
+    watch.enter("search: hit renders title once with <mark>")
+    row = page.locator(".search-row").first
+    if row.count() == 0:
+        watch.fail("no search row found")
+    else:
+        marks = row.locator(".title mark")
+        if marks.count() == 0:
+            watch.fail("search match is not inside a <mark> in title")
+        elif harness.SEARCH_TERM not in marks.first.inner_text().lower():
+            watch.fail(f"mark does not contain search term: '{marks.first.inner_text()}'")
+
+        # Count occurrences of search term in the row
+        row_text = row.inner_text().lower()
+        occurrences = row_text.count(harness.SEARCH_TERM.lower())
+        if occurrences != 1:
+            watch.fail(f"search hit renders search term {occurrences} times instead of once: '{row_text}'")
+
+        if row.locator(".search-snippet").count() > 0:
+            watch.fail("search hit carries snippet line echoing title")
+
+    # 6. No list in search is a boxed card
+    watch.enter("search: rows are flat, not a boxed card")
+    if page.locator(".search-group.card, .search-results .card, .shell-index .card").count() > 0:
+        watch.fail("search list is rendered inside a boxed card")
+
 
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
@@ -1822,6 +1915,7 @@ def run() -> int:
                 run_step(watch, check_brain_entry_missing_and_dir_words, page, watch, project, session_id)
                 run_step(watch, check_artifacts_group_by_agent, page, watch, port, project)
                 run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
+                run_step(watch, check_inbox_and_search_phone, page, watch, port, project)
 
                 # 9. Projects register and Connect
                 run_step(watch, check_projects_register_segmented_and_rows, page, watch, port)

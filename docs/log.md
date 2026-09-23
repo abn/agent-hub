@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, phone inbox and search tools rows, flat rows, and search title mark
+
+* **Update**: [Human interface](design/human-interface.md) documents the mobile
+  inbox tools row (filter field plus Unread chip without sync line), the mobile
+  search tools row with horizontally scrollable scope chips and counts, flat
+  rows without card wrappers, and search result titles shown once with an
+  action-tinted mark highlight.
+
 ## 2026-09-23, home screen mobile welcome-first and flat rows
 
 * **Update**: [Human interface](design/human-interface.md) documents Home

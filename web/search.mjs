@@ -21,6 +21,86 @@ const SCOPES = [
   { type: "brain", label: "Sessions" },
 ];
 
+const MOBILE_SCOPES = [
+  { type: "", label: "All" },
+  { type: "feed", label: "Feed" },
+  { type: "artifact", label: "Artifacts" },
+  { type: "inbox", label: "Inbox" },
+];
+
+const SEARCH_STYLE = `
+.search-row mark,
+.search-head mark {
+  background: var(--action-bg) !important;
+  color: var(--ink) !important;
+  border-radius: 3px !important;
+  padding: 0 2px !important;
+}
+.search-group .search-row:first-child {
+  border-top: 1px solid var(--line);
+}
+.search-group .search-row {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  min-height: 56px;
+  padding: 10px 16px;
+}
+@media (max-width: 1099px) {
+  .shell[data-segment="search"] .shell-head .shell-title,
+  .shell-index:has(.search-results) .shell-head .shell-title {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+  .shell[data-segment="search"] .shell-head .search-form,
+  .shell-index:has(.search-results) .shell-head .search-form {
+    width: 100% !important;
+    flex: 1 !important;
+  }
+  .shell[data-segment="search"] .shell-head .search-field > svg,
+  .shell-index:has(.search-results) .shell-head .search-field > svg {
+    display: none !important;
+  }
+  .shell[data-segment="search"] .shell-controls,
+  .shell-index:has(.search-results) .shell-controls {
+    padding: 0 16px !important;
+  }
+  .shell[data-segment="search"] .shell-controls .search-scopes,
+  .shell-index:has(.search-results) .shell-controls .search-scopes {
+    flex: 1 !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    scrollbar-width: none !important;
+  }
+  .shell[data-segment="search"] .shell-controls .chip,
+  .shell-index:has(.search-results) .shell-controls .chip {
+    flex: none !important;
+    white-space: nowrap !important;
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    border-radius: var(--r-pill) !important;
+  }
+  .shell[data-segment="search"] .shell-controls .chip[aria-pressed="true"],
+  .shell-index:has(.search-results) .shell-controls .chip[aria-pressed="true"] {
+    background: var(--ink) !important;
+    color: var(--ink-inverse) !important;
+    border: 0 !important;
+  }
+  .shell[data-segment="search"] .shell-controls .chip[aria-pressed="false"],
+  .shell-index:has(.search-results) .shell-controls .chip[aria-pressed="false"] {
+    background: transparent !important;
+    color: var(--ink-2) !important;
+    border: 1px solid var(--line-strong) !important;
+  }
+}
+`;
+
 // A corpus family as the reader knows it, and the kind badge its rows draw. A
 // feed hit draws the badge of the event it is and says its kind; one that
 // does not say which kind it is draws the neutral mark and leaves the naming
@@ -120,7 +200,9 @@ export function highlighted(snippet, words) {
     out.append("…");
   }
   for (const [index, length] of starts) {
-    out.append(text.slice(at, index), el("mark", "", text.slice(index, index + length)));
+    const mark = el("mark", "", text.slice(index, index + length));
+    mark.style.cssText = "background: var(--action-bg); color: var(--ink); border-radius: 3px; padding: 0 2px;";
+    out.append(text.slice(at, index), mark);
     at = index + length;
   }
   out.append(text.slice(at));
@@ -177,12 +259,12 @@ function resultRow(hit, words) {
   const body = el(href ? "a" : "div", "search-link grow");
   if (href) body.href = href;
   const head = el("span", "search-head");
-  head.appendChild(el("span", "title", hit.title || hit.ref_id));
+  const titleSpan = el("span", "title");
+  titleSpan.appendChild(highlighted(hit.title || hit.ref_id, words));
+  head.appendChild(titleSpan);
   const changed = Date.parse(hit.updated_at);
   if (Number.isFinite(changed)) head.appendChild(el("span", "search-time mono", relative(changed)));
-  const snippet = el("span", "search-snippet");
-  snippet.appendChild(highlighted(hit.snippet, words));
-  body.append(head, snippet, el("span", "search-where", whereLine(hit)));
+  body.append(head, el("span", "search-where", whereLine(hit)));
   row.appendChild(body);
   return row;
 }
@@ -211,9 +293,9 @@ function resultsNode(state) {
     for (const group of state.data.groups) {
       const family = FAMILIES[group.kind];
       box.appendChild(el("h2", "section-label", `${family ? family.label : group.kind} · ${group.count}`));
-      const card = el("div", "card search-group");
-      for (const hit of group.hits) card.appendChild(resultRow(hit, words));
-      box.appendChild(card);
+      const groupEl = el("div", "search-group");
+      for (const hit of group.hits) groupEl.appendChild(resultRow(hit, words));
+      box.appendChild(groupEl);
     }
   }
   return box;
@@ -227,6 +309,10 @@ async function find(term, type, project) {
   const trimmed = (term ?? "").trim();
   const state = { term: trimmed, data: { count: 0, truncated: false, groups: [] }, line: "", error: "" };
   if (!trimmed) return state;
+  if (type === "inbox") {
+    state.line = resultsLine(state.data);
+    return state;
+  }
   const scope = type ? `&type=${encodeURIComponent(type)}` : "";
   const proj = project ? `&project=${encodeURIComponent(project)}` : "";
   try {
@@ -385,8 +471,9 @@ function renderPreview(stagePane, hit, words) {
 }
 
 export async function searchScreen(term, gen) {
+  const isDesktop = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(min-width: 1100px)").matches;
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const asScope = SCOPES.find((scope) => scope.type === params.get("type"));
+  const asScope = (isDesktop ? SCOPES : [...MOBILE_SCOPES, { type: "brain", label: "Sessions" }]).find((scope) => scope.type === params.get("type"));
   let type = asScope ? asScope.type : "";
   let project = params.get("project") || "";
 
@@ -394,7 +481,7 @@ export async function searchScreen(term, gen) {
   const first = await find((term || "").trim(), type, project);
   if (stale(gen)) return;
 
-  const title = el("h1", "search-title", "Search");
+  const title = el("h1", "search-title sr-only", "Search");
   const form = el("form", "search-form");
   form.setAttribute("role", "search");
   const label = el("label", "sr-only", "Search the feed, artifacts and session brains");
@@ -420,14 +507,66 @@ export async function searchScreen(term, gen) {
   field.append(icon(18, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"), input, clear);
   form.append(label, field);
 
+  const activeScopeList = isDesktop
+    ? SCOPES
+    : (type === "brain" ? [...MOBILE_SCOPES, { type: "brain", label: "Sessions" }] : MOBILE_SCOPES);
+
   const scopes = el("div", "search-scopes");
   scopes.setAttribute("role", "group");
   scopes.setAttribute("aria-label", "Search in");
-  for (const scope of SCOPES) {
-    const chip = el("button", "chip", scope.label);
+
+  const lastScopeCounts = { "": 0, feed: 0, artifact: 0, inbox: 0, brain: 0 };
+  function recordScopeCounts(state) {
+    if (!state || !state.data) return;
+    if (!type) {
+      lastScopeCounts[""] = state.data.count || 0;
+      for (const group of state.data.groups || []) {
+        lastScopeCounts[group.kind] = group.count;
+      }
+    } else {
+      lastScopeCounts[type] = state.data.count || 0;
+    }
+  }
+  recordScopeCounts(first);
+
+  function countForScope(scopeType, data) {
+    if (scopeType === "inbox") return 0;
+    if (lastScopeCounts[scopeType] !== undefined) return lastScopeCounts[scopeType];
+    if (!data) return 0;
+    if (!scopeType) return data.count || 0;
+    const group = (data.groups || []).find((g) => g.kind === scopeType);
+    return group ? group.count : 0;
+  }
+
+  function setChipContent(chip, label, count) {
+    const span = el("span", "mono", String(count));
+    span.style.fontFamily = "var(--font-mono)";
+    span.style.fontWeight = "500";
+    chip.replaceChildren(label, " ", span);
+  }
+
+  function updateScopeChips(data) {
+    if (isDesktop) return;
+    for (const chip of scopes.querySelectorAll("button[data-scope]")) {
+      const sType = chip.dataset.scope;
+      const scopeDef = activeScopeList.find((s) => s.type === sType);
+      if (!scopeDef) continue;
+      const count = countForScope(sType, data);
+      setChipContent(chip, scopeDef.label, count);
+    }
+  }
+
+  for (const scope of activeScopeList) {
+    const chip = el("button", "chip");
     chip.type = "button";
     chip.dataset.scope = scope.type;
     chip.setAttribute("aria-pressed", String(scope.type === type));
+    if (isDesktop) {
+      chip.textContent = scope.label;
+    } else {
+      const initCount = countForScope(scope.type, first.data);
+      setChipContent(chip, scope.label, initCount);
+    }
     scopes.appendChild(chip);
   }
 
@@ -452,20 +591,28 @@ export async function searchScreen(term, gen) {
   }
   renderProjectChip();
 
-  const line = el("p", "search-line mono", first.line);
+  const line = el("p", isDesktop ? "search-line mono" : "search-line shell-meta mono", first.line);
   line.setAttribute("role", "status");
   line.setAttribute("aria-live", "polite");
 
-  // The one shell: the results are the index, the preview is the stage.
-  // The design's search head is the field itself, with the result line and the
-  // scope chips in the control row under it. The screen's name is read, not
-  // shown: the field is what the reader is looking at.
-  const indexHead = el("div", "shell-head");
-  title.classList.add("sr-only");
-  indexHead.append(el("span", "shell-slot"), title, form);
+  const styleEl = el("style");
+  styleEl.textContent = SEARCH_STYLE;
 
-  const indexControls = el("div", "shell-controls");
-  indexControls.append(line, scopes);
+  const indexHead = el("div", "shell-head");
+  let indexControls;
+  if (isDesktop) {
+    indexHead.append(styleEl, el("span", "shell-slot"), title, form);
+    indexControls = el("div", "shell-controls");
+    indexControls.append(line, scopes);
+  } else {
+    const slot = el("span", "shell-slot");
+    slot.appendChild(icon(20, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"));
+    const shellTitle = el("div", "shell-title");
+    shellTitle.append(title, form, line);
+    indexHead.append(styleEl, slot, shellTitle);
+    indexControls = el("div", "shell-controls");
+    indexControls.append(scopes);
+  }
 
   const indexBody = el("div", "shell-body");
   const indexCol = el("div", "shell-index");
@@ -482,6 +629,7 @@ export async function searchScreen(term, gen) {
   split.tabIndex = 0;
 
   const layout = el("div", "shell");
+  layout.setAttribute("data-segment", "search");
   layout.append(indexCol, split, stagePane);
 
   let selectedHitIndex = 0;
@@ -511,7 +659,9 @@ export async function searchScreen(term, gen) {
   }
 
   function updateResults(state) {
+    recordScopeCounts(state);
     line.textContent = state.line;
+    updateScopeChips(state.data);
     const nextResults = resultsNode(state);
     indexPane.innerHTML = "";
     indexPane.appendChild(nextResults);

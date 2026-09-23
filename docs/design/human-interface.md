@@ -124,10 +124,16 @@ This page records what ships; that file records what is designed.
   it.
 - Search answers as you type, inside 50 ms of the last key, and keeps the
   query in the address so Back and reload return to it. The field never
-  loses focus to its own results; the count is announced instead. Matched
-  words are marked in the snippet, and a result opens where it lives. The
-  query is sent as typed, quotes and operators included, and the hub makes it
-  safe for the index, so no query is refused.
+  loses focus to its own results; the count is announced instead. A search
+  result row shows its title once, with matched words marked directly in the
+  title using an action-tinted mark (`<mark>` on `--action-bg`, `--ink`,
+  radius 3px, padding 0 2px), without a repeated snippet line beneath it.
+  Results are flat rows rather than cards. On a phone, the search tools row
+  holds horizontally scrollable scope chips (`All n · Feed n · Artifacts n · Inbox n`)
+  whose text and counts never wrap across lines, and the count line stays in the
+  header under the search field. The query is sent as typed, quotes and
+  operators included, and the hub makes it safe for the index, so no query is
+  refused.
 - Keyboard: `/` focuses the list's own filter field when the screen has one,
   and otherwise search, which on the Search screen is its own field; `j` and
   `k` move a selection through the rows of the current
@@ -164,11 +170,14 @@ This page records what ships; that file records what is designed.
   equivalent. The toast's swipe-down dismiss ships, with a dismiss control and
   Esc beside it. On an Inbox row a swipe right marks it read or unread and a
   swipe left uncovers the row's actions without deciding anything; both are
-  also controls drawn on the row. A pull down at the top of the Inbox
-  refreshes it, as does the Refresh control beside the last-synced line. The
-  row follows the finger, and with reduced motion asked for it stays put and
-  the release reveals. The edge swipe back, the tab swipe and swipes on feed
-  rows are intended design, not yet shipped.
+  also controls drawn on the row. Inbox rows are flat list rows without card
+  wrapping, and an unread row carries both the accent dot and 600 title weight.
+  On a phone, the inbox tools row holds the filter field (flex: 1, 34px pill)
+  and an Unread chip, while the sync line lives on the More screen. A pull down
+  at the top of the Inbox refreshes it, as does the Refresh control beside the
+  last-synced line on More. The row follows the finger, and with reduced motion
+  asked for it stays put and the release reveals. The edge swipe back, the tab
+  swipe and swipes on feed rows are intended design, not yet shipped.
 
 ## Alert hierarchy
 

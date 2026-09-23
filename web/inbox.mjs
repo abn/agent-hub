@@ -209,7 +209,7 @@ function inboxRow(item, state, options = {}) {
       ${glyph(item.kind)}
       <div class="grow">
         <div class="inbox-head">
-          <div class="title"><a href="${href}">${esc(item.summary)}</a></div>
+          <div class="title"${waits(item) || item.status === "unread" ? ' style="font-weight: 600;"' : ""}><a href="${href}">${esc(item.summary)}</a></div>
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
         <div class="inbox-foot">
@@ -217,7 +217,7 @@ function inboxRow(item, state, options = {}) {
         </div>
       </div>
       ${waits(item) ? '<span class="dot-action" aria-hidden="true"></span><span class="sr-only">Waiting on you</span>' : ""}
-      ${item.status === "unread" ? '<span class="dot-unread" aria-hidden="true"></span><span class="sr-only">Unread</span>' : ""}
+      ${item.status === "unread" ? '<span class="dot-unread" aria-label="Unread" aria-hidden="true"></span><span class="sr-only">Unread</span>' : ""}
     </div>
     ${snoozeBar}
   </div>`;
@@ -432,12 +432,52 @@ export async function inbox(gen) {
   const closed = opened ? "" : lastOpen;
   lastOpen = opened ? opened.event_id : "";
 
-  const indexHead = `<div class="shell-head">
-      <span class="shell-slot" aria-hidden="true"></span>
-      <div class="shell-title"><h1 class="shell-title-line">Inbox</h1></div>
-      <button type="button" class="inbox-filter" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread only</button>
-      <button type="button" class="inbox-quiet" data-action="inbox-read-all"${unread.items.length ? "" : " disabled"}>Mark all read</button>
-    </div>`;
+  const isDesktop = typeof window !== "undefined" && window.matchMedia && window.matchMedia(DESKTOP).matches;
+  const unreadCount = unread.items.length;
+  const metaText = waiting.length
+    ? `${waiting.length} waiting · ${unreadCount} unread`
+    : `nothing waiting · ${unreadCount} unread`;
+
+  const indexHead = isDesktop
+    ? `<div class="shell-head">
+        <span class="shell-slot" aria-hidden="true"></span>
+        <div class="shell-title"><h1 class="shell-title-line">Inbox</h1></div>
+        <button type="button" class="inbox-filter" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread only</button>
+        <button type="button" class="inbox-quiet" data-action="inbox-read-all"${unreadCount ? "" : " disabled"}>Mark all read</button>
+      </div>`
+    : `<style>
+@media (max-width: 1099px) {
+  .shell[data-segment="inbox"] .shell-controls .shell-filter,
+  .shell-index:has(.inbox-rows) .shell-controls .shell-filter {
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+  .shell[data-segment="inbox"] .shell-controls .shell-filter input,
+  .shell-index:has(.inbox-rows) .shell-controls .shell-filter input {
+    height: 34px !important;
+    border: 1px solid var(--line-strong) !important;
+    border-radius: var(--r-pill) !important;
+    box-sizing: border-box !important;
+  }
+  .shell[data-segment="inbox"] .shell-controls .chip,
+  .shell-index:has(.inbox-rows) .shell-controls .chip {
+    flex: none !important;
+    white-space: nowrap !important;
+    height: 32px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+  }
+}
+</style><div class="shell-head">
+        <span class="shell-slot" aria-hidden="true"></span>
+        <div class="shell-title">
+          <h1 class="shell-title-line">Inbox</h1>
+          <span class="shell-meta mono">${esc(metaText)}</span>
+        </div>
+        <button type="button" class="inbox-quiet shell-trailing-btn" data-action="inbox-read-all" aria-label="Mark all read"${unreadCount ? "" : " disabled"}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12.5l4.5 4.5L15 8.5"></path><path d="M11 16l1 1 9.5-9.5"></path></svg>
+        </button>
+      </div>`;
   const sections =
     (waiting.length ? group("waiting", "Waiting on you", waiting.length, actorGroups(waiting, state)) : "") +
     snoozedSection(snoozed, state) +
@@ -456,9 +496,20 @@ export async function inbox(gen) {
   // On a phone the shell shows one zone at a time. The sync line rides in the
   // control row rather than under it, so the pane keeps the reserved two rows
   // every other pane has.
+  const indexControls = isDesktop
+    ? shellIndexControls("Filter inbox", "", syncLine())
+    : `<div class="shell-controls">
+        <div class="shell-filter">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
+          <input type="search" data-index-filter placeholder="Filter inbox" aria-label="Filter inbox">
+        </div>
+        <button type="button" class="chip" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread</button>
+      </div>`;
+
   const shell = shellHTML({
+    segment: "inbox",
     indexHead,
-    indexControls: shellIndexControls("Filter inbox", "", syncLine()),
+    indexControls,
     indexBody,
     stageHead: opened
       ? shellStageHead(
