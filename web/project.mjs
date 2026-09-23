@@ -5,7 +5,7 @@
 // gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
-import { artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
+import { artifactGroupMenu, artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import {
@@ -414,7 +414,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
     html: shellHTML({
       segment,
       indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
-      indexControls: shellIndexControls("Filter artifacts"),
+      indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
       stageControls,

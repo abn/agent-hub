@@ -6923,3 +6923,7 @@ dialog.dialog-project-delete {
 }
 .shell-index .inbox-group { background: transparent; }
 .shell-index .inbox-rows { background: var(--surface); }
+
+/* The artifacts index group headers: a mono label over a hairline, the same
+   shape the inbox groups use. */
+.shell-index .shell-group-label { border-bottom: 1px solid var(--line); }
