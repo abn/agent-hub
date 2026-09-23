@@ -1253,24 +1253,33 @@ fn app_css_carries_drawer_styles_on_tokens() {
         "animations remain banned outright"
     );
     for line in APP_CSS.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("transition:") {
-            let decl = rest.trim_end_matches(';').trim();
-            if decl == "none" || decl == "none !important" {
+        // A declaration may share its line with a selector or other
+        // declarations, so split on both the block opener and the declaration
+        // separator and inspect each piece. Both the shorthand and the
+        // longhand are checked, and a duration anywhere in the value must stay
+        // inside the bound.
+        for decl in line.replace('{', ";").split(';') {
+            let decl = decl.trim();
+            let value = decl
+                .strip_prefix("transition:")
+                .or_else(|| decl.strip_prefix("transition-duration:"));
+            let Some(value) = value else { continue };
+            let value = value.trim();
+            if value == "none" || value == "none !important" {
                 continue;
             }
-            for token in decl.split_whitespace() {
+            for token in value.split_whitespace() {
                 let token = token.trim_end_matches(',');
                 if let Some(ms) = token.strip_suffix("ms").and_then(|s| s.parse::<f32>().ok()) {
                     assert!(
                         ms <= 150.0,
-                        "transition duration {ms}ms exceeds 150ms limit: {trimmed}"
+                        "transition duration {ms}ms exceeds 150ms limit: {decl}"
                     );
                 } else if let Some(s) = token.strip_suffix('s').and_then(|s| s.parse::<f32>().ok())
                 {
                     assert!(
                         s * 1000.0 <= 150.0,
-                        "transition duration {}ms exceeds 150ms limit: {trimmed}",
+                        "transition duration {}ms exceeds 150ms limit: {decl}",
                         s * 1000.0
                     );
                 }
