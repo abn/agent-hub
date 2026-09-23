@@ -157,6 +157,30 @@ function alertsRow() {
     </div>`;
 }
 
+// The desktop alerts row: label and switch, with the sub as the one helper
+// line the whole screen allows. It is the only place a consequence is
+// invisible, so it is the only place a line may explain one.
+function desktopAlertsRow() {
+  const state = notificationState();
+  let sub = "The browser asks first";
+  let checked = false;
+  if (state === "blocked") {
+    sub = "Blocked in browser settings";
+  } else if (state === "granted") {
+    checked = readAlertPref("master", "on") === "on";
+    sub = checked ? "Approvals and questions only" : "Notifications off";
+  }
+
+  return `
+    <div class="form-row">
+      <div class="form-row-main">
+        <span class="form-row-title" id="alerts-label">Alert when waiting on you</span>
+        <span class="form-row-sub">${esc(sub)}</span>
+      </div>
+      ${switchControl("alerts-master", "alerts-label", checked, "toggle-alerts-switch")}
+    </div>`;
+}
+
 export async function settingsScreen(gen) {
   const [agentsRes, storage] = await Promise.all([
     api("/api/v1/agents").catch(() => ({ agents: [] })),
@@ -184,66 +208,108 @@ export async function settingsScreen(gen) {
 
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
+    // The round-11 row form: one 640px column of 48px rows under quiet mono
+    // group labels, a row is label · value · control, a glyph only where it
+    // names a destination. The alerts sub is the one helper line in the whole
+    // screen. The reserved 40px control row carries the data path once with
+    // the copy glyph on the row that owns the string; no footer repeats it.
     const desktopForm = `
     <form class="settings" data-action="prefs" onsubmit="event.preventDefault();">
-      <section class="settings-group">
-        <div class="settings-group-label">APPEARANCE</div>
-        <div class="settings-group-card">
-          <div class="settings-row row">
-            <div class="grow"><div class="title" id="label-theme">Theme</div></div>
+      <style>
+        .settings .settings-btn-row {
+          width: 100%;
+          border: 0;
+          background: none;
+          font: inherit;
+          text-align: left;
+          cursor: pointer;
+          color: var(--ink);
+        }
+        .settings-control-path {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .shell-controls-path {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .settings-copy-path-btn {
+          flex: none;
+          width: 28px;
+          height: 28px;
+          display: grid;
+          place-items: center;
+          background: none;
+          border: 0;
+          border-radius: var(--r-1);
+          color: var(--ink-2);
+          cursor: pointer;
+        }
+        .settings-copy-path-btn.is-copied {
+          color: var(--ok);
+          border: 1px solid var(--ok);
+        }
+        @media (pointer: coarse) {
+          .settings-copy-path-btn { width: 36px; height: 36px; }
+        }
+      </style>
+      <div class="form-column">
+        <section class="form-group">
+          <div class="form-group-label">APPEARANCE</div>
+          <div class="form-row">
+            <div class="form-row-main">
+              <span class="form-row-title" id="label-theme">Theme</span>
+            </div>
             <div class="settings-segmented settings-theme-seg" role="group" aria-label="Theme">
               ${desktopThemeSegment("system", currentTheme)}
               ${desktopThemeSegment("light", currentTheme)}
               ${desktopThemeSegment("dark", currentTheme)}
             </div>
           </div>
-          <div class="settings-row row switch-row">
-            <div class="grow"><div class="title" id="density-label">Compact rows</div></div>
+          <div class="form-row">
+            <div class="form-row-main">
+              <span class="form-row-title" id="density-label">Compact rows</span>
+            </div>
             ${switchControl("density", "density-label", densityCompact, "toggle-density")}
           </div>
-          <div class="settings-row row switch-row">
-            <div class="grow">
-              <div class="title" id="shortcuts-label">Single-key shortcuts</div>
-              <div class="meta">j, k, e, r act with no modifier, suspended while a text field has focus.</div>
+          <div class="form-row">
+            <div class="form-row-main">
+              <span class="form-row-title" id="shortcuts-label">Single-key shortcuts</span>
             </div>
             ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="settings-group">
-        <div class="settings-group-label">ALERTS</div>
-        <div class="settings-group-card alerts-group-card">${alertsContent()}</div>
-      </section>
+        <section class="form-group">
+          <div class="form-group-label">ALERTS</div>
+          ${desktopAlertsRow()}
+        </section>
 
-      <section class="settings-group">
-        <div class="settings-group-label">THIS HUB</div>
-        <div class="settings-group-card">
-          <a class="settings-row settings-nav-row row" href="#/storage">
-            <div class="grow">
-              <div class="title">Storage</div>
-              <div class="meta mono">${esc(storageValue)}</div>
+        <section class="form-group">
+          <div class="form-group-label">THIS HUB</div>
+          <a class="form-row" href="#/storage">
+            <div class="form-row-main">
+              <span class="form-row-title">Storage</span>
             </div>
+            <span class="form-row-value">${esc(storageValue)}</span>
             ${NAV_CHEVRON}
           </a>
-          <a class="settings-row settings-nav-row row" href="#/access">
-            <div class="grow">
-              <div class="title">Agents &amp; tokens</div>
-              <div class="meta">${esc(agentText)}</div>
+          <a class="form-row" href="#/access">
+            <div class="form-row-main">
+              <span class="form-row-title">Agents and tokens</span>
             </div>
+            <span class="form-row-value">${esc(agentCountText)}</span>
             ${NAV_CHEVRON}
           </a>
-          <div class="settings-row row">
-            <div class="grow">
-              <div class="title">This browser</div>
-              <div class="meta">Holding the access token. Signing out forgets it here and nowhere else.</div>
-            </div>
-            <button type="button" class="settings-signout-btn hairline" data-action="signout">Sign out</button>
-          </div>
-        </div>
-      </section>
-
-      <footer class="settings-footer mono">${esc(dataPath)}${nodeLine ? ` · ${esc(nodeLine)}` : ""}</footer>
+          <button type="button" class="form-row settings-btn-row" data-action="signout">
+            <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
+          </button>
+        </section>
+      </div>
     </form>`;
 
     paint(
@@ -251,7 +317,10 @@ export async function settingsScreen(gen) {
       shellHTML({
         noIndex: true,
         stageHead: shellStageHead("Settings", nodeLine),
-        stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(dataPath)}</span></div>`,
+        stageControls: `<div class="shell-controls shell-controls-path">
+          <span class="shell-meta mono settings-control-path">${esc(dataPath)}</span>
+          <button type="button" aria-label="Copy full data path" class="settings-copy-path-btn" data-action="copy-path" data-path="${esc(dataPath)}">${COPY_PATH_SVG}</button>
+        </div>`,
         stageBody: `<div class="shell-pad settings-pad">${desktopForm}</div>`,
       }),
     );
@@ -384,7 +453,9 @@ function setupDesktopSettingsEvents() {
     }
 
     // Alerts master toggle
-    const masterBtn = event.target.closest("#alerts-master, [data-action='toggle-alert-master']");
+    const masterBtn = event.target.closest(
+      "#alerts-master, [data-action='toggle-alerts-switch'], [data-action='toggle-alert-master']",
+    );
     if (masterBtn) {
       event.preventDefault();
       const current = masterBtn.getAttribute("aria-checked") === "true";
@@ -409,6 +480,27 @@ function setupDesktopSettingsEvents() {
     if (checkBtn) {
       event.preventDefault();
       render();
+      return;
+    }
+
+    // Copy path control on the reserved control row
+    const copyPathBtn = event.target.closest("[data-action='copy-path']");
+    if (copyPathBtn) {
+      event.preventDefault();
+      const fullPath = copyPathBtn.dataset.path || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(fullPath);
+        } catch {}
+      }
+      copyPathBtn.innerHTML = CHECK_SVG;
+      copyPathBtn.classList.add("is-copied");
+      copyPathBtn.setAttribute("aria-label", "Copied");
+      setTimeout(() => {
+        copyPathBtn.innerHTML = COPY_PATH_SVG;
+        copyPathBtn.classList.remove("is-copied");
+        copyPathBtn.setAttribute("aria-label", "Copy full data path");
+      }, 1400);
       return;
     }
 
@@ -458,8 +550,12 @@ function setupSettingsEvents() {
         } catch {}
       }
       copyPathBtn.innerHTML = CHECK_SVG;
+      copyPathBtn.classList.add("is-copied");
+      copyPathBtn.setAttribute("aria-label", "Copied");
       setTimeout(() => {
         copyPathBtn.innerHTML = COPY_PATH_SVG;
+        copyPathBtn.classList.remove("is-copied");
+        copyPathBtn.setAttribute("aria-label", "Copy full data path");
       }, 1400);
       return;
     }

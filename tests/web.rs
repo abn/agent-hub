@@ -27,6 +27,7 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// lists filled in, so the digest can only be recomputed from the source.
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 const HOME_JS: &str = include_str!("../web/home.mjs");
+const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1431,6 +1432,100 @@ fn desktop_round12_declares_the_shared_row_form_once() {
             "app.css must declare the shared row form class {class}"
         );
     }
+}
+
+// Round 12, desktop Settings. The pre-shell panels retire: the screen is a
+// 640px column of 48px rows under quiet mono group labels, one helper line in
+// the whole screen, the data path once on the reserved control row with its
+// copy glyph, and no footer repeating it.
+
+#[test]
+fn desktop_settings_is_the_row_form_not_the_panels() {
+    // The desktop branch is everything between the desktop form and the phone
+    // form, which is where the pre-shell panel shape used to live.
+    let desktop = SETTINGS_JS
+        .split("if (isDesktop) {")
+        .nth(1)
+        .expect("settings carries a desktop branch");
+    let desktop = desktop
+        .split("\n  const form = `")
+        .next()
+        .unwrap_or(desktop);
+    assert!(
+        !desktop.contains("settings-group-card"),
+        "desktop Settings must not draw the pre-shell panels"
+    );
+    assert!(
+        desktop.contains("form-column") && desktop.contains("form-row"),
+        "desktop Settings must use the shared row form"
+    );
+}
+
+#[test]
+fn desktop_settings_keeps_one_helper_line_and_no_second_path() {
+    // The alerts row's sub is the one allowed helper line. It lives in its own
+    // desktop helper, so the count is over every desktop piece, not the form
+    // alone. Nothing else may carry a `.form-row-sub`.
+    let alerts = SETTINGS_JS
+        .split("function desktopAlertsRow() {")
+        .nth(1)
+        .expect("settings carries the desktop alerts row");
+    let alerts = alerts.split("\n}").next().unwrap_or(alerts);
+    assert_eq!(
+        alerts.matches("form-row-sub").count(),
+        1,
+        "the desktop alerts row carries the one allowed helper line"
+    );
+    // The desktop branch runs to the phone form and holds no footer.
+    let desktop = SETTINGS_JS
+        .split("if (isDesktop) {")
+        .nth(1)
+        .expect("settings carries a desktop branch");
+    let desktop = desktop
+        .split("\n  const form = `")
+        .next()
+        .unwrap_or(desktop);
+    assert_eq!(
+        desktop.matches("form-row-sub").count(),
+        0,
+        "the desktop form itself carries no helper line"
+    );
+    assert!(
+        !desktop.contains("settings-footer"),
+        "the footer that repeated the path and the node must go"
+    );
+}
+
+#[test]
+fn desktop_settings_control_row_carries_the_path_and_the_copy_glyph() {
+    let desktop = SETTINGS_JS
+        .split("if (isDesktop) {")
+        .nth(1)
+        .expect("settings carries a desktop branch");
+    let desktop = desktop
+        .split("\n  const form = `")
+        .next()
+        .unwrap_or(desktop);
+    assert!(
+        desktop.contains("data-action=\"copy-path\""),
+        "the control row must carry the copy path control"
+    );
+    assert!(
+        desktop.contains("aria-label=\"Copy full data path\""),
+        "the copy glyph names the path it copies"
+    );
+    assert!(
+        desktop.contains("data-path="),
+        "the copy glyph carries the full absolute path to copy"
+    );
+}
+
+#[test]
+fn desktop_settings_uses_the_shared_form_column() {
+    assert!(
+        APP_CSS.contains(".form-column") && APP_CSS.contains(".form-row"),
+        "the shared row form must be declared in app.css"
+    );
 }
 
 #[tokio::test]

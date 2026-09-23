@@ -122,7 +122,9 @@ EXPECTED = {
     "search": "main .search-results .empty-state",
     "search?q=check%20notes": "main .search-results .search-row",
     "search?q=zeppelin": "main .search-results .empty-title",
-    "settings": "main .row .title",
+    # The phone settings form uses the flat `.row .title`; the desktop row
+    # form uses `.form-row-title`. Either is Settings painted.
+    "settings": "main .row .title, main .form-row-title",
     "access": "main .access-screen",
     "connect": "main .connect .connect-field",
     "more": "main .more-screen .more-row",
