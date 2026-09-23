@@ -457,14 +457,15 @@ export async function searchScreen(term, gen) {
   line.setAttribute("aria-live", "polite");
 
   // The one shell: the results are the index, the preview is the stage.
+  // The design's search head is the field itself, with the result line and the
+  // scope chips in the control row under it. The screen's name is read, not
+  // shown: the field is what the reader is looking at.
   const indexHead = el("div", "shell-head");
-  const headTitle = el("div", "shell-title");
-  title.classList.add("shell-title-line");
-  headTitle.append(title, line);
-  indexHead.append(el("span", "shell-slot"), headTitle, form);
+  title.classList.add("sr-only");
+  indexHead.append(el("span", "shell-slot"), title, form);
 
   const indexControls = el("div", "shell-controls");
-  indexControls.append(scopes);
+  indexControls.append(line, scopes);
 
   const indexBody = el("div", "shell-body");
   const indexCol = el("div", "shell-index");

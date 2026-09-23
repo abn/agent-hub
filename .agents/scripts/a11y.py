@@ -206,7 +206,8 @@ def axe_source() -> str:
 # WCAG AA ratio for the text's size.
 RUN_AXE = (
     "(tags) => axe.run(document, {runOnly: {type: 'tag', values: tags}}).then((r) => ({"
-    " violations: r.violations.map((v) => ({id: v.id, impact: v.impact, nodes: v.nodes.length})),"
+    " violations: r.violations.map((v) => ({id: v.id, impact: v.impact, nodes: v.nodes.length,"
+    "  targets: v.nodes.map((n) => n.target.join(' '))})),"
     " undecided: r.incomplete.filter((v) => v.id === 'color-contrast')"
     "  .flatMap((v) => v.nodes.map((n) => n.target.join(' '))) }))"
 )
@@ -273,8 +274,10 @@ def audit(page, source: str, where: str, failures: list[str]) -> None:
     page.evaluate(source)
     found = page.evaluate(RUN_AXE, TAGS)
     for violation in found["violations"]:
+        failed = ", ".join(dict.fromkeys(violation.get("targets") or []))
         failures.append(
             f"{where}: {violation['id']} ({violation['impact']}, {violation['nodes']} node(s))"
+            + (f" on {failed}" if failed else "")
         )
     undecided = [node for node in dict.fromkeys(found["undecided"]) if node not in CONTRAST_ALLOWED]
     for measured in page.evaluate(MEASURE, undecided):

@@ -20,7 +20,7 @@ import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
 import { toggleAside } from "./shell-layout.mjs";
-import { relative, byDay } from "./time.mjs";
+import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 const DOC_PATH = "M 6 3h9l4 4v14H6z M 8 12h8 M 8 16h8";
@@ -214,19 +214,33 @@ export function artifactGroupMenu() {
   </div>`;
 }
 
+// The label for the day an artifact was last written, in the reader's own
+// calendar. The list is ordered by that timestamp, so grouping on it keeps one
+// group per day and never repeats a label. Grouping on creation instead puts
+// the same label in the list twice, because a well-used artifact is written
+// long after it was created.
+function artifactDay(iso) {
+  const at = new Date(iso);
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(at)) / 86400000);
+  if (days === 0) return "TODAY";
+  if (days === 1) return "YESTERDAY";
+  const month = at.toLocaleString(undefined, { month: "short" }).toUpperCase();
+  return `${month} ${at.getDate()}, ${at.getFullYear()}`;
+}
+
 function artifactGroups(artifacts) {
   const groups = new Map();
   for (const a of artifacts) {
-    const key = artifactGrouping === "kind" ? String(a.kind || "other").toUpperCase() : null;
-    const label = key || "";
-    const bucket = groups.get(label) || [];
-    bucket.push(a);
-    groups.set(label, bucket);
+    const label =
+      artifactGrouping === "kind"
+        ? String(a.kind || "other").toUpperCase()
+        : artifactDay(a.updated_at || a.created_at);
+    const bucket = groups.get(label);
+    if (bucket) bucket.push(a);
+    else groups.set(label, [a]);
   }
-  if (artifactGrouping === "kind") {
-    return [...groups].map(([label, items]) => ({ label, items }));
-  }
-  return byDay(artifacts).map((group) => ({ label: group.label.toUpperCase(), items: group.events }));
+  return [...groups].map(([label, items]) => ({ label, items }));
 }
 
 export async function artifactIndex(projectId, selectedId = "") {
@@ -234,6 +248,9 @@ export async function artifactIndex(projectId, selectedId = "") {
   if (!artifacts || !artifacts.length) {
     return { rows: `<div class="shell-body-pad"><p class="empty">No artifacts yet.</p></div>`, artifacts: [] };
   }
+  // The newest artifact is what the stage shows when the reader has not chosen
+  // one, so its row is the marked one from the first paint.
+  const mark = selectedId || artifacts[0].id;
   const rows = artifactGroups(artifacts)
     .map((group) => {
       const body = group.items
@@ -243,7 +260,7 @@ export async function artifactIndex(projectId, selectedId = "") {
             : "";
           const href = `#/projects/${encodeURIComponent(projectId)}/artifacts?artifact=${encodeURIComponent(a.id)}`;
           const lock = a.protected ? `<span class="sr-only">Encrypted</span>` : "";
-          const selected = a.id === selectedId;
+          const selected = a.id === mark;
           return `<div class="row artifact-row${selected ? " selected" : ""}" data-id="${esc(a.id)}">
             <span class="row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
             <div class="grow">

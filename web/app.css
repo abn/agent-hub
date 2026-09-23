@@ -6927,3 +6927,92 @@ dialog.dialog-project-delete {
 /* The artifacts index group headers: a mono label over a hairline, the same
    shape the inbox groups use. */
 .shell-index .shell-group-label { border-bottom: 1px solid var(--line); }
+
+/* The index is a flat list. A card in an index spends width on chrome the
+   reader is not reading, and leaves the list looking like a stack of pages
+   where the design draws rows edge to edge under a hairline. */
+.shell-index .card,
+.shell-index .feed-day,
+.shell-index .inbox-rows,
+.shell-index .hub-group-header {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.shell-index .row {
+  padding-left: 16px;
+  padding-right: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.shell-index .row:last-child { border-bottom: 0; }
+.shell-index .inbox-label,
+.shell-index .shell-group-label,
+.shell-index .hub-group-header {
+  margin: 0;
+  padding: 10px 16px 6px;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+/* One title per row, and it ellipsises rather than clipping mid-word. */
+.shell-index .grow { min-width: 0; }
+.shell-index .row .title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The inbox's sync line is a control-row control, not a third band. */
+.shell-controls .inbox-sync {
+  margin: 0;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shell-controls .inbox-sync .inbox-sync-text { font-size: var(--t-12); color: var(--ink-3); }
+.shell-controls .inbox-sync .inbox-quiet { min-height: 28px; }
+.shell-index .inbox-quiet-line { margin: 0; padding: 12px 16px; }
+
+/* Home is a stage with no index: one 640 column, the same measure the prose
+   keeps everywhere else. */
+.home-pad { padding: 20px 16px 48px; }
+.home-pad > * { max-width: 640px; }
+
+/* Search: the field is the head, the result line and the chips are the row
+   under it, which is the shape the design draws. */
+.shell-head .search-form { flex: 1; min-width: 0; }
+.shell-controls .search-line { flex: none; margin: 0; }
+.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
+
+/* Search results are a flat list too. */
+.shell-index .search-results,
+.shell-index .search-group { margin: 0; padding: 0; }
+.shell-index .search-group .row {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.shell-index .search-group .row:last-child { border-bottom: 0; }
+.shell-head .search-form { flex: 1; min-width: 0; }
+.shell-controls .search-line { flex: none; margin: 0; }
+.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
+
+/* The rail's foot carries the sync line wherever the rail is shown, so the
+   inbox's own copy is for the phone, where the rail is not. Without this the
+   line eats the control row and leaves the filter field unreadably narrow. */
+@media (min-width: 1100px) {
+  .shell-controls .inbox-sync { display: none; }
+}
+.home-pad .home { flex: none; }
+
+/* A selected row's meta sits on the accent background, which needs the
+   secondary ink rather than the meta one to stay above 4.5:1. */
+.shell-index .row.selected .meta,
+.shell-index .row.selected .meta.mono { color: var(--ink-2); }
+.home-pad .home .home-summary { margin: 0; }

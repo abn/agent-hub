@@ -3,9 +3,10 @@
 // response, so painting the screen is one request however much it shows.
 
 import { api } from "./api.mjs";
-import { actionFor, esc, glyph, isOpen, paint, projectName } from "./dom.mjs";
+import { actionFor, esc, glyph, isOpen, main, paint, projectName } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
+import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { SLIVER, SLIVER_WORDS } from "./storage.mjs";
 import { timeHTML } from "./time.mjs";
 
@@ -223,31 +224,32 @@ export async function home(gen) {
   const unseen = unseenIds(recent, data.unseen || []);
   const waiting = int(data.waiting);
   const quiet = !waiting && !int(data.unread) && !unseen.size;
+  const node = [data.node?.host, data.node?.mode].filter((part) => typeof part === "string" && part);
+  const cards = quiet
+    ? quietCard(data)
+    : waitingCard(waiting, data.waiting_items || []) +
+      newestCard(
+        recent.filter((event) => !isOpen(event)),
+        unseen,
+      );
+  // Home is a stage with no index, the same shape Settings has. It keeps the
+  // reserved chrome every other pane has, so the frame does not move when the
+  // reader arrives here.
+  const gear = `<a class="home-gear" href="#/settings" aria-label="Settings">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
+    </a>`;
   paint(
     gen,
-    `<div class="home">
-      <header class="home-head">
-        ${nodeLine(data.node)}
-        <div class="home-title-row">
-          <h1>${esc(greeting())}</h1>
-          <a href="#/settings" class="home-gear" aria-label="Settings">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
-          </a>
-        </div>
-        <p class="home-summary">${summaryLine(data)}</p>
-      </header>
-      ${
-        quiet
-          ? quietCard(data)
-          : waitingCard(waiting, data.waiting_items || []) +
-            newestCard(
-              recent.filter((event) => !isOpen(event)),
-              unseen,
-            )
-      }
-      ${data.storage ? storageCard(data.storage, data.prunable || {}) : ""}
-    </div>`,
+    shellHTML({
+      noIndex: true,
+      stageHead: shellStageHead(greeting(), node.join(" · "), gear),
+      stageControls: `<div class="shell-controls"><span class="shell-meta">${esc(node.join(" · "))}</span></div>`,
+      stageBody: `<div class="shell-pad home-pad"><div class="home"><p class="home-summary">${esc(
+        summaryLine(data),
+      )}</p>${cards}${data.storage ? storageCard(data.storage, data.prunable || {}) : ""}</div></div>`,
+    }),
   );
+  installShellLayout(main);
   // The router passes this to the badge, which counts the same payload.
   return data;
 }

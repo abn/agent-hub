@@ -449,16 +449,16 @@ export async function inbox(gen) {
           `<div class="inbox-rows">${unread.items.map((row) => inboxRow(row, state)).join("")}</div>`,
         )
       : "");
-  const clear = sections
-    ? ""
-    : emptyStateHTML(EMPTY_COPY.inbox, {}, state.unreadOnly ? { href: address({ open: "" }) } : null);
-  const indexBody = `${syncLine()}${sections}${clear}${earlier(earlierItems, state)}`;
+  const clear = sections ? "" : `<p class="empty-hint inbox-quiet-line">Nothing waiting on you.</p>`;
+  const indexBody = `${sections}${clear}${earlier(earlierItems, state)}`;
 
   // Same shell as a project: the index lists the queue, the stage is the item.
-  // On a phone the shell shows one zone at a time.
+  // On a phone the shell shows one zone at a time. The sync line rides in the
+  // control row rather than under it, so the pane keeps the reserved two rows
+  // every other pane has.
   const shell = shellHTML({
     indexHead,
-    indexControls: shellIndexControls("Filter inbox"),
+    indexControls: shellIndexControls("Filter inbox", "", syncLine()),
     indexBody,
     stageHead: opened
       ? shellStageHead(
@@ -473,7 +473,13 @@ export async function inbox(gen) {
     )}</span></div>`,
     stageBody: opened
       ? detail(opened, state)
-      : `<div class="shell-pad"><p class="empty">Select an item from the list.</p></div>`,
+      : sections
+        ? `<div class="shell-pad"><p class="empty">Select an item from the list.</p></div>`
+        : `<div class="shell-pad">${emptyStateHTML(
+            EMPTY_COPY.inbox,
+            {},
+            state.unreadOnly ? { href: address({ open: "" }) } : null,
+          )}</div>`,
     hasSelection: Boolean(opened),
   });
   paint(gen, shell);

@@ -387,6 +387,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
 async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   const selected = params?.get?.("artifact") || "";
   const { rows, artifacts } = await artifactIndex(id, selected);
+  const chosen = selected || artifacts[0]?.id || "";
   const totalBytes = artifacts.reduce((sum, a) => sum + (Number(a.size_bytes) || 0), 0);
   const versions = artifacts.reduce((sum, a) => sum + (Number(a.version) || 1), 0);
   const listMeta = `${count(artifacts.length, "artifact", "artifacts")} · ${count(
@@ -401,8 +402,8 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   let stageBody = `<div class="shell-pad"><p class="empty">Select an artifact from the list.</p></div>`;
   let info = null;
 
-  if (selected) {
-    info = await artifactStage(selected, id);
+  if (chosen) {
+    info = await artifactStage(chosen, id);
     if (info) {
       stageHead = shellStageHead(info.title, info.meta, info.actions, backHref);
       stageControls = `<div class="shell-controls">${info.controls}</div>`;
