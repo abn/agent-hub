@@ -79,7 +79,6 @@ export async function moreScreen(gen) {
         <span class="more-sync-text mono">synced just now</span>
         <button type="button" class="more-refresh-btn" data-action="more-refresh">Refresh</button>
       </div>
-      <div class="more-note">The phone's one place for the sync line. Everything here is about the hub, not the work, which is why none of it earns a tab of its own.</div>
     </div>
   `;
 

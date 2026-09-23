@@ -168,9 +168,8 @@ export async function settingsScreen(gen) {
     if (a.last_seen_at && (!latestSeen || a.last_seen_at > latestSeen)) latestSeen = a.last_seen_at;
   }
   const agentCount = agents.length;
-  const agentText = `${agentCount} ${agentCount === 1 ? "agent" : "agents"}${
-    latestSeen ? ` · last call ${relative(latestSeen)}` : ""
-  }`;
+  const agentCountText = `${agentCount} ${agentCount === 1 ? "agent" : "agents"}`;
+  const agentText = `${agentCountText}${latestSeen ? ` · last call ${relative(latestSeen)}` : ""}`;
 
   const currentTheme = prefs.theme || "system";
   const densityCompact = (prefs.density || "comfortable") === "compact";
@@ -311,7 +310,7 @@ export async function settingsScreen(gen) {
         </a>
         <a href="#/access" class="settings-flat-row row settings-nav-row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">Agents and tokens</span>
-          <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentText)}</span>
+          <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
           <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout">Sign out of this browser</button>

@@ -299,8 +299,6 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
       <div class="agents-list">
         ${agentRows}
       </div>
-
-      <div style="padding:14px 16px;font-size:13px;line-height:1.5;color:var(--ink-3)">No token characters on this screen. An agent's row opens its grants, Reissue and Revoke; Revoke confirms, and is never a swipe.</div>
     </div>
   `;
 

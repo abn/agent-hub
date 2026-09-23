@@ -7147,14 +7147,6 @@ dialog.dialog-project-delete {
 .more-refresh-btn:hover {
   text-decoration: underline;
 }
-.more-note {
-  padding: 8px 16px 24px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--ink-3);
-  max-width: 560px;
-}
-
 /* Tools row segmented controls */
 .shell-controls .seg,
 .tools-seg {
