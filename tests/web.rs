@@ -16,6 +16,9 @@ const ARTIFACTS_JS: &str = include_str!("../web/artifacts.mjs");
 const INBOX_JS: &str = include_str!("../web/inbox.mjs");
 const COMMENTS_JS: &str = include_str!("../web/comments.mjs");
 const APP_CSS: &str = include_str!("../web/app.css");
+const TOKENS_CSS: &str = include_str!("../web/tokens.css");
+const DESIGN_MD: &str = include_str!("../DESIGN.md");
+const AGENTS_MD: &str = include_str!("../AGENTS.md");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
@@ -1346,6 +1349,88 @@ async fn protected_artifact_serves_the_locked_host_shell() {
         body.contains("Encrypted artifact"),
         "the locked shell names its state"
     );
+}
+
+// Round 12, the desktop spine. Knowledge is a kind of its own, storage-only, so
+// a byte count stops borrowing the question tone, and one row form is declared
+// once for the screens that are a short list of settings.
+
+#[test]
+fn desktop_round12_declares_the_knowledge_tone_in_both_themes() {
+    let dark = TOKENS_CSS
+        .find("[data-theme=\"dark\"]")
+        .expect("tokens.css declares a dark theme");
+    let (light, dark) = TOKENS_CSS.split_at(dark);
+    for (theme, block, tone, background) in [
+        ("light", light, "#5E6A1F", "#EEF0DC"),
+        ("dark", dark, "#B5C26A", "#2C3016"),
+    ] {
+        for (token, value) in [("--k-knowledge", tone), ("--k-knowledge-bg", background)] {
+            assert!(
+                block.contains(&format!("{token}: {value}")),
+                "the {theme} theme must declare {token}: {value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn desktop_round12_points_the_knowledge_segment_at_its_own_tone() {
+    let rule = ".storage-seg[data-kind=\"knowledge\"], .storage-swatch[data-kind=\"knowledge\"]";
+    assert!(
+        APP_CSS.contains(&format!("{rule} {{ background: var(--k-knowledge); }}")),
+        "the knowledge segment and swatch must paint --k-knowledge"
+    );
+    assert!(
+        !APP_CSS.contains(&format!("{rule} {{ background: var(--ink); }}")),
+        "the knowledge segment must not fall back to --ink"
+    );
+    assert!(
+        !APP_CSS.contains(&format!("{rule} {{ background: var(--k-question); }}")),
+        "the knowledge segment must not borrow the question tone"
+    );
+}
+
+#[test]
+fn desktop_round12_records_the_content_and_chrome_split_in_the_contract() {
+    assert!(
+        DESIGN_MD.contains("--k-knowledge"),
+        "DESIGN.md names the new knowledge token"
+    );
+    assert!(
+        DESIGN_MD.contains("storage-only"),
+        "DESIGN.md records that the knowledge tone is storage-only"
+    );
+    for phrase in [
+        "content rules",
+        "chrome rules",
+        "The desktop\nkeeps RULE 11.1 and 11.3",
+    ] {
+        assert!(
+            DESIGN_MD.contains(phrase),
+            "DESIGN.md must record the content/chrome split ({phrase})"
+        );
+    }
+    assert!(
+        AGENTS_MD.contains("its chrome rules"),
+        "AGENTS.md states that the chrome rules are phone-only"
+    );
+}
+
+#[test]
+fn desktop_round12_declares_the_shared_row_form_once() {
+    for class in [
+        ".form-column",
+        ".form-group-label",
+        ".form-row",
+        ".form-row-sub",
+        ".form-row-value",
+    ] {
+        assert!(
+            APP_CSS.contains(class),
+            "app.css must declare the shared row form class {class}"
+        );
+    }
 }
 
 #[tokio::test]

@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-24, desktop round 12 spine: knowledge tone and content/chrome split
+
+* **Update**: [Human interface](design/human-interface.md) documents the
+  storage-only knowledge tone (an olive pair set apart from the question tone
+  so a byte count does not read as a question) and the content/chrome split:
+  round 12's content rules hold at both widths, its chrome rules are phone-only,
+  and the desktop keeps its reserved 52px header and 40px control row.
+
 ## 2026-09-23, phone inbox and search tools rows, flat rows, and search title mark
 
 * **Update**: [Human interface](design/human-interface.md) documents the mobile

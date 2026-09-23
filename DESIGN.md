@@ -40,6 +40,12 @@ staying visually the same tone. `--k-approval` is that same value, so the
 button that asks for a decision and the badge that marks one stay one colour.
 The handoff is welcome to adopt it.
 
+**The knowledge tone is storage-only.** `--k-knowledge` and `--k-knowledge-bg`
+are an olive pair used only by the Storage breakdown's knowledge segment and
+legend. Storage is the one screen where a byte count and "an agent is asking
+you" would otherwise share a tone, so knowledge gets its own, and
+`--k-question` keeps its meaning.
+
 ## Type
 
 The scale is 28 for a page title, 22 for a section, 17 for an item title, 15
@@ -101,6 +107,20 @@ An aside exists only where something is read against the stage: anchored
 comments on an artifact, and a `kv` key beside the brain tree. Correspondence,
 which is a feed or inbox thread, is the stage, not a panel. The aside toggle is
 absent, not disabled, on feed, inbox and settings.
+
+### Content travels, chrome does not
+
+Round 12 splits the interface into content rules and chrome rules. The content
+rules, which say what a list, a summary, a settings row and a storage breakdown
+are, hold at both widths. The chrome rules, which are the 76/52 collapsing
+header, the 44px tools row, the tab bar and More, are phone-only. The desktop
+keeps RULE 11.1 and 11.3 exactly as built.
+
+The desktop changes this round makes are these. Home's lists are flat rows and
+the storage summary stays the one card. Settings is the round-11 row form and
+keeps its 40px control row. Storage adds a fourth bar segment and one helper
+line, and a zero cell reads a dash. Agents and tokens sits in the Settings frame.
+The rail's sync line is hidden when healthy.
 
 ### The frame does not move, on a desktop
 

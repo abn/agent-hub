@@ -38,7 +38,10 @@ verbatim, not reinterpreted.
 - **Event kinds.** Each of the six families has a colour and a background
   partner, used only inside the glyph badge or as a two pixel accent, never as
   body text. An answer borrows the question tone: it is the reply on that
-  thread, not a family of its own.
+  thread, not a family of its own. A seventh pair, an olive, is the knowledge
+  tone: it is drawn only by the Storage breakdown's knowledge segment and
+  legend, so a byte count does not borrow the question tone, which means "an
+  agent is asking you".
 - **Foundations.** A focus ring, two shadows, three radii, a four step spacing
   scale, and a type scale from 12 to 28.
 
@@ -102,6 +105,17 @@ bottom hairline.
 The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.
 This page records what ships; that file records what is designed.
+
+Round 12 splits the interface into content rules and chrome rules. The content
+rules, which say what a list, a summary, a settings row and a storage breakdown
+are, hold at both widths. The chrome rules, which are the collapsing phone
+header, the sticky 44px tools row, the tab bar and the More tab root, are
+phone-only. The desktop keeps its reserved 52px header and 40px control row in
+every pane, and this round gives it five changes: Home's lists are flat rows
+with the storage summary as the one card, Settings is a 640px column of 48px
+rows, Storage adds a fourth bar segment for knowledge and one helper line with
+zero cells drawn as a dash, Agents and tokens takes the same 640px row form as
+Settings, and the rail hides its sync line when the hub is healthy.
 
 ## Interaction rules
 
