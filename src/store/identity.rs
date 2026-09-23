@@ -29,6 +29,14 @@ pub struct Agent {
     pub created_at: String,
     /// When the agent was last seen, if ever.
     pub last_seen_at: Option<String>,
+    /// Lifecycle state: 'active' or 'pending'.
+    pub state: String,
+    /// The agent's why line, if enrolled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrol_note: Option<String>,
+    /// Address the agent enrolled from, if enrolled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrol_source: Option<String>,
 }
 
 /// A freshly issued token. The plaintext is returned once and never stored.
@@ -59,15 +67,15 @@ pub fn hash_token(token: &str) -> String {
     hex(&Sha256::digest(token.as_bytes()))
 }
 
-/// Resolve a token hash to its agent id.
+/// Resolve a token hash to its agent id and state.
 ///
 /// A revoked token never resolves. The token and agent last-seen timestamps
-/// are refreshed at most once per window.
-pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<String>> {
+/// are refreshed at most once per window, and only for active agents.
+pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(String, String)>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT a.id, a.last_seen_at, t.last_used_at
+            "SELECT a.id, a.last_seen_at, t.last_used_at, a.state
              FROM agent_tokens t
              JOIN agents a ON a.id = t.agent_id
              WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
@@ -81,10 +89,13 @@ pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<Str
     let agent_id = text(&row, 0)?;
     let agent_seen = text_at(&row, 1)?;
     let token_used = text_at(&row, 2)?;
+    let state = text_at(&row, 3)?.unwrap_or_else(|| "active".to_string());
     drop(rows);
 
-    touch(&conn, token_hash, &agent_id, token_used, agent_seen).await?;
-    Ok(Some(agent_id))
+    if state == "active" {
+        touch(&conn, token_hash, &agent_id, token_used, agent_seen).await?;
+    }
+    Ok(Some((agent_id, state)))
 }
 
 /// Refresh the last-seen timestamps, but only when stale, so a read does not
@@ -127,7 +138,7 @@ pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
              FROM agents ORDER BY created_at ASC",
             (),
         )
@@ -145,7 +156,7 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
              FROM agents WHERE id = ?1",
             [id],
         )
@@ -181,8 +192,8 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
         return Err(Error::Conflict(format!("agent {id} already exists")));
     }
     tx.execute(
-        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at)
-         VALUES (?1, ?2, ?3, ?4, NULL)",
+        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source)
+         VALUES (?1, ?2, ?3, ?4, NULL, 'active', NULL, NULL)",
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
@@ -219,6 +230,9 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
         personal_project_id,
         created_at,
         last_seen_at: None,
+        state: "active".to_string(),
+        enrol_note: None,
+        enrol_source: None,
     })
 }
 
@@ -455,6 +469,417 @@ pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Re
     Ok(())
 }
 
+/// Enrol an agent in pending state with an issued token.
+///
+/// One pending request per source IP is enforced: a second request while one is
+/// pending is rate-limited. The token is minted immediately and works only on
+/// the enrolment status route until approved.
+pub async fn enrol_agent(
+    db: &Database,
+    id: &str,
+    display_name: &str,
+    source: &str,
+    why: &str,
+) -> Result<(Agent, IssuedToken)> {
+    validate_agent_id(id)?;
+    validate_display_name(display_name)?;
+    let created_at = crate::store::now_rfc3339();
+    let personal_project_id = format!("space-{}", crate::store::next_id());
+    let personal_display_name = format!("{display_name} (personal)");
+
+    let plaintext = generate_token();
+    let token_hash = hash_token(&plaintext);
+
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    // One pending request per source at a time.
+    let mut pending_rows = tx
+        .query(
+            "SELECT 1 FROM agents WHERE state = 'pending' AND enrol_source = ?1",
+            vec![Value::Text(source.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if pending_rows.next().await.map_err(engine)?.is_some() {
+        drop(pending_rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::RateLimited(format!(
+            "a pending enrolment request from source '{source}' is already awaiting decision"
+        )));
+    }
+    drop(pending_rows);
+
+    // Conflict check on agent id.
+    let mut id_rows = tx
+        .query(
+            "SELECT 1 FROM agents WHERE id = ?1",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if id_rows.next().await.map_err(engine)?.is_some() {
+        drop(id_rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::Conflict(format!("agent {id} already exists")));
+    }
+    drop(id_rows);
+
+    tx.execute(
+        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source)
+         VALUES (?1, ?2, ?3, ?4, NULL, 'pending', ?5, ?6)",
+        vec![
+            Value::Text(id.to_string()),
+            Value::Text(display_name.to_string()),
+            Value::Text(personal_project_id.clone()),
+            Value::Text(created_at.clone()),
+            Value::Text(why.to_string()),
+            Value::Text(source.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "INSERT INTO agent_tokens(token_hash, agent_id, created_at, last_used_at, revoked_at)
+         VALUES (?1, ?2, ?3, NULL, NULL)",
+        vec![
+            Value::Text(token_hash),
+            Value::Text(id.to_string()),
+            Value::Text(created_at.clone()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    crate::store::projects::insert_owned(
+        &tx,
+        &personal_project_id,
+        &personal_display_name,
+        Some(id),
+        &created_at,
+        false,
+    )
+    .await?;
+
+    // Create approval event in inbox
+    events::append_in_tx(
+        &tx,
+        id,
+        None,
+        NewEvent {
+            project_id: personal_project_id.clone(),
+            kind: "approval".to_string(),
+            summary: format!("{display_name} wants to join"),
+            payload: Some(serde_json::json!({
+                "action": "enrol_request",
+                "agent_id": id,
+                "display_name": display_name,
+                "source": source,
+                "why": why,
+            })),
+            needs_action: true,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await?;
+
+    tx.commit().await.map_err(engine)?;
+
+    Ok((
+        Agent {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            personal_project_id,
+            created_at: created_at.clone(),
+            last_seen_at: None,
+            state: "pending".to_string(),
+            enrol_note: Some(why.to_string()),
+            enrol_source: Some(source.to_string()),
+        },
+        IssuedToken {
+            token: plaintext,
+            created_at,
+        },
+    ))
+}
+
+/// Approve an agent enrolment request.
+///
+/// Marks the agent 'active', resolves the inbox approval, optionally renames
+/// the id and display name, and attaches any confidential projects granted.
+pub async fn approve_enrolment(
+    db: &Database,
+    current_id: &str,
+    new_id: Option<&str>,
+    new_display_name: Option<&str>,
+    projects: Option<&[String]>,
+) -> Result<Agent> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let mut rows = tx
+        .query(
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
+             FROM agents WHERE id = ?1",
+            vec![Value::Text(current_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        drop(rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::NotFound(format!("agent {current_id} not found")));
+    };
+    let mut agent = agent_from_row(&row)?;
+    drop(rows);
+
+    if agent.state != "pending" {
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::Conflict(format!(
+            "agent {current_id} is not pending enrolment"
+        )));
+    }
+
+    let effective_id = if let Some(target_id) = new_id {
+        if target_id != current_id {
+            validate_agent_id(target_id)?;
+            let mut id_check = tx
+                .query(
+                    "SELECT 1 FROM agents WHERE id = ?1",
+                    vec![Value::Text(target_id.to_string())],
+                )
+                .await
+                .map_err(engine)?;
+            if id_check.next().await.map_err(engine)?.is_some() {
+                drop(id_check);
+                tx.rollback().await.map_err(engine)?;
+                return Err(Error::Conflict(format!("agent {target_id} already exists")));
+            }
+            drop(id_check);
+
+            tx.execute(
+                "UPDATE agent_tokens SET agent_id = ?1 WHERE agent_id = ?2",
+                vec![
+                    Value::Text(target_id.to_string()),
+                    Value::Text(current_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+
+            tx.execute(
+                "UPDATE projects SET owner_agent = ?1 WHERE owner_agent = ?2",
+                vec![
+                    Value::Text(target_id.to_string()),
+                    Value::Text(current_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+
+            tx.execute(
+                "UPDATE events SET actor = ?1 WHERE actor = ?2",
+                vec![
+                    Value::Text(target_id.to_string()),
+                    Value::Text(current_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+
+            tx.execute(
+                "UPDATE agents SET id = ?1 WHERE id = ?2",
+                vec![
+                    Value::Text(target_id.to_string()),
+                    Value::Text(current_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+
+            agent.id = target_id.to_string();
+            target_id.to_string()
+        } else {
+            current_id.to_string()
+        }
+    } else {
+        current_id.to_string()
+    };
+
+    if let Some(target_name) = new_display_name {
+        validate_display_name(target_name)?;
+        tx.execute(
+            "UPDATE agents SET display_name = ?1 WHERE id = ?2",
+            vec![
+                Value::Text(target_name.to_string()),
+                Value::Text(effective_id.clone()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+        agent.display_name = target_name.to_string();
+    }
+
+    tx.execute(
+        "UPDATE agents SET state = 'active' WHERE id = ?1",
+        vec![Value::Text(effective_id.clone())],
+    )
+    .await
+    .map_err(engine)?;
+    agent.state = "active".to_string();
+
+    if let Some(project_ids) = projects {
+        let created_at = crate::store::now_rfc3339();
+        for proj in project_ids {
+            if row_exists(&tx, Table::Projects, proj).await? {
+                tx.execute(
+                    "INSERT INTO grants(agent_id, project_id, access, created_at)
+                     VALUES (?1, ?2, 'write', ?3)
+                     ON CONFLICT(agent_id, project_id) DO UPDATE SET access = excluded.access",
+                    vec![
+                        Value::Text(effective_id.clone()),
+                        Value::Text(proj.clone()),
+                        Value::Text(created_at.clone()),
+                    ],
+                )
+                .await
+                .map_err(engine)?;
+            }
+        }
+    }
+
+    tx.execute(
+        "UPDATE inbox SET status = 'resolved'
+         WHERE event_id IN (
+             SELECT id FROM events WHERE project_id = ?1 AND kind = 'approval'
+         )",
+        vec![Value::Text(agent.personal_project_id.clone())],
+    )
+    .await
+    .map_err(engine)?;
+
+    audit(
+        &tx,
+        &agent.personal_project_id,
+        format!("agent {effective_id} enrolment approved"),
+        serde_json::json!({
+            "action": "enrol_approved",
+            "agent_id": effective_id,
+        }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(engine)?;
+    Ok(agent)
+}
+
+/// Refuse an agent enrolment request.
+///
+/// Deletes the agent row, its tokens, grants, personal space, and inbox items,
+/// leaving the suggested id free for a fresh attempt.
+pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let mut rows = tx
+        .query(
+            "SELECT personal_project_id, state FROM agents WHERE id = ?1",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        drop(rows);
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::NotFound(format!("agent {id} not found")));
+    };
+    let personal_project_id = text(&row, 0)?;
+    let state = text(&row, 1)?;
+    drop(rows);
+
+    if state != "pending" {
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::Conflict(format!(
+            "agent {id} is not pending enrolment"
+        )));
+    }
+
+    tx.execute(
+        "DELETE FROM agent_tokens WHERE agent_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "DELETE FROM grants WHERE agent_id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "DELETE FROM inbox WHERE event_id IN (SELECT id FROM events WHERE project_id = ?1)",
+        vec![Value::Text(personal_project_id.clone())],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "DELETE FROM events WHERE project_id = ?1",
+        vec![Value::Text(personal_project_id.clone())],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "DELETE FROM projects WHERE id = ?1",
+        vec![Value::Text(personal_project_id)],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.execute(
+        "DELETE FROM agents WHERE id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.commit().await.map_err(engine)?;
+    Ok(())
+}
+
+/// Look up the current agent id and state for a live token hash.
+pub async fn lookup_agent_by_token_hash(
+    db: &Database,
+    token_hash: &str,
+) -> Result<Option<(String, String)>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT a.id, a.state FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
+            [token_hash],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some((text(&row, 0)?, text(&row, 1)?))),
+        None => Ok(None),
+    }
+}
+
 fn generate_token() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
@@ -545,6 +970,9 @@ fn agent_from_row(row: &Row) -> Result<Agent> {
         personal_project_id: text(row, 2)?,
         created_at: text(row, 3)?,
         last_seen_at: text_at(row, 4)?,
+        state: text_at(row, 5)?.unwrap_or_else(|| "active".to_string()),
+        enrol_note: text_at(row, 6)?,
+        enrol_source: text_at(row, 7)?,
     })
 }
 

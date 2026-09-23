@@ -27,6 +27,7 @@ pub fn config(data_dir: &Path) -> Config {
         inbox_caps: InboxCaps::disabled(),
         active_window: Duration::from_secs(900),
         node_name: None,
+        enrol_enabled: true,
     }
 }
 

@@ -17,6 +17,7 @@ const READY_PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 pub mod agents;
 pub mod artifacts;
 pub mod auth;
+pub mod enrol;
 pub mod feed;
 pub mod inbox;
 pub mod kb;
@@ -68,6 +69,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/agents/{id}/grants/{project_id}",
             delete(agents::ungrant),
         )
+        .route("/api/v1/enrol", post(enrol::enrol))
+        .route("/api/v1/enrol/status", get(enrol::status))
+        .route("/api/v1/enrol/{id}/approve", post(enrol::approve))
+        .route("/api/v1/enrol/{id}/refuse", post(enrol::refuse))
         .route(
             "/api/v1/artifacts/{id}",
             get(artifacts::content).delete(artifacts::destroy),

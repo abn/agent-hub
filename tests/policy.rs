@@ -28,6 +28,7 @@ fn principal(actor: &str, agent_id: &str) -> Principal {
         actor: actor.to_string(),
         agent_id: Some(agent_id.to_string()),
         is_admin: false,
+        is_pending: false,
     }
 }
 
@@ -36,6 +37,7 @@ fn admin() -> Principal {
         actor: "human".to_string(),
         agent_id: None,
         is_admin: true,
+        is_pending: false,
     }
 }
 

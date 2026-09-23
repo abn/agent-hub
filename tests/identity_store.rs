@@ -74,7 +74,8 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
         .await
         .expect("resolve")
         .expect("a live token resolves");
-    assert_eq!(resolved, "worker");
+    assert_eq!(resolved.0, "worker");
+    assert_eq!(resolved.1, "active");
 
     let second = identity::issue_token(&db, &agent.id)
         .await

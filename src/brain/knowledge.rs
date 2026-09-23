@@ -590,6 +590,7 @@ mod tests {
             inbox_caps: crate::limits::InboxCaps::disabled(),
             active_window: std::time::Duration::from_secs(900),
             node_name: None,
+            enrol_enabled: true,
         })
         .await
         .expect("open state");

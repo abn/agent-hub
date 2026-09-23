@@ -157,6 +157,8 @@ pub struct Config {
     pub active_window: std::time::Duration,
     /// The name the human sees for this node, when the operator set one.
     pub node_name: Option<String>,
+    /// Whether agent self-enrolment is enabled.
+    pub enrol_enabled: bool,
 }
 
 const ACTIVE_WINDOW_SECS: u64 = 900;
@@ -240,6 +242,10 @@ impl Config {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
 
+        let enrol_enabled = std::env::var("HUB_ENROL")
+            .map(|value| value.trim() != "off")
+            .unwrap_or(true);
+
         Ok(Self {
             data_dir,
             bind,
@@ -248,6 +254,7 @@ impl Config {
             inbox_caps,
             active_window,
             node_name,
+            enrol_enabled,
         })
     }
 
@@ -1004,4 +1011,132 @@ pub fn validate_configuration(env: &dyn Fn(&str) -> Option<String>) -> Result<()
     ClientConfig::resolve(env)?;
 
     Ok(())
+}
+
+/// The user config file a client writes its token to: the first candidate
+/// `resolve_paths` names, so the file that is read is the file that is written.
+pub fn user_config_target(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let (hub_config, _system, candidates) = resolve_paths(env);
+    hub_config.or_else(|| candidates.into_iter().next())
+}
+
+/// Write or update `[client] token` in `path`, at file mode 0600.
+///
+/// The config file is the config module's to write: the enrolment command
+/// stores the token it is given here, and nothing else opens the file for
+/// writing.
+pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let existing = if path.exists() {
+        std::fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+
+    let updated = update_client_toml(&existing, token);
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(updated.as_bytes())?;
+        file.sync_all()?;
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, updated)?;
+    }
+
+    Ok(())
+}
+
+/// Replace the token in the `[client]` table, or add the table and the key.
+fn update_client_toml(content: &str, token: &str) -> String {
+    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+    let mut client_section_idx = None;
+    let mut next_section_idx = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section_name = trimmed[1..trimmed.len() - 1].trim();
+            if section_name == "client" {
+                client_section_idx = Some(i);
+            } else if client_section_idx.is_some() && next_section_idx.is_none() {
+                next_section_idx = Some(i);
+            }
+        }
+    }
+
+    if let Some(c_idx) = client_section_idx {
+        let end_idx = next_section_idx.unwrap_or(lines.len());
+        let mut token_line_idx = None;
+        for (i, line) in lines.iter().enumerate().take(end_idx).skip(c_idx + 1) {
+            let trimmed = line.trim();
+            if trimmed.split_once('=').map(|(k, _)| k.trim()) == Some("token") {
+                token_line_idx = Some(i);
+                break;
+            }
+        }
+        if let Some(t_idx) = token_line_idx {
+            lines[t_idx] = format!("token = \"{token}\"");
+        } else {
+            lines.insert(c_idx + 1, format!("token = \"{token}\""));
+        }
+        let mut out = lines.join("\n");
+        if content.ends_with('\n') {
+            out.push('\n');
+        }
+        out
+    } else {
+        let mut out = content.to_string();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("[client]\ntoken = \"{token}\"\n"));
+        out
+    }
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::update_client_toml;
+
+    #[test]
+    fn toml_insertion_on_empty() {
+        let updated = update_client_toml("", "secret");
+        assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
+    }
+
+    #[test]
+    fn toml_insertion_existing_client_no_token() {
+        let existing = "[client]\nurl = \"http://hub:4000\"\n";
+        let updated = update_client_toml(existing, "secret");
+        assert_eq!(
+            updated,
+            "[client]\ntoken = \"secret\"\nurl = \"http://hub:4000\"\n"
+        );
+    }
+
+    #[test]
+    fn toml_replacement_existing_token() {
+        let existing = "[client]\ntoken = \"old\"\n";
+        let updated = update_client_toml(existing, "secret");
+        assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
+    }
 }

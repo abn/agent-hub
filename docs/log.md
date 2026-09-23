@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, agent self-enrolment and pending token refusal indistinguishability
+
+* **Update**: [The agent surface](architecture/agent-surface.md) documents
+  the self-enrolment workflow (`agent-hub enrol`, `POST /api/v1/enrol`, and
+  `GET /api/v1/enrol/status?wait=N`), operator approval and refusal via inbox,
+  secure 0600 token storage in `config.toml`, and the security invariant
+  guaranteeing pending token refusal is byte-for-byte indistinguishable from
+  unrecognised tokens.
+
 ## 2026-09-22, unified TOML configuration and inspect commands
 
 * **Update**: [Quickstart](usage/quickstart.md) documents layered TOML

@@ -34,6 +34,7 @@ tailscale = { version = "0.5", features = ["axum"], optional = true }
 # version the lock file already pins, for the volume and host name the storage
 # screen reports. Safe API only.
 rustix = { version = "1.1.4", features = ["fs", "system"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"], optional = true }
 
 [features]
 default = ["client"]
@@ -43,6 +44,7 @@ default = ["client"]
 # implementing its client trait here, and it is rustls only: an OpenSSL
 # linkage would break the distroless image.
 client = [
+  "dep:reqwest",
   "rmcp/client",
   "rmcp/reqwest",
   "rmcp/transport-streamable-http-client-reqwest",

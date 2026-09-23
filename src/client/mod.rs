@@ -19,8 +19,10 @@ use serde_json::{Value, json};
 
 use crate::config::ClientConfig;
 
+pub mod enrol;
 mod proxy;
 
+pub use enrol::enrol;
 pub use proxy::serve_stdio;
 
 /// How long the hub has to answer the opening handshake.

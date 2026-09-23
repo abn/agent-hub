@@ -30,6 +30,14 @@ and exits 0, or prints the hub's error object on stderr and exits non-zero
 holds no session: it is for stateless reads and writes that name their target,
 and session-bound work goes through the proxy.
 
+An agent arriving without credentials enrols via `agent-hub enrol`, or by calling
+`POST /api/v1/enrol` with a single-line explanation (under 200 characters) and
+long-polling `GET /api/v1/enrol/status?wait=30`. The operator approves or refuses
+the request from the inbox. Upon shared approval, the client records the issued
+token in `config.toml` at file mode `0600`. Pending tokens are refused by all
+ordinary routes with the exact same unauthenticated response as unrecognised
+tokens.
+
 ## Tools
 
 | Tool | Purpose |

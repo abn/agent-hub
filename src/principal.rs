@@ -22,6 +22,8 @@ pub struct Principal {
     pub agent_id: Option<String>,
     /// Whether the caller is the human admin.
     pub is_admin: bool,
+    /// Whether the caller is in pending enrolment.
+    pub is_pending: bool,
 }
 
 /// Resolves a bearer token to a principal.
@@ -54,6 +56,7 @@ impl Auth {
             actor: self.local_actor.clone(),
             agent_id: None,
             is_admin: true,
+            is_pending: false,
         }
     }
 
@@ -65,6 +68,7 @@ impl Auth {
                     actor: "human".to_string(),
                     agent_id: None,
                     is_admin: true,
+                    is_pending: false,
                 })
             }
             _ => None,
@@ -72,7 +76,8 @@ impl Auth {
     }
 
     /// Resolve a token for the MCP transport: the admin token, or a per-agent
-    /// token looked up in the identity store.
+    /// token looked up in the identity store. A pending enrolment token is refused
+    /// identically to an unrecognised token.
     pub async fn resolve_agent(
         &self,
         db: &turso::Database,
@@ -85,10 +90,34 @@ impl Auth {
             .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
         let hash = identity::hash_token(presented);
         match identity::resolve_token(db, &hash).await? {
-            Some(agent_id) => Ok(Principal {
+            Some((agent_id, state)) if state == "active" => Ok(Principal {
                 actor: agent_id.clone(),
                 agent_id: Some(agent_id),
                 is_admin: false,
+                is_pending: false,
+            }),
+            _ => Err(Error::Unauthenticated(
+                "the bearer token is not recognised".to_string(),
+            )),
+        }
+    }
+
+    /// Resolve a token for the enrolment status route: accepts both active and
+    /// pending tokens.
+    pub async fn resolve_enrol(
+        &self,
+        db: &turso::Database,
+        token: Option<&str>,
+    ) -> Result<Principal> {
+        let presented = token
+            .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
+        let hash = identity::hash_token(presented);
+        match identity::resolve_token(db, &hash).await? {
+            Some((agent_id, state)) => Ok(Principal {
+                actor: agent_id.clone(),
+                agent_id: Some(agent_id),
+                is_admin: false,
+                is_pending: state == "pending",
             }),
             None => Err(Error::Unauthenticated(
                 "the bearer token is not recognised".to_string(),

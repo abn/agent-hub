@@ -39,6 +39,8 @@ pub struct AppState {
     /// Freshness ticks for the human stream. A write that changes the inbox or
     /// feed sends one; the stream carries no data, only the nudge to refetch.
     pub ticker: tokio::sync::broadcast::Sender<()>,
+    /// Share flag recorded during enrolment approvals.
+    pub enrol_shares: Arc<std::sync::Mutex<std::collections::HashMap<String, bool>>>,
 }
 
 impl AppState {
@@ -89,7 +91,28 @@ impl AppState {
             generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             host,
             ticker,
+            enrol_shares: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         })
+    }
+
+    /// Record the share flag for an approved enrolment.
+    pub fn set_enrol_share(&self, agent_id: &str, share: bool) {
+        if share {
+            self.enrol_shares
+                .lock()
+                .unwrap()
+                .insert(agent_id.to_string(), true);
+        }
+    }
+
+    /// Read the share flag for an enrolment.
+    pub fn get_enrol_share(&self, agent_id: &str) -> bool {
+        self.enrol_shares
+            .lock()
+            .unwrap()
+            .get(agent_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Nudge every stream subscriber to refetch. A send with no subscribers is

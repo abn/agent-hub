@@ -54,6 +54,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 10,
         ddl: V10,
     },
+    Migration {
+        version: 11,
+        ddl: V11,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -359,4 +363,16 @@ INSERT INTO project_feed_cursors(project_id, last_seen_event_id, updated_at)
 const V10: &str = r#"
 ALTER TABLE projects ADD COLUMN confidential INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agents DROP COLUMN trust;
+"#;
+
+/// Version 11: enrolment states for agents.
+///
+/// An agent that arrives with nothing starts as 'pending' with its enrol note
+/// and source address. Approval marks it 'active'; refusal deletes the row.
+const V11: &str = r#"
+ALTER TABLE agents ADD COLUMN state TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE agents ADD COLUMN enrol_note TEXT;
+ALTER TABLE agents ADD COLUMN enrol_source TEXT;
+CREATE INDEX IF NOT EXISTS agents_pending_source
+  ON agents(enrol_source) WHERE state = 'pending';
 "#;

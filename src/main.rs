@@ -11,6 +11,7 @@ usage:
   agent-hub tools                list the hub's tools
   agent-hub kb <command>         read and write the project knowledge base
   agent-hub config [flags]       inspect and validate configuration
+  agent-hub enrol [why]          request enrolment and wait for operator approval
 
 The hub is configured by config.toml and environment variables.
 ";
@@ -54,6 +55,7 @@ fn main() -> ExitCode {
         Some("tools") => tools(),
         Some("kb") => kb(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
+        Some("enrol") => enrol(&args[1..]),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -522,6 +524,26 @@ fn tools() -> ExitCode {
 
 #[cfg(not(feature = "client"))]
 fn kb(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(feature = "client")]
+fn enrol(args: &[String]) -> ExitCode {
+    let (config, runtime) = match client_runtime() {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    match runtime.block_on(agent_hub::client::enrol(&config, args)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(failure) => {
+            failure.report();
+            ExitCode::from(failure.exit_code())
+        }
+    }
+}
+
+#[cfg(not(feature = "client"))]
+fn enrol(_args: &[String]) -> ExitCode {
     without_client()
 }
 

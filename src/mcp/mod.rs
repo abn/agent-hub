@@ -81,6 +81,7 @@ impl HubServer {
                 actor: "unknown".to_string(),
                 agent_id: None,
                 is_admin: false,
+                is_pending: false,
             })
     }
 }
