@@ -3,10 +3,11 @@
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { main, paint, projectName, stale } from "./dom.mjs";
+import { esc, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
+import { shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -615,20 +616,132 @@ function desktopTable(usage) {
   return container;
 }
 
-function renderMobile(root, usage) {
-  root.appendChild(head(usage));
-  root.appendChild(summary(usage));
-  const byProject = el("section", "storage-by");
-  const label = el("h2", "section-label", "By project");
-  label.id = "storage-by-title";
-  byProject.setAttribute("aria-labelledby", label.id);
-  const list = el("div", "storage-projects");
-  const holding = usage.projects.filter((project) => totalOf(project) > 0 || project.prunable_sessions > 0);
-  const idle = usage.projects.filter((project) => !holding.includes(project));
-  for (const project of holding) list.appendChild(projectRow(project));
-  byProject.append(label, list);
-  if (idle.length) byProject.appendChild(idleFold(idle));
-  root.append(byProject, pruneAllCard(usage));
+function renderMobileHTML(usage) {
+  const now = new Date();
+  const readTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const nodeHost = usage.node?.host || "demo";
+  const metaText = `${nodeHost} · read ${readTime}`;
+  const remeasureBtn = `<button type="button" class="shell-action" data-action="storage-remeasure" aria-label="Re-measure" style="background:none;border:0;border-radius:var(--r-1);color:var(--ink-2);width:44px;height:44px;display:grid;place-items:center;cursor:pointer"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 5v6h-6"></path></svg></button>`;
+
+  const prunableSessions = usage.prunable?.sessions || 0;
+  const prunableBytes = usage.prunable?.bytes || 0;
+  const prunableLabel = prunableSessions === 1 ? "1 ended session" : `${prunableSessions} ended sessions`;
+  const pruneBtn = prunableSessions > 0
+    ? `<button type="button" class="storage-tools-prune-btn danger storage-review" data-action="storage-prune-all" style="flex:none;white-space:nowrap;height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Prune <span class="mono" style="font-family:var(--font-mono);font-weight:500">${esc(formatBytes(prunableBytes))}</span></button>`
+    : "";
+
+  const stageControls = `
+    <div class="shell-controls storage-mobile-tools" style="display:flex;align-items:center;gap:8px;padding:0 16px;height:44px;background:var(--surface);border-bottom:1px solid var(--line);box-sizing:border-box">
+      <span class="storage-tools-ended" style="flex:1;min-width:0;font-size:13px;color:var(--ink-2)">${esc(prunableLabel)}</span>
+      ${pruneBtn}
+    </div>`;
+
+  const used = usage.used_bytes || 0;
+  const [amount, unit] = formatBytes(used).split(" ");
+  const capacityText = usage.capacity_bytes != null ? `of ${formatBytes(usage.capacity_bytes)}` : "";
+
+  const evBytes = usage.by_kind?.events ?? 0;
+  const seBytes = usage.by_kind?.sessions ?? 0;
+  const arBytes = usage.by_kind?.artifacts ?? 0;
+  const knBytes = usage.by_kind?.knowledge ?? usage.by_kind?.kb ?? 0;
+
+  const kindsTotal = evBytes + seBytes + arBytes + knBytes || 1;
+  const evFlex = Math.max(1, Math.round((evBytes / kindsTotal) * 1000));
+  const seFlex = Math.max(1, Math.round((seBytes / kindsTotal) * 1000));
+  const arFlex = Math.max(1, Math.round((arBytes / kindsTotal) * 1000));
+  const knFlex = Math.max(1, Math.round((knBytes / kindsTotal) * 1000));
+
+  const breakdown = `Events ${formatBytes(evBytes)}, sessions ${formatBytes(seBytes)}, artifacts ${formatBytes(arBytes)}, knowledge ${formatBytes(knBytes)}`;
+  const sharedEventsBytes = usage.events_shared_bytes || evBytes;
+
+  const projectRows = usage.projects.map((project, idx) => {
+    const total = totalOf(project);
+    const parts = [
+      ["events", project.events_bytes ?? 0],
+      ["sessions", project.session_bytes ?? 0],
+      ["artifacts", project.artifact_bytes ?? 0],
+      ["knowledge", project.kb_bytes ?? 0],
+    ];
+    const nonZero = parts.filter(([, b]) => b > 0);
+    let metaLine = "";
+    if (nonZero.length === 0 || (nonZero.length === 1 && nonZero[0][0] === "events")) {
+      metaLine = "events only";
+    } else {
+      metaLine = nonZero.map(([k, b]) => `${k} ${formatBytes(b)}`).join(" · ");
+    }
+
+    const prunableLine = project.prunable_sessions > 0
+      ? `<span class="storage-project-prune" style="font-size:12px;font-weight:600;color:var(--action)">${formatBytes(project.prunable_bytes)} can be pruned</span>`
+      : "";
+
+    return `
+      <a class="storage-project-row storage-row row" href="${projectHref(project)}" style="display:flex;flex-direction:column;gap:6px;padding:12px 16px;${idx === 0 ? 'border-top:1px solid var(--line);' : ''}border-bottom:1px solid var(--line);background:var(--surface);text-decoration:none;color:inherit;box-sizing:border-box">
+        <span style="display:flex;justify-content:space-between;gap:12px">
+          <b style="font-size:15px;font-weight:600;color:var(--ink)">${esc(projectName(project))}</b>
+          <span class="mono" style="font:600 13px/1.3 var(--font-mono);color:var(--ink)">${esc(formatBytes(total))}</span>
+        </span>
+        <span class="storage-project-meta" style="font-size:12px;color:var(--ink-3)">${esc(metaLine)}</span>
+        ${prunableLine}
+      </a>
+    `;
+  }).join("");
+
+  const content = `
+    <div class="storage storage-mobile-view" style="flex:1;min-height:0;overflow:hidden">
+      <div class="storage-summary card" style="padding:18px 16px 16px;display:flex;flex-direction:column;gap:12px;background:var(--surface);border-bottom:1px solid var(--line);margin-top:16px;border-top:1px solid var(--line);border-left:0;border-right:0;border-radius:0">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+          <span class="mono" style="font:600 28px/1 var(--font-mono);letter-spacing:-.02em">${esc(amount)} <span style="font-size:15px;font-weight:500;color:var(--ink-2)">${esc(unit)}</span></span>
+          ${capacityText ? `<span class="mono" style="font:500 12px/1 var(--font-mono);color:var(--ink-3)">${esc(capacityText)}</span>` : ""}
+        </div>
+        <div class="storage-summary-bar" role="img" aria-label="${esc(breakdown)}" style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px">
+          <span class="storage-bar-seg" data-kind="events" style="flex:${evFlex};background:var(--k-signal)"></span>
+          <span class="storage-bar-seg" data-kind="sessions" style="flex:${seFlex};background:var(--k-session)"></span>
+          <span class="storage-bar-seg" data-kind="artifacts" style="flex:${arFlex};background:var(--k-artifact)"></span>
+          <span class="storage-bar-seg" data-kind="knowledge" style="flex:${knFlex};background:var(--k-question)"></span>
+        </div>
+        <div class="storage-legend-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;font-size:13px;color:var(--ink-2)">
+          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="events" style="width:10px;height:10px;border-radius:2px;background:var(--k-signal);flex:none" aria-hidden="true"></span>events <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(evBytes)}</span></span>
+          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="sessions" style="width:10px;height:10px;border-radius:2px;background:var(--k-session);flex:none" aria-hidden="true"></span>sessions <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(seBytes)}</span></span>
+          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="artifacts" style="width:10px;height:10px;border-radius:2px;background:var(--k-artifact);flex:none" aria-hidden="true"></span>artifacts <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(arBytes)}</span></span>
+          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="knowledge" style="width:10px;height:10px;border-radius:2px;background:var(--k-question);flex:none" aria-hidden="true"></span>knowledge <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(knBytes)}</span></span>
+        </div>
+        <div class="storage-helper-line" style="font-size:13px;line-height:1.45;color:var(--ink-3)">${formatBytes(sharedEventsBytes)} of events is the shared hub database, not in any row below.</div>
+      </div>
+      <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">BY PROJECT · ${usage.projects.length}</div>
+      <div class="storage-projects-list">
+        ${projectRows}
+      </div>
+    </div>
+  `;
+
+  return shellHTML({
+    segment: "storage",
+    noIndex: true,
+    stageHead: shellStageHead("Storage", metaText, remeasureBtn, "#/more"),
+    stageControls,
+    stageBody: content,
+  });
+}
+
+function setupMobileStorageEvents(usage) {
+  const root = main.querySelector(".shell") || main;
+  if (!root) return;
+
+  root.addEventListener("click", async (event) => {
+    const remeasureBtn = event.target.closest("[data-action='storage-remeasure']");
+    if (remeasureBtn) {
+      event.preventDefault();
+      await render();
+      return;
+    }
+    const pruneBtn = event.target.closest("[data-action='storage-prune-all']");
+    if (pruneBtn) {
+      event.preventDefault();
+      const holding = usage.projects.filter((p) => p.prunable_sessions > 0);
+      await pruneAll(usage, holding);
+      return;
+    }
+  });
 }
 
 async function renderDesktop(root, usage) {
@@ -655,27 +768,21 @@ if (typeof window !== "undefined" && window.matchMedia) {
 
 export async function storageScreen(gen) {
   const usage = await api("/api/v1/storage");
-  paint(gen, '<div class="storage"></div>');
-  if (stale(gen)) return;
-  const root = main.querySelector(".storage");
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
 
-  // The hub store is never empty, so nothing stored means projects hold nothing.
-  //
-  // The heading goes in before that check rather than after it. A screen with
-  // nothing on it is still a screen the reader arrived at, and the router
-  // moves focus to a heading to announce it; with the empty state returning
-  // first there was no heading to move to, so arriving at an empty Storage
-  // announced nothing and left focus on the region.
-  if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
-    root.appendChild(isDesktop ? desktopHead(usage) : head(usage));
-    root.appendChild(emptyState(EMPTY_COPY.storage));
-    return;
-  }
-
   if (isDesktop) {
+    paint(gen, '<div class="storage"></div>');
+    if (stale(gen)) return;
+    const root = main.querySelector(".storage");
+
+    if (!usage.total_bytes && !usage.projects.some((project) => totalOf(project) > 0)) {
+      root.appendChild(desktopHead(usage));
+      root.appendChild(emptyState(EMPTY_COPY.storage));
+      return;
+    }
     await renderDesktop(root, usage);
   } else {
-    renderMobile(root, usage);
+    paint(gen, renderMobileHTML(usage));
+    setupMobileStorageEvents(usage);
   }
 }

@@ -1296,7 +1296,7 @@ def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
             except Exception:
                 pass
 
-    page.set_viewport_size({"width": 1280, "height": 800})
+    page.set_viewport_size({"width": 390, "height": 844})
     watch.drain_rejections()
 
 
@@ -1583,8 +1583,171 @@ def check_connect_screen_shell_field_and_error(page, watch: Watch, port: int) ->
             if not focused_is_field:
                 watch.fail("focus did not return to connect field after error")
     finally:
+        page.evaluate(f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});")
         watch.armed = armed
     watch.drain_rejections()
+
+
+def check_settings_phone_path_and_copy(page, watch: Watch) -> None:
+    watch.enter("settings: path once with last two segments and copy full path")
+    goto(page, "#/settings", "Settings")
+    page.wait_for_timeout(300)
+    # 1. No tools row on Settings (exception to RULE 12.2)
+    has_controls = page.evaluate("!!document.querySelector('.shell-controls')")
+    if has_controls:
+        watch.fail("settings has tools row (.shell-controls), expected none (exception to RULE 12.2)")
+
+    # 2. Settings has exactly one path, and it is the last two segments
+    path_nodes = page.locator(".settings-data-path, .settings-footer")
+    if path_nodes.count() != 1:
+        watch.fail(f"settings screen has {path_nodes.count()} path nodes, expected exactly 1")
+    else:
+        text = path_nodes.inner_text().strip()
+        if not re.match(r"^…/[^/]+/[^/]+$", text):
+            watch.fail(f"settings path is not formatted as last two segments ('…/a/b'): found {text!r}")
+
+    # 3. Copy button copies full absolute path
+    copy_btn = page.locator('.settings-copy-path-btn, button[data-action="copy-path"]')
+    if copy_btn.count() == 0:
+        watch.fail("settings has no copy button for data path")
+    else:
+        full_path = copy_btn.get_attribute("data-path") or ""
+        if not full_path.startswith("/") or full_path.startswith("…"):
+            watch.fail(f"copy button data-path does not hold the full absolute path: {full_path!r}")
+
+
+def check_shortcuts_pointer_media(browser, watch: Watch, port: int) -> None:
+    watch.enter("settings: single-key shortcuts hidden under coarse pointer, present under fine")
+    # Coarse pointer (touchscreen / phone)
+    context_coarse = browser.new_context(
+        viewport={"width": 390, "height": 844}, has_touch=True
+    )
+    context_coarse.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page_coarse = context_coarse.new_page()
+    try:
+        page_coarse.goto(f"http://127.0.0.1:{port}/#/settings", wait_until="load")
+        page_coarse.wait_for_timeout(300)
+        shortcuts_visible = page_coarse.evaluate(
+            "(() => { const el = document.querySelector('#shortcuts, [data-action=\"toggle-shortcuts\"], .settings-row-shortcuts');"
+            " if (!el) return false;"
+            " const style = window.getComputedStyle(el);"
+            " return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0; })()"
+        )
+        if shortcuts_visible:
+            watch.fail("single-key shortcuts switch is visible under coarse pointer, expected hidden")
+    finally:
+        context_coarse.close()
+
+    # Fine pointer (mouse / desktop)
+    context_fine = browser.new_context(
+        viewport={"width": 1100, "height": 844}, has_touch=False
+    )
+    context_fine.add_init_script(
+        f"localStorage.setItem('hub.token', {json.dumps(harness.ADMIN_TOKEN)});"
+    )
+    page_fine = context_fine.new_page()
+    try:
+        page_fine.goto(f"http://127.0.0.1:{port}/#/settings", wait_until="load")
+        page_fine.wait_for_timeout(300)
+        shortcuts_visible = page_fine.evaluate(
+            "(() => { const el = document.querySelector('#shortcuts, [data-action=\"toggle-shortcuts\"], .settings-row-shortcuts');"
+            " if (!el) return false;"
+            " const style = window.getComputedStyle(el);"
+            " return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0; })()"
+        )
+        if not shortcuts_visible:
+            watch.fail("single-key shortcuts switch is hidden under fine pointer, expected visible")
+    finally:
+        context_fine.close()
+
+
+def check_storage_bar_and_helper_line(page, watch: Watch) -> None:
+    watch.enter("storage: 4-segment bar with knowledge --k-question and exactly one helper line")
+    goto(page, "#/storage", "Storage")
+    page.wait_for_timeout(300)
+
+    # Header meta has node and time, no path
+    header_meta = page.evaluate(
+        "document.querySelector('.shell-head .shell-meta')?.textContent || ''"
+    )
+    if "/" in header_meta or "\\" in header_meta:
+        watch.fail(f"storage header meta contains path, expected node and time only: {header_meta!r}")
+
+    # 4-segment bar
+    bar = page.locator('.storage-summary [role="img"], .storage-bar[role="img"]')
+    if bar.count() == 0:
+        watch.fail("storage summary has no role='img' stacked bar")
+    else:
+        segs = bar.locator(".storage-bar-seg, .storage-seg")
+        if segs.count() != 4:
+            watch.fail(f"storage bar has {segs.count()} segments, expected exactly 4")
+        knowledge_seg = bar.locator('[data-kind="knowledge"]')
+        if knowledge_seg.count() == 0:
+            watch.fail("storage bar missing knowledge segment")
+        else:
+            bg = knowledge_seg.evaluate("el => window.getComputedStyle(el).backgroundColor")
+            if not bg:
+                watch.fail("knowledge segment has no background color")
+
+    # Exactly one helper line
+    helper_lines = page.locator(".storage-helper-line, .storage-shared, .storage-scale")
+    helper_count = helper_lines.count()
+    if helper_count != 1:
+        watch.fail(f"storage screen has {helper_count} helper lines, expected exactly 1")
+    else:
+        text = helper_lines.first.inner_text().strip()
+        if "of events is the shared hub database, not in any row below" not in text:
+            watch.fail(f"helper line text does not match expected copy: {text!r}")
+
+
+def check_storage_project_rows_kinds(page, watch: Watch) -> None:
+    watch.enter("storage: project rows list only non-zero kinds ('events only' when all)")
+    goto(page, "#/storage", "Storage")
+    page.wait_for_timeout(300)
+
+    # Check that there is NO per-row Prune button on the phone
+    row_prune_btns = page.locator(".storage-project-row .storage-prune, .storage-row .storage-prune")
+    if row_prune_btns.count() > 0:
+        watch.fail("storage project rows carry per-row Prune button on phone, expected none")
+
+    # Check project rows meta lines
+    meta_lines = page.locator(".storage-project-meta, .storage-row .storage-detail")
+    count = meta_lines.count()
+    if count == 0:
+        watch.fail("no storage project rows found")
+        return
+
+    found_events_only = False
+    for i in range(count):
+        text = meta_lines.nth(i).inner_text().strip()
+        if " 0 B" in text or " 0 KB" in text:
+            watch.fail(f"project row meta line lists zero-byte kind: {text!r}")
+        if text == "events only":
+            found_events_only = True
+
+    if not found_events_only:
+        watch.fail("no project row with 'events only' found")
+
+
+def check_no_admin_token_on_screen(page, watch: Watch) -> None:
+    watch.enter("agents: no admin token characters on screen, masked or not")
+    goto(page, "#/access", "Agents and tokens")
+    page.wait_for_timeout(300)
+
+    token_prefix = harness.ADMIN_TOKEN[:6]
+    main_text = page.locator("main").inner_text()
+    if token_prefix in main_text:
+        watch.fail(f"admin token prefix {token_prefix!r} appears in rendered page text on #/access")
+
+    has_token_attr = page.evaluate(
+        f"Array.from(document.querySelectorAll('*')).some(el => "
+        f"  Array.from(el.attributes).some(attr => attr.value.includes({json.dumps(token_prefix)}))"
+        f")"
+    )
+    if has_token_attr:
+        watch.fail(f"an element carries the admin token prefix {token_prefix!r} in an attribute")
 
 
 def run() -> int:
@@ -1663,6 +1826,13 @@ def run() -> int:
                 # 9. Projects register and Connect
                 run_step(watch, check_projects_register_segmented_and_rows, page, watch, port)
                 run_step(watch, check_connect_screen_shell_field_and_error, page, watch, port)
+
+                # 10. Settings, Storage, and Agents and tokens
+                run_step(watch, check_settings_phone_path_and_copy, page, watch)
+                run_step(watch, check_shortcuts_pointer_media, browser, watch, port)
+                run_step(watch, check_storage_bar_and_helper_line, page, watch)
+                run_step(watch, check_storage_project_rows_kinds, page, watch)
+                run_step(watch, check_no_admin_token_on_screen, page, watch)
 
             finally:
                 context.close()
