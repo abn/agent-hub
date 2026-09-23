@@ -74,15 +74,25 @@ session, Search, Storage and prune, Project settings. Project settings holds
 the name, the read-only slug, the artifact password policy, the reserved
 retention card, Save and Delete project; agent and access management ships as
 a section of the global Settings screen rather than under Project settings.
-Mobile is primary with a four-tab bar of labelled icons (Home, Inbox,
-Projects, Search); desktop carries a permanent 200px app rail with Home,
-Inbox, Search, the project list, and Storage and Settings at its foot. A
+Mobile is primary with a five-tab bar of labelled icons (Home, Inbox,
+Projects, Search, More); desktop carries a permanent 200px app rail with Home,
+Inbox, Search, the project list, and Storage and Settings at its foot. The More
+tab root houses Storage, Agents and tokens, Settings, and the permanent sync
+line. Pushed screens from More retain More as the current tab and offer a back
+chevron in the 48px leading slot. A
 project is its own address: the feed, the artifact gallery and the sessions
 list sit under the project as segmented tabs, each with its own route, and
 each section is the same project view. The artifact viewer is itself a route,
 so reload and the browser's Back keep the artifact on screen. A desktop list
 plus detail layout is a layout primitive screens opt into; Sessions is the
 first to use it, with a 420px list beside a detail pane.
+
+On a phone the frame is one collapsing header and one sticky 44px tools row:
+the header is 76px at rest (title 22/600 with meta line 5px below) and compresses
+to 52px when scrolled past 20px (title 15/600, meta hidden), over a 120ms ease-out
+transition (instant under reduced motion) with hysteresis at 20px and 8px. Under
+it, a sticky 44px tools row holds the screen's tools with no-wrap chips and buttons.
+Settings carries no tools row and takes a bottom hairline.
 
 The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.

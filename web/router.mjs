@@ -4,6 +4,7 @@
 import { beginRender, esc, main, paint } from "./dom.mjs";
 import { refreshBadge } from "./events.mjs";
 import { applyPrefs } from "./prefs.mjs";
+import { resetScrollCollapse } from "./shell-layout.mjs";
 
 // The screen table, registered by the entry point. Keeping it out of this
 // module is what lets a screen ask for a render without an import cycle.
@@ -24,7 +25,13 @@ function setCurrent(screen, path = "") {
   // The project-owned screens sit under the Projects tab: the segmented
   // project view has that tab on every segment, and the artifact viewer is
   // the artifact inside a project, so it keeps the tab where it was opened.
-  const nav = screen === "artifacts" ? "projects" : screen;
+  // Settings, Storage and Agents and tokens are pushed from More: on a phone
+  // More stays current while they are open.
+  const isPushedFromMore =
+    screen === "settings" || screen === "storage" || screen === "access" || screen === "agents";
+  const railNav = screen === "artifacts" ? "projects" : screen;
+  const tabNav = screen === "artifacts" ? "projects" : isPushedFromMore ? "more" : screen;
+
   document.querySelectorAll(".tabbar a, .rail a").forEach((anchor) => {
     if (anchor.classList.contains("rail-project-item")) {
       const projId = anchor.dataset.projectId;
@@ -44,10 +51,10 @@ function setCurrent(screen, path = "") {
     const href = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
     const target = href.split("/")[0];
     if (anchor.classList.contains("rail-item")) {
-      if (anchor.dataset.route === nav) anchor.setAttribute("aria-current", "page");
+      if (anchor.dataset.route === railNav) anchor.setAttribute("aria-current", "page");
       else anchor.removeAttribute("aria-current");
     } else {
-      if (target === nav) anchor.setAttribute("aria-current", "page");
+      if (target === tabNav) anchor.setAttribute("aria-current", "page");
       else anchor.removeAttribute("aria-current");
     }
   });
@@ -56,6 +63,7 @@ function setCurrent(screen, path = "") {
 
 export async function render() {
   applyPrefs();
+  resetScrollCollapse();
   const gen = beginRender();
   const hash = location.hash.replace(/^#/, "") || "/home";
   const [path, query = ""] = hash.split("?");

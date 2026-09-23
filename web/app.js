@@ -28,6 +28,7 @@ import { toggleKind } from "./feed.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
 import { installKeys } from "./keys.mjs";
+import { moreScreen } from "./more.mjs";
 import { savePrefs } from "./prefs.mjs";
 import { projectFromHash, projectScreen } from "./project.mjs";
 import { projectSettingsScreen } from "./project-settings.mjs";
@@ -76,6 +77,7 @@ setScreens({
   search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
+  more: (params, gen) => moreScreen(gen),
   access: (params, gen) => accessScreen(gen),
   connect: (params, gen) => connectScreen(params, gen),
 });
@@ -109,6 +111,7 @@ main.addEventListener("click", (event) => {
   if (action === "end") acted(button, endSession(id));
   if (action === "prune") acted(button, pruneSession(id, button.dataset.agent));
   if (action === "copy-token") copyToken(button.dataset.token);
+  if (action === "more-refresh") acted(button, render());
   if (action === "agent-token") acted(button, reissueToken(id));
   if (action === "agent-revoke") acted(button, revokeToken(id));
   if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));

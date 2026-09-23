@@ -162,7 +162,7 @@ export function toggleAside(button) {
   button.setAttribute("aria-pressed", String(open));
 }
 
-const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
+const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
 
 // The reserved chrome is the rule, so the shell draws both rows whether or not
 // a screen has anything for the second one. On a phone the shell shows one
@@ -210,8 +210,10 @@ export function shellHTML({
 }
 
 export function shellStageHead(title, meta, actions = "", backHref = "") {
-  const leading = backHref
-    ? `<a class="shell-slot shell-back" href="${esc(backHref)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
+  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Agents");
+  const effectiveBack = backHref || (isPushed ? "#/more" : "");
+  const leading = effectiveBack
+    ? `<a class="shell-slot shell-back" href="${esc(effectiveBack)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
     : `<span class="shell-slot" aria-hidden="true"></span>`;
   return `<div class="shell-head">
     ${leading}
@@ -227,10 +229,12 @@ export function shellStageHead(title, meta, actions = "", backHref = "") {
 // the screen's own name and its meta. The title starts at the same x on every
 // screen, whether or not there is somewhere to go back to.
 export function shellMobileBar(title, meta = "", backHref = "") {
-  const leading = backHref
-    ? `<a class="shell-slot shell-back" href="${esc(backHref)}" aria-label="Back">${BACK_CHEVRON}</a>`
+  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Agents");
+  const effectiveBack = backHref || (isPushed ? "#/more" : "");
+  const leading = effectiveBack
+    ? `<a class="shell-slot shell-back" href="${esc(effectiveBack)}" aria-label="Back">${BACK_CHEVRON}</a>`
     : `<span class="shell-slot" aria-hidden="true"></span>`;
-  return `<div class="shell-mobilebar">
+  return `<div class="shell-head shell-mobilebar">
     ${leading}
     <div class="shell-title">
       <span class="shell-title-line">${esc(title)}</span>
@@ -347,7 +351,59 @@ if (typeof document !== "undefined") {
   });
 }
 
+let scrollWired = false;
+let isCompressed = false;
+
+export function resetScrollCollapse() {
+  isCompressed = false;
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
+      el.classList.remove("is-compressed");
+      delete el.dataset.compressed;
+    });
+  }
+}
+
+export function installScrollCollapse() {
+  if (scrollWired) return;
+  scrollWired = true;
+
+  const update = (scrollTop) => {
+    if (typeof window !== "undefined" && window.innerWidth >= 720) {
+      if (isCompressed) resetScrollCollapse();
+      return;
+    }
+    if (!isCompressed && scrollTop > 20) {
+      isCompressed = true;
+      document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
+        el.classList.add("is-compressed");
+        el.dataset.compressed = "true";
+      });
+    } else if (isCompressed && scrollTop < 8) {
+      isCompressed = false;
+      document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
+        el.classList.remove("is-compressed");
+        delete el.dataset.compressed;
+      });
+    }
+  };
+
+  const onScroll = (event) => {
+    const target = event.target;
+    const scrollTop =
+      target === document || target === window || target === document.documentElement || target === document.body
+        ? (window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0)
+        : (target?.scrollTop || 0);
+    update(scrollTop);
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+  }
+}
+
 export function installShellLayout(root = document) {
+  installScrollCollapse();
   for (const shell of root.querySelectorAll(".shell")) {
     installSplitters(shell);
     installIndexFilter(shell);

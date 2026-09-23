@@ -4,13 +4,14 @@
 .rail { display: none; }
 .topbar { display: none; }
 .tabbar {
-  display: flex; gap: 2px; position: fixed; inset: auto 0 0 0; z-index: 20;
+  display: flex; gap: 0; position: fixed; inset: auto 0 0 0; z-index: 20;
+  height: 60px; height: calc(60px + env(safe-area-inset-bottom, 0px)); box-sizing: border-box;
   background: var(--surface); border-top: 1px solid var(--line);
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 0 calc(0px + env(safe-area-inset-bottom, 0px));
 }
 .tabbar a {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-height: 44px; justify-content: center; text-decoration: none;
+  position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; min-height: 44px; padding: 0; text-decoration: none;
   color: var(--ink-3); font-size: 12px; font-weight: 500;
 }
 .tabbar a[aria-current="page"] { color: var(--ink); font-weight: 600; }
@@ -470,19 +471,18 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 /* end component: rail */
 
 /* component: tab bar */
-/* The shell's four destinations, each an icon over a label. The design draws
-   the icons at 24 and the labels at 11; the label keeps the 12px floor and
-   the anchor keeps the 44px target. The unread badge rides on the inbox
-   icon, as the tab bar component draws it. */
+/* The shell's five destinations: Home · Inbox · Projects · Search · More.
+   60px tall, 1px line top, 5 flex:1 items, 22px glyphs, 12px labels, 3px gap.
+   The unread badge rides on the inbox icon. */
 .tabbar a {
   position: relative; flex: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; min-height: 44px; padding: 4px 0;
+  gap: 3px; min-height: 44px; padding: 0;
   text-decoration: none; border-radius: var(--r-1);
   color: var(--ink-3); font-size: 12px; font-weight: 500;
 }
 .tabbar a svg { display: block; }
-.tab-icon { position: relative; width: 24px; height: 24px; }
+.tab-icon { position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
 .tabbar .badge {
   position: absolute; top: -4px; right: -8px;
   min-width: 16px; height: 16px; line-height: 16px;
@@ -7016,3 +7016,369 @@ dialog.dialog-project-delete {
 .shell-index .row.selected .meta,
 .shell-index .row.selected .meta.mono { color: var(--ink-2); }
 .home-pad .home .home-summary { margin: 0; }
+
+/* Connect has no tab bar */
+.app:has(.connect) .tabbar {
+  display: none !important;
+}
+
+/* Hide pushed screen back links on desktop */
+@media (min-width: 720px) {
+  .shell-head .shell-back[href="#/more"],
+  .shell-head .shell-back[href^="#/more"] {
+    display: none !important;
+  }
+}
+
+/* More screen */
+.more-screen {
+  max-width: 640px;
+  margin: 0;
+  padding: 0 0 48px;
+}
+.more-gap {
+  height: 20px;
+}
+.more-row {
+  min-height: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: var(--ink);
+  box-sizing: border-box;
+}
+.more-row:first-of-type {
+  border-top: 1px solid var(--line);
+}
+.more-glyph {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+}
+.more-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.more-main .title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.more-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.more-sub-prune {
+  color: var(--action);
+  font-weight: 600;
+}
+.more-val {
+  flex: none;
+  font-size: 14px;
+  color: var(--ink-2);
+  text-align: right;
+}
+.more-val.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.more-chevron {
+  width: 32px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--ink-3);
+}
+.more-sync-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 8px;
+  min-height: 44px;
+}
+.more-sync-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+.more-sync-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  flex: 1;
+}
+.more-refresh-btn {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 12px;
+  min-height: 44px;
+  cursor: pointer;
+  border-radius: var(--r-1);
+}
+.more-refresh-btn:hover {
+  text-decoration: underline;
+}
+.more-note {
+  padding: 8px 16px 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 560px;
+}
+
+/* Tools row segmented controls */
+.shell-controls .seg,
+.tools-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+  border: 0;
+  box-sizing: border-box;
+}
+.shell-controls .seg a,
+.shell-controls .seg button,
+.tools-seg a,
+.tools-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  box-shadow: none;
+}
+.shell-controls .seg a[aria-current="page"],
+.shell-controls .seg button[aria-pressed="true"],
+.tools-seg a[aria-current="page"],
+.tools-seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+.shell-controls .seg .count,
+.tools-seg .count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Phone frame and tools row: RULE 12.1 and RULE 12.2 */
+@media (max-width: 719px) {
+  html,
+  body {
+    overflow-anchor: none;
+  }
+
+  main:has(.shell),
+  main:has(.more-screen) {
+    padding: 0 0 60px;
+    overflow: visible;
+  }
+
+  .shell,
+  .shell-index,
+  .shell-stage {
+    overflow: visible;
+    overflow-anchor: none;
+  }
+
+  /* RULE 12.1: One header, two heights */
+  .shell-head {
+    height: 76px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0 8px 0 0;
+    background: var(--surface);
+    border-bottom: 0;
+    transition: height 120ms ease-out;
+    overflow-anchor: none;
+  }
+
+  .shell-head .shell-slot {
+    display: flex;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    height: 44px;
+    min-height: 44px;
+    margin: 0 !important;
+    padding: 0;
+    flex: 0 0 48px;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+
+  .shell-head:has(.shell-slot) {
+    padding-left: 0;
+  }
+
+  .shell-head .shell-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    margin: 0;
+  }
+
+  .shell-head .shell-title h1,
+  .shell-head .shell-title .shell-title-line {
+    margin: 0;
+    padding: 0;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: font-size 120ms ease-out;
+  }
+
+  .shell-head .shell-title .shell-meta {
+    display: block;
+    margin-top: 5px;
+    font-family: var(--font-mono);
+    font-size: var(--t-12);
+    color: var(--ink-3);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shell-head.is-compressed,
+  .shell.is-compressed .shell-head {
+    height: 52px;
+  }
+
+  .shell-head.is-compressed .shell-title h1,
+  .shell-head.is-compressed .shell-title .shell-title-line,
+  .shell.is-compressed .shell-head .shell-title h1,
+  .shell.is-compressed .shell-head .shell-title .shell-title-line {
+    font-size: var(--t-15);
+  }
+
+  .shell-head.is-compressed .shell-title .shell-meta,
+  .shell.is-compressed .shell-head .shell-title .shell-meta {
+    display: none;
+  }
+
+  /* Trailing buttons: at most two 44x44 glyph buttons */
+  .shell-head button:has(svg),
+  .shell-head .btn-glyph {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  /* Settings: the one screen with no tools row, carries bottom hairline */
+  .shell-no-index .shell-head,
+  .shell[data-segment="settings"] .shell-head {
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* RULE 12.2: One tools row per screen, 44px, sticky under the header */
+  .shell-controls {
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+    position: sticky;
+    top: 76px;
+    z-index: 9;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    transition: top 120ms ease-out;
+  }
+
+  .shell-head.is-compressed + .shell-controls,
+  .shell.is-compressed .shell-controls,
+  .shell-controls.is-compressed {
+    top: 52px;
+    box-shadow: var(--shadow-1);
+  }
+
+  /* Every chip and tools-row button is flex:none; white-space:nowrap */
+  .shell-controls > *,
+  .shell-controls button,
+  .shell-controls a,
+  .shell-controls .chip {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  /* Home at rest has no bar: bar appears when scrolled (compressed) */
+  .shell:has(.home-pad) .shell-head:not(.is-compressed) {
+    display: none;
+  }
+
+  /* Reduced motion instant switch */
+  @media (prefers-reduced-motion: reduce) {
+    .shell-head,
+    .shell-head .shell-title h1,
+    .shell-head .shell-title .shell-title-line,
+    .shell-controls {
+      transition: none !important;
+    }
+  }
+}

@@ -392,7 +392,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 44] = [
+const SHELL_PATHS: [&str; 45] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -418,6 +418,7 @@ const SHELL_PATHS: [&str; 44] = [
     "/storage.mjs",
     "/search.mjs",
     "/settings.mjs",
+    "/more.mjs",
     "/project-settings.mjs",
     "/agents.mjs",
     "/artifacts.mjs",
@@ -1244,11 +1245,40 @@ fn app_css_carries_drawer_styles_on_tokens() {
     ] {
         assert!(APP_CSS.contains(needle), "the drawer styles carry {needle}");
     }
-    // The drawer is shown and hidden outright. A transition here could never
-    // run, and the reduced-motion contract is held in the tokens.
+    // Transitions are permitted if duration <= 150ms. Decorative animation
+    // stays banned outright, and prefers-reduced-motion must neutralize transitions.
     assert!(
-        !APP_CSS.contains("transition"),
-        "the drawer promises no motion it cannot deliver"
+        !APP_CSS.contains("animation"),
+        "animations remain banned outright"
+    );
+    for line in APP_CSS.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("transition:") {
+            let decl = rest.trim_end_matches(';').trim();
+            if decl == "none" || decl == "none !important" {
+                continue;
+            }
+            for token in decl.split_whitespace() {
+                let token = token.trim_end_matches(',');
+                if let Some(ms) = token.strip_suffix("ms").and_then(|s| s.parse::<f32>().ok()) {
+                    assert!(
+                        ms <= 150.0,
+                        "transition duration {ms}ms exceeds 150ms limit: {trimmed}"
+                    );
+                } else if let Some(s) = token.strip_suffix('s').and_then(|s| s.parse::<f32>().ok())
+                {
+                    assert!(
+                        s * 1000.0 <= 150.0,
+                        "transition duration {}ms exceeds 150ms limit: {trimmed}",
+                        s * 1000.0
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        APP_CSS.contains("prefers-reduced-motion") && APP_CSS.contains("transition: none"),
+        "prefers-reduced-motion must neutralize transitions"
     );
     assert!(
         APP_CSS.contains("var(--"),

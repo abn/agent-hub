@@ -36,6 +36,7 @@ ROUTES = [
     "settings",
     "access",
     "connect",
+    "more",
     "artifacts",
     "home-quiet",
     "project-settings",
@@ -101,6 +102,7 @@ AUDITED = {
     "settings": ["settings"],
     "access": ["access"],
     "connect": ["connect"],
+    "more": ["more"],
 }
 
 # What only that screen, painted with its seeded data, puts on the page. The
@@ -123,6 +125,7 @@ EXPECTED = {
     "settings": "main .row .title",
     "access": "main .access-screen",
     "connect": "main .connect .connect-field",
+    "more": "main .more-screen .more-row",
     "artifacts": "main .shell-index .artifact-row",
     HOME_QUIET: "main .home .empty-state",
     PROJECT_SETTINGS: "main .pset",

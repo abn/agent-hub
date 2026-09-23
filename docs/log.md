@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, phone frame, tools row, and more tab root
+
+* **Update**: [Human interface](design/human-interface.md) documents the phone
+  frame (collapsing header from 76px at rest to 52px when scrolled past 20px,
+  with hysteresis expanding at 8px, 120ms ease-out transition, instant under
+  reduced motion, and a 48px reserved leading slot), the sticky 44px tools row
+  with no-wrap chips and buttons, and the five-tab mobile navigation bar
+  introducing the More tab root for Storage, Agents and tokens, Settings, and
+  the sync line.
+
 ## 2026-09-23, artifact thread counts on listing and reads
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Human

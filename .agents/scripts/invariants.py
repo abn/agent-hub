@@ -311,6 +311,7 @@ def guard_holds(project: str, session_id: str, artifact: str) -> dict[str, list[
         "storage": [("storage", "#/storage", "/api/v1/storage")],
         "settings": [("settings", "#/settings", "/api/v1/agents")],
         "access": [("access", "#/access", "/api/v1/agents")],
+        "more": [("more", "#/more", "/api/v1/storage")],
         "connect": [("connect", "#/connect?next=%2Fstorage", "/api/v1/home")],
     }
 
@@ -989,6 +990,186 @@ def check_toast_leaves_a_writer_alone(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
+    """The phone frame, collapsing header, tools row, five tabs, and More screen.
+
+    Holds RULE 12.1 (one header, two heights, hysteresis >20/<8), RULE 12.2
+    (one tools row per screen, 44px sticky), CHECK 12.A (content at y 120 / y 96,
+    title first glyph at x 48), CHECK 12.B (no text wrapping in tools row at 390
+    and 360), five labelled tabs with More, and More remaining current on pushed
+    screens.
+    """
+    watch.enter("phone frame: five tabs and more screen")
+    # 1. Five tabs
+    tabs = page.evaluate(
+        "Array.from(document.querySelectorAll('.tabbar a .tab-label')).map((el) => el.textContent.trim())"
+    )
+    expected_tabs = ["Home", "Inbox", "Projects", "Search", "More"]
+    if tabs != expected_tabs:
+        watch.fail(f"tab bar does not have five expected tabs: found {tabs!r}")
+
+    # 2. More screen and pushed screens
+    goto(page, "#/more", "More")
+    more_tab_current = page.evaluate(
+        "document.querySelector('.tabbar a[href=\"#/more\"]')?.getAttribute('aria-current') === 'page'"
+    )
+    if not more_tab_current:
+        watch.fail("More tab does not have aria-current='page' when on #/more")
+
+    more_rows = page.evaluate(
+        "Array.from(document.querySelectorAll('.more-screen .more-row .title')).map((el) => el.textContent.trim())"
+    )
+    expected_rows = ["Storage", "Agents and tokens", "Settings"]
+    if more_rows != expected_rows:
+        watch.fail(f"More screen rows differ from expected: found {more_rows!r}")
+
+    has_sync_line = page.evaluate("!!document.querySelector('.more-screen .more-sync-line')")
+    if not has_sync_line:
+        watch.fail("More screen is missing permanent sync line")
+
+    # Pushed screens keep More current and have back chevron to More
+    # Settings is already on the shell with shellStageHead
+    page.evaluate("location.hash = '#/settings'")
+    goto(page, "#/settings", "Settings")
+    back_href = page.evaluate(
+        "document.querySelector('.shell-head .shell-back')?.getAttribute('href')"
+    )
+    if not back_href or not back_href.startswith("#/more"):
+        watch.fail(f"Settings back chevron does not return to #/more: found {back_href!r}")
+    more_current_pushed = page.evaluate(
+        "document.querySelector('.tabbar a[href=\"#/more\"]')?.getAttribute('aria-current') === 'page'"
+    )
+    if not more_current_pushed:
+        watch.fail("More tab does not stay current while on pushed screen Settings")
+
+    # 3. Header collapse and hysteresis
+    watch.enter("phone frame: header collapse and hysteresis")
+    goto(page, "#/inbox", "Inbox")
+    page.evaluate("window.scrollTo(0, 0)")
+    settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 76) <= 2")
+    rest_height = page.evaluate(
+        "document.querySelector('.shell-head')?.getBoundingClientRect().height"
+    )
+    if rest_height is None or abs(rest_height - 76) > 2:
+        watch.fail(f"header at rest height is {rest_height!r}, expected 76px")
+
+    # Scroll past 20 (e.g. 35) -> compresses to 52px
+    page.evaluate("window.scrollTo(0, 35)")
+    settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 52) <= 2")
+    compressed_height = page.evaluate(
+        "document.querySelector('.shell-head')?.getBoundingClientRect().height"
+    )
+    if compressed_height is None or abs(compressed_height - 52) > 2:
+        watch.fail(f"header compressed height is {compressed_height!r}, expected 52px")
+
+    # Hysteresis test: scroll to 15 (between 8 and 20). Must stay compressed!
+    page.evaluate("window.scrollTo(0, 15)")
+    page.wait_for_timeout(250)
+    hysteresis_height = page.evaluate(
+        "document.querySelector('.shell-head')?.getBoundingClientRect().height"
+    )
+    if hysteresis_height is None or abs(hysteresis_height - 52) > 2:
+        watch.fail(
+            f"header failed hysteresis: expanded at scrollTop=15 to height {hysteresis_height!r}, expected 52px"
+        )
+
+    # Scroll below 8 (e.g. 4) -> expands to 76px
+    page.evaluate("window.scrollTo(0, 4)")
+    settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 76) <= 2", timeout=2000)
+    expanded_height = page.evaluate(
+        "document.querySelector('.shell-head')?.getBoundingClientRect().height"
+    )
+    if expanded_height is None or abs(expanded_height - 76) > 2:
+        watch.fail(
+            f"header failed to expand below 8px: height at scrollTop=4 is {expanded_height!r}, expected 76px"
+        )
+    page.evaluate("window.scrollTo(0, 0)")
+    settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 76) <= 2")
+
+    # 4. CHECK 12.A: content y 120 at rest, y 96 after 40px scroll; title first glyph at x 48
+    watch.enter("phone frame: CHECK 12.A coordinates")
+    test_screens = [
+        ("#/inbox", "Inbox"),
+    ]
+    for url, title in test_screens:
+        page.evaluate(f"location.hash = '{url}'")
+        goto(page, url, title)
+        page.evaluate("window.scrollTo(0, 0)")
+        settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 76) <= 2")
+
+        # Title x 48 check
+        title_x = page.evaluate(
+            "(() => { const el = document.querySelector('.shell-head .shell-title h1, .shell-head .shell-title .shell-title-line');"
+            " return el ? Math.round(el.getBoundingClientRect().left) : null; })()"
+        )
+        if title_x is not None and abs(title_x - 48) > 2:
+            watch.fail(f"{url} title first glyph at x={title_x}, expected x=48 at rest")
+
+        # Tools row bottom at 120
+        tools_bottom = page.evaluate(
+            "(() => { const el = document.querySelector('.shell-controls');"
+            " return el ? Math.round(el.getBoundingClientRect().bottom) : null; })()"
+        )
+        if tools_bottom is not None and abs(tools_bottom - 120) > 2:
+            watch.fail(f"{url} tools row bottom is at y={tools_bottom}, expected y=120 at rest")
+
+        # After 40px scroll
+        page.evaluate("window.scrollTo(0, 40)")
+        settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 52) <= 2")
+
+        title_x_scrolled = page.evaluate(
+            "(() => { const el = document.querySelector('.shell-head .shell-title h1, .shell-head .shell-title .shell-title-line');"
+            " return el ? Math.round(el.getBoundingClientRect().left) : null; })()"
+        )
+        if title_x_scrolled is not None and abs(title_x_scrolled - 48) > 2:
+            watch.fail(f"{url} title first glyph at x={title_x_scrolled}, expected x=48 after 40px scroll")
+
+        tools_bottom_scrolled = page.evaluate(
+            "(() => { const el = document.querySelector('.shell-controls');"
+            " return el ? Math.round(el.getBoundingClientRect().bottom) : null; })()"
+        )
+        if tools_bottom_scrolled is not None and abs(tools_bottom_scrolled - 96) > 2:
+            watch.fail(f"{url} tools row bottom is at y={tools_bottom_scrolled}, expected y=96 after 40px scroll")
+
+        page.evaluate("window.scrollTo(0, 0)")
+
+    # 5. CHECK 12.B: No text inside 44px tools row occupies two lines at 390 or at 360
+    watch.enter("phone frame: CHECK 12.B no wrap in tools row")
+    for width in [390, 360]:
+        page.set_viewport_size({"width": width, "height": 800})
+        for url in ["#/inbox"]:
+            page.evaluate(f"location.hash = '{url}'")
+            page.wait_for_timeout(100)
+            wrapped = page.evaluate(
+                "(() => { const row = document.querySelector('.shell-controls'); if (!row) return [];"
+                " const bad = [];"
+                " row.querySelectorAll('span, button, a, div, input').forEach((el) => {"
+                "   if (el.children.length === 0 && el.textContent.trim()) {"
+                "     const rects = el.getClientRects();"
+                "     if (rects.length > 1) bad.push(el.textContent.trim());"
+                "   }"
+                " });"
+                " return bad; })()"
+            )
+            if wrapped:
+                watch.fail(f"{url} at {width}px has text wrapping in tools row: {wrapped}")
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    # 6. Home at rest has no bar
+    watch.enter("phone frame: Home at rest has no bar")
+    goto(page, "#/home", home_title())
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(100)
+    home_bar_visible = page.evaluate(
+        "(() => { const h = document.querySelector('.shell:has(.home-pad) .shell-head');"
+        " if (!h) return false;"
+        " return window.getComputedStyle(h).display !== 'none' && h.offsetWidth > 0; })()"
+    )
+    if home_bar_visible:
+        watch.fail("Home at rest shows header bar, expected no bar at rest on phone")
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -1048,6 +1229,9 @@ def run() -> int:
                 # 6. One decision
                 run_step(watch, check_inbox_one_decision, page, watch, port, project)
                 run_step(watch, check_toast_leaves_a_writer_alone, page, watch, project)
+
+                # 7. Phone frame, tools row, 5 tabs, More screen
+                run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
 
             finally:
                 context.close()

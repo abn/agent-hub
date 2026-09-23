@@ -149,6 +149,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/more.mjs",
+        body: include_bytes!("../../web/more.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/project-settings.mjs",
         body: include_bytes!("../../web/project-settings.mjs"),
         content_type: "text/javascript; charset=utf-8",
