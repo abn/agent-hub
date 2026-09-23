@@ -74,6 +74,10 @@ export function unifiedBrainTree(sessionId, projectId, kvEntries = [], fsEntries
     const name = entry.path.split("/").pop() || entry.path;
     const glyphKind = isDir ? "folder" : (kind === "kv" ? "key" : kindGlyph(entry.type || name));
     const size = entry.size_bytes != null ? `<span class="tree-size mono">${fmt(entry.size_bytes)}</span>` : "";
+    const isFsFile = !isDir && (kind === "fs" || entry.path.startsWith("/fs") || entry.path.startsWith("fs/"));
+    const fileChev = isFsFile
+      ? `<span class="tree-file-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></span>`
+      : "";
     const chev = isDir ? `<span class="tree-chev" aria-hidden="true"></span>` : "";
     return `<div role="treeitem" class="tree-item ${isDir ? "folder" : "leaf"}"
       aria-level="2" aria-posinset="${idx + 1}" aria-setsize="${total}"
@@ -82,6 +86,7 @@ export function unifiedBrainTree(sessionId, projectId, kvEntries = [], fsEntries
       ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}
       <span class="tree-name mono">${esc(name)}</span>
       ${size}
+      ${fileChev}
     </div>`;
   };
 
@@ -188,13 +193,17 @@ export async function expandNode(treeUl, node, fetchChildren) {
       const isDir = child.isFolder;
       const glyphKind = child.glyph;
       const size = child.sizeBytes != null ? `<span class="tree-size mono">${fmt(child.sizeBytes)}</span>` : "";
+      const isFsFile = !isDir && (child.path.startsWith("/fs") || child.path.startsWith("fs/"));
+      const fileChev = isFsFile
+        ? `<span class="tree-file-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></span>`
+        : "";
       const chev = isDir ? `<span class="tree-chev" aria-hidden="true"></span>` : "";
       list.insertAdjacentHTML("beforeend", `<div role="treeitem" class="tree-item ${isDir ? "folder" : "leaf"}"
         aria-level="${level}" aria-posinset="${idx + 1}" aria-setsize="${setsize}"
         ${isDir ? 'aria-expanded="false"' : ""}
         data-path="${esc(child.path)}" data-kind="${esc(child.type || "")}"
         tabindex="-1" aria-label="${esc(child.name)}">
-        ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono">${esc(child.name)}</span>${size}
+        ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono">${esc(child.name)}</span>${size}${fileChev}
       </div>`);
     });
   if (node.tagName.toLowerCase() === "li") {

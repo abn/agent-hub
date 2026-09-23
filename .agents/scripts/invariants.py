@@ -1170,6 +1170,174 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_session_detail_single_title(page, watch: Watch, project: str, session_id: str) -> None:
+    watch.enter("session: exactly one title on screen")
+    goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}", harness.SESSION_NAME)
+    page.wait_for_timeout(300)
+    bar_title = page.locator(".shell-stage .shell-head .shell-title-line, .shell-head .shell-title-line")
+    if bar_title.count() == 0:
+        watch.fail("session detail has no bar title")
+        return
+    second_title = page.locator(".session-detail-view h1, .session-detail-header h1, .session-detail-title-block h1")
+    if second_title.count() > 0:
+        watch.fail("session detail renders a second title inside the detail view")
+
+
+def check_brain_kv_in_aside_not_stage(page, watch: Watch, project: str, session_id: str) -> None:
+    watch.enter("brain: kv key is read in the aside and not in stage")
+    goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Fkv%2Flast-run", harness.SESSION_NAME)
+    page.wait_for_timeout(300)
+    aside = page.locator(".shell-aside")
+    if aside.count() == 0 or aside.get_attribute("hidden") is not None:
+        watch.fail("aside is hidden or missing for kv key")
+        return
+    aside_text = aside.inner_text()
+    if harness.BRAIN_VALUE not in aside_text:
+        watch.fail(f"aside does not show kv value '{harness.BRAIN_VALUE}'")
+    copy_btn = aside.locator('[data-action="copy-kv-value"]')
+    if copy_btn.count() == 0:
+        watch.fail("aside has no copy glyph for kv value")
+    stage_text = page.locator(".shell-stage").inner_text()
+    if harness.BRAIN_VALUE in stage_text:
+        watch.fail(f"stage unexpectedly contains kv value '{harness.BRAIN_VALUE}'")
+    kv_leaf = page.locator('.tree-item[data-path="/kv/last-run"]')
+    if kv_leaf.count() > 0:
+        if kv_leaf.locator(".tree-file-chev, .tree-chev").count() > 0:
+            watch.fail("kv tree row carries a chevron")
+
+
+def check_brain_fs_in_stage_rendered(page, watch: Watch, project: str, session_id: str) -> None:
+    watch.enter("brain: fs file opens in stage rendered with provenance and back control")
+    goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Ffs%2Fcontext.md", "context.md")
+    page.wait_for_timeout(300)
+    stage = page.locator(".shell-stage")
+    rendered_h1 = stage.locator(".session-doc-content h1, h1:has-text('notes')")
+    if rendered_h1.count() == 0:
+        watch.fail("stage does not contain rendered element (h1) for fs markdown file")
+    stage_text = stage.inner_text()
+    if "session brain" not in stage_text or "read-only" not in stage_text:
+        watch.fail("stage does not show provenance line: 'session brain · <path> · <size> · read-only'")
+    back_btn = stage.locator('.shell-back')
+    if back_btn.count() == 0:
+        watch.fail("fs file view in stage has no back control")
+    aside = page.locator(".shell-aside")
+    if aside.count() > 0 and aside.get_attribute("hidden") is None:
+        if "notes" in aside.inner_text():
+            watch.fail("fs file is rendered in aside instead of stage")
+    if stage.locator('[data-action="comments-toggle"], [data-action="stage-version"], [data-action="share"]').count() > 0:
+        watch.fail("fs file stage has comments, version list or share controls")
+
+
+def check_brain_entry_missing_and_dir_words(page, watch: Watch, project: str, session_id: str) -> None:
+    watch.enter("brain: missing and directory paths do not throw")
+    armed, watch.armed = watch.armed, False
+    try:
+        page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Fkv%2Fmissing-key'")
+        page.wait_for_timeout(400)
+        aside = page.locator(".shell-aside")
+        if aside.count() == 0 or aside.get_attribute("hidden") is not None:
+            watch.fail("aside is hidden or missing for non-existent path")
+        elif "not found" not in aside.inner_text().lower() and "missing" not in aside.inner_text().lower():
+            watch.fail(f"aside does not state missing entry in words: '{aside.inner_text()}'")
+
+        page.evaluate(f"location.hash = '#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Ffs%2Fnotes'")
+        page.wait_for_timeout(400)
+        aside = page.locator(".shell-aside")
+        if aside.count() == 0 or aside.get_attribute("hidden") is not None:
+            watch.fail("aside is hidden or missing for directory path")
+        elif "directory" not in aside.inner_text().lower() and "folder" not in aside.inner_text().lower():
+            watch.fail(f"aside does not state directory path in words: '{aside.inner_text()}'")
+    finally:
+        watch.armed = armed
+    watch.drain_rejections()
+
+
+def check_artifacts_group_by_agent(page, watch: Watch, port: int, project: str) -> None:
+    watch.enter("artifacts: group by agent uses actor with honest fallback")
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    page.wait_for_timeout(300)
+    filter_btn = page.locator('[data-action="project-filter-toggle"]')
+    if filter_btn.count() > 0 and filter_btn.first.is_visible():
+        filter_btn.first.click()
+        page.wait_for_timeout(200)
+    group_btn = page.locator('[data-group-toggle]')
+    if group_btn.count() == 0:
+        watch.fail("artifacts screen has no group menu toggle")
+        return
+    group_btn.click()
+    page.wait_for_timeout(100)
+    agent_option = page.locator('[data-action="artifact-group"][data-group="agent"]')
+    if agent_option.count() == 0:
+        watch.fail("artifacts group menu does not offer Agent")
+        return
+    agent_option.click()
+    page.wait_for_timeout(300)
+    headers = page.locator(".shell-group-label, .section-label")
+    header_texts = [headers.nth(i).inner_text().strip() for i in range(headers.count())]
+    if not header_texts:
+        watch.fail("no group headers after grouping by agent")
+    elif any(h == "" or h.startswith("·") for h in header_texts):
+        watch.fail(f"artifact group by agent produced a blank header: {header_texts}")
+
+
+def check_artifact_row_thread_count(page, watch: Watch, port: int, project: str, artifact_id: str) -> None:
+    watch.enter("artifacts: row shows thread count excluding deleted comments")
+    raw1 = harness.request(port, "POST", f"/api/v1/artifacts/{artifact_id}/comments", {"author": "human", "body": "first comment"})
+    comm1 = json.loads(raw1.decode())
+    page.evaluate("location.hash = '#/projects'")
+    page.wait_for_timeout(200)
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    page.wait_for_timeout(300)
+    row = page.locator(f'.artifact-row[data-id="{artifact_id}"]')
+    if row.count() == 0:
+        watch.fail(f"could not find row for artifact {artifact_id}")
+        return
+    if "1 comment" not in row.inner_text():
+        watch.fail(f"artifact row does not show '· 1 comment': '{row.inner_text()}'")
+
+    raw2 = harness.request(port, "POST", f"/api/v1/artifacts/{artifact_id}/comments", {"author": "human", "body": "second comment"})
+    comm2 = json.loads(raw2.decode())
+    page.evaluate("location.hash = '#/projects'")
+    page.wait_for_timeout(200)
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    page.wait_for_timeout(300)
+    row = page.locator(f'.artifact-row[data-id="{artifact_id}"]')
+    if "2 comments" not in row.inner_text():
+        watch.fail(f"artifact row does not show '· 2 comments': '{row.inner_text()}'")
+
+    if comm2 and "id" in comm2:
+        harness.request(port, "DELETE", f"/api/v1/artifacts/{artifact_id}/comments/{comm2['id']}")
+    page.evaluate("location.hash = '#/projects'")
+    page.wait_for_timeout(200)
+    goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    page.wait_for_timeout(300)
+    row = page.locator(f'.artifact-row[data-id="{artifact_id}"]')
+    if "1 comment" not in row.inner_text():
+        watch.fail(f"artifact row does not show '· 1 comment' after deleting second comment: '{row.inner_text()}'")
+
+
+def check_project_tools_row(page, watch: Watch, project: str) -> None:
+    watch.enter("project: tools row carries segmented tabs and filter-and-group button on mobile")
+    goto(page, f"#/projects/{quote(project)}/feed", "Feed")
+    page.wait_for_timeout(300)
+    tools = page.locator(".project-tools-mobile, .project-tools-row")
+    if tools.count() == 0:
+        watch.fail("project screen has no mobile tools row")
+        return
+    feed_tab = tools.locator('[role="tab"]:has-text("Feed")')
+    artifacts_tab = tools.locator('[role="tab"]:has-text("Artifacts")')
+    sessions_tab = tools.locator('[role="tab"]:has-text("Sessions")')
+    if feed_tab.count() == 0 or artifacts_tab.count() == 0 or sessions_tab.count() == 0:
+        watch.fail("project tools row missing Feed/Artifacts/Sessions tabs")
+    filter_btn = tools.locator('.project-filter-btn, [aria-label*="Filter and group"]')
+    if filter_btn.count() == 0:
+        watch.fail("project tools row missing filter-and-group button")
+    else:
+        box = filter_btn.first.bounding_box()
+        if box and (round(box["width"]) < 44 or round(box["height"]) < 44):
+            watch.fail(f"filter-and-group button is not 44x44px, got {box['width']}x{box['height']}")
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -1232,6 +1400,15 @@ def run() -> int:
 
                 # 7. Phone frame, tools row, 5 tabs, More screen
                 run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
+
+                # 8. Project features
+                run_step(watch, check_project_tools_row, page, watch, project)
+                run_step(watch, check_session_detail_single_title, page, watch, project, session_id)
+                run_step(watch, check_brain_kv_in_aside_not_stage, page, watch, project, session_id)
+                run_step(watch, check_brain_fs_in_stage_rendered, page, watch, project, session_id)
+                run_step(watch, check_brain_entry_missing_and_dir_words, page, watch, project, session_id)
+                run_step(watch, check_artifacts_group_by_agent, page, watch, port, project)
+                run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
 
             finally:
                 context.close()

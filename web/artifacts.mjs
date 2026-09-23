@@ -23,13 +23,13 @@ import { toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
-const DOC_PATH = "M 6 3h9l4 4v14H6z M 8 12h8 M 8 16h8";
+const DOC_PATH = "M 7 3h7l4 4v14H7z M 14 3v4h4";
 const LOCK_PATH = "M 7 11V8a5 5 0 0 1 10 0v3 M 5 11h14v10H5z";
 
 function cardGlyph(protectedArtifact) {
   const path = protectedArtifact ? LOCK_PATH : DOC_PATH;
   const cls = protectedArtifact ? "lock" : "doc";
-  return `<svg class="${cls}" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
+  return `<svg class="${cls}" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
 }
 
 function formatBytes(bytes) {
@@ -197,8 +197,15 @@ export function wireArtifactStage(root, id, info) {
 // The artifacts index is grouped, and the group is a value the reader picks.
 // Date and Kind both come from the listing; the writer is not on an artifact,
 // so an Agent group would need backend data the list does not carry.
-const ARTIFACT_GROUPS = { day: "Date", kind: "Kind" };
-let artifactGrouping = "day";
+export const ARTIFACT_GROUPS = { day: "Date", kind: "Kind", agent: "Agent" };
+export let artifactGrouping = "day";
+
+export function setArtifactGrouping(group) {
+  if (group in ARTIFACT_GROUPS) {
+    artifactGrouping = group;
+    render();
+  }
+}
 
 const GROUP_CHEVRON = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 9l6 6 6-6"></path></svg>`;
 
@@ -209,7 +216,7 @@ export function artifactGroupMenu() {
     <button type="button" class="hub-group-toggle" data-group-toggle aria-haspopup="menu" aria-expanded="false">Group${GROUP_CHEVRON}</button>
     <span class="pill shell-group-pill">${ARTIFACT_GROUPS[artifactGrouping]}</span>
     <div class="shell-group-menu" role="menu" aria-label="Group artifacts" data-group-menu hidden>
-      ${item("day", "Date")}${item("kind", "Kind")}
+      ${item("day", "Date")}${item("kind", "Kind")}${item("agent", "Agent")}
     </div>
   </div>`;
 }
@@ -232,10 +239,14 @@ function artifactDay(iso) {
 function artifactGroups(artifacts) {
   const groups = new Map();
   for (const a of artifacts) {
-    const label =
-      artifactGrouping === "kind"
-        ? String(a.kind || "other").toUpperCase()
-        : artifactDay(a.updated_at || a.created_at);
+    let label;
+    if (artifactGrouping === "agent") {
+      label = (a.actor ? String(a.actor) : "Unattributed").toUpperCase();
+    } else if (artifactGrouping === "kind") {
+      label = String(a.kind || "other").toUpperCase();
+    } else {
+      label = artifactDay(a.updated_at || a.created_at);
+    }
     const bucket = groups.get(label);
     if (bucket) bucket.push(a);
     else groups.set(label, [a]);
@@ -256,13 +267,13 @@ export async function artifactIndex(projectId, selectedId = "") {
       const body = group.items
         .map((a) => {
           const comments = a.comments_count
-            ? ` · ${a.comments_count} comment${a.comments_count === 1 ? "" : "s"}`
+            ? ` · ${a.comments_count} ${a.comments_count === 1 ? "comment" : "comments"}`
             : "";
           const href = `#/projects/${encodeURIComponent(projectId)}/artifacts?artifact=${encodeURIComponent(a.id)}`;
           const lock = a.protected ? `<span class="sr-only">Encrypted</span>` : "";
           const selected = a.id === mark;
           return `<div class="row artifact-row${selected ? " selected" : ""}" data-id="${esc(a.id)}">
-            <span class="row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
+            <span class="row-glyph" style="background:none;border-radius:0;color:var(--ink-3);box-shadow:none;display:grid;place-items:center;" aria-hidden="true">${cardGlyph(a.protected)}</span>
             <div class="grow">
               <a class="title" href="${esc(href)}"${
                 selected ? ' aria-current="true"' : ""
@@ -285,8 +296,11 @@ if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
     const button = event.target.closest?.('[data-action="artifact-group"]');
     if (!button) return;
-    artifactGrouping = button.dataset.group === "kind" ? "kind" : "day";
-    render();
+    const group = button.dataset.group;
+    if (group in ARTIFACT_GROUPS) {
+      artifactGrouping = group;
+      render();
+    }
   });
 }
 

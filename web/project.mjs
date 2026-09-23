@@ -22,7 +22,15 @@ import {
 import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { pickProject } from "./projects.mjs";
-import { sessionRows, sessionDetailView } from "./sessions.mjs";
+import {
+  errorAsideHTML,
+  fetchBrainEntry,
+  kvAsideHTML,
+  renderMarkdown,
+  sessionDetailView,
+  sessionRows,
+  wireSessionDetail,
+} from "./sessions.mjs";
 import {
   installShellLayout,
   shellHTML,
@@ -97,6 +105,110 @@ function segSwitcher(id, segment, stats) {
   </div>`;
 }
 
+const PROJECT_MOBILE_STYLE = `<style>
+@media (max-width: 1099px) {
+  .shell-index .shell-head { display: none !important; }
+  .shell-index .shell-controls:not(.mobile-filter-open) { display: none !important; }
+  .shell-index .shell-controls.mobile-filter-open { display: flex !important; }
+  .project-tools-mobile {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    box-sizing: border-box;
+    position: sticky;
+    top: 52px;
+    z-index: 10;
+  }
+  .project-tools-seg {
+    flex: 1;
+    display: flex;
+    height: 36px;
+    background: var(--surface-2);
+    border-radius: var(--r-1);
+    padding: 2px;
+    box-sizing: border-box;
+    align-items: center;
+  }
+  .project-tools-seg a {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 100%;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink-2);
+    text-decoration: none;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .project-tools-seg a[aria-selected="true"],
+  .project-tools-seg a[aria-current="page"] {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: var(--shadow-1);
+  }
+  .project-tools-seg .shell-seg-count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+  .project-filter-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--ink-2);
+    cursor: pointer;
+    border-radius: var(--r-1);
+    flex: none;
+  }
+  .project-filter-btn:hover,
+  .project-filter-btn:focus-visible {
+    color: var(--ink);
+  }
+}
+@media (min-width: 1100px) {
+  .project-tools-mobile {
+    display: none !important;
+  }
+}
+</style>`;
+
+function projectToolsMobile(id, segment, stats) {
+  const count = (n) => (n == null ? "" : `<span class="shell-seg-count">${n}</span>`);
+  const tab = (seg, label, n) =>
+    `<a href="#/projects/${encodeURIComponent(id)}/${seg}" role="tab" aria-selected="${
+      segment === seg
+    }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
+  const filterGlyph = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`;
+
+  return `<div class="project-tools-mobile" role="toolbar" aria-label="Project tools">
+    <div class="project-tools-seg" role="tablist" aria-label="Project sections">
+      ${tab("feed", "Feed", null)}
+      ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
+      ${tab("sessions", "Sessions", stats?.sessions ?? null)}
+    </div>
+    <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
+      ${filterGlyph}
+    </button>
+  </div>`;
+}
+
 const FEED_GLYPH = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>`;
 
 let lastOpenSession = "";
@@ -119,6 +231,14 @@ if (typeof document !== "undefined") {
     if (newBtn) {
       event.preventDefault();
       openCreateProjectDialog();
+      return;
+    }
+    const filterToggle = event.target.closest?.('[data-action="project-filter-toggle"]');
+    if (filterToggle) {
+      const controls = document.querySelector(".shell-index .shell-controls");
+      if (controls) {
+        controls.classList.toggle("mobile-filter-open");
+      }
       return;
     }
     const link = event.target.closest?.(".session-link, .session-row a");
@@ -372,7 +492,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
-    indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
     indexControls: shellIndexControls("Filter events", group),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -414,7 +534,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   return {
     html: shellHTML({
       segment,
-      indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
       indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
@@ -430,6 +550,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
 
 async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
   const selectedId = params?.get?.("id") || params?.get?.("session") || "";
+  const filePath = params?.get?.("file") || params?.get?.("entry") || "";
   const { sessions, card } = await sessionRows(id, selectedId);
   const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
   const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
@@ -440,21 +561,59 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
   const meta = selectedSession
     ? `${selectedSession.agent} · ${selectedSession.status} · ${formatBytes(selectedSession.brain_bytes || 0)}`
     : "";
-  return shellHTML({
-    segment,
-    indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
-    indexControls: shellIndexControls("Filter sessions"),
-    indexBody: card,
-    stageHead: shellStageHead(
-      selectedSession?.session_name || "Sessions",
-      meta,
-      "",
-      `#/projects/${encodeURIComponent(id)}/sessions`,
-    ),
-    stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(activeSessionId || id)}</span></div>`,
-    stageBody: detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`,
-    hasSelection: Boolean(selectedId),
-  });
+
+  let stageHead = shellStageHead(
+    selectedSession?.session_name || "Sessions",
+    meta,
+    "",
+    `#/projects/${encodeURIComponent(id)}/sessions`,
+  );
+  let stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(activeSessionId || id)}</span></div>`;
+  let stageBody = detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`;
+  let aside = "";
+  let hasSelection = Boolean(selectedId || filePath);
+
+  if (selectedSession && filePath) {
+    const entryRes = await fetchBrainEntry(selectedSession.id, filePath);
+    if (entryRes.ok) {
+      const isFs = entryRes.entry.kind === "file" || filePath.startsWith("/fs") || filePath.startsWith("fs/");
+      if (isFs) {
+        const rendered = await renderMarkdown(entryRes.entry.content);
+        const fileName = filePath.split("/").pop() || filePath;
+        const displayPath = entryRes.entry.path.startsWith("brain/")
+          ? entryRes.entry.path
+          : entryRes.entry.path.startsWith("/")
+            ? `brain${entryRes.entry.path}`
+            : `brain/${entryRes.entry.path}`;
+        const provenance = `session brain · ${displayPath} · ${formatBytes(entryRes.entry.size_bytes)} · read-only`;
+        const backHref = `#/projects/${encodeURIComponent(id)}/sessions?id=${encodeURIComponent(selectedSession.id)}`;
+        stageHead = shellStageHead(fileName, "", "", backHref);
+        stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(provenance)}</span></div>`;
+        stageBody = `<div class="hub-viewer-doc"><div class="session-doc-content" style="max-width: 640px; margin: 0; padding: 24px 16px;">${rendered}</div></div>`;
+        aside = "";
+        hasSelection = true;
+      } else {
+        aside = kvAsideHTML(filePath, entryRes.entry.content);
+      }
+    } else {
+      aside = errorAsideHTML(filePath, entryRes.error);
+    }
+  }
+
+  return {
+    html: shellHTML({
+      segment,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexControls: shellIndexControls("Filter sessions"),
+      indexBody: card,
+      stageHead,
+      stageControls,
+      stageBody,
+      aside,
+      hasSelection,
+    }),
+    selectedSession,
+  };
 }
 
 export async function projectScreen(params, gen, path) {
@@ -530,18 +689,25 @@ export async function projectScreen(params, gen, path) {
   let shell;
   let artifactInfo = null;
   let artifactId = "";
+  let sessionSelected = null;
   if (segment === "artifacts") {
     const built = await artifactsShell(id, segment, stats, params, mobileBar);
     shell = built.html;
     artifactInfo = built.info;
     artifactId = built.selected;
-  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params, mobileBar, gen);
-  else shell = await feedShell(id, segment, stats, params, mobileBar);
+  } else if (segment === "sessions") {
+    const built = await sessionsShell(id, segment, stats, params, mobileBar, gen);
+    shell = built.html;
+    sessionSelected = built.selectedSession;
+  } else {
+    shell = await feedShell(id, segment, stats, params, mobileBar);
+  }
   if (stale(gen)) return;
 
   paint(gen, shell);
   installShellLayout(main);
   if (artifactInfo) wireArtifactStage(main, artifactId, artifactInfo);
+  if (sessionSelected) wireSessionDetail(main, id, sessionSelected.id);
   wireProjectHeader(project, stats, footprint);
 }
 // The row selection the keyboard map owns: the project's segments all paint

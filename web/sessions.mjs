@@ -42,7 +42,9 @@ export function sessionRow(s, current, isSelected = false) {
   const truncatedId = truncateMiddle(s.id);
   const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)}`;
 
-  const href = `#/session?project=${encodeURIComponent(current)}&id=${encodeURIComponent(s.id)}`;
+  const href = current
+    ? `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(s.id)}`
+    : `#/session?id=${encodeURIComponent(s.id)}`;
 
   return `<div class="row session-row${isSelected ? " selected" : ""}" data-id="${esc(s.id)}">
     ${dot}
@@ -166,38 +168,16 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
     ? `Session ended ${relative(session.last_activity ?? session.created_at)}. Brain and logs can be pruned.`
     : "Pruning becomes available once the session has ended.";
 
-  let fileViewerHTML = "";
-  if (file) {
-    const matching = (fsEntries || []).concat(kvEntries || []).find((e) => e.path === file);
-    const sizeStr = matching?.size_bytes != null ? fmtBytes(matching.size_bytes) : "";
-    const displayPath = file.startsWith("brain/") ? file : `brain${file.startsWith("/") ? "" : "/"}${file}`;
-    fileViewerHTML = `
-      <div class="session-file-header">
-        <span class="session-file-path mono" title="${esc(displayPath)}">${esc(displayPath)}</span>
-        ${sizeStr ? `<span class="session-file-size mono">${sizeStr}</span>` : ""}
-        <button type="button" class="session-file-copy" data-action="copy-file-path" data-path="${esc(file)}">Copy path</button>
-      </div>
-      <div class="session-file-body">
-        <div class="open-file row"><span class="mono">${esc(file)}</span><span class="meta">Content stays behind the agent surface; this names the entry opened.</span></div>
-      </div>
-    `;
-  } else {
-    fileViewerHTML = `
-      <div class="session-file-header">
-        <span class="session-file-path mono">brain/</span>
-        <span class="session-file-size mono">No file open</span>
-      </div>
-      <div class="session-file-body session-file-empty">
-        <p class="empty-hint meta">Select a file from the brain tree to view.</p>
-      </div>
-    `;
-  }
-
   const brainFilesCount = fsEntries ? fsEntries.length : 0;
   const brainFootnote = `${brainFilesCount} files · ${brainSize} · written by ${esc(session.owner ?? session.agent ?? "agent")}`;
 
   return `
     <div class="session-detail-view" data-session-id="${esc(session.id)}">
+      <style>
+        .session-tree-pane { width: 100% !important; flex: 1 !important; border-right: none !important; }
+        .session-file-viewer { display: none !important; }
+        .shell .session-back-bar { display: none !important; }
+      </style>
       <div class="session-back-bar">
         <a class="session-back-link" href="#/projects/${encodeURIComponent(current)}/sessions" aria-label="Back to sessions">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
@@ -209,7 +189,6 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
         <div class="session-header-main">
           <div class="session-detail-title-block">
             <div class="session-title-line">
-              <h1>${esc(session.session_name)}</h1>
               <span class="session-status ${statusClass}"><span class="state-dot" style="${session.status === 'active' ? 'background: var(--ok)' : ''}"></span>${esc(session.status)}</span>
             </div>
             <div class="meta">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
@@ -238,10 +217,6 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
             ${primaryButton}
             <p class="action-helper-sentence action-helper-note">${helperNote}</p>
           </div>
-        </div>
-
-        <div class="session-file-viewer" role="region" aria-label="File viewer">
-          ${fileViewerHTML}
         </div>
       </div>
     </div>
@@ -399,6 +374,118 @@ export async function pruneSession(id, agent) {
   });
 }
 
+let markedPromise = null;
+export function getMarked() {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (window.marked && typeof window.marked.parse === "function") {
+    return Promise.resolve(window.marked);
+  }
+  if (!markedPromise) {
+    markedPromise = new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "/vendor/marked.js";
+      script.onload = () => resolve(window.marked);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
+  }
+  return markedPromise;
+}
+
+export function fallbackMarkdown(text) {
+  const lines = (text || "").split("\n");
+  const out = [];
+  let inList = false;
+  for (const line of lines) {
+    if (line.startsWith("# ")) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h1>${esc(line.slice(2))}</h1>`);
+    } else if (line.startsWith("## ")) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h2>${esc(line.slice(3))}</h2>`);
+    } else if (line.startsWith("### ")) {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<h3>${esc(line.slice(4))}</h3>`);
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${esc(line.slice(2))}</li>`);
+    } else if (!line.trim()) {
+      if (inList) { out.push("</ul>"); inList = false; }
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      out.push(`<p>${esc(line)}</p>`);
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("");
+}
+
+export async function renderMarkdown(content) {
+  if (!content) return "";
+  try {
+    const m = await getMarked();
+    if (m && typeof m.parse === "function") {
+      return m.parse(content);
+    }
+  } catch {}
+  return fallbackMarkdown(content);
+}
+
+export async function fetchBrainEntry(sessionId, path) {
+  try {
+    const data = await api(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/brain/entry?path=${encodeURIComponent(path)}`,
+    );
+    return { ok: true, entry: data };
+  } catch (err) {
+    if (err.status === 404) {
+      return { ok: false, status: 404, error: "Entry not found" };
+    }
+    if (err.status === 409) {
+      return { ok: false, status: 409, error: "Path is a directory" };
+    }
+    if (err.status === 422) {
+      return { ok: false, status: 422, error: "Entry is not valid UTF-8" };
+    }
+    return { ok: false, status: err.status || 500, error: err.message || "Could not read entry" };
+  }
+}
+
+export function kvAsideHTML(path, content) {
+  const copyGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V5h10"></path></svg>`;
+  return `
+    <div class="shell-head">
+      <div class="shell-title"><span class="shell-title-line">Key</span></div>
+      <span class="shell-meta mono">${esc(path)}</span>
+    </div>
+    <div class="shell-controls">
+      <span class="shell-meta mono">${esc(path)}</span>
+      <div class="grow"></div>
+      <button type="button" class="hub-btn-glyph" data-action="copy-kv-value" data-value="${esc(content)}" aria-label="Copy key value">
+        ${copyGlyph}
+      </button>
+    </div>
+    <div class="shell-body">
+      <pre class="mono session-kv-value" style="margin: 0; padding: 16px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all;">${esc(content)}</pre>
+    </div>
+  `;
+}
+
+export function errorAsideHTML(path, message) {
+  return `
+    <div class="shell-head">
+      <div class="shell-title"><span class="shell-title-line">Entry</span></div>
+      <span class="shell-meta mono">${esc(path)}</span>
+    </div>
+    <div class="shell-controls">
+      <span class="shell-meta mono">${esc(path)}</span>
+    </div>
+    <div class="shell-body" style="padding: 16px;">
+      <p class="empty">${esc(message)}</p>
+    </div>
+  `;
+}
+
 if (typeof document !== "undefined") {
   document.addEventListener("click", async (event) => {
     const copyBtn = event.target.closest?.('[data-action="copy-id"], .session-copy-id');
@@ -428,6 +515,18 @@ if (typeof document !== "undefined") {
           await navigator.clipboard.writeText(path);
         } catch {}
         toast("Copied file path.");
+      }
+      return;
+    }
+
+    const copyKvBtn = event.target.closest?.('[data-action="copy-kv-value"]');
+    if (copyKvBtn) {
+      const val = copyKvBtn.dataset.value;
+      if (val != null) {
+        try {
+          await navigator.clipboard.writeText(val);
+        } catch {}
+        toast("Copied key value.");
       }
       return;
     }

@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, project tools row, brain entry stage, and artifact agent grouping
+
+* **Update**: [The human surface](architecture/human-surface.md) documents the
+  mobile project tools row with segmented tabs and filter toggle, reading
+  brain fs files in the stage with rendered preview, provenance line, and back
+  control, reading kv entries in the entry aside with copy control, and
+  grouping artifacts by publishing actor in the artifact index.
+
 ## 2026-09-23, phone frame, tools row, and more tab root
 
 * **Update**: [Human interface](design/human-interface.md) documents the phone
