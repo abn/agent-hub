@@ -228,9 +228,6 @@ const HOME_STYLE = `<style>
   .shell:has(.home-pad) .shell-controls:not(.is-compressed) {
     display: none !important;
   }
-  .shell-controls .home-desktop-meta {
-    display: none !important;
-  }
   .shell.is-compressed .home-chips-flow {
     display: none !important;
   }
@@ -295,10 +292,27 @@ const HOME_STYLE = `<style>
   }
 }
 @media (min-width: 720px) {
-  .home-welcome,
+  /* The desktop keeps its header ("Home") and reserves its control row. The
+     greeting, if shown, is the first line of stage content at the stage
+     gutter, never in the header. The phone's welcome-only node line and its
+     flow chips stay phone chrome, so they go. */
+  .home-node-phone,
   .home-chips-flow,
   .shell-controls .chip {
     display: none !important;
+  }
+  .home-welcome {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .home-greeting {
+    margin: 0;
+    font-size: var(--t-22);
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--ink);
   }
   .home-status {
     margin: 0 !important;
@@ -381,6 +395,11 @@ export async function home(gen) {
       );
   const status = statusSentence(data);
   const chips = chipsHTML(waiting, unread);
+  // On a desktop the header title is "Home", not the greeting, and the control
+  // row reserves its 40px without repeating the node line under the header that
+  // already carries it. The greeting and the flow chips are phone chrome, so the
+  // welcome block is only the greeting text at the stage gutter, if it shows at
+  // all. The header stays put; the lists and the one storage card are flat.
   const welcome = `<div class="home-welcome">
     <span class="home-node-phone mono">${esc(node.join(" · "))}</span>
     <h1 class="home-greeting">${esc(greeting())}</h1>
@@ -390,11 +409,8 @@ export async function home(gen) {
     gen,
     shellHTML({
       noIndex: true,
-      stageHead: shellStageHead(greeting(), node.join(" · ")),
-      stageControls: `<div class="shell-controls">
-        <span class="shell-meta home-desktop-meta">${esc(node.join(" · "))}</span>
-        ${chips}
-      </div>`,
+      stageHead: shellStageHead("Home", node.join(" · ")),
+      stageControls: `<div class="shell-controls">${chips}</div>`,
       stageBody: `${HOME_STYLE}<div class="shell-pad home-pad"><div class="home">${welcome}<p class="home-summary home-status">${esc(
         status,
       )}</p><div class="home-chips-flow">${chips}</div>${cards}${data.storage ? storageCard(data.storage, data.prunable || {}) : ""}</div></div>`,

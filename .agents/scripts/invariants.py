@@ -593,9 +593,13 @@ def check_router(page, watch: Watch) -> None:
     """The router dispatches known routes, handles unknown routes, and tracks history."""
     watch.enter("router: unknown route fallback")
     page.evaluate("location.hash = '#/nonexistent-route-xyz'")
+    # The desktop Home header names the screen ("Home"); on a phone it is the
+    # greeting. Either is the Home screen, so the fallback accepts both.
     if not settle(
         page,
-        f"document.title.includes('Home') || document.querySelector('main h1')?.textContent === {json.dumps(home_title())}",
+        "document.title.includes('Home')"
+        f" || document.querySelector('main h1')?.textContent === {json.dumps(home_title())}"
+        " || document.querySelector('main h1')?.textContent === 'Home'",
     ):
         watch.fail("unknown route did not fall back to Home screen")
     watch.drain_rejections()
