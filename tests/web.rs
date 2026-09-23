@@ -23,6 +23,7 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// The worker before it is stamped. The served copy has its version and cache
 /// lists filled in, so the digest can only be recomputed from the source.
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
+const HOME_JS: &str = include_str!("../web/home.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1335,5 +1336,25 @@ async fn protected_artifact_serves_the_locked_host_shell() {
     assert!(
         body.contains("Encrypted artifact"),
         "the locked shell names its state"
+    );
+}
+
+#[tokio::test]
+async fn home_has_no_gear_and_uses_flat_rows() {
+    assert!(
+        !HOME_JS.contains("home-gear"),
+        "home must have no gear button"
+    );
+    assert!(
+        !HOME_JS.contains("home-card home-waiting"),
+        "home waiting list must not be a card"
+    );
+    assert!(
+        !HOME_JS.contains("home-card\">${rows}"),
+        "home newest list must not be a card"
+    );
+    assert!(
+        HOME_JS.contains("home-storage-wrap"),
+        "home storage must be wrapped"
     );
 }

@@ -92,7 +92,12 @@ the header is 76px at rest (title 22/600 with meta line 5px below) and compresse
 to 52px when scrolled past 20px (title 15/600, meta hidden), over a 120ms ease-out
 transition (instant under reduced motion) with hysteresis at 20px and 8px. Under
 it, a sticky 44px tools row holds the screen's tools with no-wrap chips and buttons.
-Settings carries no tools row and takes a bottom hairline.
+Home is welcoming at rest: it carries no header bar, no gear, the greeting at
+28px/600 at x 16 following the time of day, the status sentence in prose, flow
+chips, flat event rows, and the storage summary as the only card. Scrolled past
+the greeting, the standard 52px bar fades in with the title at x 48 and the chips
+pin under it in the 44px tools row. Settings carries no tools row and takes a
+bottom hairline.
 
 The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.

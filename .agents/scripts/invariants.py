@@ -10,11 +10,14 @@ They survive a UI redesign because their subject is behavioral correctness.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 import hub_harness as harness
@@ -1171,6 +1174,132 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
+    watch.enter("phone home: at rest (no bar, no gear, greeting at x 16)")
+    page.set_viewport_size({"width": 390, "height": 844})
+    goto(page, "#/home", home_title())
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(100)
+
+    # 1. No bar at rest
+    home_bar_visible = page.evaluate(
+        "(() => { const h = document.querySelector('.shell:has(.home-pad) .shell-head');"
+        " if (!h) return false;"
+        " return window.getComputedStyle(h).display !== 'none' && h.offsetWidth > 0 && h.offsetHeight > 0; })()"
+    )
+    if home_bar_visible:
+        watch.fail("Home at rest shows header bar, expected no bar at rest on phone")
+
+    # 2. No gear on Home
+    has_gear = page.evaluate("!!document.querySelector('.home-gear')")
+    if has_gear:
+        watch.fail("Home at rest has gear button, expected no gear on Home")
+
+    # 3. Greeting at x 16
+    greeting_x = page.evaluate(
+        "(() => { const el = document.querySelector('.home-welcome h1, .home-greeting, .home-welcome-title');"
+        " return el ? Math.round(el.getBoundingClientRect().left) : null; })()"
+    )
+    if greeting_x is None or abs(greeting_x - 16) > 2:
+        watch.fail(f"Home greeting at rest has left={greeting_x!r}, expected x=16")
+
+    # 4. Scrolled: bar present, title at x 48, chips pinned in tools row
+    watch.enter("phone home: scrolled (bar present, title at x 48, chips pinned in tools row)")
+    page.evaluate("window.scrollTo(0, 100)")
+    settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 52) <= 2")
+
+    bar_height = page.evaluate("document.querySelector('.shell-head')?.getBoundingClientRect().height")
+    if bar_height is None or abs(bar_height - 52) > 2:
+        watch.fail(f"Home scrolled header bar height is {bar_height!r}, expected 52px")
+
+    title_x = page.evaluate(
+        "(() => { const el = document.querySelector('.shell-head .shell-title h1, .shell-head .shell-title .shell-title-line');"
+        " return el ? Math.round(el.getBoundingClientRect().left) : null; })()"
+    )
+    if title_x is None or abs(title_x - 48) > 2:
+        watch.fail(f"Home scrolled title first glyph at left={title_x!r}, expected x=48")
+
+    # Chips pinned in tools row
+    tools_pinned = page.evaluate(
+        "(() => { const row = document.querySelector('.shell-controls');"
+        " if (!row) return false;"
+        " const rect = row.getBoundingClientRect();"
+        " const chips = row.querySelectorAll('.chip');"
+        " const isPinned = Math.abs(rect.top - 52) <= 2 && Math.abs(rect.height - 44) <= 2;"
+        " const hasChips = chips.length >= 3;"
+        " return isPinned && hasChips; })()"
+    )
+    if not tools_pinned:
+        tools_info = page.evaluate(
+            "(() => { const row = document.querySelector('.shell-controls');"
+            " if (!row) return 'no .shell-controls';"
+            " const r = row.getBoundingClientRect();"
+            " return `top=${r.top}, height=${r.height}, chips=${row.querySelectorAll('.chip').length}`;"
+            " })()"
+        )
+        watch.fail(f"Home scrolled chips not pinned in tools row: {tools_info}")
+
+    # 5. Quiet copy is a sentence, not a stat line
+    watch.enter("phone home: quiet copy is a sentence, not a stat line")
+    page.evaluate("window.scrollTo(0, 0)")
+    summary_text = page.evaluate(
+        "(() => { const s = document.querySelector('.home-status, .home-summary');"
+        " return s ? s.textContent.trim() : ''; })()"
+    )
+    if "waiting on you" not in summary_text:
+        watch.fail(f"Home summary text is not a sentence: {summary_text!r}")
+    has_stat_line = page.evaluate(
+        "(() => { const text = document.querySelector('.home')?.textContent || '';"
+        " return /\\d+\\s+unread\\s*·|·\\s*\\d+\\s+unread|0 unread · 0 waiting/i.test(text); })()"
+    )
+    if has_stat_line:
+        watch.fail(f"Home still renders a bullet stat line: {summary_text!r}")
+
+    # 6. Flat rows: no .card around event list; storage summary is a card
+    watch.enter("phone home: flat rows and storage card")
+    card_around_events = page.evaluate(
+        "(() => { const bad = document.querySelectorAll('.home-waiting.card, .home-waiting.home-card, .home-newest .card, .home-newest .home-card, .card .home-row, .home-card .home-row');"
+        " return bad.length > 0; })()"
+    )
+    if card_around_events:
+        watch.fail("Home event list is wrapped in a card, expected flat rows")
+
+    storage_is_card = page.evaluate(
+        "(() => { const st = document.querySelector('.home-storage');"
+        " return st ? (st.classList.contains('card') || st.classList.contains('home-card')) : false; })()"
+    )
+    if not storage_is_card:
+        watch.fail("Home storage summary is not a card")
+
+    # Capture screenshots at 390 (rest, scrolled) and 1440 desktop
+    output_dir = Path("target/tmp/screenshots")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(200)
+    page.screenshot(path=str(output_dir / "home_390_rest.png"))
+
+    page.evaluate("window.scrollTo(0, 200)")
+    page.wait_for_timeout(200)
+    page.screenshot(path=str(output_dir / "home_390_scrolled.png"))
+
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(200)
+    page.screenshot(path=str(output_dir / "home_1440_desktop.png"))
+
+    artifact_dir = os.environ.get("AGENT_ARTIFACT_DIR")
+    if artifact_dir:
+        for name in ["home_390_rest.png", "home_390_scrolled.png", "home_1440_desktop.png"]:
+            try:
+                shutil.copy(output_dir / name, Path(artifact_dir) / name)
+            except Exception:
+                pass
+
+    page.set_viewport_size({"width": 1280, "height": 800})
+    watch.drain_rejections()
+
+
 def check_session_detail_single_title(page, watch: Watch, project: str, session_id: str) -> None:
     watch.enter("session: exactly one title on screen")
     goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}", harness.SESSION_NAME)
@@ -1520,6 +1649,7 @@ def run() -> int:
 
                 # 7. Phone frame, tools row, 5 tabs, More screen
                 run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
+                run_step(watch, check_phone_home, page, watch, port, project)
 
                 # 8. Project features
                 run_step(watch, check_project_tools_row, page, watch, project)

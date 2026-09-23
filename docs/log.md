@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, home screen mobile welcome-first and flat rows
+
+* **Update**: [Human interface](design/human-interface.md) documents Home
+  welcoming at rest on a phone (no bar, no gear, greeting at x 16 following time
+  of day, status sentence in prose, flow chips, and flat rows with storage
+  summary as the only card) and compressed when scrolled past the greeting
+  (standard 52px bar fading in with title at x 48 and chips pinned in the 44px
+  sticky tools row).
+
 ## 2026-09-23, project tools row, brain entry stage, and artifact agent grouping
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the

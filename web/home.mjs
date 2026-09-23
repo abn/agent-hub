@@ -39,13 +39,24 @@ export const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const agentsLine = (n, none = "No") =>
   n ? `${count(n, "agent", "agents")} active` : `${none} agents active`;
 
-function summaryLine(data) {
+function statusSentence(data) {
   const waiting = int(data.waiting);
-  return [
-    waiting ? `${count(waiting, "thing", "things")} waiting on you` : "Nothing waiting on you",
-    `${int(data.unread)} unread`,
-    agentsLine(int(data.agents_active), "no"),
-  ].join(" · ");
+  const unread = int(data.unread);
+  const agents = int(data.agents_active);
+
+  const waitingPart = waiting
+    ? `${count(waiting, "thing is", "things are")} waiting on you.`
+    : "Nothing is waiting on you.";
+
+  const updatesPart = unread
+    ? `${count(unread, "update", "updates")} since you last looked`
+    : "No updates since you last looked";
+
+  const agentsPart = agents
+    ? `${count(agents, "agent is", "agents are")} working right now.`
+    : "no agents are working right now.";
+
+  return `${waitingPart} ${updatesPart}, and ${agentsPart}`;
 }
 
 // A size in the unit it reads best in, to three figures and with no trailing
@@ -126,11 +137,7 @@ function homeRow(event, href, { unseen = false, chevron = false, action = false 
   </div>`;
 }
 
-// The response carries the head of the waiting queue, newest first, so the
-// card does not depend on a waiting item being among the newest events. It
-// shows the first few and says how many more the Inbox holds. The count
-// beside the title, and the one the rest is worked out from, is the whole
-// queue's.
+// Flat rows: the waiting queue is a flat list under a group title, not a card.
 function waitingCard(waiting, items) {
   if (!waiting) return "";
   const shown = items.slice(0, WAITING_ROWS);
@@ -139,7 +146,7 @@ function waitingCard(waiting, items) {
     rest > 0
       ? `<a class="home-rest" href="#/inbox">${shown.length ? `${rest} more` : count(rest, "item", "items")} in the Inbox</a>`
       : "";
-  return `<section class="home-card home-waiting" aria-labelledby="home-waiting-title">
+  return `<section class="home-waiting" aria-labelledby="home-waiting-title">
     <div class="home-card-head">
       <h2 id="home-waiting-title">Waiting on you · ${waiting}</h2>
       <a class="home-more" href="#/inbox">Inbox${CHEVRON(12)}</a>
@@ -149,6 +156,7 @@ function waitingCard(waiting, items) {
   </section>`;
 }
 
+// Flat rows: newest across projects is a flat list without a card wrapper.
 function newestCard(events, unseen) {
   if (!events.length) return "";
   const rows = events
@@ -159,17 +167,12 @@ function newestCard(events, unseen) {
     )
     .join("");
   return `<section class="home-newest" aria-labelledby="home-newest-title">
-    <h2 id="home-newest-title">Newest across projects</h2>
-    <div class="home-card">${rows}</div>
+    <h2 id="home-newest-title" class="home-section-title">Newest across projects</h2>
+    <div class="home-flat-rows">${rows}</div>
   </section>`;
 }
 
-// The bar is a drawing of the two numbers beside it, so it is hidden from a
-// reader and the share it draws is written out underneath. A volume that
-// could not be measured has no capacity, and then there is no bar to draw.
-// Nor is there under the Storage screen's threshold: a fill to scale would be
-// nothing to see, and Home holds one number, so a bar against what is used
-// would always be full. The words say it instead, and no fill is ever widened.
+// The storage card is the only card on Home.
 function storageCard(storage, prunable) {
   const used = int(storage.used_bytes);
   const capacity = storage.capacity_bytes == null ? 0 : int(storage.capacity_bytes);
@@ -183,27 +186,20 @@ function storageCard(storage, prunable) {
       `${count(sessions, "ended session", "ended sessions")} can be pruned · ${size(prunable.bytes)}`,
     );
   }
-  return `<a class="home-card home-storage" href="#/storage">
-    <span class="home-storage-head">
-      <span class="home-storage-label">Storage</span>
-      <span class="mono home-storage-n">${share === null ? `${size(used)} used` : usedOfCapacity(used, capacity)}</span>
-    </span>
-    ${
-      share === null || sliver
-        ? ""
-        : `<span class="home-bar" aria-hidden="true"><span style="width: ${(share * 100).toFixed(1)}%"></span></span>`
-    }
-    ${hints.length ? `<span class="home-storage-hint">${hints.join(" · ")}</span>` : ""}
-  </a>`;
-}
-
-// The design's status strip names the node the reader is looking at. It is
-// the same datum the top bar and the Storage screen print, carried on the
-// Home response so the screen stays one request. The top bar already says it
-// from the width it appears at, so the stylesheet draws this line below that.
-function nodeLine(node) {
-  const parts = [node?.host, node?.mode].filter((part) => typeof part === "string" && part);
-  return parts.length ? `<p class="home-node mono">${parts.map(esc).join(" · ")}</p>` : "";
+  return `<div class="home-storage-wrap">
+    <a class="card home-card home-storage" href="#/storage">
+      <span class="home-storage-head">
+        <span class="home-storage-label">Storage</span>
+        <span class="mono home-storage-n">${share === null ? `${size(used)} used` : usedOfCapacity(used, capacity)}</span>
+      </span>
+      ${
+        share === null || sliver
+          ? ""
+          : `<span class="home-bar" aria-hidden="true"><span style="width: ${(share * 100).toFixed(1)}%"></span></span>`
+      }
+      ${hints.length ? `<span class="home-storage-hint">${hints.join(" · ")}</span>` : ""}
+    </a>
+  </div>`;
 }
 
 // Quiet is when nothing waits and nothing is new: no open item, nothing
@@ -218,12 +214,163 @@ function quietCard(data) {
   });
 }
 
+function chipsHTML(waiting, unread) {
+  return `<button type="button" class="chip" data-home-chip="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-home-chip="waiting" aria-pressed="false">Waiting <span class="mono">${waiting}</span></button>
+    <button type="button" class="chip" data-home-chip="unread" aria-pressed="false">Unread <span class="mono">${unread}</span></button>`;
+}
+
+const HOME_STYLE = `<style>
+@media (max-width: 719px) {
+  .shell:has(.home-pad) .shell-head:not(.is-compressed) {
+    display: none !important;
+  }
+  .shell:has(.home-pad) .shell-controls:not(.is-compressed) {
+    display: none !important;
+  }
+  .shell-controls .home-desktop-meta {
+    display: none !important;
+  }
+  .shell.is-compressed .home-chips-flow {
+    display: none !important;
+  }
+  .home-pad {
+    padding: 0 0 48px 0;
+    background: var(--bg);
+  }
+  .home {
+    gap: 0 !important;
+  }
+  .home-welcome {
+    padding: 40px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .home-node-phone {
+    font-family: var(--font-mono);
+    font-size: var(--t-12);
+    font-weight: 500;
+    line-height: 1;
+    color: var(--ink-3);
+  }
+  .home-greeting {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    text-wrap: pretty;
+    color: var(--ink);
+  }
+  .home-status {
+    margin: 8px 0 20px !important;
+    padding: 0 16px !important;
+    font-size: var(--t-15) !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+    color: var(--ink-2) !important;
+    text-wrap: pretty;
+  }
+  .home-chips-flow {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 14px;
+    overflow-x: auto;
+  }
+  .home-storage-wrap {
+    padding: 16px;
+  }
+  .home-waiting .home-card-head,
+  .home-newest .home-section-title {
+    padding: 16px 16px 8px;
+    margin: 0;
+    font-size: var(--t-13);
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink-2);
+  }
+  .home-waiting .home-card-head {
+    border-bottom: 0;
+  }
+}
+@media (min-width: 720px) {
+  .home-welcome,
+  .home-chips-flow,
+  .shell-controls .chip {
+    display: none !important;
+  }
+  .home-status {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .home-storage-wrap {
+    padding: 0;
+  }
+  .home-section-title {
+    margin: 0;
+    font-size: var(--t-13);
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink-2);
+    padding-bottom: var(--s-2);
+  }
+}
+.home-storage.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 14px var(--s-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: inherit;
+  text-decoration: none;
+}
+.home-waiting .row:first-of-type,
+.home-newest .row:first-of-type {
+  border-top: 1px solid var(--line);
+}
+</style>`;
+
+export function installHomeChips(root = document) {
+  const syncChips = (filter) => {
+    root.querySelectorAll("[data-home-chip]").forEach((c) => {
+      c.setAttribute("aria-pressed", String(c.dataset.homeChip === filter));
+    });
+    const rows = root.querySelectorAll(".home-row");
+    rows.forEach((row) => {
+      if (filter === "all") {
+        row.hidden = false;
+      } else if (filter === "waiting") {
+        const isWaiting = row.closest(".home-waiting") !== null;
+        row.hidden = !isWaiting;
+      } else if (filter === "unread") {
+        row.hidden = !row.classList.contains("unread");
+      }
+    });
+    for (const sec of root.querySelectorAll(".home-waiting, .home-newest")) {
+      const anyVisible = sec.querySelector(".home-row:not([hidden])") !== null;
+      sec.hidden = filter !== "all" && !anyVisible;
+    }
+  };
+
+  root.querySelectorAll("[data-home-chip]").forEach((chip) => {
+    if (chip.dataset.wired === "on") return;
+    chip.dataset.wired = "on";
+    chip.addEventListener("click", () => {
+      syncChips(chip.dataset.homeChip);
+    });
+  });
+}
+
 export async function home(gen) {
   const data = await api("/api/v1/home");
   const recent = data.recent || [];
   const unseen = unseenIds(recent, data.unseen || []);
   const waiting = int(data.waiting);
-  const quiet = !waiting && !int(data.unread) && !unseen.size;
+  const unread = int(data.unread);
+  const quiet = !waiting && !unread && !unseen.size;
   const node = [data.node?.host, data.node?.mode].filter((part) => typeof part === "string" && part);
   const cards = quiet
     ? quietCard(data)
@@ -232,24 +379,29 @@ export async function home(gen) {
         recent.filter((event) => !isOpen(event)),
         unseen,
       );
-  // Home is a stage with no index, the same shape Settings has. It keeps the
-  // reserved chrome every other pane has, so the frame does not move when the
-  // reader arrives here.
-  const gear = `<a class="home-gear" href="#/settings" aria-label="Settings">
-      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
-    </a>`;
+  const status = statusSentence(data);
+  const chips = chipsHTML(waiting, unread);
+  const welcome = `<div class="home-welcome">
+    <span class="home-node-phone mono">${esc(node.join(" · "))}</span>
+    <h1 class="home-greeting">${esc(greeting())}</h1>
+  </div>`;
+
   paint(
     gen,
     shellHTML({
       noIndex: true,
-      stageHead: shellStageHead(greeting(), node.join(" · "), gear),
-      stageControls: `<div class="shell-controls"><span class="shell-meta">${esc(node.join(" · "))}</span></div>`,
-      stageBody: `<div class="shell-pad home-pad"><div class="home"><p class="home-summary">${esc(
-        summaryLine(data),
-      )}</p>${cards}${data.storage ? storageCard(data.storage, data.prunable || {}) : ""}</div></div>`,
+      stageHead: shellStageHead(greeting(), node.join(" · ")),
+      stageControls: `<div class="shell-controls">
+        <span class="shell-meta home-desktop-meta">${esc(node.join(" · "))}</span>
+        ${chips}
+      </div>`,
+      stageBody: `${HOME_STYLE}<div class="shell-pad home-pad"><div class="home">${welcome}<p class="home-summary home-status">${esc(
+        status,
+      )}</p><div class="home-chips-flow">${chips}</div>${cards}${data.storage ? storageCard(data.storage, data.prunable || {}) : ""}</div></div>`,
     }),
   );
   installShellLayout(main);
+  installHomeChips(main);
   // The router passes this to the badge, which counts the same payload.
   return data;
 }
