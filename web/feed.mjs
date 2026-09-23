@@ -56,6 +56,33 @@ export function activeKinds(projectId) {
   return new Set(kinds.filter((k) => VALID_KINDS.has(k)));
 }
 
+// The kind filter, folded into the index's Group menu. Round 5's rules hold:
+// the trigger's label is a fixed word rather than the current value, and the
+// value rides beside it as a pill. The menu items are the same control the
+// chip row used, so one handler serves both.
+const CHEVRON_DOWN = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 9l6 6 6-6"></path></svg>`;
+
+export function kindMenu(active, counts = {}) {
+  const entries = [
+    { kind: ALL, label: "All", count: counts.total },
+    ...FEED_KINDS.map(({ kind, label }) => ({ kind, label, count: counts[kind] })),
+  ];
+  const items = entries
+    .map(({ kind, label, count }) => {
+      const pressed = kind === ALL ? active.size === 0 : active.has(kind);
+      const n = count == null ? "" : ` <span class="mono shell-menu-n">${count}</span>`;
+      return `<button type="button" role="menuitemradio" aria-checked="${pressed}" data-action="kind" data-kind="${kind}">${esc(label)}${n}</button>`;
+    })
+    .join("");
+  const chosen = FEED_KINDS.filter(({ kind }) => active.has(kind)).map(({ label }) => label);
+  const pill = chosen.length ? `<span class="pill shell-group-pill">${esc(chosen.join(", "))}</span>` : "";
+  return `<div class="shell-group">
+    <button type="button" class="hub-group-toggle" data-group-toggle aria-haspopup="menu" aria-expanded="false">Group${CHEVRON_DOWN}</button>
+    ${pill}
+    <div class="shell-group-menu" role="menu" aria-label="Filter by kind" data-group-menu hidden>${items}</div>
+  </div>`;
+}
+
 export function kindChips(active, counts = {}) {
   const total = counts.total ?? 0;
   const chip = (kind, label, count, pressed) => {
@@ -400,6 +427,11 @@ export async function feedSection(current, stats = null, { chips = true } = {}) 
 // them. The shell reads the list it just painted rather than refetching.
 export function feedVisit(projectId) {
   return visits.get(projectId) || null;
+}
+
+// The kind counts the last index render worked out, for the Group menu.
+export function feedCounts(projectId) {
+  return visits.get(projectId)?.counts || {};
 }
 
 // One event by id, from the held visit. An event that has scrolled out of the

@@ -9,11 +9,14 @@ import { artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs
 import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import {
+  activeKinds,
   eventStage,
+  feedCounts,
   feedEvent,
   feedSection,
   feedVisit,
   formatEventSummary,
+  kindMenu,
   setFeedSelection,
 } from "./feed.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
@@ -363,13 +366,14 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
   setFeedSelection(selected);
   const indexBody = await feedSection(id, stats, { chips: false });
   const held = feedVisit(id);
+  const group = kindMenu(activeKinds(id), feedCounts(id));
   const event = feedEvent(id, selected) || held?.events?.[0] || null;
   const title = event ? formatEventSummary(event) : "Feed";
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
     indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
-    indexControls: shellIndexControls("Filter events"),
+    indexControls: shellIndexControls("Filter events", group),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
     stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(

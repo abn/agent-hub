@@ -239,12 +239,13 @@ export function shellMobileBar(title, meta = "", backHref = "") {
   </div>`;
 }
 
-export function shellIndexControls(placeholder) {
+export function shellIndexControls(placeholder, group = "") {
   return `<div class="shell-controls">
     <div class="shell-filter">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
       <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
     </div>
+    ${group}
   </div>`;
 }
 
@@ -295,9 +296,60 @@ export function installIndexFilter(shell) {
   field.addEventListener("input", apply);
 }
 
+// The Group menu: a fixed word on the trigger, the value beside it as a pill,
+// and the options in a menu. It is placed against the trigger rather than
+// inside the pane, because the pane clips its overflow. One document listener
+// closes it, installed once, not per render.
+export function installGroupMenu(shell) {
+  const wrap = shell.querySelector(".shell-group");
+  if (!wrap || wrap.dataset.wired === "on") return;
+  wrap.dataset.wired = "on";
+  const toggle = wrap.querySelector("[data-group-toggle]");
+  const menu = wrap.querySelector("[data-group-menu]");
+  if (!toggle || !menu) return;
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = menu.hidden;
+    if (open) {
+      const rect = toggle.getBoundingClientRect();
+      menu.style.top = `${Math.round(rect.bottom + 6)}px`;
+      menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - 200)))}px`;
+    }
+    menu.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) menu.querySelector("button")?.focus();
+  });
+  menu.addEventListener("click", (event) => {
+    if (!event.target.closest("button")) return;
+    menu.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  });
+}
+
+function closeGroupMenus(except) {
+  for (const menu of document.querySelectorAll("[data-group-menu]:not([hidden])")) {
+    if (menu === except) continue;
+    menu.hidden = true;
+    menu.closest(".shell-group")?.querySelector("[data-group-toggle]")?.setAttribute("aria-expanded", "false");
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const inside = event.target.closest?.(".shell-group, [data-group-menu]");
+    closeGroupMenus(inside ? inside.querySelector?.("[data-group-menu]") : null);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !document.querySelector("[data-group-menu]:not([hidden])")) return;
+    closeGroupMenus(null);
+  });
+}
+
 export function installShellLayout(root = document) {
   for (const shell of root.querySelectorAll(".shell")) {
     installSplitters(shell);
     installIndexFilter(shell);
+    installGroupMenu(shell);
   }
 }
