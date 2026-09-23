@@ -649,6 +649,62 @@ impl Brain {
         self.read(&parse_path(path)?).await
     }
 
+    /// Read one entry. Returns its kind and raw bytes.
+    ///
+    /// Refuses directories with [`Error::Conflict`]. Missing entries return
+    /// [`Error::NotFound`].
+    pub async fn entry(&self, path: &str) -> Result<(EntryKind, Vec<u8>)> {
+        match parse_path(path)? {
+            Namespace::Kv(key) => {
+                if key.is_empty() {
+                    return Err(Error::Conflict(format!(
+                        "brain path '{path}' is a directory"
+                    )));
+                }
+                let value = self
+                    .agent
+                    .kv
+                    .get::<StoredValue>(key)
+                    .await
+                    .map_err(engine_error)?
+                    .ok_or_else(|| Error::NotFound(format!("no brain entry at '{path}'")))?;
+                Ok((EntryKind::Key, value.into_bytes()))
+            }
+            Namespace::Fs(rest) => {
+                let fs_path = fs_path(rest);
+                if fs_path == "/" {
+                    return Err(Error::Conflict(format!(
+                        "brain path '{path}' is a directory"
+                    )));
+                }
+                let stats = self
+                    .agent
+                    .fs
+                    .stat(&fs_path)
+                    .await
+                    .map_err(engine_error)?
+                    .ok_or_else(|| Error::NotFound(format!("no brain entry at '{path}'")))?;
+                if stats.is_directory() {
+                    return Err(Error::Conflict(format!(
+                        "brain path '{path}' is a directory"
+                    )));
+                }
+                if stats.is_file() {
+                    let bytes = self
+                        .agent
+                        .fs
+                        .read_file(&fs_path)
+                        .await
+                        .map_err(engine_error)?
+                        .unwrap_or_default();
+                    Ok((EntryKind::File, bytes))
+                } else {
+                    Err(Error::NotFound(format!("no brain entry at '{path}'")))
+                }
+            }
+        }
+    }
+
     /// Store bytes, creating the entry and any missing parent directories.
     ///
     /// Takes the session write lock. A value over the cap is refused before

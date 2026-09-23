@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, read single brain entry over REST
+
+* **Update**: [The human surface](architecture/human-surface.md) documents
+  `GET /api/v1/sessions/:id/brain/entry?path=`, returning one entry's text
+  content, kind, size, and written timestamp when recorded. Directory paths
+  answer 409 Conflict, non-UTF-8 bytes answer 422 Unprocessable Content, and
+  reads against missing brains answer 404 without creating a file.
+
 ## 2026-09-23, the shell's keyboard path and pane resizing
 
 * **Update**: [Human interface](design/human-interface.md) documents `/` going

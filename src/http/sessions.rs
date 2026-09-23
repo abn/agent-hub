@@ -2,10 +2,11 @@
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
+use crate::brain::EntryKind;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery};
@@ -103,6 +104,29 @@ pub struct BrainList {
     pub path: String,
     /// Whether the level held more than one response carries.
     pub truncated: bool,
+}
+
+/// The query parameter for reading one brain entry.
+#[derive(Debug, Deserialize)]
+pub struct BrainEntryParams {
+    /// The namespaced path: `/kv/...` or `/fs/...`.
+    pub path: Option<String>,
+}
+
+/// One entry stored in a session's brain.
+#[derive(Debug, Serialize)]
+pub struct BrainEntry {
+    /// The namespaced path.
+    pub path: String,
+    /// What is stored there: "key" or "file".
+    #[serde(rename = "type")]
+    pub kind: EntryKind,
+    /// Bytes stored at the entry.
+    pub size_bytes: i64,
+    /// The entry's text content.
+    pub content: String,
+    /// The entry's last write time as RFC 3339, if recorded.
+    pub written_at: Option<String>,
 }
 
 /// `GET /api/v1/sessions?project=<id>`
@@ -327,6 +351,69 @@ pub async fn brain(
         entries,
         path: prefix.to_string(),
         truncated,
+    }))
+}
+
+/// `GET /api/v1/sessions/{id}/brain/entry?path=`
+///
+/// A valid bearer token is required. The `path` parameter is required and must
+/// be a `/kv/...` or `/fs/...` path. Returns the entry's kind, size and text.
+pub async fn brain_entry(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+    ProblemQuery(params): ProblemQuery<BrainEntryParams>,
+) -> std::result::Result<Json<BrainEntry>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let path = params.path.filter(|path| !path.is_empty()).ok_or_else(|| {
+        Problem::from_error(&Error::InvalidArgument(
+            "the 'path' query parameter is required".to_string(),
+        ))
+    })?;
+
+    let session = live(&state, &session_id).await?;
+
+    // A read does not create a brain: a session whose file is absent has no
+    // entry at any path.
+    let brain = match state
+        .brain
+        .open_existing(&session.project_id, &session.id)
+        .await
+    {
+        Ok(Some(brain)) => brain,
+        Ok(None) => {
+            return Err(Problem::from_error(&Error::NotFound(format!(
+                "no brain entry at '{path}'"
+            ))));
+        }
+        Err(err) => return Err(Problem::from_error(&err)),
+    };
+
+    let (kind, bytes) = brain
+        .entry(&path)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let size_bytes = bytes.len() as i64;
+    let content = String::from_utf8(bytes).map_err(|_| {
+        Problem::with_status(
+            &Error::InvalidArgument(format!("brain entry at '{path}' is not valid UTF-8")),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+    })?;
+
+    let canonical = crate::brain::canonical_path(&path).unwrap_or(path);
+
+    Ok(Json(BrainEntry {
+        path: canonical,
+        kind,
+        size_bytes,
+        content,
+        written_at: None,
     }))
 }
 
