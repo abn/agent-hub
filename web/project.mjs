@@ -428,24 +428,29 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   };
 }
 
-async function sessionsShell(id, segment, stats, params, mobileBar = "") {
+async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
   const selectedId = params?.get?.("id") || params?.get?.("session") || "";
   const { sessions, card } = await sessionRows(id, selectedId);
   const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
   const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
   let detailHTML = "";
-  if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id);
+  // The generation goes with it: the detail's own `stale` guard is what keeps
+  // a slow paint off the screen, and without it every detail returned empty.
+  if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen);
   const meta = selectedSession
-    ? `${selectedSession.agent_name} · ${count(selectedSession.events || 0, "event", "events")} · ${formatBytes(
-        selectedSession.size_bytes || 0,
-      )}`
+    ? `${selectedSession.agent} · ${selectedSession.status} · ${formatBytes(selectedSession.brain_bytes || 0)}`
     : "";
   return shellHTML({
     segment,
     indexHead: `${mobileBar}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
     indexControls: shellIndexControls("Filter sessions"),
     indexBody: card,
-    stageHead: shellStageHead(selectedSession?.name || "Sessions", meta, "", `#/projects/${encodeURIComponent(id)}/sessions`),
+    stageHead: shellStageHead(
+      selectedSession?.session_name || "Sessions",
+      meta,
+      "",
+      `#/projects/${encodeURIComponent(id)}/sessions`,
+    ),
     stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(activeSessionId || id)}</span></div>`,
     stageBody: detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`,
     hasSelection: Boolean(selectedId),
@@ -530,7 +535,7 @@ export async function projectScreen(params, gen, path) {
     shell = built.html;
     artifactInfo = built.info;
     artifactId = built.selected;
-  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params, mobileBar);
+  } else if (segment === "sessions") shell = await sessionsShell(id, segment, stats, params, mobileBar, gen);
   else shell = await feedShell(id, segment, stats, params, mobileBar);
   if (stale(gen)) return;
 
