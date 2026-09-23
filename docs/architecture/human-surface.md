@@ -79,11 +79,13 @@ GET    /SKILL.md
 ```
 
 The artifact content route accepts `?version=N` to read one snapshot; the
-versions route lists the immutable history oldest first; the raw route
-returns the stored bytes as text, or a JSON envelope with base64 ciphertext
-for a protected artifact. Deletion removes the artifact, its history, and
-its search entry, and records a `deleted` event. The public page serves
-`?version=N` the same way.
+listing and content routes carry thread counts across every version
+(`comments_count` and `comments_open`, defaulting to 0); the versions route
+lists the immutable history oldest first; the raw route returns the stored
+bytes as text, or a JSON envelope with base64 ciphertext for a protected
+artifact. Deletion removes the artifact, its history, and its search entry,
+and records a `deleted` event. The public page serves `?version=N` the same
+way.
 
 The two probes differ on purpose. `GET /healthz` is liveness: the process is
 up. `GET /readyz` is readiness: it queries the engine for its schema version

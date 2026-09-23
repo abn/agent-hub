@@ -163,6 +163,8 @@ impl HubServer {
             "version": artifact.version,
             "protected": artifact.protected,
             "content": content,
+            "comments_count": artifact.comments_count,
+            "comments_open": artifact.comments_open,
         })))
     }
 

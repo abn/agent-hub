@@ -52,9 +52,9 @@ tokens.
 | `inbox_read` | Read the human's global inbox, optionally by status or project. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
-| `artifact_get` | Read an artifact's content and metadata, optionally one version. |
+| `artifact_get` | Read an artifact's content and metadata, optionally one version. Includes total and open thread counts across all versions. |
 | `artifact_versions` | List an artifact's immutable version history. |
-| `artifact_list` | List a project's artifacts, optionally filtered by session. |
+| `artifact_list` | List a project's artifacts, optionally filtered by session. Each entry includes total and open thread counts across all versions. |
 | `artifact_delete` | Delete an artifact, its history, and its index row. |
 | `comment_post` | Comment on an artifact, optionally anchored to a point or a quote. |
 | `comment_list` | List an artifact's comments. |
@@ -87,6 +87,9 @@ forbidden whether it is missing or denied. Commenting works the same
 way: posting needs write access and returns a delete token shown once,
 and resolving or deleting needs the token or write access. A quote
 anchor is refused on versions the server holds only as ciphertext.
+Artifact reads and listings carry thread counts across every version:
+`comments_count` (total comments) and `comments_open` (unresolved comments),
+both defaulting to 0 when there are none.
 
 `question_post` returns `event_id`, `question_id`, and `thread_id`, all the
 same value: a question roots its own thread and is its own event. `answer_post`

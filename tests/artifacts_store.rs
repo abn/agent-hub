@@ -4,6 +4,7 @@ use agent_hub::app::AppState;
 use agent_hub::error::ErrorCode;
 use agent_hub::limits::ARTIFACT_BYTES_MAX;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
+use agent_hub::store::comments;
 use agent_hub::store::events::{FeedQuery, read_feed};
 use agent_hub::store::projects;
 
@@ -1386,4 +1387,115 @@ async fn artifact_records_publishing_actor_and_retains_across_updates() {
         .await
         .expect("get_at_version 2");
     assert_eq!(read_v2.actor.as_deref(), Some("creator-agent"));
+}
+
+#[tokio::test]
+async fn store_listing_and_reads_carry_thread_counts() {
+    let dir = TempDir::new("artifact-threads");
+    let db = open(&dir).await;
+    let art1 = artifacts::publish(&db, &dir, public("Art 1", b"v1"), None)
+        .await
+        .expect("publish 1");
+    let art2 = artifacts::publish(&db, &dir, public("Art 2", b"v1"), None)
+        .await
+        .expect("publish 2");
+
+    // Initially zero
+    let read1 = artifacts::metadata(&db, &art1.id).await.expect("meta 1");
+    assert_eq!(read1.comments_count, 0);
+    assert_eq!(read1.comments_open, 0);
+
+    // 3 comments on art1: 1 resolved, 2 open
+    let (c1, _) =
+        comments::add_comment(&db, &art1.id, "agent-one", "first", None, None, None, None)
+            .await
+            .expect("c1");
+    let (_c2, _) =
+        comments::add_comment(&db, &art1.id, "agent-one", "second", None, None, None, None)
+            .await
+            .expect("c2");
+    let (_c3, _) =
+        comments::add_comment(&db, &art1.id, "agent-one", "third", None, None, None, None)
+            .await
+            .expect("c3");
+    comments::set_comment_done(&db, &c1.id, true)
+        .await
+        .expect("done");
+
+    // Update art1 to v2; comments anchored to v1 still count
+    let art1_v2 = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &art1.id,
+        b"v2",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update art1");
+    assert_eq!(art1_v2.comments_count, 3);
+    assert_eq!(art1_v2.comments_open, 2);
+
+    // Reading at v1 snapshot
+    let (at_v1, _) = artifacts::get_at_version(&db, &dir, &art1.id, 1)
+        .await
+        .expect("get_at_version 1");
+    assert_eq!(at_v1.comments_count, 3);
+    assert_eq!(at_v1.comments_open, 2);
+
+    // Single read metadata and get
+    let meta = artifacts::metadata(&db, &art1.id).await.expect("metadata");
+    assert_eq!(meta.comments_count, 3);
+    assert_eq!(meta.comments_open, 2);
+
+    let (got, _) = artifacts::get(&db, &dir, &art1.id).await.expect("get");
+    assert_eq!(got.comments_count, 3);
+    assert_eq!(got.comments_open, 2);
+
+    // 1 comment on art2, then deleted
+    let (c_del, _) =
+        comments::add_comment(&db, &art2.id, "agent-one", "temp", None, None, None, None)
+            .await
+            .expect("c_del");
+    comments::delete_comment(&db, &c_del.id)
+        .await
+        .expect("delete");
+
+    // Listing both artifacts
+    let listed = artifacts::list(&db, "proj").await.expect("list");
+    assert_eq!(listed.len(), 2);
+    let item1 = listed.iter().find(|a| a.id == art1.id).unwrap();
+    let item2 = listed.iter().find(|a| a.id == art2.id).unwrap();
+    assert_eq!(item1.comments_count, 3);
+    assert_eq!(item1.comments_open, 2);
+    assert_eq!(item2.comments_count, 0);
+    assert_eq!(item2.comments_open, 0);
+}
+
+#[tokio::test]
+async fn store_listing_query_measurement() {
+    let dir = TempDir::new("artifact-listing-measurement");
+    let db = open(&dir).await;
+    for i in 0..100 {
+        let art = artifacts::publish(&db, &dir, public(&format!("Doc {i}"), b"content"), None)
+            .await
+            .expect("publish");
+        if i % 3 == 0 {
+            comments::add_comment(&db, &art.id, "agent-one", "note", None, None, None, None)
+                .await
+                .expect("comment");
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let listed = artifacts::list(&db, "proj").await.expect("list");
+    let elapsed = start.elapsed();
+    assert_eq!(listed.len(), 100);
+    println!(
+        "MEASUREMENT: listing {} artifacts with comments took {:?} in 1 query",
+        listed.len(),
+        elapsed
+    );
 }

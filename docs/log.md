@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, artifact thread counts on listing and reads
+
+* **Update**: [The agent surface](architecture/agent-surface.md), [Human
+  surface](architecture/human-surface.md), and [Artifacts](usage/artifacts.md)
+  document thread counts across all versions (`comments_count` and
+  `comments_open`) on artifact reads and listings over REST and MCP.
+
 ## 2026-09-23, artifact author recording
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Data

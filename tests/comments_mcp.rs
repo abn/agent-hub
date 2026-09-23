@@ -77,17 +77,39 @@ fn comment_tools_round_trip_over_stdio() {
         "listings carry no token hash"
     );
 
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let got = structured(&got);
+    assert_eq!(got["comments_count"], 1);
+    assert_eq!(got["comments_open"], 1);
+
+    let listed_art = server.call_tool("artifact_list", json!({"project_id": "proj"}));
+    let arts = structured(&listed_art)["artifacts"]
+        .as_array()
+        .expect("artifacts");
+    assert_eq!(arts[0]["comments_count"], 1);
+    assert_eq!(arts[0]["comments_open"], 1);
+
     let resolved = server.call_tool(
         "comment_resolve",
         json!({"artifact_id": artifact_id, "comment_id": comment_id, "done": true}),
     );
     assert_eq!(structured(&resolved)["comment"]["done"], true);
 
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let got = structured(&got);
+    assert_eq!(got["comments_count"], 1);
+    assert_eq!(got["comments_open"], 0);
+
     let deleted = server.call_tool(
         "comment_delete",
         json!({"artifact_id": artifact_id, "comment_id": comment_id, "delete_token": token}),
     );
     assert_eq!(structured(&deleted)["ok"], true);
+
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let got = structured(&got);
+    assert_eq!(got["comments_count"], 0);
+    assert_eq!(got["comments_open"], 0);
 
     let listed = server.call_tool("comment_list", json!({"artifact_id": artifact_id}));
     assert!(

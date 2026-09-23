@@ -123,6 +123,10 @@ pub struct ArtifactContent {
     pub favicon: String,
     /// The label of the version read, when set.
     pub label: Option<String>,
+    /// Total comments on the artifact across all versions.
+    pub comments_count: i64,
+    /// Comments not marked done across all versions.
+    pub comments_open: i64,
 }
 
 /// The `?version=N` selector shared by the versioned artifact routes.
@@ -198,6 +202,8 @@ pub async fn content(
         description: artifact.description,
         favicon: artifact.favicon,
         label: artifact.label,
+        comments_count: artifact.comments_count,
+        comments_open: artifact.comments_open,
     }))
 }
 

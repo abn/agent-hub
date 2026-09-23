@@ -5,6 +5,7 @@ use agent_hub::error::Error;
 use agent_hub::http::problem::Problem;
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
+use agent_hub::store::comments;
 use agent_hub::store::sessions;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -1932,6 +1933,284 @@ async fn cleared_label_serves_null_over_rest() {
     assert_eq!(body["label"], serde_json::Value::Null);
 }
 
+#[tokio::test]
+async fn artifact_with_three_comments_and_one_done_reads_counts() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let (c1, _) = comments::add_comment(&state.db, &id, "human", "first", None, None, None, None)
+        .await
+        .expect("c1");
+    let (_c2, _) = comments::add_comment(&state.db, &id, "human", "second", None, None, None, None)
+        .await
+        .expect("c2");
+    let (_c3, _) = comments::add_comment(&state.db, &id, "human", "third", None, None, None, None)
+        .await
+        .expect("c3");
+
+    comments::set_comment_done(&state.db, &c1.id, true)
+        .await
+        .expect("done");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["comments_count"], 3);
+    assert_eq!(body["comments_open"], 2);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = json_body(response).await;
+    let artifacts = list["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["comments_count"], 3);
+    assert_eq!(artifacts[0]["comments_open"], 2);
+}
+
+#[tokio::test]
+async fn artifact_with_no_comments_reads_zero_not_null() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["comments_count"], 0);
+    assert_eq!(body["comments_open"], 0);
+    assert!(body["comments_count"].is_i64());
+    assert!(body["comments_open"].is_i64());
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = json_body(response).await;
+    let artifacts = list["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["comments_count"], 0);
+    assert_eq!(artifacts[0]["comments_open"], 0);
+    assert!(artifacts[0]["comments_count"].is_i64());
+    assert!(artifacts[0]["comments_open"].is_i64());
+}
+
+#[tokio::test]
+async fn comment_anchored_to_older_version_is_counted() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>v1</p>").await;
+
+    // Post comment on v1
+    comments::add_comment(
+        &state.db,
+        &id,
+        "human",
+        "v1 note",
+        None,
+        Some(1),
+        None,
+        None,
+    )
+    .await
+    .expect("comment on v1");
+
+    // Update artifact to v2
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-one",
+        &id,
+        b"<p>v2</p>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update to v2");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["version"], 2);
+    assert_eq!(body["comments_count"], 1);
+    assert_eq!(body["comments_open"], 1);
+
+    // Also reading at version 1 returns the total count
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}?version=1"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let v1_body = json_body(response).await;
+    assert_eq!(v1_body["comments_count"], 1);
+    assert_eq!(v1_body["comments_open"], 1);
+
+    // And listing returns the count across versions
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let list = json_body(response).await;
+    let artifacts = list["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(artifacts[0]["comments_count"], 1);
+    assert_eq!(artifacts[0]["comments_open"], 1);
+}
+
+#[tokio::test]
+async fn deleted_comment_is_not_counted() {
+    let state = state().await;
+    let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
+
+    let (c1, _) =
+        comments::add_comment(&state.db, &id, "human", "temporary", None, None, None, None)
+            .await
+            .expect("c1");
+    comments::delete_comment(&state.db, &c1.id)
+        .await
+        .expect("delete");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["comments_count"], 0);
+    assert_eq!(body["comments_open"], 0);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let list = json_body(response).await;
+    let artifacts = list["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(artifacts[0]["comments_count"], 0);
+    assert_eq!(artifacts[0]["comments_open"], 0);
+}
+
+#[tokio::test]
+async fn listing_several_artifacts_gives_each_its_own_count() {
+    let state = state().await;
+    let id_a = publish_public(&state, "proj", "Doc A", b"<p>A</p>").await;
+    let id_b = publish_public(&state, "proj", "Doc B", b"<p>B</p>").await;
+    let id_c = publish_public(&state, "proj", "Doc C", b"<p>C</p>").await;
+
+    // Artifact A: 2 comments, 2 open
+    comments::add_comment(&state.db, &id_a, "human", "a1", None, None, None, None)
+        .await
+        .expect("a1");
+    comments::add_comment(&state.db, &id_a, "human", "a2", None, None, None, None)
+        .await
+        .expect("a2");
+
+    // Artifact B: 1 comment, 1 done (0 open)
+    let (b1, _) = comments::add_comment(&state.db, &id_b, "human", "b1", None, None, None, None)
+        .await
+        .expect("b1");
+    comments::set_comment_done(&state.db, &b1.id, true)
+        .await
+        .expect("done");
+
+    // Artifact C: 0 comments
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = json_body(response).await;
+    let artifacts = list["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(artifacts.len(), 3);
+
+    let find = |id: &str| {
+        artifacts
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap_or_else(|| panic!("artifact {id} missing"))
+    };
+
+    let item_a = find(&id_a);
+    assert_eq!(item_a["comments_count"], 2);
+    assert_eq!(item_a["comments_open"], 2);
+
+    let item_b = find(&id_b);
+    assert_eq!(item_b["comments_count"], 1);
+    assert_eq!(item_b["comments_open"], 0);
+
+    let item_c = find(&id_c);
+    assert_eq!(item_c["comments_count"], 0);
+    assert_eq!(item_c["comments_open"], 0);
+}
 #[tokio::test]
 async fn artifact_carries_creator_actor_on_listing_and_read_and_update_retains_it() {
     let state = state().await;

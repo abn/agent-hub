@@ -76,7 +76,9 @@ server's. `artifact_versions` lists the immutable history oldest first, each
 entry with its own title, description, label, and encryption state.
 `artifact_list` lists a project's artifacts, most recently updated first,
 optionally filtered by `session`. Everywhere an artifact is returned, it carries
-the publishing `actor` (null on rows written before the field was added).
+the publishing `actor` (null on rows written before the field was added), and
+`comments_count` (total comments across all versions) with `comments_open`
+(unresolved comments), both defaulting to 0 when there are none.
 `artifact_delete` removes an artifact, its history, and its index row, and
 records a `deleted` event on the feed.
 
@@ -91,7 +93,8 @@ same reads to the PWA:
 `GET /api/v1/artifacts?session=ID` list artifacts, filtered by session when
 specified;
 `GET /api/v1/artifacts/:id` (with `?version=N`) returns the metadata and
-content, and for a public markdown artifact includes a `rendered` HTML field;
+content, including `comments_count` and `comments_open`, and for a public
+markdown artifact includes a `rendered` HTML field;
 `GET /api/v1/artifacts/:id/versions` returns the history;
 `GET /api/v1/artifacts/:id/raw` returns the stored bytes as text, or a JSON
 envelope with base64 ciphertext for a protected artifact. Deletion is

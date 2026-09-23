@@ -52,6 +52,8 @@ pub struct Artifact {
     pub updated_at: String,
     #[serde(skip)]
     pub path: String,
+    pub comments_count: i64,
+    pub comments_open: i64,
 }
 
 /// One immutable version of an artifact.
@@ -198,6 +200,8 @@ pub async fn publish(
         created_at: created_at.clone(),
         updated_at: created_at.clone(),
         path: rel.clone(),
+        comments_count: 0,
+        comments_open: 0,
     };
 
     let write = async {
@@ -487,6 +491,8 @@ pub async fn update(
             created_at: existing.created_at,
             updated_at,
             path: rel,
+            comments_count: existing.comments_count,
+            comments_open: existing.comments_open,
         }))
     }
     .await;
@@ -633,7 +639,9 @@ pub async fn get_at_version(
             "SELECT a.project_id,
                     v.title, v.description, v.favicon, v.kind, v.label,
                     v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path,
-                    a.session_id, a.actor
+                    a.session_id, a.actor,
+                    (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1) AS comments_count,
+                    (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1 AND done = 0) AS comments_open
              FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
              WHERE v.artifact_id = ?1 AND v.version = ?2",
             vec![
@@ -669,6 +677,8 @@ pub async fn get_at_version(
     let path = required_text(&row, 10)?;
     let session_id = text_at(&row, 11)?;
     let actor = text_at(&row, 12)?;
+    let comments_count = int_at(&row, 13)?;
+    let comments_open = int_at(&row, 14)?;
     let bytes = blob::read(data_dir, &path)?;
     Ok((
         Artifact {
@@ -688,6 +698,8 @@ pub async fn get_at_version(
             created_at: created_at.clone(),
             updated_at: created_at,
             path,
+            comments_count,
+            comments_open,
         },
         bytes,
     ))
@@ -747,13 +759,27 @@ pub async fn list_with_session(
     let conn = super::connect(db)?;
     let (sql, params) = match session_id {
         Some(sid) => (
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
-             FROM artifacts WHERE project_id = ?1 AND session_id = ?2 ORDER BY updated_at DESC",
+            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+                    a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
+                    COUNT(c.id) AS comments_count,
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+             FROM artifacts a
+             LEFT JOIN comments c ON c.artifact_id = a.id
+             WHERE a.project_id = ?1 AND a.session_id = ?2
+             GROUP BY a.id
+             ORDER BY a.updated_at DESC",
             vec![Value::Text(project_id.to_string()), Value::Text(sid.to_string())],
         ),
         None => (
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
-             FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
+            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+                    a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
+                    COUNT(c.id) AS comments_count,
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+             FROM artifacts a
+             LEFT JOIN comments c ON c.artifact_id = a.id
+             WHERE a.project_id = ?1
+             GROUP BY a.id
+             ORDER BY a.updated_at DESC",
             vec![Value::Text(project_id.to_string())],
         ),
     };
@@ -777,8 +803,15 @@ pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Art
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
-             FROM artifacts WHERE session_id = ?1 ORDER BY updated_at DESC",
+            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+                    a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
+                    COUNT(c.id) AS comments_count,
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+             FROM artifacts a
+             LEFT JOIN comments c ON c.artifact_id = a.id
+             WHERE a.session_id = ?1
+             GROUP BY a.id
+             ORDER BY a.updated_at DESC",
             vec![Value::Text(session_id.to_string())],
         )
         .await
@@ -803,8 +836,14 @@ async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
 async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
-             FROM artifacts WHERE id = ?1",
+            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+                    a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
+                    COUNT(c.id) AS comments_count,
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+             FROM artifacts a
+             LEFT JOIN comments c ON c.artifact_id = a.id
+             WHERE a.id = ?1
+             GROUP BY a.id",
             vec![Value::Text(artifact_id.to_string())],
         )
         .await
@@ -1027,6 +1066,8 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         path: required_text(row, 12)?,
         session_id: text_at(row, 13)?,
         actor: text_at(row, 14)?,
+        comments_count: int_at(row, 15)?,
+        comments_open: int_at(row, 16)?,
     })
 }
 
