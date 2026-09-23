@@ -102,21 +102,43 @@ comments on an artifact, and a `kv` key beside the brain tree. Correspondence,
 which is a feed or inbox thread, is the stage, not a panel. The aside toggle is
 absent, not disabled, on feed, inbox and settings.
 
-### The frame does not move
+### The frame does not move, on a desktop
 
-- Every pane reserves a 52px header and a 40px control row, in that order,
-  whether or not it has anything to put in them. Content starts at the same y
-  in every pane of every section. An empty control row is correct; a missing
-  one is a bug.
-- On mobile, every screen's 52px bar starts with a 48px leading slot. A back
-  chevron lives there when there is somewhere to go back to; otherwise it is
-  empty. The title starts at the same x on every screen.
+- On a fine pointer at desktop widths, every pane reserves a 52px header and a
+  40px control row, in that order, whether or not it has anything to put in
+  them. Content starts at the same y in every pane of every section. An empty
+  control row is correct; a missing one is a bug.
+- On a phone the frame is one header and one tools row. The header is 76px at
+  rest (title 22/600, its meta under it) and 52px once the list is scrolled
+  past 20px (title 15/600, meta hidden), over 120ms and instant under reduced
+  motion, with hysteresis at 20 and 8. Under it sits one sticky 44px tools row
+  holding that screen's tools, and nothing when the screen has none. Content
+  starts at y 120 at rest and y 96 scrolled.
+- The 48px leading slot and the title's left edge hold on every screen in both
+  header states. A phone reader's place is their scroll position, so the phone
+  reserves no band. Home is the one exception at rest: it has no bar and its
+  greeting is content at x 16, with the bar fading in at x 48 once the greeting
+  leaves.
 - One gutter per pane: 16px on mobile and in the stage, 12px in the index,
   14px in the aside. Headings, body and section headers share it.
 - Prose is left-aligned in the stage and capped at 640. Panes may change
   width; the reader's place in the prose may not.
 - A list's glyph column is a fixed box, 20px in the index and 28px on the
   mobile feed, so every title starts at the same x with or without a glyph.
+
+### The phone
+
+- One header and one tools row, sized as above. The tab bar is five labelled
+  tabs: Home, Inbox, Projects, Search, More. More is a tab root, not an
+  overlay or a bare hamburger, and it holds Storage, Agents and tokens,
+  Settings and the sync line.
+- Lists are flat rows, edge to edge under a hairline, with the inbox row as
+  the model. A card means "this is a summary", and only Home's storage summary
+  is one.
+- Settings is rows with quiet group labels, no panels and no tools row. It
+  shows the data path once, last two segments, with a copy glyph. Single-key
+  shortcuts are absent under a coarse pointer.
+- No screen prints the hub's admin token, masked or not.
 
 ### Split, and remember
 

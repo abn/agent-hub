@@ -64,10 +64,14 @@ shipped behaviour.
 - **Accessibility is a build gate.** WCAG AA in both themes, a 12px UI text
   floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
   meaning carried by colour alone. Reduced motion is honoured.
-- **The frame does not move.** Every pane reserves a 52px header and a 40px
-  control row, in that order, whether or not it has content for them. One
-  gutter per pane, a fixed glyph column in every list, and prose left-aligned
-  and capped at 640. Panes change width; the reader's place does not.
+- **The frame does not move, on a desktop.** Every pane reserves a 52px header
+  and a 40px control row, in that order, whether or not it has content for
+  them. One gutter per pane, a fixed glyph column in every list, and prose
+  left-aligned and capped at 640. Panes change width; the reader's place does
+  not. **On a phone the frame is one header plus one tools row**: the header is
+  76px at rest and 52px once scrolled, the tools row is a sticky 44px, and the
+  48px leading slot and the title's left edge hold in both states. A phone
+  reader's place is their scroll position, so the phone reserves nothing.
 - **One surface per thing.** An object is read in one place at a time: the
   aside on a fine pointer, one sheet on a coarse pointer. No code path mounts
   both, and there is no comment modal on the desktop.
