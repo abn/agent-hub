@@ -4,6 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, the shell's keyboard path and pane resizing
+
+* **Update**: [Human interface](design/human-interface.md) documents `/` going
+  to the list's own filter field rather than to the Search screen, and `c`
+  toggling the comments aside, which is the keyboard path the design's shell
+  asks for.
+
 ## 2026-09-22, the design contract is written down
 
 * **Add**: `DESIGN.md` at the repository root states the design contract for

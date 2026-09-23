@@ -15,7 +15,6 @@ const MAX = { index: 480, aside: 440 };
 const STEP = 16;
 const STEP_SHIFT = 48;
 const STAGE_MIN = 560;
-const RAIL = 200;
 const SPLITTERS = 10; // two 5px dividers
 
 const key = (pane) => `ah-w-${pane}`;
@@ -39,10 +38,11 @@ function writeWidth(pane, width) {
 }
 
 // The widest the pane may be without taking the stage under its floor. The
-// shell's own width is what is available, so a narrow window clamps earlier
-// than a wide one.
+// shell's own width is what is available: the rail is a sibling, not part of
+// it, so subtracting the rail here would count it twice and cap the index
+// below its own default whenever the aside was open.
 function ceiling(pane, shellWidth, otherWidth) {
-  const room = shellWidth - RAIL - SPLITTERS - STAGE_MIN - otherWidth;
+  const room = shellWidth - SPLITTERS - STAGE_MIN - otherWidth;
   return Math.min(MAX[pane], Math.max(MIN[pane], room));
 }
 

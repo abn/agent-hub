@@ -113,9 +113,11 @@ This page records what ships; that file records what is designed.
   words are marked in the snippet, and a result opens where it lives. The
   query is sent as typed, quotes and operators included, and the hub makes it
   safe for the index, so no query is refused.
-- Keyboard: `/` focuses search, and on the Search screen that is the screen's
-  own field; `j` and `k` move a selection through the rows of the current
-  screen, Enter opens the selected row, `a` approves and `r` replies on it, and
+- Keyboard: `/` focuses the list's own filter field when the screen has one,
+  and otherwise search, which on the Search screen is its own field; `j` and
+  `k` move a selection through the rows of the current
+  screen, Enter opens the selected row, `a` approves and `r` replies on it,
+  `c` toggles the comments aside where there is one, and
   Esc closes what is on top, the open inbox card included. The card also
   carries its own way out, "Back to inbox" on a phone and "Close" on the
   desktop, named by the words it shows. Either way the card's address is

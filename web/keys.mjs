@@ -28,12 +28,13 @@ const screens = {
 // thing that knows them, the panel opens from any screen, and Settings belongs
 // to the screen that owns it.
 const SHORTCUTS = [
-  ["/", "Focus search"],
+  ["/", "Focus the list's filter, or search"],
   ["j", "Next row"],
   ["k", "Previous row"],
   ["Enter", "Open the selected row"],
   ["a", "Approve the selected row"],
   ["r", "Reply on the selected row"],
+  ["c", "Toggle the comments aside"],
   ["Esc", "Close what is on top"],
   ["?", "This list"],
 ];
@@ -124,6 +125,14 @@ function move(step) {
 
 function focusSearch(event) {
   event.preventDefault();
+  // The design's `/` goes to the list's own filter field when the screen has
+  // one, and only falls through to the Search screen when it does not.
+  const filter = document.querySelector("[data-index-filter]");
+  if (filter) {
+    filter.focus();
+    filter.select?.();
+    return;
+  }
   const field = document.getElementById("q");
   if (field) {
     field.focus();
@@ -151,6 +160,15 @@ function act(verb, event) {
   if (!target) return;
   event.preventDefault();
   target.click();
+}
+
+// `c` toggles the aside, which is the stage's own comment control. A screen
+// with no such control has no aside to toggle, so the key does nothing there.
+function toggleAsideKey(event) {
+  const control = document.querySelector('.shell-stage [data-action="comments-toggle"]');
+  if (!control) return;
+  event.preventDefault();
+  control.click();
 }
 
 function buildPanel() {
@@ -240,6 +258,7 @@ function onKey(event) {
     event.preventDefault();
     move(-1);
   } else if (event.key === "Enter") openRow(event);
+  else if (event.key === "c") toggleAsideKey(event);
   else if (event.key === "a") act("approve", event);
   else if (event.key === "r") act("reply", event);
   else if (event.key === "?") help(event);
