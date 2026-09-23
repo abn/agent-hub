@@ -1090,6 +1090,7 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     watch.enter("phone frame: CHECK 12.A coordinates")
     test_screens = [
         ("#/inbox", "Inbox"),
+        ("#/projects", "Projects"),
     ]
     for url, title in test_screens:
         page.evaluate(f"location.hash = '{url}'")
@@ -1110,7 +1111,7 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
             "(() => { const el = document.querySelector('.shell-controls');"
             " return el ? Math.round(el.getBoundingClientRect().bottom) : null; })()"
         )
-        if tools_bottom is not None and abs(tools_bottom - 120) > 2:
+        if tools_bottom is None or abs(tools_bottom - 120) > 2:
             watch.fail(f"{url} tools row bottom is at y={tools_bottom}, expected y=120 at rest")
 
         # After 40px scroll
@@ -1128,7 +1129,7 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
             "(() => { const el = document.querySelector('.shell-controls');"
             " return el ? Math.round(el.getBoundingClientRect().bottom) : null; })()"
         )
-        if tools_bottom_scrolled is not None and abs(tools_bottom_scrolled - 96) > 2:
+        if tools_bottom_scrolled is None or abs(tools_bottom_scrolled - 96) > 2:
             watch.fail(f"{url} tools row bottom is at y={tools_bottom_scrolled}, expected y=96 after 40px scroll")
 
         page.evaluate("window.scrollTo(0, 0)")
@@ -1336,6 +1337,125 @@ def check_project_tools_row(page, watch: Watch, project: str) -> None:
         box = filter_btn.first.bounding_box()
         if box and (round(box["width"]) < 44 or round(box["height"]) < 44):
             watch.fail(f"filter-and-group button is not 44x44px, got {box['width']}x{box['height']}")
+def check_projects_register_segmented_and_rows(page, watch: Watch, port: int) -> None:
+    watch.enter("projects register: segmented control, rows and no storage card")
+    harness.request(port, "POST", "/api/v1/projects", {"id": "space-test-agent", "display_name": "Test Space (personal)"})
+
+    goto(page, "#/projects", "Projects")
+    page.wait_for_timeout(300)
+
+    rows = page.locator(".project-row")
+    for i in range(rows.count()):
+        text = rows.nth(i).inner_text().lower()
+        if "agent active" in text or "agents active" in text:
+            watch.fail(f"project row unexpectedly repeats active agents: '{rows.nth(i).inner_text()}'")
+
+    header_meta = page.locator(".shell-head .shell-meta").inner_text()
+    if "·" not in header_meta:
+        watch.fail(f"header meta missing format 'count · footprint': '{header_meta}'")
+
+    storage_card = page.locator(".projects-storage, .projects-storage-card")
+    if storage_card.count() > 0 and storage_card.first.is_visible():
+        watch.fail("storage card is present on projects register, expected to leave")
+
+    spaces_footer = page.locator(".projects-agent-spaces, .projects-agent-spaces-summary")
+    if spaces_footer.count() > 0 and spaces_footer.first.is_visible():
+        watch.fail("projects-agent-spaces footer line is present, expected to be replaced by segmented control")
+
+    tools = page.locator(".shell-controls")
+    if tools.count() == 0:
+        watch.fail("projects register has no tools row")
+        return
+    proj_tab = tools.locator('[role="tab"]:has-text("Projects")')
+    spaces_tab = tools.locator('[role="tab"]:has-text("Agent spaces")')
+    if proj_tab.count() == 0 or spaces_tab.count() == 0:
+        watch.fail("tools row missing Projects / Agent spaces segmented control")
+        return
+
+    spaces_tab.first.click()
+    page.wait_for_timeout(200)
+    visible_spaces = page.locator('.project-row:visible[data-id="space-test-agent"]')
+    if visible_spaces.count() == 0:
+        watch.fail("Agent spaces tab did not show agent spaces")
+
+    proj_tab.first.click()
+    page.wait_for_timeout(200)
+    visible_spaces_after = page.locator('.project-row:visible[data-id="space-test-agent"]')
+    if visible_spaces_after.count() > 0:
+        watch.fail("Projects tab unexpectedly shows agent space rows")
+
+
+def check_connect_screen_shell_field_and_error(page, watch: Watch, port: int) -> None:
+    watch.enter("connect: shell, no tab bar, eye glyph inside field, error and focus")
+    page.evaluate("location.hash = '#/connect'")
+    page.wait_for_timeout(400)
+
+    tabbar = page.locator(".tabbar")
+    if tabbar.count() > 0 and tabbar.first.is_visible():
+        watch.fail("connect screen unexpectedly shows tab bar")
+
+    tools = page.locator(".shell-controls")
+    if tools.count() == 0:
+        watch.fail("connect screen has no tools row")
+    else:
+        tools_text = tools.inner_text().strip()
+        if "not connected" not in tools_text.lower():
+            watch.fail(f"connect tools row does not read 'Not connected': '{tools_text}'")
+
+    card = page.locator(".connect.card, main .card:has(.connect-field)")
+    if card.count() > 0:
+        watch.fail("connect screen is wrapped in a card, expected body on --bg")
+
+    field = page.locator(".connect-field")
+    if field.count() == 0:
+        watch.fail("connect field not found")
+        return
+
+    eye_btn = page.locator('[aria-label="Show token"], .connect-eye-btn')
+    if eye_btn.count() == 0:
+        watch.fail("connect screen missing show-token eye glyph")
+        return
+
+    is_inside = page.evaluate("""
+        (() => {
+            const btn = document.querySelector('[aria-label="Show token"], .connect-eye-btn');
+            const field = document.querySelector('.connect-field');
+            if (!btn || !field) return false;
+            const container = field.closest('.connect-input-box, .connect-field-wrap');
+            return container && container.contains(btn);
+        })()
+    """)
+    if not is_inside:
+        watch.fail("show-token control is not inside the field box")
+
+    if field.get_attribute("type") != "password":
+        watch.fail(f"connect field initial type is {field.get_attribute('type')}, expected 'password'")
+    eye_btn.first.click()
+    page.wait_for_timeout(100)
+    if field.get_attribute("type") != "text":
+        watch.fail("clicking show-token eye glyph did not toggle field type to 'text'")
+    eye_btn.first.click()
+    page.wait_for_timeout(100)
+    if field.get_attribute("type") != "password":
+        watch.fail("clicking show-token eye glyph again did not toggle field type back to 'password'")
+
+    armed, watch.armed = watch.armed, False
+    try:
+        field.fill("wrong-token-xyz")
+        submit_btn = page.locator('button[type="submit"]')
+        submit_btn.click()
+        page.wait_for_timeout(500)
+
+        err = page.locator(".connect-error:not([hidden])")
+        if err.count() == 0 or not err.first.is_visible():
+            watch.fail("error does not appear under the field on invalid token")
+        else:
+            focused_is_field = page.evaluate("document.activeElement === document.querySelector('.connect-field')")
+            if not focused_is_field:
+                watch.fail("focus did not return to connect field after error")
+    finally:
+        watch.armed = armed
+    watch.drain_rejections()
 
 
 def run() -> int:
@@ -1409,6 +1529,10 @@ def run() -> int:
                 run_step(watch, check_brain_entry_missing_and_dir_words, page, watch, project, session_id)
                 run_step(watch, check_artifacts_group_by_agent, page, watch, port, project)
                 run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
+
+                # 9. Projects register and Connect
+                run_step(watch, check_projects_register_segmented_and_rows, page, watch, port)
+                run_step(watch, check_connect_screen_shell_field_and_error, page, watch, port)
 
             finally:
                 context.close()

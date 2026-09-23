@@ -8,6 +8,10 @@
 import { api } from "./api.mjs";
 import { esc, paint } from "./dom.mjs";
 import { saveToken } from "./prefs.mjs";
+import {
+  installShellLayout,
+  shellHTML,
+} from "./shell-layout.mjs";
 import { toast } from "./toast.mjs";
 
 // Where the reader was going before the hub asked who they were. Only a route
@@ -20,40 +24,191 @@ export function nextFrom(params) {
 }
 
 const LOCK =
-  '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5">' +
-  '<rect x="5" y="10.5" width="14" height="10" rx="2"></rect>' +
-  '<path d="M 8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>';
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+  '<rect x="5" y="11" width="14" height="10" rx="2"></rect>' +
+  '<path d="M 8 11V8a4 4 0 0 1 8 0v3"></path></svg>';
+
+const CONNECT_STYLE = `<style>
+.connect-container {
+  padding: 20px 16px 48px;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg);
+  box-sizing: border-box;
+}
+.connect-intro {
+  margin: 0;
+  font-size: var(--t-15);
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.connect-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connect-label {
+  font-size: var(--t-13);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.connect-field-wrap {
+  height: 48px;
+  min-height: 48px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+}
+.connect-field-wrap:focus-within {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.connect-field {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-15);
+  color: var(--ink);
+  padding: 0;
+  outline: none;
+}
+.connect-eye-btn {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--r-1);
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+.connect-eye-btn:hover {
+  color: var(--ink);
+}
+.connect-eye-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.connect-error {
+  margin: 0;
+  font-size: var(--t-13);
+  color: var(--danger);
+  line-height: 1.4;
+}
+.connect-submit-btn {
+  height: 48px;
+  min-height: 48px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--r-1);
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font: 600 15px/1 var(--font-sans);
+  cursor: pointer;
+}
+.connect-submit-btn:hover {
+  opacity: 0.92;
+}
+.connect-submit-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.connect-tools-text {
+  font-size: var(--t-13);
+  color: var(--ink-2);
+}
+</style>`;
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const eye = event.target.closest?.(".connect-eye-btn, [data-role='show-token']");
+    if (eye && eye.tagName === "BUTTON") {
+      event.preventDefault();
+      connectShow(eye);
+    }
+  });
+}
 
 export async function connectScreen(params, gen) {
   const next = nextFrom(params);
   // A refusal can arrive with a dialog open on the screen behind. It outlives
   // the repaint, and a modal over this one would leave the field unreachable.
   document.querySelectorAll("dialog[open]").forEach((box) => box.close());
-  paint(
-    gen,
-    `<section class="connect card">
-      <div class="connect-mark" aria-hidden="true">${LOCK}</div>
-      <h1>Connect to this hub</h1>
-      <p class="connect-copy">This hub asks for an access token on every request. It is the token the hub was started with, and it stays on this device.</p>
+
+  const nodeLine =
+    document.getElementById("top-node")?.textContent || "demo · local";
+
+  const stageHead = `<div class="shell-head">
+    <span class="shell-slot" aria-hidden="true">${LOCK}</span>
+    <div class="shell-title">
+      <h1 class="shell-title-line">Connect</h1>
+      <span class="shell-meta mono">${esc(nodeLine)}</span>
+    </div>
+  </div>`;
+
+  const stageControls = `<div class="shell-controls"><span class="connect-tools-text">Not connected</span></div>`;
+
+  const stageBody = `
+    <div class="connect connect-container">
+      <p class="connect-intro">Paste the token the hub was started with. It stays on this device.</p>
       <form data-action="connect" data-next="${esc(next)}">
         <input class="sr-only" type="text" name="username" value="hub" autocomplete="username" tabindex="-1" aria-hidden="true">
-        <div class="pset-field">
-          <label class="pset-label" for="hub-token">Access token</label>
-          <input class="connect-field" id="hub-token" name="token" type="password" autocomplete="current-password" spellcheck="false" aria-describedby="hub-token-error">
+        <div class="connect-group">
+          <label class="connect-label" for="hub-token">Access token</label>
+          <div class="connect-field-wrap connect-input-box">
+            <input class="connect-field" id="hub-token" name="token" type="password" autocomplete="current-password" spellcheck="false" aria-describedby="hub-token-error">
+            <button type="button" class="connect-eye-btn" data-role="show-token" aria-label="Show token" aria-pressed="false">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+          </div>
           <p class="connect-error pset-error" id="hub-token-error" role="alert" hidden></p>
         </div>
-        <label class="connect-show"><input type="checkbox" data-role="show-token"> Show token</label>
-        <button class="primary" type="submit">Connect</button>
+        <button class="primary connect-submit-btn" type="submit">Connect</button>
       </form>
-    </section>`,
+    </div>
+  `;
+
+  paint(
+    gen,
+    CONNECT_STYLE +
+      shellHTML({
+        noIndex: true,
+        stageHead,
+        stageControls,
+        stageBody,
+      }),
   );
+  installShellLayout(document.querySelector(".shell"));
 }
 
 // A token is unreadable as dots and is usually pasted, so it can be read back
 // before it is sent rather than only after the hub has refused it.
 export function connectShow(box) {
-  const field = box.closest("form")?.querySelector(".connect-field");
-  if (field) field.type = box.checked ? "text" : "password";
+  const form = box.closest("form") || document.querySelector('form[data-action="connect"]');
+  const field = form?.querySelector(".connect-field");
+  if (!field) return;
+  if (box.tagName === "BUTTON") {
+    const isText = field.type === "text";
+    field.type = isText ? "password" : "text";
+    box.setAttribute("aria-pressed", isText ? "false" : "true");
+    box.setAttribute("aria-label", isText ? "Show token" : "Hide token");
+  } else {
+    field.type = box.checked ? "text" : "password";
+  }
 }
 
 // The error line is in the page from the start and only its words change, so
@@ -102,10 +257,6 @@ export async function connectSubmit(form) {
     // The hub's own words. It answers a token it does not know and a hub with
     // no token configured with the same code, so a sentence of our own here
     // would have to guess which, and would be wrong half the time.
-    // A frame of ours around the hub's own words, as a refused write says
-    // "Nothing changed" and then why. The hub answers a token it does not
-    // know and a hub with no token configured with the same code, so a
-    // sentence that named one of them would be wrong half the time.
     const why = error.status === 401 ? "Not connected" : "Could not reach the hub";
     say(form, `${why}: ${error.message}`);
     return;
