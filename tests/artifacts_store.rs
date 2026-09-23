@@ -1324,3 +1324,66 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     .expect("update with empty string clears label");
     assert_eq!(v6.label, None);
 }
+
+#[tokio::test]
+async fn artifact_records_publishing_actor_and_retains_across_updates() {
+    let dir = TempDir::new("artifact-actor");
+    let db = open(&dir).await;
+
+    let published = artifacts::publish(
+        &db,
+        &dir,
+        NewArtifact {
+            actor: "creator-agent",
+            project_id: "proj",
+            title: "Actor Test",
+            description: "",
+            favicon: "",
+            label: None,
+            kind: "html",
+            content: b"<h1>v1</h1>",
+            envelope: None,
+            session_id: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish");
+
+    assert_eq!(published.actor.as_deref(), Some("creator-agent"));
+
+    let (read, _) = artifacts::get(&db, &dir, &published.id).await.expect("get");
+    assert_eq!(read.actor.as_deref(), Some("creator-agent"));
+
+    let meta = artifacts::metadata(&db, &published.id)
+        .await
+        .expect("metadata");
+    assert_eq!(meta.actor.as_deref(), Some("creator-agent"));
+
+    let listed = artifacts::list(&db, "proj").await.expect("list");
+    assert_eq!(listed[0].actor.as_deref(), Some("creator-agent"));
+
+    let updated = artifacts::update(
+        &db,
+        &dir,
+        "modifier-agent",
+        &published.id,
+        b"<h1>v2</h1>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+    assert_eq!(updated.actor.as_deref(), Some("creator-agent"));
+
+    let (read_v1, _) = artifacts::get_at_version(&db, &dir, &published.id, 1)
+        .await
+        .expect("get_at_version 1");
+    assert_eq!(read_v1.actor.as_deref(), Some("creator-agent"));
+
+    let (read_v2, _) = artifacts::get_at_version(&db, &dir, &published.id, 2)
+        .await
+        .expect("get_at_version 2");
+    assert_eq!(read_v2.actor.as_deref(), Some("creator-agent"));
+}

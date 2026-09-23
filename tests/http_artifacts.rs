@@ -1931,3 +1931,102 @@ async fn cleared_label_serves_null_over_rest() {
     assert_eq!(body["version"], 3);
     assert_eq!(body["label"], serde_json::Value::Null);
 }
+
+#[tokio::test]
+async fn artifact_carries_creator_actor_on_listing_and_read_and_update_retains_it() {
+    let state = state().await;
+    let id = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "Actor Test",
+            kind: "html",
+            content: b"<p>initial</p>",
+            envelope: None,
+            description: "",
+            favicon: "",
+            label: None,
+            session_id: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish")
+    .id;
+
+    // 1. Publish as agent-one; listing carries actor: "agent-one"
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let listed = body["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(listed[0]["actor"], "agent-one");
+
+    // 2. Single read carries actor: "agent-one"
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["actor"], "agent-one");
+
+    // 3. Update by second agent; actor remains agent-one
+    artifacts::update(
+        &state.db,
+        &state.data_dir,
+        "agent-two",
+        &id,
+        b"<p>updated</p>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/artifacts/{id}"),
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["actor"], "agent-one");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/artifacts",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let listed = body["artifacts"].as_array().expect("artifacts array");
+    assert_eq!(listed[0]["actor"], "agent-one");
+}

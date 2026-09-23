@@ -129,6 +129,14 @@ async fn migrate_creates_schema_and_search_index() {
     );
     drop(artifact_session_index);
 
+    // Migration 13 adds actor to artifacts.
+    let mut artifact_actor = conn
+        .query("SELECT actor FROM artifacts LIMIT 1", ())
+        .await
+        .expect("artifacts.actor exists");
+    assert!(artifact_actor.next().await.expect("row").is_none());
+    drop(artifact_actor);
+
     // Migration 5 adds discussion plus the idempotency column recording it.
     let mut comments = conn
         .query(
@@ -1066,6 +1074,62 @@ async fn migration_twelve_adds_session_id_to_artifacts() {
         idx.next().await.expect("row").is_some(),
         "artifacts_session index exists"
     );
+
+    drop(conn);
+    drop(db);
+}
+
+#[tokio::test]
+async fn migration_thirteen_adds_actor_to_artifacts() {
+    let dir = TempDir::new("store-schema-v13");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 13) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-22T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert project");
+
+    // An artifact written before this migration has no actor column to set.
+    conn.execute(
+        "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id)
+         VALUES ('art-1', 'proj', 'Older Artifact', '', '', NULL, 'markdown', 1, NULL, 'proj/art-1/1.md', 10, '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z', NULL)",
+        (),
+    )
+    .await
+    .expect("insert older artifact");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    // The artifact that predates the migration keeps a null actor.
+    let mut rows = conn
+        .query("SELECT id, actor FROM artifacts WHERE id = 'art-1'", ())
+        .await
+        .expect("query artifacts");
+    let row = rows.next().await.expect("row").expect("row present");
+    assert_eq!(row.get::<String>(0).expect("id"), "art-1");
+    assert!(row.get::<Option<String>>(1).expect("actor").is_none());
 
     drop(conn);
     drop(db);

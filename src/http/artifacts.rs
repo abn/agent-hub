@@ -103,6 +103,8 @@ pub async fn list(
 /// decryptor. The server holds no plaintext for a protected artifact.
 #[derive(Debug, Serialize)]
 pub struct ArtifactContent {
+    /// Artifact actor who created it.
+    pub actor: Option<String>,
     /// Artifact title.
     pub title: String,
     /// `html` or `markdown`.
@@ -186,6 +188,7 @@ pub async fn content(
     })?;
 
     Ok(Json(ArtifactContent {
+        actor: artifact.actor,
         title: artifact.title,
         kind: artifact.kind,
         protected: artifact.protected,
@@ -714,6 +717,7 @@ fn reader_shell(
         "project_id": artifact.project_id,
         "created_at": artifact.created_at,
         "size_bytes": artifact.size_bytes,
+        "actor": artifact.actor,
     }));
     let version_blob = if with_history {
         let list: Vec<serde_json::Value> = versions
@@ -785,6 +789,7 @@ fn locked_shell(
         "project_id": artifact.project_id,
         "created_at": artifact.created_at,
         "size_bytes": artifact.size_bytes,
+        "actor": artifact.actor,
     }));
     let envelope = artifact
         .envelope

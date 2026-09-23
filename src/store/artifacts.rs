@@ -38,6 +38,7 @@ pub struct Artifact {
     pub id: String,
     pub project_id: String,
     pub session_id: Option<String>,
+    pub actor: Option<String>,
     pub title: String,
     pub description: String,
     pub favicon: String,
@@ -184,6 +185,7 @@ pub async fn publish(
         id: id.clone(),
         project_id: artifact.project_id.to_string(),
         session_id: artifact.session_id.map(str::to_string),
+        actor: Some(artifact.actor.to_string()),
         title: title.clone(),
         description: description.clone(),
         favicon: favicon.clone(),
@@ -210,8 +212,8 @@ pub async fn publish(
             return Ok(Written::Dropped(replay(&tx, &entry, None).await?));
         }
         tx.execute(
-            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11, ?12)",
+            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11, ?12, ?13)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(artifact.project_id.to_string()),
@@ -225,6 +227,7 @@ pub async fn publish(
                 Value::Integer(artifact.content.len() as i64),
                 Value::Text(created_at.clone()),
                 optional_text(artifact.session_id),
+                Value::Text(artifact.actor.to_string()),
             ],
         )
         .await
@@ -471,6 +474,7 @@ pub async fn update(
             id: artifact_id.to_string(),
             project_id: existing.project_id,
             session_id: existing.session_id,
+            actor: existing.actor,
             title: existing.title,
             description: existing.description,
             favicon: existing.favicon,
@@ -629,7 +633,7 @@ pub async fn get_at_version(
             "SELECT a.project_id,
                     v.title, v.description, v.favicon, v.kind, v.label,
                     v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path,
-                    a.session_id
+                    a.session_id, a.actor
              FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
              WHERE v.artifact_id = ?1 AND v.version = ?2",
             vec![
@@ -664,12 +668,14 @@ pub async fn get_at_version(
     let created_at = required_text(&row, 9)?;
     let path = required_text(&row, 10)?;
     let session_id = text_at(&row, 11)?;
+    let actor = text_at(&row, 12)?;
     let bytes = blob::read(data_dir, &path)?;
     Ok((
         Artifact {
             id: artifact_id.to_string(),
             project_id,
             session_id,
+            actor,
             title,
             description,
             favicon,
@@ -741,12 +747,12 @@ pub async fn list_with_session(
     let conn = super::connect(db)?;
     let (sql, params) = match session_id {
         Some(sid) => (
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
              FROM artifacts WHERE project_id = ?1 AND session_id = ?2 ORDER BY updated_at DESC",
             vec![Value::Text(project_id.to_string()), Value::Text(sid.to_string())],
         ),
         None => (
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
              FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
             vec![Value::Text(project_id.to_string())],
         ),
@@ -771,7 +777,7 @@ pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Art
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
              FROM artifacts WHERE session_id = ?1 ORDER BY updated_at DESC",
             vec![Value::Text(session_id.to_string())],
         )
@@ -797,7 +803,7 @@ async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
 async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id
+            "SELECT id, project_id, title, description, favicon, label, kind, current_ver, envelope, size_bytes, created_at, updated_at, path, session_id, actor
              FROM artifacts WHERE id = ?1",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -1020,6 +1026,7 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         updated_at: required_text(row, 11)?,
         path: required_text(row, 12)?,
         session_id: text_at(row, 13)?,
+        actor: text_at(row, 14)?,
     })
 }
 

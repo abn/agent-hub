@@ -62,6 +62,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 12,
         ddl: V12,
     },
+    Migration {
+        version: 13,
+        ddl: V13,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -388,4 +392,12 @@ CREATE INDEX IF NOT EXISTS agents_pending_source
 const V12: &str = r#"
 ALTER TABLE artifacts ADD COLUMN session_id TEXT;
 CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
+"#;
+
+/// Version 13: an artifact records who wrote it.
+///
+/// Rows written before this migration keep NULL. An update does not change
+/// the original creator.
+const V13: &str = r#"
+ALTER TABLE artifacts ADD COLUMN actor TEXT;
 "#;

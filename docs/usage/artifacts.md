@@ -54,6 +54,10 @@ otherwise the title is required.
 A publish or update records the caller session lineage when the agent acts
 within an active session. Callers cannot supply or forge session lineage: the
 session identifier is derived directly from the authenticated caller principal.
+Similarly, publishing records the creator agent as `actor`, taken from the
+resolved caller principal. Callers cannot forge `actor` in the publish request.
+Updating an artifact preserves the original `actor`; new versions do not
+overwrite who authored the document.
 
 Concurrent updates are guarded by optimistic concurrency. Pass the version the
 edit is based on as `base_version`: if the artifact has moved on, the update
@@ -71,7 +75,8 @@ content is the ciphertext; decryption is the client's job and never the
 server's. `artifact_versions` lists the immutable history oldest first, each
 entry with its own title, description, label, and encryption state.
 `artifact_list` lists a project's artifacts, most recently updated first,
-optionally filtered by `session`.
+optionally filtered by `session`. Everywhere an artifact is returned, it carries
+the publishing `actor` (null on rows written before the field was added).
 `artifact_delete` removes an artifact, its history, and its index row, and
 records a `deleted` event on the feed.
 

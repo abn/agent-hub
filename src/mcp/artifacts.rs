@@ -154,6 +154,7 @@ impl HubServer {
         })?;
 
         Ok(CallToolResult::structured(json!({
+            "actor": artifact.actor,
             "title": artifact.title,
             "description": artifact.description,
             "favicon": artifact.favicon,
@@ -261,6 +262,10 @@ struct ArtifactPublishParams {
     #[serde(default)]
     #[allow(dead_code)]
     session_id: Option<String>,
+    /// Any supplied actor is ignored to prevent forgery; lineage comes from principal.
+    #[serde(default)]
+    #[allow(dead_code)]
+    actor: Option<String>,
     /// Optional idempotency key, so a retried publish returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,

@@ -472,3 +472,36 @@ fn artifact_update_label_semantics() {
     let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
     assert_eq!(structured(&got)["label"], Value::Null);
 }
+
+#[test]
+fn artifact_publish_ignores_client_supplied_actor() {
+    let data_dir = TempDir::new("client-actor");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
+    server.initialize();
+
+    let published = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Actor Test",
+            "kind": "markdown",
+            "content": "test content",
+            "actor": "imposter",
+        }),
+    );
+    let result = structured(&published);
+    let artifact_id = result["artifact_id"]
+        .as_str()
+        .expect("artifact_publish returns an id");
+
+    let got = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
+    let got = structured(&got);
+    assert_eq!(got["actor"], "local");
+
+    let listed = server.call_tool("artifact_list", json!({"project_id": "proj"}));
+    let artifacts = structured(&listed)["artifacts"]
+        .as_array()
+        .expect("artifact_list returns artifacts");
+    assert_eq!(artifacts[0]["actor"], "local");
+}

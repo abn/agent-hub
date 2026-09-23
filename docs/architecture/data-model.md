@@ -22,7 +22,7 @@ inbox, which is global.
 |---|---|
 | `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
 | `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
-| `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, and the optional session id recording author lineage. |
+| `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
@@ -49,7 +49,9 @@ the session's own lifecycle events, because storage acts on sessions and never
 on feed events or artifacts, and the work a session left in the feed outlives
 the session. Artifacts similarly record the session they were published or
 updated during, indexed by session, linking artifact lineage to the originating
-session.
+session. Artifacts also record the publishing agent identity (`actor`) derived
+from the authenticated principal, which remains untouched across subsequent
+updates.
 
 An inbox status carries two independent things, and the human's read verb
 touches only one of them. `unread` and `read` are the read axis: the human

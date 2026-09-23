@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-23, artifact author recording
+
+* **Update**: [The agent surface](architecture/agent-surface.md), [Data
+  model](architecture/data-model.md), and [Artifacts](usage/artifacts.md)
+  document author persistence on artifacts. Publishing records the resolved
+  principal identity in `artifacts.actor`, which cannot be forged or supplied by
+  the caller. Updating an artifact retains the original creator. Artifact
+  queries, listings, and reads across REST and MCP carry the author field,
+  returning null for rows that predate the column.
+
 ## 2026-09-23, read single brain entry over REST
 
 * **Update**: [The human surface](architecture/human-surface.md) documents

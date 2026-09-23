@@ -69,7 +69,15 @@ tokens.
 | `whoami` | Report the calling identity and its personal space. |
 | `version` | Report the server version, for a connectivity check. |
 
-A publish carries a description, a favicon mark, and a version label.
+A publish carries a description, a favicon mark, and a version label. It
+also records the publishing agent identity as `actor`, resolved directly from
+the authenticated caller principal. A caller cannot set or spoof `actor` in the
+publish payload; the server ignores any client-supplied actor field. The
+creator identity stays: updating an artifact by a different agent appends an
+update event to the feed but leaves the artifact row's `actor` intact.
+Everywhere an artifact is returned (MCP `artifact_get` and `artifact_list`, REST
+listing, and single read), it carries `actor`, which is null for rows written
+before the field was added.
 `artifact_update` accepts the version the edit is based on as
 `base_version`: a stale base is refused with a conflict naming the
 current version unless `force` is passed, so two writers never silently
