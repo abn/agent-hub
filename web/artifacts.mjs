@@ -5,6 +5,7 @@
 import { api } from "./api.mjs";
 import {
   closeCommentsDrawer,
+  loadComments,
   commentsPanel,
   commentsState,
   commentsToggle,
@@ -17,6 +18,7 @@ import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
+import { toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -75,7 +77,7 @@ export async function artifactStage(id, projectId) {
     ? `<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`
     : "";
   const actions = `
-    <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-label="${
+    <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-pressed="true" aria-label="${
       commentsCount ? `Comments, ${commentsCount}` : "Start a thread"
     }">${glyphSvg("comments", { size: 18 })}${comments}</button>
     <button type="button" class="hub-btn-glyph" aria-label="More">${glyphSvg("overflow", { size: 18 })}</button>`;
@@ -102,7 +104,18 @@ export async function artifactStage(id, projectId) {
     current.title || slug,
   )}" src="${esc(frameSrc(id, newest, theme))}"></iframe></div>`;
 
+  const threads = `${commentsCount} ${commentsCount === 1 ? "thread" : "threads"}`;
+  const aside = `
+    <div class="shell-head">
+      <div class="shell-title"><span class="shell-title-line">Comments</span></div>
+      <span class="shell-meta mono">${commentsCount}</span>
+    </div>
+    <div class="shell-controls"><span class="shell-meta mono">${threads} · v${newest}</span></div>
+    <div class="shell-body"><div class="hub-comments-cards-list"></div></div>
+    <div class="shell-foot mono">Select text in the document to anchor a comment</div>`;
+
   return {
+    aside,
     title: slug,
     meta: `${current.actor || "agent"} · v${newest} of ${versions.length} · ${formatBytes(
       current.size_bytes,
@@ -131,6 +144,31 @@ export function wireArtifactStage(root, id, info) {
     window.addEventListener("message", onHeight);
   }
   if (info) startComments(id, info.version, info.protected);
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  if (!coarse) {
+    // The aside is part of the layout on a fine pointer: the threads read
+    // beside the document, and the control toggles it.
+    const list = root.querySelector(".hub-comments-cards-list");
+    if (list) commentsState.desktopContainer = list;
+    loadComments();
+    renderDesktopCards();
+    for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
+      btn.addEventListener("click", () => {
+        toggleAside(btn);
+        const aside = root.querySelector(".shell-aside");
+        const open = aside ? !aside.hidden : false;
+        btn.setAttribute("aria-pressed", String(open));
+        if (open) renderDesktopCards();
+      });
+    }
+  } else {
+    // One surface on a coarse pointer: the sheet.
+    const { toggle, badge } = commentsToggle();
+    document.body.appendChild(commentsPanel({ toggle, badge }));
+    for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
+      btn.addEventListener("click", () => openCommentsDrawer());
+    }
+  }
   for (const btn of root.querySelectorAll('[data-action="copy-path"]')) {
     btn.addEventListener("click", async () => {
       try {

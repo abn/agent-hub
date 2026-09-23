@@ -415,6 +415,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
       stageHead,
       stageControls,
       stageBody,
+      aside: info?.aside || "",
       hasSelection: Boolean(selected && info),
     }),
     info,

@@ -6845,3 +6845,13 @@ dialog.dialog-project-delete {
 .shell-head .search-field input { height: 32px; font-size: var(--t-13); }
 .shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
 .shell-stage .search-stage { height: 100%; }
+
+/* The comments aside is part of the layout on a fine pointer. */
+.shell-aside .shell-foot {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-12);
+  color: var(--ink-3);
+  flex: none;
+}
+.shell-aside .hub-comments-cards-list { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
