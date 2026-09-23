@@ -4,7 +4,7 @@
 import { api } from "./api.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { actionFor, esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
+import { esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
@@ -155,16 +155,6 @@ function noteOf(item) {
   return "";
 }
 
-// What the row's right swipe and its visible control both do. An item that
-// waits carries no read state, so it offers neither.
-function readControl(item) {
-  if (waits(item) || item.status === "resolved") return "";
-  const id = esc(item.event_id);
-  return item.status === "unread"
-    ? `<button type="button" class="inbox-quiet" data-action="inbox-read" data-id="${id}">Mark read</button>`
-    : `<button type="button" class="inbox-quiet" data-action="inbox-unread" data-id="${id}">Mark unread</button>`;
-}
-
 function decline(item, action) {
   return `<button type="button" data-action="${action}" data-id="${esc(item.event_id)}" data-summary="${esc(item.summary)}">Decline</button>`;
 }
@@ -178,15 +168,9 @@ function bringBackButton(item) {
   return `<button type="button" class="inbox-quiet" data-action="inbox-unsnooze" data-id="${esc(item.event_id)}" data-summary="${esc(item.summary)}">Bring back</button>`;
 }
 
-function rowActions(item) {
-  if (item.status === "resolved") return "";
-  if (!waits(item)) return readControl(item);
-  return (item.kind === "approval" ? decline(item, "inbox-decline") : "") + actionFor(item);
-}
-
 // The trays a swipe uncovers. They sit under the row and stay out of the tab
-// ring and the accessibility tree until a swipe shows them; every action in
-// them is also a control on the row itself.
+// ring and the accessibility tree until a swipe shows them; on a fine pointer
+// the same verbs live on the stage the row opens.
 function trays(item) {
   if (item.status === "resolved") return "";
   const id = esc(item.event_id);
@@ -216,10 +200,8 @@ function inboxRow(item, state, options = {}) {
   const swipe = waits(item) ? (trays(item) ? "actions" : "") : isResolved ? "" : "read";
   const href = esc(address({ ...state, open: item.event_id }));
   const current = state.open === item.event_id ? ' aria-current="true"' : "";
-  const outcome = isResolved ? outcomeOf(item) : "";
-  const note = isResolved ? noteOf(item) : "";
-  const snoozeBar = waits(item)
-    ? `<div class="inbox-snooze-bar">${options.snoozed ? bringBackButton(item) : snoozeButton(item)}</div>`
+  const snoozeBar = options.snoozed
+    ? `<div class="inbox-snooze-bar">${bringBackButton(item)}</div>`
     : "";
   return `<div class="inbox-item" data-id="${esc(item.event_id)}" data-status="${esc(item.status)}" data-swipe="${swipe}"${current}>
     ${trays(item)}
@@ -228,15 +210,13 @@ function inboxRow(item, state, options = {}) {
       <div class="grow">
         <div class="inbox-head">
           <div class="title"><a href="${href}">${esc(item.summary)}</a></div>
-          ${stamp(item.updated_at)}
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
-        ${outcome ? `<div class="inbox-outcome"><span class="pill pill-outcome">${esc(outcome)}</span>${note ? ` <span class="inbox-note inbox-outcome-note">${esc(note)}</span>` : ""}</div>` : ""}
         <div class="inbox-foot">
-          <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span>
-          <span class="inbox-acts">${rowActions(item)}</span>
+          <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
         </div>
       </div>
+      ${waits(item) ? '<span class="dot-action" aria-hidden="true"></span><span class="sr-only">Waiting on you</span>' : ""}
       ${item.status === "unread" ? '<span class="dot-unread" aria-hidden="true"></span><span class="sr-only">Unread</span>' : ""}
     </div>
     ${snoozeBar}

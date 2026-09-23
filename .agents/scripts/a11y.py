@@ -316,8 +316,11 @@ def enter_state(page, route: str, seeded: dict) -> None:
         page.click("main .storage-review", timeout=5000)
     elif route == APPROVAL_DIALOG:
         page.evaluate("location.hash = '#/inbox'")
-        page.wait_for_selector('main [data-action="approve"]', timeout=5000)
-        page.click('main [data-action="approve"]', timeout=5000)
+        # The decision lives on the stage, so the approval is opened first.
+        page.wait_for_selector('.shell-index .inbox-row:has(.glyph[data-kind="approval"]) .title a', timeout=5000)
+        page.click('.shell-index .inbox-row:has(.glyph[data-kind="approval"]) .title a', timeout=5000)
+        page.wait_for_selector('main [data-action="inbox-detail-approve"]', timeout=5000)
+        page.click('main [data-action="inbox-detail-approve"]', timeout=5000)
     elif route == COMMENTS_DRAWER:
         page.evaluate(
             "location.hash = '#/artifacts/%s?project=%s'"

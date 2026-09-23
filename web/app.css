@@ -6894,3 +6894,32 @@ dialog.dialog-project-delete {
   flex: none;
 }
 .shell-aside .hub-comments-cards-list { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* The inbox index rows: the design's scannable shape. The title, one line of
+   body, and one meta line that never wraps. Status is not a plate here. */
+.inbox-index .inbox-body,
+.shell-index .inbox-body {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shell-index .inbox-foot { white-space: nowrap; overflow: hidden; }
+.shell-index .inbox-row .title { min-width: 0; }
+.dot-action {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--action);
+  align-self: flex-start;
+  margin-top: 6px;
+}
+/* The group headers are a mono label over a hairline, not a card. */
+.shell-index .inbox-label {
+  margin: 0;
+  padding: 10px 16px 6px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+.shell-index .inbox-group { background: transparent; }
+.shell-index .inbox-rows { background: var(--surface); }

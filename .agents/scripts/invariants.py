@@ -893,6 +893,17 @@ def check_inbox_one_decision(page, watch: Watch, port: int, project: str) -> Non
         except Exception:
             pass
         return
+    # The row opens the item; the verbs live on the stage, which is what the
+    # design asks for and what a 300px index can hold.
+    page.click(f'{row} .title a')
+    approve = f'main [data-action="inbox-detail-approve"][data-id="{event_id}"]'
+    if not settle(page, f"!!document.querySelector({json.dumps(approve)})"):
+        watch.fail("the opened approval offers no decision")
+        try:
+            harness.request(port, "POST", f"/api/v1/approvals/{event_id}/decision", {"decision": "approve"})
+        except Exception:
+            pass
+        return
     call = f"POST /api/v1/approvals/{event_id}/decision"
     before = watch.count(call)
 
@@ -902,17 +913,17 @@ def check_inbox_one_decision(page, watch: Watch, port: int, project: str) -> Non
         " ? new Promise((go) => setTimeout(go, 700)).then(() => send(url, options)) : send(url, options); })()"
     )
     try:
-        page.click(f'{row} [data-action="approve"]')
+        page.click(approve)
         page.wait_for_selector("dialog.dialog[open]")
         page.click(".dialog-commit")
         page.wait_for_selector("dialog.dialog", state="detached")
-        # The first request is still held. The row is still drawn, so press again.
-        if page.evaluate(f"!!document.querySelector({json.dumps(row + ' [data-action=\"approve\"]')})"):
-            page.click(f'{row} [data-action="approve"]')
+        # The first request is still held. The item is still drawn, so press again.
+        if page.evaluate(f"!!document.querySelector({json.dumps(approve)})"):
+            page.click(approve)
             page.wait_for_timeout(150)
             if page.evaluate("!!document.querySelector('dialog.dialog[open]')"):
                 page.click(".dialog-commit")
-        settle(page, f"!document.querySelector({json.dumps(row + ' [data-action=\"approve\"]')})")
+        settle(page, f"!document.querySelector({json.dumps(approve)})")
         page.wait_for_timeout(900)
     finally:
         page.evaluate("window.__sendNow && window.__sendNow()")
@@ -943,8 +954,9 @@ def check_toast_leaves_a_writer_alone(page, watch: Watch, project: str) -> None:
     """
     watch.enter("inbox: a toast while typing")
     page.evaluate("location.hash = '#/inbox'")
-    page.wait_for_selector('[data-action="answer"]')
-    page.click('[data-action="answer"]')
+    # The reply composer lives on the stage, so the question is opened first.
+    page.wait_for_selector('.shell-index .inbox-row:has(.glyph[data-kind="question"]) .title a')
+    page.click('.shell-index .inbox-row:has(.glyph[data-kind="question"]) .title a')
     page.wait_for_selector(".composer-field")
     typed = "half written reply"
     field_sel = ".composer-field, textarea"
