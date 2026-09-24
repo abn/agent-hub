@@ -34,6 +34,7 @@ const SHELL_JS: &str = include_str!("../web/shell.mjs");
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const PROJECTS_JS: &str = include_str!("../web/projects.mjs");
 const CONNECT_JS: &str = include_str!("../web/connect.mjs");
+const MORE_JS: &str = include_str!("../web/more.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1676,33 +1677,51 @@ fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
     );
 }
 
-// Round 12, the rail's sync line. It follows the phone's rule: shown only when
-// stale or failed, never a standing "Synced". The designer's round 12.1 says
-// stale or failed without defining stale, so the threshold is the build's and
-// is called out as an open question.
+// Round 12.1, section 13, the sync rule. Nothing when healthy at either width
+// and no reserved space; stale after five minutes without a success while the
+// page is visible; failed after two consecutive failures or when offline; a 401
+// routes to Connect; a hidden tab does not age; a success hides the line at
+// once. The behaviour itself is driven in the browser harness
+// (check_sync_states); these are the structural halves that harness cannot see.
 
 #[test]
 fn desktop_rail_sync_line_is_hidden_until_unhealthy() {
     assert!(
-        SHELL_JS.contains("SYNC_STALE_MS"),
-        "the rail must carry a stated staleness threshold"
+        SHELL_JS.contains("const SYNC_STALE_MS = 5 * 60 * 1000"),
+        "the rail carries the five-minute staleness threshold section 13 names"
     );
     assert!(
-        SHELL_JS.contains("syncLine.hidden = true"),
-        "the healthy rail hides the sync line"
+        SHELL_JS.contains("el.hidden = true;"),
+        "the healthy state hides the line"
     );
     assert!(
-        SHELL_JS.contains("syncLine.hidden = false"),
-        "the stale or failed rail shows the sync line"
+        SHELL_JS.contains("el.hidden = false;"),
+        "the stale or failed state shows it"
     );
     assert!(
-        SHELL_JS.contains("export function noteSyncFailure() {\n  syncFailed = true;\n  revealSyncLineWhenUnhealthy();\n}"),
-        "a failed call is the rail's failure signal"
+        SHELL_JS.contains("consecutiveFailures >= 2"),
+        "two consecutive failures are what fail the state, not one"
+    );
+    assert!(
+        SHELL_JS.contains("!navigatorOnline()"),
+        "being offline is a failure in its own right"
+    );
+    assert!(
+        SHELL_JS.contains("document.visibilityState === \"hidden\""),
+        "a hidden tab does not go stale"
+    );
+    assert!(
+        SHELL_JS.contains("status === 401"),
+        "a 401 is not a sync failure"
+    );
+    assert!(
+        SHELL_JS.contains("routeToConnect()"),
+        "a 401 routes to Connect instead"
     );
     let login = INDEX_HTML;
     assert!(
-        login.contains(r#"id="rail-sync" hidden"#),
-        "the rail renders its sync line hidden at rest"
+        login.contains(r#"id="rail-sync" role="status" hidden"#),
+        "the rail renders its line hidden at rest, and announces it as a status"
     );
 }
 
@@ -1713,9 +1732,15 @@ fn desktop_rail_sync_line_is_not_a_standing_synced() {
         !login.contains(r#"id="rail-sync">synced"#),
         "the rail must not render a standing synced line in the shell markup"
     );
+    // More's line is not standing either: it ships hidden and empty, and the
+    // only place a "synced" word can come from is the stale branch.
     assert!(
-        !SHELL_JS.contains("`synced ${relative(lastSyncTime)}`\n  }"),
-        "the sync line must not be set unconditionally"
+        MORE_JS.contains(r#"id="more-sync" role="status" hidden"#),
+        "More renders its line hidden and empty at rest"
+    );
+    assert!(
+        !MORE_JS.contains("synced just now"),
+        "More no longer carries a standing synced line in its markup"
     );
 }
 
