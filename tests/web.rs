@@ -29,6 +29,7 @@ const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 const HOME_JS: &str = include_str!("../web/home.mjs");
 const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
 const STORAGE_JS: &str = include_str!("../web/storage.mjs");
+const AGENTS_JS: &str = include_str!("../web/agents.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1618,6 +1619,56 @@ fn desktop_storage_header_meta_is_node_and_time_without_a_path() {
     assert!(
         !head.contains("data_path"),
         "the desktop Storage header must not print the data path"
+    );
+}
+
+// Round 12, desktop Agents and tokens. The screen is the Settings frame
+// (RULE 11.16): rail and stage, no index, the phone's rows in the form column,
+// and no token characters anywhere on it.
+
+#[test]
+fn desktop_agents_is_the_settings_frame_not_the_access_panels() {
+    let desktop = AGENTS_JS
+        .split("function renderDesktopAgents(")
+        .nth(1)
+        .expect("agents carries a desktop renderer");
+    let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
+    assert!(
+        desktop.contains("shellHTML"),
+        "desktop Agents and tokens must render inside the shell frame"
+    );
+    assert!(
+        desktop.contains("noIndex: true"),
+        "nothing is opened one at a time, so the screen has no index"
+    );
+    assert!(
+        !desktop.contains("access-section-head") && !desktop.contains("access-header"),
+        "the pre-shell Access panels retire"
+    );
+    assert!(
+        desktop.contains("Agents and tokens"),
+        "the desktop header names the screen, not Access"
+    );
+    assert!(
+        !desktop.contains("Access"),
+        "the desktop screen no longer calls itself Access"
+    );
+}
+
+#[test]
+fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
+    let desktop = AGENTS_JS
+        .split("function renderDesktopAgents(")
+        .nth(1)
+        .expect("agents carries a desktop renderer");
+    let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
+    assert!(
+        desktop.contains("form-row") && desktop.contains("form-column"),
+        "the rows are the shared form rows in the form column"
+    );
+    assert!(
+        !desktop.contains("token-val") && !desktop.contains("showToken"),
+        "no agent or admin token characters are rendered on this screen"
     );
 }
 

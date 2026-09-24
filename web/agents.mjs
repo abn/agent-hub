@@ -15,162 +15,69 @@ export function truncateMiddle(val, startLen = 8, endLen = 4) {
 }
 
 function renderDesktopAgents(agents, projects, grantsByAgent) {
+  // Round 12 §12: Agents and tokens is a rail destination shaped like Settings
+  // (RULE 11.16), nothing is opened one at a time, so there is no index. The
+  // control row is reserved; it carries the filter field only over eight rows,
+  // and with four agents it is empty, which is correct (RULE 11.3).
   const confidentialProjects = projects.filter((p) => p.confidential);
 
-  const confidentialRows = confidentialProjects.length
-    ? confidentialProjects
-        .map(
-          (p) => `
-      <div class="row confidential-row">
-        <span class="confidential-name grow">${esc(p.display_name)} ${glyphSvg("lock", { size: 14 })}</span>
-        <span class="meta">confidential</span>
-      </div>`,
-        )
-        .join("")
-    : '<p class="empty">No confidential projects.</p>';
+  let latestSeen = null;
+  for (const a of agents) {
+    const t = a.last_seen_at || a.created_at;
+    if (t && (!latestSeen || t > latestSeen)) latestSeen = t;
+  }
+  const metaText = `${agents.length} ${agents.length === 1 ? "agent" : "agents"}${
+    latestSeen ? ` · last call ${relative(latestSeen)}` : " · no calls yet"
+  }`;
 
-  const agentRows = agents.length
-    ? agents
-        .map((agent) => {
-          const grants = grantsByAgent[agent.id] || [];
-          const grantRows = grants.length
-            ? `<div class="agent-grants">
-                ${grants
-                  .map(
-                    (grant) => `
-                  <div class="agent-grant-row">
-                    <span class="meta mono">${esc(grant.project_id)} · ${esc(grant.access)}</span>
-                    <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" aria-label="Remove grant on ${esc(grant.project_id)} for ${esc(agent.display_name || agent.id)}">Remove grant</button>
-                  </div>`,
-                  )
-                  .join("")}
-              </div>`
-            : "";
+  const adminRow = `
+    <div class="form-row">
+      <div class="form-row-main">
+        <span class="form-row-title">Admin token</span>
+        <span class="form-row-sub">set at startup by <span class="mono">HUB_ADMIN_TOKEN</span></span>
+      </div>
+      <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
+    </div>`;
 
-          return `
-      <div class="row agent-record-row" data-agent-id="${esc(agent.id)}">
-        <div class="agent-record-main">
-          <div class="grow">
-            <div class="agent-title-line">
-              <span class="title">${esc(agent.display_name || agent.id)}</span>
-              <span class="record-badge">record</span>
-            </div>
-            <div class="meta">first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · <span class="mono">${esc(agent.personal_project_id)}</span></div>
-          </div>
-          <div class="agent-record-actions">
-            <button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" aria-label="Reissue token for ${esc(agent.display_name || agent.id)}">Reissue token</button>
-            <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" aria-label="Revoke token for ${esc(agent.display_name || agent.id)}">Revoke token</button>
-          </div>
+  const agentRows = agents
+    .map((agent) => {
+      const grants = grantsByAgent[agent.id] || [];
+      const projectWord = grants.length === 1 ? "project" : "projects";
+      const grantDesc = grants.length > 0 ? `write on ${grants.length} ${projectWord}` : "no projects";
+      const activeDesc = agent.last_seen_at
+        ? `active ${relative(agent.last_seen_at)}`
+        : `seen ${relative(agent.created_at)}`;
+      return `
+      <a class="form-row" href="#/access?agent=${encodeURIComponent(agent.id)}">
+        <div class="form-row-main">
+          <span class="form-row-title">${esc(agent.display_name || agent.id)}</span>
+          <span class="form-row-sub">${esc(grantDesc)} · ${esc(activeDesc)} · <span class="mono">${esc(agent.personal_project_id)}</span></span>
         </div>
-        ${grantRows}
-      </div>`;
-        })
-        .join("")
-    : '<p class="empty">No agents have identified themselves yet.</p>';
+        <span class="form-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
+      </a>`;
+    })
+    .join("");
 
-  const agentOptions = agents.length
-    ? agents
-        .map(
-          (a) =>
-            `<option value="${esc(a.id)}">${esc(a.display_name && a.display_name !== a.id ? `${a.display_name} (${a.id})` : a.id)}</option>`,
-        )
-        .join("")
-    : '<option value="" disabled>No agents available</option>';
+  const filterField =
+    agents.length > 8
+      ? `<div class="shell-controls"><div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div></div>`
+      : `<div class="shell-controls"></div>`;
 
-  const projectOptions = projects.length
-    ? projects
-        .map(
-          (p) =>
-            `<option value="${esc(p.id)}">${esc(p.display_name && p.display_name !== p.id ? `${p.display_name} (${p.id})` : p.id)}</option>`,
-        )
-        .join("")
-    : '<option value="" disabled>No projects available</option>';
+  const content = `
+    <div class="form-column agents-form">
+      <div class="form-group-label">HUB</div>
+      ${adminRow}
+      <div class="form-group-label">AGENTS · ${agents.length}</div>
+      <div class="agents-list">${agentRows || '<p class="empty">No agents have identified themselves yet.</p>'}</div>
+    </div>`;
 
-  return `
-    <div class="access-header">
-      <a class="access-back-btn" href="#/settings" aria-label="Back to settings">
-        ${glyphSvg("chevronBack", { size: 20 })}
-      </a>
-      <h1 class="access-title">Access</h1>
-    </div>
-    <div class="access-screen">
-      <div class="access-section-head">
-        <span class="section-label">TOKEN</span>
-      </div>
-      <div class="card token-card">
-        <div class="token-head">
-          <span class="token-name">Admin token</span>
-          <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
-        </div>
-        <p class="token-sentence">The admin token comes from the hub's startup configuration. It changes when the operator restarts the hub with a different HUB_ADMIN_TOKEN.</p>
-        <p class="token-sentence meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</p>
-      </div>
-
-      <div class="access-section-head">
-        <span class="section-label">CONFIDENTIAL PROJECTS</span>
-        <span class="section-sub">A confidential project is absent, not refused: a token with no grant to it sees no project, no rows, no error.</span>
-      </div>
-      <div class="card confidential-projects">
-        ${confidentialRows}
-      </div>
-
-      <div class="access-section-head agents-head">
-        <span class="section-label">AGENTS THAT IDENTIFIED THEMSELVES</span>
-        <span class="mono agents-count">${agents.length}</span>
-      </div>
-      <div class="card agents-records">
-        ${agentRows}
-      </div>
-
-      <div class="access-section-head">
-        <span class="section-label">CREATE AGENT</span>
-        <span class="section-sub">Register an agent identity and allocate its personal space.</span>
-      </div>
-      <form class="card access-form-card" data-action="agent-create">
-        <label for="agent-id">Agent id</label>
-        <input id="agent-id" name="id" required autocomplete="off" placeholder="laptop/claude">
-        <label for="agent-name">Display name</label>
-        <input id="agent-name" name="display_name" required placeholder="Claude on laptop">
-        <p>
-          <button class="primary" type="submit">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 12 5v14 M 5 12h14"/></svg>
-            Create agent
-          </button>
-        </p>
-      </form>
-
-      <div class="access-section-head">
-        <span class="section-label">GRANT PROJECT</span>
-        <span class="section-sub">Grant an agent access to a project.</span>
-      </div>
-      <form class="card access-form-card" data-action="agent-grant">
-        <label for="grant-agent">Agent</label>
-        <select id="grant-agent" name="agent" required>
-          <option value="" disabled selected>Select agent…</option>
-          ${agentOptions}
-        </select>
-        <label for="grant-project">Project</label>
-        <select id="grant-project" name="project" required>
-          <option value="" disabled selected>Select project…</option>
-          ${projectOptions}
-        </select>
-        <p>
-          <button class="primary" type="submit">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 12 5v14 M 5 12h14"/></svg>
-            Grant project
-          </button>
-        </p>
-      </form>
-
-      <div class="access-section-head">
-        <span class="section-label">REVOKED TOKENS</span>
-        <span class="section-sub">History, not state.</span>
-      </div>
-      <div class="card revoked-tokens">
-        <p class="empty">No revoked tokens.</p>
-      </div>
-    </div>
-  `;
+  return shellHTML({
+    segment: "access",
+    noIndex: true,
+    stageHead: shellStageHead("Agents and tokens", metaText, "", "#/settings"),
+    stageControls: filterField,
+    stageBody: `<div class="shell-pad">${content}</div>`,
+  });
 }
 
 function renderMobileAgentDetail(agent, projects, grants) {

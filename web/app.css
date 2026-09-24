@@ -1409,6 +1409,12 @@ button.empty-link {
 .storage-legend-val { margin-left: auto; color: var(--ink); }
 .storage-helper-line { font-size: var(--t-13); line-height: 1.45; color: var(--ink-3); }
 
+/* Round 12, desktop Agents and tokens: the Settings frame (RULE 11.16), its
+   rows in the shared form column. */
+.agents-form { margin: 0; }
+.agents-form .form-group-label { margin-top: var(--s-4); }
+.agents-form .form-group-label:first-child { margin-top: 0; }
+
 .storage-by .section-label { margin: 0 0 6px; }
 /* The rows carry the corners themselves: clipping the list would clip the
    focus ring of the row the keyboard is on. */
@@ -5760,7 +5766,7 @@ a.session-back {
 .form-column {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
   max-width: 640px;
 }
 .form-group {
@@ -5775,8 +5781,9 @@ a.session-back {
   color: var(--ink-3);
   text-transform: uppercase;
   letter-spacing: .06em;
-  padding-bottom: var(--s-2);
+  padding: var(--s-5) 0 var(--s-2);
 }
+.form-group-label:first-child { padding-top: 0; }
 .form-row {
   display: flex;
   align-items: center;

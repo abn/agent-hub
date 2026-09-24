@@ -125,7 +125,9 @@ EXPECTED = {
     # The phone settings form uses the flat `.row .title`; the desktop row
     # form uses `.form-row-title`. Either is Settings painted.
     "settings": "main .row .title, main .form-row-title",
-    "access": "main .access-screen",
+    # The phone keeps the flat `.access-screen`; the desktop is the Settings
+    # frame and paints the shared form rows. Either is Agents and tokens.
+    "access": "main .access-screen, main .form-row-title",
     "connect": "main .connect .connect-field",
     "more": "main .more-screen .more-row",
     "artifacts": "main .shell-index .artifact-row",
