@@ -1480,7 +1480,7 @@ def check_project_tools_row(page, watch: Watch, project: str) -> None:
         if box and (round(box["width"]) < 44 or round(box["height"]) < 44):
             watch.fail(f"filter-and-group button is not 44x44px, got {box['width']}x{box['height']}")
 def check_projects_register_segmented_and_rows(page, watch: Watch, port: int) -> None:
-    watch.enter("projects register: segmented control, rows and no storage card")
+    watch.enter("projects register: rows, no storage card, and the switcher by width")
     harness.request(port, "POST", "/api/v1/projects", {"id": "space-test-agent", "display_name": "Test Space (personal)"})
 
     goto(page, "#/projects", "Projects")
@@ -1502,29 +1502,42 @@ def check_projects_register_segmented_and_rows(page, watch: Watch, port: int) ->
 
     spaces_footer = page.locator(".projects-agent-spaces, .projects-agent-spaces-summary")
     if spaces_footer.count() > 0 and spaces_footer.first.is_visible():
-        watch.fail("projects-agent-spaces footer line is present, expected to be replaced by segmented control")
+        watch.fail("projects-agent-spaces footer line is present")
 
     tools = page.locator(".shell-controls")
     if tools.count() == 0:
         watch.fail("projects register has no tools row")
         return
+
+    # Round 12.1 §12 makes the switcher phone chrome and gives the desktop the
+    # filter field in the reserved control row. Which one is correct depends on
+    # the width this harness is running at.
+    desktop = page.viewport_size["width"] >= 1100
     proj_tab = tools.locator('[role="tab"]:has-text("Projects")')
     spaces_tab = tools.locator('[role="tab"]:has-text("Agent spaces")')
-    if proj_tab.count() == 0 or spaces_tab.count() == 0:
-        watch.fail("tools row missing Projects / Agent spaces segmented control")
-        return
+    register_filter = tools.locator('[data-action="projects-filter"]')
 
-    spaces_tab.first.click()
-    page.wait_for_timeout(200)
-    visible_spaces = page.locator('.project-row:visible[data-id="space-test-agent"]')
-    if visible_spaces.count() == 0:
-        watch.fail("Agent spaces tab did not show agent spaces")
+    if desktop:
+        if proj_tab.count() > 0 or spaces_tab.count() > 0:
+            watch.fail("desktop register still draws the segmented switcher, expected the filter field")
+        if register_filter.count() == 0:
+            watch.fail("desktop register is missing the filter field in its control row")
+    else:
+        if proj_tab.count() == 0 or spaces_tab.count() == 0:
+            watch.fail("tools row missing Projects / Agent spaces segmented control")
+            return
 
-    proj_tab.first.click()
-    page.wait_for_timeout(200)
-    visible_spaces_after = page.locator('.project-row:visible[data-id="space-test-agent"]')
-    if visible_spaces_after.count() > 0:
-        watch.fail("Projects tab unexpectedly shows agent space rows")
+        spaces_tab.first.click()
+        page.wait_for_timeout(200)
+        visible_spaces = page.locator('.project-row:visible[data-id="space-test-agent"]')
+        if visible_spaces.count() == 0:
+            watch.fail("Agent spaces tab did not show agent spaces")
+
+        proj_tab.first.click()
+        page.wait_for_timeout(200)
+        visible_spaces_after = page.locator('.project-row:visible[data-id="space-test-agent"]')
+        if visible_spaces_after.count() > 0:
+            watch.fail("Projects tab unexpectedly shows agent space rows")
 
 
 def check_connect_screen_shell_field_and_error(page, watch: Watch, port: int) -> None:

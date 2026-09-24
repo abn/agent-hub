@@ -196,6 +196,41 @@ if (typeof document !== "undefined") {
   });
 }
 
+// The desktop register's filter (RULE 11.14): it hides non-matching project rows
+// and replaces the count with one mono line, the same shape the index filter
+// uses. The register has no index pane, so it filters its own lists.
+function wireProjectFilter() {
+  const field = document.querySelector("[data-action='projects-filter']");
+  if (!field || field.dataset.wired === "on") return;
+  field.dataset.wired = "on";
+  const screen = document.querySelector(".projects-screen");
+  const count = document.createElement("div");
+  count.className = "shell-count mono";
+  count.hidden = true;
+  screen?.prepend(count);
+  const apply = () => {
+    const q = field.value.trim().toLowerCase();
+    const rows = [...document.querySelectorAll(".projects-list .project-row")];
+    let shown = 0;
+    for (const row of rows) {
+      const match = !q || row.textContent.toLowerCase().includes(q);
+      row.hidden = !match;
+      if (match) shown++;
+    }
+    for (const list of document.querySelectorAll(".projects-list")) {
+      const any = [...list.querySelectorAll(".project-row:not([hidden])")].length > 0;
+      list.hidden = !any;
+    }
+    if (q) {
+      count.textContent = `${shown} of ${rows.length} match "${field.value.trim()}"`;
+      count.hidden = false;
+    } else {
+      count.hidden = true;
+    }
+  };
+  field.addEventListener("input", apply);
+}
+
 export async function projectsIndexScreen(gen, passedProjects) {
   let projects = passedProjects;
   if (!projects) {
@@ -324,16 +359,6 @@ export async function projectsIndexScreen(gen, passedProjects) {
     ? agentSpaces.map(renderRow).join("")
     : `<div class="projects-empty-tab">No agent spaces yet</div>`;
 
-  const tabsHTML = `
-    <div class="projects-tabs-track" role="tablist" aria-label="Project filter">
-      <button type="button" role="tab" class="projects-tab-btn" data-tab="projects" aria-selected="true">
-        Projects <span class="tab-count mono">${regularProjects.length}</span>
-      </button>
-      <button type="button" role="tab" class="projects-tab-btn" data-tab="spaces" aria-selected="false">
-        Agent spaces <span class="tab-count mono">${agentSpaces.length}</span>
-      </button>
-    </div>`;
-
   const bodyHTML = `
     <div class="projects-screen">
       <div class="projects-list projects-list-regular">
@@ -344,15 +369,43 @@ export async function projectsIndexScreen(gen, passedProjects) {
       </div>
     </div>`;
 
+  // The register lists every project on one screen, so the segmented switcher is
+  // phone chrome. On a desktop the control row carries the filter field once the
+  // list is over eight rows (RULE 11.14); the phone keeps the switcher, because
+  // its control row is the only place the two lists can be told apart. Round 12
+  // drops the "Agent spaces n" footer line at both widths.
+  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
+  const tabsHTML = `
+    <div class="projects-tabs-track" role="tablist" aria-label="Project filter">
+      <button type="button" role="tab" class="projects-tab-btn" data-tab="projects" aria-selected="true">
+        Projects <span class="tab-count mono">${regularProjects.length}</span>
+      </button>
+      <button type="button" role="tab" class="projects-tab-btn" data-tab="spaces" aria-selected="false">
+        Agent spaces <span class="tab-count mono">${agentSpaces.length}</span>
+      </button>
+    </div>`;
+  const filterHTML = `<div class="shell-controls">${
+    isDesktop && projects.length > 8
+      ? `<div class="shell-filter">
+           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
+           <input type="search" data-action="projects-filter" placeholder="Filter projects" aria-label="Filter projects">
+         </div>`
+      : isDesktop
+        ? ""
+        : tabsHTML
+  }</div>`;
+
+
   paint(
     gen,
     PROJECTS_REGISTER_STYLE +
       shellHTML({
         noIndex: true,
         stageHead: shellStageHead("Projects", headerMeta, newProjectBtn),
-        stageControls: `<div class="shell-controls">${tabsHTML}</div>`,
+        stageControls: filterHTML,
         stageBody: bodyHTML,
       }),
   );
   installShellLayout(document.querySelector(".shell"));
+  wireProjectFilter();
 }

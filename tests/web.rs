@@ -32,6 +32,8 @@ const STORAGE_JS: &str = include_str!("../web/storage.mjs");
 const AGENTS_JS: &str = include_str!("../web/agents.mjs");
 const SHELL_JS: &str = include_str!("../web/shell.mjs");
 const INDEX_HTML: &str = include_str!("../web/index.html");
+const PROJECTS_JS: &str = include_str!("../web/projects.mjs");
+const CONNECT_JS: &str = include_str!("../web/connect.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1714,6 +1716,63 @@ fn desktop_rail_sync_line_is_not_a_standing_synced() {
     assert!(
         !SHELL_JS.contains("`synced ${relative(lastSyncTime)}`\n  }"),
         "the sync line must not be set unconditionally"
+    );
+}
+
+// Round 12, the desktop register and Connect. §12 keeps the register's header
+// content in the 52 with the control row carrying the filter once over eight
+// rows, drops the "Agent spaces n" footer line, and keeps Connect centred with
+// no rail and no token characters once submitted.
+
+#[test]
+fn desktop_register_uses_the_filter_field_not_the_segmented_band() {
+    assert!(
+        PROJECTS_JS.contains(r#"data-action="projects-filter""#),
+        "the register control row carries the filter field"
+    );
+    let register = PROJECTS_JS
+        .split("export async function projectsIndexScreen(")
+        .nth(1)
+        .expect("the register screen exists");
+    let register = register.split("\n}").next().unwrap_or(register);
+    // The switcher is phone chrome and lives in the phone branch of the control
+    // row, not in the desktop one.
+    assert!(
+        register.contains("isDesktop"),
+        "the register chooses its control row by width"
+    );
+    let desktop_branch = register
+        .split("const filterHTML =")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        desktop_branch.contains("isDesktop && projects.length > 8"),
+        "the desktop control row carries the filter only over eight rows"
+    );
+    assert!(
+        desktop_branch.contains("tabsHTML"),
+        "the phone branch keeps the segmented switcher"
+    );
+    assert!(
+        register.contains("shell-controls"),
+        "the register still reserves its control row"
+    );
+}
+
+#[test]
+fn desktop_connect_is_the_centred_frame_with_no_token_characters() {
+    assert!(
+        CONNECT_JS.contains("connect-field") && CONNECT_JS.contains("connect-eye-btn"),
+        "the field keeps its show-token eye glyph"
+    );
+    assert!(
+        !CONNECT_JS.contains(r#"type="text" name="token""#)
+            && !CONNECT_JS.contains(r#"type="text" id="hub-token""#),
+        "the token field is never a plain text input"
+    );
+    assert!(
+        CONNECT_JS.contains("Not connected"),
+        "the tools row reads Not connected"
     );
 }
 
