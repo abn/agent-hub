@@ -28,6 +28,7 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 const HOME_JS: &str = include_str!("../web/home.mjs");
 const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
+const STORAGE_JS: &str = include_str!("../web/storage.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1525,6 +1526,98 @@ fn desktop_settings_uses_the_shared_form_column() {
     assert!(
         APP_CSS.contains(".form-column") && APP_CSS.contains(".form-row"),
         "the shared row form must be declared in app.css"
+    );
+}
+
+// Round 12, desktop Storage. The summary is a four-segment bar with its own
+// knowledge tone, one legend and one helper line. The per-project table keeps
+// a column per kind, so values align down the page, and a zero cell reads a
+// dash rather than "0 B".
+
+#[test]
+fn desktop_storage_summary_is_the_four_segment_bar() {
+    // The desktop summary block must carry the phone's four-segment bar with
+    // knowledge on its own tone, not the question tone.
+    let desktop = STORAGE_JS
+        .split("function renderDesktop(")
+        .nth(1)
+        .expect("storage carries a desktop renderer");
+    assert!(
+        desktop.contains("desktopSummary") || desktop.contains("storage-summary"),
+        "the desktop summary must draw the four-segment bar"
+    );
+    assert!(
+        STORAGE_JS.contains("--k-knowledge"),
+        "the knowledge segment must paint --k-knowledge"
+    );
+    assert!(
+        !STORAGE_JS.contains(
+            "data-kind=\"knowledge\" style=\"flex:${knFlex};background:var(--k-question)\""
+        ),
+        "the knowledge segment must not paint the question tone"
+    );
+}
+
+#[test]
+fn desktop_storage_has_a_knowledge_column_and_a_dash_for_zero() {
+    // Every kind is a column, knowledge included, and a zero cell is a dash
+    // in --ink-3 rather than "0 B".
+    for header in ["EVENTS", "SESSIONS", "ARTIFACTS", "KNOWLEDGE"] {
+        assert!(
+            STORAGE_JS.contains(header),
+            "the desktop table must carry a {header} column"
+        );
+    }
+    let table = STORAGE_JS
+        .split("function desktopTable(")
+        .nth(1)
+        .expect("storage carries a desktop table");
+    let table = table.split("\n}").next().unwrap_or(table);
+    // Both the per-project loop and the totals loop render every kind cell:
+    // a byte count when non-zero, a dash when zero.
+    let byte_cell = "if (bytes > 0) td.appendChild(el(\"span\", \"mono\", formatBytes(bytes)));";
+    let dash_cell = "else td.appendChild(el(\"span\", \"dash\", \"\\u2014\"));";
+    assert_eq!(
+        table.matches(byte_cell).count(),
+        2,
+        "both kind-cell loops render a byte count only when non-zero"
+    );
+    assert_eq!(
+        table.matches(dash_cell).count(),
+        2,
+        "both kind-cell loops render a dash for a zero cell"
+    );
+}
+
+#[test]
+fn desktop_storage_helper_line_is_the_only_one() {
+    let helper = "of events is the shared hub database, not in any row below";
+    let desktop = STORAGE_JS
+        .split("function desktopSummary(")
+        .nth(1)
+        .expect("storage carries a desktop summary");
+    let desktop = desktop.split("\n}").next().unwrap_or(desktop);
+    assert!(
+        desktop.contains(helper),
+        "the desktop summary must carry the helper line"
+    );
+    assert_eq!(
+        desktop.matches("storage-helper-line").count(),
+        1,
+        "the desktop summary carries exactly one helper line"
+    );
+}
+
+#[test]
+fn desktop_storage_header_meta_is_node_and_time_without_a_path() {
+    let head = STORAGE_JS
+        .split("function desktopHead(")
+        .nth(1)
+        .expect("storage carries a desktop head");
+    let head = head.split("\n}").next().unwrap_or(head);
+    assert!(
+        !head.contains("data_path"),
+        "the desktop Storage header must not print the data path"
     );
 }
 

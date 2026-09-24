@@ -1677,7 +1677,7 @@ def check_shortcuts_pointer_media(browser, watch: Watch, port: int) -> None:
 
 
 def check_storage_bar_and_helper_line(page, watch: Watch) -> None:
-    watch.enter("storage: 4-segment bar with knowledge --k-question and exactly one helper line")
+    watch.enter("storage: 4-segment bar with knowledge --k-knowledge and exactly one helper line")
     goto(page, "#/storage", "Storage")
     page.wait_for_timeout(300)
 

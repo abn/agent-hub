@@ -351,13 +351,12 @@ function desktopHead(usage) {
   const title = el("h1", "", "Storage");
   const now = new Date();
   const readTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const nodeHost = usage.node?.host || "demo";
+  // The header meta is node and time, no path: the path is the Settings
+  // screen's business, and the desktop Storage header states only what was
+  // measured and when.
   const desc = el("p", "storage-desc");
-  const pathText = usage.data_path || "/var/agent-hub";
-  desc.append(
-    "Everything on disk under ",
-    el("span", "mono", pathText),
-    `, read at ${readTime}. Pruning removes ended session brains; artifact blobs are removed only with their project.`,
-  );
+  desc.append(el("span", "mono", `${nodeHost} · read ${readTime}`));
   textWrap.append(title, desc);
   const remeasure = el("button", "btn storage-remeasure", "Re-measure");
   remeasure.type = "button";
@@ -446,8 +445,10 @@ function desktopTable(usage) {
     ["PROJECT", "th-project"],
     ["SHARE", "th-share"],
     ["TOTAL", "th-total num"],
-    ["BLOBS", "th-blobs num"],
-    ["BRAINS", "th-brains num"],
+    ["EVENTS", "th-events num"],
+    ["SESSIONS", "th-sessions num"],
+    ["ARTIFACTS", "th-artifacts num"],
+    ["KNOWLEDGE", "th-knowledge num"],
     ["RECLAIMABLE", "th-reclaimable num"],
     ["LAST WRITE", "th-lastwrite num"],
     ["", "th-action"],
@@ -464,15 +465,19 @@ function desktopTable(usage) {
 
   const tbody = el("tbody");
   let sumTotal = 0;
-  let sumBlobs = 0;
-  let sumBrains = 0;
+  let sumEvents = 0;
+  let sumSessions = 0;
+  let sumArtifacts = 0;
+  let sumKnowledge = 0;
   let sumReclaimable = 0;
 
   usage.projects.forEach((project, index) => {
     const total = totalOf(project);
     sumTotal += total;
-    sumBlobs += project.artifact_bytes || 0;
-    sumBrains += project.session_bytes || 0;
+    sumEvents += project.events_bytes || 0;
+    sumSessions += project.session_bytes || 0;
+    sumArtifacts += project.artifact_bytes || 0;
+    sumKnowledge += project.kb_bytes || 0;
     const prunableBytes = project.prunable_bytes || 0;
     const prunableSessions = project.prunable_sessions || 0;
     if (prunableSessions > 0) sumReclaimable += prunableBytes;
@@ -523,15 +528,19 @@ function desktopTable(usage) {
     tdTotal.appendChild(el("span", "mono bold", formatBytes(total)));
     row.appendChild(tdTotal);
 
-    // 4. BLOBS
-    const tdBlobs = el("td", "cell-blobs num");
-    tdBlobs.appendChild(el("span", "mono", formatBytes(blobBytes)));
-    row.appendChild(tdBlobs);
-
-    // 5. BRAINS
-    const tdBrains = el("td", "cell-brains num");
-    tdBrains.appendChild(el("span", "mono", formatBytes(brainBytes)));
-    row.appendChild(tdBrains);
+    // 4-7. One column per kind, so values align down the page. A zero cell is
+    // a dash in --ink-3, not "0 B".
+    for (const [cls, bytes] of [
+      ["cell-events", project.events_bytes || 0],
+      ["cell-sessions", project.session_bytes || 0],
+      ["cell-artifacts", project.artifact_bytes || 0],
+      ["cell-knowledge", project.kb_bytes || 0],
+    ]) {
+      const td = el("td", `${cls} num`);
+      if (bytes > 0) td.appendChild(el("span", "mono", formatBytes(bytes)));
+      else td.appendChild(el("span", "dash", "\u2014"));
+      row.appendChild(td);
+    }
 
     // 6. RECLAIMABLE
     const tdReclaimable = el("td", "cell-reclaimable num");
@@ -585,13 +594,17 @@ function desktopTable(usage) {
   tfTotal.appendChild(el("span", "mono bold", formatBytes(sumTotal)));
   trFoot.appendChild(tfTotal);
 
-  const tfBlobs = el("td", "cell-blobs num");
-  tfBlobs.appendChild(el("span", "mono", formatBytes(usage.by_kind?.artifacts ?? sumBlobs)));
-  trFoot.appendChild(tfBlobs);
-
-  const tfBrains = el("td", "cell-brains num");
-  tfBrains.appendChild(el("span", "mono", formatBytes(usage.by_kind?.sessions ?? sumBrains)));
-  trFoot.appendChild(tfBrains);
+  for (const [cls, bytes] of [
+    ["cell-events", usage.by_kind?.events ?? sumEvents],
+    ["cell-sessions", usage.by_kind?.sessions ?? sumSessions],
+    ["cell-artifacts", usage.by_kind?.artifacts ?? sumArtifacts],
+    ["cell-knowledge", usage.by_kind?.knowledge ?? sumKnowledge],
+  ]) {
+    const td = el("td", `${cls} num`);
+    if (bytes > 0) td.appendChild(el("span", "mono", formatBytes(bytes)));
+    else td.appendChild(el("span", "dash", "\u2014"));
+    trFoot.appendChild(td);
+  }
 
   const tfReclaimable = el("td", "cell-reclaimable num");
   tfReclaimable.appendChild(el("span", "mono action bold", formatBytes(usage.prunable?.bytes ?? sumReclaimable)));
@@ -697,13 +710,13 @@ function renderMobileHTML(usage) {
           <span class="storage-bar-seg" data-kind="events" style="flex:${evFlex};background:var(--k-signal)"></span>
           <span class="storage-bar-seg" data-kind="sessions" style="flex:${seFlex};background:var(--k-session)"></span>
           <span class="storage-bar-seg" data-kind="artifacts" style="flex:${arFlex};background:var(--k-artifact)"></span>
-          <span class="storage-bar-seg" data-kind="knowledge" style="flex:${knFlex};background:var(--k-question)"></span>
+          <span class="storage-bar-seg" data-kind="knowledge" style="flex:${knFlex};background:var(--k-knowledge)"></span>
         </div>
         <div class="storage-legend-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;font-size:13px;color:var(--ink-2)">
           <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="events" style="width:10px;height:10px;border-radius:2px;background:var(--k-signal);flex:none" aria-hidden="true"></span>events <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(evBytes)}</span></span>
           <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="sessions" style="width:10px;height:10px;border-radius:2px;background:var(--k-session);flex:none" aria-hidden="true"></span>sessions <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(seBytes)}</span></span>
           <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="artifacts" style="width:10px;height:10px;border-radius:2px;background:var(--k-artifact);flex:none" aria-hidden="true"></span>artifacts <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(arBytes)}</span></span>
-          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="knowledge" style="width:10px;height:10px;border-radius:2px;background:var(--k-question);flex:none" aria-hidden="true"></span>knowledge <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(knBytes)}</span></span>
+          <span style="display:flex;align-items:center;gap:7px"><span class="storage-swatch" data-kind="knowledge" style="width:10px;height:10px;border-radius:2px;background:var(--k-knowledge);flex:none" aria-hidden="true"></span>knowledge <span class="mono" style="margin-left:auto;font-family:var(--font-mono);color:var(--ink)">${formatBytes(knBytes)}</span></span>
         </div>
         <div class="storage-helper-line" style="font-size:13px;line-height:1.45;color:var(--ink-3)">${formatBytes(sharedEventsBytes)} of events is the shared hub database, not in any row below.</div>
       </div>
@@ -744,9 +757,77 @@ function setupMobileStorageEvents(usage) {
   });
 }
 
+function desktopSummary(usage) {
+  const used = usage.used_bytes || 0;
+  const [amount, unit] = formatBytes(used).split(" ");
+  const capacityText = usage.capacity_bytes != null ? `of ${formatBytes(usage.capacity_bytes)}` : "";
+  const evBytes = usage.by_kind?.events ?? 0;
+  const seBytes = usage.by_kind?.sessions ?? 0;
+  const arBytes = usage.by_kind?.artifacts ?? 0;
+  const knBytes = usage.by_kind?.knowledge ?? usage.by_kind?.kb ?? 0;
+  const kindsTotal = evBytes + seBytes + arBytes + knBytes || 1;
+  const sharedEventsBytes = usage.events_shared_bytes || evBytes;
+  const parts = [
+    ["events", evBytes, "--k-signal"],
+    ["sessions", seBytes, "--k-session"],
+    ["artifacts", arBytes, "--k-artifact"],
+    ["knowledge", knBytes, "--k-knowledge"],
+  ];
+
+  const wrap = el("section", "storage-summary storage-desktop-summary");
+  wrap.setAttribute("aria-label", "Storage breakdown");
+
+  const head = el("div", "storage-summary-head");
+  const amountNode = el("span", "mono storage-summary-amount");
+  amountNode.append(amount, " ", el("span", "storage-summary-unit", unit));
+  head.appendChild(amountNode);
+  if (capacityText) {
+    head.appendChild(el("span", "mono storage-summary-capacity", capacityText));
+  }
+  wrap.appendChild(head);
+
+  const bar = el("div", "storage-summary-bar");
+  bar.setAttribute("role", "img");
+  bar.setAttribute(
+    "aria-label",
+    `Events ${formatBytes(evBytes)}, sessions ${formatBytes(seBytes)}, artifacts ${formatBytes(arBytes)}, knowledge ${formatBytes(knBytes)}`,
+  );
+  for (const [kind, bytes, tone] of parts) {
+    const seg = el("span", "storage-bar-seg");
+    seg.dataset.kind = kind;
+    seg.style.flex = String(Math.max(1, Math.round((bytes / kindsTotal) * 1000)));
+    seg.style.background = `var(${tone})`;
+    bar.appendChild(seg);
+  }
+  wrap.appendChild(bar);
+
+  const legend = el("div", "storage-legend-grid");
+  for (const [kind, bytes, tone] of parts) {
+    const item = el("span", "storage-legend-item");
+    const sw = el("span", "storage-swatch");
+    sw.dataset.kind = kind;
+    sw.style.background = `var(${tone})`;
+    sw.setAttribute("aria-hidden", "true");
+    item.append(sw, kind, " ", el("span", "mono storage-legend-val", formatBytes(bytes)));
+    legend.appendChild(item);
+  }
+  wrap.appendChild(legend);
+
+  // The one helper line: the only consequence the reader cannot see.
+  wrap.appendChild(
+    el(
+      "div",
+      "storage-helper-line",
+      `${formatBytes(sharedEventsBytes)} of events is the shared hub database, not in any row below.`,
+    ),
+  );
+  return wrap;
+}
+
 async function renderDesktop(root, usage) {
   root.classList.add("storage-desktop-view");
   root.appendChild(desktopHead(usage));
+  root.appendChild(desktopSummary(usage));
   root.appendChild(summaryTiles(usage));
 
   // No second round of requests. This asked `/stats` once per project purely
