@@ -23,14 +23,17 @@ function formatTokenIssued(ts) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = null) {
-  // Round 13.1, RULE 13.2: Agents and tokens is a list-and-item screen on desktop.
-  // Index holds HUB and AGENTS; the stage holds the selected agent.
-  // #/access?agent=<id> selects it.
+function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = null, isCreating = false) {
+  // Round 13.1, RULE 13.2 & 13.3: Agents and tokens is a list-and-item screen on desktop.
+  // When creating (RULE 13.3):
+  // - Add agent button takes aria-pressed="true" and background var(--surface-2)
+  // - The index selection clears
+  // - Stage 52 header "New agent", 40 control row "It gets its token once, when you create it."
+  // - Stage body carries form, 440 max with Agent id, Display name, Create agent and Cancel.
   const confidentialProjects = projects.filter((p) => p.confidential);
   const confidentialCount = confidentialProjects.length;
 
-  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
+  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent"${isCreating ? ' aria-pressed="true"' : ""} style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:${isCreating ? "var(--surface-2)" : "none"};color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
 
   const indexHead = `
     <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;background:var(--surface);border-bottom:1px solid var(--line)">
@@ -65,7 +68,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       const activeDesc = agent.last_seen_at
         ? `active ${relative(agent.last_seen_at)}`
         : `seen ${relative(agent.created_at)}`;
-      const isSelected = selectedAgent && selectedAgent.id === agent.id;
+      const isSelected = !isCreating && selectedAgent && selectedAgent.id === agent.id;
       const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
       const bg = isSelected ? "var(--accent-bg)" : "var(--surface)";
       const metaColor = isSelected ? "var(--ink-2)" : "var(--ink-3)";
@@ -90,7 +93,40 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
   let stageControls = "";
   let stageBody = "";
 
-  if (selectedAgent) {
+  if (isCreating) {
+    stageHead = `
+      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+        <b class="shell-title-line" style="font-size:15px;font-weight:600">New agent</b>
+      </div>`;
+
+    stageControls = `
+      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)">
+        It gets its token once, when you create it.
+      </div>`;
+
+    stageBody = `
+      <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:20px 24px 0">
+        <div style="max-width:440px;display:flex;flex-direction:column;gap:16px">
+          <form class="agent-create-stage-form" data-action="desktop-agent-create" style="display:flex;flex-direction:column;gap:16px">
+            <label style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:13px;font-weight:600">Agent id</span>
+              <input id="stage-agent-id" name="id" required autocomplete="off" placeholder="deploy-bot-2" style="height:40px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-mono)">
+              <span id="stage-agent-id-error" class="field-error" style="display:none;color:var(--danger);font-size:12px;font-weight:500"></span>
+              <span style="font-size:12px;color:var(--ink-3)">Lowercase letters, digits and dashes. Cannot change later.</span>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:13px;font-weight:600">Display name</span>
+              <input id="stage-agent-name" name="display_name" required placeholder="Deploy bot (staging)" style="height:40px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans)">
+              <span id="stage-agent-name-error" class="field-error" style="display:none;color:var(--danger);font-size:12px;font-weight:500"></span>
+            </label>
+            <div style="display:flex;gap:8px;padding-top:4px">
+              <button class="primary" type="submit" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:0;background:var(--ink);color:var(--ink-inverse);font:600 14px/1 var(--font-sans);cursor:pointer">Create agent</button>
+              <button type="button" class="btn-outline" data-action="agent-cancel-create" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  } else if (selectedAgent) {
     const grants = grantsByAgent[selectedAgent.id] || [];
     const lastCall = selectedAgent.last_seen_at
       ? `last call ${relative(selectedAgent.last_seen_at)}`
@@ -107,7 +143,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
     stageControls = `
       <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
         <span style="flex:1;font-size:13px;color:var(--ink-2)">Token issued ${esc(issuedDate)}</span>
-        <button type="button" class="btn-outline" data-action="agent-token" data-id="${esc(selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Reissue token</button>
+        <button type="button" class="btn-outline" data-action="agent-token" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Reissue token</button>
       </div>`;
 
     const projectRows = grants.length
@@ -151,7 +187,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
 
   return shellHTML({
     segment: "access",
-    hasSelection: Boolean(selectedAgent),
+    hasSelection: Boolean(selectedAgent) || isCreating,
     indexHead,
     indexControls,
     indexBody,
@@ -166,7 +202,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
   const stageHead = shellStageHead(agent.display_name || agent.id, meta, "", "#/access");
   const stageControls = `
     <div class="shell-controls" style="display:flex;align-items:center;gap:8px;padding:0 16px;height:44px;background:var(--surface);border-bottom:1px solid var(--line);box-sizing:border-box">
-      <button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
+      <button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
       <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>
     </div>
   `;
@@ -299,6 +335,9 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
   });
 }
 
+let desktopState = null;
+let currentGen = 0;
+
 function setupAgentsEvents() {
   const root = main.querySelector(".shell[data-segment='access']") || main.querySelector(".access-screen") || main;
   if (!root || root.dataset.agentsEventsBound === "on") return;
@@ -314,6 +353,24 @@ function setupAgentsEvents() {
         });
       }
     } else if (event.key === "Escape") {
+      if (desktopState && desktopState.isCreating) {
+        event.preventDefault();
+        desktopState.isCreating = false;
+        paint(currentGen, renderDesktopAgents(
+          desktopState.agents,
+          desktopState.projects,
+          desktopState.grantsByAgent,
+          desktopState.selectedAgent,
+          false
+        ));
+        installShellLayout(main);
+        setupAgentsEvents();
+        const target = desktopState.previousSelected
+          ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
+          : main.querySelector(".agent-index-row");
+        target?.focus();
+        return;
+      }
       if (document.activeElement?.closest(".shell-stage")) {
         event.preventDefault();
         const selected = main.querySelector('.agent-index-row[aria-current="true"]') || main.querySelector('.agent-index-row');
@@ -326,20 +383,132 @@ function setupAgentsEvents() {
     const toggleBtn = event.target.closest("[data-action='toggle-add-agent']");
     if (toggleBtn) {
       event.preventDefault();
-      const form =
-        document.getElementById("desktop-add-agent-form") ||
-        document.getElementById("mobile-add-agent-form");
+      if (desktopState && window.matchMedia("(min-width: 720px)").matches) {
+        desktopState.isCreating = !desktopState.isCreating;
+        if (desktopState.isCreating) {
+          desktopState.previousSelected = desktopState.selectedAgent?.id || null;
+        }
+        paint(currentGen, renderDesktopAgents(
+          desktopState.agents,
+          desktopState.projects,
+          desktopState.grantsByAgent,
+          desktopState.isCreating ? null : desktopState.selectedAgent,
+          desktopState.isCreating
+        ));
+        installShellLayout(main);
+        setupAgentsEvents();
+        if (desktopState.isCreating) {
+          requestAnimationFrame(() => {
+            document.getElementById("stage-agent-id")?.focus();
+          });
+        } else {
+          const target = desktopState.previousSelected
+            ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
+            : main.querySelector(".agent-index-row");
+          target?.focus();
+        }
+        return;
+      }
+      const form = document.getElementById("mobile-add-agent-form");
       if (form) {
         form.style.display = form.style.display === "none" ? "block" : "none";
         if (form.style.display === "block") {
           form.querySelector("input")?.focus();
         }
       }
+      return;
+    }
+
+    const cancelBtn = event.target.closest("[data-action='agent-cancel-create']");
+    if (cancelBtn && desktopState) {
+      event.preventDefault();
+      desktopState.isCreating = false;
+      paint(currentGen, renderDesktopAgents(
+        desktopState.agents,
+        desktopState.projects,
+        desktopState.grantsByAgent,
+        desktopState.selectedAgent,
+        false
+      ));
+      installShellLayout(main);
+      setupAgentsEvents();
+      const target = desktopState.previousSelected
+        ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
+        : main.querySelector(".agent-index-row");
+      target?.focus();
+      return;
+    }
+  });
+
+  root.addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-action='desktop-agent-create']");
+    if (!form) return;
+    event.preventDefault();
+
+    const idInput = form.querySelector("#stage-agent-id");
+    const nameInput = form.querySelector("#stage-agent-name");
+    const idError = form.querySelector("#stage-agent-id-error");
+    const nameError = form.querySelector("#stage-agent-name-error");
+
+    if (idError) idError.style.display = "none";
+    if (nameError) nameError.style.display = "none";
+
+    const idVal = (idInput?.value || "").trim();
+    const nameVal = (nameInput?.value || "").trim();
+
+    if (!idVal) {
+      if (idError) {
+        idError.textContent = "Agent id is required.";
+        idError.style.display = "block";
+      }
+      idInput?.focus();
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(idVal)) {
+      if (idError) {
+        idError.textContent = "Lowercase letters, digits and dashes only.";
+        idError.style.display = "block";
+      }
+      idInput?.focus();
+      return;
+    }
+    if (!nameVal) {
+      if (nameError) {
+        nameError.textContent = "Display name is required.";
+        nameError.style.display = "block";
+      }
+      nameInput?.focus();
+      return;
+    }
+
+    try {
+      await api("/api/v1/agents", {
+        method: "POST",
+        body: JSON.stringify({ id: idVal, display_name: nameVal }),
+      });
+      if (desktopState) {
+        desktopState.isCreating = false;
+      }
+      location.hash = `#/access?agent=${encodeURIComponent(idVal)}`;
+      // RULE 13.3: the new agent's token is issued once, now, and B2 opens on
+      // it directly. There is nothing to reissue, so no confirm state.
+      let issued = null;
+      try {
+        issued = await api(`/api/v1/agents/${encodeURIComponent(idVal)}/token`, { method: "POST" });
+      } catch {}
+      revealIssuedToken(issued?.token || null, nameVal || idVal, idVal);
+    } catch (err) {
+      if (idError) {
+        idError.textContent = err.message || "Failed to create agent.";
+        idError.style.display = "block";
+      }
+      idInput?.focus();
     }
   });
 }
 
 export async function accessScreen(gen, params = null) {
+  currentGen = gen;
   let agents = [];
   let projects = [];
   const grantsByAgent = {};
@@ -369,10 +538,19 @@ export async function accessScreen(gen, params = null) {
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
     const selectedAgent = agentParam ? agents.find((a) => a.id === agentParam) : null;
-    paint(gen, renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent));
+    desktopState = {
+      agents,
+      projects,
+      grantsByAgent,
+      selectedAgent,
+      isCreating: false,
+      previousSelected: selectedAgent?.id || null,
+    };
+    paint(gen, renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent, false));
     installShellLayout(main);
     setupAgentsEvents();
   } else {
+    desktopState = null;
     if (agentParam) {
       const agent = agents.find((a) => a.id === agentParam);
       if (agent) {
@@ -444,7 +622,7 @@ export async function copyToken(token) {
 // CHECK 12.1.C: the token string exists in the DOM only while this dialog is
 // open. The element is removed on close, so nothing of the string survives it,
 // rather than being hidden or left in a data attribute.
-export function revealIssuedToken(token, agentName = "") {
+export function revealIssuedToken(token, agentName = "", agentId = "") {
   const opener = document.activeElement;
   const el = document.createElement("dialog");
   el.className = "dialog dialog-reveal";
@@ -452,7 +630,9 @@ export function revealIssuedToken(token, agentName = "") {
   el.setAttribute("aria-labelledby", titleId);
 
   let state = 1;
-  let visible = null;
+  // A token passed in (a just-created agent) opens straight at the reveal;
+  // otherwise state 1 confirms before issuing.
+  let visible = token || null;
 
   const form = document.createElement("form");
   form.method = "dialog";
@@ -502,7 +682,7 @@ export function revealIssuedToken(token, agentName = "") {
 
   function paintState(next) {
     state = next;
-    const name = agentName || "this agent";
+    const name = agentName || agentId || "this agent";
     if (state === 1) {
       heading.textContent = `Reissue the token for ${name}?`;
       body.textContent =
@@ -514,7 +694,7 @@ export function revealIssuedToken(token, agentName = "") {
       value.textContent = "";
       body.hidden = false;
     } else {
-      heading.textContent = `New token for ${name}`;
+      heading.textContent = `Token for ${name}`;
       body.textContent = "Copy it now. It is shown once and cannot be read again.";
       body.hidden = false;
       note.textContent = "Done closes this and drops the token from the page.";
@@ -525,14 +705,14 @@ export function revealIssuedToken(token, agentName = "") {
     }
   }
 
-  paintState(1);
+  paintState(visible ? 2 : 1);
 
   safe.addEventListener("click", () => el.close("cancel"));
   commit.addEventListener("click", async () => {
     if (state === 1) {
       commit.disabled = true;
       try {
-        const issued = await api(`/api/v1/agents/${encodeURIComponent(agentName)}/token`, {
+        const issued = await api(`/api/v1/agents/${encodeURIComponent(agentId || agentName)}/token`, {
           method: "POST",
         });
         visible = issued.token;
@@ -564,7 +744,8 @@ export function revealIssuedToken(token, agentName = "") {
   document.body.appendChild(el);
   document.documentElement.classList.add("has-dialog");
   el.showModal();
-  safe.focus();
+  if (visible) valueRow.querySelector(".reveal-copy")?.focus();
+  else safe.focus();
 
   el.addEventListener(
     "close",
@@ -594,10 +775,11 @@ export function revealIssuedToken(token, agentName = "") {
   });
 }
 
-export async function reissueToken(id) {
+export async function reissueToken(id, name = "") {
   // The dialog does the asking and the issuing: state 1 confirms, state 2
-  // reveals, and the string leaves the DOM when it closes (CHECK 12.1.C).
-  await revealIssuedToken(null, id);
+  // reveals, and the string leaves the DOM when it closes (CHECK 12.1.C). The
+  // id addresses the API; the display name is what the reader sees.
+  await revealIssuedToken(null, name || id, id);
 }
 
 export async function revokeToken(id) {

@@ -1793,6 +1793,66 @@ fn desktop_agents_is_list_and_item_shell() {
     );
 }
 
+// Round 13.1, RULE 13.3: Add agent opens the form in the stage on desktop.
+// Not an inline form in the list. Add agent takes aria-pressed="true" and
+// clears the index selection; stage 52 header "New agent", 40 row "It gets its
+// token once, when you create it.", form 440 max with Agent id, Display name,
+// Create agent, Cancel.
+#[test]
+fn desktop_agents_add_agent_opens_form_in_stage() {
+    let desktop = AGENTS_JS
+        .split("function renderDesktopAgents(")
+        .nth(1)
+        .expect("agents carries a desktop renderer");
+    let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
+    assert!(
+        desktop.contains("New agent"),
+        "RULE 13.3: stage header carries 'New agent' when creating"
+    );
+    assert!(
+        desktop.contains("It gets its token once, when you create it."),
+        "RULE 13.3: stage control row carries token copy when creating"
+    );
+    assert!(
+        desktop.contains("440"),
+        "RULE 13.3: stage form is capped at 440px"
+    );
+    assert!(
+        desktop.contains("Agent id") && desktop.contains("Display name"),
+        "RULE 13.3: stage form carries Agent id and Display name fields"
+    );
+    assert!(
+        desktop.contains("Create agent") && desktop.contains("Cancel"),
+        "RULE 13.3: stage form carries Create agent and Cancel buttons"
+    );
+    assert!(
+        !desktop.contains("desktop-add-agent-form"),
+        "RULE 13.3: old inline list form is retired"
+    );
+    // Board annotations are notes to the builder, never UI copy. Both of these
+    // shipped into the screen once and were caught by looking.
+    assert!(
+        !AGENTS_JS.contains("Focus lands on Agent id")
+            && !AGENTS_JS.contains("Revoke confirms in the B1 dialog")
+            && !AGENTS_JS.contains("as on the phone"),
+        "board annotations must not be rendered as UI copy"
+    );
+    // RULE 13.3: the created agent's token is issued and B2 opens on it directly,
+    // titled with the display name; there is nothing to reissue, so no confirm.
+    assert!(
+        AGENTS_JS.contains("revealIssuedToken(issued?.token || null, nameVal || idVal, idVal)"),
+        "create opens B2 straight away with the token and the display name"
+    );
+    assert!(
+        AGENTS_JS.contains("Token for ${name}"),
+        "the reveal is titled with the display name"
+    );
+    assert!(
+        !AGENTS_JS.contains("New token for ${name}"),
+        "the old reveal title is retired"
+    );
+}
+
 #[test]
 fn desktop_agents_never_shows_a_token() {
     let desktop = AGENTS_JS

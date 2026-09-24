@@ -112,7 +112,7 @@ main.addEventListener("click", (event) => {
   if (action === "prune") acted(button, pruneSession(id, button.dataset.agent));
   if (action === "copy-token") copyToken(button.dataset.token);
   if (action === "more-refresh") acted(button, render());
-  if (action === "agent-token") acted(button, reissueToken(id));
+  if (action === "agent-token") acted(button, reissueToken(id, button.dataset.name));
   if (action === "agent-revoke") acted(button, revokeToken(id));
   if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));
   if (action === "artifact-open") openArtifact(id);
