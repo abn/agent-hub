@@ -30,6 +30,8 @@ const HOME_JS: &str = include_str!("../web/home.mjs");
 const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
 const STORAGE_JS: &str = include_str!("../web/storage.mjs");
 const AGENTS_JS: &str = include_str!("../web/agents.mjs");
+const SHELL_JS: &str = include_str!("../web/shell.mjs");
+const INDEX_HTML: &str = include_str!("../web/index.html");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1669,6 +1671,49 @@ fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
     assert!(
         !desktop.contains("token-val") && !desktop.contains("showToken"),
         "no agent or admin token characters are rendered on this screen"
+    );
+}
+
+// Round 12, the rail's sync line. It follows the phone's rule: shown only when
+// stale or failed, never a standing "Synced". The designer's round 12.1 says
+// stale or failed without defining stale, so the threshold is the build's and
+// is called out as an open question.
+
+#[test]
+fn desktop_rail_sync_line_is_hidden_until_unhealthy() {
+    assert!(
+        SHELL_JS.contains("SYNC_STALE_MS"),
+        "the rail must carry a stated staleness threshold"
+    );
+    assert!(
+        SHELL_JS.contains("syncLine.hidden = true"),
+        "the healthy rail hides the sync line"
+    );
+    assert!(
+        SHELL_JS.contains("syncLine.hidden = false"),
+        "the stale or failed rail shows the sync line"
+    );
+    assert!(
+        SHELL_JS.contains("export function noteSyncFailure() {\n  syncFailed = true;\n  revealSyncLineWhenUnhealthy();\n}"),
+        "a failed call is the rail's failure signal"
+    );
+    let login = INDEX_HTML;
+    assert!(
+        login.contains(r#"id="rail-sync" hidden"#),
+        "the rail renders its sync line hidden at rest"
+    );
+}
+
+#[test]
+fn desktop_rail_sync_line_is_not_a_standing_synced() {
+    let login = INDEX_HTML;
+    assert!(
+        !login.contains(r#"id="rail-sync">synced"#),
+        "the rail must not render a standing synced line in the shell markup"
+    );
+    assert!(
+        !SHELL_JS.contains("`synced ${relative(lastSyncTime)}`\n  }"),
+        "the sync line must not be set unconditionally"
     );
 }
 

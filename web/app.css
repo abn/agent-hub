@@ -460,6 +460,10 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Hidden is the healthy state: the line appears only when stale or failed,
+     so the rail says nothing when there is nothing to say. */
+  .rail-sync[hidden] { display: none; }
+  .rail-sync[data-state="failed"] { color: var(--danger); }
 }
 
 @media (pointer: coarse) and (min-width: 720px) {

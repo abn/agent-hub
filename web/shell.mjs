@@ -11,12 +11,45 @@ const railProjects = document.getElementById("rail-projects");
 const syncLine = document.getElementById("rail-sync");
 
 let lastSyncTime = Date.now();
+// The rail shows the sync line only when there is something to say. A healthy
+// hub gets no standing "Synced": a line that is always there is a line nobody
+// reads. Stale means the last successful call is older than this; failed means
+// a call threw. Threshold chosen here because the designer's round 12.1 says
+// "stale or failed" without defining stale, and that is an open question.
+const SYNC_STALE_MS = 5 * 60 * 1000;
+let syncFailed = false;
 
-export function updateRailSync(time = Date.now()) {
+export function updateRailSync(time = Date.now(), failed = false) {
   lastSyncTime = time;
-  if (syncLine) {
-    syncLine.textContent = `synced ${relative(lastSyncTime)}`;
+  if (failed) syncFailed = true;
+  revealSyncLineWhenUnhealthy();
+}
+
+function revealSyncLineWhenUnhealthy() {
+  if (!syncLine) return;
+  const age = Date.now() - lastSyncTime;
+  const stale = age >= SYNC_STALE_MS;
+  if (!syncFailed && !stale) {
+    syncLine.hidden = true;
+    syncLine.textContent = "";
+    return;
   }
+  syncLine.hidden = false;
+  syncLine.textContent = syncFailed ? "not synced" : `synced ${relative(lastSyncTime)}`;
+  syncLine.dataset.state = syncFailed ? "failed" : "stale";
+}
+
+// The one call the rail already makes is the storage read that fills the node
+// line. Its failure is the rail's failure signal, so the sync line appears
+// exactly when the hub stops answering.
+export function noteSyncFailure() {
+  syncFailed = true;
+  revealSyncLineWhenUnhealthy();
+}
+
+export function noteSyncSuccess() {
+  syncFailed = false;
+  updateRailSync(Date.now());
 }
 
 // The node line names the hub the operator is looking at. It is the storage
@@ -34,7 +67,9 @@ async function fillNodeLine() {
     if (nodeLine) {
       nodeLine.textContent = `${usage.node.host} · ${usage.node.mode}`;
     }
+    noteSyncSuccess();
   } catch {
+    noteSyncFailure();
     setTimeout(fillNodeLine, 15000);
   }
 }
@@ -142,5 +177,5 @@ export function installShell() {
   fillNodeLine();
   mirrorBadge();
   renderRailProjects();
-  setInterval(() => updateRailSync(lastSyncTime), 30000);
+  setInterval(() => updateRailSync(lastSyncTime, syncFailed), 30000);
 }
