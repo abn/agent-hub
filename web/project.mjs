@@ -108,24 +108,26 @@ function segSwitcher(id, segment, stats) {
 
 const PROJECT_MOBILE_STYLE = `<style>
 @media (max-width: 1099px) {
-  .shell-index .shell-head { display: none !important; }
-  .shell-index .shell-controls:not(.mobile-filter-open) { display: none !important; }
+  /* Only the desktop segmented switcher's wrapper hides on a phone. The phone
+     header is also a .shell-head inside .shell-index, so the rule must name the
+     switcher (project-seg-head), not every .shell-head, or it takes the header
+     with it. */
+  .shell-index .shell-head.project-seg-head { display: none !important; }
+  /* The chips row is the filter panel: hidden until the filter glyph opens it.
+     The tools row carries .shell-controls too now, so it is excluded here and
+     stays visible. */
+  .shell-index .shell-controls:not(.project-tools-mobile):not(.mobile-filter-open) { display: none !important; }
   .shell-index .shell-controls.mobile-filter-open { display: flex !important; }
+  /* RULE 12.2: this is the project's tools row, so it carries .shell-controls
+     and the framework owns its height, its sticky offset (76px at rest, 52px
+     compressed) and its z-index. Pinning it at a hardcoded 52px put it 24px
+     inside the 76px header at rest, which is the band that floated over the
+     feed. */
   .project-tools-mobile {
     display: flex !important;
-    align-items: center;
-    gap: 8px;
-    height: 44px;
-    min-height: 44px;
     padding: 0 16px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
-    box-sizing: border-box;
-    position: sticky;
-    top: 52px;
-    z-index: 10;
   }
-  .project-tools-seg {
+  .project-tools-mobile > .project-tools-seg {
     flex: 1;
     display: flex;
     height: 36px;
@@ -198,7 +200,7 @@ function projectToolsMobile(id, segment, stats) {
     }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
   const filterGlyph = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`;
 
-  return `<div class="project-tools-mobile" role="toolbar" aria-label="Project tools">
+  return `<div class="project-tools-mobile shell-controls" role="toolbar" aria-label="Project tools">
     <div class="project-tools-seg" role="tablist" aria-label="Project sections">
       ${tab("feed", "Feed", null)}
       ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
@@ -236,7 +238,7 @@ if (typeof document !== "undefined") {
     }
     const filterToggle = event.target.closest?.('[data-action="project-filter-toggle"]');
     if (filterToggle) {
-      const controls = document.querySelector(".shell-index .shell-controls");
+      const controls = document.querySelector(".shell-index .shell-controls:not(.project-tools-mobile)");
       if (controls) {
         controls.classList.toggle("mobile-filter-open");
       }
@@ -336,7 +338,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
-    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
     indexControls: shellIndexControls("Filter events", group),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -378,7 +380,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
       indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
@@ -447,7 +449,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
       indexControls: shellIndexControls("Filter sessions"),
       indexBody: card,
       stageHead,

@@ -35,6 +35,7 @@ const INDEX_HTML: &str = include_str!("../web/index.html");
 const PROJECTS_JS: &str = include_str!("../web/projects.mjs");
 const CONNECT_JS: &str = include_str!("../web/connect.mjs");
 const MORE_JS: &str = include_str!("../web/more.mjs");
+const PROJECT_JS: &str = include_str!("../web/project.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -1998,6 +1999,82 @@ fn phone_home_header_stays_in_layout() {
     assert!(
         HOME_JS.contains(".shell.is-compressed .home-greeting {\n    opacity: 0;"),
         "the body copy fades out as the bar takes the string over"
+    );
+}
+
+// The project screen stacks the phone header, the tools row and the desktop
+// switcher's wrapper into one indexHead. Two things went wrong there: the
+// switcher rule hid every .shell-head (so the phone header vanished), and the
+// tools row pinned itself at a hardcoded 52px (so it floated 24px into the
+// 76px header at rest). Both are checked here so neither can come back.
+#[test]
+fn phone_project_chrome_is_one_header_and_one_tools_row() {
+    assert!(
+        PROJECT_JS
+            .contains(".shell-index .shell-head.project-seg-head { display: none !important; }"),
+        "only the switcher's wrapper may hide on a phone; the header is a .shell-head too"
+    );
+    assert!(
+        !PROJECT_JS.contains(".shell-index .shell-head { display: none !important; }"),
+        "a blanket .shell-head hide inside .shell-index takes the phone header with it"
+    );
+    assert!(
+        PROJECT_JS.contains(r#"class="shell-head project-seg-head""#),
+        "the switcher's wrapper carries the class the hide rule names"
+    );
+    // The tools row is a .shell-controls, so the framework owns its sticky
+    // offset (76px at rest, 52px compressed). It must not pin itself.
+    assert!(
+        PROJECT_JS.contains(r#"class="project-tools-mobile shell-controls""#),
+        "the project tools row is a .shell-controls so the frame's two-height rule governs it"
+    );
+    let tools_block = PROJECT_JS
+        .split(".project-tools-mobile {")
+        .nth(1)
+        .expect("the tools row has a style block")
+        .split('}')
+        .next()
+        .expect("the tools row style block closes");
+    assert!(
+        !tools_block.contains("top: 52px"),
+        "the tools row must not pin itself at 52px; the header is 76px at rest"
+    );
+    assert!(
+        !tools_block.contains("position: sticky"),
+        "the tools row takes its sticky offset from .shell-controls, not its own rule"
+    );
+    // The filter glyph toggles the chips row, which is the other .shell-controls
+    // in the index. If it matches the tools row first, the panel never opens.
+    assert!(
+        PROJECT_JS.contains(
+            r#".shell-index .shell-controls:not(.project-tools-mobile):not(.mobile-filter-open)"#
+        ),
+        "the chips row stays hidden until the filter opens it, excluding the tools row"
+    );
+    assert!(
+        PROJECT_JS.contains(
+            r#"document.querySelector(".shell-index .shell-controls:not(.project-tools-mobile)")"#
+        ),
+        "the filter glyph targets the chips row, not the tools row it comes before"
+    );
+}
+
+// commentsPanel returns the backdrop and the drawer, not a Node. Passing the
+// returned object to appendChild threw on the coarse-pointer path, so the whole
+// artifact stage painted an error card on a phone.
+#[test]
+fn phone_artifact_stage_mounts_both_comment_nodes() {
+    assert!(
+        ARTIFACTS_JS.contains("const { backdrop, drawer } = commentsPanel({ toggle, badge });"),
+        "the coarse-pointer path destructures the two nodes commentsPanel returns"
+    );
+    assert!(
+        ARTIFACTS_JS.contains("document.body.append(backdrop, drawer);"),
+        "both nodes are mounted; appending the returned object is not a Node"
+    );
+    assert!(
+        !ARTIFACTS_JS.contains("appendChild(commentsPanel("),
+        "commentsPanel returns an object, and appendChild of an object throws"
     );
 }
 

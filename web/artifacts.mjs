@@ -163,9 +163,12 @@ export function wireArtifactStage(root, id, info) {
       });
     }
   } else {
-    // One surface on a coarse pointer: the sheet.
+    // One surface on a coarse pointer: the sheet. `commentsPanel` returns the
+    // backdrop and the drawer, so both are mounted; appending the returned
+    // object itself is not a Node and throws.
     const { toggle, badge } = commentsToggle();
-    document.body.appendChild(commentsPanel({ toggle, badge }));
+    const { backdrop, drawer } = commentsPanel({ toggle, badge });
+    document.body.append(backdrop, drawer);
     for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
       btn.addEventListener("click", () => openCommentsDrawer());
     }
