@@ -6,6 +6,7 @@ import { esc, paint } from "./dom.mjs";
 import { shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
+import { refreshSyncDisplay } from "./shell.mjs";
 
 export async function moreScreen(gen) {
   let usage = {};
@@ -74,9 +75,9 @@ export async function moreScreen(gen) {
         <span class="more-val"></span>
         <span class="more-chevron" aria-hidden="true">${chevronRight}</span>
       </a>
-      <div class="more-sync-line">
+      <div class="more-sync-line" id="more-sync" role="status" hidden>
         <span class="more-sync-dot" aria-hidden="true"></span>
-        <span class="more-sync-text mono">synced just now</span>
+        <span class="more-sync-text mono"></span>
         <button type="button" class="more-refresh-btn" data-action="more-refresh">Refresh</button>
       </div>
     </div>
@@ -91,4 +92,7 @@ export async function moreScreen(gen) {
       stageBody: content,
     }),
   );
+  // More shows the same sync state the rail does, and no more: healthy means
+  // the line is absent here too, with no space reserved for it.
+  refreshSyncDisplay();
 }

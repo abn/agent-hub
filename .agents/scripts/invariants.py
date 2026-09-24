@@ -997,6 +997,64 @@ def check_toast_leaves_a_writer_alone(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_sync_states(page, watch: Watch, port: int) -> None:
+    """CHECK 12.1.A and 12.1.B, at both widths.
+
+    One failure shows nothing; two show the failed line in every place that
+    carries it. The counter is driven through the module's own functions, so
+    this fails the state itself rather than reading a screenshot.
+    """
+    watch.enter("sync: hidden when healthy, shown after two failures, at both widths")
+
+    for width, label in ((390, "phone"), (1440, "desktop")):
+        page.set_viewport_size({"width": width, "height": 900})
+        goto(page, "#/more" if width < 720 else "#/home", None)
+        page.wait_for_timeout(400)
+
+        def shown() -> list:
+            return page.evaluate(
+                "(() => { const out = [];"
+                " for (const el of document.querySelectorAll('#rail-sync, .more-sync-line')) {"
+                "   if (el.hidden) continue;"
+                "   const cs = window.getComputedStyle(el);"
+                "   if (cs.display === 'none') continue;"
+                "   const box = el.getBoundingClientRect();"
+                "   if (box.height > 0 && box.width > 0) out.push((el.id || el.className) + ':' + el.textContent.trim());"
+                " }"
+                " return out; })()"
+            )
+
+        # CHECK 12.1.A: healthy shows nothing anywhere, at this width.
+        healthy = shown()
+        if healthy:
+            watch.fail(f"{label}: healthy still shows a sync element: {healthy}")
+
+        # CHECK 12.1.B, first half: one failure still shows nothing.
+        page.evaluate("window.__sync.noteSyncFailure({ status: 500, kind: 'error' })")
+        page.wait_for_timeout(120)
+        one = shown()
+        if one:
+            watch.fail(f"{label}: one failure already shows a sync element: {one}")
+
+        # CHECK 12.1.B, second half: two failures show the line here.
+        page.evaluate("window.__sync.noteSyncFailure({ status: 500, kind: 'error' })")
+        page.wait_for_timeout(120)
+        two = shown()
+        if not two:
+            watch.fail(f"{label}: two failures did not show the sync line")
+        elif not any("not synced" in entry for entry in two):
+            watch.fail(f"{label}: two failures showed {two}, expected a 'not synced' line")
+
+        # Any success hides it again, with no "synced" flash on the way back.
+        page.evaluate("window.__sync.noteSyncSuccess()")
+        page.wait_for_timeout(120)
+        healed = shown()
+        if healed:
+            watch.fail(f"{label}: a success left the sync line showing: {healed}")
+
+    watch.drain_rejections()
+
+
 def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     """The phone frame, collapsing header, tools row, five tabs, and More screen.
 
@@ -1030,9 +1088,22 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     if more_rows != expected_rows:
         watch.fail(f"More screen rows differ from expected: found {more_rows!r}")
 
-    has_sync_line = page.evaluate("!!document.querySelector('.more-screen .more-sync-line')")
-    if not has_sync_line:
-        watch.fail("More screen is missing permanent sync line")
+    # CHECK 12.1.A: healthy means no sync element anywhere, and no space kept
+    # for one. Asserting the text is empty would pass on a visible empty line,
+    # which is exactly what the design forbids.
+    sync_visible = page.evaluate(
+        "(() => { const out = [];"
+        " for (const sel of ['.more-screen .more-sync-line', '#rail-sync']) {"
+        "   const el = document.querySelector(sel);"
+        "   if (!el) continue;"
+        "   const cs = window.getComputedStyle(el);"
+        "   const box = el.getBoundingClientRect();"
+        "   if (cs.display !== 'none' && !el.hidden && box.height > 0 && box.width > 0) out.push(sel);"
+        " }"
+        " return out; })()"
+    )
+    if sync_visible:
+        watch.fail(f"healthy hub still shows a sync element: {sync_visible}")
 
     # Pushed screens keep More current and have back chevron to More
     # Settings is already on the shell with shellStageHead
@@ -1950,6 +2021,7 @@ def run() -> int:
                 # 7. Phone frame, tools row, 5 tabs, More screen
                 run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
                 run_step(watch, check_phone_home, page, watch, port, project)
+                run_step(watch, check_sync_states, page, watch, port)
 
                 # 8. Project features
                 run_step(watch, check_project_tools_row, page, watch, project)

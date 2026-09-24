@@ -8,48 +8,151 @@ import { relative } from "./time.mjs";
 
 const nodeLine = document.getElementById("top-node");
 const railProjects = document.getElementById("rail-projects");
-const syncLine = document.getElementById("rail-sync");
+
+// The sync state, as §13 defines it.
+//
+// Shown only when it is not healthy, on both widths and in no reserved space:
+// a line that is always there is a line nobody reads. Three states.
+//
+//   healthy  nothing is shown anywhere.
+//   stale    no successful response for five minutes while the page is visible.
+//   failed   two consecutive failed requests (a network error, a ten second
+//            timeout, or a 5xx), or the browser reporting itself offline.
+//
+// A 401 is neither: it means the token is gone, so it routes to Connect.
+// A hidden tab never goes stale, so a background page does not accuse the hub
+// of a silence it did not break; on becoming visible it fetches first and only
+// then, if still old, shows stale. Any success hides the line at once, with no
+// "synced" flash on the way back.
+const SYNC_STALE_MS = 5 * 60 * 1000;
+const SYNC_TIMEOUT_MS = 10 * 1000;
 
 let lastSyncTime = Date.now();
-// The rail shows the sync line only when there is something to say. A healthy
-// hub gets no standing "Synced": a line that is always there is a line nobody
-// reads. Stale means the last successful call is older than this; failed means
-// a call threw. Threshold chosen here because the designer's round 12.1 says
-// "stale or failed" without defining stale, and that is an open question.
-const SYNC_STALE_MS = 5 * 60 * 1000;
-let syncFailed = false;
+let consecutiveFailures = 0;
+let syncState = "healthy";
 
-export function updateRailSync(time = Date.now(), failed = false) {
-  lastSyncTime = time;
-  if (failed) syncFailed = true;
-  revealSyncLineWhenUnhealthy();
+const syncTargets = () => {
+  if (typeof document === "undefined") return [];
+  return [document.getElementById("rail-sync"), document.getElementById("more-sync")].filter(Boolean);
+};
+
+function renderSync() {
+  for (const el of syncTargets()) {
+    const text = el.querySelector(".more-sync-text") || el;
+    const action = el.querySelector(".more-refresh-btn");
+    if (syncState === "healthy") {
+      el.hidden = true;
+      text.textContent = "";
+      delete el.dataset.state;
+      continue;
+    }
+    el.hidden = false;
+    el.dataset.state = syncState;
+    if (syncState === "failed") {
+      // The word carries the state and the tone only agrees with it.
+      const stamp = new Date(lastSyncTime);
+      const hh = String(stamp.getHours()).padStart(2, "0");
+      const mm = String(stamp.getMinutes()).padStart(2, "0");
+      text.textContent = navigatorOnline() ? `not synced · ${hh}:${mm}` : "offline";
+    } else {
+      text.textContent = `synced ${relative(lastSyncTime)}`;
+    }
+    if (action) action.textContent = syncState === "failed" ? "Retry" : "Refresh";
+  }
 }
 
-function revealSyncLineWhenUnhealthy() {
-  if (!syncLine) return;
-  const age = Date.now() - lastSyncTime;
-  const stale = age >= SYNC_STALE_MS;
-  if (!syncFailed && !stale) {
-    syncLine.hidden = true;
-    syncLine.textContent = "";
+function navigatorOnline() {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+// The page's own visibility is the clock's gate: a hidden tab does not age.
+function staleNow() {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return false;
+  return Date.now() - lastSyncTime >= SYNC_STALE_MS;
+}
+
+function recomputeSync() {
+  if (consecutiveFailures >= 2 || !navigatorOnline()) {
+    syncState = "failed";
+  } else if (staleNow()) {
+    syncState = "stale";
+  } else {
+    syncState = "healthy";
+  }
+  renderSync();
+}
+
+export function syncStateNow() {
+  return syncState;
+}
+
+// A screen that carries a sync line calls this after it paints, so the line
+// shows the state as it stands rather than the state as it was.
+export function refreshSyncDisplay() {
+  renderSync();
+}
+
+// The behavioral harness drives these states directly, because CHECK 12.1.B is
+// about a counter ("two consecutive failures"), and a counter that cannot be
+// set from a test cannot be checked from one either.
+if (typeof window !== "undefined") {
+  window.__sync = { noteSyncFailure, noteSyncSuccess, syncStateNow, refreshSyncDisplay };
+}
+
+export function noteSyncSuccess(time = Date.now()) {
+  lastSyncTime = time;
+  consecutiveFailures = 0;
+  recomputeSync();
+}
+
+// `kind` is what the caller knows about the failure. A 401 is not a sync
+// failure at all, so it routes to Connect instead of accusing the hub.
+export function noteSyncFailure({ status = 0, kind = "error" } = {}) {
+  if (status === 401 || kind === "unauthorized") {
+    routeToConnect();
     return;
   }
-  syncLine.hidden = false;
-  syncLine.textContent = syncFailed ? "not synced" : `synced ${relative(lastSyncTime)}`;
-  syncLine.dataset.state = syncFailed ? "failed" : "stale";
+  consecutiveFailures += 1;
+  recomputeSync();
 }
 
-// The one call the rail already makes is the storage read that fills the node
-// line. Its failure is the rail's failure signal, so the sync line appears
-// exactly when the hub stops answering.
-export function noteSyncFailure() {
-  syncFailed = true;
-  revealSyncLineWhenUnhealthy();
+function routeToConnect() {
+  if (typeof location === "undefined") return;
+  if (location.hash.startsWith("#/connect")) return;
+  location.hash = "#/connect";
 }
 
-export function noteSyncSuccess() {
-  syncFailed = false;
-  updateRailSync(Date.now());
+export function installSyncWatch() {
+  if (typeof window === "undefined" || syncWatchInstalled) return;
+  syncWatchInstalled = true;
+  const refresh = () => recomputeSync();
+  window.addEventListener("online", refresh);
+  window.addEventListener("offline", refresh);
+  document.addEventListener("visibilitychange", () => {
+    recomputeSync();
+  });
+  setInterval(refresh, 30000);
+}
+let syncWatchInstalled = false;
+
+// A call that has to answer within a bounded time, so a hung request counts as
+// a failure rather than as silence.
+export async function syncFetch(path) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+  try {
+    const res = await api(path, { signal: controller.signal });
+    noteSyncSuccess();
+    return res;
+  } catch (error) {
+    noteSyncFailure({
+      status: error?.status || 0,
+      kind: error?.status === 401 ? "unauthorized" : "error",
+    });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // The node line names the hub the operator is looking at. It is the storage
@@ -63,13 +166,11 @@ async function fillNodeLine() {
     return;
   }
   try {
-    const usage = await api("/api/v1/storage");
+    const usage = await syncFetch("/api/v1/storage");
     if (nodeLine) {
       nodeLine.textContent = `${usage.node.host} · ${usage.node.mode}`;
     }
-    noteSyncSuccess();
   } catch {
-    noteSyncFailure();
     setTimeout(fillNodeLine, 15000);
   }
 }
@@ -177,5 +278,6 @@ export function installShell() {
   fillNodeLine();
   mirrorBadge();
   renderRailProjects();
-  setInterval(() => updateRailSync(lastSyncTime, syncFailed), 30000);
+  installSyncWatch();
+  renderSync();
 }
