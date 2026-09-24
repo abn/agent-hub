@@ -5876,9 +5876,18 @@ a.session-back {
 
 /* Pointer copy consequence rules */
 @media (pointer: coarse) {
-  .fine-only {
+  .fine-only,
+  .settings-group-keyboard,
+  .form-group-keyboard {
     display: none !important;
   }
+}
+
+.settings-helper-line {
+  padding: 12px 0 0;
+  font-size: var(--t-13);
+  line-height: 1.5;
+  color: var(--ink-3);
 }
 
 @media (pointer: fine) {

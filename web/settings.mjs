@@ -259,7 +259,7 @@ export async function settingsScreen(gen) {
       </style>
       <div class="form-column">
         <section class="form-group">
-          <div class="form-group-label">APPEARANCE</div>
+          <div class="form-group-label">THIS DEVICE</div>
           <div class="form-row">
             <div class="form-row-main">
               <span class="form-row-title" id="label-theme">Theme</span>
@@ -276,17 +276,18 @@ export async function settingsScreen(gen) {
             </div>
             ${switchControl("density", "density-label", densityCompact, "toggle-density")}
           </div>
+          ${desktopAlertsRow()}
+        </section>
+
+        <section class="form-group form-group-keyboard settings-group-keyboard">
+          <div class="form-group-label">KEYBOARD</div>
           <div class="form-row">
             <div class="form-row-main">
               <span class="form-row-title" id="shortcuts-label">Single-key shortcuts</span>
+              <span class="form-row-sub">Press <span class="mono">?</span> for the list</span>
             </div>
             ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
           </div>
-        </section>
-
-        <section class="form-group">
-          <div class="form-group-label">ALERTS</div>
-          ${desktopAlertsRow()}
         </section>
 
         <section class="form-group">
@@ -305,10 +306,19 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(agentCountText)}</span>
             ${NAV_CHEVRON}
           </a>
+          <a class="form-row" href="#/about">
+            <div class="form-row-main">
+              <span class="form-row-title">About</span>
+            </div>
+            <span class="form-row-value">v0.4.1</span>
+            ${NAV_CHEVRON}
+          </a>
           <button type="button" class="form-row settings-btn-row" data-action="signout">
             <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
           </button>
         </section>
+
+        <div class="settings-helper-line">This device's settings are saved in this browser only.</div>
       </div>
     </form>`;
 
@@ -380,6 +390,11 @@ export async function settingsScreen(gen) {
         <a href="#/access" class="settings-flat-row row settings-nav-row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">Agents and tokens</span>
           <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
+          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+        </a>
+        <a href="#/about" class="settings-flat-row row settings-nav-row">
+          <span class="title" style="flex:1;font-size:15px;font-weight:500">About</span>
+          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2)">v0.4.1</span>
           <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout">Sign out of this browser</button>
