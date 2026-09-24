@@ -7471,9 +7471,13 @@ dialog.dialog-project-delete {
     white-space: nowrap;
   }
 
-  /* Home at rest has no bar: bar appears when scrolled (compressed) */
+  /* Home at rest: the bar is in layout but transparent, and its title waits at
+     opacity 0 while the greeting in the body shows. It is never display:none,
+     because a bar removed from layout cannot animate and leaves the content
+     underneath it. The Home-specific rules live in home.mjs. */
   .shell:has(.home-pad) .shell-head:not(.is-compressed) {
-    display: none;
+    background: transparent;
+    border-bottom: 0;
   }
 
   /* Reduced motion instant switch */

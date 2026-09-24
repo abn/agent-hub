@@ -1776,6 +1776,51 @@ fn desktop_connect_is_the_centred_frame_with_no_token_characters() {
     );
 }
 
+// Round 12.1, the phone Home header. Home's bar is the one that carries the
+// greeting, so the same string shrinks from 22/600 to 15/600 rather than being
+// swapped for the screen's name, and the bar stays in layout so a display
+// toggle never shifts content or paints over it.
+
+#[test]
+fn phone_home_header_carries_the_greeting_not_the_screen_name() {
+    let home = HOME_JS
+        .split("const welcome =")
+        .nth(1)
+        .expect("home builds a welcome block");
+    assert!(
+        home.contains("shellStageHead(isPhone ? greeting() : \"Home\""),
+        "the phone bar's title is the greeting; only the desktop names the screen"
+    );
+}
+
+#[test]
+fn phone_home_header_stays_in_layout() {
+    assert!(
+        !APP_CSS.contains(
+            ".shell:has(.home-pad) .shell-head:not(.is-compressed) {\n    display: none;"
+        ),
+        "the Home bar must not be display:none, or it cannot animate and it shifts content"
+    );
+    assert!(
+        APP_CSS.contains(
+            ".shell:has(.home-pad) .shell-head:not(.is-compressed) {\n    background: transparent;"
+        ),
+        "Home at rest hides the bar by making it transparent, keeping it in flow"
+    );
+    assert!(
+        HOME_JS.contains(".shell:has(.home-pad) .shell-head {\n    position: sticky;"),
+        "the Home bar is sticky, so it holds its place in the flow"
+    );
+    assert!(
+        HOME_JS.contains(".shell:has(.home-pad) .shell-head .shell-title-line {\n    opacity: 0;"),
+        "the bar's title waits hidden while the body copy shows"
+    );
+    assert!(
+        HOME_JS.contains(".shell.is-compressed .home-greeting {\n    opacity: 0;"),
+        "the body copy fades out as the bar takes the string over"
+    );
+}
+
 #[tokio::test]
 async fn home_has_no_gear_and_uses_flat_rows() {
     assert!(

@@ -222,11 +222,80 @@ function chipsHTML(waiting, unread) {
 
 const HOME_STYLE = `<style>
 @media (max-width: 719px) {
-  .shell:has(.home-pad) .shell-head:not(.is-compressed) {
-    display: none !important;
+  /* RULE 12.1 on Home: the bar is always in layout, and its title is the
+     greeting. The same string shrinks from 22/600 to 15/600 while the bar's
+     height goes 76 to 52, so there is something to interpolate. Home has no
+     bar at rest by having a transparent one over the greeting, not by
+     removing it from layout: a display toggle cannot animate and shifts the
+     content under it. Sticky, not fixed, so the bar keeps its place in the
+     flow and content never slides underneath it. */
+  .shell:has(.home-pad) .shell-head {
+    position: sticky;
+    top: 0;
+    height: 76px;
+    background: transparent;
+    border-bottom: 0;
+  }
+  .shell:has(.home-pad) .shell-head .shell-title-line {
+    opacity: 0;
+    transition:
+      opacity 120ms ease-out,
+      font-size 120ms ease-out;
+  }
+  .shell:has(.home-pad) .shell-head .shell-meta {
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+  .shell:has(.home-pad) .shell-head.is-compressed,
+  .shell:has(.home-pad).is-compressed .shell-head {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .shell:has(.home-pad) .shell-head.is-compressed .shell-title-line,
+  .shell:has(.home-pad).is-compressed .shell-head .shell-title-line {
+    opacity: 1;
+  }
+  .shell:has(.home-pad) .shell-head.is-compressed .shell-meta,
+  .shell:has(.home-pad).is-compressed .shell-head .shell-meta {
+    opacity: 0;
+  }
+  /* The bar is in the flow (sticky), so the body starts under it and nothing
+     is drawn over anything. The greeting inside the bar fades in as the copy
+     in the body fades out: one string, handed over. */
+  .shell.is-compressed .home-greeting {
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+  .shell:has(.home-pad) .shell-controls {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    box-sizing: border-box;
+    position: sticky;
+    top: 52px;
+    z-index: 9;
+    transition: height 120ms ease-out;
+  }
+  /* At rest the tools row holds the flow chips, which is Home's resting tools
+     row. Once compressed the pinned row carries them and the flow copy hides,
+     so the row's height is the only thing that changes. */
+  .shell:has(.home-pad) .shell-controls {
+    height: 44px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
   }
   .shell:has(.home-pad) .shell-controls:not(.is-compressed) {
-    display: none !important;
+    height: 0;
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+  .shell:has(.home-pad) .shell-controls:not(.is-compressed) .chip {
+    display: none;
   }
   .shell.is-compressed .home-chips-flow {
     display: none !important;
@@ -239,7 +308,7 @@ const HOME_STYLE = `<style>
     gap: 0 !important;
   }
   .home-welcome {
-    padding: 40px 16px 0;
+    padding: 0 16px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -395,21 +464,23 @@ export async function home(gen) {
       );
   const status = statusSentence(data);
   const chips = chipsHTML(waiting, unread);
-  // On a desktop the header title is "Home", not the greeting, and the control
-  // row reserves its 40px without repeating the node line under the header that
-  // already carries it. The greeting and the flow chips are phone chrome, so the
-  // welcome block is only the greeting text at the stage gutter, if it shows at
-  // all. The header stays put; the lists and the one storage card are flat.
+  // On the phone the bar carries the greeting itself, so the same string
+  // shrinks from 22/600 to 15/600 as the bar collapses (RULE 12.1); the body's
+  // copy of it fades out underneath. On a desktop the header title is "Home",
+  // not the greeting, and the control row reserves its 40px without repeating
+  // the node line under the header that already carries it.
   const welcome = `<div class="home-welcome">
     <span class="home-node-phone mono">${esc(node.join(" · "))}</span>
     <h1 class="home-greeting">${esc(greeting())}</h1>
   </div>`;
 
+  const isPhone = !window.matchMedia("(min-width: 720px)").matches;
+
   paint(
     gen,
     shellHTML({
       noIndex: true,
-      stageHead: shellStageHead("Home", node.join(" · ")),
+      stageHead: shellStageHead(isPhone ? greeting() : "Home", node.join(" · ")),
       stageControls: `<div class="shell-controls">${chips}</div>`,
       stageBody: `${HOME_STYLE}<div class="shell-pad home-pad"><div class="home">${welcome}<p class="home-summary home-status">${esc(
         status,

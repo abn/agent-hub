@@ -1163,18 +1163,24 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
                 watch.fail(f"{url} at {width}px has text wrapping in tools row: {wrapped}")
     page.set_viewport_size({"width": 390, "height": 844})
 
-    # 6. Home at rest has no bar
-    watch.enter("phone frame: Home at rest has no bar")
+    # 6. Home at rest shows no bar: the bar is in layout but transparent, so
+    # nothing of it is seen. Absent is not required and is wrong: a bar removed
+    # from layout cannot animate and it leaves the content underneath.
+    watch.enter("phone frame: Home at rest shows no bar")
     goto(page, "#/home", home_title())
     page.evaluate("window.scrollTo(0, 0)")
     page.wait_for_timeout(100)
-    home_bar_visible = page.evaluate(
+    home_bar_painted = page.evaluate(
         "(() => { const h = document.querySelector('.shell:has(.home-pad) .shell-head');"
         " if (!h) return false;"
-        " return window.getComputedStyle(h).display !== 'none' && h.offsetWidth > 0; })()"
+        " const cs = window.getComputedStyle(h);"
+        " const painted = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.borderBottomWidth !== '0px';"
+        " const title = h.querySelector('.shell-title-line');"
+        " const titleShown = title ? Number(window.getComputedStyle(title).opacity) > 0.05 : false;"
+        " return painted || titleShown; })()"
     )
-    if home_bar_visible:
-        watch.fail("Home at rest shows header bar, expected no bar at rest on phone")
+    if home_bar_painted:
+        watch.fail("Home at rest paints a header bar or its title, expected neither")
     watch.drain_rejections()
 
 
@@ -1185,14 +1191,19 @@ def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
     page.evaluate("window.scrollTo(0, 0)")
     page.wait_for_timeout(100)
 
-    # 1. No bar at rest
-    home_bar_visible = page.evaluate(
+    # 1. No bar at rest: the bar is in layout but transparent, and its title is
+    # not shown. Being absent is not the rule; being unpainted is.
+    home_bar_painted = page.evaluate(
         "(() => { const h = document.querySelector('.shell:has(.home-pad) .shell-head');"
         " if (!h) return false;"
-        " return window.getComputedStyle(h).display !== 'none' && h.offsetWidth > 0 && h.offsetHeight > 0; })()"
+        " const cs = window.getComputedStyle(h);"
+        " const painted = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.borderBottomWidth !== '0px';"
+        " const title = h.querySelector('.shell-title-line');"
+        " const titleShown = title ? Number(window.getComputedStyle(title).opacity) > 0.05 : false;"
+        " return painted || titleShown; })()"
     )
-    if home_bar_visible:
-        watch.fail("Home at rest shows header bar, expected no bar at rest on phone")
+    if home_bar_painted:
+        watch.fail("Home at rest paints a header bar or its title, expected neither")
 
     # 2. No gear on Home
     has_gear = page.evaluate("!!document.querySelector('.home-gear')")
@@ -1208,13 +1219,29 @@ def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
         watch.fail(f"Home greeting at rest has left={greeting_x!r}, expected x=16")
 
     # 4. Scrolled: bar present, title at x 48, chips pinned in tools row
-    watch.enter("phone home: scrolled (bar present, title at x 48, chips pinned in tools row)")
+    watch.enter("phone home: scrolled (bar present, title is the greeting, chips pinned in tools row)")
     page.evaluate("window.scrollTo(0, 100)")
     settle(page, "Math.abs((document.querySelector('.shell-head')?.getBoundingClientRect().height || 0) - 52) <= 2")
 
     bar_height = page.evaluate("document.querySelector('.shell-head')?.getBoundingClientRect().height")
     if bar_height is None or abs(bar_height - 52) > 2:
         watch.fail(f"Home scrolled header bar height is {bar_height!r}, expected 52px")
+
+    # The bar carries the greeting, not the screen name, so the string shrinks
+    # rather than being swapped for a different word.
+    bar_title = page.evaluate(
+        "document.querySelector('.shell-head .shell-title h1, .shell-head .shell-title .shell-title-line')?.textContent?.trim()"
+    )
+    greeting_rest = page.evaluate(
+        "(() => { const el = document.querySelector('.home-greeting');"
+        " return el ? el.textContent.trim() : null; })()"
+    )
+    if bar_title is None:
+        watch.fail("Home scrolled header bar carries no title")
+    elif bar_title == "Home" or (greeting_rest and bar_title != greeting_rest):
+        watch.fail(
+            f"Home scrolled header bar reads {bar_title!r}, expected the greeting {greeting_rest!r}"
+        )
 
     title_x = page.evaluate(
         "(() => { const el = document.querySelector('.shell-head .shell-title h1, .shell-head .shell-title .shell-title-line');"
