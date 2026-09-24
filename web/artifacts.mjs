@@ -62,9 +62,12 @@ export async function artifactStage(id, projectId) {
   if (!current) return null;
 
   let commentsCount = 0;
+  let openCommentsCount = 0;
   try {
     const list = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
-    commentsCount = Array.isArray(list) ? list.length : Array.isArray(list?.comments) ? list.comments.length : 0;
+    const arr = Array.isArray(list) ? list : Array.isArray(list?.comments) ? list.comments : [];
+    commentsCount = arr.length;
+    openCommentsCount = arr.filter((c) => !c.done).length;
   } catch {}
 
   const project = projectId || current.project_id || "";
@@ -74,12 +77,12 @@ export async function artifactStage(id, projectId) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
 
-  const comments = commentsCount
-    ? `<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`
+  const comments = openCommentsCount
+    ? `<span class="hub-glyph-count mono" aria-hidden="true">${openCommentsCount}</span>`
     : "";
   const actions = `
     <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-pressed="true" aria-label="${
-      commentsCount ? `Comments, ${commentsCount}` : "Start a thread"
+      openCommentsCount ? `Comments, ${openCommentsCount}` : "Start a thread"
     }">${glyphSvg("comments", { size: 18 })}${comments}</button>
     <button type="button" class="hub-btn-glyph" aria-label="More">${glyphSvg("overflow", { size: 18 })}</button>`;
 
@@ -105,13 +108,12 @@ export async function artifactStage(id, projectId) {
     current.title || slug,
   )}" src="${esc(frameSrc(id, newest, theme))}"></iframe></div>`;
 
-  const threads = `${commentsCount} ${commentsCount === 1 ? "thread" : "threads"}`;
   const aside = `
     <div class="shell-head">
       <div class="shell-title"><span class="shell-title-line">Comments</span></div>
-      <span class="shell-meta mono">${commentsCount}</span>
+      <span class="shell-meta mono">${openCommentsCount}</span>
     </div>
-    <div class="shell-controls"><span class="shell-meta mono">${threads} · v${newest}</span></div>
+    <div class="shell-controls"><span class="shell-meta mono">v${newest}</span></div>
     <div class="shell-body"><div class="hub-comments-cards-list"></div></div>
     <div class="shell-foot mono">Select text in the document to anchor a comment</div>`;
 

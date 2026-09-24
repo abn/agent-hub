@@ -36,6 +36,7 @@ const PROJECTS_JS: &str = include_str!("../web/projects.mjs");
 const CONNECT_JS: &str = include_str!("../web/connect.mjs");
 const MORE_JS: &str = include_str!("../web/more.mjs");
 const PROJECT_JS: &str = include_str!("../web/project.mjs");
+const FEED_JS: &str = include_str!("../web/feed.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -2417,5 +2418,94 @@ fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
     assert!(
         AGENTS_JS.contains("height:32px") && AGENTS_JS.contains("min-height:32px"),
         "C10: Add agent button is 32px tall with min-height 32px"
+    );
+}
+
+#[test]
+fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
+    // C11: Desktop filter field is 32, radius --r-1, not a 44 pill
+    let shell_filter = APP_CSS
+        .split(".shell-filter input {")
+        .nth(1)
+        .and_then(|s| s.split('}').next())
+        .expect("shell-filter input rule exists");
+    assert!(
+        shell_filter.lines().any(|l| l.trim() == "height: 32px;")
+            && shell_filter
+                .lines()
+                .any(|l| l.trim() == "min-height: 32px;")
+            && shell_filter
+                .lines()
+                .any(|l| l.trim() == "border-radius: var(--r-1);"),
+        "C11: desktop filter field is 32px tall with radius --r-1"
+    );
+
+    // C12: YESTERDAY, Earlier and inbox take 16 inset; remove author subgroup inside WAITING ON YOU
+    assert!(
+        !INBOX_JS.contains("actorGroups(waiting"),
+        "C12: author subgroup inside WAITING ON YOU must be removed"
+    );
+    assert!(
+        APP_CSS.contains(".shell-index h2.day")
+            || APP_CSS.contains(".shell-index .feed-day h2.day")
+            || APP_CSS.contains(".shell-index .feed-earlier"),
+        "C12: feed group headers and Earlier in shell-index must take the 16px inset"
+    );
+
+    // C13: Feed index last row has rounded corners removed; artifacts titles are --ink 600 no underline; selected row has no blue left bar
+    assert!(
+        APP_CSS.contains(".shell-index .feed-day .row") || APP_CSS.contains(".shell-index .row"),
+        "C13: feed index rows run edge to edge"
+    );
+    assert!(
+        APP_CSS.contains(".shell-index .artifact-row .title")
+            || APP_CSS.contains(".shell-index .artifact-row a.title"),
+        "C13: artifacts index titles are styled without underline in --ink 600"
+    );
+    assert!(
+        !APP_CSS.contains(".row.selected { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }"),
+        "C13: selected row must not carry a saturated blue left bar"
+    );
+
+    // C14: Date chip uses neutral style, not --action
+    assert!(
+        APP_CSS.contains(".shell-group-pill")
+            && APP_CSS.contains("background: var(--surface-2)")
+            && APP_CSS.contains("color: var(--ink-2)"),
+        "C14: Date/Kind group pill is neutral (--surface-2, --ink-2)"
+    );
+
+    // C15: Comments panel counts: one count in header; remove conflicting counts; Resolved has 4 gap after check
+    assert!(
+        !ARTIFACTS_JS.contains("${threads} ·"),
+        "C15: comments aside control row must not repeat thread count"
+    );
+    assert!(
+        !COMMENTS_JS.contains("<span>COMMENTS</span><span class=\"mono\">"),
+        "C15: desktop cards list must not render duplicate COMMENTS count"
+    );
+    assert!(
+        APP_CSS.contains(".hub-col-resolved-toggle") && APP_CSS.contains("gap: 4px;"),
+        "C15: Resolved toggle must have 4px gap after check glyph"
+    );
+
+    // C16: Desktop inbox does not fold Earlier leaving no row; inbox foot aligns baselines; phone inbox trailing buttons both --ink-2
+    assert!(
+        !INBOX_JS.contains("window.matchMedia(DESKTOP).matches && !items.some"),
+        "C16: desktop inbox must not fold Earlier to paint with no rows under it"
+    );
+    assert!(
+        APP_CSS.contains(".inbox-foot {\n  display: flex; align-items: baseline;"),
+        "C16: inbox foot must align baselines so mono 'now' does not sit below sans"
+    );
+    assert!(
+        APP_CSS.contains("shell-trailing-btn")
+            && (APP_CSS.contains("color: var(--ink-2)")
+                || INBOX_JS.contains("color: var(--ink-2)")),
+        "C16: phone inbox trailing buttons must both be --ink-2"
+    );
+    assert!(
+        FEED_JS.contains("feedRow"),
+        "feed rows are defined in feed.mjs"
     );
 }

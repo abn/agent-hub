@@ -255,9 +255,7 @@ function group(name, title, count, rowsHTML) {
 // and stays open when the open item is one of its rows.
 function earlier(items, state) {
   if (!items.length) return "";
-  const folded =
-    window.matchMedia(DESKTOP).matches && !items.some((item) => item.event_id === state.open);
-  return `<details class="inbox-group inbox-earlier" data-group="earlier"${folded ? "" : " open"}>
+  return `<details class="inbox-group inbox-earlier" data-group="earlier" open>
     <summary class="section-label inbox-label" data-group="earlier">Earlier · ${items.length}</summary>
     <div class="inbox-rows">${items.map((row) => inboxRow(row, state)).join("")}</div>
   </details>`;
@@ -490,7 +488,14 @@ export async function inbox(gen) {
         </div>
       </div>`;
   const sections =
-    (waiting.length ? group("waiting", "Waiting on you", waiting.length, actorGroups(waiting, state)) : "") +
+    (waiting.length
+      ? group(
+          "waiting",
+          "Waiting on you",
+          waiting.length,
+          `<div class="inbox-rows">${waiting.map((row) => inboxRow(row, state)).join("")}</div>`,
+        )
+      : "") +
     snoozedSection(snoozed, state) +
     (unread.items.length
       ? group(

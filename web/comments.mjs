@@ -769,13 +769,6 @@ export function renderDesktopCards() {
 
   const openCount = commentsState.comments.filter((c) => !c.done).length;
 
-  // Header if not already present in column head
-  if (!container.closest(".hub-comments-column")?.querySelector(".hub-comments-head")) {
-    const head = document.createElement("div");
-    head.className = "hub-col-head";
-    head.innerHTML = `<span>COMMENTS</span><span class="mono">${openCount}</span>`;
-    container.appendChild(head);
-  }
 
   if (!commentsState.comments.length) {
     const empty = document.createElement("p");
