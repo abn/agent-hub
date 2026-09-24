@@ -91,6 +91,14 @@ export function refreshCommentsToggle() {
   if (stripCount) {
     stripCount.textContent = String(openCount);
   }
+
+  // The comments panel's own header carries the same open count, so the three
+  // surfaces agree. It keeps the version it was built with, which is why the
+  // count is replaced and the rest of the line is left alone.
+  const headMeta = document.querySelector(".hub-comments-head-meta");
+  if (headMeta && headMeta.dataset.version) {
+    headMeta.textContent = `${openCount} · v${headMeta.dataset.version}`;
+  }
 }
 
 export function authorNode(authorText) {

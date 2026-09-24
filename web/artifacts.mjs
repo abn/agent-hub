@@ -1161,6 +1161,9 @@ export async function viewerRoute(params, gen, path) {
   cTitle.textContent = "Comments";
   const cMeta = document.createElement("span");
   cMeta.className = "mono hub-comments-head-meta";
+  // The count is the open threads, written live by refreshCommentsToggle; the
+  // version the line carries is fixed here.
+  cMeta.dataset.version = String(shown);
   cMeta.textContent = `${commentsCount} · v${shown}`;
   const cAdd = document.createElement("button");
   cAdd.type = "button";

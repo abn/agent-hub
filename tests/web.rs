@@ -2178,6 +2178,25 @@ fn phone_artifact_stage_mounts_both_comment_nodes() {
     );
 }
 
+// C15: the comments panel carried three counts that disagreed, because the
+// panel's own header kept the build-time total while the artifact header and the
+// strip were updated live to the open count. One metric, open threads.
+#[test]
+fn comments_panel_header_shows_the_live_open_count() {
+    assert!(
+        COMMENTS_JS.contains(r#".hub-comments-head-meta"#),
+        "refreshCommentsToggle updates the panel header count, not only the glyph and strip"
+    );
+    assert!(
+        COMMENTS_JS.contains("headMeta.dataset.version"),
+        "the panel header keeps the version it was built with"
+    );
+    assert!(
+        ARTIFACTS_JS.contains("cMeta.dataset.version = String(shown);"),
+        "the panel header records its version, so the live count can replace the total"
+    );
+}
+
 // The project artifact stage renders its own version control, separate from the
 // standalone viewer's. It once carried an action nothing answered, so it looked
 // like a dropdown and did nothing, and a fixed 36px glyph box clipped the label.
