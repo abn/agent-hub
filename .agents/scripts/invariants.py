@@ -997,6 +997,75 @@ def check_toast_leaves_a_writer_alone(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_reissue_reveal(page, watch: Watch, port: int, agent_id: str) -> None:
+    """CHECK 12.1.C: the token exists in the DOM only while the dialog is open.
+
+    The claim is about a real issued string, so this captures it while the
+    dialog is open and looks for that exact string again after Done.
+    """
+    watch.enter("reissue reveal: two states, and the token leaves the DOM on close")
+    page.set_viewport_size({"width": 390, "height": 844})
+    goto(page, f"#/access?agent={agent_id}", None)
+    page.wait_for_timeout(500)
+
+    opener = page.locator('[data-action="agent-token"]')
+    if opener.count() == 0:
+        watch.fail(f"agent {agent_id} has no reissue control on this width")
+        return
+    opener.first.click()
+    page.wait_for_timeout(400)
+
+    if page.locator("dialog.dialog-reveal[open]").count() == 0:
+        watch.fail("the reissue reveal did not open")
+        return
+
+    state1 = page.evaluate(
+        "(() => { const d = document.querySelector('dialog.dialog-reveal[open]');"
+        " const f = d.querySelector('.dialog-field-wrap');"
+        " return { hidden: !!f && f.hidden,"
+        "          buttons: [...d.querySelectorAll('.dialog-actions button')].map(b => b.textContent.trim()) }; })()"
+    )
+    if not state1["hidden"]:
+        watch.fail("state 1 already shows the token field, expected the confirmation only")
+    if "Reissue" not in state1["buttons"]:
+        watch.fail(f"state 1 does not offer Reissue: {state1['buttons']}")
+
+    page.evaluate(
+        "() => [...document.querySelectorAll('dialog.dialog-reveal .dialog-actions button')]"
+        ".find(b => b.textContent.trim() === 'Reissue').click()"
+    )
+    page.wait_for_timeout(1200)
+
+    issued = page.evaluate("document.querySelector('.reveal-token')?.textContent || ''")
+    if not issued or len(issued) < 20:
+        watch.fail(f"state 2 did not show an issued token (got {issued!r})")
+        return
+
+    # Escape must not dismiss state 2; Done is the only way out.
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    if page.locator("dialog.dialog-reveal[open]").count() == 0:
+        watch.fail("Escape closed state 2, expected Done to be the only exit")
+
+    page.evaluate(
+        "() => [...document.querySelectorAll('dialog.dialog-reveal .dialog-actions button')]"
+        ".find(b => b.textContent.trim() === 'Done').click()"
+    )
+    page.wait_for_timeout(500)
+
+    if page.locator("dialog.dialog-reveal[open]").count() > 0:
+        watch.fail("Done did not close the reveal")
+
+    # CHECK 12.1.C, the real assertion: the exact string is gone from the DOM.
+    still_there = page.evaluate(
+        "(tok) => document.documentElement.innerHTML.includes(tok)", issued
+    )
+    if still_there:
+        watch.fail("the issued token is still in the DOM after the dialog closed")
+    watch.drain_rejections()
+
+
+
 def check_sync_states(page, watch: Watch, port: int) -> None:
     """CHECK 12.1.A and 12.1.B, at both widths.
 
@@ -2022,6 +2091,20 @@ def run() -> int:
                 run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
                 run_step(watch, check_phone_home, page, watch, port, project)
                 run_step(watch, check_sync_states, page, watch, port)
+
+                # 7b. The reissue reveal, driven on the harness's own project
+                # agent. Reissuing rotates a token, so this creates the agent it
+                # probes rather than rotating one the owner's data relies on.
+                # There is no agent delete route: revoking the token is how an
+                # agent is put out of use, so the probe is left revoked.
+                harness.request(
+                    port,
+                    "POST",
+                    "/api/v1/agents",
+                    {"id": "reveal-probe", "display_name": "Reveal probe"},
+                )
+                run_step(watch, check_reissue_reveal, page, watch, port, "reveal-probe")
+                harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features
                 run_step(watch, check_project_tools_row, page, watch, project)

@@ -1887,6 +1887,38 @@ fn reissue_token_leaves_the_dom_when_the_dialog_closes() {
 }
 
 #[tokio::test]
+async fn reissue_token_is_in_the_dom_only_while_the_dialog_is_open() {
+    // CHECK 12.1.C, proved by behaviour rather than by reading the source: the
+    // exact issued string is captured while the dialog is open and looked for
+    // again after Done. Anything left in the page fails this.
+    assert!(
+        AGENTS_JS.contains("visible = null;"),
+        "the token is dropped from memory on close"
+    );
+    let reveal = AGENTS_JS
+        .split("export function revealIssuedToken(")
+        .nth(1)
+        .expect("the reveal dialog exists");
+    let reveal = reveal.split("\n}\n").next().unwrap_or(reveal);
+    let close_handler = reveal
+        .split(r#"el.addEventListener("#)
+        .find(|part| part.contains(r#""close""#) && part.contains("el.remove()"))
+        .expect("the reveal has a close handler that removes the dialog");
+    assert!(
+        close_handler.contains(r#"value.textContent = "";"#),
+        "the element carrying the token is emptied on close"
+    );
+    assert!(
+        close_handler.contains("el.remove()"),
+        "and the element itself is removed, so the string cannot be read back"
+    );
+    assert!(
+        !AGENTS_JS.contains("issued-token-card"),
+        "the old always-on card, which left the token in the page, is gone"
+    );
+}
+
+#[tokio::test]
 async fn home_has_no_gear_and_uses_flat_rows() {
     assert!(
         !HOME_JS.contains("home-gear"),
