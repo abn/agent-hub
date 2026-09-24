@@ -1821,6 +1821,71 @@ fn phone_home_header_stays_in_layout() {
     );
 }
 
+// Round 12.1, section 13, the reissue reveal. One dialog, two states, and the
+// token string in the DOM only while it is open (CHECK 12.1.C). The state
+// machine is driven in the browser, because the claim is about what is in the
+// document after a close, which no amount of reading the source can prove.
+
+#[test]
+fn reissue_reveal_is_two_states_with_done_the_only_exit() {
+    let src = AGENTS_JS;
+    assert!(
+        src.contains("function revealIssuedToken("),
+        "the reveal is its own dialog"
+    );
+    assert!(
+        src.contains("The current token stops working now"),
+        "state 1 is the confirmation, naming what stops working"
+    );
+    // State 2 is closed by Done alone. Both close requests are refused, and the
+    // refusal is keyed on state 2 rather than on any key at all.
+    assert!(
+        src.contains(r#"if (event.key === "Escape" && state === 2) event.preventDefault();"#),
+        "state 2 refuses Escape"
+    );
+    assert!(
+        src.contains(r#"el.addEventListener("cancel", (event) => {"#)
+            && src.contains("if (state === 2) event.preventDefault();"),
+        "state 2 refuses a close request that is not a key"
+    );
+    assert!(
+        src.contains(r#"commit.textContent = "Done""#),
+        "state 2's only exit is Done"
+    );
+}
+
+#[test]
+fn reissue_token_leaves_the_dom_when_the_dialog_closes() {
+    // The string must not survive the close. The close handler is the only
+    // place that can drop it, so the assertion is on that handler as a whole:
+    // it clears the value and removes the element.
+    let reveal = AGENTS_JS
+        .split("export function revealIssuedToken(")
+        .nth(1)
+        .expect("the reveal dialog exists");
+    let reveal = reveal.split("\n}\n").next().unwrap_or(reveal);
+    let close_handler = reveal
+        .split(r#"el.addEventListener("#)
+        .find(|part| part.contains(r#""close""#) && part.contains("el.remove()"))
+        .expect("the reveal has a close handler that removes the dialog");
+    assert!(
+        close_handler.contains("visible = null;"),
+        "the token is dropped from memory when the dialog closes"
+    );
+    assert!(
+        close_handler.contains(r#"value.textContent = "";"#),
+        "the element carrying the token is emptied on close, not merely hidden"
+    );
+    assert!(
+        !AGENTS_JS.contains("issued-token-card"),
+        "the old always-on card, which left the token in the page, is gone"
+    );
+    assert!(
+        !AGENTS_JS.contains("showToken("),
+        "nothing still renders a token outside the dialog"
+    );
+}
+
 #[tokio::test]
 async fn home_has_no_gear_and_uses_flat_rows() {
     assert!(

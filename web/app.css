@@ -1138,6 +1138,38 @@ html.has-dialog { overflow: hidden; }
 .dialog-count, .dialog-kept { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
 .dialog-kept:empty { display: none; }
 .dialog-error { margin: 0; font-size: var(--t-13); color: var(--danger); }
+/* The reissue reveal (round 12.1, section 13). State 2 shows the token once, in
+   a 44px field with the copy glyph on the row that owns the string. */
+.dialog-reveal .dialog-note[data-tone="danger"] { color: var(--danger); }
+.reveal-value {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: 0 var(--s-1) 0 var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+}
+.reveal-token {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--t-15);
+  overflow-wrap: anywhere;
+}
+.reveal-copy {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
 .dialog-count[hidden], .dialog-error[hidden] { display: none; }
 .dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
 .dialog-note { margin: 0; font-size: var(--t-12); color: var(--ink-3); }

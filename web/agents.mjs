@@ -328,66 +328,171 @@ export async function copyToken(token) {
   toast("Token copied.");
 }
 
-export function showToken(token, agentName = "") {
-  const existing = document.querySelector(".issued-token-card");
-  if (existing) existing.remove();
+// §13, the reissue reveal. One dialog, two states.
+//
+// State 1 is the confirmation a destructive action gets: the current token
+// stops working now, Cancel or Reissue. State 2 shows the new token once, with
+// the copy glyph and Done. Done is the only way out of state 2: Escape and the
+// scrim are inert there, because a token that can be dismissed by a stray key
+// is a token the operator loses without noticing.
+//
+// CHECK 12.1.C: the token string exists in the DOM only while this dialog is
+// open. The element is removed on close, so nothing of the string survives it,
+// rather than being hidden or left in a data attribute.
+export function revealIssuedToken(token, agentName = "") {
+  const opener = document.activeElement;
+  const el = document.createElement("dialog");
+  el.className = "dialog dialog-reveal";
+  const titleId = "reveal-title";
+  el.setAttribute("aria-labelledby", titleId);
 
-  const card = document.createElement("div");
-  card.className = "card issued-token-card";
-  card.setAttribute("role", "status");
-  card.setAttribute("aria-live", "polite");
+  let state = 1;
+  let visible = null;
 
-  const title = document.createElement("div");
-  title.className = "title";
-  title.textContent = agentName ? `New token for ${agentName}, shown once` : "New token, shown once";
+  const form = document.createElement("form");
+  form.method = "dialog";
 
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button";
-  copyBtn.className = "token-copy-btn";
-  copyBtn.dataset.action = "copy-token";
-  copyBtn.dataset.token = token;
-  copyBtn.setAttribute("aria-label", `Copy new token: ${token}`);
+  const heading = document.createElement("h2");
+  heading.className = "dialog-title";
+  heading.id = titleId;
 
-  const val = document.createElement("span");
-  val.className = "mono token-val";
-  val.textContent = token;
-
-  const copySvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  copySvg.setAttribute("width", "16");
-  copySvg.setAttribute("height", "16");
-  copySvg.setAttribute("viewBox", "0 0 24 24");
-  copySvg.setAttribute("fill", "none");
-  copySvg.setAttribute("stroke", "currentColor");
-  copySvg.setAttribute("stroke-width", "1.8");
-  copySvg.setAttribute("stroke-linecap", "round");
-  copySvg.setAttribute("stroke-linejoin", "round");
-  copySvg.setAttribute("aria-hidden", "true");
-  const path1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path1.setAttribute("d", "M 9 9h10v12H9z");
-  const path2 = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path2.setAttribute("d", "M 15 9V4H5v14h4");
-  copySvg.append(path1, path2);
-
-  copyBtn.append(val, copySvg);
-  copyBtn.addEventListener("click", () => copyToken(token));
+  const body = document.createElement("p");
+  body.className = "dialog-body";
 
   const note = document.createElement("p");
-  note.className = "token-sentence meta";
-  note.textContent = "Copy it now. Reissuing replaces it and revokes the previous token.";
+  note.className = "dialog-note";
 
-  card.append(title, copyBtn, note);
+  const actions = document.createElement("div");
+  actions.className = "dialog-actions";
 
-  const container = document.querySelector(".access-screen") || main;
-  container.prepend(card);
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  const safe = document.createElement("button");
+  safe.type = "button";
+  safe.className = "dialog-safe";
+
+  const commit = document.createElement("button");
+  commit.type = "button";
+  commit.className = "dialog-commit danger";
+
+  // State 2 only. Created when the token is revealed and removed on close, so
+  // the string is never in the DOM outside the open dialog.
+  const fieldWrap = document.createElement("div");
+  fieldWrap.className = "dialog-field-wrap";
+  fieldWrap.hidden = true;
+  const valueRow = document.createElement("div");
+  valueRow.className = "reveal-value";
+  const value = document.createElement("span");
+  value.className = "mono reveal-token";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "reveal-copy";
+  copyBtn.setAttribute("aria-label", "Copy the new token");
+  // RULE 11.13's two-sheet copy glyph, the same markup Settings uses for the
+  // path it owns. The set has no `copy` key: the motif lives where it is used.
+  copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+  copyBtn.addEventListener("click", () => {
+    if (visible) copyToken(visible);
+  });
+  valueRow.append(value, copyBtn);
+  fieldWrap.append(valueRow);
+
+  function paintState(next) {
+    state = next;
+    const name = agentName || "this agent";
+    if (state === 1) {
+      heading.textContent = `Reissue the token for ${name}?`;
+      body.textContent =
+        "The current token stops working now. Anything still using it is refused until it is given the new one.";
+      note.textContent = "Reissuing cannot be undone.";
+      safe.textContent = "Cancel";
+      commit.textContent = "Reissue";
+      fieldWrap.hidden = true;
+      value.textContent = "";
+      body.hidden = false;
+    } else {
+      heading.textContent = `New token for ${name}`;
+      body.textContent = "Copy it now. It is shown once and cannot be read again.";
+      body.hidden = false;
+      note.textContent = "Done closes this and drops the token from the page.";
+      safe.hidden = true;
+      commit.textContent = "Done";
+      fieldWrap.hidden = false;
+      value.textContent = visible || "";
+    }
+  }
+
+  paintState(1);
+
+  safe.addEventListener("click", () => el.close("cancel"));
+  commit.addEventListener("click", async () => {
+    if (state === 1) {
+      commit.disabled = true;
+      try {
+        const issued = await api(`/api/v1/agents/${encodeURIComponent(agentName)}/token`, {
+          method: "POST",
+        });
+        visible = issued.token;
+        value.textContent = visible;
+        commit.disabled = false;
+        paintState(2);
+        valueRow.querySelector(".reveal-copy")?.focus();
+      } catch (error) {
+        commit.disabled = false;
+        note.textContent = error.message;
+        note.dataset.tone = "danger";
+      }
+      return;
+    }
+    el.close("done");
+  });
+
+  // State 2 is closed by Done alone: Escape and a scrim click are refused.
+  el.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state === 2) event.preventDefault();
+  });
+  el.addEventListener("cancel", (event) => {
+    if (state === 2) event.preventDefault();
+  });
+
+  form.append(heading, body, fieldWrap, note, actions);
+  actions.append(safe, commit);
+  el.appendChild(form);
+  document.body.appendChild(el);
+  document.documentElement.classList.add("has-dialog");
+  el.showModal();
+  safe.focus();
+
+  el.addEventListener(
+    "close",
+    () => {
+      // CHECK 12.1.C, kept by removal: the string leaves the DOM here, so it
+      // cannot be read out of the page once the dialog is gone.
+      visible = null;
+      value.textContent = "";
+      el.remove();
+      document.documentElement.classList.remove("has-dialog");
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+      if (typeof render === "function") render();
+    },
+    { once: true },
+  );
+
+  return new Promise((resolve) => {
+    el.addEventListener(
+      "close",
+      () => {
+        resolve(el.returnValue === "done");
+      },
+      { once: true },
+    );
+  });
 }
 
 export async function reissueToken(id) {
-  const issued = await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, {
-    method: "POST",
-  });
-  await render();
-  showToken(issued.token, id);
+  // The dialog does the asking and the issuing: state 1 confirms, state 2
+  // reveals, and the string leaves the DOM when it closes (CHECK 12.1.C).
+  await revealIssuedToken(null, id);
 }
 
 export async function revokeToken(id) {
