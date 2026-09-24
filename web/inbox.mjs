@@ -6,6 +6,7 @@ import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
@@ -475,8 +476,18 @@ export async function inbox(gen) {
           <span class="shell-meta mono">${esc(metaText)}</span>
         </div>
         <button type="button" class="inbox-quiet shell-trailing-btn" data-action="inbox-read-all" aria-label="Mark all read"${unreadCount ? "" : " disabled"}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12.5l4.5 4.5L15 8.5"></path><path d="M11 16l1 1 9.5-9.5"></path></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 2 12.5l4.5 4.5L15 8.5"></path><path d="M 11 16l1 1 9.5-9.5"></path></svg>
         </button>
+        <div class="inbox-overflow-wrap">
+          <button type="button" class="inbox-overflow-btn shell-trailing-btn" data-action="inbox-overflow-toggle" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">
+            ${glyphSvg("overflow", { size: 19 })}
+          </button>
+          <div class="inbox-overflow-menu" role="menu" hidden>
+            <button type="button" class="inbox-menu-item" data-action="inbox-refresh" role="menuitem">
+              Refresh
+            </button>
+          </div>
+        </div>
       </div>`;
   const sections =
     (waiting.length ? group("waiting", "Waiting on you", waiting.length, actorGroups(waiting, state)) : "") +
@@ -721,7 +732,26 @@ main.addEventListener("click", (event) => {
   if (action === "inbox-read") work = setRead(id, true);
   else if (action === "inbox-unread") work = setRead(id, false);
   else if (action === "inbox-read-all") work = readAll();
-  else if (action === "inbox-refresh") work = refresh();
+  else if (action === "inbox-overflow-toggle") {
+    const wrap = button.closest(".inbox-overflow-wrap");
+    const menu = wrap?.querySelector(".inbox-overflow-menu");
+    if (menu) {
+      const open = menu.hidden;
+      menu.hidden = !open;
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        menu.querySelector("button")?.focus();
+      }
+    }
+  } else if (action === "inbox-refresh") {
+    const menu = button.closest(".inbox-overflow-menu");
+    if (menu) {
+      menu.hidden = true;
+      const btn = menu.closest(".inbox-overflow-wrap")?.querySelector(".inbox-overflow-btn");
+      if (btn) btn.setAttribute("aria-expanded", "false");
+    }
+    work = refresh();
+  }
   else if (action === "inbox-snooze") work = snoozeItem(id, summary);
   else if (action === "inbox-unsnooze") work = unsnoozeItem(id, summary);
   else if (action === "inbox-unread-only") {
@@ -745,6 +775,33 @@ main.addEventListener("click", (event) => {
     if (reply) work = answer(id, reply);
   }
   if (work) work.catch(failed);
+});
+
+// Close the overflow menu on outside click or Escape.
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".inbox-overflow-wrap")) {
+    const menus = document.querySelectorAll(".inbox-overflow-menu:not([hidden])");
+    for (const m of menus) {
+      m.hidden = true;
+      const b = m.closest(".inbox-overflow-wrap")?.querySelector(".inbox-overflow-btn");
+      if (b) b.setAttribute("aria-expanded", "false");
+    }
+  }
+});
+
+main.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    const menu = main.querySelector(".inbox-overflow-menu:not([hidden])");
+    if (menu) {
+      event.stopPropagation();
+      menu.hidden = true;
+      const btn = menu.closest(".inbox-overflow-wrap")?.querySelector(".inbox-overflow-btn");
+      if (btn) {
+        btn.setAttribute("aria-expanded", "false");
+        btn.focus();
+      }
+    }
+  }
 });
 
 // The card's close control leaves the way Esc does: the card's address is

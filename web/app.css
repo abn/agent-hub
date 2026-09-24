@@ -6394,11 +6394,13 @@ a.session-back {
 .proj-head .proj-gear {
   margin: 0;
 }
-.proj-overflow-wrap {
+.proj-overflow-wrap,
+.inbox-overflow-wrap {
   position: relative;
   flex: none;
 }
-.proj-overflow-btn {
+.proj-overflow-btn,
+.inbox-overflow-btn {
   flex: none;
   width: 44px;
   height: 44px;
@@ -6412,17 +6414,24 @@ a.session-back {
   border-radius: var(--r-1);
   cursor: pointer;
 }
-.proj-overflow-btn:hover {
+.inbox-overflow-btn {
+  margin: 0;
+}
+.proj-overflow-btn:hover,
+.inbox-overflow-btn:hover {
   background: var(--surface-2);
 }
-.proj-overflow-btn:focus-visible {
+.proj-overflow-btn:focus-visible,
+.inbox-overflow-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.proj-overflow-btn svg {
+.proj-overflow-btn svg,
+.inbox-overflow-btn svg {
   display: block;
 }
-.proj-overflow-menu {
+.proj-overflow-menu,
+.inbox-overflow-menu {
   position: absolute;
   top: 44px;
   right: 0;
@@ -6437,10 +6446,12 @@ a.session-back {
   display: flex;
   flex-direction: column;
 }
-.proj-overflow-menu[hidden] {
+.proj-overflow-menu[hidden],
+.inbox-overflow-menu[hidden] {
   display: none;
 }
-.proj-overflow-menu .proj-menu-item {
+.proj-overflow-menu .proj-menu-item,
+.inbox-overflow-menu .inbox-menu-item {
   min-height: 44px;
   padding: 0 14px;
   display: flex;
@@ -6456,10 +6467,12 @@ a.session-back {
   box-sizing: border-box;
   cursor: pointer;
 }
-.proj-overflow-menu .proj-menu-item:hover {
+.proj-overflow-menu .proj-menu-item:hover,
+.inbox-overflow-menu .inbox-menu-item:hover {
   background: var(--surface-2);
 }
-.proj-overflow-menu .proj-menu-item:focus-visible {
+.proj-overflow-menu .proj-menu-item:focus-visible,
+.inbox-overflow-menu .inbox-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }

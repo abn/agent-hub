@@ -2117,3 +2117,40 @@ async fn home_has_no_gear_and_uses_flat_rows() {
         "home storage must be wrapped"
     );
 }
+
+#[test]
+fn inbox_bar_has_mark_all_read_and_overflow_holding_refresh() {
+    let index_head = INBOX_JS
+        .split("const indexHead =")
+        .nth(1)
+        .expect("inbox defines an indexHead template");
+    let index_head = index_head
+        .split("const sections =")
+        .next()
+        .unwrap_or(index_head);
+
+    assert!(
+        index_head.contains("inbox-read-all"),
+        "inbox header must contain Mark all read button"
+    );
+    assert!(
+        index_head.contains("inbox-overflow") || index_head.contains("overflow"),
+        "inbox header must contain overflow button"
+    );
+    assert!(
+        index_head.contains("inbox-refresh") || index_head.contains("Refresh"),
+        "overflow menu must hold Refresh action"
+    );
+
+    let read_all_pos = index_head
+        .find("inbox-read-all")
+        .expect("inbox-read-all exists");
+    let overflow_pos = index_head
+        .find("inbox-overflow")
+        .or_else(|| index_head.find("overflow"))
+        .expect("overflow exists");
+    assert!(
+        overflow_pos > read_all_pos,
+        "overflow button must trail Mark all read"
+    );
+}
