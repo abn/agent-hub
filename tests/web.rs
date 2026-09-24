@@ -1730,12 +1730,13 @@ fn desktop_storage_legend_is_one_wrapping_row() {
     );
 }
 
-// Round 12, desktop Agents and tokens. The screen is the Settings frame
-// (RULE 11.16): rail and stage, no index, the phone's rows in the form column,
-// and no token characters anywhere on it.
+// Round 13.1, RULE 13.2: Agents and tokens is a list-and-item screen on desktop.
+// Supersedes ROUND-12 §12 ("shaped like Settings, no index") and round 12.1 A3.
+// The shell uses index + stage, with indexHead, indexControls, indexBody,
+// stageHead, stageControls, stageBody, and hasSelection.
 
 #[test]
-fn desktop_agents_is_the_settings_frame_not_the_access_panels() {
+fn desktop_agents_is_list_and_item_shell() {
     let desktop = AGENTS_JS
         .split("function renderDesktopAgents(")
         .nth(1)
@@ -1746,34 +1747,59 @@ fn desktop_agents_is_the_settings_frame_not_the_access_panels() {
         "desktop Agents and tokens must render inside the shell frame"
     );
     assert!(
-        desktop.contains("noIndex: true"),
-        "nothing is opened one at a time, so the screen has no index"
+        !desktop.contains("noIndex: true"),
+        "RULE 13.2: Agents and tokens is a list-and-item screen on desktop, noIndex retired"
     );
     assert!(
-        !desktop.contains("access-section-head") && !desktop.contains("access-header"),
-        "the pre-shell Access panels retire"
+        desktop.contains("indexHead")
+            && desktop.contains("indexControls")
+            && desktop.contains("indexBody")
+            && desktop.contains("stageHead")
+            && desktop.contains("stageControls")
+            && desktop.contains("stageBody"),
+        "RULE 13.2: shellHTML receives both index and stage panes"
     );
     assert!(
         desktop.contains("Agents and tokens"),
-        "the desktop header names the screen, not Access"
+        "the index header names the screen"
     );
     assert!(
-        !desktop.contains("Access"),
-        "the desktop screen no longer calls itself Access"
+        desktop.contains("Add agent") && desktop.contains("btn-outline"),
+        "index header trails Add agent outline button"
+    );
+    assert!(
+        desktop.contains("confidential projects"),
+        "the index control row carries the confidential projects count"
+    );
+    assert!(
+        desktop.contains("Admin token") && desktop.contains("live"),
+        "index carries HUB group with Admin token and live pill"
+    );
+    assert!(
+        desktop.contains("aria-current=\"true\"") || desktop.contains("aria-current=\\\"true\\\""),
+        "selected agent row in index carries aria-current=true"
+    );
+    assert!(
+        desktop.contains("data-action=\"agent-token\""),
+        "stage control row carries Reissue token action data-action=agent-token"
+    );
+    assert!(
+        desktop.contains("data-action=\"agent-revoke\""),
+        "stage body carries Revoke action"
+    );
+    assert!(
+        desktop.contains("Select an agent from the list."),
+        "when no agent is selected, stage displays empty state prompt"
     );
 }
 
 #[test]
-fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
+fn desktop_agents_never_shows_a_token() {
     let desktop = AGENTS_JS
         .split("function renderDesktopAgents(")
         .nth(1)
         .expect("agents carries a desktop renderer");
     let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
-    assert!(
-        desktop.contains("form-row") && desktop.contains("form-column"),
-        "the rows are the shared form rows in the form column"
-    );
     assert!(
         !desktop.contains("token-val") && !desktop.contains("showToken"),
         "no agent or admin token characters are rendered on this screen"
@@ -1781,7 +1807,7 @@ fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
 }
 
 #[test]
-fn desktop_agents_header_trails_add_agent_button() {
+fn desktop_agents_index_header_trails_add_agent_button() {
     let desktop = AGENTS_JS
         .split("function renderDesktopAgents(")
         .nth(1)
@@ -1791,16 +1817,10 @@ fn desktop_agents_header_trails_add_agent_button() {
         desktop.contains("Add agent"),
         "desktop Agents and tokens header must carry the Add agent button"
     );
-    let stage_head_call = desktop
-        .split("shellStageHead(")
-        .nth(1)
-        .expect("desktop renderer calls shellStageHead")
-        .split(')')
-        .next()
-        .expect("shellStageHead call closes");
     assert!(
-        stage_head_call.contains("addAgentBtn") || stage_head_call.contains("Add agent"),
-        "shellStageHead must receive Add agent as action argument"
+        desktop.contains("indexHead")
+            && (desktop.contains("addAgentBtn") || desktop.contains("Add agent")),
+        "indexHead must receive Add agent"
     );
     assert!(
         desktop.contains("height: 32px")

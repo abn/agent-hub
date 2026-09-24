@@ -4,7 +4,7 @@ import { errorCard, esc, main, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
-import { shellHTML, shellStageHead } from "./shell-layout.mjs";
+import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -14,84 +14,150 @@ export function truncateMiddle(val, startLen = 8, endLen = 4) {
   return `${val.slice(0, startLen)}\u2026${val.slice(-endLen)}`;
 }
 
-function renderDesktopAgents(agents, projects, grantsByAgent) {
-  // Round 12.1 §13: Agents and tokens is a rail destination shaped like Settings
-  // (RULE 11.16), nothing is opened one at a time, so there is no index. The
-  // control row leads with the confidential count and carries the filter field
-  // only over eight rows.
+import { registerScreen } from "./keys.mjs";
 
-  let latestSeen = null;
-  for (const a of agents) {
-    const t = a.last_seen_at || a.created_at;
-    if (t && (!latestSeen || t > latestSeen)) latestSeen = t;
-  }
-  const metaText = `${agents.length} ${agents.length === 1 ? "agent" : "agents"}${
-    latestSeen ? ` · last call ${relative(latestSeen)}` : " · no calls yet"
-  }`;
+function formatTokenIssued(ts) {
+  if (!ts) return "recently";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "recently";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = null) {
+  // Round 13.1, RULE 13.2: Agents and tokens is a list-and-item screen on desktop.
+  // Index holds HUB and AGENTS; the stage holds the selected agent.
+  // #/access?agent=<id> selects it.
+  const confidentialProjects = projects.filter((p) => p.confidential);
+  const confidentialCount = confidentialProjects.length;
+
+  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
+
+  const indexHead = `
+    <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;background:var(--surface);border-bottom:1px solid var(--line)">
+      <b class="shell-title-line" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px;font-weight:600">Agents and tokens</b>
+      ${addAgentBtn}
+    </div>`;
+
+  const indexControls = `
+    <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)">
+      <span style="flex:1;min-width:0">${confidentialCount} confidential projects</span>
+      ${
+        agents.length > 8
+          ? `<div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div>`
+          : ""
+      }
+    </div>`;
 
   const adminRow = `
-    <div class="form-row">
-      <div class="form-row-main">
-        <span class="form-row-title">Admin token</span>
-        <span class="form-row-sub">set at startup by <span class="mono">HUB_ADMIN_TOKEN</span></span>
-      </div>
+    <div class="row" style="display:flex;align-items:center;gap:10px;min-height:56px;padding:0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
+      <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+        <span style="font-size:14px;font-weight:600">Admin token</span>
+        <span style="font-size:12px;color:var(--ink-3)">set by <span class="mono" style="font-family:var(--font-mono)">HUB_ADMIN_TOKEN</span></span>
+      </span>
       <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
     </div>`;
 
   const agentRows = agents
-    .map((agent) => {
+    .map((agent, idx) => {
       const grants = grantsByAgent[agent.id] || [];
       const projectWord = grants.length === 1 ? "project" : "projects";
       const grantDesc = grants.length > 0 ? `write on ${grants.length} ${projectWord}` : "no projects";
       const activeDesc = agent.last_seen_at
         ? `active ${relative(agent.last_seen_at)}`
         : `seen ${relative(agent.created_at)}`;
+      const isSelected = selectedAgent && selectedAgent.id === agent.id;
+      const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
+      const bg = isSelected ? "var(--accent-bg)" : "var(--surface)";
+      const metaColor = isSelected ? "var(--ink-2)" : "var(--ink-3)";
+      const currentAttr = isSelected ? ' aria-current="true"' : "";
       return `
-      <a class="form-row" href="#/access?agent=${encodeURIComponent(agent.id)}">
-        <div class="form-row-main">
-          <span class="form-row-title">${esc(agent.display_name || agent.id)}</span>
-          <span class="form-row-sub">${esc(grantDesc)} · ${esc(activeDesc)} · <span class="mono">${esc(agent.personal_project_id)}</span></span>
-        </div>
-        <span class="form-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
-      </a>`;
+        <a class="row agent-index-row" href="#/access?agent=${encodeURIComponent(agent.id)}"${currentAttr} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:0 16px;${borderTop}border-bottom:1px solid var(--line);background:${bg};color:var(--ink);text-decoration:none;box-sizing:border-box">
+          <span style="font-size:14px;font-weight:600">${esc(agent.display_name || agent.id)}</span>
+          <span style="font-size:12px;color:${metaColor}">${esc(grantDesc)} · ${esc(activeDesc)}</span>
+        </a>`;
     })
     .join("");
 
-  // Section 13 answer 4: the confidential card retires and its count leads the
-  // control row as text, with the filter field joining on the right only over
-  // eight rows.
-  const confidentialCount = projects.filter((p) => p.confidential).length;
-  const filterField = `<div class="shell-controls"><span class="shell-meta">${confidentialCount} confidential projects</span>${
-    agents.length > 8
-      ? `<div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div>`
-      : ""
-  }</div>`;
-
-  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
-
-  const content = `
-    <div class="form-column agents-form">
-      <div id="desktop-add-agent-form" style="display:none;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-1);margin-bottom:16px">
-        <form data-action="agent-create" style="display:flex;flex-direction:column;gap:8px">
-          <label for="desktop-agent-id" style="font-size:13px;font-weight:600">Agent id</label>
-          <input id="desktop-agent-id" name="id" required autocomplete="off" placeholder="laptop/claude" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
-          <label for="desktop-agent-name" style="font-size:13px;font-weight:600">Display name</label>
-          <input id="desktop-agent-name" name="display_name" required placeholder="Claude on laptop" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
-          <button class="primary" type="submit" style="height:36px;margin-top:4px">Create agent</button>
-        </form>
-      </div>
-      <div class="form-group-label">HUB</div>
+  const indexBody = `
+    <div class="agents-index" style="flex:1;min-height:0;overflow:auto">
+      <div style="padding:16px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">HUB</div>
       ${adminRow}
-      <div class="form-group-label">AGENTS · ${agents.length}</div>
-      <div class="agents-list">${agentRows || '<p class="empty">No agents have identified themselves yet.</p>'}</div>
+      <div style="padding:16px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">AGENTS · ${agents.length}</div>
+      <div class="agents-list">${agentRows || '<p class="empty" style="padding:16px;color:var(--ink-3);font-size:13px">No agents have identified themselves yet.</p>'}</div>
     </div>`;
+
+  let stageHead = "";
+  let stageControls = "";
+  let stageBody = "";
+
+  if (selectedAgent) {
+    const grants = grantsByAgent[selectedAgent.id] || [];
+    const lastCall = selectedAgent.last_seen_at
+      ? `last call ${relative(selectedAgent.last_seen_at)}`
+      : "no calls yet";
+    const stageMeta = `${selectedAgent.id} · ${lastCall}`;
+    const issuedDate = formatTokenIssued(selectedAgent.created_at);
+
+    stageHead = `
+      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+        <b class="shell-title-line" style="font-size:15px;font-weight:600">${esc(selectedAgent.display_name || selectedAgent.id)}</b>
+        <span style="font:500 12px/1 var(--font-mono);color:var(--ink-3)">${esc(stageMeta)}</span>
+      </div>`;
+
+    stageControls = `
+      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+        <span style="flex:1;font-size:13px;color:var(--ink-2)">Token issued ${esc(issuedDate)}</span>
+        <button type="button" class="btn-outline" data-action="agent-token" data-id="${esc(selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Reissue token</button>
+      </div>`;
+
+    const projectRows = grants.length
+      ? grants
+          .map((grant, idx) => {
+            const proj = projects.find((p) => p.id === grant.project_id);
+            const projName = proj?.display_name || grant.project_id;
+            const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
+            return `
+              <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 12px;${borderTop}border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
+                <span style="flex:1;font-size:14px;font-weight:500">${esc(projName)}</span>
+                <span style="font-size:13px;color:var(--ink-2)">${esc(grant.access)}</span>
+              </div>`;
+          })
+          .join("")
+      : `<div style="display:flex;align-items:center;height:48px;padding:0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink-3);font-size:13px;box-sizing:border-box">No projects granted</div>`;
+
+    stageBody = `
+      <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:0 24px">
+        <div style="max-width:640px">
+          <div style="padding:20px 0 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECTS · ${grants.length}</div>
+          ${projectRows}
+          <div style="height:24px"></div>
+          <button type="button" class="agent-revoke-btn" data-action="agent-revoke" data-id="${esc(selectedAgent.id)}" style="display:flex;align-items:center;width:100%;height:48px;padding:0 12px;border:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">Revoke ${esc(selectedAgent.display_name || selectedAgent.id)}</button>
+        </div>
+      </div>`;
+  } else {
+    stageHead = `
+      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+        <h1 class="shell-title-line" style="font-size:15px;font-weight:600">Agents and tokens</h1>
+      </div>`;
+    stageControls = `
+      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
+        <span class="shell-meta mono" style="font-size:13px;color:var(--ink-3)">no agent selected</span>
+      </div>`;
+    stageBody = `
+      <div class="shell-pad" style="padding:24px">
+        <p class="empty">Select an agent from the list.</p>
+      </div>`;
+  }
 
   return shellHTML({
     segment: "access",
-    noIndex: true,
-    stageHead: shellStageHead("Agents and tokens", metaText, addAgentBtn, "#/settings"),
-    stageControls: filterField,
-    stageBody: `<div class="shell-pad">${content}</div>`,
+    hasSelection: Boolean(selectedAgent),
+    indexHead,
+    indexControls,
+    indexBody,
+    stageHead,
+    stageControls,
+    stageBody,
   });
 }
 
@@ -234,9 +300,27 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
 }
 
 function setupAgentsEvents() {
-  const root = main.querySelector(".access-screen") || main;
+  const root = main.querySelector(".shell[data-segment='access']") || main.querySelector(".access-screen") || main;
   if (!root || root.dataset.agentsEventsBound === "on") return;
   root.dataset.agentsEventsBound = "on";
+
+  root.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      const row = document.activeElement?.closest(".agent-index-row");
+      if (row) {
+        requestAnimationFrame(() => {
+          const reissueBtn = main.querySelector('.shell-stage [data-action="agent-token"]') || main.querySelector('.shell-stage');
+          if (reissueBtn) reissueBtn.focus();
+        });
+      }
+    } else if (event.key === "Escape") {
+      if (document.activeElement?.closest(".shell-stage")) {
+        event.preventDefault();
+        const selected = main.querySelector('.agent-index-row[aria-current="true"]') || main.querySelector('.agent-index-row');
+        if (selected) selected.focus();
+      }
+    }
+  });
 
   root.addEventListener("click", (event) => {
     const toggleBtn = event.target.closest("[data-action='toggle-add-agent']");
@@ -279,13 +363,16 @@ export async function accessScreen(gen, params = null) {
     return;
   }
 
+  const agentParam =
+    params?.get("agent") || new URLSearchParams(location.hash.split("?")[1] || "").get("agent");
+
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
-    paint(gen, renderDesktopAgents(agents, projects, grantsByAgent));
+    const selectedAgent = agentParam ? agents.find((a) => a.id === agentParam) : null;
+    paint(gen, renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent));
+    installShellLayout(main);
     setupAgentsEvents();
   } else {
-    const agentParam =
-      params?.get("agent") || new URLSearchParams(location.hash.split("?")[1] || "").get("agent");
     if (agentParam) {
       const agent = agents.find((a) => a.id === agentParam);
       if (agent) {
@@ -516,7 +603,7 @@ export async function reissueToken(id) {
 export async function revokeToken(id) {
   const confirmed = await confirmAction({
     title: `Revoke the token for ${id}?`,
-    body: "The agent loses access immediately. A new token can be issued, but this one is gone.",
+    body: "Its token stops working and it loses every project.",
     note: "Revoking cannot be undone.",
     safe: "Keep",
     danger: "Revoke token",
@@ -548,3 +635,5 @@ export async function ungrant(id, project) {
     toast(`Grant removed on ${project}.`);
   }
 }
+
+registerScreen("access", { rows: ".agent-index-row" });
