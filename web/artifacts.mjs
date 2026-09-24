@@ -97,7 +97,7 @@ export async function artifactStage(id, projectId) {
     <button type="button" class="hub-btn-glyph" data-action="copy-path" data-path="${esc(
       `${project} / artifacts / ${slug}`,
     )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
-    <button type="button" class="hub-btn-glyph hub-version-toggle mono" data-action="stage-version" aria-haspopup="true" aria-expanded="false">v${newest} of ${versions.length}</button>
+    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${newest}">v${newest} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}</button>
     <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}" aria-label="Copy raw">${rawGlyph}</button>`;
 
   const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
@@ -128,6 +128,7 @@ export async function artifactStage(id, projectId) {
     body,
     commentsCount,
     version: newest,
+    versions,
     protected: Boolean(current.protected),
   };
 }
@@ -193,6 +194,13 @@ export function wireArtifactStage(root, id, info) {
         toast("Failed to copy raw text");
       }
     });
+  }
+  // The version control opens the same sheet the standalone viewer mounts. The
+  // stage used to render a version button nothing answered, so the control read
+  // as a dropdown and did nothing.
+  if (info && Array.isArray(info.versions) && info.versions.length > 0) {
+    const { backdrop, sheet } = buildVersionSheet(id, info.versions, info.version, "");
+    root.append(backdrop, sheet);
   }
 }
 

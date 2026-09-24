@@ -2178,6 +2178,48 @@ fn phone_artifact_stage_mounts_both_comment_nodes() {
     );
 }
 
+// The project artifact stage renders its own version control, separate from the
+// standalone viewer's. It once carried an action nothing answered, so it looked
+// like a dropdown and did nothing, and a fixed 36px glyph box clipped the label.
+#[test]
+fn artifact_stage_version_control_is_wired_and_opens_a_sheet() {
+    assert!(
+        !ARTIFACTS_JS.contains(r#"data-action="stage-version""#),
+        "the dead stage-version action is retired"
+    );
+    assert!(
+        ARTIFACTS_JS.contains(r#"data-action="version-toggle""#),
+        "the stage version control uses the action the app answers"
+    );
+    let stage_controls = ARTIFACTS_JS
+        .split("const controls = `")
+        .nth(1)
+        .expect("the stage builds a control row")
+        .split("`;")
+        .next()
+        .expect("the controls literal closes");
+    assert!(
+        stage_controls.contains("hub-version-toggle"),
+        "the version control keeps its own class, not the fixed 36px glyph box"
+    );
+    assert!(
+        !stage_controls.contains("hub-btn-glyph hub-version-toggle"),
+        "a fixed 36px box clips the 'v3 of 3' label"
+    );
+    assert!(
+        stage_controls.contains("chevronDown"),
+        "the control shows the chevron that says it opens something"
+    );
+    assert!(
+        ARTIFACTS_JS.contains("buildVersionSheet(id, info.versions, info.version, \"\")"),
+        "the stage mounts the version sheet the control opens"
+    );
+    assert!(
+        ARTIFACTS_JS.contains("versions,"),
+        "the stage carries the versions the sheet lists"
+    );
+}
+
 // Round 12.1, section 13, the reissue reveal. One dialog, two states, and the
 // token string in the DOM only while it is open (CHECK 12.1.C). The state
 // machine is driven in the browser, because the claim is about what is in the
