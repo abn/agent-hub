@@ -7264,6 +7264,10 @@ dialog.dialog-project-delete {
   padding: 16px 16px 8px;
   min-height: 44px;
 }
+/* An author display beats the browser's own [hidden] rule, so the healthy state
+   needs to say it: section 13 hides this row outright, dot and button included,
+   rather than leaving a dot and a Refresh button on an otherwise empty line. */
+.more-sync-line[hidden] { display: none; }
 .more-sync-dot {
   width: 8px;
   height: 8px;

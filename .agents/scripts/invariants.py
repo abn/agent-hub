@@ -1081,14 +1081,20 @@ def check_sync_states(page, watch: Watch, port: int) -> None:
         page.wait_for_timeout(400)
 
         def shown() -> list:
+            # A row is only truly absent if it neither paints nor leaves any of
+            # its children painting. `display:flex` on the row beats the
+            # browser's own `[hidden]` rule, so a hidden row can still draw its
+            # dot and its button, which is how this first slipped through.
             return page.evaluate(
                 "(() => { const out = [];"
                 " for (const el of document.querySelectorAll('#rail-sync, .more-sync-line')) {"
-                "   if (el.hidden) continue;"
                 "   const cs = window.getComputedStyle(el);"
                 "   if (cs.display === 'none') continue;"
                 "   const box = el.getBoundingClientRect();"
-                "   if (box.height > 0 && box.width > 0) out.push((el.id || el.className) + ':' + el.textContent.trim());"
+                "   if (box.height <= 0 || box.width <= 0) continue;"
+                "   const text = el.textContent.trim();"
+                "   if (el.hidden) { out.push('HIDDEN-BUT-PAINTED:' + (el.id || el.className) + ':' + text); continue; }"
+                "   if (text) out.push((el.id || el.className) + ':' + text);"
                 " }"
                 " return out; })()"
             )
