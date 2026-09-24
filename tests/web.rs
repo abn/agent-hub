@@ -1494,8 +1494,38 @@ fn desktop_settings_groups_are_device_keyboard_hub() {
         "single-key shortcuts must carry sub 'Press ? for the list'"
     );
     assert!(
-        desktop.contains("About") && desktop.contains("v0.4.1"),
-        "THIS HUB must carry About row with v0.4.1"
+        desktop.contains("About") && desktop.contains("${esc(ABOUT_VERSION)}"),
+        "THIS HUB must carry the About row, showing the version from one constant"
+    );
+    // The row must not promise a destination. `#/about` is not routed, and a
+    // chevron on a row that goes nowhere is a lie the reader pays for.
+    assert!(
+        !desktop.contains("href=\"#/about\""),
+        "the About row must not link to a route that does not exist"
+    );
+    // The About row's own markup is everything from its title to the next row.
+    let about_row = desktop
+        .split("<span class=\"form-row-title\">About</span>")
+        .nth(1)
+        .and_then(|rest| rest.split("</div>\n          </div>").next())
+        .unwrap_or_default();
+    assert!(
+        !about_row.contains("NAV_CHEVRON"),
+        "the About row must not carry a chevron while it has no destination"
+    );
+    assert!(
+        SETTINGS_JS.contains(r#"const ABOUT_VERSION = "v0.4.1";"#),
+        "the version comes from one constant, not two string literals"
+    );
+    assert_eq!(
+        SETTINGS_JS.matches(r#"ABOUT_VERSION"#).count(),
+        3,
+        "the constant is declared once and used on both widths"
+    );
+    assert_eq!(
+        SETTINGS_JS.matches(r#""v0.4.1""#).count(),
+        1,
+        "the version literal appears once in the module"
     );
     assert!(
         desktop.contains("This device's settings are saved in this browser only."),
