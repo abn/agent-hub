@@ -1688,6 +1688,47 @@ fn desktop_storage_header_meta_is_node_and_time_without_a_path() {
     );
 }
 
+#[test]
+fn desktop_storage_retires_tiles_and_moves_prune_to_control_row() {
+    let desktop = STORAGE_JS
+        .split("async function renderDesktop(")
+        .nth(1)
+        .expect("storage carries a desktop renderer");
+    assert!(
+        !desktop.contains("summaryTiles"),
+        "storage tiles must retire from desktop render"
+    );
+    assert!(
+        !STORAGE_JS.contains("function summaryTiles("),
+        "summaryTiles function must be retired"
+    );
+    assert!(
+        desktop.contains("desktopControls") || desktop.contains("storage-controls"),
+        "desktop storage must render the control row"
+    );
+    assert!(
+        STORAGE_JS.contains("ended session"),
+        "control row must carry ended session count"
+    );
+}
+
+#[test]
+fn desktop_storage_legend_is_one_wrapping_row() {
+    let summary = STORAGE_JS
+        .split("function desktopSummary(")
+        .nth(1)
+        .expect("storage carries a desktop summary");
+    let summary = summary.split("\n}").next().unwrap_or(summary);
+    assert!(
+        summary.contains("storage-desktop-legend") || summary.contains("storage-legend-wrap"),
+        "desktop storage summary must use wrapping legend, not grid"
+    );
+    assert!(
+        APP_CSS.contains(".storage-desktop-legend") || APP_CSS.contains(".storage-legend-wrap"),
+        "app.css must declare wrapping legend style"
+    );
+}
+
 // Round 12, desktop Agents and tokens. The screen is the Settings frame
 // (RULE 11.16): rail and stage, no index, the phone's rows in the form column,
 // and no token characters anywhere on it.

@@ -348,91 +348,43 @@ async function pruneAll(usage, holding) {
 function desktopHead(usage) {
   const head = el("div", "storage-head");
   const textWrap = el("div", "storage-head-text");
-  const title = el("h1", "", "Storage");
+  const title = el("h1", "storage-head-title", "Storage");
   const now = new Date();
   const readTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const nodeHost = usage.node?.host || "demo";
   // The header meta is node and time, no path: the path is the Settings
   // screen's business, and the desktop Storage header states only what was
   // measured and when.
-  const desc = el("p", "storage-desc");
-  desc.append(el("span", "mono", `${nodeHost} · read ${readTime}`));
+  const desc = el("span", "storage-head-meta mono", `${nodeHost} · read ${readTime}`);
   textWrap.append(title, desc);
-  const remeasure = el("button", "btn storage-remeasure", "Re-measure");
+  const remeasure = el("button", "storage-remeasure-btn");
   remeasure.type = "button";
+  remeasure.setAttribute("aria-label", "Re-measure");
+  remeasure.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 5v6h-6"></path></svg>`;
   remeasure.addEventListener("click", () => render());
   head.append(textWrap, remeasure);
   return head;
 }
 
-function summaryTiles(usage) {
-  const tiles = el("div", "storage-tiles");
+function desktopControls(usage) {
+  const controls = el("div", "storage-controls shell-controls");
+  const prunableSessions = usage.prunable?.sessions || 0;
+  const prunableBytes = usage.prunable?.bytes || 0;
+  const label = prunableSessions === 1 ? "1 ended session" : `${prunableSessions} ended sessions`;
+  const endedText = el("span", "storage-controls-ended", label);
+  controls.appendChild(endedText);
 
-  // Tile 1: ON DISK
-  const t1 = el("section", "card storage-tile");
-  t1.setAttribute("aria-label", "On disk");
-  t1.append(
-    el("span", "storage-tile-label", "ON DISK"),
-    el("span", "storage-tile-val mono", formatBytes(usage.used_bytes)),
-    el("span", "storage-tile-sub", `across ${usage.projects.length} projects`),
-  );
-
-  // Tile 2: ARTIFACT BLOBS
-  const t2 = el("section", "card storage-tile");
-  t2.setAttribute("aria-label", "Artifact blobs");
-  const blobProjects = usage.projects.filter((p) => (p.artifact_bytes || 0) > 0).length;
-  t2.append(
-    el("span", "storage-tile-label", "ARTIFACT BLOBS"),
-    el("span", "storage-tile-val mono", formatBytes(usage.by_kind?.artifacts ?? 0)),
-    el(
-      "span",
-      "storage-tile-sub",
-      `${blobProjects} ${blobProjects === 1 ? "project" : "projects"} holding blobs`,
-    ),
-  );
-
-  // Tile 3: SESSION BRAINS
-  const t3 = el("section", "card storage-tile");
-  t3.setAttribute("aria-label", "Session brains");
-  const prunableCount = usage.prunable?.sessions || 0;
-  t3.append(
-    el("span", "storage-tile-label", "SESSION BRAINS"),
-    el("span", "storage-tile-val mono", formatBytes(usage.by_kind?.sessions ?? 0)),
-    el(
-      "span",
-      "storage-tile-sub",
-      prunableCount > 0 ? `${prunableCount} ended` : "no ended sessions",
-    ),
-  );
-
-  // Tile 4: RECLAIMABLE
-  const t4 = el("section", "card storage-tile reclaimable");
-  t4.setAttribute("aria-label", "Reclaimable");
-  const foot4 = el("div", "storage-tile-foot");
-  foot4.appendChild(
-    el(
-      "span",
-      "storage-tile-sub",
-      prunableCount > 0
-        ? `${prunableCount} ended session ${prunableCount === 1 ? "brain" : "brains"}`
-        : "no ended session brains",
-    ),
-  );
-  if (prunableCount > 0) {
-    const pruneAllBtn = el("button", "btn storage-prune-all-btn storage-review", "Prune all");
-    pruneAllBtn.type = "button";
+  if (prunableSessions > 0) {
+    const pruneBtn = el("button", "btn storage-prune-all-btn danger storage-review");
+    pruneBtn.type = "button";
+    const pruneLabel = document.createTextNode("Prune ");
+    const monoBytes = el("span", "mono", formatBytes(prunableBytes));
+    pruneBtn.append(pruneLabel, monoBytes);
     const holding = usage.projects.filter((p) => p.prunable_sessions > 0);
-    pruneAllBtn.addEventListener("click", () => pruneAll(usage, holding));
-    foot4.appendChild(pruneAllBtn);
+    pruneBtn.addEventListener("click", () => pruneAll(usage, holding));
+    controls.appendChild(pruneBtn);
   }
-  t4.append(
-    el("span", "storage-tile-label", "RECLAIMABLE"),
-    el("span", "storage-tile-val mono", formatBytes(usage.prunable?.bytes ?? 0)),
-    foot4,
-  );
-
-  tiles.append(t1, t2, t3, t4);
-  return tiles;
+  return controls;
 }
 
 function desktopTable(usage) {
@@ -801,7 +753,7 @@ function desktopSummary(usage) {
   }
   wrap.appendChild(bar);
 
-  const legend = el("div", "storage-legend-grid");
+  const legend = el("div", "storage-desktop-legend storage-legend-wrap");
   for (const [kind, bytes, tone] of parts) {
     const item = el("span", "storage-legend-item");
     const sw = el("span", "storage-swatch");
@@ -827,8 +779,8 @@ function desktopSummary(usage) {
 async function renderDesktop(root, usage) {
   root.classList.add("storage-desktop-view");
   root.appendChild(desktopHead(usage));
+  root.appendChild(desktopControls(usage));
   root.appendChild(desktopSummary(usage));
-  root.appendChild(summaryTiles(usage));
 
   // No second round of requests. This asked `/stats` once per project purely
   // to learn whether each one had a live agent, so a hub with six projects
