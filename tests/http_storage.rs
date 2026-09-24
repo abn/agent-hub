@@ -44,6 +44,25 @@ async fn usage(state: &AppState) -> Value {
     serde_json::from_slice(&bytes).expect("body is JSON")
 }
 
+/// The Settings Version row reads these, and the handoff's rule is that every
+/// number shown is real. The version comes from `Cargo.toml`; the commit is read
+/// at build time, with `unknown` the honest answer outside a git checkout.
+#[tokio::test]
+async fn storage_carries_the_build_version_and_commit() {
+    let state = state().await;
+    let usage = usage(&state).await;
+    let version = usage["version"].as_str().expect("version is present");
+    let commit = usage["commit"].as_str().expect("commit is present");
+    assert!(
+        !version.is_empty() && version != "0.0.0",
+        "the version is the package's own, not a placeholder: {version}"
+    );
+    assert!(
+        !commit.is_empty(),
+        "the commit is present, even as a fallback: {commit}"
+    );
+}
+
 /// Give a session a brain file with something in it, and report its bytes.
 async fn write_brain(state: &AppState, session: &sessions::Session) -> i64 {
     let brain = state

@@ -88,6 +88,11 @@ pub struct StorageUsage {
     pub events_shared_bytes: i64,
     pub prunable: Prunable,
     pub projects: Vec<ProjectUsage>,
+    /// The hub's own version, from `Cargo.toml`, and the short commit it was
+    /// built from. The Settings Version row reads these; they are real build
+    /// metadata, never typed literals.
+    pub version: String,
+    pub commit: String,
 }
 
 /// The label a surface prints beside the host name.
@@ -366,6 +371,11 @@ pub async fn usage_from(
         events_shared_bytes,
         prunable,
         projects: by_project,
+        // Real build metadata, resolved at compile time: the version from
+        // `Cargo.toml` and the short commit the build script read. The Version
+        // row must never carry a typed literal.
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        commit: env!("GIT_COMMIT_SHORT").to_string(),
     };
     Ok((usage, weighed))
 }
