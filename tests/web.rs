@@ -1811,6 +1811,25 @@ fn desktop_agents_header_trails_add_agent_button() {
         desktop.contains("5v14") && desktop.contains("5 12h14"),
         "Add agent button must carry the plus glyph"
     );
+    // Section 13 answer 4: the confidential card retires, and its count leads
+    // the control row as text.
+    assert!(
+        desktop.contains("confidential projects"),
+        "the desktop control row leads with the confidential count"
+    );
+    assert!(
+        !desktop.contains("confidential-projects"),
+        "the confidential card retires from the desktop screen"
+    );
+    assert!(
+        desktop.contains("confidentialCount"),
+        "the count is computed from the projects, not written twice"
+    );
+    assert_eq!(
+        desktop.matches("confidentialCount").count(),
+        2,
+        "the count is computed once and used once, with no dead variable"
+    );
 }
 
 // Round 12.1, section 13, the sync rule. Nothing when healthy at either width

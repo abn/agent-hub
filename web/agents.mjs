@@ -15,11 +15,10 @@ export function truncateMiddle(val, startLen = 8, endLen = 4) {
 }
 
 function renderDesktopAgents(agents, projects, grantsByAgent) {
-  // Round 12 §12: Agents and tokens is a rail destination shaped like Settings
+  // Round 12.1 §13: Agents and tokens is a rail destination shaped like Settings
   // (RULE 11.16), nothing is opened one at a time, so there is no index. The
-  // control row is reserved; it carries the filter field only over eight rows,
-  // and with four agents it is empty, which is correct (RULE 11.3).
-  const confidentialProjects = projects.filter((p) => p.confidential);
+  // control row leads with the confidential count and carries the filter field
+  // only over eight rows.
 
   let latestSeen = null;
   for (const a of agents) {
@@ -58,10 +57,15 @@ function renderDesktopAgents(agents, projects, grantsByAgent) {
     })
     .join("");
 
-  const filterField =
+  // Section 13 answer 4: the confidential card retires and its count leads the
+  // control row as text, with the filter field joining on the right only over
+  // eight rows.
+  const confidentialCount = projects.filter((p) => p.confidential).length;
+  const filterField = `<div class="shell-controls"><span class="shell-meta">${confidentialCount} confidential projects</span>${
     agents.length > 8
-      ? `<div class="shell-controls"><div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div></div>`
-      : `<div class="shell-controls"></div>`;
+      ? `<div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div>`
+      : ""
+  }</div>`;
 
   const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
 
