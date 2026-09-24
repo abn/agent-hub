@@ -61,6 +61,17 @@ async fn storage_carries_the_build_version_and_commit() {
         !commit.is_empty(),
         "the commit is present, even as a fallback: {commit}"
     );
+    // The image context has no .git, so the commit is passed in at build time.
+    // When it is, it wins over whatever the checkout would report.
+    if let Ok(expected) = std::env::var("GIT_COMMIT") {
+        let expected = expected.trim();
+        if !expected.is_empty() {
+            assert_eq!(
+                commit, expected,
+                "an explicit GIT_COMMIT is the value shown"
+            );
+        }
+    }
 }
 
 /// Give a session a brain file with something in it, and report its bytes.

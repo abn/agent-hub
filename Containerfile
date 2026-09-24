@@ -9,11 +9,20 @@ RUN apt-get update \
 WORKDIR /build
 
 COPY Cargo.toml Cargo.lock ./
+# The build script stamps the binary with the version and the commit it was
+# built from, so it must be in the image context too. Without it the crate does
+# not compile: the storage payload reads the value with env!.
+COPY build.rs ./
 COPY vendor ./vendor
 COPY src ./src
 COPY web ./web
 # The served skill guide is embedded into the binary at build time.
 COPY assets ./assets
+
+# The image context excludes .git, so the commit is passed in at build time.
+# With no argument the row reports "unknown" rather than inventing a value.
+ARG GIT_COMMIT=
+ENV GIT_COMMIT=${GIT_COMMIT}
 
 # The image only serves, so it leaves out the client: the stdio proxy and the
 # one-shot calls run on the agents' machines, not here.
