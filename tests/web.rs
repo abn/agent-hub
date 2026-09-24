@@ -1495,39 +1495,58 @@ fn desktop_settings_groups_are_device_keyboard_hub() {
         "single-key shortcuts must carry sub 'Press ? for the list'"
     );
     assert!(
-        desktop.contains("About") && desktop.contains("${esc(ABOUT_VERSION)}"),
-        "THIS HUB must carry the About row, showing the version from one constant"
+        desktop.contains("Version") && desktop.contains("${esc(versionValue)}"),
+        "THIS HUB must carry the Version row, rendering the payload version"
     );
-    // The row must not promise a destination. `#/about` is not routed, and a
-    // chevron on a row that goes nowhere is a lie the reader pays for.
-    assert!(
-        !desktop.contains("href=\"#/about\""),
-        "the About row must not link to a route that does not exist"
-    );
-    // The About row's own markup is everything from its title to the next row.
-    let about_row = desktop
-        .split("<span class=\"form-row-title\">About</span>")
+    assert!(!desktop.contains(">About<"), "About is renamed Version");
+    // CHECK 13.C: The Version row has no chevron, no link, no tab stop, at both widths; no route #/about.
+    assert!(!SETTINGS_JS.contains("#/about"), "#/about is not a route");
+    let version_row = desktop
+        .split("<span class=\"form-row-title\">Version</span>")
         .nth(1)
-        .and_then(|rest| rest.split("</div>\n          </div>").next())
+        .and_then(|rest| {
+            rest.split("</div>\n          </div>")
+                .next()
+                .or_else(|| rest.split("</div>\n          <button").next())
+        })
         .unwrap_or_default();
     assert!(
-        !about_row.contains("NAV_CHEVRON"),
-        "the About row must not carry a chevron while it has no destination"
+        !version_row.contains("NAV_CHEVRON") && !version_row.contains("chevron"),
+        "the Version row must not carry a chevron"
     );
     assert!(
-        SETTINGS_JS.contains(r#"const ABOUT_VERSION = "v0.4.1";"#),
-        "the version comes from one constant, not two string literals"
+        version_row.contains("36px")
+            || desktop.contains("padding-right: 36px")
+            || desktop.contains("padding-right:36px"),
+        "Version row must provide 36px right padding to right-align with chevron rows"
+    );
+    assert!(
+        desktop.contains("${esc(versionValue)}"),
+        "the Version row renders the value the payload supplied"
+    );
+    // RULE 13.1, the honesty rule: the row shows the hub's real version and
+    // commit, read from the storage payload, never a typed literal. A literal
+    // here once put a fabricated commit hash on screen.
+    assert!(
+        SETTINGS_JS.contains("storage?.version") && SETTINGS_JS.contains("storage.commit"),
+        "the version and commit come from the storage payload"
+    );
+    assert!(
+        !SETTINGS_JS.contains("4978813") && !SETTINGS_JS.contains(r#""v0.4.1""#),
+        "no fabricated version or commit literal remains in the module"
     );
     assert_eq!(
-        SETTINGS_JS.matches(r#"ABOUT_VERSION"#).count(),
-        3,
-        "the constant is declared once and used on both widths"
+        SETTINGS_JS.matches("${esc(versionValue)}").count(),
+        2,
+        "both widths render the same computed value"
     );
-    assert_eq!(
-        SETTINGS_JS.matches(r#""v0.4.1""#).count(),
-        1,
-        "the version literal appears once in the module"
+
+    // C5: Storage row shows used only, not used / capacity.
+    assert!(
+        !SETTINGS_JS.contains("usedOfCapacity(used, capacity)"),
+        "Storage row value must show used only, not used / capacity"
     );
+
     assert!(
         desktop.contains("This device's settings are saved in this browser only."),
         "desktop settings must carry the helper line"

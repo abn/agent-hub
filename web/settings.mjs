@@ -5,10 +5,10 @@ import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
-import { usedOfCapacity } from "./home.mjs";
 import { applyPrefs, prefs, savePrefs, saveToken } from "./prefs.mjs";
 import { render } from "./router.mjs";
-import { shellHTML, shellStageHead } from "./shell-layout.mjs";import { formatBytes } from "./storage.mjs";
+import { shellHTML, shellStageHead } from "./shell-layout.mjs";
+import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -70,11 +70,6 @@ const THEME_GLYPHS = {
 
 const COPY_PATH_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
 
-// The version the About row shows. Round 12.1 names `v0.4.1` for the row, and
-// the hub reports no version of its own (`Cargo.toml` is 0.0.0 and no route
-// carries one), so this is the design's value in one place rather than the
-// same string typed into two screens.
-const ABOUT_VERSION = "v0.4.1";
 const CHECK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>`;
 
 function themeSegment(value, current) {
@@ -206,11 +201,16 @@ export async function settingsScreen(gen) {
   const shortcutsOn = prefs.shortcuts === "on";
 
   const used = storage?.used_bytes ?? 0;
-  const capacity = storage?.capacity_bytes ?? 0;
-  const storageValue = capacity ? usedOfCapacity(used, capacity) : formatBytes(used);
+  const storageValue = formatBytes(used);
   const dataPath = storage?.data_path || "";
   const lastTwoPath = truncatePathLastTwo(dataPath);
   const nodeLine = storage?.node ? `${storage.node.host} · ${storage.node.mode}` : "";
+  // The row shows the hub's own version and the commit it was built from, both
+  // read from the payload. If the hub could not be reached there is nothing
+  // real to show, and the row says so rather than inventing a number.
+  const versionValue = storage?.version
+    ? `v${storage.version}${storage.commit ? ` · ${storage.commit}` : ""}`
+    : "unknown";
 
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
@@ -225,6 +225,7 @@ export async function settingsScreen(gen) {
         .settings .settings-btn-row {
           width: 100%;
           border: 0;
+          border-top: 0 !important;
           background: none;
           font: inherit;
           text-align: left;
@@ -312,13 +313,13 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(agentCountText)}</span>
             ${NAV_CHEVRON}
           </a>
-          <div class="form-row">
+          <div class="form-row" style="padding-right: 36px">
             <div class="form-row-main">
-              <span class="form-row-title">About</span>
+              <span class="form-row-title">Version</span>
             </div>
-            <span class="form-row-value">${esc(ABOUT_VERSION)}</span>
+            <span class="form-row-value" style="user-select: text">${esc(versionValue)}</span>
           </div>
-          <button type="button" class="form-row settings-btn-row" data-action="signout">
+          <button type="button" class="form-row settings-btn-row" data-action="signout" style="border-top: 0">
             <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
           </button>
         </section>
@@ -355,7 +356,7 @@ export async function settingsScreen(gen) {
         .settings-flat-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; box-sizing: border-box; }
         .settings-flat-row:first-of-type { border-top: 1px solid var(--line); }
         .settings-nav-row { padding: 8px 8px 8px 16px; }
-        .settings-btn-row { width: 100%; border: 0; font: 500 15px/1 var(--font-sans); text-align: left; cursor: pointer; color: var(--ink); }
+        .settings-btn-row { width: 100%; border: 0; border-top: 0 !important; font: 500 15px/1 var(--font-sans); text-align: left; cursor: pointer; color: var(--ink); }
         .settings-footer-row { display: flex; align-items: center; gap: 4px; padding: 14px 8px 0 16px; }
         .settings-copy-btn { flex: none; width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0; border-radius: var(--r-1); color: var(--ink-2); cursor: pointer; }
         .settings-copy-btn:focus-visible { outline: 2px solid var(--focus); }
@@ -397,11 +398,11 @@ export async function settingsScreen(gen) {
           <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
           <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
-        <div class="settings-flat-row row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">About</span>
-          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2)">${esc(ABOUT_VERSION)}</span>
+        <div class="settings-flat-row row" style="padding-right: 36px">
+          <span class="title" style="flex:1;font-size:15px;font-weight:500">Version</span>
+          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2);user-select:text">${esc(versionValue)}</span>
         </div>
-        <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout">Sign out of this browser</button>
+        <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout" style="border-top: 0">Sign out of this browser</button>
       </div>
 
       <footer class="settings-footer-row">
