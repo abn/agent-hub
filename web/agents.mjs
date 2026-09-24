@@ -63,8 +63,19 @@ function renderDesktopAgents(agents, projects, grantsByAgent) {
       ? `<div class="shell-controls"><div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div></div>`
       : `<div class="shell-controls"></div>`;
 
+  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
+
   const content = `
     <div class="form-column agents-form">
+      <div id="desktop-add-agent-form" style="display:none;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-1);margin-bottom:16px">
+        <form data-action="agent-create" style="display:flex;flex-direction:column;gap:8px">
+          <label for="desktop-agent-id" style="font-size:13px;font-weight:600">Agent id</label>
+          <input id="desktop-agent-id" name="id" required autocomplete="off" placeholder="laptop/claude" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
+          <label for="desktop-agent-name" style="font-size:13px;font-weight:600">Display name</label>
+          <input id="desktop-agent-name" name="display_name" required placeholder="Claude on laptop" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
+          <button class="primary" type="submit" style="height:36px;margin-top:4px">Create agent</button>
+        </form>
+      </div>
       <div class="form-group-label">HUB</div>
       ${adminRow}
       <div class="form-group-label">AGENTS · ${agents.length}</div>
@@ -74,7 +85,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent) {
   return shellHTML({
     segment: "access",
     noIndex: true,
-    stageHead: shellStageHead("Agents and tokens", metaText, "", "#/settings"),
+    stageHead: shellStageHead("Agents and tokens", metaText, addAgentBtn, "#/settings"),
     stageControls: filterField,
     stageBody: `<div class="shell-pad">${content}</div>`,
   });
@@ -218,16 +229,18 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
   });
 }
 
-function setupMobileAgentsEvents() {
+function setupAgentsEvents() {
   const root = main.querySelector(".access-screen") || main;
-  if (!root || root.dataset.mobileEventsBound === "on") return;
-  root.dataset.mobileEventsBound = "on";
+  if (!root || root.dataset.agentsEventsBound === "on") return;
+  root.dataset.agentsEventsBound = "on";
 
   root.addEventListener("click", (event) => {
     const toggleBtn = event.target.closest("[data-action='toggle-add-agent']");
     if (toggleBtn) {
       event.preventDefault();
-      const form = document.getElementById("mobile-add-agent-form");
+      const form =
+        document.getElementById("desktop-add-agent-form") ||
+        document.getElementById("mobile-add-agent-form");
       if (form) {
         form.style.display = form.style.display === "none" ? "block" : "none";
         if (form.style.display === "block") {
@@ -265,6 +278,7 @@ export async function accessScreen(gen, params = null) {
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   if (isDesktop) {
     paint(gen, renderDesktopAgents(agents, projects, grantsByAgent));
+    setupAgentsEvents();
   } else {
     const agentParam =
       params?.get("agent") || new URLSearchParams(location.hash.split("?")[1] || "").get("agent");
@@ -274,11 +288,11 @@ export async function accessScreen(gen, params = null) {
         paint(gen, renderMobileAgentDetail(agent, projects, grantsByAgent[agent.id] || []));
       } else {
         paint(gen, renderMobileAgentsList(agents, projects, grantsByAgent));
-        setupMobileAgentsEvents();
+        setupAgentsEvents();
       }
     } else {
       paint(gen, renderMobileAgentsList(agents, projects, grantsByAgent));
-      setupMobileAgentsEvents();
+      setupAgentsEvents();
     }
   }
 }

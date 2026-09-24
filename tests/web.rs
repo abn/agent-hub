@@ -1779,6 +1779,40 @@ fn desktop_agents_rows_use_the_shared_form_and_never_show_a_token() {
     );
 }
 
+#[test]
+fn desktop_agents_header_trails_add_agent_button() {
+    let desktop = AGENTS_JS
+        .split("function renderDesktopAgents(")
+        .nth(1)
+        .expect("agents carries a desktop renderer");
+    let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
+    assert!(
+        desktop.contains("Add agent"),
+        "desktop Agents and tokens header must carry the Add agent button"
+    );
+    let stage_head_call = desktop
+        .split("shellStageHead(")
+        .nth(1)
+        .expect("desktop renderer calls shellStageHead")
+        .split(')')
+        .next()
+        .expect("shellStageHead call closes");
+    assert!(
+        stage_head_call.contains("addAgentBtn") || stage_head_call.contains("Add agent"),
+        "shellStageHead must receive Add agent as action argument"
+    );
+    assert!(
+        desktop.contains("height: 32px")
+            || desktop.contains("height:32px")
+            || desktop.contains("agents-add-btn"),
+        "Add agent button must be 32px outline button"
+    );
+    assert!(
+        desktop.contains("5v14") && desktop.contains("5 12h14"),
+        "Add agent button must carry the plus glyph"
+    );
+}
+
 // Round 12.1, section 13, the sync rule. Nothing when healthy at either width
 // and no reserved space; stale after five minutes without a success while the
 // page is visible; failed after two consecutive failures or when offline; a 401

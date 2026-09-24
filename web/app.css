@@ -1450,6 +1450,28 @@ button.empty-link {
 .agents-form { margin: 0; }
 .agents-form .form-group-label { margin-top: var(--s-4); }
 .agents-form .form-group-label:first-child { margin-top: 0; }
+.agents-add-btn {
+  flex: none;
+  white-space: nowrap;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 9px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 var(--t-13)/1 var(--font-sans);
+  cursor: pointer;
+}
+.agents-add-btn:hover {
+  background: var(--surface-2);
+}
+.agents-add-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
 
 .storage-by .section-label { margin: 0 0 6px; }
 /* The rows carry the corners themselves: clipping the list would clip the
