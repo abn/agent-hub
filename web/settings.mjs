@@ -69,6 +69,12 @@ const THEME_GLYPHS = {
 };
 
 const COPY_PATH_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+
+// The version the About row shows. Round 12.1 names `v0.4.1` for the row, and
+// the hub reports no version of its own (`Cargo.toml` is 0.0.0 and no route
+// carries one), so this is the design's value in one place rather than the
+// same string typed into two screens.
+const ABOUT_VERSION = "v0.4.1";
 const CHECK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>`;
 
 function themeSegment(value, current) {
@@ -306,13 +312,12 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(agentCountText)}</span>
             ${NAV_CHEVRON}
           </a>
-          <a class="form-row" href="#/about">
+          <div class="form-row">
             <div class="form-row-main">
               <span class="form-row-title">About</span>
             </div>
-            <span class="form-row-value">v0.4.1</span>
-            ${NAV_CHEVRON}
-          </a>
+            <span class="form-row-value">${esc(ABOUT_VERSION)}</span>
+          </div>
           <button type="button" class="form-row settings-btn-row" data-action="signout">
             <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
           </button>
@@ -392,11 +397,10 @@ export async function settingsScreen(gen) {
           <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
           <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
-        <a href="#/about" class="settings-flat-row row settings-nav-row">
+        <div class="settings-flat-row row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">About</span>
-          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2)">v0.4.1</span>
-          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
-        </a>
+          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2)">${esc(ABOUT_VERSION)}</span>
+        </div>
         <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout">Sign out of this browser</button>
       </div>
 
