@@ -1330,6 +1330,122 @@ def check_phone_frame_and_tools_row(page, watch: Watch, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_desktop_agents_list_and_item(page, watch: Watch, agent_id: str) -> None:
+    """CHECK 13.A at 1440: Agents and tokens is a list-and-item screen.
+
+    RULE 13.2 retires `noIndex` on the desktop: the index selects an agent and
+    the stage shows it with a Reissue token control. Before this round the
+    reissue reveal was unreachable at 1440, so the check is the control's mere
+    presence plus the selected row.
+    """
+    watch.enter("desktop agents: list and item, reissue reachable at 1440")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    # The reissue check leaves the hash on this same route, and setting an equal
+    # hash fires no hashchange, so the screen would keep its phone layout. Hop
+    # through Home first to force the desktop render.
+    goto(page, "#/home", None)
+    goto(page, f"#/access?agent={agent_id}", None)
+    page.wait_for_timeout(500)
+
+    has_index = page.evaluate("!!document.querySelector('.shell-index')")
+    if not has_index:
+        watch.fail("Agents and tokens has no index pane at 1440")
+
+    current = page.evaluate(
+        "(() => { const r = document.querySelector('.shell-index [aria-current=\"true\"], "
+        ".shell-index [aria-current=\"page\"]'); return r ? r.textContent.trim() : null; })()"
+    )
+    if not current:
+        watch.fail("no agent row is selected at 1440")
+
+    reissue = page.locator('[data-action="agent-token"]').count()
+    if reissue == 0:
+        watch.fail("the reissue control is unreachable at 1440")
+
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+def check_desktop_chrome_geometry(page, watch: Watch, project: str) -> None:
+    """CHECK 13.D and 13.E at 1440.
+
+    Every desktop pane's chrome lands at y 52 and y 92: the header ends at 52 and
+    the control row spans 52..92, and no control in that 40px row is taller than
+    32. Every group label and index subheading starts at the pane's gutter (16
+    index, 24 stage) and never at the pane's own x 0. A label's inset is often
+    padding on a pane-wide element, so this measures the TEXT x, not the border
+    box.
+    """
+    watch.enter("desktop chrome: panes land at 52/92 and labels sit on the gutter")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/home", None)
+    for route, name in (
+        ("#/settings", "Settings"),
+        ("#/storage", "Storage"),
+        ("#/access", "Agents and tokens"),
+    ):
+        goto(page, route, None)
+        page.wait_for_timeout(400)
+        geom = page.evaluate(
+            """() => {
+              const vis = (e) => { const cs = getComputedStyle(e);
+                                   return cs.display !== 'none' && e.getBoundingClientRect().height > 2; };
+              const head = [...document.querySelectorAll('.shell-head, .storage-head')].find(vis) || null;
+              const ctl = [...document.querySelectorAll('.shell-controls, .storage-controls')].find(vis) || null;
+              const row = ctl || head;
+              const tall = row ? [...row.querySelectorAll('*')]
+                .filter(e => { const r = e.getBoundingClientRect(); return r.height > 32.5 && r.height < 200; })
+                .map(e => e.tagName + '.' + (e.className || '').toString().split(' ')[0]
+                          + ':' + Math.round(e.getBoundingClientRect().height)) : [];
+              const idx = document.querySelector('.shell-index');
+              const stage = document.querySelector('.shell-stage');
+              const labels = [];
+              const sel = '.form-group-label, .settings-group-label, .shell-group-label, h2.day, .index-subhead, .section-label';
+              for (const e of document.querySelectorAll(sel)) {
+                const r = e.getBoundingClientRect();
+                if (r.height < 2) continue;
+                let textX = null;
+                const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+                const tn = w.nextNode();
+                if (tn) { const range = document.createRange(); range.selectNodeContents(tn);
+                          const rr = range.getBoundingClientRect(); if (rr.width > 0) textX = rr.left; }
+                if (textX === null) textX = r.left + parseFloat(getComputedStyle(e).paddingLeft || '0');
+                const pane = (stage && r.left >= stage.getBoundingClientRect().left) ? stage : (idx || stage);
+                const off = pane ? Math.round(textX - pane.getBoundingClientRect().left) : null;
+                labels.push({ text: e.textContent.trim().slice(0, 20), offset: off });
+              }
+              return {
+                head: head ? Math.round(head.getBoundingClientRect().bottom) : null,
+                ctl: ctl ? { top: Math.round(ctl.getBoundingClientRect().top),
+                             bottom: Math.round(ctl.getBoundingClientRect().bottom) } : null,
+                tall: tall.slice(0, 6),
+                labels,
+              };
+            }"""
+        )
+        if geom["head"] != 52:
+            watch.fail(f"{name}: header does not land at 52 (got {geom['head']})")
+        if geom["ctl"] is None:
+            watch.fail(f"{name}: no control row found")
+        elif geom["ctl"]["top"] != 52 or geom["ctl"]["bottom"] != 92:
+            watch.fail(f"{name}: control row does not span 52..92 (got {geom['ctl']})")
+        if geom["tall"]:
+            watch.fail(f"{name}: a control in the 40px row is taller than 32: {geom['tall']}")
+        for label in geom["labels"]:
+            if label["offset"] == 0:
+                watch.fail(f"{name}: label {label['text']!r} sits at the pane's x 0")
+            elif label["offset"] not in (16, 24):
+                watch.fail(
+                    f"{name}: label {label['text']!r} sits at {label['offset']}px, not the 16/24 gutter"
+                )
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
     watch.enter("phone home: at rest (no bar, no gear, greeting at x 16)")
     page.set_viewport_size({"width": 390, "height": 844})
@@ -2097,6 +2213,8 @@ def run() -> int:
                 run_step(watch, check_phone_frame_and_tools_row, page, watch, project)
                 run_step(watch, check_phone_home, page, watch, port, project)
                 run_step(watch, check_sync_states, page, watch, port)
+                # 7a. Desktop chrome: panes at 52/92 and labels on the gutter.
+                run_step(watch, check_desktop_chrome_geometry, page, watch, project)
 
                 # 7b. The reissue reveal, driven on the harness's own project
                 # agent. Reissuing rotates a token, so this creates the agent it
@@ -2110,6 +2228,7 @@ def run() -> int:
                     {"id": "reveal-probe", "display_name": "Reveal probe"},
                 )
                 run_step(watch, check_reissue_reveal, page, watch, port, "reveal-probe")
+                run_step(watch, check_desktop_agents_list_and_item, page, watch, "reveal-probe")
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features
