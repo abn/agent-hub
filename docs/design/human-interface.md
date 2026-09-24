@@ -111,11 +111,12 @@ rules, which say what a list, a summary, a settings row and a storage breakdown
 are, hold at both widths. The chrome rules, which are the collapsing phone
 header, the sticky 44px tools row, the tab bar and the More tab root, are
 phone-only. The desktop keeps its reserved 52px header and 40px control row in
-every pane, and this round gives it five changes: Home's lists are flat rows
-with the storage summary as the one card, Settings is a 640px column of 48px
-rows, Storage adds a fourth bar segment for knowledge and one helper line with
-zero cells drawn as a dash, Agents and tokens takes the same 640px row form as
-Settings, and the rail hides its sync line when the hub is healthy.
+every pane, and this round gives it five changes: Home's lists are flat rows with
+the storage summary on the canvas between hairlines, Settings is a 640px column
+of 48px rows ending in a Version value row, Storage adds a fourth bar segment for
+knowledge and one helper line with zero cells drawn as a dash, Agents and tokens
+is a list-and-item screen with an index beside a stage, and the rail hides its
+sync line when the hub is healthy.
 
 ## Interaction rules
 

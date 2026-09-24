@@ -116,11 +116,13 @@ are, hold at both widths. The chrome rules, which are the 76/52 collapsing
 header, the 44px tools row, the tab bar and More, are phone-only. The desktop
 keeps RULE 11.1 and 11.3 exactly as built.
 
-The desktop changes this round makes are these. Home's lists are flat rows and
-the storage summary stays the one card. Settings is the round-11 row form and
-keeps its 40px control row. Storage adds a fourth bar segment and one helper
-line, and a zero cell reads a dash. Agents and tokens sits in the Settings frame.
-The rail's sync line is hidden when healthy.
+The desktop changes this round makes are these. Home's lists are flat rows. The
+storage summary sits on the canvas between hairlines, not in a card. Settings is
+the round-11 row form and keeps its 40px control row; its THIS HUB group ends
+with Version, a value row that promises nothing. Storage adds a fourth bar
+segment and one helper line, and a zero cell reads a dash. Agents and tokens is a
+list-and-item screen, an index beside a stage, like the inbox. The rail's sync
+line is hidden when healthy.
 
 ### The frame does not move, on a desktop
 
@@ -242,12 +244,14 @@ Agents and access, Connect, and the knowledge base.
   aside, named in mono with the copy glyph. An `fs` file opens in the stage
   rendered by the same parser as an artifact, read-only, with a back control
   and a mono provenance line.
-- **Settings.** Five rows and a value each: theme as a three-way segmented
-  group, compact rows, waiting on you, storage, agents and tokens, about. One
-  helper line in the whole screen, where the consequence is invisible: the
-  notifications line. No paragraph explains a toggle.
-- **Storage.** The summary card and the by-project rows. Never touches feed
-  events or artifacts.
+- **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
+  three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
+  shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents
+  and tokens, and Version, a value row reading the version and short commit the
+  binary was built from, with no destination, no chevron and no tab stop. One
+  helper line in the whole screen. No paragraph explains a toggle.
+- **Storage.** The summary and the by-project rows. Never touches feed events
+  or artifacts.
 
 ## Interaction
 

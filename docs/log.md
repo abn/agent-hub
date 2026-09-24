@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-24, round 13.1: Version row, agents as a list and item, summary between hairlines
+
+* **Update**: [Human interface](design/human-interface.md) records the desktop
+  changes round 13.1 makes. Settings' THIS HUB group ends with a Version value
+  row, which reads the version and short commit the binary was built from and
+  promises no destination. Agents and tokens is a list-and-item screen with an
+  index beside a stage, not a Settings-shaped form. The storage summary sits on
+  the canvas between hairlines rather than in a card.
+
 ## 2026-09-24, desktop round 12 spine: knowledge tone and content/chrome split
 
 * **Update**: [Human interface](design/human-interface.md) documents the
