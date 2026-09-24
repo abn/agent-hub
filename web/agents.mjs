@@ -33,7 +33,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
   const confidentialProjects = projects.filter((p) => p.confidential);
   const confidentialCount = confidentialProjects.length;
 
-  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent"${isCreating ? ' aria-pressed="true"' : ""} style="flex:none;white-space:nowrap;height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:${isCreating ? "var(--surface-2)" : "none"};color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
+  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent"${isCreating ? ' aria-pressed="true"' : ""} style="flex:none;white-space:nowrap;height:32px;min-height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:${isCreating ? "var(--surface-2)" : "none"};color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
 
   const indexHead = `
     <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;background:var(--surface);border-bottom:1px solid var(--line)">

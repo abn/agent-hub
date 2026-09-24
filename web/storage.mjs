@@ -444,8 +444,9 @@ function desktopTable(usage) {
     const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
     dot.setAttribute("aria-hidden", "true");
     const link = el("a", "storage-proj-link", projectName(project));
-    link.href = projectHref(project);
-    tdProject.append(dot, link);
+    const inner = el("div", "storage-proj-inner");
+    inner.append(dot, link);
+    tdProject.appendChild(inner);
     row.appendChild(tdProject);
 
     // 2. SHARE
@@ -574,8 +575,8 @@ function desktopTable(usage) {
   container.appendChild(
     el(
       "p",
-      "storage-footnote mono",
-      "A dash is a project with no ended sessions. Free space on the volume is not shown \u2014 the hub cannot read it.",
+      "storage-footnote",
+      "A dash is a project with no ended sessions. Free space on the volume is not shown: the hub cannot read it.",
     ),
   );
   return container;

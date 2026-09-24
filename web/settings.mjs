@@ -77,7 +77,7 @@ function themeSegment(value, current) {
   const isCurrent = current === value;
   return `<button type="button" role="radio" class="settings-theme-btn" data-theme-val="${value}" aria-checked="${
     isCurrent ? "true" : "false"
-  }" aria-label="${labels[value]}" style="width:44px;min-width:44px;height:100%;border:0;border-radius:5px;${
+  }" aria-label="${labels[value]}" style="width:36px;min-width:36px;height:30px;min-height:30px;border:0;border-radius:5px;${
     isCurrent ? "background:var(--surface);box-shadow:var(--shadow-1);color:var(--ink);" : "background:none;color:var(--ink-2);"
   }display:grid;place-items:center;cursor:pointer">${THEME_GLYPHS[value]}</button>`;
 }
@@ -263,6 +263,12 @@ export async function settingsScreen(gen) {
         @media (pointer: coarse) {
           .settings-copy-path-btn { width: 36px; height: 36px; }
         }
+        /* The global 44px tap-target floor belongs to touch. On a fine pointer
+           this glyph sits in the desktop control row, which is 40px and carries
+           no control taller than 32 (CHECK 13.D), so the floor is lifted. */
+        @media (pointer: fine) {
+          .settings-copy-path-btn { min-height: 0; }
+        }
       </style>
       <div class="form-column">
         <section class="form-group">
@@ -366,7 +372,7 @@ export async function settingsScreen(gen) {
         <div class="settings-group-title">THIS DEVICE</div>
         <div class="settings-flat-row row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">Theme</span>
-          <div role="radiogroup" aria-label="Theme" style="flex:none;display:flex;height:40px;padding:2px;box-sizing:border-box;border-radius:var(--r-1);background:var(--surface-2)">
+          <div role="radiogroup" aria-label="Theme" style="flex:none;display:flex;height:34px;padding:2px;box-sizing:border-box;border-radius:var(--r-1);background:var(--surface-2)">
             ${themeSegment("system", currentTheme)}
             ${themeSegment("light", currentTheme)}
             ${themeSegment("dark", currentTheme)}

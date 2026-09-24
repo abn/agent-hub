@@ -2330,3 +2330,92 @@ fn inbox_bar_has_mark_all_read_and_overflow_holding_refresh() {
         "overflow button must trail Mark all read"
     );
 }
+
+#[test]
+fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
+    // C1 & C2: group labels 20 above, 8 below, no first-child zero padding
+    assert!(
+        APP_CSS.contains("padding: 20px 0 8px;"),
+        "C1: group labels take 20px above and 8px below"
+    );
+    assert!(
+        !APP_CSS.contains(".form-group-label:first-child { padding-top: 0; }"),
+        "C2: first group label keeps 20px above (y 112 = 92 + 20)"
+    );
+
+    // C3: desktop rows keep --surface fill and 12 inset
+    assert!(
+        APP_CSS.contains("padding: 8px 12px;") && APP_CSS.contains("background: var(--surface);"),
+        "C3: desktop form rows keep --surface fill and 12 inset"
+    );
+
+    // C4: theme control 34 track on --surface-2, 2px padding, thumb radius 5 --shadow-1
+    assert!(
+        APP_CSS.contains(".settings-theme-seg")
+            && APP_CSS.contains("background: var(--surface-2)")
+            && APP_CSS.contains("height: 34px"),
+        "C4: theme control is a 34 track on --surface-2"
+    );
+
+    // C8: storage table sits between hairlines with radius 0
+    assert!(
+        APP_CSS.contains(".storage-table-wrap") && APP_CSS.contains("border-radius: 0;"),
+        "C8: storage table sits between hairlines with radius 0"
+    );
+    // C8 covers the summary too, and a second rule fighting the first left the
+    // card border on three sides. One rule, and it clears the full border.
+    assert_eq!(
+        APP_CSS.matches(".storage-desktop-summary {").count(),
+        1,
+        "C8: the summary has one rule, not two fighting over the border"
+    );
+    let summary = APP_CSS
+        .split(".storage-desktop-summary {")
+        .nth(1)
+        .expect("summary rule present")
+        .split('}')
+        .next()
+        .expect("summary rule closes");
+    assert!(
+        summary.contains("border: 0;") && summary.contains("border-bottom: 1px solid var(--line);"),
+        "C8: the summary sits between hairlines, not in a bordered card"
+    );
+    // CHECK 13.D: the storage control row is flush under the 52 header. The
+    // shared flex gap pushed it to y 68; the fix cancels exactly that one gap.
+    assert!(
+        APP_CSS.contains(".storage-desktop-view > .storage-controls")
+            && APP_CSS.contains("margin-top: calc(-1 * var(--s-4));"),
+        "C6/CHECK 13.D: storage control row sits flush at y 52 under the header"
+    );
+    // CHECK 13.D: no control in the 40px row is taller than 32. The global
+    // button floor is 44; the copy glyph lifts it on a fine pointer.
+    assert!(
+        SETTINGS_JS.contains("@media (pointer: fine)")
+            && SETTINGS_JS.contains(".settings-copy-path-btn { min-height: 0; }"),
+        "CHECK 13.D: the copy glyph does not inherit the 44px touch floor on desktop"
+    );
+
+    // C7: desktop control-row Prune is 30
+    assert!(
+        APP_CSS.contains(".storage-prune-all-btn")
+            && APP_CSS.contains("height: 30px")
+            && APP_CSS.contains("min-height: 30px"),
+        "C7: desktop control-row Prune button is 30px with min-height 30px"
+    );
+
+    // C9: footnote is sans 13 --ink-3
+    assert!(
+        !STORAGE_JS.contains("storage-footnote mono"),
+        "C9: storage footnote is sans, not mono"
+    );
+    assert!(
+        APP_CSS.contains(".storage-footnote") && APP_CSS.contains("var(--t-13)"),
+        "C9: storage footnote is 13px"
+    );
+
+    // C10: Add agent 32 in 52 header
+    assert!(
+        AGENTS_JS.contains("height:32px") && AGENTS_JS.contains("min-height:32px"),
+        "C10: Add agent button is 32px tall with min-height 32px"
+    );
+}
