@@ -40,6 +40,7 @@ const PROJECT_JS: &str = include_str!("../web/project.mjs");
 const FEED_JS: &str = include_str!("../web/feed.mjs");
 const EVENTS_JS: &str = include_str!("../web/events.mjs");
 const PREFS_JS: &str = include_str!("../web/prefs.mjs");
+const SESSIONS_JS: &str = include_str!("../web/sessions.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -2571,6 +2572,50 @@ fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
     assert!(
         FEED_JS.contains("feedRow"),
         "feed rows are defined in feed.mjs"
+    );
+}
+
+// H8: a hub served behind a path-stripping proxy lives at a prefix, and an
+// origin-root URL loses it. These four controls used to build their own URLs
+// from the origin or with a leading slash instead of resolving against the
+// document, which `api.mjs` already does.
+#[test]
+fn browser_urls_resolve_against_the_document_base() {
+    assert!(
+        ARTIFACTS_JS.contains(
+            r#"new URL(`api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`, document.baseURI)"#
+        ),
+        "the raw fetch resolves against the document base"
+    );
+    assert!(
+        !ARTIFACTS_JS.contains("fetch(`/api/v1/artifacts/"),
+        "the raw fetch no longer uses an origin-root path"
+    );
+    assert!(
+        ARTIFACTS_JS
+            .contains(r#"new URL(`artifacts/${encodeURIComponent(id)}`, document.baseURI)"#),
+        "the share URL resolves against the document base"
+    );
+    assert!(
+        !ARTIFACTS_JS.contains("${location.origin}/artifacts/"),
+        "the share URL no longer hardcodes the origin root"
+    );
+    assert!(
+        SESSIONS_JS.contains(r#"new URL("vendor/marked.js", document.baseURI)"#),
+        "the markdown dependency resolves against the document base"
+    );
+    assert!(
+        !SESSIONS_JS.contains(r#"script.src = "/vendor/marked.js""#),
+        "the markdown dependency no longer uses an origin-root path"
+    );
+    assert!(
+        FEED_JS.contains(r#"new URL("mcp", base)"#)
+            && FEED_JS.contains(r#"new URL("SKILL.md", base)"#),
+        "the MCP setup resolves against the document base"
+    );
+    assert!(
+        !FEED_JS.contains("${origin}/mcp") && !FEED_JS.contains("${origin}/SKILL.md"),
+        "the MCP setup no longer hardcodes the origin root"
     );
 }
 

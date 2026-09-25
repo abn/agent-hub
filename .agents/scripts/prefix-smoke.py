@@ -395,6 +395,30 @@ def check_artifact_frames(
             failures.append(f"loading the html artifact under the prefix never fetched {wanted}")
 
 
+def check_prefix_raw_fetch(
+    page, failures: list[str], entries: list, project: str, artifact_id: str
+) -> None:
+    # H8: the raw-text fetch was built from the origin root, so under a
+    # path-stripping proxy it 404d. The copy control must reach the hub at the
+    # prefix, which shows up as a real request with the prefix in its path.
+    start = len(entries)
+    page.evaluate(f"location.hash = '#/artifacts/{quote(artifact_id)}?project={quote(project)}'")
+    if not settle(page, "!!document.querySelector('[data-action=\"copy-raw\"]')"):
+        failures.append("the artifact viewer offered no raw-copy control under the prefix")
+        return
+    page.evaluate("() => document.querySelector('[data-action=\"copy-raw\"]').click()")
+    page.wait_for_timeout(1500)
+    raw = [(url, status) for url, status in entries[start:] if "/raw" in url]
+    if not raw:
+        failures.append("the raw fetch never reached the network under the prefix")
+        return
+    for url, status in raw:
+        if status != 200:
+            failures.append(f"the raw fetch under the prefix answered {status}: {url}")
+        if PREFIX not in url:
+            failures.append(f"the raw fetch dropped the prefix: {url}")
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -420,6 +444,9 @@ def run() -> int:
                             check_service_worker(page, failures, token)
                             check_artifact_frames(
                                 page, failures, entries, project, seeded["artifact_id"], html_artifact
+                            )
+                            check_prefix_raw_fetch(
+                                page, failures, entries, project, seeded["artifact_id"]
                             )
                 except PlaywrightTimeoutError as err:
                     failures.append(f"timed out: {str(err).splitlines()[0] if str(err) else 'timeout exceeded'}")

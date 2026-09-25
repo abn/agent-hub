@@ -383,7 +383,7 @@ export function getMarked() {
   if (!markedPromise) {
     markedPromise = new Promise((resolve) => {
       const script = document.createElement("script");
-      script.src = "/vendor/marked.js";
+      script.src = new URL("vendor/marked.js", document.baseURI).href;
       script.onload = () => resolve(window.marked);
       script.onerror = () => resolve(null);
       document.head.appendChild(script);

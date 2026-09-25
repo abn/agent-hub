@@ -386,7 +386,10 @@ async function fetchRawText(id, version) {
   const headers = {};
   const token = localStorage.getItem("hub.token");
   if (token) headers.Authorization = "Bearer " + token;
-  const res = await fetch(`/api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`, { headers });
+  const res = await fetch(
+    new URL(`api/v1/artifacts/${encodeURIComponent(id)}/raw${query}`, document.baseURI),
+    { headers },
+  );
   if (!res.ok) throw new Error("Failed to fetch raw text");
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) {
@@ -587,7 +590,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
     <span class="hub-share-subline">${esc(current.title || "")} · <span class="mono">v${shown}</span></span>
   `;
 
-  const shareUrl = `${location.origin}/artifacts/${encodeURIComponent(id)}`;
+  const shareUrl = new URL(`artifacts/${encodeURIComponent(id)}`, document.baseURI).href;
 
   const linkRow = document.createElement("div");
   linkRow.className = "hub-share-link-row";

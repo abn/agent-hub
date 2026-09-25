@@ -586,17 +586,19 @@ async function showOlder(projectId) {
 // document gives them. The token is the agent's, issued in Settings, and is
 // never the one this browser holds.
 export function mcpSetup(projectId) {
-  const origin = location.origin;
+  // Resolve against the document, not the origin: a hub served behind a
+  // path-stripping proxy lives at a prefix, and the origin alone loses it. H8.
+  const base = new URL(".", document.baseURI).href;
   return [
     `# Agent Hub MCP setup. The project slug is ${projectId}.`,
     "# Streamable HTTP:",
-    `POST ${origin}/mcp`,
+    `POST ${new URL("mcp", base).href}`,
     "Authorization: Bearer <agent token>",
     "",
     "# A harness that speaks only stdio runs the proxy:",
-    `HUB_URL=${origin} HUB_TOKEN=<agent token> agent-hub mcp`,
+    `HUB_URL=${base} HUB_TOKEN=<agent token> agent-hub mcp`,
     "",
-    `# The full guide: ${origin}/SKILL.md`,
+    `# The full guide: ${new URL("SKILL.md", base).href}`,
     "",
   ].join("\n");
 }
