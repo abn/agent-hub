@@ -784,7 +784,7 @@ export async function reissueToken(id, name = "") {
 export async function revokeToken(id) {
   const confirmed = await confirmAction({
     title: `Revoke the token for ${id}?`,
-    body: "Its token stops working and it loses every project.",
+    body: "Its token stops working now, so it loses access to every project until a new token is issued. Its project grants are kept.",
     note: "Revoking cannot be undone.",
     safe: "Keep",
     danger: "Revoke token",

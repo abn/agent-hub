@@ -288,6 +288,12 @@ Agent voice, past tense, no exclamation marks. Approvals name the action and
 its blast radius. Toasts state what happened and the reversible path. Empty
 states say what this is and what to do. No emoji anywhere.
 
+The revoke-token confirmation deviates from the round 13.1 handoff copy, which
+said the agent "loses every project". Revoking only stops the token; grants are
+kept, and reissuing a token restores access. The dialog says so, because the
+handoff's words read as if the grants were gone and the Access screen keeps
+revoke and grant removal as separate controls.
+
 ## Build gates
 
 A screen that fails one of these is not done. The first four are the design's
