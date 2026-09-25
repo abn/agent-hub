@@ -871,13 +871,19 @@ function reveal(item) {
 }
 
 function isInbox() {
-  return !!main.querySelector(".inbox-screen");
+  return !!inboxScreen();
+}
+
+// The inbox paints on the one shell; there is no separate screen element. It
+// is the shell whose segment says inbox.
+function inboxScreen() {
+  return main.querySelector('.shell[data-segment="inbox"]');
 }
 
 // Whether a downward drag is the reader's to pull or the page's to scroll is
 // decided before the gesture starts, so the class follows the scroll position.
 function atTop() {
-  const screen = main.querySelector(".inbox-screen");
+  const screen = inboxScreen();
   if (screen) screen.classList.toggle("at-top", window.scrollY <= 0);
 }
 window.addEventListener("scroll", atTop, { passive: true });

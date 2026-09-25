@@ -2619,6 +2619,29 @@ fn browser_urls_resolve_against_the_document_base() {
     );
 }
 
+// The inbox swipe and pull searched for `.inbox-screen`, which no screen
+// renders: the inbox is the one shell with `data-segment="inbox"`. The gesture
+// setup therefore never registered.
+#[test]
+fn inbox_gestures_target_the_shell_not_a_vanished_screen() {
+    assert!(
+        !INBOX_JS.contains(".inbox-screen"),
+        "the inbox is the shell, not an .inbox-screen element"
+    );
+    assert!(
+        INBOX_JS.contains(r#".shell[data-segment="inbox"]"#),
+        "the gesture setup finds the inbox shell"
+    );
+    assert!(
+        !APP_CSS.contains(".inbox-screen"),
+        "no CSS rule waits for an element that is never rendered"
+    );
+    assert!(
+        APP_CSS.contains(r#".shell[data-segment="inbox"] { touch-action: pan-y; }"#),
+        "the inbox shell carries the base gesture rule"
+    );
+}
+
 // H20: the read cursor waited for `.feed-chips`, but the one shell renders the
 // project feed with chips:false, so the sentinel never appeared and the cursor
 // rescheduled forever. It now looks at the feed body it actually paints, and

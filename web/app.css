@@ -2277,9 +2277,10 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .inbox-sync .mono { color: var(--ink-3); }
 /* A finger moving sideways on a row is the row's, and at the top of the page a
    finger moving down is the pull. Anything else is the page scrolling. A
-   browser that does not know the second value keeps the first. */
-.inbox-screen { touch-action: pan-y; }
-.inbox-screen.at-top { touch-action: pan-down; }
+   browser that does not know the second value keeps the first. The inbox is the
+   shell whose segment says inbox; there is no separate screen element. */
+.shell[data-segment="inbox"] { touch-action: pan-y; }
+.shell[data-segment="inbox"].at-top { touch-action: pan-down; }
 
 .inbox-label { margin: var(--s-4) 0 var(--s-1); }
 .inbox-label[data-group="waiting"] { color: var(--action); }
@@ -7046,7 +7047,6 @@ dialog.dialog-project-delete {
   .shell-stage .inbox-back { display: none; }
 }
 .shell-index .inbox-top { display: none; }
-.shell-index .inbox-screen { display: block; }
 
 /* Settings is the one screen with no index: rail and stage, a 640px form. */
 .settings-pad { padding: 0 16px 48px; }
