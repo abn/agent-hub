@@ -540,7 +540,11 @@ pub async fn update_for_principal(
                 project_id: &existing.project_id,
                 kind: "artifact",
                 ref_id: artifact_id,
-                session_id: opts.session_id,
+                // Lineage is the creating session, immutable like `actor`. An
+                // update does not move it, so the row, the search document, the
+                // session listing and the API all agree. The update's own feed
+                // event still records the writing session.
+                session_id: existing.session_id.as_deref(),
                 title: Some(&existing.title),
                 body: searchable_body(content, protected),
                 updated_at: &updated_at,

@@ -1498,3 +1498,55 @@ async fn store_listing_query_measurement() {
         elapsed
     );
 }
+
+/// H14: session lineage is the publishing session and an update does not move
+/// it, as it does not move `actor`. The path that once might have moved it is
+/// the search index; this holds the stored document to the same session.
+#[tokio::test]
+async fn an_update_keeps_the_publishing_session_lineage() {
+    let dir = TempDir::new("artifact-lineage-update");
+    let db = open(dir.path()).await;
+
+    let mut published = public("Report", b"<h1>first</h1>");
+    published.session_id = Some("sess-a");
+    let artifact = artifacts::publish(&db, dir.path(), published, None)
+        .await
+        .expect("publish");
+
+    let updated = artifacts::update_for_principal(
+        &db,
+        dir.path(),
+        None,
+        "agent-two",
+        &artifact.id,
+        b"<h1>second</h1>",
+        EnvelopeUpdate::Keep,
+        UpdateOptions {
+            session_id: Some("sess-b"),
+            ..UpdateOptions::default()
+        },
+        None,
+    )
+    .await
+    .expect("cross-session update");
+
+    assert_eq!(
+        updated.session_id.as_deref(),
+        Some("sess-a"),
+        "the update keeps the publishing session"
+    );
+    assert_eq!(
+        updated.actor.as_deref(),
+        Some("agent-one"),
+        "and keeps the publishing actor"
+    );
+
+    let (stored, _bytes) = artifacts::get(&db, dir.path(), &artifact.id)
+        .await
+        .expect("get");
+    assert_eq!(
+        stored.session_id.as_deref(),
+        Some("sess-a"),
+        "the stored row keeps the publishing session too"
+    );
+}

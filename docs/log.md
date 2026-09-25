@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-26, artifact session lineage is creation, not the last write
+
+* **Correct**: [Artifacts](usage/artifacts.md) and the
+  [data model](architecture/data-model.md) said an artifact records the session
+  it was "published or updated" during. The row, the search document, the
+  session listing and the API always carried the **publishing** session; only the
+  update's own feed event carries the writer. An update leaves the artifact's
+  session lineage alone, as it leaves `actor` alone. The 2026-09-22 entry below
+  is corrected by this one.
+
 ## 2026-09-25, the operating model is stated once
 
 * **Add**: [Operating model](architecture/model.md) states the trust posture in

@@ -47,9 +47,10 @@ column is wider than the lifecycle events: an agent's signals, questions and
 approvals carry it too. Pruning is not wider for it. A prune still removes only
 the session's own lifecycle events, because storage acts on sessions and never
 on feed events or artifacts, and the work a session left in the feed outlives
-the session. Artifacts similarly record the session they were published or
-updated during, indexed by session, linking artifact lineage to the originating
-session. Artifacts also record the publishing agent identity (`actor`) derived
+the session. Artifacts record the session they were published during, indexed by
+session, linking artifact lineage to the originating session; an update leaves
+that lineage alone, as it leaves `actor` alone. Artifacts also record the
+publishing agent identity (`actor`) derived
 from the authenticated principal, which remains untouched across subsequent
 updates.
 

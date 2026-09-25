@@ -51,9 +51,11 @@ a `favicon` (a short emoji mark), and a `label` naming the version (60 bytes at
 most). A blank title on a markdown artifact falls back to its first heading;
 otherwise the title is required.
 
-A publish or update records the caller session lineage when the agent acts
-within an active session. Callers cannot supply or forge session lineage: the
-session identifier is derived directly from the authenticated caller principal.
+A publish records the caller session as its lineage when the agent acts within
+an active session. Callers cannot supply or forge session lineage: the session
+identifier is derived directly from the authenticated caller principal.
+Updating an artifact preserves the original session lineage, as it preserves the
+original `actor`; new versions do not move who created the document.
 Similarly, publishing records the creator agent as `actor`, taken from the
 resolved caller principal. Callers cannot forge `actor` in the publish request.
 Updating an artifact preserves the original `actor`; new versions do not
