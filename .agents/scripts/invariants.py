@@ -568,6 +568,127 @@ def check_search_is_text(page, watch: Watch) -> None:
     watch.drain_rejections()
 
 
+def check_untrusted_markdown_and_comment_sanitization(page, watch: Watch) -> None:
+    """Markdown rendering and resolved comment quotes must sanitize untrusted HTML and dangerous URL schemes."""
+    watch.enter("text: session markdown and comment quote sanitization")
+    res = page.evaluate("""async () => {
+        const { renderMarkdown } = await import('/sessions.mjs');
+        const { commentsState, renderDesktopCards } = await import('/comments.mjs');
+
+        // 1. Session Markdown rendering
+        const maliciousMd = `# Notes\\n<script id="pwned-script">alert(1)</script><iframe src="https://example.com" id="pwned-iframe"></iframe><form id="pwned-form"></form><a href="javascript:alert(1)" id="pwned-js-link">click</a><a href="data:text/html,evil" id="pwned-data-link">data</a><a href="https://example.com" id="safe-link">safe</a>`;
+        const rendered = await renderMarkdown(maliciousMd);
+        const container = document.createElement("div");
+        container.innerHTML = rendered;
+
+        const hasScript = !!container.querySelector("#pwned-script, script");
+        const hasIframe = !!container.querySelector("#pwned-iframe, iframe");
+        const hasForm = !!container.querySelector("#pwned-form, form");
+        const jsLink = container.querySelector("#pwned-js-link, a[href^='javascript:']");
+        const dataLink = container.querySelector("#pwned-data-link, a[href^='data:']");
+        const safeLink = container.querySelector("#safe-link");
+
+        // 2. Resolved comment quote in comments.mjs
+        const { renderDesktopCard } = await import('/comments.mjs');
+        const card = renderDesktopCard({
+            id: 9999,
+            done: true,
+            body: "quote test",
+            author: "agent",
+            created_at: new Date().toISOString(),
+            anchor: { mode: "text", quote: '<b id="pwned-quote">malicious</b>' }
+        });
+        const quoteElement = card.querySelector("#pwned-quote");
+        const quoteText = card.querySelector(".hub-card-resolved-text")?.textContent || "";
+
+        return {
+            hasScript,
+            hasIframe,
+            hasForm,
+            hasJsScheme: !!jsLink && jsLink.getAttribute("href")?.toLowerCase().startsWith("javascript:"),
+            hasDataScheme: !!dataLink && dataLink.getAttribute("href")?.toLowerCase().startsWith("data:"),
+            hasSafeLink: !!safeLink && safeLink.getAttribute("href") === "https://example.com",
+            hasInjectedQuoteElement: !!quoteElement,
+            quoteTextContainsQuote: quoteText.includes("malicious"),
+        };
+    }""")
+    if res.get("hasScript"):
+        watch.fail("renderMarkdown leaves <script> in rendered DOM")
+    if res.get("hasIframe"):
+        watch.fail("renderMarkdown leaves <iframe> in rendered DOM")
+    if res.get("hasForm"):
+        watch.fail("renderMarkdown leaves <form> in rendered DOM")
+    if res.get("hasJsScheme"):
+        watch.fail("renderMarkdown permits javascript: link scheme")
+    if res.get("hasDataScheme"):
+        watch.fail("renderMarkdown permits data: link scheme")
+    if res.get("hasInjectedQuoteElement"):
+        watch.fail("resolved comment quote becomes an HTML element")
+    if not res.get("quoteTextContainsQuote"):
+        watch.fail("resolved comment quote text is missing from card header")
+    watch.drain_rejections()
+
+
+def capture_b7_screenshots(page, watch: Watch, port: int, project: str, session_id: str, artifact_id: str) -> None:
+    """Capture screenshots of session document and resolved quote surfaces at 390 and 1440 in both themes."""
+    watch.enter("screenshots: session document and resolved quote surfaces")
+    output_dir = Path("target/tmp/screenshots")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Session document surface:
+    goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}&file=%2Ffs%2Fcontext.md", "context.md")
+    page.wait_for_timeout(400)
+
+    for width, label in [(390, "390"), (1440, "1440")]:
+        page.set_viewport_size({"width": width, "height": 844 if width == 390 else 900})
+        for theme in ["light", "dark"]:
+            page.evaluate(f"document.documentElement.setAttribute('data-theme', '{theme}')")
+            page.wait_for_timeout(200)
+            page.screenshot(path=str(output_dir / f"session_doc_{label}_{theme}.png"))
+
+    # 2. Resolved quote surface:
+    raw = harness.request(
+        port,
+        "POST",
+        f"/api/v1/artifacts/{artifact_id}/comments",
+        {
+            "author": "human",
+            "body": "Reviewed and resolved.",
+            "anchor": {"mode": "text", "quote": "Notes on architecture and design", "version": 1},
+        },
+    )
+    comm = json.loads(raw.decode())
+    comm_id = comm.get("id")
+    if comm_id:
+        harness.request(
+            port,
+            "PATCH",
+            f"/api/v1/artifacts/{artifact_id}/comments/{comm_id}",
+            {"done": True},
+        )
+
+    goto(page, f"#/projects/{quote(project)}/artifacts/{quote(artifact_id)}", "Artifact")
+    page.wait_for_timeout(400)
+
+    for width, label in [(390, "390"), (1440, "1440")]:
+        page.set_viewport_size({"width": width, "height": 844 if width == 390 else 900})
+        page.wait_for_timeout(200)
+        if width == 390:
+            page.evaluate("() => { const b = document.querySelector('[data-action=\"comments-toggle\"]'); if (b) b.click(); }")
+            page.wait_for_timeout(300)
+            page.evaluate("() => { const b = document.querySelector('.hub-resolved-toggle'); if (b) b.click(); }")
+            page.wait_for_timeout(200)
+        for theme in ["light", "dark"]:
+            page.evaluate(f"document.documentElement.setAttribute('data-theme', '{theme}')")
+            page.wait_for_timeout(200)
+            page.screenshot(path=str(output_dir / f"resolved_quote_{label}_{theme}.png"))
+
+    # Reset viewport and theme
+    page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
+    page.set_viewport_size({"width": 390, "height": 844})
+    watch.drain_rejections()
+
+
 def check_problem_fields(page, watch: Watch) -> None:
     """A refused request keeps the problem's status and code, not only its words."""
     watch.enter("api: a problem keeps its status and code")
@@ -2187,6 +2308,7 @@ def run() -> int:
                 run_step(watch, check_inbox_card_escape, page, watch, port, project)
                 run_step(watch, check_search_is_text, page, watch)
                 run_step(watch, check_problem_fields, page, watch)
+                run_step(watch, check_untrusted_markdown_and_comment_sanitization, page, watch)
 
                 # 4. Races
                 run_step(watch, check_router, page, watch)
@@ -2240,6 +2362,7 @@ def run() -> int:
                 run_step(watch, check_artifacts_group_by_agent, page, watch, port, project)
                 run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
                 run_step(watch, check_inbox_and_search_phone, page, watch, port, project)
+                run_step(watch, capture_b7_screenshots, page, watch, port, project, session_id, artifact_id)
 
                 # 9. Projects register and Connect
                 run_step(watch, check_projects_register_segmented_and_rows, page, watch, port)

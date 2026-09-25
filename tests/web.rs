@@ -2786,3 +2786,19 @@ fn protected_artifacts_report_a_secure_context_requirement() {
         "the message names the deployment requirement, not a wrong password"
     );
 }
+
+#[test]
+fn session_markdown_is_sanitized_and_comment_quotes_use_text_content() {
+    assert!(
+        SESSIONS_JS.contains("sanitizeMarkdownHtml"),
+        "sessions.mjs must define sanitizeMarkdownHtml"
+    );
+    assert!(
+        SESSIONS_JS.contains("sanitizeMarkdownHtml(raw)"),
+        "renderMarkdown must return sanitized HTML"
+    );
+    assert!(
+        COMMENTS_JS.contains("span.textContent = `Resolved${quoteLabel}`"),
+        "comments.mjs must use textContent for resolved quote labels"
+    );
+}

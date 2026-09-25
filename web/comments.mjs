@@ -831,7 +831,7 @@ export function renderDesktopCards() {
   }
 }
 
-function renderDesktopCard(comment) {
+export function renderDesktopCard(comment) {
   const card = document.createElement("div");
   card.className = "hub-comment-card" + (comment.done ? " resolved" : "");
   card.dataset.commentId = String(comment.id);
@@ -844,8 +844,12 @@ function renderDesktopCard(comment) {
   if (comment.done) {
     const resHead = document.createElement("div");
     resHead.className = "hub-card-resolved-head mono";
+    resHead.innerHTML = `<svg class="resolved-glyph" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Resolved"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>`;
+    const span = document.createElement("span");
+    span.className = "hub-card-resolved-text";
     const quoteLabel = comment.anchor && comment.anchor.quote ? ` · “${comment.anchor.quote}”` : "";
-    resHead.innerHTML = `<svg class="resolved-glyph" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Resolved"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg><span class="hub-card-resolved-text">Resolved${quoteLabel}</span>`;
+    span.textContent = `Resolved${quoteLabel}`;
+    resHead.appendChild(span);
     card.appendChild(resHead);
   } else if (comment.anchor) {
     // Tinted or outlined quote for open threads

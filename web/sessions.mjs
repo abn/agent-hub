@@ -432,15 +432,137 @@ export function fallbackMarkdown(text) {
   return out.join("");
 }
 
+const ALLOWED_TAGS = new Set([
+  "h1", "h2", "h3", "h4", "h5", "h6",
+  "p", "blockquote", "pre", "code", "hr", "br",
+  "ul", "ol", "li",
+  "strong", "b", "em", "i", "s", "del", "strike", "sub", "sup", "mark", "span",
+  "a", "img",
+  "table", "thead", "tbody", "tr", "th", "td",
+]);
+
+const DANGEROUS_TAGS = new Set([
+  "script", "style", "iframe", "frame", "object", "embed", "applet",
+  "form", "input", "button", "textarea", "select", "option",
+  "svg", "math", "base", "meta", "link", "template", "noscript",
+]);
+
+const ALLOWED_ATTRS = {
+  a: new Set(["href", "title", "target", "rel"]),
+  img: new Set(["src", "alt", "title", "width", "height"]),
+  th: new Set(["align"]),
+  td: new Set(["align"]),
+  code: new Set(["class"]),
+  pre: new Set(["class"]),
+  span: new Set(["class"]),
+};
+
+const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+function isSafeUrl(urlStr) {
+  if (!urlStr) return false;
+  const cleaned = urlStr.trim().replace(/[\x00-\x20]+/g, "");
+  if (
+    cleaned.startsWith("#") ||
+    cleaned.startsWith("/") ||
+    cleaned.startsWith("./") ||
+    cleaned.startsWith("../") ||
+    cleaned.startsWith("?")
+  ) {
+    return true;
+  }
+  const colonIdx = cleaned.indexOf(":");
+  if (colonIdx === -1) {
+    return true;
+  }
+  const scheme = cleaned.slice(0, colonIdx + 1).toLowerCase();
+  return SAFE_PROTOCOLS.has(scheme);
+}
+
+function sanitizeNode(parent) {
+  const children = Array.from(parent.childNodes);
+  for (const node of children) {
+    if (node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      if (DANGEROUS_TAGS.has(tag)) {
+        node.remove();
+        continue;
+      }
+      if (!ALLOWED_TAGS.has(tag)) {
+        while (node.firstChild) {
+          parent.insertBefore(node.firstChild, node);
+        }
+        node.remove();
+        continue;
+      }
+      const attrs = Array.from(node.attributes);
+      const allowedAttrsForTag = ALLOWED_ATTRS[tag];
+      for (const attr of attrs) {
+        const attrName = attr.name.toLowerCase();
+        if (attrName.startsWith("on") || !allowedAttrsForTag || !allowedAttrsForTag.has(attrName)) {
+          node.removeAttribute(attr.name);
+          continue;
+        }
+        if (tag === "a" && attrName === "href") {
+          if (!isSafeUrl(attr.value)) {
+            node.removeAttribute("href");
+          } else if (node.getAttribute("target") === "_blank") {
+            node.setAttribute("rel", "noopener noreferrer");
+          }
+        } else if (tag === "img" && attrName === "src") {
+          if (!isSafeUrl(attr.value)) {
+            node.removeAttribute("src");
+          }
+        } else if (attrName === "class") {
+          const safeClasses = attr.value
+            .split(/\s+/)
+            .filter((c) => /^language-[a-zA-Z0-9_-]+$/.test(c) || c === "mono")
+            .join(" ");
+          if (safeClasses) {
+            node.setAttribute("class", safeClasses);
+          } else {
+            node.removeAttribute("class");
+          }
+        }
+      }
+      if (tag === "img" && !node.hasAttribute("src")) {
+        node.remove();
+        continue;
+      }
+      sanitizeNode(node);
+    } else if (node.nodeType === 8) {
+      node.remove();
+    } else if (node.nodeType !== 3) {
+      node.remove();
+    }
+  }
+}
+
+export function sanitizeMarkdownHtml(html) {
+  if (!html) return "";
+  if (typeof DOMParser === "undefined") {
+    return esc(html);
+  }
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<body>${html}</body>`, "text/html");
+  sanitizeNode(doc.body);
+  return doc.body.innerHTML;
+}
+
 export async function renderMarkdown(content) {
   if (!content) return "";
+  let raw = "";
   try {
     const m = await getMarked();
     if (m && typeof m.parse === "function") {
-      return m.parse(content);
+      raw = m.parse(content);
+    } else {
+      raw = fallbackMarkdown(content);
     }
-  } catch {}
-  return fallbackMarkdown(content);
+  } catch {
+    raw = fallbackMarkdown(content);
+  }
+  return sanitizeMarkdownHtml(raw);
 }
 
 export async function fetchBrainEntry(sessionId, path) {

@@ -18,6 +18,12 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
+## 2026-09-25, markdown rendering sanitization and plain-text comment quotes
+
+* **Update**: [Human surface](architecture/human-surface.md) documents that rendered
+  session markdown files are sanitized through an allowlist to strip dangerous elements
+  and URL schemes, and resolved comment quotes are inserted safely as plain text.
+
 ## 2026-09-25, final-path artifact blob orphaning and startup reconciliation
 
 * **Update**: [Data model](architecture/data-model.md) documents immediate cleanup of
