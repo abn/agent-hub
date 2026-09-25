@@ -69,18 +69,19 @@ impl AppState {
 
         // The engine lock is held from here, so no other hub is mid-update over
         // this directory and none is in flight in this one: any content still
-        // waiting for a version number was left by an interrupted update. This
-        // is housekeeping, so a file it cannot remove is a warning and never a
-        // reason the hub does not start.
-        match blob::reap_pending(&config.data_dir) {
+        // waiting for a version number or unreferenced by committed metadata
+        // was left by an interrupted write or crash. This is housekeeping, so
+        // a file it cannot remove is a warning and never a reason the hub does
+        // not start.
+        match blob::reconcile(&db, &config.data_dir).await {
             Ok(0) => {}
             Ok(reaped) => tracing::info!(
                 reaped,
-                "removed artifact content left by an interrupted update"
+                "reconciled unreferenced artifact content left by an interrupted write"
             ),
             Err(err) => tracing::warn!(
                 error = %err,
-                "could not clear artifact content left by an interrupted update"
+                "could not reconcile unreferenced artifact content"
             ),
         }
 

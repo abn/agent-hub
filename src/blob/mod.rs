@@ -143,6 +143,84 @@ pub fn reap_pending(data_dir: &Path) -> Result<usize> {
     Ok(removed)
 }
 
+/// Reconcile on-disk version and pending files against committed artifact versions,
+/// removing any unreferenced orphan files left by interrupted writes or crashes.
+pub async fn reconcile(db: &turso::Database, data_dir: &Path) -> Result<usize> {
+    let conn = crate::store::connect(db)?;
+    let mut rows = conn
+        .query("SELECT path FROM artifact_versions", ())
+        .await
+        .map_err(|err| Error::Engine(err.to_string()))?;
+    let mut committed = std::collections::HashSet::new();
+    while let Some(row) = rows
+        .next()
+        .await
+        .map_err(|err| Error::Engine(err.to_string()))?
+    {
+        if let turso::Value::Text(p) = row
+            .get_value(0)
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            committed.insert(p);
+        }
+    }
+
+    let mut removed = 0;
+    for project in child_dirs(&data_dir.join("artifacts"))? {
+        let project_name = match project.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        for artifact in child_dirs(&project)? {
+            let artifact_name = match artifact.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name.to_string(),
+                None => continue,
+            };
+            for entry in std::fs::read_dir(&artifact)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let file_name = match entry.file_name().into_string() {
+                    Ok(name) => name,
+                    Err(_) => continue,
+                };
+                let is_pending = file_name.starts_with(PENDING_PREFIX);
+                let rel = format!("artifacts/{project_name}/{artifact_name}/{file_name}");
+                if is_pending || (is_version_file(&file_name) && !committed.contains(&rel)) {
+                    std::fs::remove_file(entry.path())?;
+                    removed += 1;
+                }
+            }
+            if is_dir_empty(&artifact)? {
+                let _ = std::fs::remove_dir(&artifact);
+            }
+        }
+        if is_dir_empty(&project)? {
+            let _ = std::fs::remove_dir(&project);
+        }
+    }
+    Ok(removed)
+}
+
+fn is_version_file(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('v') else {
+        return false;
+    };
+    let Some((ver, _ext)) = rest.split_once('.') else {
+        return false;
+    };
+    !ver.is_empty() && ver.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_dir_empty(path: &Path) -> Result<bool> {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => Ok(entries.next().is_none()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// The directories directly under `path`. A symlink is not one of them, and a
 /// missing directory yields none.
 fn child_dirs(path: &Path) -> Result<Vec<PathBuf>> {

@@ -131,7 +131,10 @@ Artifact blobs live in a filesystem store under a per-project directory. That
 store is the blob layer; no external object store is needed. A protected
 artifact stores an envelope (algorithm, key derivation, iterations, salt, and
 initialisation vector) beside the ciphertext, and the browser holds the only
-key.
+key. Blob writes are protected against orphaning: updates clean up promoted
+final-path files immediately if the metadata transaction fails, and the hub
+reconciles on-disk files against committed `artifact_versions` at startup,
+pruning unreferenced blobs and empty directories.
 
 ## Session brain file
 

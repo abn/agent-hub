@@ -604,7 +604,9 @@ pub async fn update_for_principal(
     // committed. An unreferenced version file is harmless, and the next update
     // renames over it.
     let cleanup = || {
-        if promoted.is_none() {
+        if let Some(ref rel) = promoted {
+            let _ = blob::remove(data_dir, rel);
+        } else {
             let _ = blob::remove(data_dir, &pending);
         }
     };

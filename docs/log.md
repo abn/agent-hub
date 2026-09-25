@@ -18,6 +18,12 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
+## 2026-09-25, final-path artifact blob orphaning and startup reconciliation
+
+* **Update**: [Data model](architecture/data-model.md) documents immediate cleanup of
+  promoted final-path files on update transaction failure, and startup reconciliation of
+  on-disk artifact blobs against committed version metadata.
+
 ## 2026-09-25, idempotency namespaces, target binding, and resolved question immutability
 
 * **Update**: [Agent surface](architecture/agent-surface.md) documents that idempotency
