@@ -103,7 +103,7 @@ async fn an_agent_reaches_open_projects_and_confidential_projects_require_grant(
     projects::create_with_confidential(&db, "confidential", "Confidential", true)
         .await
         .expect("confidential project");
-    identity::add_grant(&db, "trust", "confidential", "read")
+    identity::add_grant(&db, "trust", "confidential")
         .await
         .expect("grant for trust");
     let strict_token = identity::issue_token(&db, "strict")
@@ -731,10 +731,10 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
     projects::create_with_confidential(&db, "secret", "Secret", true)
         .await
         .expect("secret project");
-    identity::add_grant(&db, "one", "secret", "write")
+    identity::add_grant(&db, "one", "secret")
         .await
         .expect("grant one");
-    identity::add_grant(&db, "two", "secret", "write")
+    identity::add_grant(&db, "two", "secret")
         .await
         .expect("grant two");
     let one_token = identity::issue_token(&db, "one")
@@ -976,13 +976,13 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
     projects::create_with_confidential(&db, "shared", "Shared", true)
         .await
         .expect("confidential shared project");
-    identity::add_grant(&db, "one", "shared", "write")
+    identity::add_grant(&db, "one", "shared")
         .await
         .expect("write grant");
-    identity::add_grant(&db, "two", "shared", "read")
+    identity::add_grant(&db, "two", "shared")
         .await
         .expect("read grant");
-    identity::add_grant(&db, "holder", "shared", "read")
+    identity::add_grant(&db, "holder", "shared")
         .await
         .expect("read grant");
     let one_token = identity::issue_token(&db, "one")

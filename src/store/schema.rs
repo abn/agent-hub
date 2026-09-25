@@ -66,6 +66,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 13,
         ddl: V13,
     },
+    Migration {
+        version: 14,
+        ddl: V14,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -400,4 +404,23 @@ CREATE INDEX IF NOT EXISTS artifacts_session ON artifacts(session_id);
 /// the original creator.
 const V13: &str = r#"
 ALTER TABLE artifacts ADD COLUMN actor TEXT;
+"#;
+
+/// Version 14: a grant is access, not a level.
+///
+/// A grant carried `read` or `write`, but authorization only ever asked whether
+/// a grant existed, so the level was presented in the API and the interface
+/// without being enforced. The table is rebuilt without it: a grant is access or
+/// no access, the model in `docs/architecture/model.md`.
+const V14: &str = r#"
+CREATE TABLE grants_v14(
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(agent_id, project_id)
+);
+INSERT INTO grants_v14(agent_id, project_id, created_at)
+  SELECT agent_id, project_id, created_at FROM grants;
+DROP TABLE grants;
+ALTER TABLE grants_v14 RENAME TO grants;
 "#;

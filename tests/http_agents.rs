@@ -127,7 +127,7 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
             "POST",
             "/api/v1/agents/worker/grants",
             auth,
-            r#"{"project_id":"proj","access":"read"}"#,
+            r#"{"project_id":"proj"}"#,
         ))
         .await
         .expect("grant");
@@ -141,6 +141,10 @@ async fn the_agents_surface_manages_agents_tokens_and_grants() {
     assert_eq!(response.status(), StatusCode::OK);
     let grants = json_body(response).await;
     assert_eq!(grants["grants"].as_array().expect("grants").len(), 1);
+    assert!(
+        grants["grants"][0].get("access").is_none(),
+        "a grant is access, not a level"
+    );
 
     let response = app
         .clone()
@@ -205,7 +209,7 @@ async fn the_agents_surface_maps_store_errors() {
             "POST",
             "/api/v1/agents/worker/grants",
             auth,
-            r#"{"project_id":"ghost","access":"read"}"#,
+            r#"{"project_id":"ghost"}"#,
         ))
         .await
         .expect("grant to a missing project");

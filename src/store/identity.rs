@@ -53,8 +53,6 @@ pub struct IssuedToken {
 pub struct Grant {
     pub agent_id: String,
     pub project_id: String,
-    /// `read` or `write`.
-    pub access: String,
     pub created_at: String,
 }
 
@@ -363,7 +361,7 @@ pub async fn list_grants(db: &Database, agent_id: &str) -> Result<Vec<Grant>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT agent_id, project_id, access, created_at
+            "SELECT agent_id, project_id, created_at
              FROM grants WHERE agent_id = ?1 ORDER BY created_at ASC",
             [agent_id],
         )
@@ -377,13 +375,7 @@ pub async fn list_grants(db: &Database, agent_id: &str) -> Result<Vec<Grant>> {
 }
 
 /// Grant an agent access to a project, replacing an existing grant.
-pub async fn add_grant(
-    db: &Database,
-    agent_id: &str,
-    project_id: &str,
-    access: &str,
-) -> Result<Grant> {
-    validate_access(access)?;
+pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<Grant> {
     let created_at = crate::store::now_rfc3339();
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -399,15 +391,13 @@ pub async fn add_grant(
         return Err(Error::NotFound(format!("project {project_id} not found")));
     }
     tx.execute(
-        "INSERT INTO grants(agent_id, project_id, access, created_at)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO grants(agent_id, project_id, created_at)
+         VALUES (?1, ?2, ?3)
          ON CONFLICT(agent_id, project_id) DO UPDATE SET
-           access = excluded.access,
            created_at = excluded.created_at",
         vec![
             Value::Text(agent_id.to_string()),
             Value::Text(project_id.to_string()),
-            Value::Text(access.to_string()),
             Value::Text(created_at.clone()),
         ],
     )
@@ -416,12 +406,11 @@ pub async fn add_grant(
     audit(
         &tx,
         project_id,
-        format!("grant for {agent_id} on {project_id} set to {access}"),
+        format!("grant for {agent_id} on {project_id}"),
         serde_json::json!({
             "action": "grant_set",
             "agent_id": agent_id,
             "project_id": project_id,
-            "access": access,
         }),
     )
     .await?;
@@ -429,7 +418,6 @@ pub async fn add_grant(
     Ok(Grant {
         agent_id: agent_id.to_string(),
         project_id: project_id.to_string(),
-        access: access.to_string(),
         created_at,
     })
 }
@@ -754,9 +742,10 @@ pub async fn approve_enrolment(
         for proj in project_ids {
             if row_exists(&tx, Table::Projects, proj).await? {
                 tx.execute(
-                    "INSERT INTO grants(agent_id, project_id, access, created_at)
-                     VALUES (?1, ?2, 'write', ?3)
-                     ON CONFLICT(agent_id, project_id) DO UPDATE SET access = excluded.access",
+                    "INSERT INTO grants(agent_id, project_id, created_at)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(agent_id, project_id) DO UPDATE SET
+                       created_at = excluded.created_at",
                     vec![
                         Value::Text(effective_id.clone()),
                         Value::Text(proj.clone()),
@@ -967,15 +956,6 @@ fn validate_display_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_access(access: &str) -> Result<()> {
-    match access {
-        "read" | "write" => Ok(()),
-        other => Err(Error::InvalidArgument(format!(
-            "unknown grant access '{other}', expected read or write"
-        ))),
-    }
-}
-
 fn agent_from_row(row: &Row) -> Result<Agent> {
     Ok(Agent {
         id: text(row, 0)?,
@@ -993,8 +973,7 @@ fn grant_from_row(row: &Row) -> Result<Grant> {
     Ok(Grant {
         agent_id: text(row, 0)?,
         project_id: text(row, 1)?,
-        access: text(row, 2)?,
-        created_at: text(row, 3)?,
+        created_at: text(row, 2)?,
     })
 }
 

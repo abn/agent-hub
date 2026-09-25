@@ -123,7 +123,7 @@ async fn delete_project_cascades_its_data() {
     let agent = identity::create_agent(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
-    identity::add_grant(&state.db, "laptop", "homelab", "read")
+    identity::add_grant(&state.db, "laptop", "homelab")
         .await
         .expect("grant");
 

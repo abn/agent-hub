@@ -50,7 +50,7 @@ impl Hub {
         identity::create_agent(&self.state.db, id, id)
             .await
             .expect("create agent");
-        identity::add_grant(&self.state.db, id, project_id, "write")
+        identity::add_grant(&self.state.db, id, project_id)
             .await
             .expect("grant write");
         identity::issue_token(&self.state.db, id)

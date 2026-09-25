@@ -194,7 +194,7 @@ main.addEventListener("submit", (event) => {
     const project = String(data.get("project") || "").trim();
     api(`/api/v1/agents/${encodeURIComponent(agent)}/grants`, {
       method: "POST",
-      body: JSON.stringify({ project_id: project, access: String(data.get("access") || "write") }),
+      body: JSON.stringify({ project_id: project }),
     })
       .then(() => render())
       .catch(failed);

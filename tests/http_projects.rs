@@ -591,7 +591,7 @@ async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identi
     );
 
     // Explicit grant gives agent access:
-    agent_hub::store::identity::add_grant(&state.db, "agent-one", "secret-work", "read")
+    agent_hub::store::identity::add_grant(&state.db, "agent-one", "secret-work")
         .await
         .expect("grant");
 
@@ -649,4 +649,80 @@ async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identi
         .await
         .expect("revoked bytes");
     assert_eq!(revoked_bytes, clean_ghost_bytes);
+}
+
+/// An agent may tighten a project and never loosen it: the asymmetry the
+/// operating model states. Renaming is the admin's, and only the admin may make
+/// a confidential project public again.
+#[tokio::test]
+async fn an_agent_may_lock_a_project_and_only_the_admin_may_unlock_it() {
+    let state = state().await;
+    let agent = agent_hub::store::identity::create_agent(&state.db, "locker", "Locker")
+        .await
+        .expect("create agent");
+    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+        .await
+        .expect("issue token")
+        .token;
+    let agent_auth = format!("Bearer {token}");
+    projects::create(&state.db, "open-work", "Open Work")
+        .await
+        .expect("create project");
+
+    let locked = call_with_auth(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(&agent_auth),
+        Some(serde_json::json!({ "confidential": true })),
+    )
+    .await;
+    assert_eq!(locked.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(locked).await["confidential"],
+        Value::Bool(true),
+        "an agent may make a project confidential"
+    );
+
+    let refused = call_with_auth(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(&agent_auth),
+        Some(serde_json::json!({ "confidential": false })),
+    )
+    .await;
+    assert_eq!(
+        refused.status(),
+        StatusCode::BAD_REQUEST,
+        "an agent may not make a confidential project public"
+    );
+
+    let rename = call_with_auth(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(&agent_auth),
+        Some(serde_json::json!({ "display_name": "Renamed" })),
+    )
+    .await;
+    assert_eq!(
+        rename.status(),
+        StatusCode::BAD_REQUEST,
+        "renaming stays the admin's"
+    );
+
+    let unlocked = call(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(serde_json::json!({ "confidential": false })),
+    )
+    .await;
+    assert_eq!(unlocked.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(unlocked).await["confidential"],
+        Value::Bool(false),
+        "the admin unlocks it"
+    );
 }

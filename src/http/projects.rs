@@ -136,15 +136,20 @@ pub async fn get(
 /// 404. A body that names neither field is an accepted no-op, and one that
 /// writes nothing wakes nobody. An agent's personal space is settable here,
 /// unlike on delete.
+///
+/// An agent may **tighten** a project it can write: it may set `confidential`,
+/// and only to true. Renaming and making a project public again are the
+/// admin's, the asymmetry the operating model states.
 pub async fn update(
     State(state): State<AppState>,
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
     body: std::result::Result<Json<ProjectPatch>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<Project>, Problem> {
-    state
+    let principal = state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
     let payload = json_body(body, "project body must be JSON with display_name")?;
@@ -154,6 +159,25 @@ pub async fn update(
             "a project id is read-only after creation; it names the project in every MCP call"
                 .to_string(),
         )));
+    }
+
+    if !principal.is_admin {
+        if payload.display_name.is_some() {
+            return Err(Problem::from_error(&crate::error::Error::InvalidArgument(
+                "only the admin may rename a project".to_string(),
+            )));
+        }
+        if payload.confidential != Some(true) {
+            return Err(Problem::from_error(&crate::error::Error::InvalidArgument(
+                "an agent may make a project confidential; only the admin may make it public"
+                    .to_string(),
+            )));
+        }
+        // It must be able to write the project, and a missing one reads as a
+        // denial like every other non-admin refusal.
+        crate::policy::authorize(&state.db, &principal, &id, crate::policy::Access::Write)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
     }
 
     let changes = projects::ProjectChanges {

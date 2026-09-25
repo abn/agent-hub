@@ -138,7 +138,7 @@ impl Fleet {
                 .await
                 .expect("create agent");
             if confidential && idx == 0 {
-                identity::add_grant(&db, agent, PROJECT, "read")
+                identity::add_grant(&db, agent, PROJECT)
                     .await
                     .expect("add grant");
             }

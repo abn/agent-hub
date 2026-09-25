@@ -36,8 +36,6 @@ pub struct CreateAgent {
 #[derive(Debug, Deserialize)]
 pub struct GrantBody {
     pub project_id: String,
-    /// `read` or `write`.
-    pub access: String,
 }
 
 /// An agent's grants.
@@ -137,7 +135,7 @@ pub async fn grant(
 ) -> std::result::Result<(StatusCode, Json<Grant>), Problem> {
     admin(&state, &headers)?;
     let request = json_body(payload, "grant body must be valid JSON")?;
-    let grant = identity::add_grant(&state.db, &id, &request.project_id, &request.access)
+    let grant = identity::add_grant(&state.db, &id, &request.project_id)
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok((StatusCode::CREATED, Json(grant)))

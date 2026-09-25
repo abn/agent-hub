@@ -46,7 +46,7 @@ async fn identity_changes_emit_system_events() {
 
     identity::issue_token(&db, "worker").await.expect("issue");
     identity::revoke_token(&db, "worker").await.expect("revoke");
-    identity::add_grant(&db, "worker", "proj", "read")
+    identity::add_grant(&db, "worker", "proj")
         .await
         .expect("grant");
     identity::remove_grant(&db, "worker", "proj")

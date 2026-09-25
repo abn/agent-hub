@@ -144,7 +144,7 @@ async fn grants_are_upserted_and_removed() {
             .expect("has_grant")
     );
 
-    identity::add_grant(&db, "worker", "proj", "read")
+    identity::add_grant(&db, "worker", "proj")
         .await
         .expect("grant read");
     assert!(
@@ -155,23 +155,21 @@ async fn grants_are_upserted_and_removed() {
 
     let grants = identity::list_grants(&db, "worker").await.expect("list");
     assert_eq!(grants.len(), 1);
-    assert_eq!(grants[0].access, "read");
-
-    let upgraded = identity::add_grant(&db, "worker", "proj", "write")
-        .await
-        .expect("upgrade to write");
-    let grants = identity::list_grants(&db, "worker").await.expect("list");
-    assert_eq!(grants.len(), 1, "the grant is replaced, not duplicated");
-    assert_eq!(grants[0].access, "write");
     assert_eq!(
-        upgraded.created_at, grants[0].created_at,
-        "the returned grant matches the stored row"
+        grants[0].project_id, "proj",
+        "a grant is access, with no level"
     );
 
-    let bad = identity::add_grant(&db, "worker", "proj", "admin")
+    // A second grant replaces the first rather than adding a second row.
+    let regranted = identity::add_grant(&db, "worker", "proj")
         .await
-        .expect_err("unknown access");
-    assert_eq!(bad.code(), ErrorCode::InvalidArgument);
+        .expect("regrant");
+    let grants = identity::list_grants(&db, "worker").await.expect("list");
+    assert_eq!(grants.len(), 1, "the grant is replaced, not duplicated");
+    assert_eq!(
+        regranted.created_at, grants[0].created_at,
+        "the returned grant matches the stored row"
+    );
 
     identity::remove_grant(&db, "worker", "proj")
         .await
@@ -227,7 +225,7 @@ async fn a_grant_needs_a_real_project_and_agent() {
         .await
         .expect("create");
 
-    let no_project = identity::add_grant(&db, "worker", "ghost", "read")
+    let no_project = identity::add_grant(&db, "worker", "ghost")
         .await
         .expect_err("missing project");
     assert_eq!(no_project.code(), ErrorCode::NotFound);
@@ -235,7 +233,7 @@ async fn a_grant_needs_a_real_project_and_agent() {
     projects::create(&db, "proj", "Project")
         .await
         .expect("project");
-    let no_agent = identity::add_grant(&db, "ghost", "proj", "read")
+    let no_agent = identity::add_grant(&db, "ghost", "proj")
         .await
         .expect_err("missing agent");
     assert_eq!(no_agent.code(), ErrorCode::NotFound);
@@ -259,7 +257,7 @@ async fn renaming_a_pending_agent_moves_its_grants() {
     projects::create(&db, "secret", "Secret")
         .await
         .expect("project");
-    identity::add_grant(&db, "candidate", "secret", "write")
+    identity::add_grant(&db, "candidate", "secret")
         .await
         .expect("grant");
 
@@ -278,5 +276,28 @@ async fn renaming_a_pending_agent_moves_its_grants() {
             .await
             .expect("new id"),
         "the grant moves with the agent"
+    );
+}
+
+/// The migration rebuilds `grants` without the level it never enforced.
+#[tokio::test]
+async fn grants_carry_no_access_level() {
+    let db = fresh("identity-grants-columns").await;
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("PRAGMA table_info(grants)", ())
+        .await
+        .expect("pragma");
+    let mut columns = Vec::new();
+    while let Some(row) = rows.next().await.expect("row") {
+        columns.push(row.get::<String>(1).expect("column name"));
+    }
+    assert!(
+        columns.iter().any(|c| c == "agent_id") && columns.iter().any(|c| c == "project_id"),
+        "the grant table keeps its key: {columns:?}"
+    );
+    assert!(
+        !columns.iter().any(|c| c == "access"),
+        "a grant is access, not a level: {columns:?}"
     );
 }

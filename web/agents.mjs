@@ -155,7 +155,6 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
             return `
               <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 12px;${borderTop}border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
                 <span style="flex:1;font-size:14px;font-weight:500">${esc(projName)}</span>
-                <span style="font-size:13px;color:var(--ink-2)">${esc(grant.access)}</span>
               </div>`;
           })
           .join("")
@@ -211,7 +210,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
         .map(
           (grant) => `
         <div class="row" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface)">
-          <span class="mono" style="font-size:13px;font-family:var(--font-mono)">${esc(grant.project_id)} · ${esc(grant.access)}</span>
+          <span class="mono" style="font-size:13px;font-family:var(--font-mono)">${esc(grant.project_id)}</span>
           <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 12px/1 var(--font-sans);cursor:pointer">Remove grant</button>
         </div>
       `,

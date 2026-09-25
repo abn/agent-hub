@@ -137,7 +137,7 @@ async fn a_confidential_project_requires_an_explicit_grant() {
     assert!(forbidden(&db, &who, "secret", Access::Read).await);
     assert!(forbidden(&db, &who, "secret", Access::Write).await);
 
-    identity::add_grant(&db, "agent", "secret", "read")
+    identity::add_grant(&db, "agent", "secret")
         .await
         .expect("add grant");
     authorize(&db, &who, "secret", Access::Read)
@@ -331,7 +331,7 @@ async fn visibility_lists_the_reachable_projects() {
         Visibility::All => panic!("agent should not see confidential project"),
     }
 
-    identity::add_grant(&db, "agent", "secret", "read")
+    identity::add_grant(&db, "agent", "secret")
         .await
         .expect("grant");
     let visible = visibility(&db, &who).await.expect("agent");
