@@ -1038,28 +1038,41 @@ pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
 
     let updated = update_client_toml(&existing, token);
 
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(updated.as_bytes())?;
-        file.sync_all()?;
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
+    // Write beside the target at 0600 and rename it into place: the token is
+    // then never in a file with broader permissions, and never half-written.
+    // `mode` only applies when a file is created, so an existing temp file is
+    // repaired explicitly, and a permission failure is an error rather than
+    // something to ignore while the token sits readable. H12.
+    let mut temp_name = path.as_os_str().to_owned();
+    temp_name.push(format!(".tmp-{}", std::process::id()));
+    let temp_path = PathBuf::from(temp_name);
 
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, updated)?;
-    }
+    let write = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp_path)?;
+        {
+            use std::io::Write;
+            file.write_all(updated.as_bytes())?;
+            file.sync_all()?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::rename(&temp_path, path)
+    })();
 
-    Ok(())
+    if write.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write
 }
 
 /// Replace the token in the `[client]` table, or add the table and the key.
@@ -1245,6 +1258,41 @@ mod private_mode_tests {
         assert_eq!(mode(&file), 0o600, "a broad file is repaired to 0600");
 
         private_file(&dir.join("missing-wal")).expect("a missing sidecar is not an error");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn client_token_write_is_owner_only_and_leaves_no_temp() {
+        use super::write_client_token;
+        let dir = scratch("token");
+        std::fs::create_dir_all(&dir).expect("create scratch");
+        let file = dir.join("config.toml");
+        std::fs::write(&file, "[client]\nurl = \"http://hub\"\n").expect("seed");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("loosen");
+
+        write_client_token(&file, "secret-token").expect("write");
+        assert_eq!(
+            mode(&file),
+            0o600,
+            "an existing broad file is replaced at 0600"
+        );
+        let text = std::fs::read_to_string(&file).expect("read");
+        assert!(
+            text.contains("token = \"secret-token\""),
+            "token written: {text}"
+        );
+        assert!(
+            text.contains("url = \"http://hub\""),
+            "the rest of the file is kept: {text}"
+        );
+
+        let entries: Vec<_> = std::fs::read_dir(&dir).expect("list").collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "the temp file is renamed, not left behind"
+        );
+
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }
