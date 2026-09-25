@@ -559,11 +559,19 @@ function repaintFold(projectId, visit, action) {
 }
 
 async function loadOlder(projectId, visit) {
-  const page = await api(feedPath(projectId, activeKinds(projectId), visit.before));
-  if (visits.get(projectId) !== visit) return;
-  visit.events = visit.events.concat(page.events);
-  visit.before = page.next_before || visit.before;
-  visit.more = page.events.length === PAGE;
+  // A second call while the first is in flight would fetch the same cursor and
+  // append the page twice. H16 lower-severity list.
+  if (visit.loading) return;
+  visit.loading = true;
+  try {
+    const page = await api(feedPath(projectId, activeKinds(projectId), visit.before));
+    if (visits.get(projectId) !== visit) return;
+    visit.events = visit.events.concat(page.events);
+    visit.before = page.next_before || visit.before;
+    visit.more = page.events.length === PAGE;
+  } finally {
+    visit.loading = false;
+  }
 }
 
 async function toggleFold(button, projectId) {
