@@ -324,10 +324,16 @@ pub async fn brain(
     let prefix = params.path.as_deref().unwrap_or(BOTH_NAMESPACES);
 
     // A read does not create a brain: a session whose file is absent simply
-    // has no entries yet.
+    // has no entries yet. Liveness is confirmed under the session lock.
     let brain = match state
         .brain
-        .open_existing(&session.project_id, &session.id)
+        .open_existing_live(&session.project_id, &session.id, async || {
+            let current = session_store::get(&state.db, &session_id).await?;
+            if current.is_none_or(|s| s.deleted_at.is_some() || s.status == "quarantined") {
+                return Err(Error::NotFound(format!("session {session_id} not found")));
+            }
+            Ok(())
+        })
         .await
     {
         Ok(Some(brain)) => brain,
@@ -378,10 +384,16 @@ pub async fn brain_entry(
     let session = live(&state, &session_id).await?;
 
     // A read does not create a brain: a session whose file is absent has no
-    // entry at any path.
+    // entry at any path. Liveness is confirmed under the session lock.
     let brain = match state
         .brain
-        .open_existing(&session.project_id, &session.id)
+        .open_existing_live(&session.project_id, &session.id, async || {
+            let current = session_store::get(&state.db, &session_id).await?;
+            if current.is_none_or(|s| s.deleted_at.is_some() || s.status == "quarantined") {
+                return Err(Error::NotFound(format!("session {session_id} not found")));
+            }
+            Ok(())
+        })
         .await
     {
         Ok(Some(brain)) => brain,

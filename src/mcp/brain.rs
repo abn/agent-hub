@@ -763,10 +763,20 @@ impl HubServer {
 
         // A source that never wrote has no file to copy, and the fork starts
         // with an empty brain rather than an invented one.
+        let db = self.state.db.clone();
+        let source_id = source.id.clone();
         if let Some(brain) = self
             .state
             .brain
-            .open_existing(&source.project_id, &source.id)
+            .open_existing_live(&source.project_id, &source.id, async move || {
+                let current = sessions::get(&db, &source_id).await?;
+                if current.is_none_or(|s| s.deleted_at.is_some() || s.status == "quarantined") {
+                    return Err(Error::NotFound(format!(
+                        "source session {source_id} not found"
+                    )));
+                }
+                Ok(())
+            })
             .await?
         {
             let db = self.state.db.clone();
@@ -1046,10 +1056,20 @@ impl HubServer {
                             .await?
                     }
                 };
+                let db = self.state.db.clone();
+                let sid = session.id.clone();
                 Ok(self
                     .state
                     .brain
-                    .open_existing(&session.project_id, &session.id)
+                    .open_existing_live(&session.project_id, &session.id, async move || {
+                        let current = sessions::get(&db, &sid).await?;
+                        if current
+                            .is_none_or(|s| s.deleted_at.is_some() || s.status == "quarantined")
+                        {
+                            return Err(Error::NotFound(format!("session {sid} not found")));
+                        }
+                        Ok(())
+                    })
                     .await?
                     .map(|brain| Target {
                         project_id: session.project_id,

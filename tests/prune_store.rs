@@ -554,3 +554,137 @@ async fn undo_after_the_window_is_rejected() {
         .expect_err("the window has passed");
     assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
 }
+
+#[tokio::test]
+async fn sweep_cannot_remove_session_or_brain_after_undo_returned_success() {
+    let dir = TempDir::new("prune-undo-sweep-order");
+    let db = open(&dir).await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let store = BrainStore::new(dir.join("sessions"));
+    let brain = store.open("proj", &session.id).await.expect("open brain");
+    brain.put("/kv/note", b"precious data").await.expect("put");
+    let brain_file = dir.join(&session.brain_path);
+    assert!(brain_file.exists());
+
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    let token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+    // Undo the prune successfully within the window
+    prune::undo(&db, &token.undo_token)
+        .await
+        .expect("undo succeeds");
+
+    // Now run sweep: sweep must NOT commit or remove the brain of the restored session
+    let committed = prune::sweep(&db, &dir).await.expect("sweep");
+    assert_eq!(committed, 0, "sweep must commit 0 sessions");
+    assert!(brain_file.exists(), "brain file must still exist");
+    assert!(
+        sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .is_some(),
+        "session must still exist"
+    );
+}
+
+#[tokio::test]
+async fn undo_cannot_succeed_after_sweep_claims_session() {
+    let dir = TempDir::new("prune-sweep-undo-order");
+    let db = open(&dir).await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let store = BrainStore::new(dir.join("sessions"));
+    let brain = store.open("proj", &session.id).await.expect("open brain");
+    brain.put("/kv/note", b"data").await.expect("put");
+
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    let token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+    // Manually claim the session for sweep
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET status = 'quarantined' WHERE id = ?1",
+        vec![turso::Value::Text(session.id.clone())],
+    )
+    .await
+    .expect("claim");
+
+    // Attempting undo must fail with Conflict because it is claimed/quarantined
+    let err = prune::undo(&db, &token.undo_token)
+        .await
+        .expect_err("undo must fail after claim");
+    assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn interrupted_sweep_recovers_at_startup_and_cleans_quarantine_files() {
+    let dir = TempDir::new("prune-recovery");
+    let db = open(&dir).await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let store = BrainStore::new(dir.join("sessions"));
+    let brain = store.open("proj", &session.id).await.expect("open brain");
+    brain.put("/kv/note", b"data").await.expect("put");
+    let brain_file = dir.join(&session.brain_path);
+    assert!(brain_file.exists());
+
+    sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    let _token = prune::prune_session(&db, &session.id).await.expect("prune");
+
+    // Simulate an interrupted sweep:
+    // Session status set to 'quarantined', brain quarantined to .quarantine
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "UPDATE sessions SET status = 'quarantined' WHERE id = ?1",
+        vec![turso::Value::Text(session.id.clone())],
+    )
+    .await
+    .expect("set quarantined");
+
+    store
+        .quarantine("proj", &session.id)
+        .await
+        .expect("quarantine file");
+    assert!(!brain_file.exists());
+    let mut q_path = brain_file.into_os_string();
+    q_path.push(".quarantine");
+    let q_path = std::path::PathBuf::from(q_path);
+    assert!(q_path.exists(), "quarantined file exists");
+
+    // Also place an orphaned .quarantine file with no session row
+    let orphan_dir = dir.join("sessions/proj");
+    std::fs::create_dir_all(&orphan_dir).expect("orphan dir");
+    let orphan_file = orphan_dir.join("orphan.db.quarantine");
+    std::fs::write(&orphan_file, b"orphan").expect("write orphan");
+    assert!(orphan_file.exists());
+
+    // Recover intermediate states at startup
+    let recovered = prune::recover(&db, &dir).await.expect("recover");
+    assert_eq!(recovered, 1, "one quarantined session recovered");
+
+    // Both quarantined files are cleaned up
+    assert!(!q_path.exists(), "quarantined brain file removed");
+    assert!(!orphan_file.exists(), "orphan quarantine file removed");
+
+    // The session row is deleted
+    assert!(
+        sessions::get(&db, &session.id)
+            .await
+            .expect("get")
+            .is_none(),
+        "recovered session metadata was deleted"
+    );
+}

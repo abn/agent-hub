@@ -240,7 +240,19 @@ impl BrainStore {
     /// A read path uses this so it never creates a brain for a session whose
     /// file is absent; `None` means there is nothing stored yet.
     pub async fn open_existing(&self, project_id: &str, session_id: &str) -> Result<Option<Brain>> {
-        self.open_under_lock(project_id, session_id, false, async || Ok(()))
+        self.open_existing_live(project_id, session_id, async || Ok(()))
+            .await
+    }
+
+    /// Open the brain for a session only when its file already exists, checking
+    /// liveness under the session lock.
+    pub async fn open_existing_live(
+        &self,
+        project_id: &str,
+        session_id: &str,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<Option<Brain>> {
+        self.open_under_lock(project_id, session_id, false, alive)
             .await
     }
 
@@ -288,6 +300,93 @@ impl BrainStore {
         }))
     }
 
+    /// Quarantine a session's brain file while holding its write lock.
+    ///
+    /// The active file is moved atomically to `.quarantine` so concurrent or
+    /// subsequent opens cannot find it, while keeping data on disk until
+    /// metadata deletion commits.
+    pub async fn quarantine(&self, project_id: &str, session_id: &str) -> Result<bool> {
+        let path = self.brain_path(project_id, session_id)?;
+        let lock = lock_for(&path);
+        let _guard = lock.lock().await;
+
+        let q_path = quarantine_path(&path);
+        if !path.exists() {
+            return Ok(q_path.exists());
+        }
+
+        if path.is_dir() {
+            let err = std::fs::remove_file(&path).unwrap_err();
+            return Err(err.into());
+        }
+
+        std::fs::rename(&path, &q_path)?;
+        for suffix in SIDECAR_SUFFIXES {
+            let mut sidecar = path.clone().into_os_string();
+            sidecar.push(suffix);
+            let sidecar_path = PathBuf::from(sidecar);
+            if sidecar_path.exists() {
+                let q_sidecar = quarantine_path(&sidecar_path);
+                if let Err(err) = std::fs::rename(&sidecar_path, &q_sidecar) {
+                    tracing::warn!(
+                        sidecar = %sidecar_path.display(),
+                        error = %err,
+                        "could not quarantine a brain sidecar"
+                    );
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Remove a session's quarantined brain file while holding its write lock.
+    pub async fn remove_quarantine(&self, project_id: &str, session_id: &str) -> Result<()> {
+        let path = self.brain_path(project_id, session_id)?;
+        let lock = lock_for(&path);
+        let _guard = lock.lock().await;
+
+        let q_path = quarantine_path(&path);
+        let _ = remove_if_present(&q_path);
+        for suffix in SIDECAR_SUFFIXES {
+            let mut sidecar = path.clone().into_os_string();
+            sidecar.push(suffix);
+            let q_sidecar = quarantine_path(&PathBuf::from(sidecar));
+            let _ = remove_if_present(&q_sidecar);
+        }
+        let _ = remove_if_present(&path);
+        for suffix in SIDECAR_SUFFIXES {
+            let mut sidecar = path.clone().into_os_string();
+            sidecar.push(suffix);
+            let _ = remove_if_present(&PathBuf::from(sidecar));
+        }
+        Ok(())
+    }
+
+    /// Remove any orphaned `.quarantine` files across the sessions tree.
+    pub fn clean_all_quarantine(sessions_root: &Path) -> Result<usize> {
+        let mut count = 0;
+        if !sessions_root.exists() {
+            return Ok(0);
+        }
+        if let Ok(projects) = std::fs::read_dir(sessions_root) {
+            for project in projects.flatten() {
+                if project.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && let Ok(files) = std::fs::read_dir(project.path())
+                {
+                    for file in files.flatten() {
+                        if let Some(name) = file.file_name().to_str()
+                            && name.ends_with(".quarantine")
+                            && std::fs::remove_file(file.path()).is_ok()
+                        {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(count)
+    }
+
     /// Remove a session's brain file while holding its write lock.
     ///
     /// Taking the lock is the point: a prune must not race an in-flight write
@@ -318,6 +417,12 @@ impl BrainStore {
         }
         Ok(removed)
     }
+}
+
+fn quarantine_path(path: &Path) -> PathBuf {
+    let mut q = path.as_os_str().to_os_string();
+    q.push(".quarantine");
+    PathBuf::from(q)
 }
 
 /// What the engine can write beside a brain file, as a suffix on its path.
@@ -456,6 +561,8 @@ impl Brain {
 
     /// Read recent tool_calls audit records.
     pub async fn audit_recent(&self, limit: Option<i64>) -> Result<Vec<agentfs_sdk::ToolCall>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         self.agent.tools.recent(limit).await.map_err(engine_error)
     }
 
@@ -468,6 +575,8 @@ impl Brain {
         &self,
         mut visit: impl FnMut(WriteRecord) -> std::ops::ControlFlow<()>,
     ) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         let conn = self.agent.get_connection().await.map_err(engine_error)?;
         let mut rows = conn
             .query(
@@ -646,6 +755,8 @@ impl Brain {
     /// A directory under `/fs/` reads as `None`; only regular files have
     /// content.
     pub async fn get(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         self.read(&parse_path(path)?).await
     }
 
@@ -654,6 +765,8 @@ impl Brain {
     /// Refuses directories with [`Error::Conflict`]. Missing entries return
     /// [`Error::NotFound`].
     pub async fn entry(&self, path: &str) -> Result<(EntryKind, Vec<u8>)> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         match parse_path(path)? {
             Namespace::Kv(key) => {
                 if key.is_empty() {
@@ -835,6 +948,8 @@ impl Brain {
     /// the directory, as `/fs/<dir>/<name>`. A prefix with nothing under it
     /// yields an empty list.
     pub async fn list(&self, prefix: &str) -> Result<Vec<Entry>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
         match parse_path(prefix)? {
             Namespace::Kv(key_prefix) => {
                 let mut keys = self.agent.kv.keys().await.map_err(engine_error)?;

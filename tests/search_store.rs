@@ -797,3 +797,56 @@ async fn an_artifact_snippet_is_still_the_opening_of_its_content() {
         hits[0].snippet
     );
 }
+
+#[tokio::test]
+async fn soft_pruned_session_brain_is_immediately_excluded_from_search() {
+    let dir = TempDir::new("search-soft-prune");
+    let db = open(&dir).await;
+    let session = agent_hub::store::sessions::start(&db, "proj", "worker", "agent-one")
+        .await
+        .expect("start");
+
+    // Plant a brain search doc for this session
+    search::index_doc(
+        &db.connect().expect("connect"),
+        SearchDoc {
+            doc_id: "brain:proj:worker:/kv/secret",
+            project_id: "proj",
+            kind: "brain",
+            ref_id: "/kv/secret",
+            session_id: Some(&session.id),
+            title: Some("/kv/secret"),
+            body: "super secret design plans",
+            updated_at: "2026-09-25T12:00:00Z",
+        },
+    )
+    .await
+    .expect("index");
+
+    // Before prune, searching for "secret" finds the brain document
+    let hits = search::query(&db, &q("secret")).await.expect("search");
+    assert_eq!(hits.len(), 1, "before prune, brain doc is found");
+    assert_eq!(hits[0].kind, "brain");
+
+    // End and soft-prune the session
+    agent_hub::store::sessions::end(&db, &session.id, "agent-one", None)
+        .await
+        .expect("end");
+    let token = agent_hub::store::prune::prune_session(&db, &session.id)
+        .await
+        .expect("prune");
+
+    // During the undo window (soft-pruned), search MUST exclude it immediately
+    let hits_pruned = search::query(&db, &q("secret")).await.expect("search");
+    assert!(
+        hits_pruned.is_empty(),
+        "soft-pruned session brain must not be visible in search"
+    );
+
+    // If undone, it becomes visible again
+    agent_hub::store::prune::undo(&db, &token.undo_token)
+        .await
+        .expect("undo");
+    let hits_restored = search::query(&db, &q("secret")).await.expect("search");
+    assert_eq!(hits_restored.len(), 1, "undo restores search visibility");
+}

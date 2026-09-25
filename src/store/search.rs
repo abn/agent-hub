@@ -189,6 +189,8 @@ async fn query_limited(
         params.extend(visible.iter().map(|id| Value::Text(id.clone())));
         scopes.push_str(&format!(" AND project_id IN ({})", holes.join(", ")));
     }
+    // Brain entries for soft-pruned sessions are excluded from search immediately.
+    scopes.push_str(" AND (type != 'brain' OR session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL))");
 
     let sql = if scopes.is_empty() {
         params.push(Value::Integer(limit));

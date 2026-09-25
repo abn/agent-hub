@@ -144,12 +144,47 @@ pub async fn prune_ended(db: &Database, project_id: Option<&str>) -> Result<Batc
 
 /// Restore a session pruned within the window.
 pub async fn undo(db: &Database, token: &str) -> Result<()> {
-    let session = crate::store::sessions::get(db, token)
-        .await?
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let mut rows = tx
+        .query(
+            "SELECT status, deleted_at FROM sessions WHERE id = ?1",
+            vec![Value::Text(token.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+
+    let row = rows
+        .next()
+        .await
+        .map_err(engine)?
         .ok_or_else(|| Error::NotFound(format!("session {token} not found")))?;
-    let deleted_at = session
-        .deleted_at
-        .ok_or_else(|| Error::NotFound(format!("session {token} is not pruned")))?;
+
+    let status = match row.get_value(0).map_err(engine)? {
+        Value::Text(status) => status,
+        _ => return Err(Error::NotFound(format!("session {token} not found"))),
+    };
+
+    let deleted_at = match row.get_value(1).map_err(engine)? {
+        Value::Text(deleted_at) => deleted_at,
+        _ => return Err(Error::NotFound(format!("session {token} is not pruned"))),
+    };
+    drop(rows);
+
+    if status == "quarantined" {
+        return Err(Error::Conflict(
+            "the undo window for this prune has passed".to_string(),
+        ));
+    }
+    if status != "ended" {
+        return Err(Error::Conflict(format!(
+            "session {token} cannot be restored from status {status}"
+        )));
+    }
 
     let now = time::OffsetDateTime::now_utc();
     let pruned_at =
@@ -161,14 +196,9 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
         ));
     }
 
-    let conn = super::connect(db)?;
-    // The window check above is advisory: the sweep can commit the row between
-    // it and the write, and the boundary is where both fire. The write carries
-    // the tombstone it was checked against, so a commit that lands in between
-    // matches no row and the human is told the prune stands.
-    let restored = conn
+    let restored = tx
         .execute(
-            "UPDATE sessions SET deleted_at = NULL WHERE id = ?1 AND deleted_at = ?2",
+            "UPDATE sessions SET deleted_at = NULL WHERE id = ?1 AND status = 'ended' AND deleted_at = ?2",
             vec![Value::Text(token.to_string()), Value::Text(deleted_at)],
         )
         .await
@@ -178,7 +208,31 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
             "session {token} changed while undoing the prune; it was not restored"
         )));
     }
+    tx.commit().await.map_err(engine)?;
     Ok(())
+}
+
+/// Claim an expired pruned session for sweep inside an immediate transaction.
+async fn claim(db: &Database, session_id: &str, deleted_at: &str) -> Result<bool> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let updated = tx
+        .execute(
+            "UPDATE sessions SET status = 'quarantined'
+             WHERE id = ?1 AND status = 'ended' AND deleted_at = ?2",
+            vec![
+                Value::Text(session_id.to_string()),
+                Value::Text(deleted_at.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+    Ok(updated > 0)
 }
 
 /// Commit every prune whose window has passed. Returns how many were committed.
@@ -186,7 +240,8 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, deleted_at FROM sessions WHERE deleted_at IS NOT NULL",
+            "SELECT id, project_id, deleted_at, status FROM sessions
+             WHERE deleted_at IS NOT NULL AND status IN ('ended', 'quarantined')",
             (),
         )
         .await
@@ -206,12 +261,17 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
             Value::Text(value) => value,
             _ => continue,
         };
-        pending.push((id, project_id, deleted_at));
+        let status = match row.get_value(3).map_err(engine)? {
+            Value::Text(value) => value,
+            _ => continue,
+        };
+        pending.push((id, project_id, deleted_at, status));
     }
+    drop(rows);
 
     let now = time::OffsetDateTime::now_utc();
     let mut committed = 0;
-    for (id, project_id, deleted_at) in pending {
+    for (id, project_id, deleted_at, status) in pending {
         let pruned_at = time::OffsetDateTime::parse(
             &deleted_at,
             &time::format_description::well_known::Rfc3339,
@@ -220,10 +280,17 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
         if (now - pruned_at).whole_seconds() < UNDO_WINDOW_SECS {
             continue;
         }
+
+        // Claim the session transactionally before touching files or metadata.
+        if status == "ended" && !claim(db, &id, &deleted_at).await? {
+            continue;
+        }
+
         // One session whose brain file cannot be removed would otherwise be
         // retried first on every tick and hold up every prune behind it.
         if let Err(err) = commit(db, data_dir, &id, &project_id).await {
             tracing::warn!(session_id = %id, error = %err, "prune commit failed");
+            let _ = revert_claim(db, data_dir, &project_id, &id).await;
             continue;
         }
         committed += 1;
@@ -231,16 +298,36 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
     Ok(committed)
 }
 
-async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &str) -> Result<()> {
-    // Removing the file is the point of the prune, through the wrapper so it
-    // takes the session lock; a failure must abort the commit.
-    let removed = crate::brain::BrainStore::for_data_dir(data_dir)
-        .remove(project_id, session_id)
-        .await?;
-    if !removed {
-        tracing::warn!(session_id, "prune found no brain file to remove");
+async fn revert_claim(
+    db: &Database,
+    data_dir: &Path,
+    project_id: &str,
+    session_id: &str,
+) -> Result<()> {
+    let store = crate::brain::BrainStore::for_data_dir(data_dir);
+    if let Ok(path) = store.brain_path(project_id, session_id) {
+        let mut q_path = path.into_os_string();
+        q_path.push(".quarantine");
+        if !std::path::Path::new(&q_path).exists() {
+            let conn = super::connect(db)?;
+            let _ = conn
+                .execute(
+                    "UPDATE sessions SET status = 'ended' WHERE id = ?1 AND status = 'quarantined'",
+                    vec![Value::Text(session_id.to_string())],
+                )
+                .await;
+        }
     }
+    Ok(())
+}
 
+async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &str) -> Result<()> {
+    let store = crate::brain::BrainStore::for_data_dir(data_dir);
+
+    // 1. Quarantine the file under the session lock
+    let _ = store.quarantine(project_id, session_id).await?;
+
+    // 2. Commit metadata deletion
     let mut conn = super::connect(db)?;
     let tx = conn
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
@@ -286,7 +373,53 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     )
     .await
     .map_err(engine)?;
-    tx.commit().await.map_err(engine)
+    tx.commit().await.map_err(engine)?;
+
+    // 3. Remove quarantined files
+    store.remove_quarantine(project_id, session_id).await?;
+    Ok(())
+}
+
+/// Recover any intermediate prune states at startup:
+/// 1. Committed claims (status = 'quarantined'): complete the commit.
+/// 2. Orphaned *.quarantine files: remove them.
+pub async fn recover(db: &Database, data_dir: &Path) -> Result<usize> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT id, project_id FROM sessions WHERE status = 'quarantined'",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+
+    let mut pending = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let id = match row.get_value(0).map_err(engine)? {
+            Value::Text(v) => v,
+            _ => continue,
+        };
+        let project_id = match row.get_value(1).map_err(engine)? {
+            Value::Text(v) => v,
+            _ => continue,
+        };
+        pending.push((id, project_id));
+    }
+    drop(rows);
+
+    let mut recovered = 0;
+    for (id, project_id) in pending {
+        if let Err(err) = commit(db, data_dir, &id, &project_id).await {
+            tracing::warn!(session_id = %id, error = %err, "prune recovery commit failed");
+        } else {
+            recovered += 1;
+        }
+    }
+
+    let sessions_dir = data_dir.join("sessions");
+    let _ = crate::brain::BrainStore::clean_all_quarantine(&sessions_dir);
+
+    Ok(recovered)
 }
 
 /// Why this session cannot be pruned as it stands, if it cannot.
