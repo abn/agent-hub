@@ -319,6 +319,10 @@ impl HubServer {
             actor: &principal.actor,
             verifies: None,
         };
+        let project_id_for_index = target.project_id.clone();
+        let session_id_for_index = target.session_id.clone();
+        let path_for_index = path.clone();
+        let content_for_index = params.content.clone();
         let version = target
             .brain
             .put_if_recorded(
@@ -326,11 +330,20 @@ impl HubServer {
                 params.content.as_bytes(),
                 params.if_version.as_deref(),
                 stamp,
-                async || {},
+                async move || {
+                    if let Err(err) = self
+                        .index_write(
+                            &project_id_for_index,
+                            session_id_for_index.as_deref(),
+                            &path_for_index,
+                            &content_for_index,
+                        )
+                        .await
+                    {
+                        tracing::warn!(error = %err, path = %path_for_index, "could not index brain write");
+                    }
+                },
             )
-            .await
-            .map_err(to_error_data)?;
-        self.index_write(&target, &path, &params.content)
             .await
             .map_err(to_error_data)?;
 
@@ -446,14 +459,23 @@ impl HubServer {
             actor: &principal.actor,
             verifies: None,
         };
-        // Deleting what is already absent stays a success at the session
-        // store; it is only not logged, because nothing happened.
+        let session_id_for_delete = target.session_id.clone();
+        let path_for_delete = path.clone();
         target
             .brain
-            .delete_if_recorded(&path, params.if_version.as_deref(), stamp, async || {})
-            .await
-            .map_err(to_error_data)?;
-        self.delete_doc(&target, &path)
+            .delete_if_recorded(
+                &path,
+                params.if_version.as_deref(),
+                stamp,
+                async move || {
+                    if let Err(err) = self
+                        .delete_doc(session_id_for_delete.as_deref(), &path_for_delete)
+                        .await
+                    {
+                        tracing::warn!(error = %err, path = %path_for_delete, "could not delete brain search doc");
+                    }
+                },
+            )
             .await
             .map_err(to_error_data)?;
 
@@ -632,17 +654,6 @@ struct Target {
     brain: Brain,
 }
 
-impl Target {
-    /// The search document id for one session brain entry.
-    ///
-    /// Only a session brain is written through a target. The knowledge base
-    /// builds its own document ids in its own write path.
-    fn doc_id(&self, path: &str) -> String {
-        let session_id = self.session_id.as_deref().unwrap_or_default();
-        format!("brain:{session_id}:{path}")
-    }
-}
-
 /// Remove a file that should not outlive a failed fork.
 ///
 /// A copy that was not finished, or whose session row was not written, is not
@@ -779,35 +790,54 @@ impl HubServer {
             })
             .await?
         {
-            let db = self.state.db.clone();
+            let db_alive = self.state.db.clone();
+            let db_copied = self.state.db.clone();
             let source_id = source.id.clone();
-            let copied = brain
-                .vacuum_into(&temporary, async move || {
-                    // Under the source's write lock, which a prune also takes
-                    // to remove the file: a prune that lands between the branch
-                    // and the copy must not be copied out from under.
-                    match sessions::get(&db, &source_id).await? {
-                        Some(session) if session.deleted_at.is_none() => Ok(()),
-                        _ => Err(Error::Conflict(format!(
-                            "session {source_id} was pruned while forking it session_id={source_id}"
-                        ))),
-                    }
-                })
-                .await;
-            if let Err(err) = copied {
-                discard(&temporary);
-                return Err(err);
-            }
-            std::fs::rename(&temporary, &destination)?;
-            discard(&temporary);
-        }
+            let temporary_clone = temporary.clone();
+            let destination_clone = destination.clone();
+            let source_clone = source.clone();
+            let session_name_string = session_name.to_string();
+            let caller_string = caller.to_string();
+            let new_id_string = new_id.clone();
 
-        match sessions::insert_fork(&self.state.db, source, session_name, caller, &new_id).await {
-            Ok(session) => Ok(session),
-            Err(err) => {
-                discard(&destination);
-                Err(err)
+            let copied = brain
+                .vacuum_and_then(
+                    &temporary,
+                    async move || {
+                        // Under the source's write lock, which a prune also takes
+                        // to remove the file: a prune that lands between the branch
+                        // and the copy must not be copied out from under.
+                        match sessions::get(&db_alive, &source_id).await? {
+                            Some(session) if session.deleted_at.is_none() => Ok(()),
+                            _ => Err(Error::Conflict(format!(
+                                "session {source_id} was pruned while forking it session_id={source_id}"
+                            ))),
+                        }
+                    },
+                    async move || {
+                        std::fs::rename(&temporary_clone, &destination_clone)?;
+                        sessions::insert_fork(
+                            &db_copied,
+                            &source_clone,
+                            &session_name_string,
+                            &caller_string,
+                            &new_id_string,
+                        )
+                        .await
+                    },
+                )
+                .await;
+
+            discard(&temporary);
+            match copied {
+                Ok(session) => Ok(session),
+                Err(err) => {
+                    discard(&destination);
+                    Err(err)
+                }
             }
+        } else {
+            sessions::insert_fork(&self.state.db, source, session_name, caller, &new_id).await
         }
     }
 
@@ -1150,18 +1180,25 @@ impl HubServer {
 
     /// Index a value written to a session brain: path as title, content as
     /// body.
-    async fn index_write(&self, target: &Target, path: &str, body: &str) -> Result<()> {
+    async fn index_write(
+        &self,
+        project_id: &str,
+        session_id: Option<&str>,
+        path: &str,
+        body: &str,
+    ) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
-        let doc_id = target.doc_id(path);
+        let s_id = session_id.unwrap_or_default();
+        let doc_id = format!("brain:{s_id}:{path}");
         index_doc(
             &conn,
             SearchDoc {
                 doc_id: &doc_id,
-                project_id: &target.project_id,
+                project_id,
                 kind: "brain",
                 ref_id: path,
-                session_id: target.session_id.as_deref(),
+                session_id,
                 title: Some(path),
                 body,
                 updated_at: &updated_at,
@@ -1171,11 +1208,13 @@ impl HubServer {
     }
 
     /// Remove a session brain value's search row.
-    async fn delete_doc(&self, target: &Target, path: &str) -> Result<()> {
+    async fn delete_doc(&self, session_id: Option<&str>, path: &str) -> Result<()> {
         let conn = crate::store::connect(&self.state.db)?;
+        let s_id = session_id.unwrap_or_default();
+        let doc_id = format!("brain:{s_id}:{path}");
         conn.execute(
             "DELETE FROM search_docs WHERE doc_id = ?1",
-            vec![Value::Text(target.doc_id(path))],
+            vec![Value::Text(doc_id)],
         )
         .await
         .map_err(crate::store::engine)?;

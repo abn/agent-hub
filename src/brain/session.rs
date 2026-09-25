@@ -727,6 +727,18 @@ impl Brain {
         destination: &Path,
         alive: impl AsyncFnOnce() -> Result<()>,
     ) -> Result<()> {
+        self.vacuum_and_then(destination, alive, async || Ok(()))
+            .await
+    }
+
+    /// Copy this brain file into a new file, executing a hook under the source's
+    /// lock after the copy completes.
+    pub async fn vacuum_and_then<R>(
+        &self,
+        destination: &Path,
+        alive: impl AsyncFnOnce() -> Result<()>,
+        on_copied: impl AsyncFnOnce() -> Result<R>,
+    ) -> Result<R> {
         let destination = destination.to_str().ok_or_else(|| {
             Error::Config("brain copy destination is not valid UTF-8".to_string())
         })?;
@@ -747,7 +759,8 @@ impl Brain {
         conn.execute(&format!("VACUUM INTO '{destination}'"), ())
             .await
             .map_err(|err| Error::Engine(err.to_string()))?;
-        Ok(())
+        let res = on_copied().await?;
+        Ok(res)
     }
 
     /// Read a value. Returns `None` when nothing is stored at the path.
@@ -840,6 +853,7 @@ impl Brain {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        crate::limits::check_brain_file_projected(self.file_bytes(), bytes.len())?;
         self.check_expected(&namespace, path, expected).await?;
         self.write(&namespace, bytes).await?;
         Ok(version(bytes))
@@ -864,6 +878,7 @@ impl Brain {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        crate::limits::check_brain_file_projected(self.file_bytes(), bytes.len())?;
         // One read serves both questions about what is being replaced.
         let before = match (expected, stamp.verifies) {
             (None, None) => None,
@@ -1256,9 +1271,11 @@ pub const KNOWLEDGE_FILE: &str = "kb";
 /// not folded back yet, so a stat of the file alone under-reports a brain that
 /// was just written to, sometimes by most of its size.
 pub fn file_bytes(path: &Path) -> i64 {
-    let mut sidecar = path.to_path_buf().into_os_string();
-    sidecar.push("-wal");
-    [path.to_path_buf(), PathBuf::from(sidecar)]
+    let mut wal = path.to_path_buf().into_os_string();
+    wal.push("-wal");
+    let mut shm = path.to_path_buf().into_os_string();
+    shm.push("-shm");
+    [path.to_path_buf(), PathBuf::from(wal), PathBuf::from(shm)]
         .iter()
         .filter_map(|path| std::fs::metadata(path).ok())
         .map(|meta| meta.len() as i64)

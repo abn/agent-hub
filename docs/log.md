@@ -18,6 +18,13 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
+## 2026-09-25, search boundary body truncation, write limits, and locked fork snapshot
+
+* **Update**: [Components](architecture/components.md) documents character-boundary
+  safe search body truncation at the indexing boundary.
+* **Update**: [Data model](architecture/data-model.md) documents that session forking
+  copies the brain file under the source session's write lock through the engine to
+  guarantee snapshot consistency across search rows and audit log entries.
 
 ## 2026-09-25, project write barrier and generation-scoped deletion quarantine
 

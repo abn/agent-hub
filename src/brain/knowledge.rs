@@ -478,10 +478,6 @@ async fn index(state: &AppState, project_id: &str, path: &str, body: &str) {
         .as_ref()
         .and_then(|frontmatter| frontmatter.title.as_deref())
         .unwrap_or(path);
-    let mut end = body.len().min(crate::limits::SEARCH_BODY_BYTES_MAX);
-    while !body.is_char_boundary(end) {
-        end -= 1;
-    }
     let doc_id = doc_id(project_id, path);
     let updated_at = crate::store::now_rfc3339();
     let indexed = async {
@@ -495,7 +491,7 @@ async fn index(state: &AppState, project_id: &str, path: &str, body: &str) {
                 ref_id: path,
                 session_id: None,
                 title: Some(title),
-                body: &body[..end],
+                body,
                 updated_at: &updated_at,
             },
         )

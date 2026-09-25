@@ -158,7 +158,8 @@ moment it is marked.
 Ownership moves two ways, and the hub picks which from the source's state.
 Adopting an ended session moves the owner and nothing else: the id, the file
 and every search row stay as they are. Forking a running one copies the file
-through the engine, which takes the audit log with it, and writes a second set
+under the source session's write lock through the engine to guarantee snapshot
+consistency, which takes the audit log with it, and writes a second set
 of search rows under the new session id; the source is not told and not
 touched. Either way the lineage is recorded on the row, and it stays recorded
 after the source is pruned, where the surfaces render it as a session that is

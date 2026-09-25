@@ -216,6 +216,16 @@ pub fn check_brain_file(file_bytes: i64) -> Result<()> {
     Ok(())
 }
 
+/// Reject a write when the brain file and incoming write would exceed the hard ceiling.
+pub fn check_brain_file_projected(file_bytes: i64, incoming_bytes: usize) -> Result<()> {
+    if file_bytes.saturating_add(incoming_bytes as i64) >= BRAIN_FILE_BYTES_HARD {
+        return Err(Error::PayloadTooLarge(format!(
+            "brain file projected size exceeds {BRAIN_FILE_BYTES_HARD} bytes"
+        )));
+    }
+    Ok(())
+}
+
 /// Reject a handoff note over the cap.
 pub fn check_handoff(handoff: &str) -> Result<()> {
     if handoff.chars().count() > HANDOFF_CHARS_MAX {

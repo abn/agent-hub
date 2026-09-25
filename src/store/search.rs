@@ -33,8 +33,21 @@ pub struct SearchDoc<'a> {
     pub updated_at: &'a str,
 }
 
+/// Truncate search body text to SEARCH_BODY_BYTES_MAX ensuring UTF-8 char boundary safety.
+pub fn truncate_search_body(body: &str) -> &str {
+    if body.len() <= crate::limits::SEARCH_BODY_BYTES_MAX {
+        return body;
+    }
+    let mut end = crate::limits::SEARCH_BODY_BYTES_MAX;
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    &body[..end]
+}
+
 /// Insert or refresh one document in the corpus.
 pub async fn index_doc(conn: &Connection, doc: SearchDoc<'_>) -> Result<()> {
+    let body = truncate_search_body(doc.body);
     conn.execute(
         "INSERT INTO search_docs(doc_id, project_id, type, ref_id, session_id, title, body, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -49,7 +62,7 @@ pub async fn index_doc(conn: &Connection, doc: SearchDoc<'_>) -> Result<()> {
             Value::Text(doc.ref_id.to_string()),
             optional_text(doc.session_id),
             optional_text(doc.title),
-            Value::Text(doc.body.to_string()),
+            Value::Text(body.to_string()),
             Value::Text(doc.updated_at.to_string()),
         ],
     )
