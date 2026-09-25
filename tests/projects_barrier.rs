@@ -253,7 +253,7 @@ async fn policy_revocation_racing_event_write_is_rejected_at_write_barrier() {
     let agent = identity::create_agent(&state.db, "agent-secret", "Secret Agent")
         .await
         .expect("create agent");
-    identity::add_grant(&state.db, &agent.id, "conf-proj", "write")
+    identity::add_grant(&state.db, &agent.id, "conf-proj")
         .await
         .expect("add grant");
 
