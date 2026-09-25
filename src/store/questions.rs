@@ -118,10 +118,42 @@ pub async fn answer(
         )));
     }
 
+    if let Some(key) = idempotency_key
+        && let Some(entry) = crate::store::idempotency::lookup_entry(
+            &tx,
+            &question.project_id,
+            crate::store::idempotency::OP_ANSWER,
+            key,
+        )
+        .await?
+        && let Some(event_id) = entry.event_id
+    {
+        if entry.target_id.as_deref() != Some(question_id) {
+            return Err(Error::InvalidArgument(
+                "idempotency key was used for a different question".to_string(),
+            ));
+        }
+        return Ok(event_id);
+    }
+
+    match inbox::status_in_tx(&tx, question_id).await?.as_deref() {
+        Some("resolved") => {
+            return Err(Error::Conflict(format!(
+                "question {question_id} was already answered"
+            )));
+        }
+        Some(_) => {}
+        None => {
+            return Err(Error::NotFound(format!(
+                "question {question_id} is not tracked in the inbox"
+            )));
+        }
+    }
+
     let id = events::append_in_tx(
         &tx,
         actor,
-        idempotency_key,
+        None,
         NewEvent {
             project_id: question.project_id.clone(),
             kind: "answer".to_string(),
@@ -133,6 +165,19 @@ pub async fn answer(
         },
     )
     .await?;
+
+    if let Some(key) = idempotency_key {
+        let created_at = crate::store::now_rfc3339();
+        crate::store::idempotency::record_answer(
+            &tx,
+            &question.project_id,
+            key,
+            &id,
+            question_id,
+            &created_at,
+        )
+        .await?;
+    }
 
     inbox::set_status_in_tx(&tx, question_id, "resolved").await?;
     tx.commit().await.map_err(crate::store::engine)?;
@@ -184,11 +229,20 @@ pub async fn decide(
     // appended, checked before the resolved guard so a replay is not a
     // conflict.
     if let Some(key) = idempotency_key
-        && let Some(entry) =
-            crate::store::idempotency::lookup_entry(&tx, &approval.project_id, "decision", key)
-                .await?
+        && let Some(entry) = crate::store::idempotency::lookup_entry(
+            &tx,
+            &approval.project_id,
+            crate::store::idempotency::OP_DECISION,
+            key,
+        )
+        .await?
         && let Some(event_id) = entry.event_id
     {
+        if entry.target_id.as_deref() != Some(approval_id) {
+            return Err(Error::InvalidArgument(
+                "idempotency key was used for a different approval".to_string(),
+            ));
+        }
         return Ok(event_id);
     }
     // An approval is decided once. An approval always enters the inbox when it
@@ -247,6 +301,7 @@ pub async fn decide(
             &approval.project_id,
             key,
             &id,
+            approval_id,
             &created_at,
         )
         .await?;

@@ -153,7 +153,8 @@ pub async fn add_comment(
 
     let (project_id, current_ver) = artifact_version(&tx, artifact_id).await?;
     if let Some(key) = idempotency_key
-        && let Some(entry) = idempotency::lookup_entry(&tx, &project_id, "comment", key).await?
+        && let Some(entry) =
+            idempotency::lookup_entry(&tx, &project_id, idempotency::OP_COMMENT, key).await?
     {
         let comment_id = entry.comment_id.as_deref().ok_or_else(|| {
             Error::InvalidArgument("idempotency key was used for a different write".to_string())
@@ -164,6 +165,13 @@ pub async fn add_comment(
             ))
         })?;
         if comment.artifact_id != artifact_id {
+            return Err(Error::InvalidArgument(
+                "idempotency key was used for a different write".to_string(),
+            ));
+        }
+        if let Some(target) = entry.target_id.as_deref()
+            && target != artifact_id
+        {
             return Err(Error::InvalidArgument(
                 "idempotency key was used for a different write".to_string(),
             ));
@@ -207,7 +215,7 @@ pub async fn add_comment(
     .await
     .map_err(engine)?;
     if let Some(key) = idempotency_key {
-        idempotency::record_comment(&tx, &project_id, key, &id, &created_at).await?;
+        idempotency::record_comment(&tx, &project_id, key, &id, artifact_id, &created_at).await?;
     }
     tx.commit().await.map_err(engine)?;
 

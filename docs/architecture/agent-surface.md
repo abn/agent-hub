@@ -176,7 +176,13 @@ resource a caller may not reach returns the same error whether it is missing
 or denied, so an agent cannot use an error as an existence check. A write that
 creates a durable record elsewhere (a feed event, a question, an answer, an
 artifact, or a decision) accepts an optional idempotency key, so a retry after
-a dropped connection returns the original result instead of a duplicate. A
+a dropped connection returns the original result instead of a duplicate. An
+idempotency key is scoped to its specific operation and event kind (such as
+`event:signal`, `event:question`, `answer`, `decision`, `artifact:publish`,
+and `artifact:update`) and is bound to its target entity, so a key reused
+across different entities or operations is rejected or isolated rather than
+replaying unrelated records. An answered question is resolved permanently and
+refuses further answers. A
 question or an approval is an open item on the human, and the hub caps how many
 one actor may leave open in a project; a write past the cap is refused with
 `rate_limited` and changes nothing, and resolving an item frees its slot. See

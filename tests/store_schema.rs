@@ -1180,3 +1180,55 @@ async fn migration_fourteen_adds_status_to_projects() {
     drop(conn);
     drop(db);
 }
+
+#[tokio::test]
+async fn migration_fifteen_adds_target_id_to_idempotency() {
+    let dir = TempDir::new("store-schema-v15");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 15) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    conn.execute(
+        "INSERT INTO idempotency(project_id, operation, idempotency_key, event_id, created_at) \
+         VALUES ('proj', 'event', 'legacy-key', 'ev-1', '2026-09-22T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert legacy idempotency row");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    let mut rows = conn
+        .query(
+            "SELECT project_id, operation, idempotency_key, target_id FROM idempotency WHERE idempotency_key = 'legacy-key'",
+            (),
+        )
+        .await
+        .expect("query idempotency");
+    let row = rows.next().await.expect("row").expect("row present");
+    assert_eq!(row.get::<String>(0).expect("project_id"), "proj");
+    assert_eq!(row.get::<String>(1).expect("operation"), "event");
+    assert_eq!(row.get::<String>(2).expect("idempotency_key"), "legacy-key");
+    assert!(row.get::<Option<String>>(3).expect("target_id").is_none());
+
+    drop(conn);
+    drop(db);
+}

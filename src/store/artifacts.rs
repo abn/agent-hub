@@ -174,8 +174,13 @@ pub async fn publish_for_principal(
     // here so a retry writes no blob at all, and again inside the transaction,
     // where the first call's record is certain to be visible.
     if let Some(key) = idempotency_key
-        && let Some(entry) =
-            idempotency::lookup_entry(&conn, artifact.project_id, "artifact", key).await?
+        && let Some(entry) = idempotency::lookup_entry(
+            &conn,
+            artifact.project_id,
+            idempotency::OP_ARTIFACT_PUBLISH,
+            key,
+        )
+        .await?
     {
         return replay(&conn, &entry, None).await;
     }
@@ -217,7 +222,7 @@ pub async fn publish_for_principal(
 
         if let Some(key) = idempotency_key
             && let Some(entry) =
-                idempotency::lookup_entry(&tx, artifact.project_id, "artifact", key).await?
+                idempotency::lookup_entry(&tx, artifact.project_id, idempotency::OP_ARTIFACT_PUBLISH, key).await?
         {
             return Ok(Written::Dropped(replay(&tx, &entry, None).await?));
         }
@@ -319,7 +324,7 @@ pub async fn publish_for_principal(
         )
         .await?;
         if let Some(key) = idempotency_key {
-            idempotency::record_artifact(&tx, artifact.project_id, key, &event_id, &id, 1, &created_at)
+            idempotency::record_artifact_publish(&tx, artifact.project_id, key, &event_id, &id, 1, &created_at)
                 .await?;
         }
         tx.commit().await.map_err(engine)?;
@@ -408,8 +413,13 @@ pub async fn update_for_principal(
     // As in publish, the lookup runs before the blob write and again inside
     // the transaction.
     if let Some(key) = idempotency_key
-        && let Some(entry) =
-            idempotency::lookup_entry(&conn, &current.project_id, "artifact", key).await?
+        && let Some(entry) = idempotency::lookup_entry(
+            &conn,
+            &current.project_id,
+            idempotency::OP_ARTIFACT_UPDATE,
+            key,
+        )
+        .await?
     {
         return replay(&conn, &entry, Some(artifact_id)).await;
     }
@@ -457,7 +467,7 @@ pub async fn update_for_principal(
 
         if let Some(key) = idempotency_key
             && let Some(entry) =
-                idempotency::lookup_entry(&tx, &existing.project_id, "artifact", key).await?
+                idempotency::lookup_entry(&tx, &existing.project_id, idempotency::OP_ARTIFACT_UPDATE, key).await?
         {
             return Ok(Written::Dropped(
                 replay(&tx, &entry, Some(artifact_id)).await?,
@@ -552,7 +562,7 @@ pub async fn update_for_principal(
         )
         .await?;
         if let Some(key) = idempotency_key {
-            idempotency::record_artifact(
+            idempotency::record_artifact_update(
                 &tx,
                 &existing.project_id,
                 key,
@@ -1037,6 +1047,13 @@ async fn replay(
     })?;
     if let Some(expected) = expected
         && expected != artifact_id
+    {
+        return Err(Error::InvalidArgument(
+            "idempotency key was used for a different artifact".to_string(),
+        ));
+    }
+    if let Some(target) = entry.target_id.as_deref()
+        && target != artifact_id
     {
         return Err(Error::InvalidArgument(
             "idempotency key was used for a different artifact".to_string(),

@@ -18,6 +18,12 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
+## 2026-09-25, idempotency namespaces, target binding, and resolved question immutability
+
+* **Update**: [Agent surface](architecture/agent-surface.md) documents that idempotency
+  keys are namespaced per operation and event kind, bound to target entities to prevent
+  cross-entity replay, and that resolved questions reject subsequent answers.
+
 ## 2026-09-25, session ownership atomicity, guarded transitions, and lease validation
 
 * **Update**: [Agent surface](architecture/agent-surface.md) documents that ended or

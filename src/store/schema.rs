@@ -436,3 +436,12 @@ ALTER TABLE grants_v14 RENAME TO grants;
 const V15: &str = r#"
 ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 "#;
+
+/// Version 15: idempotency target binding.
+///
+/// Idempotency rows record an optional target ID (such as an artifact ID,
+/// question ID, or approval ID) to validate that retried keys are not replayed
+/// across different entities or operations.
+const V15: &str = r#"
+ALTER TABLE idempotency ADD COLUMN target_id TEXT;
+"#;

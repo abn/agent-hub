@@ -659,7 +659,7 @@ async fn a_replayed_write_is_returned_before_its_thread_is_checked() {
         .await
         .expect("append root");
     let mut child = event("child event");
-    child.thread_id = Some(root_id);
+    child.thread_id = Some(root_id.clone());
     let first = append(&db, "agent-one", Some("k-thread"), child)
         .await
         .expect("append child");
@@ -673,10 +673,18 @@ async fn a_replayed_write_is_returned_before_its_thread_is_checked() {
         .expect("a replay is not validated again");
     assert_eq!(first, second);
 
-    let mut orphan = event("child event");
+    let mut answer = event("reply event");
+    answer.kind = "answer".to_string();
+    answer.thread_id = Some(root_id);
+    let first_ans = append(&db, "agent-one", Some("k-answer"), answer)
+        .await
+        .expect("append answer");
+
+    let mut orphan = event("reply event");
     orphan.kind = "answer".to_string();
-    let third = append(&db, "agent-one", Some("k-thread"), orphan)
+    orphan.thread_id = None;
+    let third = append(&db, "agent-one", Some("k-answer"), orphan)
         .await
         .expect("a replay is not validated again");
-    assert_eq!(first, third);
+    assert_eq!(first_ans, third);
 }
