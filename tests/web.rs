@@ -37,6 +37,8 @@ const CONNECT_JS: &str = include_str!("../web/connect.mjs");
 const MORE_JS: &str = include_str!("../web/more.mjs");
 const PROJECT_JS: &str = include_str!("../web/project.mjs");
 const FEED_JS: &str = include_str!("../web/feed.mjs");
+const EVENTS_JS: &str = include_str!("../web/events.mjs");
+const PREFS_JS: &str = include_str!("../web/prefs.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -2595,5 +2597,35 @@ fn feed_cursor_advances_on_the_feed_body_not_a_chip_row() {
     assert!(
         mark.contains("feedProject(location.hash) !== projectId"),
         "the cursor stops retrying once the reader leaves this feed"
+    );
+}
+
+// H21: Settings wrote `hub.alerts.master` and nothing read it, so the opt-out
+// did nothing. The page gates its post to the worker, because a worker cannot
+// read local storage itself.
+#[test]
+fn waiting_notification_honours_the_opt_out() {
+    let show = EVENTS_JS
+        .split("function showWaitingNotification(")
+        .nth(1)
+        .expect("events raises the waiting notification")
+        .split("export async function startStream")
+        .next()
+        .expect("showWaitingNotification is bounded by startStream");
+    assert!(
+        show.contains("alertsEnabled()"),
+        "the notification path reads the opt-out before posting"
+    );
+    let gate = show.find("alertsEnabled()").expect("gate present");
+    let post = show
+        .find("postMessage")
+        .expect("the notification ultimately posts a message");
+    assert!(
+        gate < post,
+        "the opt-out is checked before the worker is told to show anything"
+    );
+    assert!(
+        PREFS_JS.contains(r#""hub.alerts.master""#),
+        "the master switch is read from the key Settings writes"
     );
 }

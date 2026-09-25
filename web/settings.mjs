@@ -5,7 +5,7 @@ import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
-import { applyPrefs, prefs, savePrefs, saveToken } from "./prefs.mjs";
+import { alertsEnabled, applyPrefs, prefs, savePrefs, saveToken, setAlertsEnabled } from "./prefs.mjs";
 import { render } from "./router.mjs";
 import { shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
@@ -113,7 +113,7 @@ function alertsContent() {
       </div>`;
   }
   if (state === "granted") {
-    const on = readAlertPref("master", "on") === "on";
+    const on = alertsEnabled();
     return `
       <div class="settings-row row switch-row">
         <div class="grow">
@@ -144,7 +144,7 @@ function alertsRow() {
     sub = "Blocked in browser settings";
     checked = false;
   } else if (state === "granted") {
-    checked = readAlertPref("master", "on") === "on";
+    checked = alertsEnabled();
     sub = checked ? "Approvals and questions only" : "Notifications off";
   }
 
@@ -168,7 +168,7 @@ function desktopAlertsRow() {
   if (state === "blocked") {
     sub = "Blocked in browser settings";
   } else if (state === "granted") {
-    checked = readAlertPref("master", "on") === "on";
+    checked = alertsEnabled();
     sub = checked ? "Approvals and questions only" : "Notifications off";
   }
 
@@ -486,7 +486,7 @@ function setupDesktopSettingsEvents() {
       event.preventDefault();
       const current = masterBtn.getAttribute("aria-checked") === "true";
       const next = !current;
-      writeAlertPref("master", next ? "on" : "off");
+      setAlertsEnabled(next);
       masterBtn.setAttribute("aria-checked", String(next));
       masterBtn.classList.toggle("on", next);
       masterBtn.classList.toggle("off", !next);
@@ -623,7 +623,7 @@ function setupSettingsEvents() {
       if (state === "granted") {
         const current = masterBtn.getAttribute("aria-checked") === "true";
         const next = !current;
-        writeAlertPref("master", next ? "on" : "off");
+        setAlertsEnabled(next);
         masterBtn.setAttribute("aria-checked", String(next));
         masterBtn.classList.toggle("on", next);
         masterBtn.classList.toggle("off", !next);
@@ -637,7 +637,7 @@ function setupSettingsEvents() {
         if ("Notification" in window) {
           const res = await Notification.requestPermission();
           if (res === "granted") {
-            writeAlertPref("master", "on");
+            setAlertsEnabled(true);
             masterBtn.setAttribute("aria-checked", "true");
             masterBtn.classList.add("on");
             masterBtn.classList.remove("off");

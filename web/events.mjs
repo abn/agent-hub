@@ -2,7 +2,7 @@
 // stream raises when work starts waiting while the app is in the background.
 
 import { api } from "./api.mjs";
-import { prefs } from "./prefs.mjs";
+import { alertsEnabled, prefs } from "./prefs.mjs";
 
 const badge = document.getElementById("tab-badge");
 
@@ -33,6 +33,9 @@ function noteWaiting(count) {
 }
 
 function showWaitingNotification(count) {
+  // The reader's switch comes first. The worker cannot read local storage, so
+  // deciding here is the only place the opt-out can be honoured. H21.
+  if (!alertsEnabled()) return;
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   if (!("serviceWorker" in navigator)) return;
   navigator.serviceWorker.ready

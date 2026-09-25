@@ -91,3 +91,14 @@ export function savePrefs(values) {
   write("hub.density", prefs.density);
   write("hub.shortcuts", prefs.shortcuts);
 }
+
+// The waiting-on-you notification switch. It gates the page's own post to the
+// service worker: a worker cannot read local storage, so the page decides
+// whether the worker is told to show anything.
+export function alertsEnabled() {
+  return read("hub.alerts.master", SWITCH, "on") === "on";
+}
+
+export function setAlertsEnabled(on) {
+  return write("hub.alerts.master", on ? "on" : "off");
+}
