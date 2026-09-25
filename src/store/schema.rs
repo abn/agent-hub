@@ -74,6 +74,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 15,
         ddl: V15,
     },
+    Migration {
+        version: 16,
+        ddl: V16,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -437,11 +441,11 @@ const V15: &str = r#"
 ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 "#;
 
-/// Version 15: idempotency target binding.
+/// Version 16: idempotency target binding.
 ///
 /// Idempotency rows record an optional target ID (such as an artifact ID,
 /// question ID, or approval ID) to validate that retried keys are not replayed
 /// across different entities or operations.
-const V15: &str = r#"
+const V16: &str = r#"
 ALTER TABLE idempotency ADD COLUMN target_id TEXT;
 "#;
