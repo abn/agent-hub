@@ -14,7 +14,9 @@ use common::http::{json_body, problem_body};
 use common::state::TestState;
 
 async fn state() -> TestState {
-    common::state::open("http-sessions").await
+    let state = common::state::open("http-sessions").await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    state
 }
 
 fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {

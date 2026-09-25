@@ -1353,6 +1353,9 @@ mod tests {
     #[tokio::test]
     async fn a_touch_the_store_refuses_does_not_reach_the_caller() {
         let state = state("brain-touch").await;
+        crate::store::projects::create(&state.db, "proj", "Project")
+            .await
+            .expect("create project");
         let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
             .await
             .expect("start");

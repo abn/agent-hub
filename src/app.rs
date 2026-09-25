@@ -96,6 +96,18 @@ impl AppState {
             ),
         }
 
+        match store::projects::recover(&db, &config.data_dir).await {
+            Ok(0) => {}
+            Ok(recovered) => tracing::info!(
+                recovered,
+                "recovered deleting project states from an interrupted delete"
+            ),
+            Err(err) => tracing::warn!(
+                error = %err,
+                "could not recover deleting project states"
+            ),
+        }
+
         let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
         let knowledge = BrainStore::new(config.knowledge_dir());

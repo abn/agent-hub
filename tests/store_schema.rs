@@ -1134,3 +1134,49 @@ async fn migration_thirteen_adds_actor_to_artifacts() {
     drop(conn);
     drop(db);
 }
+
+#[tokio::test]
+async fn migration_fourteen_adds_status_to_projects() {
+    let dir = TempDir::new("store-schema-v14");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 14) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('legacy', 'Legacy', '2026-09-22T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert legacy project");
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    let mut rows = conn
+        .query("SELECT id, status FROM projects WHERE id = 'legacy'", ())
+        .await
+        .expect("query projects");
+    let row = rows.next().await.expect("row").expect("row present");
+    assert_eq!(row.get::<String>(0).expect("id"), "legacy");
+    assert_eq!(row.get::<String>(1).expect("status"), "active");
+
+    drop(conn);
+    drop(db);
+}

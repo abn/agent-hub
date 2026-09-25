@@ -91,6 +91,103 @@ pub async fn authorize(
     Ok(())
 }
 
+/// Reject a caller that may not reach a project, evaluated inside an active write transaction.
+///
+/// Guards against TOCTOU races where a grant is revoked, confidentiality changed, or
+/// project deleted between pre-transaction authorization and write commit.
+pub async fn authorize_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    principal: &Principal,
+    project_id: &str,
+    access: Access,
+) -> Result<()> {
+    let mut rows = tx
+        .query(
+            "SELECT id, owner_agent, confidential, status FROM projects WHERE id = ?1",
+            vec![Value::Text(project_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let row = match rows.next().await.map_err(engine)? {
+        Some(r) => r,
+        None => {
+            tracing::debug!(actor = %principal.actor, project = %project_id, "project not found in tx");
+            return Err(if principal.is_admin {
+                Error::NotFound(format!("project {project_id} not found"))
+            } else {
+                denied()
+            });
+        }
+    };
+    let status: String = match row.get_value(3).map_err(engine)? {
+        Value::Text(s) => s,
+        _ => "active".to_string(),
+    };
+    if status != "active" {
+        tracing::debug!(actor = %principal.actor, project = %project_id, "project not active in tx");
+        return Err(if principal.is_admin {
+            Error::NotFound(format!("project {project_id} not found"))
+        } else {
+            denied()
+        });
+    }
+
+    if principal.is_admin {
+        return Ok(());
+    }
+
+    let owner_agent = match row.get_value(1).map_err(engine)? {
+        Value::Text(val) => Some(val),
+        _ => None,
+    };
+    if access == Access::Write
+        && owner_agent.is_some()
+        && !owned_by(&owner_agent, principal.agent_id.as_deref())
+    {
+        tracing::debug!(
+            actor = %principal.actor,
+            project = %project_id,
+            ?access,
+            "cannot write another agent's personal space in tx"
+        );
+        return Err(denied());
+    }
+
+    let confidential = match row.get_value(2).map_err(engine)? {
+        Value::Integer(val) => val != 0,
+        _ => false,
+    };
+    if confidential {
+        let has_grant = match principal.agent_id.as_deref() {
+            Some(agent_id) => {
+                let mut grant_rows = tx
+                    .query(
+                        "SELECT 1 FROM grants WHERE agent_id = ?1 AND project_id = ?2",
+                        vec![
+                            Value::Text(agent_id.to_string()),
+                            Value::Text(project_id.to_string()),
+                        ],
+                    )
+                    .await
+                    .map_err(engine)?;
+                grant_rows.next().await.map_err(engine)?.is_some()
+            }
+            None => false,
+        };
+        if !has_grant {
+            tracing::debug!(
+                actor = %principal.actor,
+                project = %project_id,
+                ?access,
+                "confidential project without grant in tx"
+            );
+            return Err(denied());
+        }
+    }
+
+    Ok(())
+}
+
 /// The one denial a non-admin caller sees, shared by every non-admin refusal
 /// so that a missing resource and a denied one are indistinguishable.
 fn denied() -> Error {

@@ -18,11 +18,13 @@ async fn state() -> TestState {
 }
 
 async fn state_with_window(active_window: std::time::Duration) -> TestState {
-    common::state::open_with("http-storage", |config| {
+    let state = common::state::open_with("http-storage", |config| {
         config.active_window = active_window;
         config.node_name = Some("node-under-test".to_string());
     })
-    .await
+    .await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
+    state
 }
 
 async fn usage(state: &AppState) -> Value {
@@ -256,9 +258,7 @@ async fn ended_session(state: &AppState, project: &str, name: &str) -> sessions:
 async fn pruning_a_project_takes_its_ended_sessions_and_leaves_the_rest() {
     let state = state().await;
     for project in ["proj", "other"] {
-        agent_hub::store::projects::create(&state.db, project, "Project")
-            .await
-            .expect("create project");
+        let _ = agent_hub::store::projects::create(&state.db, project, "Project").await;
     }
     let first = ended_session(&state, "proj", "nightly").await;
     let second = ended_session(&state, "proj", "backfill").await;
@@ -393,9 +393,7 @@ async fn the_sweep_commits_every_session_a_batch_pruned() {
 #[tokio::test]
 async fn pruning_a_project_with_nothing_ended_removes_nothing() {
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Project")
-        .await
-        .expect("create project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
     sessions::start(&state.db, "proj", "live", "agent-one")
         .await
         .expect("start");
@@ -527,9 +525,7 @@ async fn an_agent_that_has_gone_quiet_is_not_counted_as_active() {
 #[tokio::test]
 async fn project_stats_count_what_the_header_and_the_tab_row_show() {
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Project")
-        .await
-        .expect("create project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
     agent_hub::store::projects::create(&state.db, "other", "Other")
         .await
         .expect("create project");
@@ -605,9 +601,7 @@ async fn an_active_window_beyond_the_calendar_does_not_take_the_read_surfaces_do
     // read surfaces still have to answer: a screen that panics over a
     // timestamp is worse than one that counts nobody.
     let state = state_with_window(std::time::Duration::MAX).await;
-    agent_hub::store::projects::create(&state.db, "proj", "Project")
-        .await
-        .expect("create project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
     let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");

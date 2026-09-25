@@ -19,6 +19,14 @@ software release notes and the repository changelog.
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
 
+## 2026-09-25, project write barrier and generation-scoped deletion quarantine
+
+* **Update**: [Data model](architecture/data-model.md) records the project status
+  column in the projects table. Active project status and authorization are
+  validated inside write transactions across events, artifacts, sessions, and
+  comments, and deletion isolates file directories into unique quarantined paths
+  prior to metadata removal to protect recreated slugs.
+
 ## 2026-09-24, round 13.1: Version row, agents as a list and item, summary between hairlines
 
 * **Update**: [Human interface](design/human-interface.md) records the desktop

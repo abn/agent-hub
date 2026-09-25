@@ -32,6 +32,7 @@ fn event(summary: &str) -> NewEvent {
 #[tokio::test]
 async fn the_human_feed_hides_system_events() {
     let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
     append(&state.db, "agent", None, event("a signal"))
         .await
         .expect("append signal");
@@ -104,6 +105,7 @@ async fn missing_token_is_a_problem() {
 #[tokio::test]
 async fn bearer_token_reads_events_newest_first() {
     let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
     append(&state.db, "agent", None, event("first"))
         .await
         .expect("append first");
@@ -174,9 +176,8 @@ async fn read_feed_page(state: &AppState) -> Value {
 #[tokio::test]
 async fn the_feed_says_how_far_the_human_has_read_it() {
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Proj")
-        .await
-        .expect("create project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Proj").await;
+    let _ = agent_hub::store::projects::create(&state.db, "other", "Other").await;
     let first = append(&state.db, "agent", None, event("first"))
         .await
         .expect("append first");

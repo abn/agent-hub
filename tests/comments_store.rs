@@ -11,6 +11,7 @@ use common::store::open;
 use common::temp::TempDir;
 
 async fn publish(db: &turso::Database, dir: &std::path::Path) -> String {
+    let _ = projects::create(db, "proj", "Default Project").await;
     artifacts::publish(
         db,
         dir,

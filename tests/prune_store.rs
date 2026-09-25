@@ -8,8 +8,14 @@ use agent_hub::store::{prune, sessions};
 
 mod common;
 
-use common::store::open;
+use common::store::open as common_open;
 use common::temp::TempDir;
+
+async fn open(dir: &TempDir) -> turso::Database {
+    let db = common_open(dir).await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
+    db
+}
 
 #[tokio::test]
 async fn prune_hides_a_session_and_undo_restores_it() {

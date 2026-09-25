@@ -16,7 +16,9 @@ use common::stdio::{StdioClient as McpServer, structured};
 use common::temp::TempDir;
 
 async fn state() -> TestState {
-    common::state::open("session-lineage").await
+    let state = common::state::open("session-lineage").await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
+    state
 }
 
 #[tokio::test]
@@ -312,6 +314,7 @@ fn mcp_artifact_session_lineage_and_parities() {
 async fn pruning_preserves_artifacts_and_search_index() {
     let dir = TempDir::new("prune-artifacts");
     let db = common::store::open(&dir).await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
 
     let session = sessions::start(&db, "proj", "sess-art", "agent-one")
         .await

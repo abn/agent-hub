@@ -604,6 +604,9 @@ mod tests {
     #[tokio::test]
     async fn a_signal_nudges_the_stream_once_its_event_is_in_the_feed() {
         let (state, _dir) = state("kb-signal").await;
+        projects::create(&state.db, "proj", "Project")
+            .await
+            .expect("create project");
         let mut ticks = state.ticker.subscribe();
         let stored = async || {
             read_feed(&state.db, "proj", &FeedQuery::default())

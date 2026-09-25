@@ -10,8 +10,13 @@ use agent_hub::store::projects;
 
 mod common;
 
-use common::store::open;
 use common::temp::TempDir;
+
+async fn open(dir: &std::path::Path) -> turso::Database {
+    let db = common::store::open(dir).await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Default Project").await;
+    db
+}
 
 fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
     NewArtifact {
@@ -1125,9 +1130,7 @@ fn protected<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
 async fn two_artifacts_in_one_project_may_differ_one_locked_one_not() {
     let dir = TempDir::new("artifact-mixed");
     let db = open(&dir).await;
-    projects::create(&db, "proj", "Proj")
-        .await
-        .expect("create project");
+    let _ = projects::create(&db, "proj", "Proj").await;
 
     let plain = artifacts::publish(&db, &dir, public("Report", b"in the clear"), None)
         .await
@@ -1150,9 +1153,7 @@ async fn two_artifacts_in_one_project_may_differ_one_locked_one_not() {
 async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
     let dir = TempDir::new("artifact-clear");
     let db = open(&dir).await;
-    projects::create(&db, "proj", "Proj")
-        .await
-        .expect("create project");
+    let _ = projects::create(&db, "proj", "Proj").await;
     let artifact = artifacts::publish(&db, &dir, protected("Secret", b"ciphertext"), None)
         .await
         .expect("publish");
@@ -1215,9 +1216,7 @@ async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
 async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let dir = TempDir::new("label-clear");
     let db = open(&dir).await;
-    projects::create(&db, "proj", "Project")
-        .await
-        .expect("proj");
+    let _ = projects::create(&db, "proj", "Project").await;
 
     let mut art = public("Doc", b"v1");
     art.label = Some("v1");

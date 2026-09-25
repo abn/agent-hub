@@ -14,7 +14,9 @@ use common::http::{json_body, problem_body, request, text_body};
 use common::state::TestState;
 
 async fn state() -> TestState {
-    common::state::open("comments-http").await
+    let state = common::state::open("comments-http").await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    state
 }
 
 async fn publish(state: &AppState, title: &str, content: &[u8]) -> String {

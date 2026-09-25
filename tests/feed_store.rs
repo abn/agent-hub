@@ -11,7 +11,9 @@ mod common;
 use common::store::TestDb;
 
 async fn open() -> TestDb {
-    common::store::fresh("feed").await
+    let db = common::store::fresh("feed").await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Default Project").await;
+    db
 }
 
 fn event(summary: &str) -> NewEvent {
@@ -432,6 +434,7 @@ async fn the_feed_cursor_only_ever_moves_forward() {
 #[tokio::test]
 async fn the_cursor_ignores_an_event_from_elsewhere_or_from_nowhere() {
     let db = open().await;
+    let _ = agent_hub::store::projects::create(&db, "other", "other").await;
     let mine = append(&db, "agent-one", None, event("mine"))
         .await
         .expect("append");
@@ -463,9 +466,7 @@ async fn the_unseen_count_follows_the_feed_and_the_cursor() {
     let db = open().await;
     // The counts are reported per project on the roll, so both exist.
     for id in ["proj", "other"] {
-        agent_hub::store::projects::create(&db, id, id)
-            .await
-            .expect("create project");
+        let _ = agent_hub::store::projects::create(&db, id, id).await;
     }
     append(&db, "agent-one", None, event("first"))
         .await

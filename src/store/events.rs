@@ -115,6 +115,25 @@ pub async fn append_action(
     append_with_caps(db, Some(caps), actor, idempotency_key, event).await
 }
 
+pub async fn append_for_principal(
+    db: &Database,
+    principal: &crate::principal::Principal,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
+    append_with_caps_and_principal(db, None, principal, idempotency_key, event).await
+}
+
+pub async fn append_action_for_principal(
+    db: &Database,
+    caps: &crate::limits::InboxCaps,
+    principal: &crate::principal::Principal,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
+    append_with_caps_and_principal(db, Some(caps), principal, idempotency_key, event).await
+}
+
 async fn append_with_caps(
     db: &Database,
     caps: Option<&crate::limits::InboxCaps>,
@@ -128,6 +147,30 @@ async fn append_with_caps(
         .await
         .map_err(engine)?;
     let id = append_in_tx_capped(&tx, caps, actor, idempotency_key, event).await?;
+    tx.commit().await.map_err(engine)?;
+    Ok(id)
+}
+
+async fn append_with_caps_and_principal(
+    db: &Database,
+    caps: Option<&crate::limits::InboxCaps>,
+    principal: &crate::principal::Principal,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+) -> Result<String> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    crate::policy::authorize_in_tx(
+        &tx,
+        principal,
+        &event.project_id,
+        crate::policy::Access::Write,
+    )
+    .await?;
+    let id = append_in_tx_capped(&tx, caps, &principal.actor, idempotency_key, event).await?;
     tx.commit().await.map_err(engine)?;
     Ok(id)
 }
@@ -159,6 +202,29 @@ async fn append_in_tx_capped(
         &event.summary,
         payload_text.as_deref().map(str::len).unwrap_or(0),
     )?;
+
+    let mut p_rows = tx
+        .query(
+            "SELECT status FROM projects WHERE id = ?1",
+            vec![Value::Text(event.project_id.clone())],
+        )
+        .await
+        .map_err(engine)?;
+    let p_row = p_rows
+        .next()
+        .await
+        .map_err(engine)?
+        .ok_or_else(|| Error::NotFound(format!("project {} not found", event.project_id)))?;
+    let status: String = match p_row.get_value(0).map_err(engine)? {
+        Value::Text(s) => s,
+        _ => "active".to_string(),
+    };
+    if status != "active" {
+        return Err(Error::NotFound(format!(
+            "project {} not found",
+            event.project_id
+        )));
+    }
 
     // A question and an approval both wait on the human, whichever surface
     // wrote them, so the rule lives here rather than at each write path.

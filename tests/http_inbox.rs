@@ -18,7 +18,9 @@ use common::http::{json_body, problem_body, request};
 use common::state::TestState;
 
 async fn state() -> TestState {
-    common::state::open("http-inbox").await
+    let state = common::state::open("http-inbox").await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
+    state
 }
 
 async fn seed_question(state: &AppState, subject: &str) -> String {
@@ -650,6 +652,7 @@ async fn marking_a_waiting_item_read_leaves_it_waiting() {
 #[tokio::test]
 async fn marking_everything_read_is_scoped_by_project() {
     let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "other", "Other").await;
     seed_finished(&state, "here").await;
     seed_finished_in(&state, "other", "there").await;
     seed_question(&state, "Ship it?").await;
@@ -733,9 +736,7 @@ async fn home(state: &AppState) -> Value {
 #[tokio::test]
 async fn home_lists_what_waits_even_when_newer_events_have_buried_it() {
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
-        .await
-        .expect("project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
     let approval = seed_approval(&state, "Restart the node?").await;
     let question = seed_question(&state, "Deploy tonight?").await;
     for n in 0..12 {
@@ -926,11 +927,10 @@ async fn an_inbox_item_names_its_project() {
     // The Inbox shows where an item is from. Without the name on the item the
     // screen can only print the slug, as it did.
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
-        .await
-        .expect("create");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
     seed_approval(&state, "Restart the node?").await;
     // An item whose project has no row still lists, with no name to give.
+    let _ = agent_hub::store::projects::create(&state.db, "no-such-project", "Temporary").await;
     let orphan = events::append(
         &state.db,
         "agent-one",
@@ -947,6 +947,10 @@ async fn an_inbox_item_names_its_project() {
     )
     .await
     .expect("append");
+    let conn = state.db.connect().expect("connect");
+    conn.execute("DELETE FROM projects WHERE id = 'no-such-project'", ())
+        .await
+        .expect("delete");
 
     let response = router(state.clone())
         .oneshot(request("GET", "/api/v1/inbox", Some("Bearer token"), None))

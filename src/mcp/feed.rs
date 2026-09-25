@@ -65,18 +65,18 @@ impl HubServer {
             session_id,
         };
         let event_id = if needs_action {
-            events::append_action(
+            events::append_action_for_principal(
                 &self.state.db,
                 &self.state.config.inbox_caps,
-                &principal.actor,
+                &principal,
                 params.idempotency_key.as_deref(),
                 event,
             )
             .await
         } else {
-            events::append(
+            events::append_for_principal(
                 &self.state.db,
-                &principal.actor,
+                &principal,
                 params.idempotency_key.as_deref(),
                 event,
             )

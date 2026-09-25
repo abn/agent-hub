@@ -12,7 +12,9 @@ use common::http::{get, json_body};
 use common::state::TestState;
 
 async fn state() -> TestState {
-    common::state::open("search-http").await
+    let state = common::state::open("search-http").await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
+    state
 }
 
 async fn seed(state: &AppState) {
@@ -322,9 +324,7 @@ fn hits(body: &serde_json::Value) -> Vec<serde_json::Value> {
 #[tokio::test]
 async fn a_hit_names_its_project_as_the_projects_list_does() {
     let state = state().await;
-    agent_hub::store::projects::create(&state.db, "proj", "Engine Room")
-        .await
-        .expect("project");
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
     seed(&state).await;
 
     let response = router(state.clone())

@@ -28,10 +28,12 @@ async fn state() -> TestState {
 }
 
 async fn state_with_public_url(public_url: Option<&str>) -> TestState {
-    common::state::open_with("http-artifacts", |config| {
+    let state = common::state::open_with("http-artifacts", |config| {
         config.public_url = public_url.map(str::to_string);
     })
-    .await
+    .await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    state
 }
 
 /// A GET with an explicit Host, so origin-derived values are deterministic.
@@ -179,6 +181,7 @@ async fn listing_artifacts_requires_a_token() {
 #[tokio::test]
 async fn listing_artifacts_returns_the_project_artifacts() {
     let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "other", "Other").await;
     let first = publish_public(&state, "proj", "Report", b"<p>one</p>").await;
     publish_public(&state, "other", "Elsewhere", b"<p>two</p>").await;
 

@@ -220,6 +220,7 @@ fn payload_over_cap_returns_payload_too_large() {
 #[test]
 fn streamable_http_requires_a_bearer_token() {
     let data_dir = TempDir::new("http");
+    common::seed::seed_project(data_dir.path(), "http");
     let (_child, port) = serve(data_dir.path());
 
     let initialize = json!({

@@ -7,8 +7,14 @@ use agent_hub::store::search::{self, SearchDoc, SearchQuery};
 
 mod common;
 
-use common::store::open;
+use common::store::open as common_open;
 use common::temp::TempDir;
+
+async fn open(dir: &TempDir) -> turso::Database {
+    let db = common_open(dir).await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
+    db
+}
 
 async fn seed(db: &turso::Database, dir: &std::path::Path) {
     let event = NewEvent {

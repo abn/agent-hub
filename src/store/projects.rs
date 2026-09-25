@@ -24,6 +24,8 @@ pub struct Project {
     pub agents_active: i64,
     /// Whether the project is confidential and hidden without a grant.
     pub confidential: bool,
+    /// Status: 'active' or 'deleting'.
+    pub status: String,
 }
 
 /// The fields of a project the human may change after creation.
@@ -41,8 +43,8 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, confidential
-             FROM projects ORDER BY created_at ASC",
+            "SELECT id, display_name, owner_agent, created_at, confidential, status
+             FROM projects WHERE status = 'active' ORDER BY created_at ASC",
             (),
         )
         .await
@@ -174,6 +176,7 @@ pub async fn create_with_confidential(
         unseen_events: 0,
         agents_active: 0,
         confidential,
+        status: "active".to_string(),
     })
 }
 
@@ -195,7 +198,7 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
         .map_err(engine)?;
     let mut rows = tx
         .query(
-            "SELECT 1 FROM projects WHERE id = ?1",
+            "SELECT 1 FROM projects WHERE id = ?1 AND status = 'active'",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -246,8 +249,8 @@ pub(crate) async fn insert_owned(
     confidential: bool,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings, confidential)
-         VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5)",
+        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings, confidential, status)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, 'active')",
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
@@ -380,8 +383,8 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, confidential
-             FROM projects WHERE id = ?1",
+            "SELECT id, display_name, owner_agent, created_at, confidential, status
+             FROM projects WHERE id = ?1 AND status = 'active'",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -399,20 +402,82 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
 /// Delete a project and every row and file scoped to it.
 ///
 /// Refuses an agent's personal space: that project belongs to the agent and is
-/// removed only with it. The rows are deleted in one transaction first, so
-/// nothing is visible but partially gone; the files are then removed best
-/// effort, since an orphaned file is invisible while an orphaned row is not.
+/// removed only with it. The deletion sets status to 'deleting' in an immediate
+/// transaction to block late writes, moves project directories to generation-scoped
+/// quarantined locations, deletes metadata rows in an immediate transaction,
+/// and then removes the quarantined files.
 pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
-    let project = get(db, id)
-        .await?
-        .ok_or_else(|| Error::NotFound(format!("project {id} not found")))?;
-    if project.owner_agent.is_some() {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let mut rows = tx
+        .query(
+            "SELECT owner_agent, status FROM projects WHERE id = ?1",
+            vec![Value::Text(id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let (owner_agent, status) = match rows.next().await.map_err(engine)? {
+        Some(row) => {
+            let owner: Option<String> = match row.get_value(0).map_err(engine)? {
+                Value::Text(s) => Some(s),
+                _ => None,
+            };
+            let status: String = match row.get_value(1).map_err(engine)? {
+                Value::Text(s) => s,
+                _ => "active".to_string(),
+            };
+            (owner, status)
+        }
+        None => return Err(Error::NotFound(format!("project {id} not found"))),
+    };
+    if owner_agent.is_some() {
         return Err(Error::Conflict(format!(
             "project {id} is an agent's personal space"
         )));
     }
+    if status != "active" {
+        return Err(Error::NotFound(format!("project {id} not found")));
+    }
 
+    tx.execute(
+        "UPDATE projects SET status = 'deleting' WHERE id = ?1",
+        vec![Value::Text(id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+
+    finish_delete(db, data_dir, id).await
+}
+
+pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     let session_ids = session_ids(db, id).await?;
+
+    let del_id = crate::store::next_id();
+    let q_art = data_dir
+        .join("artifacts")
+        .join(format!(".deleted-{id}-{del_id}"));
+    let art_dir = data_dir.join("artifacts").join(id);
+    if art_dir.exists() {
+        let _ = std::fs::rename(&art_dir, &q_art);
+    }
+
+    let q_sess = data_dir
+        .join("sessions")
+        .join(format!(".deleted-{id}-{del_id}"));
+    let sess_dir = data_dir.join("sessions").join(id);
+    if sess_dir.exists() {
+        let _ = std::fs::rename(&sess_dir, &q_sess);
+    }
+
+    let q_kb = crate::brain::knowledge_dir(data_dir).join(format!(".deleted-{id}-{del_id}"));
+    let kb_dir = crate::brain::knowledge_dir(data_dir).join(id);
+    if kb_dir.exists() {
+        let _ = std::fs::rename(&kb_dir, &q_kb);
+    }
 
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -483,9 +548,16 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     .map_err(engine)?;
     tx.commit().await.map_err(engine)?;
 
-    // Every artifact version lives under one directory, so remove the tree
-    // rather than only the current version's file. A file failure here leaves
-    // an orphan, not a dangling row.
+    if q_art.exists() {
+        let _ = std::fs::remove_dir_all(&q_art);
+    }
+    if q_sess.exists() {
+        let _ = std::fs::remove_dir_all(&q_sess);
+    }
+    if q_kb.exists() {
+        let _ = std::fs::remove_dir_all(&q_kb);
+    }
+
     if let Err(err) = blob::remove_tree(data_dir, &format!("artifacts/{id}")) {
         tracing::warn!(project = id, error = %err, "artifact tree removal failed");
     }
@@ -495,21 +567,65 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
             tracing::warn!(session_id, error = %err, "brain removal failed");
         }
     }
-    // A knowledge base has no prune path of its own: deleting the project it
-    // belongs to is the only way it goes, and it goes with everything else.
     if let Err(err) = BrainStore::for_knowledge(data_dir)
         .remove(id, crate::brain::KNOWLEDGE_FILE)
         .await
     {
         tracing::warn!(project = id, error = %err, "knowledge base removal failed");
     }
-    // Only the directory, and only once it is empty: removing it with whatever
-    // it still holds would hide a file the removal above failed to take.
     let held = crate::brain::knowledge_dir(data_dir).join(id);
     if let Err(err) = std::fs::remove_dir(&held)
         && err.kind() != std::io::ErrorKind::NotFound
     {
         tracing::warn!(project = id, error = %err, "knowledge base directory removal failed");
+    }
+    Ok(())
+}
+
+/// Recover any projects left in 'deleting' status and clean up orphaned generation-scoped directories.
+pub async fn recover(db: &Database, data_dir: &Path) -> Result<usize> {
+    let mut recovered = 0;
+    clean_deleted_dirs(&data_dir.join("artifacts"))?;
+    clean_deleted_dirs(&data_dir.join("sessions"))?;
+    clean_deleted_dirs(&crate::brain::knowledge_dir(data_dir))?;
+
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query("SELECT id FROM projects WHERE status = 'deleting'", ())
+        .await
+        .map_err(engine)?;
+    let mut deleting_ids = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let Value::Text(id) = row.get_value(0).map_err(engine)? {
+            deleting_ids.push(id);
+        }
+    }
+    drop(rows);
+    drop(conn);
+
+    for id in deleting_ids {
+        if let Err(err) = finish_delete(db, data_dir, &id).await {
+            tracing::warn!(project = id, error = %err, "could not complete recovery of deleting project");
+        } else {
+            recovered += 1;
+        }
+    }
+
+    Ok(recovered)
+}
+
+fn clean_deleted_dirs(parent: &Path) -> Result<()> {
+    if !parent.exists() {
+        return Ok(());
+    }
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str()
+                && name.starts_with(".deleted-")
+            {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
     }
     Ok(())
 }
@@ -551,6 +667,10 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         Value::Integer(value) => value != 0,
         _ => false,
     };
+    let status = match row.get_value(5).map_err(engine)? {
+        Value::Text(value) => value,
+        _ => "active".to_string(),
+    };
     Ok(Project {
         id: text(0)?,
         display_name: text(1)?,
@@ -561,6 +681,7 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         unseen_events: 0,
         agents_active: 0,
         confidential,
+        status,
     })
 }
 

@@ -53,6 +53,7 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
         .await
         .expect("issue token")
         .token;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start session");

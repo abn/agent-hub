@@ -11,10 +11,16 @@ use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{self, FeedQuery};
 use agent_hub::store::questions::{self, NewQuestion};
 
+use agent_hub::store::projects;
+
 mod common;
 
 use common::store::open;
 use common::temp::TempDir;
+
+async fn ensure_project(db: &turso::Database) {
+    let _ = projects::create(db, "proj", "Project").await;
+}
 
 /// More writers than worker threads, so the lock is contended for real.
 const WRITERS: usize = 8;
@@ -34,6 +40,7 @@ fn assert_not_locked<T>(result: &Result<T, Error>) {
 async fn concurrent_same_key_publishes_serialize() {
     let dir = TempDir::new("lock-artifact");
     let db = Arc::new(open(&dir).await);
+    ensure_project(&db).await;
 
     let mut handles = Vec::new();
     for _ in 0..WRITERS {
@@ -90,6 +97,7 @@ async fn concurrent_same_key_publishes_serialize() {
 async fn concurrent_same_key_questions_serialize() {
     let dir = TempDir::new("lock-question");
     let db = Arc::new(open(&dir).await);
+    ensure_project(&db).await;
 
     let mut handles = Vec::new();
     for _ in 0..WRITERS {
@@ -139,6 +147,7 @@ async fn concurrent_same_key_questions_serialize() {
 async fn concurrent_same_key_answers_serialize() {
     let dir = TempDir::new("lock-answer");
     let db = Arc::new(open(&dir).await);
+    ensure_project(&db).await;
     let question_id = questions::post(
         &db,
         &agent_hub::limits::InboxCaps::disabled(),

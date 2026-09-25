@@ -154,6 +154,9 @@ async fn projects_create_list_and_storage() {
 #[tokio::test]
 async fn storage_usage_sums_every_stored_version() {
     let state = state().await;
+    agent_hub::store::projects::create(&state.db, "homelab", "Homelab")
+        .await
+        .expect("create project");
 
     let published = artifacts::publish(
         &state.db,
@@ -762,6 +765,9 @@ async fn an_unsafe_host_falls_back_to_the_bind() {
 #[tokio::test]
 async fn serves_artifact_content_for_the_viewer() {
     let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
     let published = artifacts::publish(
         &state.db,
         &state.data_dir,
@@ -1109,6 +1115,9 @@ fn app_css_carries_viewer_and_callout_styles() {
 #[tokio::test]
 async fn public_artifact_page_loads_for_the_embed() {
     let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
     let published = artifacts::publish(
         &state.db,
         &state.data_dir,
@@ -1154,6 +1163,9 @@ async fn comments_store_round_trip_behind_the_drawer() {
     // the drawer targets that frozen surface.
     use agent_hub::store::comments;
     let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
     let published = artifacts::publish(
         &state.db,
         &state.data_dir,
@@ -1320,6 +1332,9 @@ fn app_css_carries_drawer_styles_on_tokens() {
 #[tokio::test]
 async fn protected_artifact_serves_the_locked_host_shell() {
     let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Project")
+        .await
+        .expect("create project");
     let published = artifacts::publish(
         &state.db,
         &state.data_dir,

@@ -66,6 +66,8 @@ pub async fn start_resumed(
         .await
         .map_err(engine)?;
 
+    assert_project_active(&tx, project_id).await?;
+
     let existing = find_owned_on(&tx, project_id, agent, session_name).await?;
     if existing.is_none()
         && let Some(pruned) = find_pruned_on(&tx, project_id, agent, session_name).await?
@@ -198,6 +200,8 @@ pub async fn start_from(
         .await
         .map_err(engine)?;
 
+    assert_project_active(&tx, project_id).await?;
+
     let source = get_on(&tx, source_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("session {source_id} not found")))?;
@@ -328,6 +332,8 @@ pub async fn insert_fork(
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+
+    assert_project_active(&tx, &source.project_id).await?;
 
     collision_free(&tx, &source.project_id, caller, session_name, None).await?;
 
@@ -950,4 +956,30 @@ fn validate_id(kind: &str, value: &str) -> Result<()> {
 
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+async fn assert_project_active(
+    tx: &turso::transaction::Transaction<'_>,
+    project_id: &str,
+) -> Result<()> {
+    let mut p_rows = tx
+        .query(
+            "SELECT status FROM projects WHERE id = ?1",
+            vec![Value::Text(project_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    let p_row = p_rows
+        .next()
+        .await
+        .map_err(engine)?
+        .ok_or_else(|| Error::NotFound(format!("project {project_id} not found")))?;
+    let status: String = match p_row.get_value(0).map_err(engine)? {
+        Value::Text(s) => s,
+        _ => "active".to_string(),
+    };
+    if status != "active" {
+        return Err(Error::NotFound(format!("project {project_id} not found")));
+    }
+    Ok(())
 }

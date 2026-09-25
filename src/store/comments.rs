@@ -311,7 +311,10 @@ async fn artifact_version(
 ) -> Result<(String, i64)> {
     let mut rows = tx
         .query(
-            "SELECT project_id, current_ver FROM artifacts WHERE id = ?1",
+            "SELECT a.project_id, a.current_ver, p.status
+             FROM artifacts a
+             JOIN projects p ON a.project_id = p.id
+             WHERE a.id = ?1",
             vec![Value::Text(artifact_id.to_string())],
         )
         .await
@@ -334,6 +337,13 @@ async fn artifact_version(
                     ));
                 }
             };
+            let status: String = match row.get_value(2).map_err(engine)? {
+                Value::Text(s) => s,
+                _ => "active".to_string(),
+            };
+            if status != "active" {
+                return Err(Error::NotFound(format!("artifact {artifact_id} not found")));
+            }
             Ok((project_id, current_ver))
         }
         None => Err(Error::NotFound(format!("artifact {artifact_id} not found"))),

@@ -36,9 +36,10 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
         let session_id = self.session_in(&params.project_id).await;
-        let artifact = artifacts::publish(
+        let artifact = artifacts::publish_for_principal(
             &self.state.db,
             &self.state.data_dir,
+            Some(&principal),
             NewArtifact {
                 actor: &principal.actor,
                 project_id: &params.project_id,
@@ -82,9 +83,10 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
         let session_id = self.session_in(&existing.project_id).await;
-        let artifact = artifacts::update(
+        let artifact = artifacts::update_for_principal(
             &self.state.db,
             &self.state.data_dir,
+            Some(&principal),
             &principal.actor,
             &params.artifact_id,
             params.content.as_bytes(),

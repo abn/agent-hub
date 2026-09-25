@@ -151,6 +151,16 @@ pub async fn publish(
     artifact: NewArtifact<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
+    publish_for_principal(db, data_dir, None, artifact, idempotency_key).await
+}
+
+pub async fn publish_for_principal(
+    db: &Database,
+    data_dir: &Path,
+    principal: Option<&crate::principal::Principal>,
+    artifact: NewArtifact<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
     limits::check_artifact(artifact.content.len())?;
     let title = resolve_title(artifact.title, artifact.kind, artifact.content)?;
     let description = check_description(artifact.description)?;
@@ -174,47 +184,75 @@ pub async fn publish(
     let created_at = crate::store::now_rfc3339();
     let envelope_json = artifact.envelope.as_ref().map(|value| value.to_string());
     let protected = envelope_json.is_some();
-    let rel = blob::write(
-        data_dir,
-        artifact.project_id,
-        &id,
-        1,
-        artifact.kind,
-        artifact.content,
-    )?;
 
-    let published = Artifact {
-        id: id.clone(),
-        project_id: artifact.project_id.to_string(),
-        session_id: artifact.session_id.map(str::to_string),
-        actor: Some(artifact.actor.to_string()),
-        title: title.clone(),
-        description: description.clone(),
-        favicon: favicon.clone(),
-        label: label.clone(),
-        kind: artifact.kind.to_string(),
-        version: 1,
-        protected,
-        envelope: artifact.envelope.clone(),
-        size_bytes: artifact.content.len() as i64,
-        created_at: created_at.clone(),
-        updated_at: created_at.clone(),
-        path: rel.clone(),
-        comments_count: 0,
-        comments_open: 0,
-    };
+    let mut created_rel: Option<String> = None;
 
     let write = async {
         let tx = conn
             .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
             .await
             .map_err(engine)?;
+
+        let mut p_rows = tx
+            .query(
+                "SELECT status FROM projects WHERE id = ?1",
+                vec![Value::Text(artifact.project_id.to_string())],
+            )
+            .await
+            .map_err(engine)?;
+        let p_row = p_rows.next().await.map_err(engine)?.ok_or_else(|| {
+            Error::NotFound(format!("project {} not found", artifact.project_id))
+        })?;
+        let status: String = match p_row.get_value(0).map_err(engine)? {
+            Value::Text(s) => s,
+            _ => "active".to_string(),
+        };
+        if status != "active" {
+            return Err(Error::NotFound(format!("project {} not found", artifact.project_id)));
+        }
+
+        if let Some(p) = principal {
+            crate::policy::authorize_in_tx(&tx, p, artifact.project_id, crate::policy::Access::Write).await?;
+        }
+
         if let Some(key) = idempotency_key
             && let Some(entry) =
                 idempotency::lookup_entry(&tx, artifact.project_id, "artifact", key).await?
         {
             return Ok(Written::Dropped(replay(&tx, &entry, None).await?));
         }
+
+        let rel = blob::write(
+            data_dir,
+            artifact.project_id,
+            &id,
+            1,
+            artifact.kind,
+            artifact.content,
+        )?;
+        created_rel = Some(rel.clone());
+
+        let published = Artifact {
+            id: id.clone(),
+            project_id: artifact.project_id.to_string(),
+            session_id: artifact.session_id.map(str::to_string),
+            actor: Some(artifact.actor.to_string()),
+            title: title.clone(),
+            description: description.clone(),
+            favicon: favicon.clone(),
+            label: label.clone(),
+            kind: artifact.kind.to_string(),
+            version: 1,
+            protected,
+            envelope: artifact.envelope.clone(),
+            size_bytes: artifact.content.len() as i64,
+            created_at: created_at.clone(),
+            updated_at: created_at.clone(),
+            path: rel.clone(),
+            comments_count: 0,
+            comments_open: 0,
+        };
+
         tx.execute(
             "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11, ?12, ?13)",
@@ -292,11 +330,15 @@ pub async fn publish(
     match write {
         Ok(Written::Kept(published)) => Ok(published),
         Ok(Written::Dropped(replayed)) => {
-            let _ = blob::remove(data_dir, &rel);
+            if let Some(rel) = created_rel {
+                let _ = blob::remove(data_dir, &rel);
+            }
             Ok(replayed)
         }
         Err(err) => {
-            let _ = blob::remove(data_dir, &rel);
+            if let Some(rel) = created_rel {
+                let _ = blob::remove(data_dir, &rel);
+            }
             Err(err)
         }
     }
@@ -316,6 +358,32 @@ pub async fn publish(
 pub async fn update(
     db: &Database,
     data_dir: &Path,
+    actor: &str,
+    artifact_id: &str,
+    content: &[u8],
+    envelope: EnvelopeUpdate,
+    opts: UpdateOptions<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
+    update_for_principal(
+        db,
+        data_dir,
+        None,
+        actor,
+        artifact_id,
+        content,
+        envelope,
+        opts,
+        idempotency_key,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_for_principal(
+    db: &Database,
+    data_dir: &Path,
+    principal: Option<&crate::principal::Principal>,
     actor: &str,
     artifact_id: &str,
     content: &[u8],
@@ -364,6 +432,28 @@ pub async fn update(
         let existing = row_on(&tx, artifact_id)
             .await?
             .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+        let mut p_rows = tx
+            .query(
+                "SELECT status FROM projects WHERE id = ?1",
+                vec![Value::Text(existing.project_id.clone())],
+            )
+            .await
+            .map_err(engine)?;
+        let p_row = p_rows.next().await.map_err(engine)?.ok_or_else(|| {
+            Error::NotFound(format!("project {} not found", existing.project_id))
+        })?;
+        let status: String = match p_row.get_value(0).map_err(engine)? {
+            Value::Text(s) => s,
+            _ => "active".to_string(),
+        };
+        if status != "active" {
+            return Err(Error::NotFound(format!("project {} not found", existing.project_id)));
+        }
+
+        if let Some(p) = principal {
+            crate::policy::authorize_in_tx(&tx, p, &existing.project_id, crate::policy::Access::Write).await?;
+        }
 
         if let Some(key) = idempotency_key
             && let Some(entry) =

@@ -70,6 +70,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 14,
         ddl: V14,
     },
+    Migration {
+        version: 15,
+        ddl: V15,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -423,4 +427,12 @@ INSERT INTO grants_v14(agent_id, project_id, created_at)
   SELECT agent_id, project_id, created_at FROM grants;
 DROP TABLE grants;
 ALTER TABLE grants_v14 RENAME TO grants;
+"#;
+
+/// Version 15: project deletion status for write barrier and generation scoping.
+///
+/// Projects gain `status` column defaulting to 'active'. During deletion, status
+/// moves to 'deleting' to block late writes before metadata and files are cleaned up.
+const V15: &str = r#"
+ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 "#;

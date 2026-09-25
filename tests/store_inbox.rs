@@ -13,7 +13,10 @@ mod common;
 use common::store::TestDb;
 
 async fn open() -> TestDb {
-    common::store::fresh("inbox").await
+    let db = common::store::fresh("inbox").await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
+    let _ = agent_hub::store::projects::create(&db, "other", "Other Project").await;
+    db
 }
 
 fn question(subject: &str) -> NewQuestion<'_> {
