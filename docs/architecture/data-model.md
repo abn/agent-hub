@@ -20,7 +20,7 @@ inbox, which is global.
 
 | Table | Holds |
 |---|---|
-| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
+| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, lifecycle status (`active` or `deleting`), the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
 | `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
 | `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
@@ -30,7 +30,7 @@ inbox, which is global.
 | `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
 | `agents` | Agent identity, display name, and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
-| `grants` | An agent, a project, and read or write access, for granting access to a confidential project. |
+| `grants` | An agent and a project: access to a confidential project, with no read or write levels. The [operating model](model.md) states who may reach what. |
 | `search_docs` | The search corpus: one row per indexed document (feed, artifact, session brain path, or knowledge base page) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable

@@ -159,8 +159,10 @@ are HTTP calls, so they are the token's identity, and `HUB_AGENT_ID` is
 advisory there: only the embedded standalone stdio mode carries no token, acts
 as the human admin, and takes its actor label from `HUB_AGENT_ID`. A token
 reaches every ordinary project and its own personal space; confidential
-projects require explicit grants. Global reads are confined to the caller's
-visible projects, so a search or an inbox read never crosses a boundary.
+projects require explicit grants, and a grant is access or no access, with no
+levels. The [operating model](model.md) states the full posture. Global reads
+are confined to the caller's visible projects, so a search or an inbox read
+never crosses a boundary.
 
 ## Pagination, errors, and idempotency
 

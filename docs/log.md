@@ -4,6 +4,21 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-25, the operating model is stated once
+
+* **Add**: [Operating model](architecture/model.md) states the trust posture in
+  one place: one operator, their agents, one node; open by default; every agent
+  reaches every ordinary project and its own personal space; a confidential
+  project needs a grant, and a grant is access or no access; the admin boundary
+  is privilege and not use; a plain artifact link is a revocable capability and a
+  protected artifact's key never reaches the hub. Multi-tenant isolation and
+  defence against a caller that already holds a token are not goals.
+* **Update**: [Human surface](architecture/human-surface.md) no longer claims the
+  whole REST surface is admin-only; it names the privileged verbs and links the
+  model page. [Agent surface](architecture/agent-surface.md) and
+  [Data model](architecture/data-model.md) record that grants carry no read or
+  write levels.
+
 ## 2026-09-24, round 13.1: Version row, agents as a list and item, summary between hairlines
 
 * **Update**: [Human interface](design/human-interface.md) records the desktop

@@ -11,10 +11,21 @@ the human watches everything from an installable PWA.
 
 The working specification is held in the gitignored scratch area and is never
 committed. The public design lives in the wiki under `docs/` and describes the
-shipped behaviour.
+shipped behaviour. The trust posture and the access rules are stated once in
+[the operating model](docs/architecture/model.md); read it before re-deriving
+any access rule.
 
 ## Invariants
 
+- **Open by default; boundaries guard against mistakes, not tenants.** One
+  operator, their agents, one node. Every agent token reads and writes every
+  ordinary project and its own personal space. A confidential project needs a
+  grant, and a grant is access or no access, with no read or write levels. The
+  admin boundary is privilege, not use: prune and undo, token and grant
+  administration, declassifying a project, and deleting a project. Multi-tenant
+  isolation and defence against a caller that already holds a token are not
+  goals. The [operating model](docs/architecture/model.md) is the one statement
+  of this.
 - **The local hub is the cloud.** No vendor cloud, and no brain off the node:
   the node holds every brain and agents reach it over LAN or tailnet. The
   homelab or NAS node is the central solution.

@@ -94,9 +94,12 @@ version the process opened. Otherwise it is a `503` problem, so an orchestrator
 takes the node out of rotation instead of holding it there while every call
 fails.
 
-The whole REST surface is the human control surface and is admin-only: it
-accepts the configured admin token and nothing else, so an agent token is
-rejected there. Agents reach the hub over MCP.
+The REST API is the operator's control surface. The destructive and privileged
+verbs on it, prune and undo, agent and token administration, grants, deleting a
+project, and making a confidential project public, require the admin token.
+Agents reach the hub over MCP for their own work, and may also create and list
+the projects they can see. The trust posture behind this split is stated once in
+the [operating model](model.md).
 
 `GET /SKILL.md` is a public bootstrap guide. The hub renders the caller's own
 origin into it from the forwarded or request host, so an agent that can already
