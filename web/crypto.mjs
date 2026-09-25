@@ -20,6 +20,11 @@ const IV_BYTES = 12;
 // each other, because the cipher reports both the same way.
 export const UNSUPPORTED_ENVELOPE = "unsupported-envelope";
 
+// Set as `code` when the browser has no Web Crypto at all. It is not a wrong
+// password: `crypto.subtle` is only exposed in a secure context, so a hub
+// opened over plain LAN HTTP cannot decrypt anything a password would fix.
+export const INSECURE_CONTEXT = "insecure-context";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -67,6 +72,16 @@ function iterationsOf(envelope) {
 }
 
 async function deriveKey(password, salt, iterations) {
+  // Web Crypto is only exposed in a secure context. Plain LAN HTTP, which the
+  // quickstart documents, has no `crypto.subtle`, and the failure otherwise
+  // reads as a wrong password. H17.
+  if (!globalThis.crypto || !globalThis.crypto.subtle) {
+    const refused = new Error(
+      "Web Crypto is unavailable: this page is not a secure context",
+    );
+    refused.code = INSECURE_CONTEXT;
+    throw refused;
+  }
   const material = await crypto.subtle.importKey(
     "raw",
     encoder.encode(password),

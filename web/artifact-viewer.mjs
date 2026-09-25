@@ -3,7 +3,7 @@
 // in a frame; every behavior below binds one of the frozen shell ids the
 // server renders, and nothing else. No inline scripts: the shell loads this
 // module plus the classic vendor scripts.
-import { decrypt, UNSUPPORTED_ENVELOPE } from "./crypto.mjs";
+import { decrypt, INSECURE_CONTEXT, UNSUPPORTED_ENVELOPE } from "./crypto.mjs";
 
 const THEME_KEY = "hub-artifact-theme";
 
@@ -508,6 +508,15 @@ function init() {
       renderForTheme(state, state.theme);
       return "ok";
     } catch (error) {
+      if (error?.code === INSECURE_CONTEXT) {
+        // Not a password problem: the browser will not decrypt without a
+        // secure context, so say what the deployment needs instead of inviting
+        // another attempt. H17.
+        errorLine.textContent =
+          "This artifact is encrypted, and this page cannot decrypt it: the browser only offers Web Crypto over HTTPS or on localhost. Open the hub over HTTPS.";
+        errorLine.hidden = false;
+        return "unsupported";
+      }
       if (error?.code === UNSUPPORTED_ENVELOPE) {
         // Leave the field as it is: focusing it would read as an invitation
         // to try a password again, and no password opens this envelope.

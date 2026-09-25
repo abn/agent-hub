@@ -20,6 +20,7 @@ const TOKENS_CSS: &str = include_str!("../web/tokens.css");
 const DESIGN_MD: &str = include_str!("../DESIGN.md");
 const AGENTS_MD: &str = include_str!("../AGENTS.md");
 const VIEWER_JS: &str = include_str!("../web/artifact-viewer.mjs");
+const CRYPTO_JS: &str = include_str!("../web/crypto.mjs");
 const FRAME_LOADER_JS: &str = include_str!("../web/frame-loader.js");
 const MARKED_JS: &str = include_str!("../web/vendor/marked.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
@@ -2627,5 +2628,36 @@ fn waiting_notification_honours_the_opt_out() {
     assert!(
         PREFS_JS.contains(r#""hub.alerts.master""#),
         "the master switch is read from the key Settings writes"
+    );
+}
+
+// H17: Web Crypto is only exposed in a secure context, and the quickstart
+// documents plain LAN HTTP. An unguarded `crypto.subtle` fails as if the
+// password were wrong, which sends the reader down the wrong path.
+#[test]
+fn protected_artifacts_report_a_secure_context_requirement() {
+    assert!(
+        CRYPTO_JS.contains("export const INSECURE_CONTEXT"),
+        "crypto names the insecure-context refusal distinctly"
+    );
+    assert!(
+        CRYPTO_JS.contains("!globalThis.crypto || !globalThis.crypto.subtle")
+            && CRYPTO_JS.contains("refused.code = INSECURE_CONTEXT"),
+        "the key derivation refuses before touching crypto.subtle"
+    );
+    assert!(
+        VIEWER_JS.contains("error?.code === INSECURE_CONTEXT"),
+        "the viewer handles the insecure-context refusal"
+    );
+    let branch = VIEWER_JS
+        .split("error?.code === INSECURE_CONTEXT")
+        .nth(1)
+        .expect("the branch exists")
+        .split("if (error?.code === UNSUPPORTED_ENVELOPE)")
+        .next()
+        .expect("the branch is bounded");
+    assert!(
+        branch.contains("HTTPS") && !branch.contains("Wrong password"),
+        "the message names the deployment requirement, not a wrong password"
     );
 }
