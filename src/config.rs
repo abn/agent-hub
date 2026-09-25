@@ -1113,6 +1113,56 @@ fn update_client_toml(content: &str, token: &str) -> String {
     }
 }
 
+/// Create a directory and make it readable only by its owner.
+///
+/// The data directory holds every session brain, knowledge page and artifact
+/// blob. On Unix it is created `0700`, and an existing directory broader than
+/// that is repaired rather than trusted: a permissive umask would otherwise
+/// leave the hub's whole store readable by any other local account. H11.
+pub fn private_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        builder.create(path)?;
+        let mode = std::fs::metadata(path)?.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Restrict a file that already exists to its owner (`0600`). A missing file is
+/// not an error: the caller hardens what it just created, and sidecars appear
+/// only once the engine has written them. H11.
+pub fn private_file(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        match std::fs::metadata(path) {
+            Ok(metadata) => {
+                if metadata.permissions().mode() & 0o077 != 0 {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+                }
+                Ok(())
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod token_tests {
     use super::update_client_toml;
@@ -1138,5 +1188,63 @@ mod token_tests {
         let existing = "[client]\ntoken = \"old\"\n";
         let updated = update_client_toml(existing, "secret");
         assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
+    }
+}
+
+/// The store's own files are private to the operator's account. These run under
+/// the build tree, never the system temp directory.
+#[cfg(all(test, unix))]
+mod private_mode_tests {
+    use super::{private_dir, private_file};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    fn scratch(name: &str) -> PathBuf {
+        let unique = format!(
+            "private-mode-{}-{}-{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after the epoch")
+                .as_nanos()
+        );
+        PathBuf::from("target/tmp").join(unique)
+    }
+
+    fn mode(path: &PathBuf) -> u32 {
+        std::fs::metadata(path)
+            .expect("path exists")
+            .permissions()
+            .mode()
+            & 0o777
+    }
+
+    #[test]
+    fn private_dir_creates_and_repairs_owner_only() {
+        let dir = scratch("dir");
+        std::fs::create_dir_all(&dir).expect("create scratch");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("loosen");
+        private_dir(&dir).expect("harden");
+        assert_eq!(mode(&dir), 0o700, "a broad directory is repaired to 0700");
+
+        let nested = dir.join("child");
+        private_dir(&nested).expect("create child");
+        assert_eq!(mode(&nested), 0o700, "a created directory is 0700");
+
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn private_file_repairs_and_tolerates_absence() {
+        let dir = scratch("file");
+        std::fs::create_dir_all(&dir).expect("create scratch");
+        let file = dir.join("hub.db");
+        std::fs::write(&file, b"x").expect("write");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("loosen");
+        private_file(&file).expect("harden");
+        assert_eq!(mode(&file), 0o600, "a broad file is repaired to 0600");
+
+        private_file(&dir.join("missing-wal")).expect("a missing sidecar is not an error");
+        std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

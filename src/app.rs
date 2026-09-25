@@ -1,10 +1,10 @@
 //! Composition root: open the engine, apply migrations, serve.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::brain::BrainStore;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::error::Result;
 use crate::principal::Auth;
 use crate::{blob, http, mcp, net, store};
@@ -46,13 +46,26 @@ pub struct AppState {
 impl AppState {
     /// Create the data layout and open the store.
     pub async fn open(config: Config) -> Result<Self> {
-        std::fs::create_dir_all(&config.data_dir)?;
-        std::fs::create_dir_all(config.sessions_dir())?;
-        std::fs::create_dir_all(config.knowledge_dir())?;
-        std::fs::create_dir_all(config.artifacts_dir())?;
+        // The whole store is private to the operator's account: brains,
+        // knowledge pages and artifact blobs all live here. H11.
+        config::private_dir(&config.data_dir)?;
+        config::private_dir(&config.sessions_dir())?;
+        config::private_dir(&config.knowledge_dir())?;
+        config::private_dir(&config.artifacts_dir())?;
 
         let db = store::open_engine(&config.hub_db_path()).await?;
         let schema_version = store::migrate(&db).await?;
+
+        // The engine creates the database and its sidecars under whatever umask
+        // is in force, so they are hardened after the fact. A sidecar that does
+        // not exist yet is not an error.
+        let db_path = config.hub_db_path();
+        config::private_file(&db_path)?;
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = db_path.clone().into_os_string();
+            sidecar.push(suffix);
+            config::private_file(Path::new(&sidecar))?;
+        }
 
         // The engine lock is held from here, so no other hub is mid-update over
         // this directory and none is in flight in this one: any content still
