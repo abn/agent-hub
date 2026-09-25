@@ -240,3 +240,43 @@ async fn a_grant_needs_a_real_project_and_agent() {
         .expect_err("missing agent");
     assert_eq!(no_agent.code(), ErrorCode::NotFound);
 }
+
+/// H9: an approval rename moved tokens, project ownership and event actors, but
+/// not grants. A later agent reusing the old id inherited the confidential
+/// project through policy::authorize.
+#[tokio::test]
+async fn renaming_a_pending_agent_moves_its_grants() {
+    let db = fresh("identity-rename-grants").await;
+    identity::enrol_agent(
+        &db,
+        "candidate",
+        "Candidate",
+        "a-harness",
+        "to test the rename",
+    )
+    .await
+    .expect("enrol");
+    projects::create(&db, "secret", "Secret")
+        .await
+        .expect("project");
+    identity::add_grant(&db, "candidate", "secret", "write")
+        .await
+        .expect("grant");
+
+    identity::approve_enrolment(&db, "candidate", Some("candidate-v2"), None, None)
+        .await
+        .expect("approve under a new id");
+
+    assert!(
+        !identity::has_grant(&db, "candidate", "secret")
+            .await
+            .expect("old id"),
+        "the old id keeps no grant"
+    );
+    assert!(
+        identity::has_grant(&db, "candidate-v2", "secret")
+            .await
+            .expect("new id"),
+        "the grant moves with the agent"
+    );
+}

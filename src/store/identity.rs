@@ -675,6 +675,19 @@ pub async fn approve_enrolment(
             .await
             .map_err(engine)?;
 
+            // A grant is keyed by the agent id, so it has to move with the
+            // agent. Left behind, a later agent reusing the old id would inherit
+            // the confidential project through policy::authorize. H9.
+            tx.execute(
+                "UPDATE grants SET agent_id = ?1 WHERE agent_id = ?2",
+                vec![
+                    Value::Text(target_id.to_string()),
+                    Value::Text(current_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+
             tx.execute(
                 "UPDATE projects SET owner_agent = ?1 WHERE owner_agent = ?2",
                 vec![
