@@ -420,7 +420,7 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
         .await
         .expect("start");
     plant_brain_entry(&state, "proj", &session.id, "needle notes").await;
-    sessions::end(&state.db, &session.id, "agent-two", None)
+    sessions::end(&state.db, &session.id, "agent-two", None, None)
         .await
         .expect("end");
 

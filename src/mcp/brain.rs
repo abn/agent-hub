@@ -24,7 +24,7 @@ use crate::principal::Principal;
 use crate::store::search::{SearchDoc, index_doc};
 use crate::store::{projects, sessions};
 
-use super::{HubServer, to_error_data};
+use super::{ActiveSessionLease, HubServer, to_error_data};
 
 #[tool_router(router = brain_router, vis = "pub")]
 impl HubServer {
@@ -70,7 +70,14 @@ impl HubServer {
             }
         };
 
-        *self.active.lock().await = Some((session.project_id.clone(), session.id.clone()));
+        let mut active = self.active.lock().await;
+        let next_epoch = active.as_ref().map_or(1, |l| l.epoch + 1);
+        *active = Some(ActiveSessionLease {
+            project_id: session.project_id.clone(),
+            session_id: session.id.clone(),
+            agent: session.agent.clone(),
+            epoch: next_epoch,
+        });
 
         self.state.notify();
         // The brain is reached only through the namespaced tool paths, so the
@@ -124,10 +131,16 @@ impl HubServer {
                 session.id, session.agent
             ))));
         }
+        let expected_owner = if principal.is_admin {
+            None
+        } else {
+            Some(principal.actor.as_str())
+        };
         sessions::end(
             &self.state.db,
             &params.session_id,
             &principal.actor,
+            expected_owner,
             params.handoff.as_deref(),
         )
         .await
@@ -136,7 +149,7 @@ impl HubServer {
         let mut active = self.active.lock().await;
         if active
             .as_ref()
-            .is_some_and(|(_, id)| id == &params.session_id)
+            .is_some_and(|lease| lease.session_id == params.session_id)
         {
             *active = None;
         }
@@ -323,6 +336,31 @@ impl HubServer {
         let session_id_for_index = target.session_id.clone();
         let path_for_index = path.clone();
         let content_for_index = params.content.clone();
+        let db_alive = self.state.db.clone();
+        let sid_alive = target.session_id.clone();
+        let actor_alive = principal.actor.clone();
+        let is_admin = principal.is_admin;
+        let alive = async move || {
+            if let Some(session_id) = sid_alive.as_deref() {
+                match sessions::get(&db_alive, session_id).await? {
+                    Some(s) if s.deleted_at.is_some() => Err(Error::Conflict(format!(
+                        "session {session_id} has been pruned"
+                    ))),
+                    Some(s) if s.status != "active" => {
+                        Err(Error::Conflict(format!("session {session_id} has ended")))
+                    }
+                    Some(s) if !is_admin && s.agent != actor_alive => Err(Error::Conflict(
+                        format!("session {session_id} now belongs to {}", s.agent),
+                    )),
+                    Some(_) => Ok(()),
+                    None => Err(Error::Conflict(format!(
+                        "session {session_id} no longer exists"
+                    ))),
+                }
+            } else {
+                Ok(())
+            }
+        };
         let version = target
             .brain
             .put_if_recorded(
@@ -330,6 +368,7 @@ impl HubServer {
                 params.content.as_bytes(),
                 params.if_version.as_deref(),
                 stamp,
+                alive,
                 async move || {
                     if let Err(err) = self
                         .index_write(
@@ -427,7 +466,7 @@ impl HubServer {
                 .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
                 .await
                 .map_err(to_error_data)?;
-            let session_id = self.session_in(&project_id).await;
+            let session_id = self.session_in(&principal, &project_id).await;
             let path = knowledge::delete(
                 &self.state,
                 &project_id,
@@ -461,12 +500,38 @@ impl HubServer {
         };
         let session_id_for_delete = target.session_id.clone();
         let path_for_delete = path.clone();
+        let db_alive = self.state.db.clone();
+        let sid_alive = target.session_id.clone();
+        let actor_alive = principal.actor.clone();
+        let is_admin = principal.is_admin;
+        let alive = async move || {
+            if let Some(session_id) = sid_alive.as_deref() {
+                match sessions::get(&db_alive, session_id).await? {
+                    Some(s) if s.deleted_at.is_some() => Err(Error::Conflict(format!(
+                        "session {session_id} has been pruned"
+                    ))),
+                    Some(s) if s.status != "active" => {
+                        Err(Error::Conflict(format!("session {session_id} has ended")))
+                    }
+                    Some(s) if !is_admin && s.agent != actor_alive => Err(Error::Conflict(
+                        format!("session {session_id} now belongs to {}", s.agent),
+                    )),
+                    Some(_) => Ok(()),
+                    None => Err(Error::Conflict(format!(
+                        "session {session_id} no longer exists"
+                    ))),
+                }
+            } else {
+                Ok(())
+            }
+        };
         target
             .brain
             .delete_if_recorded(
                 &path,
                 params.if_version.as_deref(),
                 stamp,
+                alive,
                 async move || {
                     if let Err(err) = self
                         .delete_doc(session_id_for_delete.as_deref(), &path_for_delete)
@@ -858,18 +923,50 @@ impl HubServer {
     /// An event written while a session is open belongs to that session, so a
     /// session detail screen can count what the session produced. A write into
     /// another project is not this session's work, so it carries no session.
-    pub(super) async fn session_in(&self, project_id: &str) -> Option<String> {
-        let session_id = {
-            let active = self.active.lock().await;
-            active
-                .as_ref()
-                .filter(|(project, _)| project == project_id)
-                .map(|(_, session_id)| session_id.clone())
-        };
-        if let Some(session_id) = &session_id {
-            self.touch_activity(session_id).await;
+    pub(super) async fn session_in(
+        &self,
+        principal: &Principal,
+        project_id: &str,
+    ) -> Option<String> {
+        let lease = self.active.lock().await.clone()?;
+        if lease.project_id != project_id {
+            return None;
         }
-        session_id
+        if !principal.is_admin && lease.agent != principal.actor {
+            let mut active = self.active.lock().await;
+            if active
+                .as_ref()
+                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
+            {
+                *active = None;
+            }
+            return None;
+        }
+        let Ok(Some(current)) = sessions::get(&self.state.db, &lease.session_id).await else {
+            let mut active = self.active.lock().await;
+            if active
+                .as_ref()
+                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
+            {
+                *active = None;
+            }
+            return None;
+        };
+        if current.deleted_at.is_some()
+            || current.status != "active"
+            || (!principal.is_admin && current.agent != principal.actor)
+        {
+            let mut active = self.active.lock().await;
+            if active
+                .as_ref()
+                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
+            {
+                *active = None;
+            }
+            return None;
+        }
+        self.touch_activity(&lease.session_id).await;
+        Some(lease.session_id)
     }
 
     /// Record that the session is still at work.
@@ -884,7 +981,7 @@ impl HubServer {
     }
 
     /// The recorded active session, or a conflict when none was started.
-    async fn active_session(&self) -> Result<(String, String)> {
+    async fn active_session(&self) -> Result<ActiveSessionLease> {
         let active = self.active.lock().await;
         active.clone().ok_or_else(|| {
             Error::Conflict("no active session; call session_start first".to_string())
@@ -914,8 +1011,8 @@ impl HubServer {
         principal: &Principal,
         access: Access,
     ) -> Result<sessions::Session> {
-        let (_, session_id) = self.active_session().await?;
-        let session = self.live_session(&session_id).await?;
+        let lease = self.active_session().await?;
+        let session = self.live_session(&lease.session_id).await?;
         policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
         // Resolving a session is what a session doing work looks like: brain
         // traffic emits no events, so without this an agent writing for an hour
@@ -931,6 +1028,13 @@ impl HubServer {
             return Err(Error::Conflict(format!(
                 "session {} now belongs to {}; call session_start to begin or resume a session of your own",
                 session.id, session.agent
+            )));
+        }
+        if matches!(access, Access::Write) && session.status == "ended" {
+            *self.active.lock().await = None;
+            return Err(Error::Conflict(format!(
+                "session {} has ended; call session_start to begin or resume a session of your own",
+                session.id
             )));
         }
         Ok(session)
@@ -1005,7 +1109,7 @@ impl HubServer {
                             "a session named by agent and name needs a project_id, or an active session to take one from"
                                 .to_string(),
                         )
-                    })?.0,
+                    })?.project_id,
                 };
                 policy::authorize(&self.state.db, principal, &project_id, Access::Read).await?;
                 sessions::find_owned(&self.state.db, &project_id, agent, name)
@@ -1161,7 +1265,7 @@ impl HubServer {
                         .to_string(),
                 )
                     })?
-                    .0
+                    .project_id
             }
         };
         // The policy layer lets the admin through without looking the project

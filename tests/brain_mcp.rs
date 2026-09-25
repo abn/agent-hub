@@ -228,7 +228,7 @@ fn a_pruned_session_is_not_resurrected_by_an_active_slot() {
             .await
             .expect("get")
             .expect("the session exists");
-        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent", None)
+        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent", None, None)
             .await
             .expect("end");
         agent_hub::store::prune::prune_session(&db, &session_id)
@@ -790,7 +790,7 @@ fn pruning_a_session_leaves_the_project_knowledge_base() {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
-        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent", None)
+        agent_hub::store::sessions::end(&db, &session_id, "stdio-agent", None, None)
             .await
             .expect("end");
         agent_hub::store::prune::prune_session(&db, &session_id)
@@ -1099,7 +1099,7 @@ fn a_pruned_session_is_not_readable() {
         let db = open_engine(&data_dir.path().join("hub.db"))
             .await
             .expect("open engine");
-        agent_hub::store::sessions::end(&db, &writer_id, "local", None)
+        agent_hub::store::sessions::end(&db, &writer_id, "local", None, None)
             .await
             .expect("end");
         agent_hub::store::prune::prune_session(&db, &writer_id)

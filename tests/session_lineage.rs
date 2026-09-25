@@ -141,7 +141,7 @@ async fn feed_and_artifacts_return_empty_for_unknown_or_pruned_session() {
     .await
     .expect("append");
 
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&state.db, &session.id)
@@ -341,7 +341,7 @@ async fn pruning_preserves_artifacts_and_search_index() {
     .expect("publish");
 
     // Prune session
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");

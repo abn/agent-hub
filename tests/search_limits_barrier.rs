@@ -69,7 +69,7 @@ async fn search_body_truncation_is_char_boundary_safe() {
     // Fill up to 65535 bytes with ASCII, and then put a 4-byte unicode character
     // spanning bytes 65535..65539 across the 65536 boundary
     let mut content = "a".repeat(SEARCH_BODY_BYTES_MAX - 1);
-    content.push('🦀'); // 4-byte UTF-8
+    content.push('\u{2070E}'); // 4-byte UTF-8
     content.push_str("trailing");
 
     let conn = state.db.connect().expect("connect");

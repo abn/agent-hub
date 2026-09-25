@@ -533,6 +533,7 @@ pub async fn end(
     db: &Database,
     session_id: &str,
     actor: &str,
+    expected_owner: Option<&str>,
     handoff: Option<&str>,
 ) -> Result<()> {
     if let Some(handoff) = handoff {
@@ -548,25 +549,67 @@ pub async fn end(
     // retried end and a concurrent end cannot both append.
     let session = get_on(&tx, session_id)
         .await?
+        .filter(|session| session.deleted_at.is_none())
         .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
+
+    if expected_owner.is_some_and(|expected| session.agent != expected) {
+        return Err(Error::Forbidden(format!(
+            "session {} belongs to another agent owner={}",
+            session.id, session.agent
+        )));
+    }
 
     if session.status == "ended" {
         return Ok(());
     }
 
     let now = crate::store::now_rfc3339();
-    tx.execute(
-        "UPDATE sessions SET status = 'ended', last_activity = ?1,
-                             handoff = COALESCE(?2, handoff)
-         WHERE id = ?3",
-        vec![
-            Value::Text(now),
-            handoff.map_or(Value::Null, |note| Value::Text(note.to_string())),
-            Value::Text(session_id.to_string()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
+    let moved = if let Some(expected) = expected_owner {
+        tx.execute(
+            "UPDATE sessions SET status = 'ended', last_activity = ?1,
+                                 handoff = COALESCE(?2, handoff)
+             WHERE id = ?3 AND agent = ?4 AND status = 'active' AND deleted_at IS NULL",
+            vec![
+                Value::Text(now),
+                handoff.map_or(Value::Null, |note| Value::Text(note.to_string())),
+                Value::Text(session_id.to_string()),
+                Value::Text(expected.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?
+    } else {
+        tx.execute(
+            "UPDATE sessions SET status = 'ended', last_activity = ?1,
+                                 handoff = COALESCE(?2, handoff)
+             WHERE id = ?3 AND status = 'active' AND deleted_at IS NULL",
+            vec![
+                Value::Text(now),
+                handoff.map_or(Value::Null, |note| Value::Text(note.to_string())),
+                Value::Text(session_id.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?
+    };
+
+    if moved == 0 {
+        let current = get_on(&tx, session_id).await?;
+        if let Some(s) = current {
+            if s.status == "ended" {
+                return Ok(());
+            }
+            if expected_owner.is_some_and(|expected| s.agent != expected) {
+                return Err(Error::Forbidden(format!(
+                    "session {} belongs to another agent owner={}",
+                    session_id, s.agent
+                )));
+            }
+        }
+        return Err(Error::Conflict(format!(
+            "session {session_id} state changed while ending it"
+        )));
+    }
 
     events::append_in_tx(
         &tx,

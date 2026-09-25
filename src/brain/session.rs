@@ -872,12 +872,14 @@ impl Brain {
         bytes: &[u8],
         expected: Option<&str>,
         stamp: Stamp<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
         indexed: impl AsyncFnOnce(),
     ) -> Result<String> {
         crate::limits::check_brain_value(bytes.len())?;
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        alive().await?;
         crate::limits::check_brain_file_projected(self.file_bytes(), bytes.len())?;
         // One read serves both questions about what is being replaced.
         let before = match (expected, stamp.verifies) {
@@ -1077,11 +1079,13 @@ impl Brain {
         path: &str,
         expected: Option<&str>,
         stamp: Stamp<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
         removed: impl AsyncFnOnce(),
     ) -> Result<bool> {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        alive().await?;
         if !self.exists(&namespace).await? {
             return Ok(false);
         }

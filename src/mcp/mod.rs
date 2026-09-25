@@ -33,16 +33,25 @@ mod identity;
 mod inbox;
 mod search;
 
+/// The lease recording an active session on a client connection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveSessionLease {
+    pub project_id: String,
+    pub session_id: String,
+    pub agent: String,
+    pub epoch: u64,
+}
+
 /// The hub's MCP server.
 #[derive(Clone)]
 pub struct HubServer {
     tool_router: ToolRouter<Self>,
     state: AppState,
-    /// The session the brain tools act on, as `(project_id, session_id)`.
+    /// The session the brain tools act on, as an active lease.
     ///
     /// Set by `session_start` and read by the brain tools. One server instance
     /// serves one client, so a single slot matches stdio and per-session HTTP.
-    active: Arc<AsyncMutex<Option<(String, String)>>>,
+    active: Arc<AsyncMutex<Option<ActiveSessionLease>>>,
 }
 
 impl HubServer {

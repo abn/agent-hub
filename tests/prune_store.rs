@@ -24,7 +24,7 @@ async fn prune_hides_a_session_and_undo_restores_it() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
 
@@ -59,7 +59,7 @@ async fn sweep_commits_an_expired_prune() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -114,7 +114,7 @@ async fn sweep_skips_a_session_it_cannot_commit() {
         .await
         .expect("start");
     for session in [&blocked, &next] {
-        sessions::end(&db, &session.id, "agent-one", None)
+        sessions::end(&db, &session.id, "agent-one", None, None)
             .await
             .expect("end");
         prune::prune_session(&db, &session.id).await.expect("prune");
@@ -235,7 +235,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
         .await
         .expect("append");
     }
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
 
@@ -276,7 +276,7 @@ async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
     let fork = sessions::insert_fork(&db, &source, "nightly-copy", "agent-two", "forked-one")
         .await
         .expect("fork");
-    sessions::end(&db, &source.id, "agent-one", None)
+    sessions::end(&db, &source.id, "agent-one", None, None)
         .await
         .expect("end");
 
@@ -327,7 +327,7 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -373,7 +373,7 @@ async fn a_fresh_prune_is_not_committed() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -413,7 +413,7 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
         let session = sessions::start(&db, "proj", &name, "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None)
+        sessions::end(&db, &session.id, "agent-one", None, None)
             .await
             .expect("end");
 
@@ -450,7 +450,7 @@ async fn a_prune_that_loses_to_another_prune_says_the_session_is_pruned() {
         let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None)
+        sessions::end(&db, &session.id, "agent-one", None, None)
             .await
             .expect("end");
 
@@ -492,7 +492,7 @@ async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
         let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None)
+        sessions::end(&db, &session.id, "agent-one", None, None)
             .await
             .expect("end");
         let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -535,7 +535,7 @@ async fn undo_after_the_window_is_rejected() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -575,7 +575,7 @@ async fn sweep_cannot_remove_session_or_brain_after_undo_returned_success() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -610,7 +610,7 @@ async fn undo_cannot_succeed_after_sweep_claims_session() {
     let brain = store.open("proj", &session.id).await.expect("open brain");
     brain.put("/kv/note", b"data").await.expect("put");
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -645,7 +645,7 @@ async fn interrupted_sweep_recovers_at_startup_and_cleans_quarantine_files() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let _token = prune::prune_session(&db, &session.id).await.expect("prune");

@@ -162,9 +162,15 @@ pub async fn delete(
         verifies: None,
     };
     let deleted = brain
-        .delete_if_recorded(&path, if_version, stamp, async || {
-            unindex(state, project_id, &path).await;
-        })
+        .delete_if_recorded(
+            &path,
+            if_version,
+            stamp,
+            async || Ok(()),
+            async || {
+                unindex(state, project_id, &path).await;
+            },
+        )
         .await?;
     if !deleted {
         return Err(no_page(&path));
@@ -394,6 +400,7 @@ async fn store(
                 actor,
                 verifies: Some(brings_in_newest_verification),
             },
+            async || Ok(()),
             async || index(state, project_id, &path, content).await,
         )
         .await?;

@@ -835,7 +835,7 @@ async fn soft_pruned_session_brain_is_immediately_excluded_from_search() {
     assert_eq!(hits[0].kind, "brain");
 
     // End and soft-prune the session
-    agent_hub::store::sessions::end(&db, &session.id, "agent-one", None)
+    agent_hub::store::sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let token = agent_hub::store::prune::prune_session(&db, &session.id)

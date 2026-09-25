@@ -18,6 +18,13 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
+## 2026-09-25, session ownership atomicity, guarded transitions, and lease validation
+
+* **Update**: [Agent surface](architecture/agent-surface.md) documents that ended or
+  reassigned sessions clear active leases and reject subsequent brain writes.
+* **Update**: [Data model](architecture/data-model.md) documents guarded session store
+  transitions and file-locked validation of session activity on brain mutation.
+
 ## 2026-09-25, search boundary body truncation, write limits, and locked fork snapshot
 
 * **Update**: [Components](architecture/components.md) documents character-boundary

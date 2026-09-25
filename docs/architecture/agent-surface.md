@@ -43,7 +43,7 @@ tokens.
 | Tool | Purpose |
 |---|---|
 | `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. With `from`, it picks up another agent's session. |
-| `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. The brain is retained until the human prunes it. |
+| `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. |

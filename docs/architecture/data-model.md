@@ -149,7 +149,9 @@ forked by another agent, and is removed only when the human prunes the session.
 Durable knowledge leaves it only by explicit promotion.
 
 A brain is written only through its owner's active session, and read by anyone
-who may read the session's project. The single writer is what keeps one working
+who may read the session's project. Session end and reassignment are atomic
+guarded transitions in the store; once ended, active leases clear and brain
+mutations under the file lock are refused. The single writer is what keeps one working
 state coherent; the open read is what lets a fleet of agents see what a sibling
 is working from. Reads never create a brain file, so a session that wrote
 nothing leaves nothing on disk, and a pruned session is unreadable from the

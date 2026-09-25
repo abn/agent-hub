@@ -281,7 +281,7 @@ async fn brain_hides_a_pruned_session() {
     let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     agent_hub::store::prune::prune_session(&state.db, &session.id)
@@ -346,9 +346,15 @@ async fn a_listing_carries_the_owner_and_where_the_work_came_from() {
     let source = sessions::start(&state.db, "proj", "migration", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &source.id, "agent-one", Some("half applied"))
-        .await
-        .expect("end");
+    sessions::end(
+        &state.db,
+        &source.id,
+        "agent-one",
+        None,
+        Some("half applied"),
+    )
+    .await
+    .expect("end");
     sessions::start_from(&state.db, "proj", "pickup", "agent-two", &source.id)
         .await
         .expect("adopt");
@@ -391,7 +397,7 @@ async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
     let fork = sessions::insert_fork(&state.db, &source, "branch", "agent-two", "01FORKED")
         .await
         .expect("fork");
-    sessions::end(&state.db, &source.id, "agent-one", None)
+    sessions::end(&state.db, &source.id, "agent-one", None, None)
         .await
         .expect("end the source");
     agent_hub::store::prune::prune_session(&state.db, &source.id)
@@ -657,7 +663,7 @@ async fn a_pruned_session_has_no_detail() {
     let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     agent_hub::store::prune::prune_session(&state.db, &session.id)

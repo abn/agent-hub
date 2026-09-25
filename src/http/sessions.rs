@@ -297,7 +297,7 @@ pub async fn end(
 
     // The human ends a session from the control surface; the note is the
     // agent's to leave, so this route takes none.
-    session_store::end(&state.db, &session_id, &principal.actor, None)
+    session_store::end(&state.db, &session_id, &principal.actor, None, None)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 

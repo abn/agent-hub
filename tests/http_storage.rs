@@ -144,7 +144,7 @@ async fn ending_a_session_moves_its_bytes_into_what_a_prune_would_reclaim() {
             + before["by_kind"]["events"].as_i64().expect("events")
     );
 
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     state.notify();
@@ -167,7 +167,7 @@ async fn a_pruned_session_leaves_the_report_at_once() {
         .await
         .expect("start");
     write_brain(&state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     state.notify();
@@ -248,7 +248,7 @@ async fn ended_session(state: &AppState, project: &str, name: &str) -> sessions:
         .await
         .expect("start");
     write_brain(state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     session
@@ -821,7 +821,7 @@ async fn a_project_emptied_by_a_prune_keeps_its_row_until_undo_fills_it_again() 
         .await
         .expect("start");
     let brain_bytes = write_brain(&state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None)
+    sessions::end(&state.db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     state.notify();

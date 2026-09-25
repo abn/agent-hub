@@ -38,7 +38,7 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let session_id = self.session_in(&params.project_id).await;
+        let session_id = self.session_in(&principal, &params.project_id).await;
         let event_id = questions::post(
             &self.state.db,
             &self.state.config.inbox_caps,

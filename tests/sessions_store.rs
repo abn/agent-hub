@@ -75,7 +75,7 @@ async fn resuming_a_pruned_name_is_a_conflict() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -109,7 +109,7 @@ async fn end_marks_the_session_and_emits_an_event() {
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
 
@@ -136,10 +136,10 @@ async fn ending_twice_does_not_emit_a_second_event() {
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end again");
 
@@ -162,8 +162,8 @@ async fn concurrent_ends_emit_one_event() {
         .expect("start");
 
     let (a, b) = tokio::join!(
-        sessions::end(&db, &session.id, "agent-one", None),
-        sessions::end(&db, &session.id, "agent-one", None),
+        sessions::end(&db, &session.id, "agent-one", None, None),
+        sessions::end(&db, &session.id, "agent-one", None, None),
     );
     assert!(
         a.is_ok() || b.is_ok(),
@@ -190,7 +190,7 @@ async fn list_returns_active_and_ended_sessions() {
     let two = sessions::start(&db, "proj", "two", "agent-one")
         .await
         .expect("two");
-    sessions::end(&db, &two.id, "agent-one", None)
+    sessions::end(&db, &two.id, "agent-one", None, None)
         .await
         .expect("end two");
 
@@ -208,6 +208,7 @@ async fn end_unknown_session_is_not_found() {
         &db,
         "01900000-0000-0000-0000-000000000000",
         "agent-one",
+        None,
         None,
     )
     .await
@@ -233,7 +234,7 @@ async fn racing_pickups_adopt_a_session_once() {
         let session = sessions::start(&db, "proj", "handover", "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None)
+        sessions::end(&db, &session.id, "agent-one", None, None)
             .await
             .expect("end");
 
@@ -295,7 +296,7 @@ async fn a_handoff_note_rides_the_session_and_its_event() {
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", Some("half applied"))
+    sessions::end(&db, &session.id, "agent-one", None, Some("half applied"))
         .await
         .expect("end");
 
@@ -317,7 +318,7 @@ async fn a_handoff_note_rides_the_session_and_its_event() {
     assert_eq!(payload["handoff"], "half applied");
 
     // A retried end does not clear the note.
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end again");
     let again = sessions::get(&db, &session.id)
@@ -335,7 +336,7 @@ async fn a_handoff_over_the_cap_is_refused() {
         .expect("start");
     let note = "n".repeat(agent_hub::limits::HANDOFF_CHARS_MAX + 1);
 
-    let err = sessions::end(&db, &session.id, "agent-one", Some(&note))
+    let err = sessions::end(&db, &session.id, "agent-one", None, Some(&note))
         .await
         .expect_err("over the cap");
     assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
@@ -357,7 +358,7 @@ async fn a_listing_narrows_by_project_status_and_agent() {
     let two = sessions::start(&db, "proj", "two", "agent-two")
         .await
         .expect("two");
-    sessions::end(&db, &two.id, "agent-two", Some("over to you"))
+    sessions::end(&db, &two.id, "agent-two", None, Some("over to you"))
         .await
         .expect("end two");
 
@@ -430,7 +431,7 @@ async fn a_pruned_session_is_omitted_from_a_listing() {
     let session = sessions::start(&db, "proj", "old", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None)
+    sessions::end(&db, &session.id, "agent-one", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -655,10 +656,10 @@ async fn an_ended_or_pruned_session_makes_no_agent_active() {
         .await
         .expect("touch");
 
-    sessions::end(&db, &ended.id, "agent-one", None)
+    sessions::end(&db, &ended.id, "agent-one", None, None)
         .await
         .expect("end");
-    sessions::end(&db, &pruned.id, "agent-two", None)
+    sessions::end(&db, &pruned.id, "agent-two", None, None)
         .await
         .expect("end");
     prune::prune_session(&db, &pruned.id).await.expect("prune");
