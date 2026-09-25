@@ -2570,3 +2570,30 @@ fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
         "feed rows are defined in feed.mjs"
     );
 }
+
+// H20: the read cursor waited for `.feed-chips`, but the one shell renders the
+// project feed with chips:false, so the sentinel never appeared and the cursor
+// rescheduled forever. It now looks at the feed body it actually paints, and
+// stops when the reader leaves the feed.
+#[test]
+fn feed_cursor_advances_on_the_feed_body_not_a_chip_row() {
+    let mark = FEED_JS
+        .split("function markSeen(")
+        .nth(1)
+        .expect("feed has a markSeen")
+        .split("export async function feedSection")
+        .next()
+        .expect("markSeen is bounded by feedSection");
+    assert!(
+        !mark.contains(r#".querySelector(".feed-chips")"#),
+        "the cursor must not wait for a chip row the one shell never renders"
+    );
+    assert!(
+        mark.contains(".feed-day, .feed-fold, [data-action='feed-copy-setup']"),
+        "the cursor waits for the feed body it actually paints"
+    );
+    assert!(
+        mark.contains("feedProject(location.hash) !== projectId"),
+        "the cursor stops retrying once the reader leaves this feed"
+    );
+}

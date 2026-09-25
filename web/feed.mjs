@@ -337,9 +337,18 @@ function feedPath(projectId, active, before) {
 function markSeen(projectId, visit) {
   const newest = visit.events[0]?.id;
   if (visit.filtered || !newest || newest <= visit.sent) return;
-  const painted = () => feedProject(location.hash) === projectId && !!main.querySelector(".feed-chips");
+  // The feed is painted once its body is in the index: the day groups, the
+  // older-events fold, or the empty state. A chip row is not the sentinel: the
+  // one shell draws its own control row and renders the feed with chips:false,
+  // so waiting for `.feed-chips` waited for a row that never came.
+  const painted = () => {
+    const body = main.querySelector("#ah-index");
+    return !!body && !!body.querySelector(".feed-day, .feed-fold, [data-action='feed-copy-setup']");
+  };
   const send = () => {
     if (visits.get(projectId) !== visit || newest <= visit.sent) return;
+    // The reader left this project's feed: stop retrying rather than loop.
+    if (feedProject(location.hash) !== projectId) return;
     if (!painted()) {
       setTimeout(send, 50);
       return;
