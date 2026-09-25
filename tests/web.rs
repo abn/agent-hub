@@ -2619,6 +2619,27 @@ fn browser_urls_resolve_against_the_document_base() {
     );
 }
 
+// DESIGN.md: "End session ... with a confirmation". The action used to fire the
+// moment the button was pressed, which cannot be undone.
+#[test]
+fn ending_a_session_asks_first() {
+    let end = SESSIONS_JS
+        .split("export async function endSession(")
+        .nth(1)
+        .expect("sessions has an endSession")
+        .split("\n}\n")
+        .next()
+        .expect("endSession closes");
+    assert!(
+        end.contains("confirmAction("),
+        "ending a session asks first"
+    );
+    assert!(end.contains("/end"), "the confirmation still posts the end");
+    let ask = end.find("confirmAction(").expect("the ask exists");
+    let post = end.find("/end").expect("the post exists");
+    assert!(ask < post, "the ask comes before the request, not after it");
+}
+
 // The inbox swipe and pull searched for `.inbox-screen`, which no screen
 // renders: the inbox is the one shell with `data-segment="inbox"`. The gesture
 // setup therefore never registered.
@@ -2639,6 +2660,27 @@ fn inbox_gestures_target_the_shell_not_a_vanished_screen() {
     assert!(
         APP_CSS.contains(r#".shell[data-segment="inbox"] { touch-action: pan-y; }"#),
         "the inbox shell carries the base gesture rule"
+    );
+}
+
+// The older-feed loader had no in-flight guard, so a second call fetched the
+// same cursor and appended the page twice.
+#[test]
+fn older_feed_loading_is_guarded_against_overlap() {
+    let load = FEED_JS
+        .split("async function loadOlder(")
+        .nth(1)
+        .expect("feed has a loadOlder")
+        .split("\n}\n")
+        .next()
+        .expect("loadOlder closes");
+    assert!(
+        load.contains("if (visit.loading) return;"),
+        "a second load while one is in flight returns"
+    );
+    assert!(
+        load.contains("visit.loading = true;") && load.contains("visit.loading = false;"),
+        "the guard is cleared on every path"
     );
 }
 

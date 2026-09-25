@@ -300,8 +300,20 @@ function fmtBytes(bytes) {
 }
 
 export async function endSession(id) {
-  await api(`/api/v1/sessions/${encodeURIComponent(id)}/end`, { method: "POST" });
-  render();
+  // Ending stops something live and cannot be undone, so it asks first, in the
+  // same dialog pattern prune and revoke use.
+  const confirmed = await confirmAction({
+    title: "End this session?",
+    body: "The agent's session stops now. Ending cannot be undone.",
+    note: "Once ended, its brain can be pruned to reclaim the space.",
+    safe: "Keep",
+    danger: "End session",
+    commit: async () => {
+      await api(`/api/v1/sessions/${encodeURIComponent(id)}/end`, { method: "POST" });
+      await render();
+    },
+  });
+  if (confirmed) toast("Session ended.");
 }
 
 export async function pruneAllEnded(project) {
