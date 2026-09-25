@@ -166,7 +166,11 @@ const partsOf = (project) => [
   ["knowledge", project.kb_bytes ?? 0],
 ];
 const totalOf = (project) => partsOf(project).reduce((sum, [, bytes]) => sum + bytes, 0);
-const projectHref = (project) => `#/projects/${encodeURIComponent(project.project_id)}/sessions`;
+// Open the project, not a forced segment. Every Storage row used to land on
+// /sessions, so a project with no sessions (an agent's personal space, most
+// often) opened an empty screen. A bare project address defaults to the feed,
+// which is the project's own entry point.
+const projectHref = (project) => `#/projects/${encodeURIComponent(project.project_id)}`;
 
 function projectRow(project) {
   const id = project.project_id;
