@@ -49,6 +49,9 @@ search paths, and validation status.
 | `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
 | `inbox_action_per_agent` | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
 | `inbox_action_per_project` | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
+| `enrol_pending_max` | `HUB_ENROL_PENDING_MAX` | `20` | Most pending enrolment requests the hub holds at once, across every source |
+| `enrol_pending_ttl_secs` | `HUB_ENROL_PENDING_TTL_SECS` | `86400` | How long a pending enrolment waits before it is treated as abandoned and cleaned up; 1 to 2592000 seconds |
+| `trust_proxy` | `HUB_TRUST_PROXY` | unset | Comma-separated peer IP addresses whose forwarded client header the hub trusts, such as `127.0.0.1` when a reverse proxy runs on the same host; unset trusts none |
 | `node_name` | `HUB_NODE_NAME` | the host name | Name the human sees for this node; set it when the host name is a generated container id |
 | `tailnet` | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `tailnet_port` | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |

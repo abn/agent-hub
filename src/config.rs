@@ -159,6 +159,14 @@ pub struct Config {
     pub node_name: Option<String>,
     /// Whether agent self-enrolment is enabled.
     pub enrol_enabled: bool,
+    /// The most pending enrolment requests the hub keeps at once.
+    pub enrol_pending_max: usize,
+    /// How long a pending enrolment waits before it counts as abandoned.
+    pub enrol_pending_ttl: std::time::Duration,
+    /// Peers whose forwarded client header the hub trusts, a proxy on the
+    /// operator's own machine most often. Empty trusts none, and the socket
+    /// peer is the identity.
+    pub trusted_proxies: Vec<std::net::IpAddr>,
 }
 
 const ACTIVE_WINDOW_SECS: u64 = 900;
@@ -246,6 +254,28 @@ impl Config {
             .map(|value| value.trim() != "off")
             .unwrap_or(true);
 
+        let enrol_pending_max =
+            Setting::resolved(env, "hub", "enrol_pending_max", &files, Some("20"))
+                .value
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "20".to_string());
+        let enrol_pending_max: usize = enrol_pending_max.parse().map_err(|_| {
+            Error::Config(format!(
+                "HUB_ENROL_PENDING_MAX must be a whole number, got '{enrol_pending_max}'"
+            ))
+        })?;
+        let enrol_pending_ttl = Self::parse_enrol_pending_ttl(
+            Setting::resolved(env, "hub", "enrol_pending_ttl_secs", &files, Some("86400"))
+                .value
+                .as_deref(),
+        )?;
+        let trusted_proxies = Self::parse_trusted_proxies(
+            Setting::resolved(env, "hub", "trust_proxy", &files, None)
+                .value
+                .as_deref(),
+        )?;
+
         Ok(Self {
             data_dir,
             bind,
@@ -255,6 +285,9 @@ impl Config {
             active_window,
             node_name,
             enrol_enabled,
+            enrol_pending_max,
+            enrol_pending_ttl,
+            trusted_proxies,
         })
     }
 
@@ -272,6 +305,46 @@ impl Config {
             },
         };
         Ok(std::time::Duration::from_secs(secs))
+    }
+
+    /// Read how long an abandoned enrolment waits before it is cleaned up.
+    pub fn parse_enrol_pending_ttl(value: Option<&str>) -> Result<std::time::Duration> {
+        const DEFAULT_SECS: u64 = 24 * 60 * 60;
+        const MAX_SECS: u64 = 30 * 24 * 60 * 60;
+        let secs = match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => DEFAULT_SECS,
+            Some(value) => match value.parse::<u64>() {
+                Ok(secs) if secs > 0 && secs <= MAX_SECS => secs,
+                _ => {
+                    return Err(Error::Config(format!(
+                        "HUB_ENROL_PENDING_TTL_SECS must be a whole number of seconds from 1 to {MAX_SECS}, got '{value}'"
+                    )));
+                }
+            },
+        };
+        Ok(std::time::Duration::from_secs(secs))
+    }
+
+    /// Read the peers whose forwarded client header the hub trusts. The socket
+    /// peer is not part of this: with none configured, no header is trusted.
+    pub fn parse_trusted_proxies(value: Option<&str>) -> Result<Vec<std::net::IpAddr>> {
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        let mut proxies = Vec::new();
+        for part in value.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let ip = part.parse().map_err(|_| {
+                Error::Config(format!(
+                    "HUB_TRUST_PROXY entries must be IP addresses, got '{part}'"
+                ))
+            })?;
+            proxies.push(ip);
+        }
+        Ok(proxies)
     }
 
     /// The instant a session must have been touched since to count as active.

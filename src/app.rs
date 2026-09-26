@@ -202,6 +202,18 @@ pub async fn run(config: Config) -> Result<()> {
                 Ok(_) => {}
                 Err(err) => tracing::warn!(error = %err, "prune sweep failed"),
             }
+            // An abandoned enrolment stops blocking its source once it is old
+            // enough, and its request and approval leave with it.
+            match crate::store::identity::expire_pending(
+                &sweeper.db,
+                sweeper.config.enrol_pending_ttl,
+            )
+            .await
+            {
+                Ok(0) => {}
+                Ok(expired) => tracing::info!(expired, "expired abandoned enrolment requests"),
+                Err(err) => tracing::warn!(error = %err, "could not expire pending enrolments"),
+            }
             tokio::time::sleep(interval).await;
         }
     });
@@ -232,7 +244,11 @@ pub async fn run(config: Config) -> Result<()> {
     // operator asked for port 0.
     tracing::info!(bind = %listener.local_addr()?, schema_version, "hub listening");
 
-    axum::serve(listener, router).await?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

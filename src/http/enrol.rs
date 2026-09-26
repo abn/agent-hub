@@ -11,6 +11,13 @@ use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
+use axum::extract::ConnectInfo;
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+
+use crate::config::Config;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::store::identity::{self, Agent};
@@ -24,8 +31,6 @@ pub struct EnrolRequest {
     pub display_name: Option<String>,
     #[serde(default)]
     pub why: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
 }
 
 /// Query parameters for enrolment status polling.
@@ -77,9 +82,11 @@ fn slugify(name: &str) -> String {
 /// Request agent enrolment on the hub. If enrolment is disabled via
 /// HUB_ENROL=off, returns 403 Forbidden. Refuses why strings containing
 /// newlines or exceeding 200 characters with 400 Bad Request. Enforces one
-/// pending enrolment per source IP at a time (returns 429 Too Many Requests).
+/// pending enrolment per socket peer, and a whole-hub pending cap, at a time
+/// (returns 429 Too Many Requests).
 pub async fn enrol(
     State(state): State<AppState>,
+    Peer(peer): Peer,
     headers: HeaderMap,
     payload: std::result::Result<Json<EnrolRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<Value>), Problem> {
@@ -115,31 +122,7 @@ pub async fn enrol(
         )));
     }
 
-    let source = if let Some(src) = request
-        .source
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        src.to_string()
-    } else if let Some(ip) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        ip.to_string()
-    } else if let Some(ip) = headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        ip.to_string()
-    } else {
-        "unknown".to_string()
-    };
+    let source = enrolment_source(&state.config, peer, &headers);
 
     let id = match request
         .suggested_id
@@ -151,9 +134,16 @@ pub async fn enrol(
         None => slugify(display_name),
     };
 
-    let (agent, token) = identity::enrol_agent(&state.db, &id, display_name, &source, why.trim())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let (agent, token) = identity::enrol_agent(
+        &state.db,
+        &id,
+        display_name,
+        &source,
+        why.trim(),
+        state.config.enrol_pending_max,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
 
     state.notify();
 
@@ -165,6 +155,58 @@ pub async fn enrol(
             "status": "pending",
         })),
     ))
+}
+
+/// The socket peer of an enrolment, when the server provides it. The POSIX
+/// listener supplies it through the connect-info service; the tailnet listener
+/// in use does not, so an unresolved peer reads as absent rather than failing
+/// the request. The global cap and the pending TTL still bound those.
+pub struct Peer(pub Option<SocketAddr>);
+
+impl<S> FromRequestParts<S> for Peer
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(Peer(
+            parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|connect| connect.0),
+        ))
+    }
+}
+
+/// Who an enrolment is from: the socket peer, and the forwarded client only
+/// when that peer is a configured trusted proxy. A body field cannot set this,
+/// so a caller cannot spoof or block another source.
+fn enrolment_source(config: &Config, peer: Option<SocketAddr>, headers: &HeaderMap) -> String {
+    let Some(peer) = peer else {
+        return "unknown".to_string();
+    };
+    let peer_ip = peer.ip();
+    if config.trusted_proxies.contains(&peer_ip) {
+        if let Some(client) = headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit(',').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return client.to_string();
+        }
+        if let Some(real) = headers
+            .get("x-real-ip")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return real.to_string();
+        }
+    }
+    peer_ip.to_string()
 }
 
 /// `GET /api/v1/enrol/status?wait=N`

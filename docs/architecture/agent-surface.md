@@ -38,6 +38,15 @@ token in `config.toml` at file mode `0600`. Pending tokens are refused by all
 ordinary routes with the exact same unauthenticated response as unrecognised
 tokens.
 
+An enrolment is rate-limited by its **socket peer**. A caller cannot set that
+identity: a body field is ignored, and forwarded headers are honoured only when
+the peer address is listed in `trust_proxy`, where the last hop the proxy
+appended is the client. A hub holding `enrol_pending_max` pending requests
+refuses more, and a request older than `enrol_pending_ttl_secs` is treated as
+abandoned and removed along with its request event and its search row. Over the
+optional embedded tailnet the peer is not available, so those requests share one
+identity.
+
 ## Tools
 
 | Tool | Purpose |

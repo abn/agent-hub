@@ -251,6 +251,7 @@ async fn renaming_a_pending_agent_moves_its_grants() {
         "Candidate",
         "a-harness",
         "to test the rename",
+        20,
     )
     .await
     .expect("enrol");
@@ -300,4 +301,60 @@ async fn grants_carry_no_access_level() {
         !columns.iter().any(|c| c == "access"),
         "a grant is access, not a level: {columns:?}"
     );
+}
+
+/// H7: an abandoned enrolment is cleaned up, and its approval event's search
+/// row goes with it rather than lingering as a searchable orphan.
+#[tokio::test]
+async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
+    let db = fresh("identity-expire").await;
+    let (agent, _token) =
+        identity::enrol_agent(&db, "waiter", "Waiter", "10.0.0.9", "please let me in", 20)
+            .await
+            .expect("enrol");
+
+    let conn = db.connect().expect("connect");
+    let count = |sql: &'static str, project: &str| {
+        let conn = db.connect().expect("connect");
+        let project = project.to_string();
+        async move {
+            let mut rows = conn.query(sql, [project.as_str()]).await.expect("count");
+            rows.next()
+                .await
+                .expect("row")
+                .expect("a count row")
+                .get::<i64>(0)
+                .expect("count")
+        }
+    };
+
+    let docs_before = count(
+        "SELECT COUNT(*) FROM search_docs WHERE project_id = ?1",
+        &agent.personal_project_id,
+    )
+    .await;
+    assert!(
+        docs_before > 0,
+        "the approval event is indexed before expiry"
+    );
+
+    let expired = identity::expire_pending(&db, std::time::Duration::from_secs(0))
+        .await
+        .expect("expire");
+    assert_eq!(expired, 1, "the pending enrolment expires");
+
+    let agents: i64 = {
+        let mut rows = conn
+            .query("SELECT COUNT(*) FROM agents WHERE id = 'waiter'", ())
+            .await
+            .expect("count");
+        rows.next().await.unwrap().unwrap().get(0).unwrap()
+    };
+    assert_eq!(agents, 0, "the pending agent is gone");
+    let docs_after = count(
+        "SELECT COUNT(*) FROM search_docs WHERE project_id = ?1",
+        &agent.personal_project_id,
+    )
+    .await;
+    assert_eq!(docs_after, 0, "the search rows go with the events");
 }

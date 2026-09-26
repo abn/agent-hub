@@ -28,6 +28,9 @@ pub fn config(data_dir: &Path) -> Config {
         active_window: Duration::from_secs(900),
         node_name: None,
         enrol_enabled: true,
+        enrol_pending_max: 20,
+        enrol_pending_ttl: Duration::from_secs(24 * 60 * 60),
+        trusted_proxies: Vec::new(),
     }
 }
 

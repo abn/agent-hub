@@ -1,26 +1,28 @@
 //! Agent enrolment tests: self-enrolment, pending tokens, long polling,
 //! operator approval and refusal, and token indistinguishability.
 
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use agent_hub::http::router;
 use agent_hub::store::identity;
 use agent_hub::store::projects;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::extract::ConnectInfo;
+use axum::http::{Request, StatusCode, header};
 use serde_json::json;
 use tower::ServiceExt;
 
 mod common;
 
-use common::http::{body_bytes, get, json_body, json_request, post, request};
-use common::state::{ADMIN_TOKEN, TestState};
+use common::http::{body_bytes, get, json_body, json_request, json_request_from, post, request};
+use common::state::{ADMIN_TOKEN, TestState, open_with};
 
 async fn state() -> TestState {
     common::state::open("enrol").await
 }
 
-fn enrol_req(suggested_id: &str, display_name: &str, why: &str, source: &str) -> Request<Body> {
+fn enrol_req(suggested_id: &str, display_name: &str, why: &str, _source: &str) -> Request<Body> {
     json_request(
         "POST",
         "/api/v1/enrol",
@@ -29,7 +31,28 @@ fn enrol_req(suggested_id: &str, display_name: &str, why: &str, source: &str) ->
             "suggested_id": suggested_id,
             "display_name": display_name,
             "why": why,
-            "source": source,
+        })
+        .to_string(),
+    )
+}
+
+/// An enrolment from an explicit socket peer. The peer is the identity now, so
+/// a test about the source rule sets it here rather than in the body.
+fn enrol_req_from(
+    peer: SocketAddr,
+    suggested_id: &str,
+    display_name: &str,
+    why: &str,
+) -> Request<Body> {
+    json_request_from(
+        peer,
+        "POST",
+        "/api/v1/enrol",
+        None,
+        &json!({
+            "suggested_id": suggested_id,
+            "display_name": display_name,
+            "why": why,
         })
         .to_string(),
     )
@@ -347,44 +370,32 @@ async fn second_enrolment_from_same_source_while_pending_is_refused() {
     let state = state().await;
     let app = router(state.clone());
 
+    let peer_a: SocketAddr = "10.0.0.6:5000".parse().unwrap();
+    let peer_b: SocketAddr = "10.0.0.7:5000".parse().unwrap();
+
     let res1 = app
         .clone()
-        .oneshot(enrol_req(
-            "first-agent",
-            "First",
-            "From ip 10.0.0.6",
-            "10.0.0.6",
-        ))
+        .oneshot(enrol_req_from(peer_a, "first-agent", "First", "First"))
         .await
         .expect("enrol 1");
     assert_eq!(res1.status(), StatusCode::ACCEPTED);
 
-    // Second from same source while first is pending must be refused.
+    // Second from the same peer while the first is pending must be refused.
     let res2 = app
         .clone()
-        .oneshot(enrol_req(
-            "second-agent",
-            "Second",
-            "From ip 10.0.0.6",
-            "10.0.0.6",
-        ))
+        .oneshot(enrol_req_from(peer_a, "second-agent", "Second", "Second"))
         .await
         .expect("enrol 2");
     assert_eq!(
         res2.status(),
         StatusCode::TOO_MANY_REQUESTS,
-        "second pending request from same source IP must be refused"
+        "second pending request from the same socket peer must be refused"
     );
 
-    // Different source IP is accepted.
+    // A different peer is accepted, and a body cannot claim to be one.
     let res3 = app
         .clone()
-        .oneshot(enrol_req(
-            "third-agent",
-            "Third",
-            "From ip 10.0.0.7",
-            "10.0.0.7",
-        ))
+        .oneshot(enrol_req_from(peer_b, "third-agent", "Third", "Third"))
         .await
         .expect("enrol 3");
     assert_eq!(res3.status(), StatusCode::ACCEPTED);
@@ -735,4 +746,160 @@ fn cli_enrol_reports_error_without_failing_if_unable_to_write_file() {
     assert!(stderr.contains("could not write token to"), "{stderr}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Token: "), "{stdout}");
+}
+
+/// An enrolment from an explicit peer, optionally with a forwarded client.
+fn enrol_from(peer: SocketAddr, forwarded: Option<&str>, id: &str, name: &str) -> Request<Body> {
+    let mut builder = Request::builder()
+        .uri("/api/v1/enrol")
+        .method("POST")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(value) = forwarded {
+        builder = builder.header("x-forwarded-for", value);
+    }
+    let mut request = builder
+        .body(Body::from(
+            json!({ "suggested_id": id, "display_name": name, "why": "test" }).to_string(),
+        ))
+        .expect("build request");
+    request.extensions_mut().insert(ConnectInfo(peer));
+    request
+}
+
+/// H7: the identity is the socket peer. A body field cannot claim another
+/// source, so a caller cannot block a victim or dodge the per-source rule.
+#[tokio::test]
+async fn a_body_source_cannot_spoof_the_socket_peer() {
+    let state = state().await;
+    let app = router(state.clone());
+    let peer: SocketAddr = "10.0.0.6:5000".parse().unwrap();
+
+    // Two requests from one peer, each claiming a different source in the body.
+    let first = app
+        .clone()
+        .oneshot(json_request_from(
+            peer,
+            "POST",
+            "/api/v1/enrol",
+            None,
+            &json!({"suggested_id": "spoof-one", "display_name": "One", "why": "One", "source": "9.9.9.9"}).to_string(),
+        ))
+        .await
+        .expect("enrol 1");
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+
+    let second = app
+        .clone()
+        .oneshot(json_request_from(
+            peer,
+            "POST",
+            "/api/v1/enrol",
+            None,
+            &json!({"suggested_id": "spoof-two", "display_name": "Two", "why": "Two", "source": "8.8.8.8"}).to_string(),
+        ))
+        .await
+        .expect("enrol 2");
+    assert_eq!(
+        second.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "the same peer with a different body source is still the same source"
+    );
+}
+
+/// H7: forwarded headers are honoured only behind a trusted proxy, and then the
+/// last hop the proxy appended is the client.
+#[tokio::test]
+async fn forwarded_client_is_honoured_only_behind_a_trusted_proxy() {
+    // Default: no trusted proxy, so the header is ignored and one peer is one
+    // source however many clients it claims.
+    let untrusted = open_with("enrol-untrusted", |_| {}).await;
+    let app = router(untrusted.clone());
+    let proxy: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+    let ok = app
+        .clone()
+        .oneshot(enrol_from(proxy, Some("203.0.113.1"), "u-one", "One"))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::ACCEPTED);
+    let refused = app
+        .clone()
+        .oneshot(enrol_from(proxy, Some("203.0.113.2"), "u-two", "Two"))
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "an untrusted peer cannot use the header to become several sources"
+    );
+
+    // Trusted proxy: the forwarded client is the identity, so two clients behind
+    // it do not collide.
+    let trusted = open_with("enrol-trusted", |config| {
+        config.trusted_proxies = vec!["10.0.0.1".parse().unwrap()];
+    })
+    .await;
+    let app = router(trusted.clone());
+    let client_a = app
+        .clone()
+        .oneshot(enrol_from(proxy, Some("203.0.113.1"), "t-one", "One"))
+        .await
+        .unwrap();
+    assert_eq!(client_a.status(), StatusCode::ACCEPTED);
+    let client_b = app
+        .clone()
+        .oneshot(enrol_from(proxy, Some("203.0.113.2"), "t-two", "Two"))
+        .await
+        .unwrap();
+    assert_eq!(
+        client_b.status(),
+        StatusCode::ACCEPTED,
+        "a trusted proxy distinguishes clients"
+    );
+    let client_a_again = app
+        .clone()
+        .oneshot(enrol_from(proxy, Some("203.0.113.1"), "t-three", "Three"))
+        .await
+        .unwrap();
+    assert_eq!(
+        client_a_again.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "one client is one source"
+    );
+}
+
+/// H7: a whole-hub cap bounds a caller that varies its source.
+#[tokio::test]
+async fn the_pending_enrolment_cap_bounds_across_sources() {
+    let state = open_with("enrol-cap", |config| {
+        config.enrol_pending_max = 2;
+    })
+    .await;
+    let app = router(state.clone());
+
+    for (i, peer) in ["10.0.1.1:1", "10.0.1.2:1"].iter().enumerate() {
+        let peer: SocketAddr = peer.parse().unwrap();
+        let res = app
+            .clone()
+            .oneshot(enrol_from(
+                peer,
+                None,
+                &format!("cap-{i}"),
+                &format!("Cap {i}"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::ACCEPTED);
+    }
+
+    let third: SocketAddr = "10.0.1.3:1".parse().unwrap();
+    let res = app
+        .clone()
+        .oneshot(enrol_from(third, None, "cap-3", "Cap 3"))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "the third pending enrolment is refused at the cap"
+    );
 }

@@ -594,6 +594,9 @@ mod tests {
             active_window: std::time::Duration::from_secs(900),
             node_name: None,
             enrol_enabled: true,
+            enrol_pending_max: 20,
+            enrol_pending_ttl: std::time::Duration::from_secs(24 * 60 * 60),
+            trusted_proxies: Vec::new(),
         })
         .await
         .expect("open state");

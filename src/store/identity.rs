@@ -422,6 +422,48 @@ pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
     })
 }
 
+/// Refuse every pending enrolment older than `ttl`, so an abandoned request
+/// stops blocking its source and cannot accumulate. Returns how many were
+/// cleaned up. Reuses the refusal path, so the tokens, personal project, events
+/// and their search rows all go with it.
+pub async fn expire_pending(db: &Database, ttl: std::time::Duration) -> Result<usize> {
+    let now = time::OffsetDateTime::now_utc();
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT id, created_at FROM agents WHERE state = 'pending'",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    let mut stale = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let id = text(&row, 0)?;
+        let created = text(&row, 1)?;
+        let Ok(at) =
+            time::OffsetDateTime::parse(&created, &time::format_description::well_known::Rfc3339)
+        else {
+            continue;
+        };
+        let age = time::Duration::try_from(ttl).unwrap_or(time::Duration::MAX);
+        if now - at >= age {
+            stale.push(id);
+        }
+    }
+    drop(rows);
+
+    let mut expired = 0;
+    for id in stale {
+        match refuse_enrolment(db, &id).await {
+            Ok(()) => expired += 1,
+            Err(err) => {
+                tracing::warn!(agent_id = %id, error = %err, "could not expire a pending enrolment")
+            }
+        }
+    }
+    Ok(expired)
+}
+
 /// Remove a grant.
 pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<()> {
     let mut conn = super::connect(db)?;
@@ -468,6 +510,7 @@ pub async fn enrol_agent(
     display_name: &str,
     source: &str,
     why: &str,
+    pending_max: usize,
 ) -> Result<(Agent, IssuedToken)> {
     validate_agent_id(id)?;
     validate_display_name(display_name)?;
@@ -500,6 +543,29 @@ pub async fn enrol_agent(
         )));
     }
     drop(pending_rows);
+
+    // A whole-hub ceiling, checked in the same transaction, so a caller that
+    // varies its source cannot fill the store with pending agents.
+    let mut pending_count = tx
+        .query("SELECT COUNT(*) FROM agents WHERE state = 'pending'", ())
+        .await
+        .map_err(engine)?;
+    let pending: i64 = match pending_count.next().await.map_err(engine)? {
+        Some(row) => row
+            .get_value(0)
+            .map_err(engine)?
+            .as_integer()
+            .copied()
+            .unwrap_or(0),
+        None => 0,
+    };
+    drop(pending_count);
+    if pending as usize >= pending_max {
+        tx.rollback().await.map_err(engine)?;
+        return Err(Error::RateLimited(format!(
+            "the hub is holding its limit of {pending_max} pending enrolment requests"
+        )));
+    }
 
     // Conflict check on agent id.
     let mut id_rows = tx
@@ -833,6 +899,15 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
 
     tx.execute(
         "DELETE FROM inbox WHERE event_id IN (SELECT id FROM events WHERE project_id = ?1)",
+        vec![Value::Text(personal_project_id.clone())],
+    )
+    .await
+    .map_err(engine)?;
+
+    // The events are indexed; the rows must go with them, or a refused
+    // enrolment leaves searchable orphans behind.
+    tx.execute(
+        "DELETE FROM search_docs WHERE project_id = ?1",
         vec![Value::Text(personal_project_id.clone())],
     )
     .await
