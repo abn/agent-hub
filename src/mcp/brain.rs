@@ -146,6 +146,16 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        // Fold the log into the file the session leaves behind.
+        if let Ok(Some(brain)) = self
+            .state
+            .brain
+            .open_existing(&session.project_id, &params.session_id)
+            .await
+        {
+            let _ = brain.checkpoint().await;
+        }
+
         let mut active = self.active.lock().await;
         if active
             .as_ref()

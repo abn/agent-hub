@@ -301,6 +301,18 @@ pub async fn end(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
+    // A finished brain becomes one file: the log is folded in and truncated so
+    // its size is the data it holds.
+    if let Ok(Some(session)) = session_store::get(&state.db, &session_id).await
+        && let Ok(Some(brain)) = state
+            .brain
+            .open_existing(&session.project_id, &session_id)
+            .await
+        && let Err(err) = brain.checkpoint().await
+    {
+        tracing::warn!(session_id = %session_id, error = %err, "could not checkpoint the brain after end");
+    }
+
     state.notify();
     Ok(Json(EndResult { ok: true }))
 }

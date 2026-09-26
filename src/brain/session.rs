@@ -559,6 +559,28 @@ impl Brain {
             .map_err(engine_error)
     }
 
+    /// Fold the write-ahead log into the database file and truncate it, so the
+    /// file's size reflects the data it holds rather than pages still in the
+    /// log. Run when a session ends, so a finished brain is one consolidated
+    /// file and its size means what a reader expects.
+    pub async fn checkpoint(&self) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        // The pragma returns a row, so it is run as a query and drained.
+        let mut rows = conn
+            .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        while rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+            .is_some()
+        {}
+        Ok(())
+    }
+
     /// Read recent tool_calls audit records.
     pub async fn audit_recent(&self, limit: Option<i64>) -> Result<Vec<agentfs_sdk::ToolCall>> {
         let _guard = self.lock.lock().await;

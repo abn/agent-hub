@@ -704,3 +704,56 @@ async fn a_listing_row_carries_the_brain_size_the_prune_button_shows() {
     .await;
     assert_eq!(body["sessions"][0]["brain_bytes"], brain_bytes);
 }
+
+/// Ending a session folds its brain log into the file, so a finished brain's
+/// size is the data it holds rather than pages still in the log.
+#[tokio::test]
+async fn ending_a_session_checkpoints_its_brain_log() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let brain = state
+        .brain
+        .open("proj", &session.id)
+        .await
+        .expect("open brain");
+    for i in 0..200 {
+        brain
+            .put(&format!("/kv/k{i}"), format!("value {i}").as_bytes())
+            .await
+            .expect("put");
+    }
+    let mut wal = state
+        .brain
+        .brain_path("proj", &session.id)
+        .expect("brain path")
+        .into_os_string();
+    wal.push("-wal");
+    let wal = std::path::PathBuf::from(wal);
+    let before = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    assert!(before > 0, "the log holds writes before the session ends");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/sessions/{}/end", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let after = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    assert!(
+        after < before,
+        "ending the session truncates the log: {before} before, {after} after"
+    );
+    assert_eq!(
+        brain.get("/kv/k199").await.expect("get"),
+        Some(b"value 199".to_vec()),
+        "the data survives"
+    );
+}

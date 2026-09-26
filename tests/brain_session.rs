@@ -767,3 +767,43 @@ async fn delete_if_compare_and_set() {
         .expect("should delete");
     assert!(brain.get("/fs/test.txt").await.expect("get").is_none());
 }
+
+/// A checkpoint folds the write-ahead log into the file and truncates it, so a
+/// finished brain's size is the data it holds rather than pages still in the
+/// log.
+#[tokio::test]
+async fn checkpoint_folds_the_log_into_the_file() {
+    let root = TempDir::new("checkpoint");
+    let store = BrainStore::new(root.to_path_buf());
+    let brain = store.open("proj", "session").await.expect("open brain");
+
+    for i in 0..200 {
+        brain
+            .put(&format!("/kv/k{i}"), format!("value {i}").as_bytes())
+            .await
+            .expect("put");
+    }
+
+    let path = store.brain_path("proj", "session").expect("brain path");
+    let mut wal = path.clone().into_os_string();
+    wal.push("-wal");
+    let wal = std::path::PathBuf::from(wal);
+    let wal_before = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    assert!(
+        wal_before > 0,
+        "the log holds the writes before checkpointing"
+    );
+
+    brain.checkpoint().await.expect("checkpoint");
+
+    let wal_after = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    assert!(
+        wal_after < wal_before,
+        "the log is truncated: {wal_before} bytes before, {wal_after} after"
+    );
+    assert_eq!(
+        brain.get("/kv/k199").await.expect("get"),
+        Some(b"value 199".to_vec()),
+        "the data survives the fold"
+    );
+}

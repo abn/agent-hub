@@ -175,6 +175,9 @@ The handoff note a session leaves when it ends lives on the session row and in
 the feed event, never in the brain: a session that never wrote must not get a
 brain file merely because it ended. A recovery handoff document is a separate
 convention, on a well-known path inside the brain, not a separate subsystem.
+Ending a session that has a brain file checkpoints it: the write-ahead log is
+folded into the file and truncated, so a finished brain's size on disk is the
+data it holds rather than pages still in the log.
 
 ## Project knowledge base
 
