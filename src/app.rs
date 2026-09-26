@@ -109,6 +109,31 @@ impl AppState {
             ),
         }
 
+        // Fold the log of every finished session into its file once, so a brain
+        // that ended while this was not yet automatic is consolidated too. Best
+        // effort: a brain that cannot be consolidated is left as it is.
+        match store::sessions::ended_unpruned(&db).await {
+            Ok(sessions) => {
+                let store = BrainStore::new(config.sessions_dir());
+                for (project_id, session_id) in sessions {
+                    match store.open_existing(&project_id, &session_id).await {
+                        Ok(Some(brain)) => {
+                            if let Err(err) = brain.checkpoint().await {
+                                tracing::warn!(session_id = %session_id, error = %err, "could not checkpoint a finished brain");
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            tracing::warn!(session_id = %session_id, error = %err, "could not open a finished brain")
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "could not list finished sessions to checkpoint")
+            }
+        }
+
         let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
         let knowledge = BrainStore::new(config.knowledge_dir());

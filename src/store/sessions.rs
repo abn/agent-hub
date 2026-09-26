@@ -781,6 +781,34 @@ async fn get_on(conn: &turso::Connection, session_id: &str) -> Result<Option<Ses
 }
 
 /// List a project's sessions, most recently active first.
+/// Every ended, unpruned session, with the project it belongs to. Used at
+/// startup to fold a finished brain's log into its file, so a session that
+/// ended before that became automatic is consolidated too.
+pub async fn ended_unpruned(db: &Database) -> Result<Vec<(String, String)>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT project_id, id FROM sessions
+             WHERE status = 'ended' AND deleted_at IS NULL",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let project_id = match row.get_value(0).map_err(engine)? {
+            Value::Text(value) => value,
+            _ => continue,
+        };
+        let id = match row.get_value(1).map_err(engine)? {
+            Value::Text(value) => value,
+            _ => continue,
+        };
+        out.push((project_id, id));
+    }
+    Ok(out)
+}
+
 pub async fn list(db: &Database, project_id: &str) -> Result<Vec<Session>> {
     let conn = super::connect(db)?;
     let mut rows = conn
