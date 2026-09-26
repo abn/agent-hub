@@ -78,6 +78,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/artifacts/{id}",
             get(artifacts::content).delete(artifacts::destroy),
         )
+        .route(
+            "/api/v1/artifacts/{id}/share",
+            post(artifacts::share_create)
+                .delete(artifacts::share_revoke)
+                .get(artifacts::share_get),
+        )
         .route("/api/v1/artifacts/{id}/versions", get(artifacts::versions))
         .route("/api/v1/artifacts/{id}/raw", get(artifacts::raw))
         .route(
@@ -145,6 +151,9 @@ pub fn router(state: AppState) -> Router {
         .route("/artifacts/{id}", get(artifacts::host))
         .route("/artifacts/{id}/frame", get(artifacts::frame))
         .route("/artifacts/{id}/og.svg", get(artifacts::og_svg))
+        .route("/s/{token}", get(artifacts::share_host))
+        .route("/s/{token}/frame", get(artifacts::share_frame))
+        .route("/s/{token}/og.svg", get(artifacts::share_og_svg))
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limits::REQUEST_BODY_BYTES_MAX))

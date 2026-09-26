@@ -4159,13 +4159,16 @@ a.session-back {
 }
 
 .hub-share-copy-btn {
+  width: 36px;
+  height: 36px;
   min-height: 36px;
-  padding: 0 12px;
+  padding: 0;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
   background: none;
   color: var(--ink);
-  font: 600 13px/1 var(--font-sans);
   cursor: pointer;
   flex: none;
 }
@@ -4384,6 +4387,12 @@ a.session-back {
   border: 1px solid var(--line-strong);
   background: none;
   color: var(--ink);
+}
+
+.hub-share-primary.is-danger {
+  border: 1px solid var(--danger);
+  background: none;
+  color: var(--danger);
 }
 
 .hub-share-copy-pw-btn {

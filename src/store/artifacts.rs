@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use turso::{Database, Row, Value};
 
 use crate::blob;
@@ -673,6 +673,12 @@ pub async fn delete(
     .await
     .map_err(engine)?;
     tx.execute(
+        "DELETE FROM artifact_shares WHERE artifact_id = ?1",
+        vec![Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.execute(
         "DELETE FROM idempotency WHERE artifact_id = ?1",
         vec![Value::Text(artifact_id.to_string())],
     )
@@ -1251,4 +1257,162 @@ fn optional_text(value: Option<&str>) -> Value {
 
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+fn generate_share_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// An artifact share link token and version binding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactShare {
+    pub artifact_id: String,
+    pub token: String,
+    pub version: i64,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
+}
+
+/// Create or rotate a share link for an artifact.
+///
+/// If `version` is specified, checks that the version exists; otherwise pins to the
+/// artifact's current version. Mints a unique, unguessable token and invalidates any
+/// previous token by rotating the row.
+pub async fn create_or_rotate_share(
+    db: &Database,
+    artifact_id: &str,
+    version: Option<i64>,
+) -> Result<ArtifactShare> {
+    let art = metadata(db, artifact_id).await?;
+    let ver = match version {
+        Some(v) => {
+            let versions = list_versions(db, artifact_id).await?;
+            if !versions.iter().any(|item| item.version == v) {
+                return Err(Error::NotFound(format!(
+                    "version {v} not found for artifact {artifact_id}"
+                )));
+            }
+            v
+        }
+        None => art.version,
+    };
+
+    let token = generate_share_token();
+    let created_at = crate::store::now_rfc3339();
+
+    let conn = super::connect(db)?;
+    conn.execute(
+        "INSERT INTO artifact_shares(artifact_id, token, version, created_at, revoked_at)
+         VALUES (?1, ?2, ?3, ?4, NULL)
+         ON CONFLICT(artifact_id) DO UPDATE SET
+           token = excluded.token,
+           version = excluded.version,
+           created_at = excluded.created_at,
+           revoked_at = NULL",
+        vec![
+            Value::Text(artifact_id.to_string()),
+            Value::Text(token.clone()),
+            Value::Integer(ver),
+            Value::Text(created_at.clone()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    Ok(ArtifactShare {
+        artifact_id: artifact_id.to_string(),
+        token,
+        version: ver,
+        created_at,
+        revoked_at: None,
+    })
+}
+
+/// Revoke the active share link for an artifact, if any.
+pub async fn revoke_share(db: &Database, artifact_id: &str) -> Result<()> {
+    let _ = metadata(db, artifact_id).await?;
+    let now = crate::store::now_rfc3339();
+    let conn = super::connect(db)?;
+    conn.execute(
+        "UPDATE artifact_shares SET revoked_at = ?1 WHERE artifact_id = ?2 AND revoked_at IS NULL",
+        vec![Value::Text(now), Value::Text(artifact_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
+/// Lookup an active (unrevoked) share by its token.
+pub async fn get_active_share_by_token(
+    db: &Database,
+    token: &str,
+) -> Result<Option<ArtifactShare>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT artifact_id, token, version, created_at, revoked_at
+             FROM artifact_shares
+             WHERE token = ?1 AND revoked_at IS NULL",
+            vec![Value::Text(token.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(share_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Lookup the current share record for an artifact, whether active or revoked.
+pub async fn get_share_for_artifact(
+    db: &Database,
+    artifact_id: &str,
+) -> Result<Option<ArtifactShare>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT artifact_id, token, version, created_at, revoked_at
+             FROM artifact_shares
+             WHERE artifact_id = ?1",
+            vec![Value::Text(artifact_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(share_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Whether an artifact has ever had a share record.
+pub async fn has_share_record(db: &Database, artifact_id: &str) -> Result<bool> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM artifact_shares WHERE artifact_id = ?1",
+            vec![Value::Text(artifact_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    Ok(rows.next().await.map_err(engine)?.is_some())
+}
+
+fn share_from_row(row: &Row) -> Result<ArtifactShare> {
+    Ok(ArtifactShare {
+        artifact_id: required_text(row, 0)?,
+        token: required_text(row, 1)?,
+        version: int_at(row, 2)?,
+        created_at: required_text(row, 3)?,
+        revoked_at: text_at(row, 4)?,
+    })
 }

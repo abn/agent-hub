@@ -15,7 +15,7 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -462,6 +462,17 @@ pub async fn host(
             .await
             .map_err(|err| Problem::from_error(&err))?,
     };
+
+    if !artifact.protected
+        && artifact_store::has_share_record(&state.db, &artifact.id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+    {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "artifact {artifact_id} not found"
+        ))));
+    }
+
     let shown = query.version.unwrap_or(artifact.version);
     let pinned = query.version.is_some();
     let origin = request_origin(&state.config, &headers);
@@ -474,7 +485,7 @@ pub async fn host(
                 "artifact {artifact_id} ciphertext is not UTF-8 text"
             )))
         })?;
-        locked_shell(&artifact, &ciphertext, shown, pinned, &origin)
+        locked_shell(&artifact, &ciphertext, shown, pinned, &origin, None)
     } else {
         let versions = artifact_store::list_versions(&state.db, &artifact_id)
             .await
@@ -483,7 +494,7 @@ pub async fn host(
             .await
             .map_err(|err| Problem::from_error(&err))?;
         reader_shell(
-            &artifact, &bytes, shown, pinned, &versions, &thread, &origin,
+            &artifact, &bytes, shown, pinned, &versions, &thread, &origin, None,
         )
     };
     Ok(host_response(document))
@@ -513,6 +524,16 @@ pub async fn frame(
             .await
             .map_err(|err| Problem::from_error(&err))?,
     };
+
+    if !artifact.protected
+        && artifact_store::has_share_record(&state.db, &artifact.id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+    {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "artifact {artifact_id} not found"
+        ))));
+    }
 
     if artifact.protected {
         return Err(Problem::from_error(&Error::InvalidArgument(format!(
@@ -565,6 +586,284 @@ pub async fn og_svg(
             .await
             .map_err(|err| Problem::from_error(&err))?,
     };
+
+    if !artifact.protected
+        && artifact_store::has_share_record(&state.db, &artifact.id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+    {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "artifact {artifact_id} not found"
+        ))));
+    }
+
+    Ok(og_response(og_card(&artifact)))
+}
+
+/// A share link record returned by the share management endpoints.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ShareResponse {
+    pub token: String,
+    pub url: String,
+    pub version: i64,
+    pub created_at: String,
+}
+
+/// Request body for creating or rotating a share link.
+#[derive(Debug, Default, Deserialize)]
+pub struct ShareCreateRequest {
+    pub version: Option<i64>,
+}
+
+/// `POST /api/v1/artifacts/{id}/share`
+///
+/// Admin only. Creates or rotates a share link for this artifact.
+pub async fn share_create(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> std::result::Result<Json<ShareResponse>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let req: ShareCreateRequest = if body.is_empty() {
+        ShareCreateRequest::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|err| {
+            Problem::from_error(&Error::InvalidArgument(format!("invalid JSON body: {err}")))
+        })?
+    };
+
+    let share = artifact_store::create_or_rotate_share(&state.db, &artifact_id, req.version)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    // Relative on purpose: the link is resolved by the browser against the
+    // page it is on, so a hub mounted behind a path-stripping proxy gets the
+    // prefix right. `request_origin` knows only scheme and authority. H8.
+    let url = format!("s/{}", share.token);
+
+    Ok(Json(ShareResponse {
+        token: share.token,
+        url,
+        version: share.version,
+        created_at: share.created_at,
+    }))
+}
+
+/// `DELETE /api/v1/artifacts/{id}/share`
+///
+/// Admin only. Revokes the active share link for this artifact.
+pub async fn share_revoke(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<StatusCode, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    artifact_store::revoke_share(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /api/v1/artifacts/{id}/share`
+///
+/// Admin only. Returns the active share link for this artifact if present.
+pub async fn share_get(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<ShareResponse>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let share = artifact_store::get_share_for_artifact(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    match share {
+        Some(s) if s.revoked_at.is_none() => {
+            // Relative, like the create route: the browser resolves it against
+            // the document, so the path prefix survives.
+            let url = format!("s/{}", s.token);
+            Ok(Json(ShareResponse {
+                token: s.token,
+                url,
+                version: s.version,
+                created_at: s.created_at,
+            }))
+        }
+        _ => Err(Problem::from_error(&Error::NotFound(
+            "no active share link".to_string(),
+        ))),
+    }
+}
+
+/// `GET /s/{token}`
+///
+/// Public: a recipient opens a share link using a revocable token.
+/// Serves the pinned version recorded when the share was created.
+pub async fn share_host(
+    State(state): State<AppState>,
+    ProblemPath(token): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Response, Problem> {
+    let share = match artifact_store::get_active_share_by_token(&state.db, &token)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+    {
+        Some(s) => s,
+        None => {
+            return Err(Problem::from_error(&Error::NotFound(
+                "artifact not found".to_string(),
+            )));
+        }
+    };
+
+    let (artifact, bytes) = artifact_store::get_at_version(
+        &state.db,
+        &state.data_dir,
+        &share.artifact_id,
+        share.version,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
+    let shown = share.version;
+    let pinned = true;
+    let origin = request_origin(&state.config, &headers);
+
+    let document = if artifact.protected {
+        let ciphertext = String::from_utf8(bytes).map_err(|_| {
+            Problem::from_error(&Error::InvalidArgument(format!(
+                "artifact {} ciphertext is not UTF-8 text",
+                share.artifact_id
+            )))
+        })?;
+        locked_shell(&artifact, &ciphertext, shown, pinned, &origin, Some(&token))
+    } else {
+        let versions = artifact_store::list_versions(&state.db, &share.artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        let thread = comment_store::list_comments(&state.db, &share.artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        reader_shell(
+            &artifact,
+            &bytes,
+            shown,
+            pinned,
+            &versions,
+            &thread,
+            &origin,
+            Some(&token),
+        )
+    };
+    Ok(host_response(document))
+}
+
+/// `GET /s/{token}/frame`
+///
+/// Public: the sandboxed body of a plain HTML artifact for a share link.
+/// Serves the pinned version.
+pub async fn share_frame(
+    State(state): State<AppState>,
+    ProblemPath(token): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<FrameQuery>,
+    headers: HeaderMap,
+) -> std::result::Result<Response, Problem> {
+    let share = match artifact_store::get_active_share_by_token(&state.db, &token)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+    {
+        Some(s) => s,
+        None => {
+            return Err(Problem::from_error(&Error::NotFound(
+                "artifact not found".to_string(),
+            )));
+        }
+    };
+
+    let (artifact, bytes) = artifact_store::get_at_version(
+        &state.db,
+        &state.data_dir,
+        &share.artifact_id,
+        share.version,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
+    if artifact.protected {
+        return Err(Problem::from_error(&Error::InvalidArgument(format!(
+            "artifact {} is protected; it unlocks in the host page",
+            share.artifact_id
+        ))));
+    }
+    match artifact.kind.as_str() {
+        "html" => {}
+        "markdown" => {
+            return Err(Problem::from_error(&Error::InvalidArgument(
+                "markdown renders in the host page".to_string(),
+            )));
+        }
+        other => {
+            return Err(Problem::from_error(&Error::InvalidArgument(format!(
+                "artifact {} kind '{other}' has no frame view",
+                share.artifact_id
+            ))));
+        }
+    }
+
+    let theme = match query.theme.as_deref() {
+        Some("dark") => "dark",
+        _ => "light",
+    };
+    let content = String::from_utf8_lossy(&bytes);
+    let origin = request_origin(&state.config, &headers);
+    Ok(frame_response(
+        frame_document(&artifact.title, &content, theme),
+        &origin,
+    ))
+}
+
+/// `GET /s/{token}/og.svg`
+///
+/// Public: a static preview card for a share link.
+pub async fn share_og_svg(
+    State(state): State<AppState>,
+    ProblemPath(token): ProblemPath<String>,
+) -> std::result::Result<Response, Problem> {
+    let share = match artifact_store::get_active_share_by_token(&state.db, &token)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+    {
+        Some(s) => s,
+        None => {
+            return Err(Problem::from_error(&Error::NotFound(
+                "artifact not found".to_string(),
+            )));
+        }
+    };
+
+    let (artifact, _bytes) = artifact_store::get_at_version(
+        &state.db,
+        &state.data_dir,
+        &share.artifact_id,
+        share.version,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
     Ok(og_response(og_card(&artifact)))
 }
 
@@ -687,6 +986,7 @@ fn raw_json_response(body: String) -> Response {
 /// HTML artifacts load through the frame route, markdown artifacts render in
 /// the host page from the inlined source. The version picker appears only
 /// when the artifact has more than one version.
+#[allow(clippy::too_many_arguments)]
 fn reader_shell(
     artifact: &Artifact,
     bytes: &[u8],
@@ -695,21 +995,25 @@ fn reader_shell(
     versions: &[ArtifactVersion],
     thread: &[Comment],
     origin: &str,
+    share_token: Option<&str>,
 ) -> String {
     let title = escape_html(&artifact.title);
-    let with_history = versions.len() > 1;
+    let with_history = versions.len() > 1 && share_token.is_none();
     let picker = if with_history {
         picker_html(versions, shown)
     } else {
         String::new()
     };
     let frame = if artifact.kind == "html" {
-        // Relative to this page's own URL ("/artifacts/{id}"), not the
+        // Relative to this page's own URL ("/artifacts/{id}" or "/s/{token}"), not the
         // origin root: a leading slash here would collapse to the origin
         // root under a reverse proxy that mounts the hub on a path.
+        let frame_path = match share_token {
+            Some(token) => format!("{token}/frame?version={shown}&amp;theme=light"),
+            None => format!("{}/frame?version={shown}&amp;theme=light", artifact.id),
+        };
         format!(
-            "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"{}/frame?version={shown}&amp;theme=light\"></iframe>\n",
-            artifact.id,
+            "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"{frame_path}\"></iframe>\n"
         )
     } else {
         format!("<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\"></iframe>\n")
@@ -724,6 +1028,7 @@ fn reader_shell(
         "created_at": artifact.created_at,
         "size_bytes": artifact.size_bytes,
         "actor": artifact.actor,
+        "share_token": share_token,
     }));
     let version_blob = if with_history {
         let list: Vec<serde_json::Value> = versions
@@ -771,7 +1076,7 @@ fn reader_shell(
          <script type=\"application/json\" id=\"hub-versions\">{version_blob}</script>\n\
          <script type=\"application/json\" id=\"hub-markdown-body\">{markdown_blob}</script>\n\
          </body>\n</html>\n",
-        head = shell_head(artifact, shown, pinned, origin),
+        head = shell_head(artifact, shown, pinned, origin, share_token),
     )
 }
 
@@ -784,6 +1089,7 @@ fn locked_shell(
     shown: i64,
     pinned: bool,
     origin: &str,
+    share_token: Option<&str>,
 ) -> String {
     let title = escape_html(&artifact.title);
     let meta = script_json(&json!({
@@ -796,6 +1102,7 @@ fn locked_shell(
         "created_at": artifact.created_at,
         "size_bytes": artifact.size_bytes,
         "actor": artifact.actor,
+        "share_token": share_token,
     }));
     let envelope = artifact
         .envelope
@@ -842,7 +1149,7 @@ fn locked_shell(
          <script type=\"application/json\" id=\"hub-envelope\">{envelope}</script>\n\
          <script type=\"application/json\" id=\"hub-ciphertext\">{encoded}</script>\n\
          </body>\n</html>\n",
-        head = shell_head(artifact, shown, pinned, origin),
+        head = shell_head(artifact, shown, pinned, origin, share_token),
         lock = LOCK_SVG,
     )
 }
@@ -854,15 +1161,34 @@ const VIEWER_CSS: &str = include_str!("../../web/artifact-shell.css");
 /// vendor and viewer scripts. No inline scripts.
 ///
 /// The stylesheet and script paths are relative to this page's own URL
-/// ("/artifacts/{id}"), one segment below the files it shares with the PWA
+/// ("/artifacts/{id}" or "/s/{token}"), one segment below the files it shares with the PWA
 /// shell, so "../" reaches them under whatever prefix a proxy mounts the hub
 /// on. A leading slash would collapse to the origin root instead.
-fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> String {
+fn shell_head(
+    artifact: &Artifact,
+    shown: i64,
+    pinned: bool,
+    origin: &str,
+    share_token: Option<&str>,
+) -> String {
     let title = escape_html(&artifact.title);
     let description = escape_html(&artifact.description);
-    let pinned = match pinned {
+    let pinned_param = match pinned {
         true => format!("?version={shown}"),
         false => String::new(),
+    };
+    let (og_img, og_url) = match share_token {
+        Some(token) => (
+            format!("{origin}/s/{token}/og.svg"),
+            format!("{origin}/s/{token}"),
+        ),
+        None => (
+            format!(
+                "{origin}/artifacts/{id}/og.svg{pinned_param}",
+                id = artifact.id
+            ),
+            format!("{origin}/artifacts/{id}{pinned_param}", id = artifact.id),
+        ),
     };
     format!(
         "<meta charset=\"utf-8\">\n\
@@ -870,14 +1196,13 @@ fn shell_head(artifact: &Artifact, shown: i64, pinned: bool, origin: &str) -> St
          <meta name=\"robots\" content=\"noindex\">\n<title>{title}</title>\n\
          <meta property=\"og:title\" content=\"{title}\">\n\
          <meta property=\"og:description\" content=\"{description}\">\n\
-         <meta property=\"og:image\" content=\"{origin}/artifacts/{id}/og.svg{pinned}\">\n\
-         <meta property=\"og:url\" content=\"{origin}/artifacts/{id}{pinned}\">\n\
+         <meta property=\"og:image\" content=\"{og_img}\">\n\
+         <meta property=\"og:url\" content=\"{og_url}\">\n\
          <meta name=\"twitter:card\" content=\"summary_large_image\">\n\
          <link rel=\"stylesheet\" href=\"../tokens.css\">\n\
          <style>\n{VIEWER_CSS}</style>\n\
          <script src=\"../vendor/marked.js\"></script>\n\
          <script type=\"module\" src=\"../artifact-viewer.mjs\"></script>\n</head>\n",
-        id = artifact.id,
     )
 }
 

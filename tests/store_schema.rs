@@ -31,6 +31,7 @@ const TABLES: &[&str] = &[
     "idempotency",
     "search_docs",
     "project_feed_cursors",
+    "artifact_shares",
 ];
 
 #[tokio::test]
@@ -1228,6 +1229,61 @@ async fn migration_fifteen_adds_target_id_to_idempotency() {
     assert_eq!(row.get::<String>(1).expect("operation"), "event");
     assert_eq!(row.get::<String>(2).expect("idempotency_key"), "legacy-key");
     assert!(row.get::<Option<String>>(3).expect("target_id").is_none());
+
+    drop(conn);
+    drop(db);
+}
+
+#[tokio::test]
+async fn migration_seventeen_creates_artifact_shares_table() {
+    let dir = TempDir::new("store-schema-v17");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 17) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    let mut rows = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'artifact_shares'",
+            (),
+        )
+        .await
+        .expect("query sqlite_master");
+    assert!(
+        rows.next().await.expect("row").is_some(),
+        "artifact_shares table exists"
+    );
+
+    let mut idx = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_artifact_shares_token'",
+            (),
+        )
+        .await
+        .expect("query sqlite_master index");
+    assert!(
+        idx.next().await.expect("row").is_some(),
+        "idx_artifact_shares_token index exists"
+    );
 
     drop(conn);
     drop(db);

@@ -35,7 +35,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 import hub_harness as harness
 
@@ -419,6 +419,49 @@ def check_prefix_raw_fetch(
             failures.append(f"the raw fetch dropped the prefix: {url}")
 
 
+def check_prefix_share_link(
+    page, failures: list[str], entries: list, base: str, port: int, artifact_id: str
+) -> None:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/artifacts/{artifact_id}/share",
+        headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            share_data = json.loads(resp.read().decode("utf-8"))
+    except Exception as err:
+        failures.append(f"failed to create share link: {err}")
+        return
+
+    token = share_data.get("token")
+    if not token:
+        failures.append("creating share link failed to return a token")
+        return
+
+    # The hub returns a relative link; resolved against the page it must carry
+    # the prefix, which a hand-built URL would hide.
+    returned = share_data.get("url", "")
+    resolved = urljoin(f"{base}{PREFIX}/", returned)
+    if PREFIX not in resolved:
+        failures.append(
+            f"the share link the hub returned drops the prefix: {returned!r} resolves to {resolved}"
+        )
+
+    start = len(entries)
+    page.goto(f"{base}{PREFIX}/s/{token}", wait_until="load")
+    if not settle(page, "!!document.querySelector('main iframe')", timeout=8000):
+        failures.append("the share link page embedded no frame under the prefix")
+    page.wait_for_timeout(600)
+    bad = [f"{status} {url}" for url, status in entries[start:] if status >= 400]
+    if bad:
+        failures.append("loading the share link page under the prefix 404d: " + "; ".join(bad))
+    names = {asset_url_name(url) for url, status in entries[start:] if status == 200}
+    for wanted in ("frame-loader.js", "artifact-viewer.mjs", "tokens.css", "marked.js"):
+        if wanted not in names:
+            failures.append(f"loading the share link page under the prefix never fetched {wanted}")
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -447,6 +490,9 @@ def run() -> int:
                             )
                             check_prefix_raw_fetch(
                                 page, failures, entries, project, seeded["artifact_id"]
+                            )
+                            check_prefix_share_link(
+                                page, failures, entries, base, port, html_artifact
                             )
                 except PlaywrightTimeoutError as err:
                     failures.append(f"timed out: {str(err).splitlines()[0] if str(err) else 'timeout exceeded'}")

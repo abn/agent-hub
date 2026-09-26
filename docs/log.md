@@ -13,6 +13,12 @@ software release notes and the repository changelog.
   update's own feed event carries the writer. An update leaves the artifact's
   session lineage alone, as it leaves `actor` alone. The 2026-09-22 entry below
   is corrected by this one.
+## 2026-09-26, revocable artifact share links and version pinning
+
+* **Update**: [Artifacts](usage/artifacts.md) documents capability-based sharing for
+  plain artifacts via revocable tokens, version pinning to the snapshot active at share
+  creation, access concealment preventing existence oracles, and key-governed
+  lifecycle for encrypted artifacts where withdrawal is deletion.
 
 ## 2026-09-25, the operating model is stated once
 

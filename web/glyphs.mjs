@@ -20,7 +20,6 @@ export const GLYPH_PATHS = {
   copyRaw: '<path d="M 9 7l-4 5 4 5"/><path d="M 15 7l4 5-4 5"/>',
   idCard:
     '<rect x="3" y="5.5" width="18" height="13" rx="2.2"/><circle cx="9" cy="11" r="1.9"/><path d="M 6.3 15.7a3 3 0 0 1 5.4 0M 14.5 10.5h3.5M 14.5 14h3.5"/>',
-  key: '<circle cx="8" cy="12" r="4"/><path d="M 12 12h9M 18 12v4"/>',
   link: '<path d="M 10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M 14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/>',
   lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M 8 10V7a4 4 0 0 1 8 0v3"/>',
   overflow:

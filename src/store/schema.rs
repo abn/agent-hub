@@ -78,6 +78,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 16,
         ddl: V16,
     },
+    Migration {
+        version: 17,
+        ddl: V17,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -448,4 +452,20 @@ ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 /// across different entities or operations.
 const V16: &str = r#"
 ALTER TABLE idempotency ADD COLUMN target_id TEXT;
+"#;
+
+/// Version 17: artifact share links.
+///
+/// A plain artifact shared by link carries a revocable, unguessable token
+/// pinned to a specific version. Revoking the token stops that URL; rotating
+/// generates a new token and invalidates previous shares.
+const V17: &str = r#"
+CREATE TABLE IF NOT EXISTS artifact_shares(
+  artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_shares_token ON artifact_shares(token);
 "#;

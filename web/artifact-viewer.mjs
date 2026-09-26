@@ -232,7 +232,8 @@ function showMarkdown(frame, meta, source, theme) {
 // again: a leading slash here would collapse to the origin root under a
 // path prefix, the same defect this whole page exists to avoid.
 function frameUrl(meta, theme) {
-  const base = `${encodeURIComponent(meta.id)}/frame`;
+  const target = meta.share_token || meta.id;
+  const base = `${encodeURIComponent(target)}/frame`;
   const params = new URLSearchParams();
   if (meta.version != null) params.set("version", String(meta.version));
   params.set("theme", theme);

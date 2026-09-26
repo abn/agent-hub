@@ -138,18 +138,27 @@ Protected artifacts have no version picker: switching
 versions means reloading with `?version=N` and entering the password again.
 Share the URL and the password through different channels.
 
-### Sharing and per-artifact choice
+### Sharing
 
-Password protection is a per-artifact choice made when sharing, not a
-project-wide setting. Two artifacts in the same project can differ: one plain and
-one locked.
+An artifact is shared through the overflow menu in the artifact viewer.
 
-In the artifact viewer, the overflow menu offers Share, which opens the share
-sheet. A public link allows anyone with the URL to open the artifact without an
-account or sign-in. Toggling "Lock with a password" encrypts the artifact before
-it leaves the device. Once created, separate copy actions are provided for the
-link and the password, ensuring the two do not travel in one paste. An existing
-link can be revoked at any time from the same sheet.
+For a plain artifact, sharing issues a unique, unguessable capability token. The
+resulting link (`/s/{token}`) serves the specific pinned version that was active
+when the share link was created. Once a plain artifact has been shared, the
+unauthenticated `/artifacts/{id}` route returns 404, so access is governed by the
+token alone; that holds after a revoke too, and a fresh share rotates the token. The share sheet provides a copy control
+for the link and a danger-confirmed "Revoke link" action. Revoking the token
+deactivates that URL immediately: requests for a revoked token return 404
+indistinguishable from an unknown token, preventing existence oracles. Creating a
+fresh share link for the artifact rotates the token, invalidating any previous
+link.
+
+For a protected artifact, the ciphertext is already protected by the client's
+encryption key, which never reaches the hub. The share sheet provides a copy
+control for the public URL (`/artifacts/{id}`) and a note explaining that the
+password was chosen on publish and cannot be recovered or reset by the hub.
+Because protection rests in the encryption key rather than server-side access
+revocation, withdrawal is achieved by deleting the artifact (`Delete artifact`).
 
 When updating an artifact via the MCP tool or API, an update specifies what
 happens to the protection:
