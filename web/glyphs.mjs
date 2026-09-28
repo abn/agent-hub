@@ -2,9 +2,10 @@
 // Glyphs are inline SVG strings with currentColor, aria-hidden, space after 'M'.
 
 export const GLYPH_PATHS = {
-  bell: '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 10 19a2 2 0 0 0 4 0"/>',
-  bellStruck:
-    '<path d="M 12 4a5 5 0 0 0-5 5v4l-2 3h14l-2-3V9a5 5 0 0 0-5-5z"/><path d="M 4 4l16 16"/>',
+  // The comment anchor, added in round 14 with the knowledge base's comment
+  // threads: a pin, because the anchor is a place in the document.
+  anchorPin:
+    '<path d="M12 21s6-6.2 6-10.2a6 6 0 0 0-12 0C6 14.8 12 21 12 21z"/><circle cx="12" cy="10.5" r="2"/>',
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
   // Two crossing strokes. Close was a word in one place and a down chevron
   // in two others, and a chevron says the sheet goes somewhere rather than
@@ -17,10 +18,10 @@ export const GLYPH_PATHS = {
   // at 20px on a phone, which is where it had to work and had never been seen.
   comments:
     '<path d="M 5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/>',
+  // A sheet and its duplicate. Added in round 11, drawn in round 14 wherever a
+  // value is lifted out of the page.
+  copy: '<rect x="9" y="9" width="10" height="10" rx="2"/><path d="M 15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"/>',
   copyRaw: '<path d="M 9 7l-4 5 4 5"/><path d="M 15 7l4 5-4 5"/>',
-  idCard:
-    '<rect x="3" y="5.5" width="18" height="13" rx="2.2"/><circle cx="9" cy="11" r="1.9"/><path d="M 6.3 15.7a3 3 0 0 1 5.4 0M 14.5 10.5h3.5M 14.5 14h3.5"/>',
-  link: '<path d="M 10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M 14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/>',
   lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M 8 10V7a4 4 0 0 1 8 0v3"/>',
   overflow:
     '<g fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></g>',
@@ -29,7 +30,6 @@ export const GLYPH_PATHS = {
   // legibly, and every keyboard on a phone puts an arrow where this button is.
   // Three strokes, one motif, nothing inside anything.
   send: '<path d="M 12 20V5"/><path d="M 6 11l6-6 6 6"/>',
-  trash: '<path d="M 5 7h14M 9 7V5h6v2M 7 7l1 13h8l1-13"/>',
 };
 
 export function glyphSvg(name, { size = 20, strokeWidth = 1.7, className = "" } = {}) {

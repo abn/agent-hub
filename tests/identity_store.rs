@@ -358,3 +358,33 @@ async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
     .await;
     assert_eq!(docs_after, 0, "the search rows go with the events");
 }
+
+/// The agent list reports whether a live token exists, which is the state the
+/// interface's "No live token" control row reads.
+#[tokio::test]
+async fn list_agents_reports_a_live_token() {
+    let db = fresh("identity-has-live-token").await;
+    let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop")
+        .await
+        .expect("create");
+
+    let listed = identity::list_agents(&db).await.expect("list");
+    assert_eq!(listed.len(), 1);
+    assert!(!listed[0].has_live_token, "a new agent has no token yet");
+
+    identity::issue_token(&db, &agent.id).await.expect("issue");
+    let listed = identity::list_agents(&db).await.expect("list");
+    assert!(listed[0].has_live_token, "an issued token is live");
+
+    identity::revoke_token(&db, &agent.id)
+        .await
+        .expect("revoke");
+    let listed = identity::list_agents(&db).await.expect("list");
+    assert!(!listed[0].has_live_token, "a revoked token is not live");
+
+    let one = identity::get_agent(&db, &agent.id)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert!(!one.has_live_token, "the single-agent read agrees");
+}

@@ -6,8 +6,9 @@
 
 import { api } from "./api.mjs";
 import { artifactGroupMenu, artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
-import { confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
+import { confirmAction, confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import {
   activeKinds,
   eventStage,
@@ -21,6 +22,7 @@ import {
 } from "./feed.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
+import { render } from "./router.mjs";
 import { pickProject, projectsIndexScreen } from "./projects.mjs";
 export { projectsIndexScreen } from "./projects.mjs";
 import {
@@ -92,6 +94,43 @@ async function projectFootprint(projectId) {
 // index that lists, a stage that shows the selected item, and an aside only
 // where something is read against the stage. The section switcher lives in
 // the index header, so the stage's top edge never moves between sections.
+
+// The way into the project's own screen. The design's gear, drawn from the
+// markup its settings module owns; the project header has room for one 44px
+// control and no more.
+function projectGear(id) {
+  return `<a class="proj-gear" href="#/projects/${esc(encodeURIComponent(id))}/settings" aria-label="Project settings">
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
+  </a>`;
+}
+
+export function projectLockBadge(project) {
+  if (!project || !project.confidential) return "";
+  return `<span class="project-lock" role="img" aria-label="confidential" style="display:inline-flex;align-items:center;gap:4px;flex:none;margin-right:8px;color:var(--ink-2);font-size:12px;white-space:nowrap">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`;
+}
+
+// The project's own actions, in the header overflow the design draws. The lock
+// item is the project's confidential state: an operator may go either way. The
+// copy and delete items are the ones the menu was designed with; a screen that
+// already owns delete passes full=false and gets the lock alone.
+export function projectOverflow(project, { full = true } = {}) {
+  const confidential = !!project.confidential;
+  const lockItem = confidential
+    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-public">Make public…</button>`
+    : `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-confidential">Make confidential…</button>`;
+  const extras = full
+    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="copy-project-path">Copy path</button>
+      <div class="proj-menu-divider" role="separator"></div>
+      <button type="button" role="menuitem" class="proj-menu-item proj-menu-delete" data-action="delete-project">Delete project</button>`
+    : "";
+  return `<span class="proj-overflow-wrap">
+    <button type="button" class="proj-overflow-btn" aria-label="Project actions" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 20 })}</button>
+    <div class="proj-overflow-menu" role="menu" hidden>
+      ${lockItem}
+      ${extras}
+    </div>
+  </span>`;
+}
 
 function segSwitcher(id, segment, stats) {
   const count = (n) => (n == null ? "" : `<span class="shell-seg-count">${n}</span>`);
@@ -192,7 +231,7 @@ const PROJECT_MOBILE_STYLE = `<style>
 }
 </style>`;
 
-function projectToolsMobile(id, segment, stats) {
+function projectToolsMobile(id, segment, stats, project) {
   const count = (n) => (n == null ? "" : `<span class="shell-seg-count">${n}</span>`);
   const tab = (seg, label, n) =>
     `<a href="#/projects/${encodeURIComponent(id)}/${seg}" role="tab" aria-selected="${
@@ -209,6 +248,7 @@ function projectToolsMobile(id, segment, stats) {
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
     </button>
+    ${projectGear(id)}
   </div>`;
 }
 
@@ -263,71 +303,122 @@ if (typeof document !== "undefined") {
   });
 }
 
-function wireProjectHeader(project, stats, footprint) {
-  const wrap = main.querySelector(".proj-overflow-wrap");
-  if (!wrap) return;
-  const btn = wrap.querySelector(".proj-overflow-btn");
-  const menu = wrap.querySelector(".proj-overflow-menu");
-  if (!btn || !menu) return;
+export function wireProjectHeader(project, stats, footprint) {
+  // The overflow is drawn in both the desktop section header and the phone
+  // tools row, so every instance is wired; each owns its own menu.
+  for (const wrap of main.querySelectorAll(".proj-overflow-wrap")) {
+    const btn = wrap.querySelector(".proj-overflow-btn");
+    const menu = wrap.querySelector(".proj-overflow-menu");
+    if (!btn || !menu) continue;
 
-  const close = () => {
-    menu.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-  };
+    const close = () => {
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    };
 
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = menu.hidden;
-    menu.hidden = !open;
-    btn.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) {
-      const first = menu.querySelector("button, a");
-      if (first) first.focus();
-    }
-  });
-
-  menu.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
+    btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      close();
-      btn.focus();
-    }
-  });
-
-  const copyBtn = menu.querySelector('button[data-action="copy-project-path"]');
-  if (copyBtn) {
-    copyBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      close();
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(`/p/${project.id}`);
-        }
-      } catch {}
-      toast("Path copied");
-    });
-  }
-
-  const deleteBtn = menu.querySelector('button[data-action="delete-project"]');
-  if (deleteBtn) {
-    deleteBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      close();
-      const confirmed = await confirmProjectDelete({ project, stats, footprint });
-      if (confirmed) {
-        try {
-          await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
-          location.hash = "#/projects";
-          toast("Project deleted.");
-        } catch (err) {
-          toast(`Deletion failed: ${err.message}`);
-        }
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) {
+        const first = menu.querySelector("button, a");
+        if (first) first.focus();
       }
     });
+
+    menu.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+        btn.focus();
+      }
+    });
+
+    const setConfidential = (next, title, body, commitLabel) => async (e) => {
+      e.stopPropagation();
+      close();
+      const confirmed = await confirmAction({
+        title,
+        body,
+        safe: "Cancel",
+        tone: "primary",
+        danger: commitLabel,
+      });
+      if (!confirmed) return;
+      try {
+        await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ confidential: next }),
+        });
+        toast(next ? "Project is confidential." : "Project is public.");
+        render();
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+
+    const name = project.display_name || project.id;
+    const lockBtn = menu.querySelector('button[data-action="project-make-confidential"]');
+    if (lockBtn) {
+      lockBtn.addEventListener(
+        "click",
+        setConfidential(
+          true,
+          `Make ${name} confidential?`,
+          "Only agents you grant it can reach it. Any agent without a grant loses access now.",
+          "Make confidential",
+        ),
+      );
+    }
+    const publicBtn = menu.querySelector('button[data-action="project-make-public"]');
+    if (publicBtn) {
+      publicBtn.addEventListener(
+        "click",
+        setConfidential(
+          false,
+          `Make ${name} public?`,
+          "Every agent on this hub can reach it, and its grants are no longer needed.",
+          "Make public",
+        ),
+      );
+    }
+
+    const copyBtn = menu.querySelector('button[data-action="copy-project-path"]');
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        close();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(`/p/${project.id}`);
+          }
+        } catch {}
+        toast("Path copied");
+      });
+    }
+
+    const deleteBtn = menu.querySelector('button[data-action="delete-project"]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        close();
+        const confirmed = await confirmProjectDelete({ project, stats, footprint });
+        if (confirmed) {
+          try {
+            await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+            location.hash = "#/projects";
+            toast("Project deleted.");
+          } catch (err) {
+            toast(`Deletion failed: ${err.message}`);
+          }
+        }
+      });
+    }
   }
 }
 
-async function feedShell(id, segment, stats, params, mobileBar = "") {
+async function feedShell(id, segment, stats, params, mobileBar = "", project = null) {
   const selected = params?.get?.("event") || "";
   setFeedSelection(selected);
   const indexBody = await feedSection(id, stats, { chips: false });
@@ -338,7 +429,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
-    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
+    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
     indexControls: shellIndexControls("Filter events", group),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -350,7 +441,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "") {
   });
 }
 
-async function artifactsShell(id, segment, stats, params, mobileBar = "") {
+async function artifactsShell(id, segment, stats, params, mobileBar = "", project = null) {
   const selected = params?.get?.("artifact") || "";
   const { rows, artifacts } = await artifactIndex(id, selected);
   const chosen = selected || artifacts[0]?.id || "";
@@ -380,7 +471,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
       indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
@@ -394,7 +485,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "") {
   };
 }
 
-async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
+async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, project = null) {
   const selectedId = params?.get?.("id") || params?.get?.("session") || "";
   const filePath = params?.get?.("file") || params?.get?.("entry") || "";
   const { sessions, card } = await sessionRows(id, selectedId);
@@ -449,7 +540,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen) {
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
       indexControls: shellIndexControls("Filter sessions"),
       indexBody: card,
       stageHead,
@@ -537,16 +628,16 @@ export async function projectScreen(params, gen, path) {
   let artifactId = "";
   let sessionSelected = null;
   if (segment === "artifacts") {
-    const built = await artifactsShell(id, segment, stats, params, mobileBar);
+    const built = await artifactsShell(id, segment, stats, params, mobileBar, project);
     shell = built.html;
     artifactInfo = built.info;
     artifactId = built.selected;
   } else if (segment === "sessions") {
-    const built = await sessionsShell(id, segment, stats, params, mobileBar, gen);
+    const built = await sessionsShell(id, segment, stats, params, mobileBar, gen, project);
     shell = built.html;
     sessionSelected = built.selectedSession;
   } else {
-    shell = await feedShell(id, segment, stats, params, mobileBar);
+    shell = await feedShell(id, segment, stats, params, mobileBar, project);
   }
   if (stale(gen)) return;
 

@@ -161,6 +161,7 @@ pub async fn update(
         )));
     }
 
+    let mut was_confidential = false;
     if !principal.is_admin {
         if payload.display_name.is_some() {
             return Err(Problem::from_error(&crate::error::Error::InvalidArgument(
@@ -178,6 +179,12 @@ pub async fn update(
         crate::policy::authorize(&state.db, &principal, &id, crate::policy::Access::Write)
             .await
             .map_err(|err| Problem::from_error(&err))?;
+        // Read the old state, so repeating the call does not signal twice.
+        was_confidential = crate::store::projects::get(&state.db, &id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+            .map(|project| project.confidential)
+            .unwrap_or(false);
     }
 
     let changes = projects::ProjectChanges {
@@ -189,6 +196,28 @@ pub async fn update(
     let project = projects::update(&state.db, &id, changes)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+
+    // An agent tightening a project is a signal the human should see; the
+    // admin's own change is the control they just used, so it says nothing.
+    if !principal.is_admin && !was_confidential && project.confidential {
+        let event = crate::store::events::NewEvent {
+            project_id: project.id.clone(),
+            kind: "signal".to_string(),
+            summary: format!(
+                "{} made {} confidential",
+                principal.actor, project.display_name
+            ),
+            payload: Some(serde_json::json!({ "action": "made_confidential" })),
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        };
+        if let Err(err) =
+            crate::store::events::append(&state.db, &principal.actor, None, event).await
+        {
+            tracing::warn!(project_id = %id, error = %err, "could not append a confidentiality signal");
+        }
+    }
 
     if changed {
         state.notify();

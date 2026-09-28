@@ -2270,6 +2270,156 @@ def check_inbox_and_search_phone(page, watch: Watch, port: int, project: str) ->
         watch.fail("search list is rendered inside a boxed card")
 
 
+# CHECK 14.B: every visible text node's computed size, at or above the floor.
+ROUND14_FONT_FLOOR = r"""
+() => {
+  const bad = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const text = (node.textContent || '').trim();
+    if (!text) continue;
+    const el = node.parentElement;
+    if (!el || el.closest('[aria-hidden="true"]')) continue;
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    if (!el.getClientRects().length) continue;
+    const size = parseFloat(style.fontSize);
+    if (size && size < 12) {
+      bad.push(el.tagName.toLowerCase() + ' ' + size + 'px ' + JSON.stringify(text.slice(0, 24)));
+    }
+  }
+  return bad.slice(0, 8);
+}
+"""
+
+ROUND14_ROUTES = (
+    "#/home",
+    "#/projects/{project}/feed",
+    "#/projects/{project}/artifacts",
+    "#/projects/{project}/sessions",
+    "#/inbox",
+    "#/search",
+    "#/settings",
+    "#/storage",
+    "#/access",
+    "#/more",
+    "#/projects",
+)
+
+
+def check_round14(page, watch: Watch, port: int, project: str, artifact_id: str, protected_id: str) -> None:
+    """CHECK 14.A-D: the access copy, the type floor, the share sheet and the token states."""
+    agent = "round14-probe"
+    confidential = "round14-confidential"
+    harness.request(port, "POST", "/api/v1/agents", {"id": agent, "display_name": "Round 14 probe"})
+    harness.request(port, "POST", f"/api/v1/agents/{agent}/token")
+    harness.request(
+        port,
+        "POST",
+        "/api/v1/projects",
+        {"id": confidential, "display_name": "Round 14 confidential", "confidential": True},
+    )
+    harness.request(port, "POST", f"/api/v1/agents/{agent}/grants", {"project_id": confidential})
+
+    # 14.A: no read/write level rendered as an access value.
+    watch.enter("round 14 CHECK 14.A: no read/write access value on Agents and tokens")
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/home", None)
+    goto(page, f"#/access?agent={agent}", None)
+    page.wait_for_timeout(400)
+    screen = page.inner_text(".shell")
+    for token in ("write on", "read on"):
+        if token in screen:
+            watch.fail(f"the agents screen still renders '{token}' as an access value")
+
+    # 14.D: revoke leaves the grants, issue restores access with no new grant.
+    watch.enter("round 14 CHECK 14.D: revoke leaves the grants, issue restores access")
+    rows_expr = (
+        "() => Array.from(document.querySelectorAll('.agent-project-row'))"
+        " .map((row) => row.textContent.trim())"
+    )
+    rows_before = page.evaluate(rows_expr)
+    if not rows_before:
+        watch.fail("the probe agent's project rows did not render")
+    page.click('[data-action="agent-revoke"]')
+    page.wait_for_selector("dialog .dialog-commit", timeout=5000)
+    page.click("dialog .dialog-commit")
+    page.wait_for_timeout(700)
+    controls = page.inner_text(".shell-stage")
+    if "No live token" not in controls:
+        watch.fail("after revoking, the control row does not read 'No live token'")
+    if "Issue token" not in controls:
+        watch.fail("after revoking, the action is not 'Issue token'")
+    if page.evaluate(rows_expr) != rows_before:
+        watch.fail("revoking the token changed the project rows")
+    page.click('[data-action="agent-issue"]')
+    page.wait_for_selector("dialog .reveal-token", timeout=5000)
+    page.click("dialog .dialog-commit")
+    page.wait_for_timeout(700)
+    if page.evaluate(rows_expr) != rows_before:
+        watch.fail("issuing a token changed the project rows")
+
+    # 14.C: the share sheet's actions follow the artifact.
+    watch.enter("round 14 CHECK 14.C: the share sheet's actions follow the artifact")
+    page.set_viewport_size({"width": 1440, "height": 900})
+
+    def open_share(which: str) -> str:
+        # The share sheet lives in the artifact viewer, the artifact opened on
+        # its own, which is where the overflow the sheet hangs from is drawn.
+        # The sheet asks the share endpoint, and a 404 there is the "no link
+        # yet" answer, so the response watch stands down for the open.
+        armed, watch.armed = watch.armed, False
+        try:
+            goto(page, f"#/artifacts/{quote(which)}?project={quote(project)}", None)
+            page.wait_for_timeout(600)
+            if page.locator(".hub-more").count() == 0:
+                watch.fail(f"the artifact viewer for {which} has no overflow control")
+                return ""
+            page.click(".hub-more")
+            page.click('[data-action="share"]')
+            page.wait_for_selector(".hub-share-sheet:not([hidden])", timeout=5000)
+            page.wait_for_selector(".hub-share-primary", timeout=5000)
+            text = page.inner_text(".hub-share-sheet")
+            page.click(".hub-share-backdrop")
+            page.wait_for_timeout(200)
+            return text
+        finally:
+            watch.armed = armed
+
+    plain = open_share(artifact_id)
+    if "Delete artifact" in plain:
+        watch.fail("the plain artifact's share sheet offers Delete artifact")
+    if "Make link" not in plain and "Revoke link" not in plain:
+        watch.fail("the plain artifact's share sheet offers neither Make link nor Revoke link")
+
+    protected = open_share(protected_id)
+    if "Revoke link" in protected:
+        watch.fail("the protected artifact's share sheet offers Revoke link")
+    if "Delete artifact" not in protected:
+        watch.fail("the protected artifact's share sheet does not offer Delete artifact")
+
+    # 14.B: no text under the 12px floor, at both widths and both themes.
+    watch.enter("round 14 CHECK 14.B: no text under 12px at 390 and 1440, both themes")
+    for width, height in ((390, 844), (1440, 900)):
+        page.set_viewport_size({"width": width, "height": height})
+        for theme in ("light", "dark"):
+            page.evaluate("(value) => { document.documentElement.dataset.theme = value; }", theme)
+            for route in ROUND14_ROUTES:
+                goto(page, route.replace("{project}", quote(project)), None)
+                page.wait_for_timeout(150)
+                for item in page.evaluate(ROUND14_FONT_FLOOR) or []:
+                    watch.fail(f"under the 12px floor at {width}/{theme} on {route}: {item}")
+
+    # Leave the phone viewport and the app's own theme for the checks that
+    # follow, which assume both.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { delete document.documentElement.dataset.theme; }")
+    page.wait_for_timeout(100)
+
+    harness.request(port, "DELETE", f"/api/v1/agents/{agent}/token")
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -2349,8 +2499,12 @@ def run() -> int:
                     "/api/v1/agents",
                     {"id": "reveal-probe", "display_name": "Reveal probe"},
                 )
+                # The reissue control exists only where a live token does, so
+                # the probe starts with one.
+                harness.request(port, "POST", "/api/v1/agents/reveal-probe/token")
                 run_step(watch, check_reissue_reveal, page, watch, port, "reveal-probe")
                 run_step(watch, check_desktop_agents_list_and_item, page, watch, "reveal-probe")
+                run_step(watch, check_round14, page, watch, port, project, artifact_id, protected_id)
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features

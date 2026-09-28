@@ -5,6 +5,7 @@ import { api } from "./api.mjs";
 import { unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { pickProject, withProject } from "./projects.mjs";
 import { render } from "./router.mjs";
 import { relative } from "./time.mjs";
@@ -586,7 +587,7 @@ export async function fetchBrainEntry(sessionId, path) {
 }
 
 export function kvAsideHTML(path, content) {
-  const copyGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V5h10"></path></svg>`;
+  const copyGlyph = glyphSvg("copy", { size: 14 });
   return `
     <div class="shell-head">
       <div class="shell-title"><span class="shell-title-line">Key</span></div>

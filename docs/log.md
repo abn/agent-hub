@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-28, the share and access copy round
+
+* **Update**: [Artifacts](usage/artifacts.md) states the share sheet's real
+  shape: **Make link** before a share, the link with a copy control and a
+  confirmed **Revoke link** when one exists, and **Delete artifact** for a
+  protected artifact, whose withdrawal is deletion because the key never reached
+  the hub.
+* **Note**: The agent screen renders no read or write level, because a grant is
+  access or no access. The project's own screen carries the lock control (make
+  confidential, make public), and an agent that makes a project confidential
+  leaves a `signal` feed event.
+
 ## 2026-09-26, artifact session lineage is creation, not the last write
 
 * **Correct**: [Artifacts](usage/artifacts.md) and the

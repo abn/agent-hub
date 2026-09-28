@@ -146,19 +146,22 @@ For a plain artifact, sharing issues a unique, unguessable capability token. The
 resulting link (`/s/{token}`) serves the specific pinned version that was active
 when the share link was created. Once a plain artifact has been shared, the
 unauthenticated `/artifacts/{id}` route returns 404, so access is governed by the
-token alone; that holds after a revoke too, and a fresh share rotates the token. The share sheet provides a copy control
-for the link and a danger-confirmed "Revoke link" action. Revoking the token
-deactivates that URL immediately: requests for a revoked token return 404
-indistinguishable from an unknown token, preventing existence oracles. Creating a
-fresh share link for the artifact rotates the token, invalidating any previous
-link.
+token alone; that holds after a revoke too, and a fresh share rotates the token.
+Before the first share the sheet offers **Make link** and says that sharing
+creates one link to this version. With a link it shows the link, a copy control,
+the version it opens, and a confirmed **Revoke link** action. Revoking deactivates
+that URL immediately: requests for a revoked token return 404 indistinguishable
+from an unknown token, preventing existence oracles. Creating a fresh share link
+for the artifact rotates the token, invalidating any previous link, and returns
+the sheet to the Make link state.
 
 For a protected artifact, the ciphertext is already protected by the client's
 encryption key, which never reaches the hub. The share sheet provides a copy
-control for the public URL (`/artifacts/{id}`) and a note explaining that the
-password was chosen on publish and cannot be recovered or reset by the hub.
-Because protection rests in the encryption key rather than server-side access
-revocation, withdrawal is achieved by deleting the artifact (`Delete artifact`).
+control for the public URL (`/artifacts/{id}`) and a note that whoever published
+it set its password, which the hub cannot reset or recover. Because protection
+rests in the encryption key rather than server-side access revocation, withdrawal
+is achieved by deleting the artifact, a **Delete artifact** action confirmed with
+the words that every version and every link to it stop working.
 
 When updating an artifact via the MCP tool or API, an update specifies what
 happens to the protection:

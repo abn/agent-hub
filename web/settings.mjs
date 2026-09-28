@@ -68,7 +68,7 @@ const THEME_GLYPHS = {
     '<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"></path></svg>',
 };
 
-const COPY_PATH_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+const COPY_PATH_SVG = glyphSvg("copy", { size: 17 });
 
 const CHECK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>`;
 
@@ -94,7 +94,6 @@ function alertsContent() {
   if (state === "unsupported") {
     return `
       <div class="settings-row row">
-        <span class="alerts-glyph unsupported" aria-hidden="true">${glyphSvg("bellStruck", { size: 20 })}</span>
         <div class="grow">
           <div class="title">Waiting on you</div>
           <div class="meta">This browser cannot notify. The inbox still shows everything.</div>
@@ -104,7 +103,6 @@ function alertsContent() {
   if (state === "blocked") {
     return `
       <div class="settings-row row">
-        <span class="alerts-glyph blocked" aria-hidden="true">${glyphSvg("bellStruck", { size: 20 })}</span>
         <div class="grow">
           <div class="title">Waiting on you</div>
           <div class="meta">Blocked in this browser. Allow notifications for this site, then check again.</div>
@@ -125,7 +123,6 @@ function alertsContent() {
   }
   return `
     <div class="settings-row row">
-      <span class="alerts-glyph" aria-hidden="true">${glyphSvg("bell", { size: 20 })}</span>
       <div class="grow">
         <div class="title">Waiting on you</div>
         <div class="meta">Your browser will ask first. Nothing is sent until you turn it on.</div>

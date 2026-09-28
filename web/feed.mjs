@@ -260,7 +260,9 @@ function feedRow(event, baseline, selected = false) {
   const summaryText = formatEventSummary(event);
   const open = isOpen(event);
   const title = `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`;
-  const waitingPill = open ? `<span class="pill pill-waiting">Waiting on you</span>` : "";
+  const waitingPill = open
+    ? `<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>`
+    : "";
   return `<div class="row feed-row${unread ? " unread" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
     ${glyph(event.kind)}
     <div class="grow">
@@ -489,7 +491,7 @@ export function eventStage(event, projectId) {
     <article class="shell-prose feed-stage">
       <div class="feed-stage-pills">
         <span class="pill" data-kind="${esc(event.kind)}">${esc(word)}</span>
-        ${open ? `<span class="pill pill-waiting">Waiting on you</span>` : ""}
+        ${open ? `<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>` : ""}
       </div>
       <h2 class="feed-stage-title">${esc(title)}</h2>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>

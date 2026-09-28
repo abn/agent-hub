@@ -601,7 +601,7 @@ export function confirmProjectDelete({ project, stats = null, footprint = "" }) 
   delBtn.className = "dialog-del-btn";
   delBtn.disabled = true;
   delBtn.setAttribute("aria-disabled", "true");
-  delBtn.innerHTML = `${glyphSvg("trash", { size: 16 })}<span>Delete</span>`;
+  delBtn.textContent = "Delete";
 
   actions.append(cancel, delBtn);
   el.appendChild(actions);

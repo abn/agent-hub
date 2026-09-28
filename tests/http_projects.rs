@@ -726,3 +726,108 @@ async fn an_agent_may_lock_a_project_and_only_the_admin_may_unlock_it() {
         "the admin unlocks it"
     );
 }
+
+/// An agent that tightens a project leaves a signal the human can see; the
+/// admin's own change is the control they just used and says nothing.
+#[tokio::test]
+async fn an_agent_tightening_a_project_leaves_a_signal() {
+    let state = state().await;
+    let agent = agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+        .await
+        .expect("create agent");
+    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+        .await
+        .expect("issue token")
+        .token;
+    let agent_auth = format!("Bearer {token}");
+
+    projects::create(&state.db, "open-work", "Open Work")
+        .await
+        .expect("create project");
+
+    let response = call_with_auth(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(&agent_auth),
+        Some(serde_json::json!({ "confidential": true })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let conn = state.db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT summary FROM events WHERE project_id = 'open-work' AND kind = 'signal'",
+            (),
+        )
+        .await
+        .expect("query");
+    let row = rows.next().await.expect("row").expect("a signal row");
+    assert_eq!(
+        row.get::<String>(0).expect("summary"),
+        "agent-one made Open Work confidential"
+    );
+
+    // Repeating the call does not signal twice. The project is confidential
+    // now, so the agent needs the grant that confidential access requires.
+    agent_hub::store::identity::add_grant(&state.db, "agent-one", "open-work")
+        .await
+        .expect("grant");
+    let again = call_with_auth(
+        &state,
+        "PATCH",
+        "/api/v1/projects/open-work",
+        Some(&agent_auth),
+        Some(serde_json::json!({ "confidential": true })),
+    )
+    .await;
+    assert_eq!(again.status(), StatusCode::OK);
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM events WHERE project_id = 'open-work' AND kind = 'signal'",
+            (),
+        )
+        .await
+        .expect("query");
+    assert_eq!(
+        rows.next()
+            .await
+            .expect("row")
+            .expect("count")
+            .get::<i64>(0)
+            .expect("count"),
+        1,
+        "the second tightening writes no second signal"
+    );
+
+    // The admin's change is not an agent signal.
+    projects::create(&state.db, "other-work", "Other Work")
+        .await
+        .expect("create project");
+    let admin = call(
+        &state,
+        "PATCH",
+        "/api/v1/projects/other-work",
+        Some(serde_json::json!({ "confidential": true })),
+    )
+    .await;
+    assert_eq!(admin.status(), StatusCode::OK);
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM events WHERE project_id = 'other-work' AND kind = 'signal'",
+            (),
+        )
+        .await
+        .expect("query");
+    assert_eq!(
+        rows.next()
+            .await
+            .expect("row")
+            .expect("count")
+            .get::<i64>(0)
+            .expect("count"),
+        0,
+        "the admin's own change leaves no signal"
+    );
+}

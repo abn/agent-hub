@@ -3,6 +3,7 @@
 
 import { api } from "./api.mjs";
 import { esc, paint, stale } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { formatBytes } from "./storage.mjs";
 import {
   installShellLayout,
@@ -335,13 +336,16 @@ export async function projectsIndexScreen(gen, passedProjects) {
     }
 
     const titleClass = hasWaiting || hasUnread ? "project-title unread" : "project-title";
+    const lockMeta = p.confidential
+      ? `<span class="project-lock" role="img" aria-label="confidential" style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`
+      : "";
 
     return `
       <div class="row project-row" data-id="${esc(p.id)}">
         <a class="project-link" href="#/projects/${encodeURIComponent(p.id)}/feed">
           <span class="project-info">
             <span class="title ${titleClass}">${esc(p.display_name)}</span>
-            <span class="meta project-meta">${artifactsText} · <span class="mono">${footprintText}</span></span>
+            <span class="meta project-meta">${lockMeta}${artifactsText} · <span class="mono">${footprintText}</span></span>
           </span>
           ${badgeHTML}
           <span class="project-chev-slot" aria-hidden="true">

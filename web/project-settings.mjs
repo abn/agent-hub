@@ -10,6 +10,7 @@ import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { deleteProject } from "./settings.mjs";
+import { projectLockBadge, projectOverflow, wireProjectHeader } from "./project.mjs";
 import { toast } from "./toast.mjs";
 
 const NOT_FOUND = {
@@ -111,7 +112,7 @@ function localDate(timestamp) {
   return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}`;
 }
 
-function skeleton(projectId, deletable) {
+function skeleton(projectId, deletable, project) {
   const back = `#/projects/${esc(encodeURIComponent(projectId))}/feed`;
   return `
     <div class="proj-head">
@@ -120,8 +121,9 @@ function skeleton(projectId, deletable) {
       </a>
       <div class="grow">
         <h1>Project settings</h1>
-        <p class="pset-sub mono"></p>
+        <p class="proj-head-meta">${projectLockBadge(project)}<span class="pset-sub mono"></span></p>
       </div>
+      ${projectOverflow(project, { full: false })}
     </div>
     <form class="pset" data-action="project-settings" novalidate>
       <div class="pset-field">
@@ -173,8 +175,9 @@ export async function projectSettingsScreen(gen, path) {
 
   // An agent's personal space is settable but not deletable: it goes with the
   // agent, so the control the hub would refuse is not offered.
-  paint(gen, skeleton(saved.id, !saved.owner_agent));
+  paint(gen, skeleton(saved.id, !saved.owner_agent, saved));
   document.title = "Project settings · Agent Hub";
+  wireProjectHeader(saved, null, "");
 
   const form = main.querySelector(".pset");
   const name = form.elements.display_name;

@@ -29,6 +29,8 @@ pub struct Agent {
     pub created_at: String,
     /// When the agent was last seen, if ever.
     pub last_seen_at: Option<String>,
+    /// Whether the agent has a live (unrevoked) token.
+    pub has_live_token: bool,
     /// Lifecycle state: 'active' or 'pending'.
     pub state: String,
     /// The agent's why line, if enrolled.
@@ -136,7 +138,8 @@ pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
+                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
              FROM agents ORDER BY created_at ASC",
             (),
         )
@@ -154,7 +157,8 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
+                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
              FROM agents WHERE id = ?1",
             [id],
         )
@@ -228,6 +232,7 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
         personal_project_id,
         created_at,
         last_seen_at: None,
+        has_live_token: false,
         state: "active".to_string(),
         enrol_note: None,
         enrol_source: None,
@@ -651,6 +656,7 @@ pub async fn enrol_agent(
             personal_project_id,
             created_at: created_at.clone(),
             last_seen_at: None,
+            has_live_token: true,
             state: "pending".to_string(),
             enrol_note: Some(why.to_string()),
             enrol_source: Some(source.to_string()),
@@ -681,7 +687,8 @@ pub async fn approve_enrolment(
 
     let mut rows = tx
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source
+            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
+                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
              FROM agents WHERE id = ?1",
             vec![Value::Text(current_id.to_string())],
         )
@@ -1038,6 +1045,7 @@ fn agent_from_row(row: &Row) -> Result<Agent> {
         personal_project_id: text(row, 2)?,
         created_at: text(row, 3)?,
         last_seen_at: text_at(row, 4)?,
+        has_live_token: integer_at(row, 8)?.unwrap_or(0) != 0,
         state: text_at(row, 5)?.unwrap_or_else(|| "active".to_string()),
         enrol_note: text_at(row, 6)?,
         enrol_source: text_at(row, 7)?,
@@ -1091,6 +1099,16 @@ fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
         Value::Null => Ok(None),
         other => Err(Error::Engine(format!(
             "expected text in column {index}, found {other:?}"
+        ))),
+    }
+}
+
+fn integer_at(row: &Row, index: usize) -> Result<Option<i64>> {
+    match row.get_value(index).map_err(engine)? {
+        Value::Integer(value) => Ok(Some(value)),
+        Value::Null => Ok(None),
+        other => Err(Error::Engine(format!(
+            "expected integer in column {index}, found {other:?}"
         ))),
     }
 }

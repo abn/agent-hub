@@ -20,8 +20,8 @@ is real.
 
 ## Tokens
 
-`web/tokens.css` is the design's token file, shipped verbatim except for one
-documented deviation below. Every colour, radius, spacing step and type size
+`web/tokens.css` is the design's token file, shipped verbatim except for the
+documented deviations below. Every colour, radius, spacing step and type size
 resolves to a token there. A value the token file does not carry is a design
 question, not a local decision.
 
@@ -34,11 +34,20 @@ question, not a local decision.
 
 **Deviation: the action tone.** The handoff's `--action` is `#9A5E0C`, which
 measures 4.47:1 on `--action-bg` and 4.39:1 on `--surface-2`, below the WCAG AA
-4.5:1 minimum for the 11px bold "waiting on you" pill and the Approve button.
-The repo ships `#95590B`, which measures 4.80:1 and 4.71:1 and passes AA while
-staying visually the same tone. `--k-approval` is that same value, so the
-button that asks for a decision and the badge that marks one stay one colour.
-The handoff is welcome to adopt it.
+4.5:1 minimum for the 12/600 "waiting on you" pill and the Approve button. The
+repo ships `#95590B`, which measures 4.80:1 and 4.71:1 and passes AA while
+staying visually the same tone; round 14 confirms that value. `--k-approval` is
+that same value, so the button that asks for a decision and the badge that marks
+one stay one colour.
+
+**Deviation: the field border.** The handoff's hairline is one step lighter than
+the 3:1 non-text minimum against the field's own surface, so an empty field's
+border alone would not carry it. The build darkens the field border by one step.
+Round 14 accepts this as the field border everywhere.
+
+The status pill ("Waiting on you") is 12/600 with a 6px dot, height 22, padding
+0 8, radius 11 and a 6px gap, the same box as the live token pill. Any 11px text
+is a defect: it is raised to 12 and the container grows.
 
 **The knowledge tone is storage-only.** `--k-knowledge` and `--k-knowledge-bg`
 are an olive pair used only by the Storage breakdown's knowledge segment and
@@ -77,9 +86,9 @@ The handoff's `glyphs/*.svg` files carry a provenance block added by the
 export pipeline. It is not design data and must not ship; `web/glyphs.mjs`
 holds the bare paths and inline markup only.
 
-The build's set is being reconciled with these twelve. A check holds that no
-two names draw the same path and that no drawn glyph is unused; the reachability
-of the twelve themselves is tracked as a gap, not yet a gate.
+The build's set now carries the twelve except `key`, which nothing draws yet,
+and keeps `close` and `send`, which round 15 draws into the set. A check holds
+that no two names draw the same path and that no drawn glyph is unused.
 
 ## Layout: the shell
 
@@ -288,11 +297,21 @@ Agent voice, past tense, no exclamation marks. Approvals name the action and
 its blast radius. Toasts state what happened and the reversible path. Empty
 states say what this is and what to do. No emoji anywhere.
 
-The revoke-token confirmation deviates from the round 13.1 handoff copy, which
-said the agent "loses every project". Revoking only stops the token; grants are
-kept, and reissuing a token restores access. The dialog says so, because the
-handoff's words read as if the grants were gone and the Access screen keeps
-revoke and grant removal as separate controls.
+The revoke-token dialog carries round 14's copy: "Its token stops working now.
+Its projects stay granted, and a new token restores its access." Revoking stops
+the token and nothing else; the Access screen keeps revoke and grant removal as
+separate controls. The stage's foot reads **Revoke token**, and an agent with no
+live token reads "No live token" with **Issue token** beside it.
+
+A grant is access or no access, with no read or write level, so no screen renders
+`read` or `write` as an access value. The agent's PROJECTS rows are the project
+name, with the lock glyph and the word "confidential" only on a confidential
+project, and a trailing overflow with **Remove access**. The project's own screen
+carries the lock control in its overflow: **Make confidential** and **Make
+public**, the operator's two directions. The share sheet shares or withdraws and
+nothing else: a plain artifact offers the link and **Revoke link**, a protected
+one the link and **Delete artifact**, because encryption was chosen when the
+document was published.
 
 ## Build gates
 

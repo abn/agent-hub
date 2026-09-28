@@ -86,7 +86,7 @@ export async function artifactStage(id, projectId) {
     }">${glyphSvg("comments", { size: 18 })}${comments}</button>
     <button type="button" class="hub-btn-glyph" aria-label="More">${glyphSvg("overflow", { size: 18 })}</button>`;
 
-  const copyGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+  const copyGlyph = glyphSvg("copy", { size: 14 });
   const rawGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-4 5 4 5"></path><path d="M15 7l4 5-4 5"></path></svg>`;
 
   const controls = `
@@ -567,6 +567,17 @@ function buildVersionSheet(id, versions, shown, projectId) {
   return { backdrop, sheet };
 }
 
+// The share URL is long and its tail is the part that differs, so the middle is
+// elided for display; the full value stays in the title and is what the copy
+// control takes.
+function middleTruncate(value, max = 38) {
+  const text = String(value || "");
+  if (text.length <= max) return text;
+  const head = Math.ceil((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+}
+
 // Share sheet: opens from overflow menu
 function buildShareSheet(id, current, shown, moreBtn) {
   const backdrop = document.createElement("div");
@@ -593,7 +604,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
   const bodyWrap = document.createElement("div");
   bodyWrap.className = "hub-share-body";
 
-  const copySvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M 5 15V5h10"/></svg>`;
+  const copySvg = glyphSvg("copy", { size: 16 });
 
   async function copyToClipboard(url) {
     try {
@@ -608,14 +619,14 @@ function buildShareSheet(id, current, shown, moreBtn) {
     bodyWrap.innerHTML = "";
 
     if (current.protected) {
-      // Encrypted artifact: Copy link and Delete artifact
+      // Encrypted artifact: the link, then delete. Encryption was chosen when
+      // the document was published, so the sheet cannot lock or unlock it.
       const shareUrl = new URL(`artifacts/${encodeURIComponent(id)}`, document.baseURI).href;
 
       const linkRow = document.createElement("div");
       linkRow.className = "hub-share-link-row";
       linkRow.innerHTML = `
-        ${glyphSvg("lock", { size: 18 })}
-        <span class="hub-share-url mono">${esc(shareUrl)}</span>
+        <span class="hub-share-url mono" title="${esc(shareUrl)}">${esc(middleTruncate(shareUrl))}</span>
         <button type="button" class="hub-share-copy-btn" aria-label="Copy share link" data-action="copy-link">
           ${copySvg}
         </button>
@@ -626,7 +637,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
 
       const helper = document.createElement("div");
       helper.className = "hub-share-helper";
-      helper.textContent = "This artifact was encrypted by whoever published it. The hub cannot reset or recover the password.";
+      helper.textContent = "Whoever published this set its password. The hub cannot reset or recover it.";
 
       const actions = document.createElement("div");
       actions.className = "hub-share-actions";
@@ -636,9 +647,9 @@ function buildShareSheet(id, current, shown, moreBtn) {
       delBtn.textContent = "Delete artifact";
       delBtn.addEventListener("click", async () => {
         const ok = await confirmAction({
-          title: "Delete artifact?",
-          body: "This removes the artifact and all its versions permanently. There is no undo.",
-          safe: "Keep artifact",
+          title: `Delete ${current.title || "this artifact"}?`,
+          body: "Every version and every link to it stop working. This cannot be undone.",
+          safe: "Cancel",
           danger: "Delete artifact",
           tone: "danger",
         });
@@ -671,8 +682,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
         const linkRow = document.createElement("div");
         linkRow.className = "hub-share-link-row";
         linkRow.innerHTML = `
-          ${glyphSvg("link", { size: 18 })}
-          <span class="hub-share-url mono">${esc(shareUrl)}</span>
+          <span class="hub-share-url mono" title="${esc(shareUrl)}">${esc(middleTruncate(shareUrl))}</span>
           <button type="button" class="hub-share-copy-btn" aria-label="Copy share link" data-action="copy-link">
             ${copySvg}
           </button>
@@ -683,7 +693,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
 
         const helper = document.createElement("div");
         helper.className = "hub-share-helper";
-        helper.textContent = `Anyone with this link can open version ${activeShare.version}. No account, no sign-in.`;
+        helper.textContent = `This link opens version ${activeShare.version}. It is the only way in.`;
 
         const actions = document.createElement("div");
         actions.className = "hub-share-actions";
@@ -693,11 +703,11 @@ function buildShareSheet(id, current, shown, moreBtn) {
         revokeBtn.textContent = "Revoke link";
         revokeBtn.addEventListener("click", async () => {
           const ok = await confirmAction({
-            title: "Revoke public link?",
-            body: "The URL stops working immediately. Anyone with the link will no longer be able to open this artifact.",
-            safe: "Keep link",
+            title: "Revoke this link?",
+            body: "Anyone holding it loses access. Sharing again makes a new link.",
+            safe: "Cancel",
             danger: "Revoke link",
-            tone: "danger",
+            tone: "primary",
           });
           if (ok) {
             try {
@@ -713,23 +723,16 @@ function buildShareSheet(id, current, shown, moreBtn) {
 
         bodyWrap.append(linkRow, helper, actions);
       } else {
-        const statusRow = document.createElement("div");
-        statusRow.className = "hub-share-status";
-        statusRow.innerHTML = `
-          <span class="hub-share-status-dot"></span>
-          <span>This artifact has no active link</span>
-        `;
-
         const helper = document.createElement("div");
         helper.className = "hub-share-helper";
-        helper.textContent = `Creating a link generates a revocable, unguessable URL pinned to version ${shown}.`;
+        helper.textContent = "Sharing creates one link to this version.";
 
         const actions = document.createElement("div");
         actions.className = "hub-share-actions";
         const createBtn = document.createElement("button");
         createBtn.type = "button";
         createBtn.className = "hub-share-primary";
-        createBtn.textContent = "Create link";
+        createBtn.textContent = "Make link";
         createBtn.addEventListener("click", async () => {
           try {
             createBtn.disabled = true;
@@ -747,7 +750,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
         });
         actions.appendChild(createBtn);
 
-        bodyWrap.append(statusRow, helper, actions);
+        bodyWrap.append(helper, actions);
       }
     }
   }

@@ -126,6 +126,12 @@ function quoteBlockNode(comment, shownVersion) {
     block.className = "hub-quote-block outlined";
   }
 
+  const quoteRow = document.createElement("div");
+  quoteRow.className = "hub-quote-row";
+  const anchorIcon = document.createElement("span");
+  anchorIcon.className = "hub-quote-icon";
+  anchorIcon.setAttribute("aria-hidden", "true");
+  anchorIcon.innerHTML = glyphSvg("anchorPin", { size: 14 });
   const quoteText = document.createElement("div");
   quoteText.className = "hub-quote-text mono";
   if (anchor.mode === "text" && anchor.quote) {
@@ -133,7 +139,8 @@ function quoteBlockNode(comment, shownVersion) {
   } else if (anchor.mode === "point") {
     quoteText.textContent = "Pinned";
   }
-  block.appendChild(quoteText);
+  quoteRow.append(anchorIcon, quoteText);
+  block.appendChild(quoteRow);
 
   const stamp = document.createElement("div");
   stamp.className = "hub-quote-stamp mono";

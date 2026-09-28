@@ -1819,8 +1819,12 @@ fn desktop_agents_is_list_and_item_shell() {
         "selected agent row in index carries aria-current=true"
     );
     assert!(
-        desktop.contains("data-action=\"agent-token\""),
-        "stage control row carries Reissue token action data-action=agent-token"
+        desktop.contains("agent-token") && desktop.contains("agent-issue"),
+        "stage control row carries the reissue and issue token actions"
+    );
+    assert!(
+        desktop.contains("No live token"),
+        "stage control row names the no-live-token state"
     );
     assert!(
         desktop.contains("data-action=\"agent-revoke\""),

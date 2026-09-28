@@ -64,7 +64,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
     .map((agent, idx) => {
       const grants = grantsByAgent[agent.id] || [];
       const projectWord = grants.length === 1 ? "project" : "projects";
-      const grantDesc = grants.length > 0 ? `write on ${grants.length} ${projectWord}` : "no projects";
+      const grantDesc = grants.length > 0 ? `${grants.length} ${projectWord}` : "no projects";
       const activeDesc = agent.last_seen_at
         ? `active ${relative(agent.last_seen_at)}`
         : `seen ${relative(agent.created_at)}`;
@@ -140,10 +140,12 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
         <span style="font:500 12px/1 var(--font-mono);color:var(--ink-3)">${esc(stageMeta)}</span>
       </div>`;
 
+    const liveToken = selectedAgent.has_live_token !== false;
+
     stageControls = `
       <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <span style="flex:1;font-size:13px;color:var(--ink-2)">Token issued ${esc(issuedDate)}</span>
-        <button type="button" class="btn-outline" data-action="agent-token" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Reissue token</button>
+        <span style="flex:1;font-size:13px;color:var(--ink-2)">${liveToken ? `Token issued ${esc(issuedDate)}` : "No live token"}</span>
+        <button type="button" class="btn-outline" data-action="${liveToken ? "agent-token" : "agent-issue"}" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${liveToken ? "Reissue token" : "Issue token"}</button>
       </div>`;
 
     const projectRows = grants.length
@@ -151,22 +153,44 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
           .map((grant, idx) => {
             const proj = projects.find((p) => p.id === grant.project_id);
             const projName = proj?.display_name || grant.project_id;
+            const confidential = proj ? proj.confidential === true : true;
             const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
+            const lead = confidential
+              ? `<span class="agent-project-lock" role="img" aria-label="confidential" style="flex:none;width:24px;display:grid;place-items:center;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}</span>`
+              : `<span aria-hidden="true" style="flex:none;width:24px"></span>`;
             return `
-              <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 12px;${borderTop}border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
-                <span style="flex:1;font-size:14px;font-weight:500">${esc(projName)}</span>
+              <div class="row agent-project-row" style="display:flex;align-items:center;gap:8px;height:48px;padding:0 4px 0 12px;${borderTop}border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
+                ${lead}
+                <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(projName)}</span>
+                <span class="agent-row-menu" style="flex:none;position:relative;display:inline-flex">
+                  <button type="button" class="hub-btn-glyph" data-action="agent-project-menu" aria-label="More actions for ${esc(projName)}" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 18 })}</button>
+                  <div class="shell-group-menu" role="menu" hidden>
+                    <button type="button" role="menuitem" data-action="agent-ungrant" data-id="${esc(selectedAgent.id)}" data-project="${esc(grant.project_id)}">Remove access</button>
+                  </div>
+                </span>
               </div>`;
           })
           .join("")
-      : `<div style="display:flex;align-items:center;height:48px;padding:0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink-3);font-size:13px;box-sizing:border-box">No projects granted</div>`;
+      : `<div style="display:flex;align-items:center;height:48px;padding:0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink-3);font-size:13px;box-sizing:border-box">No confidential projects granted. Every public project is open to this agent.</div>`;
+
+    const grantRow = `
+      <button type="button" class="agent-grant-row" data-action="agent-grant-open" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="display:flex;align-items:center;gap:8px;width:100%;height:48px;padding:0 12px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--accent);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">
+        <span aria-hidden="true" style="flex:none;width:24px;display:grid;place-items:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg></span>
+        Grant a project
+      </button>`;
 
     stageBody = `
       <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:0 24px">
         <div style="max-width:640px">
           <div style="padding:20px 0 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECTS · ${grants.length}</div>
           ${projectRows}
+          ${grantRow}
           <div style="height:24px"></div>
-          <button type="button" class="agent-revoke-btn" data-action="agent-revoke" data-id="${esc(selectedAgent.id)}" style="display:flex;align-items:center;width:100%;height:48px;padding:0 12px;border:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">Revoke ${esc(selectedAgent.display_name || selectedAgent.id)}</button>
+          ${
+            liveToken
+              ? `<button type="button" class="agent-revoke-btn" data-action="agent-revoke" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="display:flex;align-items:center;width:100%;height:48px;padding:0 12px;border:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">Revoke token</button>`
+              : ""
+          }
         </div>
       </div>`;
   } else {
@@ -199,33 +223,48 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
 function renderMobileAgentDetail(agent, projects, grants) {
   const meta = `first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · ${agent.personal_project_id}`;
   const stageHead = shellStageHead(agent.display_name || agent.id, meta, "", "#/access");
+  const liveToken = agent.has_live_token !== false;
   const stageControls = `
     <div class="shell-controls" style="display:flex;align-items:center;gap:8px;padding:0 16px;height:44px;background:var(--surface);border-bottom:1px solid var(--line);box-sizing:border-box">
-      <button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
-      <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>
+      ${
+        liveToken
+          ? `<button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
+      <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>`
+          : `<span style="flex:1;font-size:13px;color:var(--ink-2)">No live token</span>
+      <button type="button" class="btn-hairline" data-action="agent-issue" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Issue token</button>`
+      }
     </div>
   `;
+  const grantedIds = new Set(grants.map((grant) => grant.project_id));
   const grantRows = grants.length
     ? grants
-        .map(
-          (grant) => `
-        <div class="row" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface)">
-          <span class="mono" style="font-size:13px;font-family:var(--font-mono)">${esc(grant.project_id)}</span>
-          <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 12px/1 var(--font-sans);cursor:pointer">Remove grant</button>
+        .map((grant) => {
+          const proj = projects.find((p) => p.id === grant.project_id);
+          const projName = proj?.display_name || grant.project_id;
+          const confidential = proj ? proj.confidential === true : true;
+          const lead = confidential
+            ? `<span role="img" aria-label="confidential" style="flex:none;width:24px;display:grid;place-items:center;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}</span>`
+            : `<span aria-hidden="true" style="flex:none;width:24px"></span>`;
+          return `
+        <div class="row" style="display:flex;align-items:center;gap:8px;min-height:48px;padding:0 8px 0 16px;border-bottom:1px solid var(--line);background:var(--surface)">
+          ${lead}
+          <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(projName)}</span>
+          <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 12px/1 var(--font-sans);cursor:pointer">Remove access</button>
         </div>
-      `,
-        )
+      `;
+        })
         .join("")
-    : '<div style="padding:16px;color:var(--ink-3);font-size:13px">No project grants.</div>';
+    : '<div style="padding:16px;color:var(--ink-3);font-size:13px">No confidential projects granted. Every public project is open to this agent.</div>';
 
-  const projectOptions = projects.length
-    ? projects
+  const grantable = projects.filter((p) => p.confidential && !grantedIds.has(p.id));
+  const projectOptions = grantable.length
+    ? grantable
         .map(
           (p) =>
             `<option value="${esc(p.id)}">${esc(p.display_name && p.display_name !== p.id ? `${p.display_name} (${p.id})` : p.id)}</option>`,
         )
         .join("")
-    : '<option value="" disabled>No projects available</option>';
+    : '<option value="" disabled>No confidential projects to grant</option>';
 
   const content = `
     <div class="access-screen" style="flex:1;min-height:0;overflow:hidden">
@@ -241,7 +280,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
           <option value="" disabled selected>Select project…</option>
           ${projectOptions}
         </select>
-        <button class="primary" type="submit" style="height:36px;align-self:flex-start">Grant project</button>
+        <button class="primary" type="submit" style="height:36px;align-self:flex-start"${grantable.length ? "" : " disabled"}>Grant project</button>
       </form>
     </div>
   `;
@@ -281,7 +320,7 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
     .map((agent, idx) => {
       const grants = grantsByAgent[agent.id] || [];
       const projectWord = grants.length === 1 ? "project" : "projects";
-      const grantDesc = grants.length > 0 ? `write on ${grants.length} ${projectWord}` : "no projects";
+      const grantDesc = grants.length > 0 ? `${grants.length} ${projectWord}` : "no projects";
       const activeDesc = agent.last_seen_at ? `active ${relative(agent.last_seen_at)}` : `seen ${relative(agent.created_at)}`;
       const metaLine = `${grantDesc} · ${activeDesc}`;
 
@@ -337,10 +376,53 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
 let desktopState = null;
 let currentGen = 0;
 
+// The trailing overflow on a project row. A menu opened here is closed by the
+// document listener installed once, so a render does not stack handlers.
+let rowMenusWired = false;
+function wireRowMenus() {
+  if (rowMenusWired || typeof document === "undefined") return;
+  rowMenusWired = true;
+  const closeAll = (except) => {
+    for (const menu of document.querySelectorAll(".agent-row-menu [role='menu']:not([hidden])")) {
+      if (menu === except) continue;
+      menu.hidden = true;
+      menu
+        .closest(".agent-row-menu")
+        ?.querySelector("[aria-haspopup='menu']")
+        ?.setAttribute("aria-expanded", "false");
+    }
+  };
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-action='agent-project-menu']");
+    if (toggle) {
+      const menu = toggle.closest(".agent-row-menu")?.querySelector("[role='menu']");
+      const open = !!menu?.hidden;
+      closeAll(menu);
+      if (menu) {
+        if (open) {
+          const rect = toggle.getBoundingClientRect();
+          menu.style.top = `${Math.round(rect.bottom + 6)}px`;
+          menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - 200)))}px`;
+        }
+        menu.hidden = !open;
+        toggle.setAttribute("aria-expanded", String(open));
+        if (open) menu.querySelector("button")?.focus();
+      }
+      return;
+    }
+    if (!event.target.closest?.(".agent-row-menu")) closeAll();
+    else closeAll(event.target.closest(".agent-row-menu")?.querySelector("[role='menu']"));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAll();
+  });
+}
+
 function setupAgentsEvents() {
   const root = main.querySelector(".shell[data-segment='access']") || main.querySelector(".access-screen") || main;
   if (!root || root.dataset.agentsEventsBound === "on") return;
   root.dataset.agentsEventsBound = "on";
+  wireRowMenus();
 
   root.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -379,6 +461,17 @@ function setupAgentsEvents() {
   });
 
   root.addEventListener("click", (event) => {
+    const grantBtn = event.target.closest("[data-action='agent-grant-open']");
+    if (grantBtn && desktopState) {
+      event.preventDefault();
+      openGrantPicker(
+        grantBtn.dataset.id,
+        grantBtn.dataset.name,
+        desktopState.projects,
+        desktopState.grantsByAgent[grantBtn.dataset.id] || [],
+      );
+      return;
+    }
     const toggleBtn = event.target.closest("[data-action='toggle-add-agent']");
     if (toggleBtn) {
       event.preventDefault();
@@ -588,13 +681,12 @@ export async function agentsSection() {
   return `
     <div class="card access-card">
       <div class="row access-row">
-        <span class="access-glyph">${glyphSvg("idCard", { size: 17 })}</span>
         <div class="grow">
           <div class="title">Access</div>
           <div class="meta">A token is an identity of its own. Several agents may share one - a proxy or an aggregator usually does.</div>
         </div>
       </div>
-      <p><a class="button access-link" href="#/access">${glyphSvg("idCard", { size: 17 })} Manage access</a></p>
+      <p><a class="button access-link" href="#/access">Manage access</a></p>
       <div class="meta" style="margin-top: var(--s-3); margin-bottom: var(--s-1);">Agents that identified themselves:</div>
       ${agentRows || '<p class="empty">No agents yet.</p>'}
     </div>
@@ -672,7 +764,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
   copyBtn.setAttribute("aria-label", "Copy the new token");
   // RULE 11.13's two-sheet copy glyph, the same markup Settings uses for the
   // path it owns. The set has no `copy` key: the motif lives where it is used.
-  copyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-7A1.5 1.5 0 0 0 5 6.5v7A1.5 1.5 0 0 0 6.5 15H9"></path></svg>`;
+  copyBtn.innerHTML = glyphSvg("copy", { size: 18 });
   copyBtn.addEventListener("click", () => {
     if (visible) copyToken(visible);
   });
@@ -781,12 +873,147 @@ export async function reissueToken(id, name = "") {
   await revealIssuedToken(null, name || id, id);
 }
 
-export async function revokeToken(id) {
+// The picker a grant opens. Only confidential projects without a grant are
+// listed: a public project is already open to every agent, so there is nothing
+// to grant. This mirrors the shared dialog's shape (a platform `<dialog>`, the
+// safe control focused first, focus kept inside its own ring).
+function openGrantPicker(agentId, agentName, projects, grants) {
+  const granted = new Set((grants || []).map((grant) => grant.project_id));
+  const options = (projects || []).filter((p) => p.confidential && !granted.has(p.id));
+
+  const opener = document.activeElement;
+  const el = document.createElement("dialog");
+  el.className = "dialog";
+  const titleId = "grant-title";
+  el.setAttribute("aria-labelledby", titleId);
+  el.setAttribute("aria-label", `Grant a project to ${agentName || agentId}`);
+
+  const form = document.createElement("form");
+  form.method = "dialog";
+
+  const heading = document.createElement("h2");
+  heading.className = "dialog-title";
+  heading.id = titleId;
+  heading.textContent = "Grant a project";
+  form.appendChild(heading);
+
+  const body = document.createElement("p");
+  body.className = "dialog-body";
+
+  const problem = document.createElement("p");
+  problem.className = "dialog-note";
+  problem.hidden = true;
+
+  const actions = document.createElement("div");
+  actions.className = "dialog-actions";
+  const safe = document.createElement("button");
+  safe.type = "button";
+  safe.className = "dialog-safe";
+  safe.textContent = "Cancel";
+  const commit = document.createElement("button");
+  commit.type = "button";
+  commit.className = "dialog-commit";
+  commit.textContent = "Grant";
+  commit.disabled = !options.length;
+  actions.append(safe, commit);
+
+  let select = null;
+  if (options.length) {
+    body.textContent =
+      "Only confidential projects without a grant are listed. A public project is already open to this agent.";
+    const wrap = document.createElement("div");
+    wrap.className = "dialog-field-wrap";
+    const label = document.createElement("label");
+    label.className = "dialog-label";
+    label.htmlFor = "grant-project-select";
+    label.textContent = "Project";
+    select = document.createElement("select");
+    select.id = "grant-project-select";
+    select.className = "dialog-field";
+    select.style.height = "36px";
+    for (const project of options) {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent =
+        project.display_name && project.display_name !== project.id
+          ? `${project.display_name} (${project.id})`
+          : project.id;
+      select.appendChild(option);
+    }
+    wrap.append(label, select);
+    form.append(body, wrap, problem, actions);
+  } else {
+    body.textContent = "No confidential projects are left to grant. Make a project confidential first.";
+    safe.textContent = "Close";
+    form.append(body, actions);
+  }
+
+  safe.addEventListener("click", () => el.close("cancel"));
+  commit.addEventListener("click", async () => {
+    if (commit.disabled || !select) return;
+    commit.disabled = true;
+    problem.hidden = true;
+    try {
+      await api(`/api/v1/agents/${encodeURIComponent(agentId)}/grants`, {
+        method: "POST",
+        body: JSON.stringify({ project_id: select.value }),
+      });
+    } catch (error) {
+      problem.textContent = error.message;
+      problem.hidden = false;
+      commit.disabled = false;
+      return;
+    }
+    el.close("grant");
+  });
+
+  el.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const ring = [...el.querySelectorAll("select, button:not([disabled])")];
+    if (!ring.length) return;
+    const edge = event.shiftKey ? ring[0] : ring[ring.length - 1];
+    if (document.activeElement !== edge) return;
+    event.preventDefault();
+    (event.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+  });
+
+  el.appendChild(form);
+  document.body.appendChild(el);
+  document.documentElement.classList.add("has-dialog");
+  el.showModal();
+  (select || safe).focus();
+
+  return new Promise((resolve) => {
+    el.addEventListener(
+      "close",
+      () => {
+        const done = el.returnValue === "grant";
+        el.remove();
+        document.documentElement.classList.remove("has-dialog");
+        if (opener instanceof HTMLElement && opener.isConnected) {
+          opener.focus({ preventScroll: true });
+        }
+        if (done && typeof render === "function") render();
+        resolve(done);
+      },
+      { once: true },
+    );
+  });
+}
+
+export async function issueToken(id, name = "") {
+  // Issuing where there is no live token is not destructive, so the reveal is
+  // shown directly rather than behind the reissue confirmation.
+  const issued = await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "POST" });
+  await revealIssuedToken(issued.token, name || id, id);
+}
+
+export async function revokeToken(id, name = "") {
   const confirmed = await confirmAction({
-    title: `Revoke the token for ${id}?`,
-    body: "Its token stops working now, so it loses access to every project until a new token is issued. Its project grants are kept.",
-    note: "Revoking cannot be undone.",
-    safe: "Keep",
+    title: `Revoke ${name || id}'s token?`,
+    body: "Its token stops working now. Its projects stay granted, and a new token restores its access.",
+    safe: "Cancel",
+    tone: "primary",
     danger: "Revoke token",
     commit: async () => {
       await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
@@ -794,7 +1021,7 @@ export async function revokeToken(id) {
     },
   });
   if (confirmed) {
-    toast(`Token revoked for ${id}.`);
+    toast(`Token revoked for ${name || id}.`);
   }
 }
 
