@@ -9,8 +9,9 @@ software release notes and the repository changelog.
 * **Add**: [Project knowledge base](usage/knowledge-base.md) documents the
   project's fourth section, Wiki: one `meta=1` tree, a reader that keeps the
   frontmatter out of the body and lists backlinks, and an editor that writes
-  back the version it read. Rename, move, a rendered-compare merge, history,
-  lint and review are not in this version.
+  back the version it read. The Wiki home carries the counts and the Recent
+  changes and Lint screens; rename, move, a rendered-compare merge, comment
+  threads and the review action are not in this version.
 
 ## 2026-09-28, the share and access copy round
 

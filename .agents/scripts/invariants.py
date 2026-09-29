@@ -2465,6 +2465,16 @@ def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
     if "Edited by the check." not in body:
         watch.fail("the wiki edit did not land in the reader")
 
+    goto(page, f"#/projects/{quote(project)}/wiki?view=changes", None)
+    page.wait_for_timeout(500)
+    if page.locator(".wiki-change").count() == 0:
+        watch.fail("Recent changes rendered no rows")
+
+    goto(page, f"#/projects/{quote(project)}/wiki?view=lint", None)
+    page.wait_for_timeout(500)
+    if page.locator(".wiki-finding").count() == 0:
+        watch.fail("Lint rendered no findings for a tree without an index")
+
     page.set_viewport_size({"width": 390, "height": 844})
     watch.drain_rejections()
 

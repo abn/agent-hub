@@ -633,7 +633,7 @@ export async function projectScreen(params, gen, path) {
   let sessionSelected = null;
   if (segment === "wiki") {
     const selected = params?.get("page") || "";
-    const stage = await wikiStage(id, params, shellStageHead);
+    const stage = await wikiStage(id, params, shellStageHead, stats);
     const indexBody = await wikiIndexBody(id, selected);
     const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
     shell = shellHTML({

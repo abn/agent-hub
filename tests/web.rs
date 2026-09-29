@@ -2843,6 +2843,10 @@ fn the_project_wiki_segment_is_wired() {
         WIKI_JS.contains("readFrontmatter"),
         "the reader keeps the frontmatter out of the page body"
     );
+    assert!(
+        WIKI_JS.contains("kb/history") && WIKI_JS.contains("kb/lint"),
+        "the Wiki home holds Recent changes and Lint"
+    );
     let served = include_str!("../src/http/web.rs");
     assert!(
         served.contains("/wiki.mjs"),

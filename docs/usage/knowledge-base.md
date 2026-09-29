@@ -229,9 +229,12 @@ metadata and is shown as the page's type, status and tags rather than as body
 text, and the backlinks are listed under it. An edit writes the page back with
 the version token the read carried, so a page that changed under the reader is
 refused rather than overwritten; the conflict is said in place. **New page**
-writes a page that is not there yet, with `if_version: "absent"`. Rename, move,
-a rendered-compare merge, the history and lint screens, and the review action
-are not in this version.
+writes a page that is not there yet, with `if_version: "absent"`. The Wiki home
+carries the page, needs-review and stale counts and holds the two housekeeping
+screens: **Recent changes** (`kb/history`, who did what to which page and when;
+the rows are not tappable in this version) and **Lint** (`kb/lint`, the tree's
+findings with a Re-check that walks it again). Rename, move, a rendered-compare
+merge, comment threads and the review action are not in this version.
 
 ## What there is not
 

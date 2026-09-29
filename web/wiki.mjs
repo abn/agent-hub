@@ -201,21 +201,120 @@ function editorStage(id, path, content, version, isNew, shellStageHead) {
 // The stage for the wiki segment, given the route's query and the shell's
 // stage-head builder (the project view owns the chrome, so it is passed in
 // rather than imported, which would be a module cycle).
-export async function wikiStage(id, params, shellStageHead) {
+const OP_WORDS = {
+  "kb.put": "wrote",
+  "kb.delete": "deleted",
+  "kb.review": "reviewed",
+  "kb.promote": "promoted",
+};
+
+function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
+  return {
+    head: shellStageHead(title, "", actions, `#/projects/${encodeURIComponent(id)}/wiki`),
+    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(controls)}</span></div>`,
+    body,
+  };
+}
+
+// Recent changes: who did what, to which page, and when. The rows are not
+// tappable in this version (round 14 item 7), and a row says only what the log
+// holds.
+async function changesStage(id, shellStageHead) {
+  let data;
+  try {
+    data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/history?limit=50`);
+  } catch (error) {
+    return simpleStage(shellStageHead, id, "Recent changes", "", `<div class="shell-pad"><p class="empty">${esc(error.message)}</p></div>`);
+  }
+  const rows = data.rows || [];
+  const body = rows.length
+    ? rows
+        .map(
+          (row) => `<div class="row wiki-change" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line)">
+        <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(row.at)}</span>
+        <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(row.actor)}</span>
+        <span class="mono" style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayPath(row.path))}</span>
+        <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(OP_WORDS[row.op] || row.op)}</span>
+      </div>`,
+        )
+        .join("")
+    : `<p class="empty" style="padding:16px">No changes yet.</p>`;
+  return simpleStage(shellStageHead, id, "Recent changes", `${rows.length} change${rows.length === 1 ? "" : "s"}`, `<div class="wiki-changes">${body}</div>`);
+}
+
+// Lint: the tree's findings, with a Re-check that walks it again.
+async function lintStage(id, params, shellStageHead) {
+  const fresh = params?.get("fresh") === "1";
+  let data;
+  try {
+    data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/lint${fresh ? "?fresh=1" : ""}`);
+  } catch (error) {
+    return simpleStage(shellStageHead, id, "Lint", "", `<div class="shell-pad"><p class="empty">${esc(error.message)}</p></div>`);
+  }
+  const findings = data.findings || [];
+  const recheck = `<a class="btn-outline" href="#/projects/${encodeURIComponent(id)}/wiki?view=lint&fresh=1" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/28px var(--font-sans)">Re-check</a>`;
+  const body = findings.length
+    ? findings
+        .map(
+          (finding) => `<div class="row wiki-finding" style="display:flex;flex-direction:column;gap:3px;padding:10px 16px;border-bottom:1px solid var(--line)">
+        <span class="mono" style="font-size:12px;color:var(--ink-3)">${esc(finding.code)}</span>
+        <span style="font-size:14px">${esc(finding.message)}</span>
+        ${
+          finding.path
+            ? `<a class="mono" href="${wikiPageHash(id, displayPath(finding.path))}" style="font-size:12px;color:var(--accent);text-decoration:none">${esc(displayPath(finding.path))}</a>`
+            : ""
+        }
+      </div>`,
+        )
+        .join("")
+    : `<p class="empty" style="padding:16px">No findings. The tree is consistent.</p>`;
+  return {
+    head: shellStageHead("Lint", `${findings.length} finding${findings.length === 1 ? "" : "s"}`, recheck, `#/projects/${encodeURIComponent(id)}/wiki`),
+    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">checked ${esc(data.checked_at || "")}</span></div>`,
+    body,
+  };
+}
+
+// The Wiki home: the counts, and the two housekeeping screens, which live here
+// and never in the inbox.
+async function homeStage(id, stats, shellStageHead) {
+  let s = null;
+  try {
+    s = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/stats`);
+  } catch {
+    s = null;
+  }
+  const pages = s?.pages ?? stats?.kb_pages ?? 0;
+  const review = s?.needs_review?.total ?? 0;
+  const stale = s?.stale ?? 0;
+  const link = (view, label) =>
+    `<a class="row" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}" style="display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">${label}</a>`;
+  const body = `<div class="wiki-home">
+    <div style="padding:16px;display:flex;gap:24px">
+      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">PAGES</div><div style="font-size:22px;font-weight:600">${pages}</div></div>
+      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">NEEDS REVIEW</div><div style="font-size:22px;font-weight:600">${review}</div></div>
+      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">STALE</div><div style="font-size:22px;font-weight:600">${stale}</div></div>
+    </div>
+    ${link("changes", "Recent changes")}
+    ${link("lint", "Lint")}
+  </div>`;
+  return simpleStage(shellStageHead, id, "Wiki", `${pages} page${pages === 1 ? "" : "s"}`, body);
+}
+
+export async function wikiStage(id, params, shellStageHead, stats) {
   const selected = params?.get("page") || "";
   const editing = params?.get("edit") === "1";
   const isNew = params?.get("new") === "1";
+  const view = params?.get("view") || "";
+  if (view === "changes") return changesStage(id, shellStageHead);
+  if (view === "lint") return lintStage(id, params, shellStageHead);
   if (isNew) return editorStage(id, "", "", "absent", true, shellStageHead);
   if (editing && selected) {
     const page = (await readPage(id, selected)) || { content: "", version: "absent" };
     return editorStage(id, selected, page.content || "", page.version || "absent", false, shellStageHead);
   }
   if (selected) return pageStage(id, selected, shellStageHead);
-  return {
-    head: shellStageHead("Wiki", "", "", `#/projects/${encodeURIComponent(id)}/feed`),
-    controls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / wiki</span></div>`,
-    body: `<div class="shell-pad"><p class="empty">Select a page from the tree, or write a new one.</p></div>`,
-  };
+  return homeStage(id, stats, shellStageHead);
 }
 
 // The version token a Save carries back: the read's token for an edit, the
