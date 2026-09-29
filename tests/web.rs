@@ -413,7 +413,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 45] = [
+const SHELL_PATHS: [&str; 46] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -445,6 +445,7 @@ const SHELL_PATHS: [&str; 45] = [
     "/artifacts.mjs",
     "/comments.mjs",
     "/glyphs.mjs",
+    "/wiki.mjs",
     "/connect.mjs",
     "/frontmatter.mjs",
     "/app.css",
@@ -2804,5 +2805,47 @@ fn session_markdown_is_sanitized_and_comment_quotes_use_text_content() {
     assert!(
         COMMENTS_JS.contains("span.textContent = `Resolved${quoteLabel}`"),
         "comments.mjs must use textContent for resolved quote labels"
+    );
+}
+
+const WIKI_JS: &str = include_str!("../web/wiki.mjs");
+
+// The knowledge base is a fourth project segment: a tree from one meta
+// listing, a reader that strips frontmatter, and an editor that writes back
+// with the version it read.
+#[test]
+fn the_project_wiki_segment_is_wired() {
+    assert!(
+        PROJECT_JS.contains(r#"const SEGMENTS = ["feed", "wiki", "artifacts", "sessions"];"#),
+        "the wiki is a fourth project segment"
+    );
+    assert!(
+        PROJECT_JS.contains(r#"tab("wiki", "Wiki""#),
+        "the project section switcher carries the Wiki tab"
+    );
+    assert!(
+        PROJECT_JS.contains("wikiStage(") && PROJECT_JS.contains("wikiIndexBody("),
+        "the project view builds the wiki tree and stage"
+    );
+    assert!(
+        APP_JS.contains("wiki-new") && APP_JS.contains("wiki-save"),
+        "the wiki actions are routed"
+    );
+    assert!(
+        WIKI_JS.contains("kb/pages?meta=1"),
+        "the tree costs one meta listing"
+    );
+    assert!(
+        WIKI_JS.contains("if_version"),
+        "a save carries the version it read"
+    );
+    assert!(
+        WIKI_JS.contains("readFrontmatter"),
+        "the reader keeps the frontmatter out of the page body"
+    );
+    let served = include_str!("../src/http/web.rs");
+    assert!(
+        served.contains("/wiki.mjs"),
+        "the asset table serves the wiki module"
     );
 }

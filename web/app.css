@@ -6823,6 +6823,13 @@ dialog.dialog-project-delete {
 .shell-seg a .shell-seg-count { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
 .shell-seg a[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-1); }
 .shell-seg a[aria-selected="true"] .shell-seg-count { color: var(--ink-2); }
+/* The project's four sections do not fit the index pane at its narrowest, so
+   the switcher scrolls sideways rather than clipping the last tab; the gear
+   beside it stays put. */
+.shell-head.project-seg-head { gap: 8px; }
+.shell-head.project-seg-head .shell-seg { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.shell-head.project-seg-head .shell-seg::-webkit-scrollbar { display: none; }
+.shell-head.project-seg-head .shell-seg a { flex: none; }
 
 /* The list filter: a pill field in the control row, filtering in place. */
 .shell-filter {

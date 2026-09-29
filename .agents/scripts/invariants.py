@@ -2420,6 +2420,55 @@ def check_round14(page, watch: Watch, port: int, project: str, artifact_id: str,
     harness.request(port, "DELETE", f"/api/v1/agents/{agent}/token")
 
 
+def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
+    """The wiki segment: one meta tree, a reader that strips frontmatter, and an
+    editor that writes back the version it read."""
+    watch.enter("wiki: tree, reader and editor")
+    content = (
+        "---\ntype: runbook\nstatus: standard\n---\n"
+        "# Deploy\n\nRun the release from the checkout.\n"
+    )
+    harness.request(
+        port,
+        "PUT",
+        f"/api/v1/projects/{quote(project)}/kb/pages/runbooks/deploy.md",
+        {"content": content},
+    )
+
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, f"#/projects/{quote(project)}/wiki", None)
+    page.wait_for_timeout(500)
+    if page.locator(".wiki-row").count() == 0:
+        watch.fail("the wiki tree rendered no rows")
+
+    goto(page, f"#/projects/{quote(project)}/wiki?page=runbooks%2Fdeploy.md", None)
+    page.wait_for_timeout(600)
+    if page.locator(".wiki-page").count() == 0:
+        watch.fail("the wiki reader did not render the page")
+    else:
+        body = page.inner_text(".wiki-page")
+        if "Deploy" not in body or "type:" in body:
+            watch.fail(f"the reader did not keep the frontmatter out of the body: {body[:80]!r}")
+
+    goto(page, f"#/projects/{quote(project)}/wiki?page=runbooks%2Fdeploy.md&edit=1", None)
+    page.wait_for_timeout(600)
+    if page.locator("#wiki-content").count() == 0:
+        watch.fail("the wiki editor did not open")
+        return
+    page.fill(
+        "#wiki-content",
+        "---\ntype: runbook\nstatus: standard\n---\n# Deploy\n\nEdited by the check.\n",
+    )
+    page.click('[data-action="wiki-save"]')
+    page.wait_for_timeout(1000)
+    body = page.inner_text(".wiki-page") if page.locator(".wiki-page").count() else ""
+    if "Edited by the check." not in body:
+        watch.fail("the wiki edit did not land in the reader")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    watch.drain_rejections()
+
+
 def run() -> int:
     with harness.running_hub(NAME) as (port, seeded):
         project = seeded["project_id"]
@@ -2505,6 +2554,7 @@ def run() -> int:
                 run_step(watch, check_reissue_reveal, page, watch, port, "reveal-probe")
                 run_step(watch, check_desktop_agents_list_and_item, page, watch, "reveal-probe")
                 run_step(watch, check_round14, page, watch, port, project, artifact_id, protected_id)
+                run_step(watch, check_wiki_read_write, page, watch, port, project)
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features

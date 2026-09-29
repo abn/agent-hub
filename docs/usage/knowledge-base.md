@@ -219,6 +219,20 @@ tags?, if_version?)` reads `from_path` from the caller's active session brain
 and returns `{ok, path, version, lint[]}`. A `brain_delete` of a page that does
 not exist is `not_found`.
 
+## The Wiki segment
+
+A project carries a fourth section, **Wiki**, beside Feed, Artifacts and
+Sessions; its tab names the page count. The tree is one listing of the whole
+knowledge base (`meta=1`), so directories, pages and their derived numbers
+arrive in one request. Selecting a page renders it: the frontmatter block is
+metadata and is shown as the page's type, status and tags rather than as body
+text, and the backlinks are listed under it. An edit writes the page back with
+the version token the read carried, so a page that changed under the reader is
+refused rather than overwritten; the conflict is said in place. **New page**
+writes a page that is not there yet, with `if_version: "absent"`. Rename, move,
+a rendered-compare merge, the history and lint screens, and the review action
+are not in this version.
+
 ## What there is not
 
 There is no move or rename. A move is a read, a write with

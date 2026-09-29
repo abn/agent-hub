@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-09-29, the wiki human surface
+
+* **Add**: [Project knowledge base](usage/knowledge-base.md) documents the
+  project's fourth section, Wiki: one `meta=1` tree, a reader that keeps the
+  frontmatter out of the body and lists backlinks, and an editor that writes
+  back the version it read. Rename, move, a rendered-compare merge, history,
+  lint and review are not in this version.
+
 ## 2026-09-28, the share and access copy round
 
 * **Update**: [Artifacts](usage/artifacts.md) states the share sheet's real

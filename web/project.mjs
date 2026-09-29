@@ -24,6 +24,7 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
 import { pickProject, projectsIndexScreen } from "./projects.mjs";
+import { wikiIndexBody, wikiStage } from "./wiki.mjs";
 export { projectsIndexScreen } from "./projects.mjs";
 import {
   errorAsideHTML,
@@ -46,7 +47,7 @@ import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 
-const SEGMENTS = ["feed", "artifacts", "sessions"];
+const SEGMENTS = ["feed", "wiki", "artifacts", "sessions"];
 
 // The id and the segment a `#/projects/<id>/<segment>` hash names. The segment
 // defaults to the feed, so `#/projects/<id>` is the project's feed.
@@ -140,6 +141,7 @@ function segSwitcher(id, segment, stats) {
     }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
   return `<div class="shell-seg" role="tablist" aria-label="Project sections">
     ${tab("feed", "Feed", null)}
+    ${tab("wiki", "Wiki", stats?.kb_pages ?? null)}
     ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
     ${tab("sessions", "Sessions", stats?.sessions ?? null)}
   </div>`;
@@ -239,11 +241,13 @@ function projectToolsMobile(id, segment, stats, project) {
     }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
   const filterGlyph = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`;
 
+  const showCounts = typeof window === "undefined" || window.innerWidth >= 360;
   return `<div class="project-tools-mobile shell-controls" role="toolbar" aria-label="Project tools">
     <div class="project-tools-seg" role="tablist" aria-label="Project sections">
       ${tab("feed", "Feed", null)}
-      ${tab("artifacts", "Artifacts", stats?.artifacts ?? null)}
-      ${tab("sessions", "Sessions", stats?.sessions ?? null)}
+      ${tab("wiki", "Wiki", showCounts ? stats?.kb_pages ?? null : null)}
+      ${tab("artifacts", "Artifacts", showCounts ? stats?.artifacts ?? null : null)}
+      ${tab("sessions", "Sessions", showCounts ? stats?.sessions ?? null : null)}
     </div>
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
@@ -627,7 +631,22 @@ export async function projectScreen(params, gen, path) {
   let artifactInfo = null;
   let artifactId = "";
   let sessionSelected = null;
-  if (segment === "artifacts") {
+  if (segment === "wiki") {
+    const selected = params?.get("page") || "";
+    const stage = await wikiStage(id, params, shellStageHead);
+    const indexBody = await wikiIndexBody(id, selected);
+    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
+    shell = shellHTML({
+      segment,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
+      indexControls: shellIndexControls("Search this wiki", "", newBtn),
+      indexBody,
+      stageHead: stage.head,
+      stageControls: stage.controls,
+      stageBody: stage.body,
+      hasSelection: Boolean(selected || params?.get("new") === "1" || params?.get("edit") === "1"),
+    });
+  } else if (segment === "artifacts") {
     const built = await artifactsShell(id, segment, stats, params, mobileBar, project);
     shell = built.html;
     artifactInfo = built.info;
