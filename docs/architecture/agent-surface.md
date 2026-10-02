@@ -51,6 +51,15 @@ abandoned and removed along with its request event and its search row. Over the
 optional embedded tailnet the peer is not available, so those requests share one
 identity.
 
+## The agent guide
+
+The hub serves its agent guide (`assets/SKILL.md`) over MCP as a resource,
+`agenthub://skill`, as well as at `GET /SKILL.md`. The initialize handshake
+advertises the `resources` capability, `whoami` returns the guide's URL, and
+`agent-hub tools` prints each tool's `inputSchema`, so an agent wired only to MCP
+can discover both the tools and the conventions without a human handing it the
+document.
+
 ## Tools
 
 | Tool | Purpose |
@@ -60,9 +69,10 @@ identity.
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. |
-| `question_post` | Ask the human or another agent a question. It lands in the inbox and the feed, and returns the question id. |
+| `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
-| `inbox_read` | Read the human's global inbox, optionally by status or project. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
+| `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
+| `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
 | `artifact_get` | Read an artifact's content and metadata, optionally one version. Includes total and open thread counts across all versions. |
@@ -79,7 +89,7 @@ identity.
 | `brain_delete` | Remove a path from either store. |
 | `brain_promote` | Copy an entry from the caller's active session brain into a project knowledge base page that cites the session it came from. |
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
-| `whoami` | Report the calling identity and its personal space. |
+| `whoami` | Report the calling identity, its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
 
 A publish carries a description, a favicon mark, and a version label. It

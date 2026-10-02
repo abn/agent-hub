@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-02, the agent can wait, and discovery is self-serve
+
+* **Add**: [Agent surface](architecture/agent-surface.md) documents `inbox_wait`,
+  an agent-side long poll over the same ticker the enrolment poll uses, and the
+  `since` cursor on `inbox_read`; the guide is served as an MCP resource
+  (`agenthub://skill`) with its URL returned by `whoami`; and `question_post` no
+  longer advertises an addressee, since agent-to-agent messaging is deferred.
+* **Update**: `agent-hub tools` prints the `inputSchema`; the API no longer
+  advertises the ignored `actor`/`session_id` on artifact publish, and the
+  duplicate `session_id` on `feed_read` and `artifact_list` is gone.
+
 ## 2026-10-02, the first run works end to end
 
 * **Fix**: [Agent surface](architecture/agent-surface.md) records that deciding
