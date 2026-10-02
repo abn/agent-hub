@@ -9,11 +9,12 @@
 //! made it that far is inert: no row points at it, and it is swept at the next
 //! startup.
 //!
-//! The IO here is blocking and is called from async handlers. At the artifact
-//! cap and the single-operator scale this is accepted: the worst case is one
-//! Tokio worker stalled for the duration of a large transfer. Revisit with
-//! `spawn_blocking` or `tokio::fs` if the node ever serves concurrent large
-//! transfers.
+//! The IO here is blocking, so every operation runs it on the Tokio blocking
+//! pool through [`blocking`]. A transfer up to the artifact cap holds a
+//! blocking thread, not an async worker, so the runtime stays free to answer
+//! other requests while a large blob moves. On a current-thread runtime (the
+//! test harness) there is no other worker to hand off to and no concurrent
+//! caller, so the call runs inline.
 
 use std::path::{Path, PathBuf};
 
@@ -41,8 +42,12 @@ pub fn write(
 ) -> Result<String> {
     crate::limits::check_artifact(bytes.len())?;
     let rel = blob_path(project_id, artifact_id, version, kind)?;
-    write_at(data_dir, &rel, bytes)?;
-    Ok(rel)
+    let data_dir = data_dir.to_path_buf();
+    let bytes = bytes.to_vec();
+    blocking(move || -> Result<String> {
+        write_at(&data_dir, &rel, &bytes)?;
+        Ok(rel)
+    })
 }
 
 /// Write a blob under a pending name and return its relative path.
@@ -61,8 +66,12 @@ pub fn write_pending(
     let ext = extension(kind)?;
     let token = ulid::Ulid::generate();
     let rel = format!("artifacts/{project_id}/{artifact_id}/{PENDING_PREFIX}{token}.{ext}");
-    write_at(data_dir, &rel, bytes)?;
-    Ok(rel)
+    let data_dir = data_dir.to_path_buf();
+    let bytes = bytes.to_vec();
+    blocking(move || -> Result<String> {
+        write_at(&data_dir, &rel, &bytes)?;
+        Ok(rel)
+    })
 }
 
 /// Rename a pending blob onto its version path and return that path.
@@ -81,24 +90,28 @@ pub fn promote(
     let rel = blob_path(project_id, artifact_id, version, kind)?;
     let from = resolve(data_dir, pending)?;
     let to = resolve(data_dir, &rel)?;
-    std::fs::rename(from, to)?;
-    Ok(rel)
+    blocking(move || -> Result<String> {
+        std::fs::rename(from, to)?;
+        Ok(rel)
+    })
 }
 
 /// Read a blob by its relative path.
 pub fn read(data_dir: &Path, rel: &str) -> Result<Vec<u8>> {
     let path = resolve(data_dir, rel)?;
-    Ok(std::fs::read(path)?)
+    blocking(move || -> Result<Vec<u8>> { Ok(std::fs::read(path)?) })
 }
 
 /// Remove a blob. A missing blob is not an error.
 pub fn remove(data_dir: &Path, rel: &str) -> Result<()> {
     let path = resolve(data_dir, rel)?;
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    blocking(move || -> Result<()> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    })
 }
 
 /// Remove a directory tree under the data directory.
@@ -107,11 +120,13 @@ pub fn remove(data_dir: &Path, rel: &str) -> Result<()> {
 /// under one directory. A tree that is already absent is not an error.
 pub fn remove_tree(data_dir: &Path, rel: &str) -> Result<()> {
     let path = resolve(data_dir, rel)?;
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    blocking(move || -> Result<()> {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    })
 }
 
 /// Remove every pending blob under the data directory, returning the count.
@@ -237,6 +252,32 @@ fn child_dirs(path: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(dirs)
+}
+
+/// Run a blocking closure off the async worker.
+///
+/// The serving runtime is multi-threaded, so the closure is submitted to the
+/// Tokio blocking pool and the worker is handed off while it runs: the runtime
+/// keeps answering other requests during a transfer up to the artifact cap. A
+/// current-thread runtime (the test harness) has no other worker to hand off
+/// to and no concurrent caller, so the closure runs inline. Every argument the
+/// closure reads is cloned to an owned value first, so it is `Send + 'static`
+/// and no borrow of the caller's data crosses the await.
+fn blocking<T, F>(f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return f();
+    };
+    if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+        return f();
+    }
+    tokio::task::block_in_place(|| match handle.block_on(tokio::task::spawn_blocking(f)) {
+        Ok(result) => result,
+        Err(err) => Err(Error::Engine(format!("blocking task failed: {err}"))),
+    })
 }
 
 fn write_at(data_dir: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
