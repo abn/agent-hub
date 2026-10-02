@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use agent_hub::config::{ClientConfig, Config};
@@ -12,6 +13,9 @@ usage:
   agent-hub kb <command>         read and write the project knowledge base
   agent-hub config [flags]       inspect and validate configuration
   agent-hub enrol [why]          request enrolment and wait for operator approval
+  agent-hub backup --out DIR     back up the store while no hub serves it
+  agent-hub restore --from DIR   restore the store from a backup
+  agent-hub check                check store integrity, and any manifest present
 
 The hub is configured by config.toml and environment variables.
 ";
@@ -21,6 +25,35 @@ usage:
   agent-hub config            show every setting, its value, and where it came from
   agent-hub config --path     print the files that would be read, found or not
   agent-hub config --check    parse and validate, exit non-zero on a problem
+";
+
+const BACKUP_USAGE: &str = "\
+usage:
+  agent-hub backup --out DIR [--data-dir DIR]
+
+Copy the store offline: the hub database, every session brain and project
+knowledge file through the engine, and every artifact blob verbatim, with a
+manifest.json of each file's size and sha256. A running hub holds the engine
+lock, so stop it first, or snapshot the volume.
+";
+
+const RESTORE_USAGE: &str = "\
+usage:
+  agent-hub restore --from DIR [--data-dir DIR] [--force]
+
+Verify every checksum, then replace the data directory with the backup's
+contents through a staging directory. Refuses a non-empty data directory
+without --force, and refuses while a hub holds the store.
+";
+
+const CHECK_USAGE: &str = "\
+usage:
+  agent-hub check [--data-dir DIR]
+
+Run the engine's integrity check on the hub database and every session brain
+and project knowledge file, verify a backup manifest when one is present, and
+report artifact blobs the store names but the tree is missing. Exits non-zero
+on any failure.
 ";
 
 #[cfg(feature = "client")]
@@ -56,6 +89,9 @@ fn main() -> ExitCode {
         Some("kb") => kb(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
         Some("enrol") => enrol(&args[1..]),
+        Some("backup") => backup_cmd(&args[1..]),
+        Some("restore") => restore_cmd(&args[1..]),
+        Some("check") => check_cmd(&args[1..]),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -104,6 +140,200 @@ fn config_cmd(args: &[String]) -> ExitCode {
             eprintln!("agent-hub config: unknown option '{other}'");
             eprint!("{CONFIG_USAGE}");
             ExitCode::from(2)
+        }
+    }
+}
+
+/// The flags the three offline data-lifecycle commands share.
+#[derive(Default)]
+struct OpsOptions {
+    data_dir: Option<String>,
+    out: Option<String>,
+    from: Option<String>,
+    force: bool,
+}
+
+impl OpsOptions {
+    fn parse(args: &[String], usage: &str) -> std::result::Result<Self, String> {
+        let mut options = Self::default();
+        let mut args = args.iter();
+        while let Some(argument) = args.next() {
+            match argument.as_str() {
+                "--data-dir" => options.data_dir = Some(ops_value(&mut args, "--data-dir")?),
+                "--out" => options.out = Some(ops_value(&mut args, "--out")?),
+                "--from" => options.from = Some(ops_value(&mut args, "--from")?),
+                "--force" => options.force = true,
+                other => return Err(format!("unknown option '{other}'\n{usage}")),
+            }
+        }
+        Ok(options)
+    }
+}
+
+/// The value after a long option, for a command that is not the client.
+fn ops_value(
+    args: &mut std::slice::Iter<'_, String>,
+    flag: &str,
+) -> std::result::Result<String, String> {
+    args.next()
+        .map(String::to_string)
+        .ok_or_else(|| format!("{flag} needs a value"))
+}
+
+/// The data directory the command acts on: the flag, or the configured one.
+fn ops_data_dir(explicit: Option<String>) -> std::result::Result<PathBuf, String> {
+    match explicit {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => Config::from_env()
+            .map(|config| config.data_dir)
+            .map_err(|err| err.to_string()),
+    }
+}
+
+/// Copy the whole store into a fresh output directory.
+fn backup_cmd(args: &[String]) -> ExitCode {
+    let options = match OpsOptions::parse(args, BACKUP_USAGE) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("agent-hub backup: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let Some(out) = options.out else {
+        eprintln!("agent-hub backup: --out DIR is required\n{BACKUP_USAGE}");
+        return ExitCode::from(2);
+    };
+    let data_dir = match ops_data_dir(options.data_dir) {
+        Ok(data_dir) => data_dir,
+        Err(message) => {
+            eprintln!("agent-hub: {message}");
+            return ExitCode::from(78);
+        }
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(agent_hub::ops::backup(
+        &data_dir,
+        std::path::Path::new(&out),
+    )) {
+        Ok(report) => {
+            println!(
+                "backed up {} files, {} bytes, at schema v{} to {}{}",
+                report.files,
+                report.bytes,
+                report.schema_version,
+                out,
+                if report.used_fallback {
+                    " (byte copy: the engine refused VACUUM INTO)"
+                } else {
+                    ""
+                }
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Verify a backup and replace the data directory with it.
+fn restore_cmd(args: &[String]) -> ExitCode {
+    let options = match OpsOptions::parse(args, RESTORE_USAGE) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("agent-hub restore: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let Some(from) = options.from else {
+        eprintln!("agent-hub restore: --from DIR is required\n{RESTORE_USAGE}");
+        return ExitCode::from(2);
+    };
+    let data_dir = match ops_data_dir(options.data_dir) {
+        Ok(data_dir) => data_dir,
+        Err(message) => {
+            eprintln!("agent-hub: {message}");
+            return ExitCode::from(78);
+        }
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(agent_hub::ops::restore(
+        std::path::Path::new(&from),
+        &data_dir,
+        options.force,
+    )) {
+        Ok(report) => {
+            println!(
+                "restored {} files, {} bytes, to {}",
+                report.files,
+                report.bytes,
+                data_dir.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Check store integrity and any backup manifest present.
+fn check_cmd(args: &[String]) -> ExitCode {
+    let options = match OpsOptions::parse(args, CHECK_USAGE) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("agent-hub check: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let data_dir = match ops_data_dir(options.data_dir) {
+        Ok(data_dir) => data_dir,
+        Err(message) => {
+            eprintln!("agent-hub: {message}");
+            return ExitCode::from(78);
+        }
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(agent_hub::ops::check(&data_dir)) {
+        Ok(report) => {
+            for problem in &report.problems {
+                eprintln!("agent-hub: {problem}");
+            }
+            if report.is_ok() {
+                println!("checked {} engine files, no problems", report.checked);
+                ExitCode::SUCCESS
+            } else {
+                println!(
+                    "checked {} engine files, {} problems",
+                    report.checked,
+                    report.problems.len()
+                );
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            ExitCode::FAILURE
         }
     }
 }
