@@ -41,6 +41,196 @@ pub struct AppState {
     pub ticker: tokio::sync::broadcast::Sender<()>,
     /// Share flag recorded during enrolment approvals.
     pub enrol_shares: Arc<std::sync::Mutex<std::collections::HashMap<String, bool>>>,
+    /// The data directory and hub store as they were when the store opened.
+    /// The readiness probe compares against this so a removed or replaced path
+    /// is unavailable even while the open file descriptor still answers.
+    pub store_identity: StoreIdentity,
+}
+
+/// The device and inode of a path, for detecting that it was removed or
+/// replaced under a running process.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+pub struct PathIdentity {
+    pub dev: u64,
+    pub ino: u64,
+}
+
+#[cfg(unix)]
+impl PathIdentity {
+    /// Read the identity of `path` as it is now.
+    pub fn of(path: &Path) -> std::io::Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(path)?;
+        Ok(Self {
+            dev: meta.dev(),
+            ino: meta.ino(),
+        })
+    }
+}
+
+/// The identity of the data directory and `hub.db` captured at open.
+///
+/// Empty on non-Unix, where the version leg is the only one available.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StoreIdentity {
+    #[cfg(unix)]
+    pub data_dir: Option<PathIdentity>,
+    #[cfg(unix)]
+    pub hub_db: Option<PathIdentity>,
+}
+
+impl StoreIdentity {
+    /// Compare the captured identity against the paths as they are now.
+    ///
+    /// A path that no longer stats or whose device or inode moved is not the
+    /// store this process opened: it was removed, unmounted or replaced.
+    #[cfg(unix)]
+    pub fn check(&self, data_dir: &Path, hub_db: &Path) -> std::result::Result<(), String> {
+        if let Some(expected) = self.data_dir {
+            compare_path("the data directory", data_dir, expected)?;
+        }
+        if let Some(expected) = self.hub_db {
+            compare_path("the hub store", hub_db, expected)?;
+        }
+        Ok(())
+    }
+
+    /// No identity leg off Unix; the version leg carries readiness alone.
+    #[cfg(not(unix))]
+    pub fn check(&self, _data_dir: &Path, _hub_db: &Path) -> std::result::Result<(), String> {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn compare_path(
+    label: &str,
+    path: &Path,
+    expected: PathIdentity,
+) -> std::result::Result<(), String> {
+    match PathIdentity::of(path) {
+        Ok(now) if now.dev == expected.dev && now.ino == expected.ino => Ok(()),
+        Ok(_) => Err(format!("{label} at {} was replaced", path.display())),
+        Err(err) => Err(format!("{label} at {} is gone: {err}", path.display())),
+    }
+}
+
+fn capture_store_identity(data_dir: &Path, hub_db: &Path) -> StoreIdentity {
+    #[cfg(unix)]
+    {
+        StoreIdentity {
+            data_dir: PathIdentity::of(data_dir).ok(),
+            hub_db: PathIdentity::of(hub_db).ok(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (data_dir, hub_db);
+        StoreIdentity::default()
+    }
+}
+
+/// Copy the hub store aside before a migration touches it.
+///
+/// The copy is the engine's `VACUUM INTO`, which writes a consistent snapshot
+/// of everything committed regardless of what is still in the source's
+/// write-ahead log. It runs before any writer exists in this process and the
+/// engine's file lock keeps every other process out, so nothing is writing
+/// while it runs. Only the newest three copies are kept.
+async fn backup_before_migration(db: &turso::Database, data_dir: &Path, from: i64) -> Result<()> {
+    let backups = data_dir.join("backups");
+    config::private_dir(&backups)?;
+
+    let target = backups.join(format!("pre-migration-v{from}-{}.db", backup_stamp()));
+    // The destination is a string literal to the engine, so a quote in the
+    // path is doubled rather than ending it.
+    let target_sql = target.to_string_lossy().replace('\'', "''");
+    let conn = store::connect(db)?;
+    conn.execute(&format!("VACUUM INTO '{target_sql}'"), ())
+        .await
+        .map_err(store::engine)?;
+    config::private_file(&target)?;
+    tracing::info!(
+        path = %target.display(),
+        from,
+        to = store::schema::SUPPORTED_MAX,
+        "copied the store aside before migrating it"
+    );
+
+    prune_backups(&backups, 3);
+    Ok(())
+}
+
+/// A filename-safe UTC stamp for a backup, distinct within a process.
+fn backup_stamp() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}.{:03}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond(),
+    )
+}
+
+/// Remove every pre-migration backup beyond the newest `keep`.
+///
+/// A copy is a write-ahead-log database, so its `.db-wal` and `.db-shm`
+/// sidecars belong to it; a pruned backup goes as a set, never leaving a
+/// sidecar of its own behind. A file that cannot be removed is a warning: it
+/// costs disk, which the readiness probe watches, but it is not a reason the
+/// hub does not start.
+fn prune_backups(dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut backups: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_backup_store(&path) {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        backups.push((modified, path));
+    }
+    if backups.len() <= keep {
+        return;
+    }
+    backups.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    for (_, stem) in backups.into_iter().skip(keep) {
+        for path in [stem.clone(), sidecar(&stem, "-wal"), sidecar(&stem, "-shm")] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "could not remove an old pre-migration backup"
+                ),
+            }
+        }
+    }
+}
+
+/// Whether a directory entry is a pre-migration backup's database file.
+fn is_backup_store(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("pre-migration-") && name.ends_with(".db"))
+}
+
+/// The path of one of a store file's sidecars.
+fn sidecar(stem: &Path, suffix: &str) -> PathBuf {
+    let mut name = stem.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
 }
 
 impl AppState {
@@ -54,7 +244,19 @@ impl AppState {
         config::private_dir(&config.artifacts_dir())?;
 
         let db = store::open_engine(&config.hub_db_path()).await?;
+
+        // A migration changes the store in place. Copy it aside first, and only
+        // when there is something to migrate: a second start on an up-to-date
+        // store must not leave a backup behind.
+        let from = store::schema_version(&db).await?;
+        if from < store::schema::SUPPORTED_MAX {
+            backup_before_migration(&db, &config.data_dir, from).await?;
+        }
         let schema_version = store::migrate(&db).await?;
+
+        // Captured once the store exists on disk, before any path can move
+        // under the running process.
+        let store_identity = capture_store_identity(&config.data_dir, &config.hub_db_path());
 
         // The engine creates the database and its sidecars under whatever umask
         // is in force, so they are hardened after the fact. A sidecar that does
@@ -155,6 +357,7 @@ impl AppState {
             host,
             ticker,
             enrol_shares: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            store_identity,
         })
     }
 

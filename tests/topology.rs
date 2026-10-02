@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use agent_hub::app::AppState;
 use agent_hub::brain::BrainStore;
 use agent_hub::http::router;
-use agent_hub::store::{identity, migrate, open_engine, prune, sessions};
+use agent_hub::store::{identity, migrate, open_engine, prune, schema, sessions};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value as Json;
@@ -170,24 +170,132 @@ async fn readyz_reports_ready_when_the_engine_answers() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ready");
     assert_eq!(body["schema_version"], schema_version);
+    assert_eq!(
+        body["supported_max"],
+        schema::SUPPORTED_MAX,
+        "the probe says how far this binary can go"
+    );
+    assert!(
+        body["free_bytes"].as_i64().is_some_and(|free| free > 0),
+        "the probe reports the room on the volume: {body}"
+    );
 }
 
 #[tokio::test]
-async fn readyz_reports_unavailable_when_the_engine_does_not_answer() {
-    let state = probe_state("topology-unready").await;
+async fn readyz_reports_unavailable_when_the_store_path_is_gone() {
+    let state = probe_state("topology-removed-store").await;
 
-    // The store stops answering the readiness query, as it would if the data
-    // volume went away under a running process.
-    let conn = state.db.connect().expect("connect");
-    conn.execute("DROP TABLE schema_version", ())
-        .await
-        .expect("drop the version table");
-    drop(conn);
+    // The process keeps the file descriptor, so the engine still answers the
+    // version query. The path is what a restart, a backup or an operator
+    // walks, and it is gone: readiness must say so. (The inode stays alive
+    // while the descriptor is held, so an inode-only check would not.)
+    std::fs::remove_file(state.dir().join("hub.db")).expect("remove the store path");
 
     let (status, content_type, body) = probe(&state).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(content_type.as_deref(), Some("application/problem+json"));
     assert_eq!(body["code"], "unavailable");
+    let detail = body["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("hub store") && detail.contains("gone"),
+        "the problem names the missing path: {detail}"
+    );
+}
+
+#[tokio::test]
+async fn readyz_reports_unavailable_when_the_store_file_is_replaced() {
+    let state = probe_state("topology-replaced-store").await;
+
+    // A different file is renamed over the path. The process keeps its
+    // descriptor on the original, so the version query still answers; the
+    // captured device and inode are what tell the two apart.
+    let hub = state.dir().join("hub.db");
+    let other = state.dir().join("replacement.db");
+    std::fs::write(&other, b"not this hub").expect("write a replacement");
+    std::fs::rename(&other, &hub).expect("replace the store path");
+
+    let (status, content_type, body) = probe(&state).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    assert_eq!(body["code"], "unavailable");
+    let detail = body["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("hub store") && detail.contains("replaced"),
+        "the problem says the store was replaced: {detail}"
+    );
+}
+
+#[tokio::test]
+async fn migrate_refuses_a_store_newer_than_the_binary() {
+    let dir = TempDir::new("topology-newer-store");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    migrate(&db)
+        .await
+        .expect("migrate to the supported version");
+
+    // A later binary wrote a schema this one has never seen.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO schema_version(version) VALUES (?1)",
+        (schema::SUPPORTED_MAX + 1,),
+    )
+    .await
+    .expect("record a newer version");
+    drop(conn);
+
+    let refused = migrate(&db)
+        .await
+        .expect_err("the startup migration refuses a newer store");
+    let message = refused.to_string();
+    assert!(
+        message.contains(&(schema::SUPPORTED_MAX + 1).to_string())
+            && message.contains(&schema::SUPPORTED_MAX.to_string()),
+        "the refusal names both versions: {message}"
+    );
+}
+
+/// A store that has migrations pending is copied aside first; one that is
+/// already current is not. The copy is per migration, not per start.
+#[tokio::test]
+async fn a_second_start_writes_no_pre_migration_backup() {
+    let dir = TempDir::new("topology-backup-once");
+    let config = common::state::config(&dir);
+
+    let state = AppState::open(config.clone()).await.expect("first open");
+    let first = backup_names(dir.path());
+    assert_eq!(
+        first.len(),
+        1,
+        "a fresh store is copied aside once before migrating: {first:?}"
+    );
+    drop(state);
+
+    let state = AppState::open(config).await.expect("second open");
+    assert_eq!(
+        backup_names(dir.path()),
+        first,
+        "an up-to-date store writes no backup on start"
+    );
+    drop(state);
+}
+
+/// The pre-migration backup files present in `data_dir`.
+fn backup_names(data_dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(data_dir.join("backups"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| {
+                    entry.file_name().to_str().is_some_and(|name| {
+                        name.starts_with("pre-migration-") && name.ends_with(".db")
+                    })
+                })
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
 }
 
 #[tokio::test]

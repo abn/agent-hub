@@ -88,6 +88,14 @@ pub const MIGRATIONS: &[Migration] = &[
     },
 ];
 
+/// The highest migration version this binary knows how to produce.
+///
+/// A store at a version above this was written by a newer binary. This one
+/// cannot reason about a schema it has never seen, so it refuses to open it
+/// rather than migrating it backwards or writing into columns it does not
+/// understand.
+pub const SUPPORTED_MAX: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;
+
 /// Version 1: the full `hub.db` schema, including the full-text index over
 /// `search_docs` that native search depends on.
 const V1: &str = r#"

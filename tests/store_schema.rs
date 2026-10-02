@@ -1,7 +1,7 @@
 //! Store schema tests: migration version, tables, and the full-text index.
 
-use agent_hub::store::schema::MIGRATIONS;
-use agent_hub::store::{migrate, open_engine};
+use agent_hub::store::schema::{MIGRATIONS, SUPPORTED_MAX};
+use agent_hub::store::{migrate, open_engine, schema_version};
 
 mod common;
 
@@ -15,6 +15,93 @@ fn latest() -> i64 {
         .map(|m| m.version)
         .max()
         .expect("migrations")
+}
+
+#[test]
+fn supported_max_is_the_newest_migration() {
+    assert_eq!(
+        SUPPORTED_MAX,
+        latest(),
+        "the guard's ceiling must be the last migration in the list"
+    );
+}
+
+#[tokio::test]
+async fn migrate_refuses_a_store_newer_than_the_binary() {
+    let dir = TempDir::new("store-schema-newer");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let version = migrate(&db)
+        .await
+        .expect("migrate to the supported version");
+    assert_eq!(version, SUPPORTED_MAX);
+
+    // Another binary migrated the store further than this one knows how to go.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO schema_version(version) VALUES (?1)",
+        (SUPPORTED_MAX + 1,),
+    )
+    .await
+    .expect("record a newer version");
+    drop(conn);
+
+    let refused = migrate(&db)
+        .await
+        .expect_err("a store newer than the binary is refused");
+    let message = refused.to_string();
+    assert!(
+        message.contains(&(SUPPORTED_MAX + 1).to_string())
+            && message.contains(&SUPPORTED_MAX.to_string()),
+        "the refusal names both versions: {message}"
+    );
+    assert_eq!(
+        schema_version(&db).await.expect("read version"),
+        SUPPORTED_MAX + 1,
+        "the refusal leaves the store exactly as it was"
+    );
+
+    drop(db);
+}
+
+#[tokio::test]
+async fn checkpoint_hub_folds_the_log_without_losing_writes() {
+    let dir = TempDir::new("store-schema-checkpoint");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let version = migrate(&db).await.expect("migrate");
+
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert a project");
+    drop(conn);
+
+    agent_hub::store::checkpoint_hub(&db)
+        .await
+        .expect("checkpoint the store");
+
+    assert_eq!(
+        schema_version(&db).await.expect("read version"),
+        version,
+        "the checkpoint leaves the schema where it was"
+    );
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("SELECT id FROM projects", ())
+        .await
+        .expect("query projects");
+    let row = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("the write survives the checkpoint");
+    assert_eq!(row.get::<String>(0).expect("id"), "proj");
+
+    drop(rows);
+    drop(conn);
+    drop(db);
 }
 
 const TABLES: &[&str] = &[

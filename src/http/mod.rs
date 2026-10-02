@@ -14,6 +14,13 @@ use crate::{limits, store};
 /// instead of queueing behind a writer.
 const READY_PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Free space the data volume must hold before the hub calls itself ready.
+///
+/// A store with no room left cannot checkpoint its write-ahead log or apply a
+/// migration, so a probe that ignored the volume stayed ready through the one
+/// failure an operator is about to hit.
+const READY_MIN_FREE_BYTES: i64 = 64 * 1024 * 1024;
+
 pub mod agents;
 pub mod artifacts;
 pub mod auth;
@@ -178,37 +185,74 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Readiness: the engine answers and carries the schema the process opened.
+/// Readiness: the engine answers, at a schema this binary knows, over the
+/// store it opened, on a volume with room left.
 ///
-/// A probe that reported only the version cached at startup stayed ready
-/// through an unmounted volume or a replaced store, which is the failure a
-/// healthcheck exists to catch.
+/// Three legs, because a probe that trusted only the version cached at startup
+/// stayed ready through an unmounted volume or a replaced store. The first is
+/// the live schema version against what this binary supports; the second the
+/// device and inode of the data directory and `hub.db` against what was
+/// captured at open; the third a cheap content read, so a store that is not
+/// this hub's is caught even while its descriptor still answers.
 async fn readyz(State(state): State<AppState>) -> std::result::Result<Json<Value>, Problem> {
-    let probe = tokio::time::timeout(READY_PROBE_WAIT, store::applied_version(&state.db)).await;
+    let probe = tokio::time::timeout(READY_PROBE_WAIT, store::schema_version(&state.db)).await;
     let version = match probe {
         Ok(Ok(version)) => version,
         Ok(Err(err)) => {
-            return Err(Problem::from_error(&Error::Unavailable(format!(
-                "the store did not answer: {err}"
-            ))));
+            return Err(unavailable(format!("the store did not answer: {err}")));
         }
         Err(_) => {
-            return Err(Problem::from_error(&Error::Unavailable(
+            return Err(unavailable(
                 "the store did not answer the readiness query in time".to_string(),
-            )));
+            ));
         }
     };
+
+    if version > store::schema::SUPPORTED_MAX {
+        return Err(unavailable(format!(
+            "the store is at schema version {version}, newer than this binary supports ({})",
+            store::schema::SUPPORTED_MAX
+        )));
+    }
     if version != state.schema_version {
-        return Err(Problem::from_error(&Error::Unavailable(format!(
+        return Err(unavailable(format!(
             "the store is at schema version {version}, the process opened {}",
             state.schema_version
-        ))));
+        )));
+    }
+
+    store::probe_content(&state.db)
+        .await
+        .map_err(|err| unavailable(format!("the store's content did not read back: {err}")))?;
+
+    if let Err(detail) = state
+        .store_identity
+        .check(&state.data_dir, &state.config.hub_db_path())
+    {
+        return Err(unavailable(detail));
+    }
+
+    let free = store::free_space_bytes(&state.data_dir);
+    if let Some(free) = free
+        && free < READY_MIN_FREE_BYTES
+    {
+        return Err(unavailable(format!(
+            "the data directory has {free} bytes free, under the {READY_MIN_FREE_BYTES}-byte margin"
+        )));
     }
 
     Ok(Json(json!({
         "status": "ready",
         "schema_version": version,
+        "supported_max": store::schema::SUPPORTED_MAX,
+        "free_bytes": free,
+        "free_space_margin_bytes": READY_MIN_FREE_BYTES,
     })))
+}
+
+/// A readiness failure, as problem details with the unavailable code.
+fn unavailable(detail: String) -> Problem {
+    Problem::from_error(&Error::Unavailable(detail))
 }
 
 async fn not_found() -> Problem {

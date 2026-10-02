@@ -69,6 +69,13 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
     .map_err(engine)?;
 
     let current = read_version(&conn).await?;
+    if current > schema::SUPPORTED_MAX {
+        return Err(Error::Engine(format!(
+            "the hub store is at schema version {current}, but this binary supports at most {}; \
+             upgrade the binary before opening it",
+            schema::SUPPORTED_MAX
+        )));
+    }
 
     for migration in schema::MIGRATIONS
         .iter()
@@ -94,13 +101,29 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
 /// Read the applied schema version over a fresh connection.
 ///
 /// The readiness probe uses this to ask the engine a real question rather than
-/// trusting the version it cached at startup.
-pub async fn applied_version(db: &turso::Database) -> Result<i64> {
+/// trusting the version it cached at startup. A store whose version table is
+/// absent reads as 0: before the first migration there is nothing to record.
+pub async fn schema_version(db: &turso::Database) -> Result<i64> {
     let conn = connect(db)?;
     read_version(&conn).await
 }
 
 async fn read_version(conn: &turso::Connection) -> Result<i64> {
+    // The table is absent on a store that has never migrated, and a version
+    // read must not create it: a readiness probe that repaired the store it
+    // was sent to check would never report it broken.
+    let mut present = conn
+        .query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    if present.next().await.map_err(engine)?.is_none() {
+        return Ok(0);
+    }
+    drop(present);
+
     let mut rows = conn
         .query("SELECT COALESCE(MAX(version), 0) FROM schema_version", ())
         .await
@@ -108,6 +131,62 @@ async fn read_version(conn: &turso::Connection) -> Result<i64> {
     match rows.next().await.map_err(engine)? {
         Some(row) => row.get::<i64>(0).map_err(engine),
         None => Ok(0),
+    }
+}
+
+/// A cheap read of the store's own content, for the readiness probe.
+///
+/// The version table is a migration log, not the data, so it can answer even
+/// when the store behind it was overwritten in place. Reading one core table
+/// is enough to catch that without walking anything: a store that is not this
+/// hub's database has no `projects` table to count.
+pub async fn probe_content(db: &turso::Database) -> Result<i64> {
+    let conn = connect(db)?;
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM projects", ())
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => row.get::<i64>(0).map_err(engine),
+        None => Ok(0),
+    }
+}
+
+/// Checkpoint the hub store's write-ahead log and truncate it.
+///
+/// Called once at clean shutdown, after every writer has stopped, so the next
+/// process opens a store whose log is already folded into the database.
+pub async fn checkpoint_hub(db: &turso::Database) -> Result<()> {
+    let conn = connect(db)?;
+    // The pragma answers with a result row, so it is stepped to completion
+    // rather than executed.
+    let mut rows = conn
+        .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
+        .await
+        .map_err(engine)?;
+    while rows.next().await.map_err(engine)?.is_some() {}
+    Ok(())
+}
+
+/// Free bytes on the volume the data directory sits on.
+///
+/// One syscall, for the readiness probe's free-space margin. A failure is
+/// reported as unknown rather than zero: a directory that cannot be measured
+/// is not a directory that is full.
+pub fn free_space_bytes(data_dir: &Path) -> Option<i64> {
+    match rustix::fs::statvfs(data_dir) {
+        Ok(stat) => {
+            let block = i64::try_from(stat.f_frsize).ok()?;
+            Some(i64::try_from(stat.f_bavail).ok()? * block)
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %data_dir.display(),
+                error = %err,
+                "could not measure the data volume"
+            );
+            None
+        }
     }
 }
 
