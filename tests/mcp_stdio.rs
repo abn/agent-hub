@@ -109,3 +109,50 @@ fn embedded_stdio_against_running_hub_refuses() {
         "the refusal names the situation and what to do: {stderr}"
     );
 }
+
+#[test]
+fn resources_list_and_read_the_agent_guide() {
+    // An agent wired only to MCP must be able to find the guide, not only a
+    // human who knows the HTTP address. The handshake advertises resources, the
+    // guide is listed, and reading it returns the document itself.
+    let data_dir = TempDir::new("mcp-stdio-resources");
+    let mut server = McpServer::mcp(&data_dir, &[]);
+
+    let init = server.call(
+        "initialize",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "mcp-stdio-resources", "version": "0.0.0"},
+        }),
+    );
+    let result = init.get("result").expect("initialize returns a result");
+    assert!(
+        !result["capabilities"]["resources"].is_null(),
+        "the resources capability is advertised"
+    );
+
+    server.notify("notifications/initialized");
+
+    let listed = server.call("resources/list", json!({}));
+    let resources = listed["result"]["resources"]
+        .as_array()
+        .expect("resources/list returns an array");
+    assert!(
+        resources
+            .iter()
+            .any(|resource| resource["uri"] == "agenthub://skill"),
+        "the agent guide is listed as agenthub://skill"
+    );
+
+    let read = server.call("resources/read", json!({"uri": "agenthub://skill"}));
+    let contents = read["result"]["contents"]
+        .as_array()
+        .expect("resources/read returns contents");
+    let text = contents[0]["text"].as_str().expect("text contents");
+    assert!(
+        text.contains("Arriving without a token"),
+        "the guide carries the arrival section"
+    );
+    assert!(text.contains("inbox_wait"), "the guide names the wait tool");
+}

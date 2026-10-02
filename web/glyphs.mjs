@@ -30,6 +30,11 @@ export const GLYPH_PATHS = {
   // legibly, and every keyboard on a phone puts an arrow where this button is.
   // Three strokes, one motif, nothing inside anything.
   send: '<path d="M 12 20V5"/><path d="M 6 11l6-6 6 6"/>',
+  // Two of the design's twelve are absent on purpose: no screen draws them, and
+  // the check below rejects an entry nothing draws. `key` belonged to the
+  // password-on-share sheet that round 14 superseded, and `link` to the share
+  // row that now shows the address with the `copy` glyph. Round 15 redraws them
+  // when a screen needs them.
 };
 
 export function glyphSvg(name, { size = 20, strokeWidth = 1.7, className = "" } = {}) {
