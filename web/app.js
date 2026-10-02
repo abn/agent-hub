@@ -29,6 +29,7 @@ import { toggleKind } from "./feed.mjs";
 import {
   wikiCommentAdd,
   wikiCommentResolve,
+  wikiHistoryEarlier,
   wikiInstruction,
   wikiNew,
   wikiPromote,
@@ -134,6 +135,7 @@ main.addEventListener("click", (event) => {
   if (action === "wiki-review") acted(button, wikiReview(button));
   if (action === "wiki-comment-add") wikiCommentAdd(button);
   if (action === "wiki-comment-resolve") wikiCommentResolve(button);
+  if (action === "wiki-history-earlier") wikiHistoryEarlier(button);
   if (action === "wiki-promote") wikiPromote(button);
   if (action === "wiki-instruction") wikiInstruction(button);
   if (action === "version-toggle") toggleVersionMenu(button);

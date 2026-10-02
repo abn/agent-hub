@@ -146,7 +146,8 @@ home on a phone, where the index control row is hidden.
 
 The Wiki home carries the page, needs-review and stale counts and holds the
 housekeeping screens: **Recent changes** (`kb/history`) reads who did what to
-which page and when, with rows that are not tappable in this version, and
+which page and when, grouped by day, with rows that are not tappable in this
+version and an Earlier control that walks back a page of rows in place, and
 **Lint** (`kb/lint`) lists the whole tree's findings with a Re-check that walks
 it again. **Needs review** lists the pages the hub judges not human-reviewed,
 and a row opens the page. The Home storage card carries one housekeeping line,

@@ -2860,6 +2860,10 @@ fn the_project_wiki_segment_is_wired() {
         "a page carries a comment thread"
     );
     assert!(
+        WIKI_JS.contains("wiki-history-earlier") && WIKI_JS.contains("all loaded"),
+        "Recent changes walks back a page at a time"
+    );
+    assert!(
         WIKI_JS.contains("Resolved ·"),
         "resolved threads fold under a count"
     );

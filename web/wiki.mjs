@@ -317,27 +317,83 @@ function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
 // Recent changes: who did what, to which page, and when. The rows are not
 // tappable in this version (round 14 item 7), and a row says only what the log
 // holds.
+const HISTORY_PAGE = 25;
+
+// The write log, newest first, grouped under its day. The newest page is
+// drawn; Earlier walks back one page of rows at a time in place, its count
+// falling until every row is loaded.
+function historyRows(rows) {
+  let out = "";
+  let day = null;
+  for (const row of rows) {
+    const stamp = String(row.at || "");
+    const date = stamp.slice(0, 10);
+    if (date !== day) {
+      day = date;
+      out += `<div class="mono wiki-history-day" style="padding:10px 16px 4px;font-size:12px;color:var(--ink-3);letter-spacing:.06em">${esc(date)}</div>`;
+    }
+    out += `<div class="row wiki-change" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line)">
+      <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(stamp)}</span>
+      <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(row.actor)}</span>
+      <span class="mono" style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayPath(row.path))}</span>
+      <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(OP_WORDS[row.op] || row.op)}</span>
+    </div>`;
+  }
+  return out;
+}
+
+function historyEarlier(id, data, loaded) {
+  if (data.truncated && data.next_before) {
+    const remaining = Math.max(0, (data.total ?? loaded) - loaded);
+    return `<button type="button" class="btn-outline wiki-history-earlier" data-action="wiki-history-earlier" data-id="${esc(id)}" data-before="${esc(data.next_before)}" style="margin:12px 16px;height:32px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--accent);font:600 13px/1 var(--font-sans);cursor:pointer">Earlier · ${remaining}</button>`;
+  }
+  return `<div class="mono wiki-history-done" style="padding:12px 16px;font-size:12px;color:var(--ink-3)">${loaded} change${loaded === 1 ? "" : "s"} · all loaded</div>`;
+}
+
 async function changesStage(id, shellStageHead) {
   let data;
   try {
-    data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/history?limit=50`);
+    data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/history?limit=${HISTORY_PAGE}`);
   } catch (error) {
     return simpleStage(shellStageHead, id, "Recent changes", "", `<div class="shell-pad"><p class="empty">${esc(error.message)}</p></div>`);
   }
   const rows = data.rows || [];
   const body = rows.length
-    ? rows
-        .map(
-          (row) => `<div class="row wiki-change" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line)">
-        <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(row.at)}</span>
-        <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(row.actor)}</span>
-        <span class="mono" style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayPath(row.path))}</span>
-        <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(OP_WORDS[row.op] || row.op)}</span>
-      </div>`,
-        )
-        .join("")
+    ? `<div class="wiki-changes">${historyRows(rows)}${historyEarlier(id, data, rows.length)}</div>`
     : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · recent changes</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No changes yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this wiki is logged here with who and when.</p></div>`;
-  return simpleStage(shellStageHead, id, "Recent changes", `${rows.length} change${rows.length === 1 ? "" : "s"}`, `<div class="wiki-changes">${body}</div>`);
+  return simpleStage(shellStageHead, id, "Recent changes", `${data.total ?? rows.length} change${(data.total ?? rows.length) === 1 ? "" : "s"}`, body);
+}
+
+// Walk one page further back, in place, keeping the control's position.
+export async function wikiHistoryEarlier(button) {
+  const id = button.dataset.id || "";
+  const before = button.dataset.before || "";
+  button.disabled = true;
+  try {
+    const data = await api(
+      `/api/v1/projects/${encodeURIComponent(id)}/kb/history?limit=${HISTORY_PAGE}&before=${encodeURIComponent(before)}`,
+    );
+    const holder = button.parentElement;
+    const rows = data.rows || [];
+    const temp = document.createElement("div");
+    temp.innerHTML = historyRows(rows);
+    while (temp.firstChild) holder.insertBefore(temp.firstChild, button);
+    const loaded = holder.querySelectorAll(".wiki-change").length;
+    const next = historyEarlier(id, data, loaded);
+    if (next.startsWith("<button")) {
+      const temp2 = document.createElement("div");
+      temp2.innerHTML = next;
+      const fresh = temp2.firstElementChild;
+      button.replaceWith(fresh);
+    } else {
+      const temp2 = document.createElement("div");
+      temp2.innerHTML = next;
+      button.replaceWith(temp2.firstElementChild);
+    }
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+  }
 }
 
 // Lint: the tree's findings, with a Re-check that walks it again.
