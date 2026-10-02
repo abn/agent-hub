@@ -42,4 +42,10 @@ ENV HUB_BIND=0.0.0.0:8080
 
 EXPOSE 8080
 
+# The runtime is distroless: no shell and no curl, so the check is the binary's
+# own `health` subcommand, which GETs /readyz. Exec form, because there is no
+# shell to parse a string one.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/agent-hub", "health"]
+
 ENTRYPOINT ["/usr/local/bin/agent-hub"]

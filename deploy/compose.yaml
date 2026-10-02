@@ -23,6 +23,15 @@ services:
     tmpfs:
       - /tmp
     restart: unless-stopped
+    # The image is distroless, so the probe is the binary's own health
+    # subcommand against the hub's readiness endpoint on the container's own
+    # loopback. It exits non-zero the moment the store stops answering.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/agent-hub", "health", "--url", "http://127.0.0.1:8080"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   hub-data:

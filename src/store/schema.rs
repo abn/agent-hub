@@ -86,6 +86,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 18,
         ddl: V18,
     },
+    Migration {
+        version: 19,
+        ddl: V19,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -503,4 +507,21 @@ CREATE TABLE IF NOT EXISTS kb_comments(
 );
 CREATE INDEX IF NOT EXISTS kb_comments_page
   ON kb_comments(project_id, path, created_at, id);
+"#;
+
+/// Version 19: the millisecond of the newest id the hub has minted.
+///
+/// ULIDs sort by their embedded timestamp, and every ordered read (the feed
+/// cursors above all) compares them as text. A wall clock that steps backwards
+/// would have a fresh process mint ids that sort before the newest one already
+/// committed, so the high-water millisecond is persisted here, seeded into an
+/// in-memory atomic at open, and minted ids are clamped strictly above it. One
+/// row, keyed by a constant, so a read is a point lookup. A store that predates
+/// this migration starts at zero, which clamps nothing until an id is minted.
+const V19: &str = r#"
+CREATE TABLE IF NOT EXISTS id_high_water(
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  millis INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO id_high_water(singleton, millis) VALUES (1, 0);
 "#;

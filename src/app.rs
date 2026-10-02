@@ -254,6 +254,22 @@ impl AppState {
         }
         let schema_version = store::migrate(&db).await?;
 
+        // Seed the id high-water mark this process mints against. When the
+        // wall clock has stepped behind the last id a previous process minted,
+        // say so: ids remain ordered because the mint is clamped forward.
+        if let Some(millis) = store::read_id_high_water(&db).await? {
+            store::set_id_high_water(millis);
+            let now = store::millis_now();
+            if millis > now {
+                tracing::warn!(
+                    high_water_ms = millis,
+                    now_ms = now,
+                    behind_ms = millis - now,
+                    "the wall clock is behind the last minted id; new ids are clamped forward"
+                );
+            }
+        }
+
         // Captured once the store exists on disk, before any path can move
         // under the running process.
         let store_identity = capture_store_identity(&config.data_dir, &config.hub_db_path());
@@ -423,7 +439,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     // Commit any prune whose undo window has passed, then keep sweeping.
     let sweeper = state.clone();
-    tokio::spawn(async move {
+    let sweeper_task = tokio::spawn(async move {
         let interval = sweep_interval();
         loop {
             match sweeper.sweep_prunes().await {
@@ -458,14 +474,19 @@ pub async fn run(config: Config) -> Result<()> {
             "HUB_ADMIN_TOKEN is required when the tailnet endpoint is enabled".to_string(),
         ));
     }
-    if tailnet.enabled() {
+    let tailnet_task = if tailnet.enabled() {
         let tailnet_router = router.clone();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
+            // The embedded endpoint owns its own reconnect loop and takes no
+            // shutdown handle, so it is dropped with the process rather than
+            // drained: see the graceful shutdown below.
             if let Err(err) = net::serve(&tailnet, tailnet_router).await {
                 tracing::error!(error = %err, "tailnet endpoint stopped");
             }
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
     // The address the listener got, which is not the configured one when the
@@ -486,12 +507,96 @@ pub async fn run(config: Config) -> Result<()> {
         state.config.data_dir.display()
     );
 
-    axum::serve(
-        listener,
-        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await?;
+    // SIGTERM or SIGINT stops the accept loop and lets in-flight requests
+    // finish. The drain window is applied only AFTER the signal, so a hub that
+    // is simply serving is never stopped by it.
+    let (stopping_tx, stopping_rx) = tokio::sync::oneshot::channel();
+    let shutdown = async move {
+        shutdown_signal().await;
+        let _ = stopping_tx.send(());
+    };
+    let server = std::future::IntoFuture::into_future(
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown),
+    );
+    let drain = async {
+        let _ = stopping_rx.await;
+        tokio::time::sleep(SHUTDOWN_DRAIN).await;
+        tracing::warn!(
+            seconds = SHUTDOWN_DRAIN.as_secs(),
+            "the drain window elapsed with connections still open; closing"
+        );
+    };
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => result.map_err(crate::error::Error::from)?,
+        _ = drain => {}
+    }
+
+    // Stop the background writers before checkpointing, so the fold sees a
+    // store no one else is touching.
+    sweeper_task.abort();
+    // The tailnet listener is a separate serve with its own reconnect loop and
+    // no shutdown handle, so it is dropped here rather than drained. Stdio MCP
+    // is a different path entirely and never reaches this code.
+    if let Some(task) = tailnet_task {
+        task.abort();
+    }
+
+    // Fold the log and record the id high-water mark, so the next start opens
+    // a store whose log is already folded and whose ids continue from here.
+    if let Err(err) = store::persist_id_high_water(&state.db).await {
+        tracing::warn!(error = %err, "could not persist the id high-water mark");
+    }
+    if let Err(err) = store::checkpoint_hub(&state.db).await {
+        tracing::warn!(error = %err, "could not checkpoint the hub store");
+    }
+    eprintln!("agent-hub serve: stopped");
     Ok(())
+}
+
+/// How long a stopping hub waits for in-flight requests to finish.
+const SHUTDOWN_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Resolve when the process is asked to stop.
+///
+/// SIGTERM is what a supervised container or service manager sends; SIGINT is
+/// Ctrl-C. Both drain the same way.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut terminate = match signal(SignalKind::terminate()) {
+            Ok(signal) => signal,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not watch for SIGTERM");
+                return std::future::pending().await;
+            }
+        };
+        let mut interrupt = match signal(SignalKind::interrupt()) {
+            Ok(signal) => signal,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not watch for SIGINT");
+                return std::future::pending().await;
+            }
+        };
+        tokio::select! {
+            _ = terminate.recv() => tracing::info!("SIGTERM received, draining"),
+            _ = interrupt.recv() => tracing::info!("SIGINT received, draining"),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::warn!(error = %err, "could not watch for Ctrl-C");
+            return std::future::pending().await;
+        }
+        tracing::info!("interrupt received, draining");
+    }
 }
 
 /// How often the prune sweeper runs. Overridable so a test can watch it commit

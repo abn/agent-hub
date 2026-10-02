@@ -16,6 +16,7 @@ usage:
   agent-hub backup --out DIR     back up the store while no hub serves it
   agent-hub restore --from DIR   restore the store from a backup
   agent-hub check                check store integrity, and any manifest present
+  agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 
 The hub is configured by config.toml and environment variables.
 ";
@@ -56,6 +57,16 @@ report artifact blobs the store names but the tree is missing. Exits non-zero
 on any failure.
 ";
 
+const HEALTH_USAGE: &str = "\
+usage:
+  agent-hub health [--url URL]
+
+GET the hub's /readyz probe and exit 0 when it is ready, non-zero otherwise.
+The URL defaults to http://127.0.0.1:8080; the /readyz path is appended unless
+the URL already names it. Plain HTTP only, for a container health check with no
+shell to curl from.
+";
+
 #[cfg(feature = "client")]
 const KB_USAGE: &str = "\
 usage:
@@ -92,6 +103,7 @@ fn main() -> ExitCode {
         Some("backup") => backup_cmd(&args[1..]),
         Some("restore") => restore_cmd(&args[1..]),
         Some("check") => check_cmd(&args[1..]),
+        Some("health") => health_cmd(&args[1..]),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -335,6 +347,108 @@ fn check_cmd(args: &[String]) -> ExitCode {
             eprintln!("agent-hub: {err}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// GET the hub's readiness probe, for a container whose runtime has no shell.
+fn health_cmd(args: &[String]) -> ExitCode {
+    let mut base = String::from("http://127.0.0.1:8080");
+    let mut args = args.iter();
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--url" => match args.next() {
+                Some(value) => base = value.clone(),
+                None => {
+                    eprintln!("agent-hub health: --url needs a value\n{HEALTH_USAGE}");
+                    return ExitCode::from(2);
+                }
+            },
+            "--help" | "-h" => {
+                print!("{HEALTH_USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            other => {
+                eprintln!("agent-hub health: unknown option '{other}'\n{HEALTH_USAGE}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    match probe_readyz(&base) {
+        Ok(()) => {
+            println!("ready");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("agent-hub health: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// How long the probe waits for the hub to answer.
+const HEALTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Request `/readyz` over plain HTTP and succeed on a 200.
+///
+/// The runtime image is distroless: no shell and no curl, so the check is the
+/// binary itself. Only `http` is spoken; a hub behind TLS is checked by the
+/// orchestrator's own probe.
+fn probe_readyz(base: &str) -> std::result::Result<(), String> {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+
+    let url = url::Url::parse(base).map_err(|err| format!("'{base}' is not a URL: {err}"))?;
+    if url.scheme() != "http" {
+        return Err(format!(
+            "health speaks plain http, not '{}'; point it at the hub's own listener",
+            url.scheme()
+        ));
+    }
+    let host = url.host_str().ok_or("the URL has no host")?;
+    let port = url.port_or_known_default().ok_or("the URL has no port")?;
+
+    let mut path = url.path().trim_end_matches('/').to_string();
+    if !path.ends_with("/readyz") {
+        path.push_str("/readyz");
+    }
+
+    let mut addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|err| format!("{host}:{port} did not resolve: {err}"))?;
+    let address = addresses
+        .next()
+        .ok_or_else(|| format!("{host}:{port} resolved to no address"))?;
+    let mut stream = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT)
+        .map_err(|err| format!("could not reach {address}: {err}"))?;
+    stream
+        .set_read_timeout(Some(HEALTH_TIMEOUT))
+        .map_err(|err| format!("could not bound the read: {err}"))?;
+    stream
+        .set_write_timeout(Some(HEALTH_TIMEOUT))
+        .map_err(|err| format!("could not bound the write: {err}"))?;
+
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("could not send the probe: {err}"))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|err| format!("could not read the answer: {err}"))?;
+    let status = response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or("the hub did not answer with an HTTP status")?;
+    if status == 200 {
+        Ok(())
+    } else {
+        let detail = response.split("\r\n\r\n").nth(1).unwrap_or_default().trim();
+        Err(format!("not ready: the hub answered {status} {detail}"))
     }
 }
 

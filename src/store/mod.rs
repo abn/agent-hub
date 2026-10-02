@@ -1,6 +1,7 @@
 //! The hub store: engine access, schema, migrations, and domain modules.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 
@@ -201,6 +202,63 @@ pub(crate) fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
+/// The millisecond of the newest id minted in this process, or read from the
+/// store at open, whichever is greater.
+///
+/// See [`next_id`]: it is the clamp that keeps a backward wall-clock step from
+/// minting an id below one already committed. Only ever raised.
+static ID_HIGH_WATER_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Raise the process-wide id high-water mark. A lower value is ignored, so
+/// opening a second store in one process cannot pull the mark back.
+pub(crate) fn set_id_high_water(millis: u64) {
+    ID_HIGH_WATER_MS.fetch_max(millis, Ordering::SeqCst);
+}
+
+/// The process-wide id high-water mark, for persistence at shutdown.
+fn id_high_water_ms() -> u64 {
+    ID_HIGH_WATER_MS.load(Ordering::SeqCst)
+}
+
+/// Milliseconds since the Unix epoch, or zero before it.
+pub(crate) fn millis_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| u64::try_from(since.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+/// Read the persisted id high-water mark, if the store carries one.
+pub(crate) async fn read_id_high_water(db: &turso::Database) -> Result<Option<u64>> {
+    let conn = connect(db)?;
+    let mut rows = conn
+        .query("SELECT millis FROM id_high_water WHERE singleton = 1", ())
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => {
+            let millis = row.get::<i64>(0).map_err(engine)?;
+            Ok(Some(u64::try_from(millis).unwrap_or(0)))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Persist the process-wide id high-water mark into the store.
+///
+/// Called once at clean shutdown, so a later process opens at the mark this
+/// one reached rather than at whatever the table held when it started.
+pub async fn persist_id_high_water(db: &turso::Database) -> Result<()> {
+    let conn = connect(db)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO id_high_water(singleton, millis) VALUES (1, ?1)",
+        [id_high_water_ms() as i64],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
 /// Mint the next store id.
 ///
 /// Ids are ULIDs and every ordered read compares them as text, the feed
@@ -210,6 +268,12 @@ pub(crate) fn now_rfc3339() -> String {
 /// One process-wide monotonic generator closes that: the hub is the only
 /// writer, and an event id is minted with the write lock already held, so id
 /// order is commit order.
+///
+/// The generator is monotonic only inside one process, and rebuilds from nil on
+/// restart, so the high-water mark read at open is what carries the ordering
+/// across a wall clock that stepped backwards: a mint taken at or below the
+/// mark is placed one millisecond past it, and then the id's timestamp alone
+/// outranks every id already committed.
 pub(crate) fn next_id() -> String {
     static GENERATOR: std::sync::Mutex<ulid::Generator> =
         std::sync::Mutex::new(ulid::Generator::new());
@@ -217,19 +281,29 @@ pub(crate) fn next_id() -> String {
     let mut generator = GENERATOR
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match generator.generate() {
+
+    let now_ms = millis_now();
+    let high = ID_HIGH_WATER_MS.load(Ordering::SeqCst);
+    let at = if now_ms > high {
+        std::time::SystemTime::now()
+    } else {
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis(high.saturating_add(1))
+    };
+
+    let id = match generator.generate_from_datetime(at) {
         Ok(id) => id,
         // Reachable only after 2^80 ids inside one millisecond. Rolling into
         // the next millisecond keeps the sequence increasing rather than
         // failing a write that has nothing wrong with it.
         Err(overflow) => overflow.commit_overflow_increment(),
-    }
-    .to_string()
+    };
+    ID_HIGH_WATER_MS.fetch_max(id.timestamp_ms(), Ordering::SeqCst);
+    id.to_string()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::next_id;
+    use super::{millis_now, next_id, set_id_high_water};
 
     #[test]
     fn ids_increase_in_generation_order() {
@@ -270,5 +344,21 @@ mod tests {
         all.sort_unstable();
         all.dedup();
         assert_eq!(all.len(), total, "every id is distinct");
+    }
+
+    #[test]
+    fn ids_clear_a_high_water_mark_ahead_of_the_clock() {
+        // The wall clock stepped back behind the last id this store minted.
+        let future = millis_now() + 3_600_000;
+        set_id_high_water(future);
+
+        let first: ulid::Ulid = next_id().parse().expect("a ULID");
+        assert!(
+            first.timestamp_ms() > future,
+            "a mint below the mark sorts before an id already committed"
+        );
+
+        let second: ulid::Ulid = next_id().parse().expect("a ULID");
+        assert!(first < second, "the clamp stays monotonic after it lifts");
     }
 }
