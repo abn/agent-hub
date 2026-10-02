@@ -2465,6 +2465,12 @@ def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
     if "Edited by the check." not in body:
         watch.fail("the wiki edit did not land in the reader")
 
+    if page.locator('[data-action="wiki-review"]').count() == 0:
+        watch.fail("the wiki reader offers no Review control")
+    else:
+        page.click('[data-action="wiki-review"]')
+        page.wait_for_timeout(800)
+
     goto(page, f"#/projects/{quote(project)}/wiki?view=changes", None)
     page.wait_for_timeout(500)
     if page.locator(".wiki-change").count() == 0:

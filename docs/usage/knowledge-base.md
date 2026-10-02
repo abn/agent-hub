@@ -228,13 +228,20 @@ arrive in one request. Selecting a page renders it: the frontmatter block is
 metadata and is shown as the page's type, status and tags rather than as body
 text, and the backlinks are listed under it. An edit writes the page back with
 the version token the read carried, so a page that changed under the reader is
-refused rather than overwritten; the conflict is said in place. **New page**
-writes a page that is not there yet, with `if_version: "absent"`. The Wiki home
-carries the page, needs-review and stale counts and holds the two housekeeping
-screens: **Recent changes** (`kb/history`, who did what to which page and when;
-the rows are not tappable in this version) and **Lint** (`kb/lint`, the tree's
-findings with a Re-check that walks it again). Rename, move, a rendered-compare
-merge, comment threads and the review action are not in this version.
+refused rather than overwritten; the conflict is said in place, with **Reload
+theirs** and **Keep mine**. **New page** writes a page that is not there yet,
+with `if_version: "absent"`. A **Review** control on the reader stamps the page
+the human has read, carrying the version they read; **Needs review** lists the
+pages the hub judges not human-reviewed, and a row opens the page. A session
+brain entry offers **Save to wiki** (`kb/promote`). The Wiki home carries the
+page, needs-review and stale counts and holds the housekeeping screens:
+**Recent changes** (`kb/history`, who did what to which page and when; the rows
+are not tappable in this version) and **Lint** (`kb/lint`, the tree's findings
+with a Re-check that walks it again).
+
+Not in this version: rename and move; a rendered-compare merge (the conflict
+path offers the hub's copy or yours, not a merge); and comment threads on a
+page, which have no store in the hub at all.
 
 ## What there is not
 

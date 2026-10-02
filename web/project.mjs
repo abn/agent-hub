@@ -529,7 +529,10 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
         const provenance = `session brain · ${displayPath} · ${formatBytes(entryRes.entry.size_bytes)} · read-only`;
         const backHref = `#/projects/${encodeURIComponent(id)}/sessions?id=${encodeURIComponent(selectedSession.id)}`;
         stageHead = shellStageHead(fileName, "", "", backHref);
-        stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(provenance)}</span></div>`;
+        stageControls = `<div class="shell-controls" style="gap:8px;padding:0 16px">
+          <span class="shell-meta mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(provenance)}</span>
+          <button type="button" class="btn-outline" data-action="wiki-promote" data-id="${esc(id)}" data-session="${esc(selectedSession.id)}" data-session-name="${esc(selectedSession.session_name || selectedSession.id)}" data-path="${esc(entryRes.entry.path)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Save to wiki</button>
+        </div>`;
         stageBody = `<div class="hub-viewer-doc"><div class="session-doc-content" style="max-width: 640px; margin: 0; padding: 24px 16px;">${rendered}</div></div>`;
         aside = "";
         hasSelection = true;

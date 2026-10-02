@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-02, the wiki reviews, promote and conflict path
+
+* **Update**: [Project knowledge base](usage/knowledge-base.md) adds the
+  **Review** control on the reader, the **Needs review** list, **Save to wiki**
+  from a session brain entry, and the editor's in-place conflict path (keep
+  yours or reload the hub's). Rename and move, a rendered-compare merge, and
+  page comment threads are not built; the hub has no page-comment store.
+
 ## 2026-09-29, the wiki human surface
 
 * **Add**: [Project knowledge base](usage/knowledge-base.md) documents the

@@ -2847,6 +2847,18 @@ fn the_project_wiki_segment_is_wired() {
         WIKI_JS.contains("kb/history") && WIKI_JS.contains("kb/lint"),
         "the Wiki home holds Recent changes and Lint"
     );
+    assert!(
+        WIKI_JS.contains("/review") && WIKI_JS.contains("wiki-review"),
+        "the reader can review a page"
+    );
+    assert!(
+        WIKI_JS.contains("kb/promote"),
+        "a session brain entry can be saved to the wiki"
+    );
+    assert!(
+        WIKI_JS.contains("changed while you were editing"),
+        "the editor states a conflict in place"
+    );
     let served = include_str!("../src/http/web.rs");
     assert!(
         served.contains("/wiki.mjs"),
