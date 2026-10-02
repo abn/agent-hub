@@ -1,12 +1,8 @@
 //! Escaping for text the hub puts into HTML it generates.
 //!
-//! The hub used to render markdown here as well, with a hand-rolled parser
-//! whose contract was total escaping. That renderer is gone: it knew nothing
-//! of tables and ended a list item at the first newline, so a bullet wrapped
-//! at eighty columns broke out of its own list. Markdown is now parsed in the
-//! browser, by the parser already shipped for protected artifacts, whose
-//! plaintext the server never sees. One renderer, and it is the one that can
-//! read what agents write.
+//! The hub does not render markdown itself: the browser parses it with the
+//! parser already shipped for protected artifacts, whose plaintext the server
+//! never sees. One renderer, and it is the one that can read what agents write.
 //!
 //! What remains is the escape used wherever the hub builds markup itself: the
 //! viewer shell, the frame document, and the preview tags.

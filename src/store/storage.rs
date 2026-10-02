@@ -28,10 +28,9 @@ pub struct ProjectUsage {
     pub prunable_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_write: Option<String>,
-    /// Distinct agents with a live session in this project. Carried here so
-    /// the storage screen can mark a project live without asking once per
-    /// project: it used to make one request per row before it could draw the
-    /// table, which on this hub is six round trips for six booleans.
+    /// Distinct agents with a live session in this project. Carried here so the
+    /// storage screen can mark a project live without asking once per project,
+    /// which on this hub would be six round trips for six booleans.
     pub agents_active: i64,
 }
 

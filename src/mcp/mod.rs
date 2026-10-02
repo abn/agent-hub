@@ -171,8 +171,8 @@ impl ServerHandler for HubServer {
     /// Advertise the resource surface alongside the tools.
     ///
     /// Hand-written so the macro does not generate a tools-only `get_info`:
-    /// providing our own leaves the macro's `get_info` out, and this one
-    /// enables both capabilities.
+    /// defining it here keeps the macro from emitting one, and this one enables
+    /// both capabilities.
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(
             ServerCapabilities::builder()

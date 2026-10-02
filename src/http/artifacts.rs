@@ -1047,14 +1047,10 @@ fn reader_shell(
     } else {
         "null".to_string()
     };
-    // The source, not HTML. The hub used to render markdown here with a
-    // hand-rolled parser that knew nothing of tables and ended a list item at
-    // the first newline, so every bullet an agent wrapped at eighty columns
-    // broke out of its list and every table came through as pipes. The
-    // browser already carries a real parser and already uses it for protected
-    // artifacts, whose plaintext the server never sees; sending it the source
-    // makes both kinds render the same way rather than keeping a weaker
-    // second renderer alive for the public half.
+    // The source, not HTML: the browser already carries a real markdown parser
+    // and already uses it for protected artifacts, whose plaintext the server
+    // never sees. Sending it the source makes both kinds render the same way,
+    // rather than keeping a weaker second renderer alive for the public half.
     let markdown_blob = if artifact.kind == "markdown" {
         script_json(&json!(String::from_utf8_lossy(bytes)))
     } else {

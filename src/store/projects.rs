@@ -19,8 +19,8 @@ pub struct Project {
     /// Feed events newer than the human's last-seen cursor on this project.
     pub unseen_events: i64,
     /// Distinct agents with a live session here. Carried on the listing so a
-    /// screen showing many projects learns it once: the rail used to ask for
-    /// each project separately, on every navigation.
+    /// screen showing many projects learns it once, not once per project on
+    /// every navigation.
     pub agents_active: i64,
     /// Whether the project is confidential and hidden without a grant.
     pub confidential: bool,

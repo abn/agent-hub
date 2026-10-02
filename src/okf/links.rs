@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn brackets_that_never_close_cost_one_pass() {
         // A page is agent-written and up to 1 MiB, and this runs inside a put.
-        // A line of `[` with no `]`, or with one at the very end, used to be
+        // A line of `[` with no `]`, or with one at the very end, must not be
         // rescanned from every bracket.
         let started = std::time::Instant::now();
         let open = "[".repeat(1 << 20);

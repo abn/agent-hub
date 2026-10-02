@@ -130,8 +130,8 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
-        // A subcommand this binary does not know used to start a hub, which
-        // turned a typo into a second engine process on the data directory.
+        // An unknown subcommand must not start a hub: a typo would otherwise
+        // become a second engine process on the data directory.
         Some(other) => {
             eprintln!("agent-hub: unknown subcommand '{other}'");
             eprint!("{USAGE}");
