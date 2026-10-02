@@ -9,6 +9,7 @@ import {
   copyToken,
   issueToken,
   reissueToken,
+  revealIssuedToken,
   revokeToken,
   ungrant,
 } from "./agents.mjs";
@@ -207,7 +208,17 @@ main.addEventListener("submit", (event) => {
       display_name: String(data.get("display_name") || "").trim(),
     };
     api("/api/v1/agents", { method: "POST", body: JSON.stringify(payload) })
-      .then(() => render())
+      .then(async () => {
+        // The token is issued once, now, and the reveal opens on it directly:
+        // the copy promises it, and a mobile create that skipped it left the
+        // agent with no way in. The agent's own screen is where it lands.
+        location.hash = `#/access?agent=${encodeURIComponent(payload.id)}`;
+        let issued = null;
+        try {
+          issued = await api(`/api/v1/agents/${encodeURIComponent(payload.id)}/token`, { method: "POST" });
+        } catch {}
+        await revealIssuedToken(issued?.token || null, payload.display_name || payload.id, payload.id);
+      })
       .catch(failed);
   } else if (action === "agent-grant") {
     const agent = String(data.get("agent") || "").trim();

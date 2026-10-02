@@ -1,6 +1,7 @@
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { errorCard, esc, main, paint } from "./dom.mjs";
+import { mcpSetup } from "./feed.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { prefs } from "./prefs.mjs";
 import { render } from "./router.mjs";
@@ -68,6 +69,8 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       const activeDesc = agent.last_seen_at
         ? `active ${relative(agent.last_seen_at)}`
         : `seen ${relative(agent.created_at)}`;
+      const pending = agent.state === "pending";
+      const metaDesc = pending ? `waiting to join · asked ${relative(agent.created_at)}` : `${grantDesc} · ${activeDesc}`;
       const isSelected = !isCreating && selectedAgent && selectedAgent.id === agent.id;
       const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
       const bg = isSelected ? "var(--accent-bg)" : "var(--surface)";
@@ -75,8 +78,11 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       const currentAttr = isSelected ? ' aria-current="true"' : "";
       return `
         <a class="row agent-index-row" href="#/access?agent=${encodeURIComponent(agent.id)}"${currentAttr} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:0 16px;${borderTop}border-bottom:1px solid var(--line);background:${bg};color:var(--ink);text-decoration:none;box-sizing:border-box">
-          <span style="font-size:14px;font-weight:600">${esc(agent.display_name || agent.id)}</span>
-          <span style="font-size:12px;color:${metaColor}">${esc(grantDesc)} · ${esc(activeDesc)}</span>
+          <span style="display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;font-weight:600">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(agent.display_name || agent.id)}</span>
+            ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
+          </span>
+          <span style="font-size:12px;color:${metaColor}">${esc(metaDesc)}</span>
         </a>`;
     })
     .join("");
@@ -133,10 +139,12 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       : "no calls yet";
     const stageMeta = `${selectedAgent.id} · ${lastCall}`;
     const issuedDate = formatTokenIssued(selectedAgent.created_at);
+    const pending = selectedAgent.state === "pending";
 
     stageHead = `
       <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
         <b class="shell-title-line" style="font-size:15px;font-weight:600">${esc(selectedAgent.display_name || selectedAgent.id)}</b>
+        ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
         <span style="font:500 12px/1 var(--font-mono);color:var(--ink-3)">${esc(stageMeta)}</span>
       </div>`;
 
@@ -179,9 +187,18 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
         Grant a project
       </button>`;
 
+    const enrolReason =
+      pending && selectedAgent.enrol_note
+        ? `<div class="agent-enrol-reason">
+            <span class="agent-enrol-label">Asked to join</span>
+            <p class="agent-enrol-note">${esc(selectedAgent.enrol_note)}</p>
+          </div>`
+        : "";
+
     stageBody = `
       <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:0 24px">
         <div style="max-width:640px">
+          ${enrolReason}
           <div style="padding:20px 0 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECTS · ${grants.length}</div>
           ${projectRows}
           ${grantRow}
@@ -221,7 +238,8 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
 }
 
 function renderMobileAgentDetail(agent, projects, grants) {
-  const meta = `first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · ${agent.personal_project_id}`;
+  const pending = agent.state === "pending";
+  const meta = `${pending ? "pending enrolment · " : ""}first seen ${relative(agent.created_at)}${agent.last_seen_at ? " · active " + relative(agent.last_seen_at) : ""} · ${agent.personal_project_id}`;
   const stageHead = shellStageHead(agent.display_name || agent.id, meta, "", "#/access");
   const liveToken = agent.has_live_token !== false;
   const stageControls = `
@@ -268,6 +286,14 @@ function renderMobileAgentDetail(agent, projects, grants) {
 
   const content = `
     <div class="access-screen" style="flex:1;min-height:0;overflow:hidden">
+      ${
+        pending && agent.enrol_note
+          ? `<div class="agent-enrol-reason">
+              <span class="agent-enrol-label">Asked to join</span>
+              <p class="agent-enrol-note">${esc(agent.enrol_note)}</p>
+            </div>`
+          : ""
+      }
       <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECT GRANTS</div>
       <div class="agent-grants-list" style="border-top:1px solid var(--line)">
         ${grantRows}
@@ -322,12 +348,16 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
       const projectWord = grants.length === 1 ? "project" : "projects";
       const grantDesc = grants.length > 0 ? `${grants.length} ${projectWord}` : "no projects";
       const activeDesc = agent.last_seen_at ? `active ${relative(agent.last_seen_at)}` : `seen ${relative(agent.created_at)}`;
-      const metaLine = `${grantDesc} · ${activeDesc}`;
+      const pending = agent.state === "pending";
+      const metaLine = pending ? `waiting to join · asked ${relative(agent.created_at)}` : `${grantDesc} · ${activeDesc}`;
 
       return `
       <a class="row agent-row" href="#/access?agent=${encodeURIComponent(agent.id)}" style="display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 8px 10px 16px;${idx === 0 ? "border-top:1px solid var(--line);" : ""}border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);text-decoration:none;box-sizing:border-box">
         <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-          <span class="title" style="font-size:15px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(agent.display_name || agent.id)}</span>
+          <span class="title" style="display:flex;align-items:center;gap:6px;font-size:15px;font-weight:600;min-width:0">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(agent.display_name || agent.id)}</span>
+            ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
+          </span>
           <span class="meta" style="font-size:12px;color:var(--ink-3)">${esc(metaLine)}</span>
         </span>
         <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
@@ -693,13 +723,13 @@ export async function agentsSection() {
   `;
 }
 
-export async function copyToken(token) {
+export async function copyToken(token, message = "Token copied.") {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     try {
       await navigator.clipboard.writeText(token);
     } catch {}
   }
-  toast("Token copied.");
+  toast(message);
 }
 
 // §13, the reissue reveal. One dialog, two states.
@@ -724,6 +754,9 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
   // A token passed in (a just-created agent) opens straight at the reveal;
   // otherwise state 1 confirms before issuing.
   let visible = token || null;
+  // The setup snippet for the revealed token, built with the token already in
+  // place. Held only while the dialog is open, like the token itself.
+  let setup = null;
 
   const form = document.createElement("form");
   form.method = "dialog";
@@ -771,6 +804,29 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
   valueRow.append(value, copyBtn);
   fieldWrap.append(valueRow);
 
+  // State 2 only, built on paint and cleared on close. The token is embedded,
+  // so a reader copying the setup never splices it in by hand.
+  const setupWrap = document.createElement("div");
+  setupWrap.className = "reveal-setup";
+  setupWrap.hidden = true;
+  const setupHead = document.createElement("div");
+  setupHead.className = "reveal-setup-head";
+  const setupLabel = document.createElement("span");
+  setupLabel.className = "dialog-label";
+  setupLabel.textContent = "MCP setup for this agent";
+  const setupCopy = document.createElement("button");
+  setupCopy.type = "button";
+  setupCopy.className = "reveal-copy";
+  setupCopy.setAttribute("aria-label", "Copy setup for this agent");
+  setupCopy.innerHTML = glyphSvg("copy", { size: 18 });
+  setupCopy.addEventListener("click", () => {
+    if (setup) copyToken(setup, "MCP setup copied.");
+  });
+  const setupText = document.createElement("pre");
+  setupText.className = "reveal-setup-text";
+  setupHead.append(setupLabel, setupCopy);
+  setupWrap.append(setupHead, setupText);
+
   function paintState(next) {
     state = next;
     const name = agentName || agentId || "this agent";
@@ -783,6 +839,9 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       commit.textContent = "Reissue";
       fieldWrap.hidden = true;
       value.textContent = "";
+      setup = null;
+      setupText.textContent = "";
+      setupWrap.hidden = true;
       body.hidden = false;
     } else {
       heading.textContent = `Token for ${name}`;
@@ -793,6 +852,9 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       commit.textContent = "Done";
       fieldWrap.hidden = false;
       value.textContent = visible || "";
+      setup = visible ? mcpSetup("", visible) : null;
+      setupText.textContent = setup || "";
+      setupWrap.hidden = !setup;
     }
   }
 
@@ -829,7 +891,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
     if (state === 2) event.preventDefault();
   });
 
-  form.append(heading, body, fieldWrap, note, actions);
+  form.append(heading, body, fieldWrap, setupWrap, note, actions);
   actions.append(safe, commit);
   el.appendChild(form);
   document.body.appendChild(el);
@@ -845,6 +907,8 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       // cannot be read out of the page once the dialog is gone.
       visible = null;
       value.textContent = "";
+      setup = null;
+      setupText.textContent = "";
       el.remove();
       document.documentElement.classList.remove("has-dialog");
       if (opener instanceof HTMLElement && opener.isConnected) {

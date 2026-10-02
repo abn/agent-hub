@@ -15,6 +15,7 @@ export const EMPTY_COPY = {
     screen: "home",
     title: "Quiet night.",
     body: "Nothing is waiting on you.",
+    link: "Create a project",
   },
   inbox: {
     screen: "inbox",
@@ -25,7 +26,7 @@ export const EMPTY_COPY = {
   feed: {
     screen: "project feed",
     title: "No events yet in {project}.",
-    body: "Agents post here over MCP. The project slug is {project}.",
+    body: "Agents post here over MCP. Get an agent token under Agents and tokens, then copy the setup for the project slug {project}.",
     link: "Copy MCP setup",
   },
   artifacts: {

@@ -593,20 +593,29 @@ async function showOlder(projectId) {
 }
 
 // What an agent needs to reach this hub, in the forms the hub's own skill
-// document gives them. The token is the agent's, issued in Settings, and is
-// never the one this browser holds.
-export function mcpSetup(projectId) {
+// document gives them. The token is the agent's, issued under Agents and
+// tokens, and is never the one this browser holds. When the caller holds the
+// token already it is embedded, so a reader never splices it by hand; when it
+// does not, the snippet names where the token comes from.
+export function mcpSetup(projectId, token = "<agent token>") {
   // Resolve against the document, not the origin: a hub served behind a
   // path-stripping proxy lives at a prefix, and the origin alone loses it. H8.
   const base = new URL(".", document.baseURI).href;
+  const hasToken = token !== "<agent token>";
+  const where = hasToken
+    ? ""
+    : `# Create an agent at ${new URL("#/access", base).href} and copy the token it shows once.`;
   return [
-    `# Agent Hub MCP setup. The project slug is ${projectId}.`,
+    projectId
+      ? `# Agent Hub MCP setup. The project slug is ${projectId}.`
+      : "# Agent Hub MCP setup.",
+    ...(where ? [where] : []),
     "# Streamable HTTP:",
     `POST ${new URL("mcp", base).href}`,
-    "Authorization: Bearer <agent token>",
+    `Authorization: Bearer ${token}`,
     "",
     "# A harness that speaks only stdio runs the proxy:",
-    `HUB_URL=${base} HUB_TOKEN=<agent token> agent-hub mcp`,
+    `HUB_URL=${base} HUB_TOKEN=${token} agent-hub mcp`,
     "",
     `# The full guide: ${new URL("SKILL.md", base).href}`,
     "",

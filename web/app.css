@@ -154,6 +154,9 @@ h3.group {
   font-size: 12px; font-weight: 600;
 }
 .pill-status .pill-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--action); }
+/* A value pill that marks a state rather than an alert: neutral surface, so it
+   does not compete with the "Waiting on you" pill beside it. */
+.pill-enrol { background: var(--surface-2); color: var(--ink-2); }
 /* component: chips */
 /* The design draws a chip at 32px, which is under the tap target, so the
    drawn box stays 32px and the hit area grows to 44px with a pseudo-element. */
@@ -439,6 +442,16 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     color: var(--ink-3);
     text-transform: uppercase;
     padding: var(--s-3) var(--s-2) var(--s-1);
+  }
+  /* The section header is the door to the register, not only a label: with no
+     projects listed under it, this is the only way to reach #/projects from the
+     desktop rail. */
+  a.rail-section-header {
+    display: block;
+    text-decoration: none;
+  }
+  a.rail-section-header:hover {
+    color: var(--ink);
   }
 
   .rail-badge {
@@ -1178,6 +1191,37 @@ html.has-dialog { overflow: hidden; }
   background: none;
   color: var(--ink-2);
   cursor: pointer;
+}
+/* The setup rides under the token, with its own copy glyph on the row that
+   owns the string, so a reader who already has the token does not hand-splice
+   it into the snippet. */
+.reveal-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.reveal-setup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.reveal-setup-head .dialog-label {
+  flex: 1;
+  min-width: 0;
+}
+.reveal-setup-text {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  max-height: 30vh;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: var(--t-12);
+  line-height: 1.6;
+  color: var(--ink-2);
+  white-space: pre;
 }
 .dialog-count[hidden], .dialog-error[hidden] { display: none; }
 .dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
@@ -2476,6 +2520,20 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   padding: var(--s-2) var(--s-3);
   border-left: 3px solid var(--line-strong);
   background: var(--surface-2);
+}
+
+/* The reason an enrolling agent gave, read before the operator decides. The
+   left rule is the action tone so the block reads as the thing being asked,
+   not as a note left after the fact. */
+.inbox-detail-reason {
+  margin: var(--s-1) 0;
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--action);
+  background: var(--action-bg);
+}
+.inbox-detail-reason strong {
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .inbox-detail-snooze-wrap {
@@ -5371,6 +5429,40 @@ a.session-back {
   line-height: 1.5;
   color: var(--ink-3);
   margin: 0;
+}
+
+/* A pending enrolment reads as a state, not a count: a pill on the row and the
+   reason the agent gave, so the operator is not deciding blind. */
+.agent-pending-pill {
+  flex: none;
+  padding: 1px 7px;
+  font-size: var(--t-12);
+  font-weight: 600;
+}
+
+.agent-enrol-reason {
+  margin: 16px 0 0;
+  padding: var(--s-3) var(--s-4);
+  border-left: 3px solid var(--action);
+  background: var(--action-bg);
+  border-radius: 0 var(--r-1) var(--r-1) 0;
+}
+
+.agent-enrol-label {
+  display: block;
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.agent-enrol-note {
+  margin: var(--s-2) 0 0;
+  font-size: var(--t-15);
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .confidential-row {

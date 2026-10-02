@@ -80,6 +80,16 @@ function bodyOf(item) {
   return typeof body === "string" ? body.trim() : "";
 }
 
+// An agent enrolling through the hub's self-service path posts an approval
+// whose payload carries the action and the reason the agent gave. The decision
+// is on the agent that asked, so the card shows the reason before Approve.
+function enrolOf(item) {
+  if (item.kind !== "approval") return null;
+  const payload = item.payload || {};
+  if (payload.action !== "enrol_request") return null;
+  return typeof payload.why === "string" ? payload.why.trim() : "";
+}
+
 const SNOOZE_KEY = "hub.snooze";
 const SNOOZE_DURATION_MS = 60 * 60 * 1000;
 
@@ -309,6 +319,8 @@ function detail(item, state) {
   const isResolved = item.status === "resolved";
   const outcome = isResolved ? outcomeOf(item) : "";
   const note = isResolved ? noteOf(item) : "";
+  const enrol = enrolOf(item);
+  const isEnrol = enrol !== null;
   let answers = "";
   if (waits(item) && item.kind === "approval") {
     answers = `<div class="inbox-answers">
@@ -323,10 +335,12 @@ function detail(item, state) {
     <div class="inbox-detail-head">
       ${glyph(item.kind)}
       ${waits(item) ? '<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>' : ""}
+      ${waits(item) && isEnrol ? '<span class="pill pill-enrol">Pending enrolment</span>' : ""}
       ${outcome ? `<span class="pill pill-outcome">${esc(outcome)}</span>` : ""}
       <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
     </div>
     <h2 class="item-title" id="inbox-detail-title">${esc(item.summary)}</h2>
+    ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}</div>` : ""}
     ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}
     ${note ? `<div class="inbox-detail-resolved-note"><strong>${outcome === "Approved" || outcome === "Declined" ? "Decision note" : "Answer"}:</strong> ${esc(note)}</div>` : ""}
     ${answers}

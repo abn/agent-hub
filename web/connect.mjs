@@ -143,14 +143,30 @@ if (typeof document !== "undefined") {
   });
 }
 
+// A hub started without an admin token refuses every control request with a
+// sentence of its own. The screen reads that sentence rather than guessing,
+// because a token field cannot satisfy a hub that has no token to match.
+const NO_ADMIN = /no admin token is configured/i;
+
+async function noAdminToken() {
+  try {
+    await api("/api/v1/home");
+    return false;
+  } catch (error) {
+    return error.status === 401 && NO_ADMIN.test(error.message || "");
+  }
+}
+
 export async function connectScreen(params, gen) {
   const next = nextFrom(params);
   // A refusal can arrive with a dialog open on the screen behind. It outlives
   // the repaint, and a modal over this one would leave the field unreachable.
   document.querySelectorAll("dialog[open]").forEach((box) => box.close());
 
+  // The hand-typed fallback "demo · local" named a hub that was not there. The
+  // reader's own address is the real node until a token can name it properly.
   const nodeLine =
-    document.getElementById("top-node")?.textContent || "demo · local";
+    document.getElementById("top-node")?.textContent?.trim() || location.host || "this hub";
 
   const stageHead = `<div class="shell-head">
     <span class="shell-slot" aria-hidden="true">${LOCK}</span>
@@ -160,11 +176,19 @@ export async function connectScreen(params, gen) {
     </div>
   </div>`;
 
-  const stageControls = `<div class="shell-controls"><span class="connect-tools-text">Not connected</span></div>`;
+  const blocked = await noAdminToken();
 
-  const stageBody = `
+  const stageControls = `<div class="shell-controls"><span class="connect-tools-text">${blocked ? "No admin token" : "Not connected"}</span></div>`;
+
+  const stageBody = blocked
+    ? `
     <div class="connect connect-container">
-      <p class="connect-intro">Paste the token the hub was started with. It stays on this device.</p>
+      <p class="connect-intro">This hub was started without an admin token, so its control surface is disabled. Set <span class="mono">HUB_ADMIN_TOKEN</span> and restart the hub, then reload this page.</p>
+    </div>
+  `
+    : `
+    <div class="connect connect-container">
+      <p class="connect-intro">Paste the hub's admin token, the value of <span class="mono">HUB_ADMIN_TOKEN</span> at startup. It stays on this device.</p>
       <form data-action="connect" data-next="${esc(next)}">
         <input class="sr-only" type="text" name="username" value="hub" autocomplete="username" tabindex="-1" aria-hidden="true">
         <div class="connect-group">

@@ -209,11 +209,15 @@ function storageCard(storage, prunable) {
 function quietCard(data) {
   const last = data.last_event_at ? ago(data.last_event_at) : "";
   const agents = agentsLine(int(data.agents_active));
-  return emptyStateHTML({
-    ...EMPTY_COPY.home,
-    title: `Quiet ${dayPart(new Date())}.`,
-    body: `${EMPTY_COPY.home.body} ${agents}${last ? `, last event ${last}` : ""}.`,
-  });
+  return emptyStateHTML(
+    {
+      ...EMPTY_COPY.home,
+      title: `Quiet ${dayPart(new Date())}.`,
+      body: `${EMPTY_COPY.home.body} ${agents}${last ? `, last event ${last}` : ""}.`,
+    },
+    {},
+    { action: "new-project" },
+  );
 }
 
 function chipsHTML(waiting, unread) {
