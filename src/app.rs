@@ -254,17 +254,24 @@ impl AppState {
         }
         let schema_version = store::migrate(&db).await?;
 
-        // Seed the id high-water mark this process mints against. When the
-        // wall clock has stepped behind the last id a previous process minted,
-        // say so: ids remain ordered because the mint is clamped forward.
-        if let Some(millis) = store::read_id_high_water(&db).await? {
-            store::set_id_high_water(millis);
+        // Seed the id high-water mark this process mints against, from the
+        // persisted table AND from the newest id the data already holds: the
+        // table is written only at a clean shutdown, so a crash after the last
+        // mint would otherwise leave it behind. When the wall clock has stepped
+        // behind the mark, say so; ids remain ordered because the mint is
+        // clamped forward.
+        let mut high_water = store::read_id_high_water(&db).await?.unwrap_or(0);
+        if let Some(newest) = store::read_newest_event_ms(&db).await? {
+            high_water = high_water.max(newest);
+        }
+        if high_water > 0 {
+            store::set_id_high_water(high_water);
             let now = store::millis_now();
-            if millis > now {
+            if high_water > now {
                 tracing::warn!(
-                    high_water_ms = millis,
+                    high_water_ms = high_water,
                     now_ms = now,
-                    behind_ms = millis - now,
+                    behind_ms = high_water - now,
                     "the wall clock is behind the last minted id; new ids are clamped forward"
                 );
             }

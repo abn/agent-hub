@@ -244,6 +244,29 @@ pub(crate) async fn read_id_high_water(db: &turso::Database) -> Result<Option<u6
     }
 }
 
+/// The millisecond of the newest event id, if the store holds any.
+///
+/// The persisted high-water mark is written only at a clean shutdown, so a
+/// crash after the last mint leaves it behind. Seeding from the data as well
+/// closes that window without touching the store per mint.
+pub(crate) async fn read_newest_event_ms(db: &turso::Database) -> Result<Option<u64>> {
+    let conn = connect(db)?;
+    let mut rows = conn
+        .query("SELECT MAX(id) FROM events", ())
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        return Ok(None);
+    };
+    let id = match row.get_value(0).map_err(engine)? {
+        turso::Value::Text(text) => text,
+        _ => return Ok(None),
+    };
+    Ok(ulid::Ulid::from_string(&id)
+        .ok()
+        .map(|ulid| ulid.timestamp_ms()))
+}
+
 /// Persist the process-wide id high-water mark into the store.
 ///
 /// Called once at clean shutdown, so a later process opens at the mark this

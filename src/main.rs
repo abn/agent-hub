@@ -85,13 +85,21 @@ relative to it: 'runbooks/deploy.md' is '/fs/runbooks/deploy.md'.
 ";
 
 fn main() -> ExitCode {
-    // Logs go to stderr so the stdio MCP transport keeps stdout protocol-clean.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // A serving hub defaults to info, so an operator who set nothing still sees
+    // a failure (a failed sweep, a dropped tailnet, a failed checkpoint); the
+    // other subcommands stay quiet unless RUST_LOG says otherwise, and every
+    // log goes to stderr so the stdio MCP transport keeps stdout protocol-clean.
+    let default_filter = match args.first().map(String::as_str) {
+        None | Some("serve") => "agent_hub=info",
+        _ => "error",
+    };
+    let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| default_filter.to_string());
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)
         .init();
-
-    let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("serve") => report(serve()),
         Some("mcp") => mcp(),

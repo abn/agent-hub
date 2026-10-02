@@ -791,3 +791,29 @@ fn a_negative_or_unparseable_event_ceiling_is_refused() {
         assert!(matches!(err, agent_hub::error::Error::Config(_)), "{value}");
     }
 }
+
+/// `config --check` verifies the data directory, so a bad path is one clear
+/// line rather than a failure at first write.
+#[test]
+fn config_check_reports_an_unusable_data_directory() {
+    let root = TempDir::new("hub-config-data-dir");
+    let good = root.join("data");
+    std::fs::create_dir_all(&good).expect("data dir");
+    agent_hub::config::validate_configuration(&env(&[(
+        "HUB_DATA_DIR",
+        good.to_str().expect("utf-8 path"),
+    )]))
+    .expect("a writable data directory passes the check");
+
+    let file = root.join("not-a-dir");
+    std::fs::write(&file, b"x").expect("file");
+    let err = agent_hub::config::validate_configuration(&env(&[(
+        "HUB_DATA_DIR",
+        file.to_str().expect("utf-8 path"),
+    )]))
+    .expect_err("a file where the data directory goes fails the check");
+    assert!(
+        err.to_string().contains("not a directory"),
+        "the refusal names the problem: {err}"
+    );
+}

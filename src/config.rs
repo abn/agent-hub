@@ -1133,10 +1133,41 @@ pub fn validate_configuration(env: &dyn Fn(&str) -> Option<String>) -> Result<()
         }
     }
 
-    Config::resolve(env)?;
+    let config = Config::resolve(env)?;
     ClientConfig::resolve(env)?;
+    check_data_dir(&config.data_dir)?;
 
     Ok(())
+}
+
+/// The data directory must be writable, or its nearest existing ancestor must
+/// be, so the hub can create it on start. `config --check` turns a bad path
+/// into one clear line rather than a failure at first write.
+fn check_data_dir(path: &std::path::Path) -> Result<()> {
+    let mut probe = path;
+    while !probe.exists() {
+        match probe.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => probe = parent,
+            _ => break,
+        }
+    }
+    if !probe.is_dir() {
+        return Err(Error::Config(format!(
+            "the data directory {} is not a directory",
+            path.display()
+        )));
+    }
+    let marker = probe.join(".agent-hub-write-check");
+    match std::fs::File::create(&marker) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&marker);
+            Ok(())
+        }
+        Err(err) => Err(Error::Config(format!(
+            "the data directory {} is not writable: {err}",
+            probe.display()
+        ))),
+    }
 }
 
 /// The user config file a client writes its token to: the first candidate
