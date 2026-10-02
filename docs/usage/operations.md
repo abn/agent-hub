@@ -93,6 +93,55 @@ take the node out of rotation.
 
 `GET /healthz` is liveness only: the process is up.
 
+## Practical limits
+
+The node is sized for one operator and their agents, not a fleet of tenants,
+so a handful of things grow with use rather than being capped. Knowing where
+they are is how you decide when to prune.
+
+- **Sessions.** No count cap. A session lives until the human prunes it. One
+  session brain file warns past 256 MiB and is refused at 1 GiB, and a listing
+  returns at most 200 sessions.
+- **Events.** A project's feed holds `events_per_project`
+  (`HUB_EVENTS_PER_PROJECT`, default one million). A write past it is refused
+  and names the cap; promote durable work to the knowledge base or prune the
+  feed to make room. Lifecycle and audit records do not count.
+- **Knowledge base.** One page is capped at 1 MiB and one path at 512 bytes. A
+  project's knowledge base file warns past 256 MiB and is refused at 1 GiB, so
+  its page count follows that file's size rather than a count of its own.
+  History and last-write scan the write log newest first, which is the brain
+  engine's own call table; the hub wraps it and does not index it, so those
+  reads cost more as the log grows. A history request carries at most 200 rows
+  and reports the real total.
+- **Artifacts.** One blob is capped at 50 MiB. A blob now moves on the Tokio
+  blocking pool, so a large transfer no longer holds an async worker and the
+  hub keeps answering other requests while it lands. Many large transfers at
+  once are felt in memory (roughly 50 MiB each in flight) and disk bandwidth
+  rather than in the workers; past the blocking pool's ceiling they queue.
+- **Search.** A filtered search reads at most 5000 rows before it stops, and
+  returns at most 100 hits a page. A scope that matches more than the fetch cap
+  is reported as truncated rather than scanned whole.
+
+## Metrics
+
+`GET /metrics` reports the hub's own counters in Prometheus text: HTTP requests
+by method and status class, events appended by kind, and MCP tool calls by tool.
+It is admin-gated like the rest of the control surface, so the scraper carries
+the admin token in `Authorization: Bearer`. There is no separate scrape
+credential.
+
+## Doctor
+
+```sh
+agent-hub doctor [--data-dir DIR]
+```
+
+One read-only report: the data directory and its identity, the schema version
+and the most this binary supports, free space, the write-ahead log size, the id
+high-water mark, and any artifact blob the store names but the tree is missing.
+It refuses while a hub holds the store, like the other offline commands, and
+exits non-zero on any problem.
+
 ## Configuration
 
 `agent-hub config` reports the active settings and where each came from, and

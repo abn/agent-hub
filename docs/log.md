@@ -6,6 +6,27 @@ software release notes and the repository changelog.
 
 ## 2026-10-02
 
+### Metrics, doctor, and the tailnet rebuild
+
+* **Add**: [Operations](usage/operations.md) documents `GET /metrics` and the
+  `doctor` command. The hub overrides its MCP `call_tool` so an unknown tool name
+  answers with a hub `not_found` tool result rather than a bare protocol error.
+* **Update**: blob IO runs on the blocking pool; the embedded tailnet endpoint
+  rebuilds its device on a full session drop instead of only reconnecting the
+  listener.
+
+
+### The practical ceilings, and blob IO off the async workers
+
+* **Add**: [Operations](usage/operations.md) gains a **Practical limits**
+  section: sessions are uncapped and a brain file is refused at 1 GiB, a
+  project's feed holds `HUB_EVENTS_PER_PROJECT`, a page is capped at 1 MiB and
+  a knowledge base file at 1 GiB with history and last-write read by a linear
+  scan of the brain engine's own write log rather than a hub index, an artifact
+  blob is capped at 50 MiB, and a search reads at most 5000 rows.
+* **Update**: Artifact blob reads and writes run on the Tokio blocking pool, so
+  a transfer up to the 50 MiB cap no longer holds an async worker.
+
 ### The feed has a ceiling, ids survive a clock jump, and the hub drains
 
 * **Add**: [Operations](usage/operations.md) documents the project event ceiling
