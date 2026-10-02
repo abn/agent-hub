@@ -11,6 +11,7 @@ pub mod home;
 pub mod idempotency;
 pub mod identity;
 pub mod inbox;
+pub mod page_comments;
 pub mod projects;
 pub mod prune;
 pub mod questions;

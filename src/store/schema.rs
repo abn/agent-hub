@@ -82,6 +82,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 17,
         ddl: V17,
     },
+    Migration {
+        version: 18,
+        ddl: V18,
+    },
 ];
 
 /// Version 1: the full `hub.db` schema, including the full-text index over
@@ -468,4 +472,27 @@ CREATE TABLE IF NOT EXISTS artifact_shares(
   revoked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_artifact_shares_token ON artifact_shares(token);
+"#;
+
+/// Version 18: comment threads on knowledge base pages.
+///
+/// A page comment is keyed by the project and the canonical page path rather
+/// than a page id, since the knowledge base has no page table. Deleting a
+/// project removes its comments with it; the reference documents the relation,
+/// and foreign keys are not enforced in this schema, so the project delete
+/// sweeps the rows. The index serves the one read: a page's thread, oldest
+/// first.
+const V18: &str = r#"
+CREATE TABLE IF NOT EXISTS kb_comments(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  anchor TEXT,
+  done INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS kb_comments_page
+  ON kb_comments(project_id, path, created_at, id);
 "#;

@@ -119,7 +119,7 @@ fn problem(err: Error) -> Problem {
 /// The admin gate, then the project. Nothing about the request is read
 /// before the gate, so a caller without the token learns nothing from the
 /// refusal, whatever it sent.
-async fn check_access(
+pub(crate) async fn check_access(
     state: &AppState,
     headers: &HeaderMap,
     project_id: &str,
@@ -146,7 +146,7 @@ async fn check_access(
 /// `kv` is the namespace itself, so `kv/x` is the key-value path the knowledge
 /// base refuses and never a directory called `kv`. The result goes through
 /// the same canonicalisation every other surface uses.
-fn page_path(path: &str) -> std::result::Result<String, Problem> {
+pub(crate) fn page_path(path: &str) -> std::result::Result<String, Problem> {
     let relative = path.trim_start_matches('/');
     let namespaced = match relative.split('/').next() {
         Some("fs" | "kv") => format!("/{relative}"),

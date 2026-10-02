@@ -21,6 +21,7 @@ pub mod enrol;
 pub mod feed;
 pub mod inbox;
 pub mod kb;
+pub mod kb_comments;
 pub mod origin;
 pub mod problem;
 pub mod projects;
@@ -126,6 +127,18 @@ pub fn router(state: AppState) -> Router {
                 .post(kb::page_post),
         )
         .route("/api/v1/projects/{id}/kb/promote", post(kb::promote))
+        .route(
+            "/api/v1/projects/{id}/kb/comments",
+            get(kb_comments::list).post(kb_comments::create),
+        )
+        .route(
+            "/api/v1/projects/{id}/kb/comments/{comment_id}",
+            delete(kb_comments::remove),
+        )
+        .route(
+            "/api/v1/projects/{id}/kb/comments/{comment_id}/done",
+            post(kb_comments::set_done),
+        )
         .route("/api/v1/projects/{id}/kb/history", get(kb::history))
         .route("/api/v1/projects/{id}/kb/backlinks", get(kb::backlinks))
         .route("/api/v1/projects/{id}/kb/lint", get(kb::lint))
