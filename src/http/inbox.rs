@@ -277,7 +277,8 @@ pub struct DecisionBody {
 /// `POST /api/v1/approvals/{id}/decision`
 ///
 /// A valid bearer token is required. The decision is recorded on the feed and
-/// resolves the waiting item. An unknown id is a 404, a non-approval id a 400.
+/// resolves the waiting item. A self-enrolment approval also admits or refuses
+/// the enrolling agent. An unknown id is a 404, a non-approval id a 400.
 pub async fn decide(
     State(state): State<AppState>,
     ProblemPath(approval_id): ProblemPath<String>,
@@ -301,7 +302,7 @@ pub async fn decide(
         }
     };
 
-    let event_id = question_store::decide(
+    let decision = question_store::decide_reporting(
         &state.db,
         &principal.actor,
         &approval_id,
@@ -312,6 +313,15 @@ pub async fn decide(
     .await
     .map_err(|err| Problem::from_error(&err))?;
 
+    // An approval decision that admitted a self-enrolled agent turns on the
+    // agent's enrolment share, so the enrolling client's status long-poll can
+    // collect the token it already holds.
+    if let Some(agent_id) = decision.enrolled_agent {
+        state.set_enrol_share(&agent_id, true);
+    }
+
     state.notify();
-    Ok(Json(AnswerResult { event_id }))
+    Ok(Json(AnswerResult {
+        event_id: decision.event_id,
+    }))
 }

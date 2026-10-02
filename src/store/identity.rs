@@ -684,7 +684,24 @@ pub async fn approve_enrolment(
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+    let agent =
+        approve_enrolment_in_tx(&tx, current_id, new_id, new_display_name, projects).await?;
+    tx.commit().await.map_err(engine)?;
+    Ok(agent)
+}
 
+/// Approve an enrolment inside the caller's transaction.
+///
+/// The decision path admits a self-enrolled agent in the same transaction that
+/// records the decision, so the two cannot diverge. The caller owns commit and
+/// rollback; an error leaves the transaction to roll back when it is dropped.
+pub(crate) async fn approve_enrolment_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    current_id: &str,
+    new_id: Option<&str>,
+    new_display_name: Option<&str>,
+    projects: Option<&[String]>,
+) -> Result<Agent> {
     let mut rows = tx
         .query(
             "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
@@ -696,14 +713,12 @@ pub async fn approve_enrolment(
         .map_err(engine)?;
     let Some(row) = rows.next().await.map_err(engine)? else {
         drop(rows);
-        tx.rollback().await.map_err(engine)?;
         return Err(Error::NotFound(format!("agent {current_id} not found")));
     };
     let mut agent = agent_from_row(&row)?;
     drop(rows);
 
     if agent.state != "pending" {
-        tx.rollback().await.map_err(engine)?;
         return Err(Error::Conflict(format!(
             "agent {current_id} is not pending enrolment"
         )));
@@ -721,7 +736,6 @@ pub async fn approve_enrolment(
                 .map_err(engine)?;
             if id_check.next().await.map_err(engine)?.is_some() {
                 drop(id_check);
-                tx.rollback().await.map_err(engine)?;
                 return Err(Error::Conflict(format!("agent {target_id} already exists")));
             }
             drop(id_check);
@@ -813,7 +827,7 @@ pub async fn approve_enrolment(
     if let Some(project_ids) = projects {
         let created_at = crate::store::now_rfc3339();
         for proj in project_ids {
-            if row_exists(&tx, Table::Projects, proj).await? {
+            if row_exists(tx, Table::Projects, proj).await? {
                 tx.execute(
                     "INSERT INTO grants(agent_id, project_id, created_at)
                      VALUES (?1, ?2, ?3)
@@ -842,7 +856,7 @@ pub async fn approve_enrolment(
     .map_err(engine)?;
 
     audit(
-        &tx,
+        tx,
         &agent.personal_project_id,
         format!("agent {effective_id} enrolment approved"),
         serde_json::json!({
@@ -852,7 +866,6 @@ pub async fn approve_enrolment(
     )
     .await?;
 
-    tx.commit().await.map_err(engine)?;
     Ok(agent)
 }
 
@@ -866,7 +879,20 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
+    refuse_enrolment_in_tx(&tx, id).await?;
+    tx.commit().await.map_err(engine)?;
+    Ok(())
+}
 
+/// Refuse an enrolment inside the caller's transaction.
+///
+/// The decision path wipes a refused self-enrolment in the same transaction
+/// that records the decision. The caller owns commit and rollback; an error
+/// leaves the transaction to roll back when it is dropped.
+pub(crate) async fn refuse_enrolment_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    id: &str,
+) -> Result<()> {
     let mut rows = tx
         .query(
             "SELECT personal_project_id, state FROM agents WHERE id = ?1",
@@ -876,7 +902,6 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
         .map_err(engine)?;
     let Some(row) = rows.next().await.map_err(engine)? else {
         drop(rows);
-        tx.rollback().await.map_err(engine)?;
         return Err(Error::NotFound(format!("agent {id} not found")));
     };
     let personal_project_id = text(&row, 0)?;
@@ -884,7 +909,6 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
     drop(rows);
 
     if state != "pending" {
-        tx.rollback().await.map_err(engine)?;
         return Err(Error::Conflict(format!(
             "agent {id} is not pending enrolment"
         )));
@@ -941,8 +965,30 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
     .await
     .map_err(engine)?;
 
-    tx.commit().await.map_err(engine)?;
     Ok(())
+}
+
+/// The personal project of an agent whose enrolment is still pending, read
+/// inside the caller's transaction.
+///
+/// `None` when the id is unknown or the agent is already active. The decision
+/// path uses this to anchor an enrolment approval to the event's own actor and
+/// project, so a forged approval naming someone else cannot admit them.
+pub(crate) async fn pending_enrolment_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    agent_id: &str,
+) -> Result<Option<String>> {
+    let mut rows = tx
+        .query(
+            "SELECT personal_project_id FROM agents WHERE id = ?1 AND state = 'pending'",
+            vec![Value::Text(agent_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(text(&row, 0)?)),
+        None => Ok(None),
+    }
 }
 
 /// Look up the current agent id and state for a live token hash.

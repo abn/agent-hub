@@ -5,6 +5,7 @@ use turso::Database;
 
 use crate::error::{Error, Result};
 use crate::store::events::{self, NewEvent};
+use crate::store::identity;
 use crate::store::inbox;
 
 /// A question to post.
@@ -184,6 +185,17 @@ pub async fn answer(
     Ok(id)
 }
 
+/// The outcome of an approval decision.
+#[derive(Debug, Clone)]
+pub struct Decision {
+    /// The id of the answer event recorded for the decision.
+    pub event_id: String,
+    /// The pending agent admitted by an `enrol_request` approval, when the
+    /// decision approved one. The caller turns on the agent's enrolment share
+    /// so the enrolling client can collect its token on the status long-poll.
+    pub enrolled_agent: Option<String>,
+}
+
 /// Approve or decline an approval, with an optional note saying why.
 ///
 /// The note is trimmed, a blank one is no note, and one over
@@ -196,6 +208,11 @@ pub async fn answer(
 /// resolve commit in one immediate transaction, so two concurrent decisions
 /// serialise: the second sees `resolved` and conflicts rather than appending a
 /// contradictory answer.
+///
+/// An approval whose payload carries `action == "enrol_request"` is a
+/// self-enrolment decision. It admits or refuses the enrolling agent in this
+/// same transaction, deriving the subject from the event rather than the
+/// payload; see [`decide_reporting`].
 pub async fn decide(
     db: &Database,
     actor: &str,
@@ -204,6 +221,28 @@ pub async fn decide(
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
+    Ok(
+        decide_reporting(db, actor, approval_id, approved, note, idempotency_key)
+            .await?
+            .event_id,
+    )
+}
+
+/// As [`decide`], reporting the subject admitted by an enrolment approval.
+///
+/// When the event is a self-enrolment request, the subject is the event's own
+/// `actor`, required to be a still-pending agent in its own personal project.
+/// The payload's `agent_id` is ignored: any active agent can append an
+/// approval through `signal_append`, so a payload that names a third party
+/// must never admit them. A mismatch is an invalid argument and admits no one.
+pub async fn decide_reporting(
+    db: &Database,
+    actor: &str,
+    approval_id: &str,
+    approved: bool,
+    note: Option<&str>,
+    idempotency_key: Option<&str>,
+) -> Result<Decision> {
     // Before anything is read or written, so a refused note decides nothing.
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     if let Some(note) = note {
@@ -243,7 +282,10 @@ pub async fn decide(
                 "idempotency key was used for a different approval".to_string(),
             ));
         }
-        return Ok(event_id);
+        return Ok(Decision {
+            event_id,
+            enrolled_agent: None,
+        });
     }
     // An approval is decided once. An approval always enters the inbox when it
     // is written, so an untracked one is a data fault, not a decidable event.
@@ -258,6 +300,46 @@ pub async fn decide(
             return Err(Error::NotFound(format!(
                 "approval {approval_id} is not tracked in the inbox"
             )));
+        }
+    }
+
+    // A self-enrolment approval admits or refuses its subject in this same
+    // transaction. The subject comes from the event, never the payload: the
+    // actor must be a pending agent and the event must sit in that agent's own
+    // personal project. An active agent can append such an approval through
+    // `signal_append`, so trusting `payload.agent_id` would admit a victim.
+    let is_enrolment = approval
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.get("action"))
+        .and_then(serde_json::Value::as_str)
+        == Some("enrol_request");
+
+    let mut enrolled_agent = None;
+    if is_enrolment {
+        // The actor must be a still-pending agent and the event must sit in
+        // that agent's own personal project. `pending_enrolment_in_tx` yields
+        // the personal project, which anchors the second half of the check.
+        let personal_project = identity::pending_enrolment_in_tx(&tx, &approval.actor).await?;
+        let subject = approval.actor.as_str();
+        if personal_project.as_deref() != Some(approval.project_id.as_str()) {
+            return Err(Error::InvalidArgument(format!(
+                "approval {approval_id} is not the pending enrolment of its own project"
+            )));
+        }
+        if approved {
+            identity::approve_enrolment_in_tx(&tx, subject, None, None, None).await?;
+            enrolled_agent = Some(subject.to_string());
+        } else {
+            identity::refuse_enrolment_in_tx(&tx, subject).await?;
+            // The refusal deletes the personal project, its events, and the
+            // inbox item, so there is no thread left for a decision answer.
+            // The decided approval's own id stands in for it.
+            tx.commit().await.map_err(crate::store::engine)?;
+            return Ok(Decision {
+                event_id: approval_id.to_string(),
+                enrolled_agent: None,
+            });
         }
     }
 
@@ -308,5 +390,8 @@ pub async fn decide(
     }
     inbox::set_status_in_tx(&tx, approval_id, "resolved").await?;
     tx.commit().await.map_err(crate::store::engine)?;
-    Ok(id)
+    Ok(Decision {
+        event_id: id,
+        enrolled_agent,
+    })
 }
