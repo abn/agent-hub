@@ -4,7 +4,13 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
-## 2026-10-02, the agent can wait, and discovery is self-serve
+## 2026-10-02
+
+### Log headings are OKF-conformant
+
+* **Update**: `docs/log.md` gives each date a bare `YYYY-MM-DD` heading with the entry title as a subheading, so the bundle passes the OKF validator's `okf/reserved/log-date-heading` rule as well as the repository check.
+
+### The agent can wait, and discovery is self-serve
 
 * **Add**: [Agent surface](architecture/agent-surface.md) documents `inbox_wait`,
   an agent-side long poll over the same ticker the enrolment poll uses, and the
@@ -15,7 +21,7 @@ software release notes and the repository changelog.
   advertises the ignored `actor`/`session_id` on artifact publish, and the
   duplicate `session_id` on `feed_read` and `artifact_list` is gone.
 
-## 2026-10-02, the first run works end to end
+### The first run works end to end
 
 * **Fix**: [Agent surface](architecture/agent-surface.md) records that deciding
   an `enrol_request` admits or refuses the agent in the decision's own
@@ -28,7 +34,7 @@ software release notes and the repository changelog.
   issue on a phone, the setup in the reveal, the enrolment reason, and the
   no-admin-token Connect state.
 
-## 2026-10-02, wiki comment threads, the page sheet and the Home review line
+### Wiki comment threads, the page sheet and the Home review line
 
 * **Add**: [Project knowledge base](usage/knowledge-base.md) and the
   [human interface](design/human-interface.md) record the shipped wiki surface
@@ -40,7 +46,7 @@ software release notes and the repository changelog.
   storage card's one housekeeping line. The store's `kb_comments` table is
   migration 18.
 
-## 2026-10-02, the wiki reviews, promote and conflict path
+### The wiki reviews, promote and conflict path
 
 * **Update**: [Project knowledge base](usage/knowledge-base.md) adds the
   **Review** control on the reader, the **Needs review** list, **Save to wiki**
@@ -48,7 +54,9 @@ software release notes and the repository changelog.
   yours or reload the hub's). Rename and move, a rendered-compare merge, and
   page comment threads are not built; the hub has no page-comment store.
 
-## 2026-09-29, the wiki human surface
+## 2026-09-29
+
+### The wiki human surface
 
 * **Add**: [Project knowledge base](usage/knowledge-base.md) documents the
   project's fourth section, Wiki: one `meta=1` tree, a reader that keeps the
@@ -57,7 +65,9 @@ software release notes and the repository changelog.
   changes and Lint screens; rename, move, a rendered-compare merge, comment
   threads and the review action are not in this version.
 
-## 2026-09-28, the share and access copy round
+## 2026-09-28
+
+### The share and access copy round
 
 * **Update**: [Artifacts](usage/artifacts.md) states the share sheet's real
   shape: **Make link** before a share, the link with a copy control and a
@@ -69,7 +79,9 @@ software release notes and the repository changelog.
   confidential, make public), and an agent that makes a project confidential
   leaves a `signal` feed event.
 
-## 2026-09-26, artifact session lineage is creation, not the last write
+## 2026-09-26
+
+### Artifact session lineage is creation, not the last write
 
 * **Correct**: [Artifacts](usage/artifacts.md) and the
   [data model](architecture/data-model.md) said an artifact records the session
@@ -78,14 +90,17 @@ software release notes and the repository changelog.
   update's own feed event carries the writer. An update leaves the artifact's
   session lineage alone, as it leaves `actor` alone. The 2026-09-22 entry below
   is corrected by this one.
-## 2026-09-26, revocable artifact share links and version pinning
+
+### Revocable artifact share links and version pinning
 
 * **Update**: [Artifacts](usage/artifacts.md) documents capability-based sharing for
   plain artifacts via revocable tokens, version pinning to the snapshot active at share
   creation, access concealment preventing existence oracles, and key-governed
   lifecycle for encrypted artifacts where withdrawal is deletion.
 
-## 2026-09-25, the operating model is stated once
+## 2026-09-25
+
+### The operating model is stated once
 
 * **Add**: [Operating model](architecture/model.md) states the trust posture in
   one place: one operator, their agents, one node; open by default; every agent
@@ -99,32 +114,33 @@ software release notes and the repository changelog.
   model page. [Agent surface](architecture/agent-surface.md) and
   [Data model](architecture/data-model.md) record that grants carry no read or
   write levels.
-## 2026-09-25, markdown rendering sanitization and plain-text comment quotes
+
+### Markdown rendering sanitization and plain-text comment quotes
 
 * **Update**: [Human surface](architecture/human-surface.md) documents that rendered
   session markdown files are sanitized through an allowlist to strip dangerous elements
   and URL schemes, and resolved comment quotes are inserted safely as plain text.
 
-## 2026-09-25, final-path artifact blob orphaning and startup reconciliation
+### Final-path artifact blob orphaning and startup reconciliation
 
 * **Update**: [Data model](architecture/data-model.md) documents immediate cleanup of
   promoted final-path files on update transaction failure, and startup reconciliation of
   on-disk artifact blobs against committed version metadata.
 
-## 2026-09-25, idempotency namespaces, target binding, and resolved question immutability
+### Idempotency namespaces, target binding, and resolved question immutability
 
 * **Update**: [Agent surface](architecture/agent-surface.md) documents that idempotency
   keys are namespaced per operation and event kind, bound to target entities to prevent
   cross-entity replay, and that resolved questions reject subsequent answers.
 
-## 2026-09-25, session ownership atomicity, guarded transitions, and lease validation
+### Session ownership atomicity, guarded transitions, and lease validation
 
 * **Update**: [Agent surface](architecture/agent-surface.md) documents that ended or
   reassigned sessions clear active leases and reject subsequent brain writes.
 * **Update**: [Data model](architecture/data-model.md) documents guarded session store
   transitions and file-locked validation of session activity on brain mutation.
 
-## 2026-09-25, search boundary body truncation, write limits, and locked fork snapshot
+### Search boundary body truncation, write limits, and locked fork snapshot
 
 * **Update**: [Components](architecture/components.md) documents character-boundary
   safe search body truncation at the indexing boundary.
@@ -132,7 +148,7 @@ software release notes and the repository changelog.
   copies the brain file under the source session's write lock through the engine to
   guarantee snapshot consistency across search rows and audit log entries.
 
-## 2026-09-25, project write barrier and generation-scoped deletion quarantine
+### Project write barrier and generation-scoped deletion quarantine
 
 * **Update**: [Data model](architecture/data-model.md) records the project status
   column in the projects table. Active project status and authorization are
@@ -140,7 +156,9 @@ software release notes and the repository changelog.
   comments, and deletion isolates file directories into unique quarantined paths
   prior to metadata removal to protect recreated slugs.
 
-## 2026-09-24, round 13.1: Version row, agents as a list and item, summary between hairlines
+## 2026-09-24
+
+### Round 13.1: Version row, agents as a list and item, summary between hairlines
 
 * **Update**: [Human interface](design/human-interface.md) records the desktop
   changes round 13.1 makes. Settings' THIS HUB group ends with a Version value
@@ -149,7 +167,7 @@ software release notes and the repository changelog.
   index beside a stage, not a Settings-shaped form. The storage summary sits on
   the canvas between hairlines rather than in a card.
 
-## 2026-09-24, desktop round 12 spine: knowledge tone and content/chrome split
+### Desktop round 12 spine: knowledge tone and content/chrome split
 
 * **Update**: [Human interface](design/human-interface.md) documents the
   storage-only knowledge tone (an olive pair set apart from the question tone
@@ -157,7 +175,9 @@ software release notes and the repository changelog.
   round 12's content rules hold at both widths, its chrome rules are phone-only,
   and the desktop keeps its reserved 52px header and 40px control row.
 
-## 2026-09-23, phone inbox and search tools rows, flat rows, and search title mark
+## 2026-09-23
+
+### Phone inbox and search tools rows, flat rows, and search title mark
 
 * **Update**: [Human interface](design/human-interface.md) documents the mobile
   inbox tools row (filter field plus Unread chip without sync line), the mobile
@@ -165,7 +185,7 @@ software release notes and the repository changelog.
   rows without card wrappers, and search result titles shown once with an
   action-tinted mark highlight.
 
-## 2026-09-23, home screen mobile welcome-first and flat rows
+### Home screen mobile welcome-first and flat rows
 
 * **Update**: [Human interface](design/human-interface.md) documents Home
   welcoming at rest on a phone (no bar, no gear, greeting at x 16 following time
@@ -174,7 +194,7 @@ software release notes and the repository changelog.
   (standard 52px bar fading in with title at x 48 and chips pinned in the 44px
   sticky tools row).
 
-## 2026-09-23, project tools row, brain entry stage, and artifact agent grouping
+### Project tools row, brain entry stage, and artifact agent grouping
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   mobile project tools row with segmented tabs and filter toggle, reading
@@ -182,7 +202,7 @@ software release notes and the repository changelog.
   control, reading kv entries in the entry aside with copy control, and
   grouping artifacts by publishing actor in the artifact index.
 
-## 2026-09-23, phone frame, tools row, and more tab root
+### Phone frame, tools row, and more tab root
 
 * **Update**: [Human interface](design/human-interface.md) documents the phone
   frame (collapsing header from 76px at rest to 52px when scrolled past 20px,
@@ -192,14 +212,14 @@ software release notes and the repository changelog.
   introducing the More tab root for Storage, Agents and tokens, Settings, and
   the sync line.
 
-## 2026-09-23, artifact thread counts on listing and reads
+### Artifact thread counts on listing and reads
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Human
   surface](architecture/human-surface.md), and [Artifacts](usage/artifacts.md)
   document thread counts across all versions (`comments_count` and
   `comments_open`) on artifact reads and listings over REST and MCP.
 
-## 2026-09-23, artifact author recording
+### Artifact author recording
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Data
   model](architecture/data-model.md), and [Artifacts](usage/artifacts.md)
@@ -209,7 +229,7 @@ software release notes and the repository changelog.
   queries, listings, and reads across REST and MCP carry the author field,
   returning null for rows that predate the column.
 
-## 2026-09-23, read single brain entry over REST
+### Read single brain entry over REST
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   `GET /api/v1/sessions/:id/brain/entry?path=`, returning one entry's text
@@ -217,14 +237,16 @@ software release notes and the repository changelog.
   answer 409 Conflict, non-UTF-8 bytes answer 422 Unprocessable Content, and
   reads against missing brains answer 404 without creating a file.
 
-## 2026-09-23, the shell's keyboard path and pane resizing
+### The shell's keyboard path and pane resizing
 
 * **Update**: [Human interface](design/human-interface.md) documents `/` going
   to the list's own filter field rather than to the Search screen, and `c`
   toggling the comments aside, which is the keyboard path the design's shell
   asks for.
 
-## 2026-09-22, the design contract is written down
+## 2026-09-22
+
+### The design contract is written down
 
 * **Add**: `DESIGN.md` at the repository root states the design contract for
   the human surface: tokens and the one documented deviation, the type scale
@@ -237,7 +259,7 @@ software release notes and the repository changelog.
   desktop description to the app rail that ships and points at `DESIGN.md`
   for the designed shell.
 
-## 2026-09-22, session lineage for artifacts and feed
+### Session lineage for artifacts and feed
 
 * **Update**: [The agent surface](architecture/agent-surface.md), [Data
   model](architecture/data-model.md), and [Artifacts](usage/artifacts.md)
@@ -249,7 +271,9 @@ software release notes and the repository changelog.
   an unknown or pruned session. Artifact search documents are preserved during
   session pruning.
 
-## 2026-09-23, agent self-enrolment and pending token refusal indistinguishability
+## 2026-09-23
+
+### Agent self-enrolment and pending token refusal indistinguishability
 
 * **Update**: [The agent surface](architecture/agent-surface.md) documents
   the self-enrolment workflow (`agent-hub enrol`, `POST /api/v1/enrol`, and
@@ -258,14 +282,16 @@ software release notes and the repository changelog.
   guaranteeing pending token refusal is byte-for-byte indistinguishable from
   unrecognised tokens.
 
-## 2026-09-22, unified TOML configuration and inspect commands
+## 2026-09-22
+
+### Unified TOML configuration and inspect commands
 
 * **Update**: [Quickstart](usage/quickstart.md) documents layered TOML
   configuration (`config.toml`) shared by hub and client across system and
   user locations, overridden by environment variables, and the `agent-hub config`
   inspection commands (`--path`, `--check`).
 
-## 2026-09-22, trust removal and confidential projects
+### Trust removal and confidential projects
 
 * **Update**: [ADR 0021](adr/0021-the-token-is-the-identity.md) moves to
   stable as trust is removed from the principal, policy, API, and schema.
@@ -275,7 +301,8 @@ software release notes and the repository changelog.
   [Quickstart](usage/quickstart.md), and [Overview](overview.md) remove
   `HUB_TRUST_DEFAULT` and trust levels from agent records, and document
   confidential projects.
-## 2026-09-22, project deletion overflow menu and typed confirmation manifest
+
+### Project deletion overflow menu and typed confirmation manifest
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the project deletion flow: an overflow menu in the project header with
@@ -284,7 +311,7 @@ software release notes and the repository changelog.
   counts for Artifacts, Threads, Files on disk, and Agents that have written,
   and slug-matching typed confirmation before execution.
 
-## 2026-09-22, settings gear relocated to home and project creation sheet
+### Settings gear relocated to home and project creation sheet
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   relocating the Settings gear control from the Projects header to the Home
@@ -293,7 +320,7 @@ software release notes and the repository changelog.
   a 48px primary action, and adding the responsive project creation sheet and
   modal with live slug derivation and conflict resolution.
 
-## 2026-09-22, grouped settings layout, segmented controls, and alert states
+### Grouped settings layout, segmented controls, and alert states
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the Settings screen organized into four groups (Appearance, Alerts, Access,
@@ -307,7 +334,7 @@ software release notes and the repository changelog.
   vertically with 12px mono uppercase labels; on desktop (1100px) groups render
   in a two-column layout with 132px label column and 560px cards.
 
-## 2026-09-22, radius hierarchy, fixed trigger labels, and glyph additions
+### Radius hierarchy, fixed trigger labels, and glyph additions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the interface radius hierarchy and trigger conventions: containers are
@@ -318,7 +345,7 @@ software release notes and the repository changelog.
   for ID card, sign-out, trash, bell, bell-off, and check are added to the
   icon system.
 
-## 2026-09-22, desktop home layout and inline waiting row actions
+### Desktop home layout and inline waiting row actions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the desktop Home layout: a single 640px measure column held left against
@@ -326,8 +353,7 @@ software release notes and the repository changelog.
   and inline action buttons (Approve for approvals, Reply for questions)
   rendered directly on waiting rows at desktop widths.
 
-
-## 2026-09-22, desktop storage screen
+### Desktop storage screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   desktop Storage screen layout from 720px: four summary tiles across the top
@@ -338,8 +364,7 @@ software release notes and the repository changelog.
   for reclaimable space rather than 0 B, Prune buttons appear solely on rows with
   reclaimable bytes, and free host disk space is omitted with an explanatory footnote.
 
-
-## 2026-09-22, desktop search layout, preview stage, and match highlighting
+### Desktop search layout, preview stage, and match highlighting
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   desktop Search layout from 1100px: a 420px results index beside a preview
@@ -349,8 +374,7 @@ software release notes and the repository changelog.
   controls in the stage header. Scope pills include an interactive dismissible
   project filter chip, and result groups remain in a unified list.
 
-
-## 2026-09-22, desktop artifacts list grid and three-pane viewer
+### Desktop artifacts list grid and three-pane viewer
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the desktop artifacts list and viewer layout. The gallery presents a 5-up card
@@ -360,8 +384,7 @@ software release notes and the repository changelog.
   a 280px index column, a 640px document measure, and a 320px comments margin
   column. Resolved comment threads carry a check glyph and the word Resolved.
 
-
-## 2026-09-22, desktop four-zone layout for sessions and brain file viewer
+### Desktop four-zone layout for sessions and brain file viewer
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   desktop four-zone layout for Sessions: the navigation rail, 340px session
@@ -371,16 +394,14 @@ software release notes and the repository changelog.
   directly in the detail header, and brain tree items render full file names
   without truncation.
 
-
-## 2026-09-22, desktop project screen layout, aside, and inline actions
+### Desktop project screen layout, aside, and inline actions
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   desktop project screen layout: a 320px aside at 1280px and above (toggleable
   from 1100 to 1279px) with three sections (Right now, Storage, and Latest
   artifacts), and inline Approve and Reply controls on feed rows.
 
-
-## 2026-09-22, app rail, pane layout zones, and prose measure
+### App rail, pane layout zones, and prose measure
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   desktop shell layout: a permanent vertical app rail replacing the horizontal
@@ -389,15 +410,14 @@ software release notes and the repository changelog.
   exclusion of personal agent spaces from the rail, and relocation of the
   viewport width cap to a 640px measure container for prose.
 
-
-## 2026-09-22, agent creation and project grant forms on access screen
+### Agent creation and project grant forms on access screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the restored agent creation and project grant controls on the Access screen
   (`#/access`). Operators can register new agent identities by id and display
   name, and grant project access with binary assignment.
 
-## 2026-09-22, the token is the identity
+### The token is the identity
 
 * **Add**: [ADR 0021](adr/0021-the-token-is-the-identity.md) records the
   identity model the hub is moving to: a token names who is calling rather
@@ -409,7 +429,10 @@ software release notes and the repository changelog.
   no trust; the API, the policy and the served skill still carry it, and the
   divergence is listed in the record itself. It exists because the decision
   lived only in conversation, which is how the two halves came apart.
-## 2026-09-21, share sheet and per-artifact password choice
+
+## 2026-09-21
+
+### Share sheet and per-artifact password choice
 
 * **Update**: [Artifacts](usage/artifacts.md) and [The human surface](architecture/human-surface.md)
   document that the per-project password policy setting has been removed.
@@ -418,7 +441,7 @@ software release notes and the repository changelog.
   an optional password switch that encrypts before leaving the device, separate
   copy actions for the link and password, and link revocation.
 
-## 2026-09-21, document comments, text anchors, and margin cards
+### Document comments, text anchors, and margin cards
 
 * **Update**: [The human surface](architecture/human-surface.md) and
   [Artifacts](usage/artifacts.md) document inline document comments: open comments
@@ -431,7 +454,7 @@ software release notes and the repository changelog.
   on desktop from 900px, prose stays at 560px beside a fixed 272px comments
   margin column with interactive cards.
 
-## 2026-09-21, access screen and identity model documentation
+### Access screen and identity model documentation
 
 * **Update**: [The human surface](architecture/human-surface.md) and
   [the agent surface](architecture/agent-surface.md) document the standalone
@@ -443,7 +466,7 @@ software release notes and the repository changelog.
   a confirmation dialog, and revoked tokens as history. Confidential projects
   are absent rather than refused.
 
-## 2026-09-21, unified chip design across feed and search
+### Unified chip design across feed and search
 
 * **Update**: [The human surface](architecture/human-surface.md) documents that
   search scope chips follow the project feed's unified chip treatment: 32px
@@ -452,7 +475,7 @@ software release notes and the repository changelog.
   under a coarse pointer. Search chips display no count when no per-scope count
   is known prior to running a query.
 
-## 2026-09-21, compact artifact title bar, glyph set, and viewer geometry
+### Compact artifact title bar, glyph set, and viewer geometry
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   compact 60px artifact viewer chrome: a 44px top row holding the back chevron,
@@ -461,7 +484,7 @@ software release notes and the repository changelog.
   holding author, version control, size, and age. Prose starts at 104px under the
   24px document title.
 
-## 2026-09-21, the PWA serves correctly behind a path-stripping reverse proxy
+### The PWA serves correctly behind a path-stripping reverse proxy
 
 * **Update**: [Quickstart](usage/quickstart.md) documents that a reverse
   proxy may mount the hub on a path (`https://host/hub/`) as long as it
@@ -469,7 +492,7 @@ software release notes and the repository changelog.
   trailing-slash-free entry on its own, and that this needs no
   configuration: there is no base-path environment variable.
 
-## 2026-09-21, phone shell layering, mobile settings route, and install icons
+### Phone shell layering, mobile settings route, and install icons
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   phone shell fixes: the fixed tab bar carries `z-index: 20` so list row controls
@@ -479,14 +502,14 @@ software release notes and the repository changelog.
   project. The web app manifest includes raster PNG icons (192px, 512px, and
   maskable) generated from the mark and served by the embedded shell table.
 
-## 2026-09-21, resolved questions carry attached answers in inbox
+### Resolved questions carry attached answers in inbox
 
 * **Update**: [The human surface](architecture/human-surface.md) and
   [the agent surface](architecture/agent-surface.md) document that a resolved
   question in the inbox carries its attached answer object holding who replied,
   when, and what was written, matching the shape returned by `inbox_read`.
 
-## 2026-09-21, artifact viewer redraw, version sheet, and grouped list
+### Artifact viewer redraw, version sheet, and grouped list
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   redrawn artifact viewer, version sheet, and grouped artifacts gallery. The
@@ -498,7 +521,7 @@ software release notes and the repository changelog.
   an accent rail marking Current. The comments strip renders only when threads
   exist, and chrome links are never underlined.
 
-## 2026-09-21, sessions list and session detail redraw
+### Sessions list and session detail redraw
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   redrawn sessions list and detail views. The list groups sessions into active and
@@ -511,14 +534,14 @@ software release notes and the repository changelog.
   names only, and replaces disabled prune buttons with a single primary action and
   informative helper sentence.
 
-## 2026-09-21, projects index screen
+### Projects index screen
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   the projects index screen at `#/projects`, which lists all projects with
   agent, artifact, and footprint counts, amber waiting or accent unread badges,
   and a collapsible fold for personal agent spaces.
 
-## 2026-09-21, project feed chips redraw and row grammar
+### Project feed chips redraw and row grammar
 
 * **Update**: [The human surface](architecture/human-surface.md) documents the
   redrawn project feed chips and row grammar: 32px pills (13/500) on one
@@ -529,7 +552,9 @@ software release notes and the repository changelog.
   from one agent within two minutes collapse into one row ("published N artifacts"),
   and event verbs are lower case and past tense while objects are kept as written.
 
-## 2026-09-20, client-side rendering restored for protected markdown artifacts
+## 2026-09-20
+
+### Client-side rendering restored for protected markdown artifacts
 
 * **Update**: [Artifacts](usage/artifacts.md) records that browser-side rendering
   is restored for decrypted protected markdown artifacts using vendored `marked.js`
@@ -537,7 +562,7 @@ software release notes and the repository changelog.
   supporting callouts and mermaid diagrams. Public markdown artifacts continue
   using server-side rendering.
 
-## 2026-09-20, evaluations for multiple tokens and offline knowledge base
+### Evaluations for multiple tokens and offline knowledge base
 
 * **Note**: [Agent identity and trust](adr/0012-agent-identity-and-trust.md) and
   the [data model](architecture/data-model.md) record that multiple live tokens
@@ -549,7 +574,7 @@ software release notes and the repository changelog.
   for the knowledge base is to be evaluated: today what is cached is the app shell
   and its assets, while page content is not.
 
-## 2026-09-20, embedded stdio is supported with isolation
+### Embedded stdio is supported with isolation
 
 * **Update**: The operational contract and the [quickstart](usage/quickstart.md)
   document that embedded stdio mode is supported standalone against the local data directory
@@ -557,21 +582,21 @@ software release notes and the repository changelog.
   already held by a running hub fails at startup with a clear message:
   `a hub is already using this directory; set HUB_URL to reach it instead`.
 
-## 2026-09-20, device-local snooze for waiting items
+### Device-local snooze for waiting items
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   device-local snooze for waiting items. Snoozed items leave Waiting on you for
   1 hour, are listed in a Snoozed group where they can be brought back, and
   snoozing is immediately undoable through a toast.
 
-## 2026-09-20, decided approvals and answered questions in Earlier
+### Decided approvals and answered questions in Earlier
 
 * **Update**: [The human surface](architecture/human-surface.md) documents
   resolved items moving to Earlier alongside read items, showing their outcome
   in words and decision note or answer body without decision controls, with the
   Earlier count reflecting both read and resolved items.
 
-## 2026-09-20, one markdown renderer for artifacts
+### One markdown renderer for artifacts
 
 * **Update**: [The human surface](architecture/human-surface.md) records that
   markdown artifact rendering is consolidated onto the hub's server-side
@@ -579,21 +604,21 @@ software release notes and the repository changelog.
   public standalone route and the in-app viewer, eliminating client-side
   markdown parsing libraries.
 
-## 2026-09-20, artifact events on the project feed link to their destination
+### Artifact events on the project feed link to their destination
 
 * **Update**: [The human surface](architecture/human-surface.md) notes that an
   artifact event row on the project feed links to that artifact in the viewer
   within its project, while rows without an entity destination in the app
   remain unlinked.
 
-## 2026-09-20, search matches by prefix with whole-word ranking
+### Search matches by prefix with whole-word ranking
 
 * **Update**: [The human surface](architecture/human-surface.md) updates the
   Search row to describe prefix matching: unquoted words match terms that
   begin with the typed query, whole-word matches rank above prefix-only matches,
   and balanced quoted phrases remain exact.
 
-## 2026-09-20, the shipped skill says how to write for the human
+### The shipped skill says how to write for the human
 
 * **Update**: the bootstrap skill served at `/SKILL.md` gains a short section
   on writing for the human: the summary stands alone, the ask comes first,
@@ -602,7 +627,7 @@ software release notes and the repository changelog.
   before it writes to a person, so the document that teaches the tools now
   teaches the voice with them.
 
-## 2026-09-20, one way to set a token, and it checks
+### One way to set a token, and it checks
 
 * **Update**: [The human surface](architecture/human-surface.md) says the
   Connect screen is the only place a token is entered, so a token is never
@@ -610,19 +635,19 @@ software release notes and the repository changelog.
   it says whether this device holds a token and links to that screen to change
   it, beside Sign out. Saving a preference does not touch the token.
 
-## 2026-09-20, a route change focuses the screen's heading
+### A route change focuses the screen's heading
 
 * **Update**: [The human surface](architecture/human-surface.md) says a route
   change moves focus to the new screen's own heading rather than to the whole
   content region, so the focus ring frames the heading, and that a screen which
   has already placed focus inside itself keeps it.
 
-## 2026-09-20, desktop shell polish and vertical centring for Connect
+### Desktop shell polish and vertical centring for Connect
 
 * **Update**: [The human surface](architecture/human-surface.md) notes that
   on desktop the Connect card is vertically centred in the available space.
 
-## 2026-09-20, Sessions layout on phone width
+### Sessions layout on phone width
 
 * **Update**: [The human surface](architecture/human-surface.md) describes the
   Sessions screen phone layout, where the list is shown alone rather than
@@ -630,14 +655,14 @@ software release notes and the repository changelog.
   list, closing it returns focus to the opened row, and controls meet the tap
   target floor.
 
-## 2026-09-20, feed chips meet the tap target floor on a single scrolling row
+### Feed chips meet the tap target floor on a single scrolling row
 
 * **Update**: [The human surface](architecture/human-surface.md) records that
   the project feed's kind filter chips meet the 44px tap target floor on a single
   scrolling row with sentence case labels and counts, superseding earlier wrapped
   layouts.
 
-## 2026-09-20, a screen that asks for the access token
+### A screen that asks for the access token
 
 * **Update**: [The human surface](architecture/human-surface.md) adds the
   Connect screen, where a reader enters the hub's access token. A refused
@@ -646,20 +671,20 @@ software release notes and the repository changelog.
   beside the field. Settings says whether this device holds a token and offers
   Sign out, which asks first and then forgets it.
 
-## 2026-09-20, the Inbox calls a project by its name
+### The Inbox calls a project by its name
 
 * **Update**: [The human surface](architecture/human-surface.md) says an
   Inbox row's footer and the open card name a project by its display name, and
   by its slug when no name comes with it, as the other screens do.
 
-## 2026-09-20, an inbox item names its project
+### An inbox item names its project
 
 * **Update**: [The human surface](architecture/human-surface.md) lists
   `project_display_name` on every inbox item, over REST and over `inbox_read`
   alike, null for an id no project row carries. Home's `waiting_items` are the
   same entries, so their shape is unchanged.
 
-## 2026-09-20, the decision dialogs take a note
+### The decision dialogs take a note
 
 * **Update**: [The human surface](architecture/human-surface.md) says the
   Approve and Decline dialogs offer an optional note, how its count, the hub's
@@ -667,20 +692,20 @@ software release notes and the repository changelog.
   project feed shows the note on the decision's row. The inbox does not list
   resolved items, so it shows no decided approval.
 
-## 2026-09-20, a search row says what it found
+### A search row says what it found
 
 * **Update**: [The human surface](architecture/human-surface.md) says a search
   row draws the event kind and actor of a feed hit, the version and size of an
   artifact hit, and the session name and status of a session brain hit.
 
-## 2026-09-20, Home lists the waiting queue itself and names the node
+### Home lists the waiting queue itself and names the node
 
 * **Update**: [The human surface](architecture/human-surface.md) says Home's
   waiting card is drawn from `waiting_items`, three shown and the rest counted
   from `waiting`, and that Home carries the status strip's node line from
   `node` where the top bar is not on screen. Home is still one request.
 
-## 2026-09-20, the Storage screen draws a row's four parts
+### The Storage screen draws a row's four parts
 
 * **Update**: [The human surface](architecture/human-surface.md) says a
   Storage row now shows a project's events beside its sessions, artifacts and
@@ -688,7 +713,7 @@ software release notes and the repository changelog.
   part of the hub database and gives its size, and that projects holding
   nothing fold under a count while an emptied project keeps its row.
 
-## 2026-09-20, the screens call a project by its name
+### The screens call a project by its name
 
 * **Update**: [The human surface](architecture/human-surface.md) says the
   Storage rows and their prune dialogs, Home's rows and the search rows name a
@@ -696,14 +721,14 @@ software release notes and the repository changelog.
   with it. Links still carry the slug. The inbox listing carries no display
   name, so its rows still print the slug.
 
-## 2026-09-20, the storage report weighs only new events
+### The storage report weighs only new events
 
 * **Update**: [The human surface](architecture/human-surface.md) says how a
   storage row's `events_bytes` stays cheap on a long feed: the first report
   weighs the feed, later ones add the events appended since, and a committed
   prune, a project delete or ten minutes start it over.
 
-## 2026-09-20, a decision's note is kept, capped and handed back
+### A decision's note is kept, capped and handed back
 
 * **Update**: [The human surface](architecture/human-surface.md) describes the
   note a decision may carry: stored as `payload.note` on the decision's feed
@@ -713,7 +738,7 @@ software release notes and the repository changelog.
   an agent how to read the outcome of its approval. The dialogs do not offer a
   note yet.
 
-## 2026-09-20, a feed snippet is never serialized JSON
+### A feed snippet is never serialized JSON
 
 * **Update**: [The human surface](architecture/human-surface.md) says what a
   search `snippet` is made of. A feed hit shows the event payload's `body`
@@ -723,7 +748,7 @@ software release notes and the repository changelog.
   served skill document tells an agent to put the sentence worth reading in
   `body`.
 
-## 2026-09-20, a search hit says what kind of thing it is
+### A search hit says what kind of thing it is
 
 * **Update**: [The human surface](architecture/human-surface.md) and
   [the agent surface](architecture/agent-surface.md) list what a search hit
@@ -733,7 +758,7 @@ software release notes and the repository changelog.
   confined, so the order is unchanged and nothing of a project the caller
   cannot see is shown. The served skill document names them for agents.
 
-## 2026-09-20, home carries the node and the head of the waiting queue
+### Home carries the node and the head of the waiting queue
 
 * **Update**: [The human surface](architecture/human-surface.md) lists two
   more fields on the home response: `node`, the host and mode Storage already
@@ -741,7 +766,7 @@ software release notes and the repository changelog.
   newest first, shaped as inbox entries. `waiting` stays the size of the whole
   queue, and Home is still one request.
 
-## 2026-09-20, a storage row splits four ways and an empty project keeps its row
+### A storage row splits four ways and an empty project keeps its row
 
 * **Update**: [The human surface](architecture/human-surface.md) lists
   `events_bytes` on each storage row and `events_shared_bytes` beside
@@ -750,7 +775,7 @@ software release notes and the repository changelog.
   the hub store make `by_kind.events`. Every project now has a row, so one a
   prune has just emptied stays listed with zeros.
 
-## 2026-09-20, responses name a project as the projects list does
+### Responses name a project as the projects list does
 
 * **Update**: [The human surface](architecture/human-surface.md) lists
   `project_display_name` on the storage rows, on Home's `recent` events and
@@ -758,7 +783,7 @@ software release notes and the repository changelog.
   shows, read once per response, and it is null for an id no project row
   carries. The screens still print the slug.
 
-## 2026-09-20, edited since review is about bytes, not seconds
+### Edited since review is about bytes, not seconds
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) restates how
   `trust` reaches `edited_since_review`. The write log now notes which write
@@ -768,7 +793,7 @@ software release notes and the repository changelog.
   before its write lands, and an edit in the same second as a review no longer
   passes as reviewed.
 
-## 2026-09-20, a link inside code is not a link
+### A link inside code is not a link
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) says what counts as
   code when links are read for backlinks and lint: a fence that holds a shorter
@@ -777,7 +802,7 @@ software release notes and the repository changelog.
   nor keeps it from being reported as an orphan, and names the one case still
   read as prose, an indented block nested in a list.
 
-## 2026-09-20, a first line that only looks like an opener is refused
+### A first line that only looks like an opener is refused
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) lists a new cause
   of a 400 from review and promote: a page whose first line starts with `---`
@@ -785,14 +810,15 @@ software release notes and the repository changelog.
   such a page as having no frontmatter and wrote a second block above the
   first. A first line of four or more dashes is still body text.
 
-## 2026-09-20, a thread id names the start of a thread
+### A thread id names the start of a thread
 
 * **Update**: The served skill document (`GET /SKILL.md`) says that a
   `thread_id` given to `signal_append` must name the event that starts a
   thread, that the id of a reply is refused with the thread to name instead,
   and that a retried write with the same `idempotency_key` is answered with the
   first call's id before its thread is looked at again.
-## 2026-09-20, the design page catches up with the inbox card and search
+
+### The design page catches up with the inbox card and search
 
 * **Update**: [Human interface](design/human-interface.md) now records what
   the entry of 2026-09-19 said it did: the inbox card's close control, the
@@ -804,7 +830,7 @@ software release notes and the repository changelog.
   that under 1% of the volume no storage segment would be a pixel wide: just
   under the threshold the bar would still be a few pixels.
 
-## 2026-09-20, the viewer's theme control names where a press goes
+### The viewer's theme control names where a press goes
 
 * **Update**: [Human surface](architecture/human-surface.md) records the
   artifact viewer's theme control: one glyph, for the theme a press switches
@@ -814,7 +840,7 @@ software release notes and the repository changelog.
   The viewer now names the theme in the frame's address, and the framed page
   shows no control of its own, so the two cannot disagree.
 
-## 2026-09-20, Home's storage bar is to scale or absent
+### Home's storage bar is to scale or absent
 
 * **Update**: [Human surface](architecture/human-surface.md) records that
   Home's storage card keeps to the Storage screen's threshold. Under 1% of the
@@ -822,38 +848,40 @@ software release notes and the repository changelog.
   the fill is the share, with no minimum width. It used to widen the fill to
   two pixels, which no share under 0.6% of the bar is.
 
-## 2026-09-20, focus after a card whose row is folded away
+### Focus after a card whose row is folded away
 
 * **Update**: [Human surface](architecture/human-surface.md) records where
   focus goes when an inbox card closes and its row sits under a folded Earlier:
   to the Earlier disclosure. It used to stay on the page region.
 
-## 2026-09-20, closing the inbox card by its own control
+### Closing the inbox card by its own control
 
 * **Update**: [Human surface](architecture/human-surface.md) records that the
   inbox card's close control leaves the card the way Esc does. The control used
   to push a new address, so Back reopened the card the reader had just closed.
 
-## 2026-09-20, a review is not an edit since the review
+### A review is not an edit since the review
 
 * **Update**: [The knowledge base](usage/knowledge-base.md) says how `trust`
   treats a review's own write. It used to compare clocks only, so a page could
   read `edited_since_review` the moment a human reviewed it on a busy node.
 
-## 2026-09-20, tests keep their files under the build tree
+### Tests keep their files under the build tree
 
 * **Update**: The [contributor guide](contribution/guide.md) records where a
   test may write: under `target/tmp`, through the shared test directory or the
   browser harness's scratch root, never the system temp directory, which is
   often memory and keeps what a killed run leaves behind. A hook enforces it.
 
-## 2026-09-20, the address the hub logs
+### The address the hub logs
 
 * **Update**: [Quickstart](usage/quickstart.md) notes that a `HUB_BIND` with
   port `0` takes a free port, and that the `hub listening` log line names the
   address the listener was given rather than the one configured.
 
-## 2026-09-19, the inbox card, the selection, search as typed, and the checks
+## 2026-09-19
+
+### The inbox card, the selection, search as typed, and the checks
 
 * **Update**: [Human surface](architecture/human-surface.md) records the inbox
   card's close control ("Back to inbox" on a phone, "Close" on the desktop,
@@ -874,7 +902,7 @@ software release notes and the repository changelog.
   Node skip in `make web/check` and `HUB_REQUIRE_BROWSER`, and what the
   accessibility walk covers at its two widths.
 
-## 2026-09-19, knowledge base backend and promote
+### Knowledge base backend and promote
 
 * **Creation**: [Project knowledge base](usage/knowledge-base.md) documents the
   ten REST routes the human surface reads and writes pages through, each with
@@ -897,7 +925,7 @@ software release notes and the repository changelog.
   keeps its 4 MiB cap.
 * **Note**: There is no move or rename, and wiki links are not followed.
 
-## 2026-09-19, a search query is words, and a thread is in its project
+### A search query is words, and a thread is in its project
 
 * **Update**: The served skill document (`GET /SKILL.md`) now says how a search
   query is read: any text is accepted, a quoted phrase is a phrase, punctuation
@@ -905,21 +933,23 @@ software release notes and the repository changelog.
   nothing rather than failing. It also says that a `thread_id` given to
   `signal_append` must name an event in the same project.
 
-## 2026-09-19, clearing an artifact label on update
+### Clearing an artifact label on update
 
 * **Update**: `artifact_update` accepts an explicit null or empty string to clear
   an existing label, matching how `envelope: null` unprotects an artifact.
   Omitting the label keeps the current version's label. Described in
   [artifacts](usage/artifacts.md).
 
-## 2026-09-19, integrity verification for vendored scripts
+### Integrity verification for vendored scripts
 
 * **Update**: Documented the manifest and integrity check for third-party scripts
   under `web/vendor/`. Added guidance to the human surface architecture document
   and contributor guide explaining how `web/vendor/MANIFEST.json` tracks source,
   license, version, and SHA-256 digests.
 
-## 2026-09-18, storage you can read and prune from
+## 2026-09-18
+
+### Storage you can read and prune from
 
 * **Update**: The Storage screen now matches the design. It names the data
   path and the node, shows what is used against the volume's capacity, and
@@ -935,7 +965,8 @@ software release notes and the repository changelog.
   project row splits sessions, artifacts and knowledge only. When the volume
   cannot be measured the capacity is left out and the bar is drawn against
   what is used.
-## 2026-09-18, Home as the day at a glance
+
+### Home as the day at a glance
 
 * **Update**: Home now matches the design. The title is the reader's day and
   part of day, over a summary line of what waits, what is unread and how many
@@ -952,7 +983,8 @@ software release notes and the repository changelog.
   Home response has no node name, no project display names and no list of the
   waiting queue, so Home omits the node line, names projects by slug, and
   lists only the waiting items that are among the newest events.
-## 2026-09-18, a project's own settings screen
+
+### A project's own settings screen
 
 * **Update**: Project settings ships as its own screen, behind a gear in the
   project header. It edits the name, shows the slug in mono as text because
@@ -966,7 +998,8 @@ software release notes and the repository changelog.
   confirmation; the list under the global Settings screen stays.
 * **Note**: The architecture and design pages no longer list Project settings
   as intended design.
-## 2026-09-18, search that answers as you type
+
+### Search that answers as you type
 
 * **Update**: The Search screen now matches the design. A 48px field with a
   clear button answers as it is typed in, scope chips narrow it to the feed,
@@ -979,7 +1012,8 @@ software release notes and the repository changelog.
   typed nor what an agent wrote is read as markup or as index syntax. A project
   scope, a date scope and landing on the hit inside its destination remain
   intended design.
-## 2026-09-18, the project feed
+
+### The project feed
 
 * **Update**: The project feed now matches the design. The kind filters are
   one scrolling line of chips led by All. Today and Yesterday are open, and
@@ -995,7 +1029,8 @@ software release notes and the repository changelog.
   the hub's skill document gives, filled with this hub's origin and never
   with the reader's own token. Where the browser has no clipboard, as on a
   plain LAN address, the text is shown selected to be copied by hand.
-## 2026-09-18, an inbox that can be read
+
+### An inbox that can be read
 
 * **Update**: The Inbox now matches the design. It reads in three groups,
   Waiting on you and Unread with their counts and Earlier for what has been
@@ -1016,7 +1051,7 @@ software release notes and the repository changelog.
 * **Note**: Quick answers on a question, a snooze under a swipe, and a note
   sent with a decision stay intended design.
 
-## 2026-09-18, a session, its brain as a tree
+### A session, its brain as a tree
 
 * **Update**: The sessions screen and its detail view now match the design.
   A session row carries the state dot, the owner, a mono id and size, and a
@@ -1027,7 +1062,7 @@ software release notes and the repository changelog.
   navigation, and a real focus trail. The pinned action bar names End session
   and Prune (ends first), which asks first and stays reversible.
 
-## 2026-09-18, reaching the app without a mouse
+### Reaching the app without a mouse
 
 * **Update**: A timestamp is no longer a stop of its own in the tab order. A
   row carried one each, so a long feed cost a Tab press per row and every stop
@@ -1052,7 +1087,7 @@ software release notes and the repository changelog.
 * **Note**: Described in [human interface](design/human-interface.md) and
   [human surface](architecture/human-surface.md).
 
-## 2026-09-18, the shell and the project view
+### The shell and the project view
 
 * **Update**: The mobile tab bar draws the four destinations as labelled icon
   tabs, with the Inbox unread badge riding on the icon; the desktop top bar
@@ -1074,7 +1109,7 @@ software release notes and the repository changelog.
 * **Note**: Described in [human interface](design/human-interface.md) and
   [human surface](architecture/human-surface.md).
 
-## 2026-09-18, remembering an artifact password, honestly
+### Remembering an artifact password, honestly
 
 * **Update**: The password gate offers to remember a password only where the
   browser will actually keep it. Opened from inside the app the artifact runs
@@ -1086,14 +1121,14 @@ software release notes and the repository changelog.
   page, and the next visit asks for it again. Described in
   [artifacts](usage/artifacts.md).
 
-## 2026-09-18, unlocking a protected artifact inside the app
+### Unlocking a protected artifact inside the app
 
 * **Note**: Unlocking now runs from the Unlock button's activation, which Enter
   in the password field reaches too. Opened from inside the app the artifact
   runs in a frame where the browser blocks a form submission outright, so until
   now the button did nothing there.
 
-## 2026-09-18, time, keys, and a theme that keeps up
+### Time, keys, and a theme that keeps up
 
 * **Update**: A timestamp is a component rather than a truncated ISO string. A
   row shows a compact relative form in the reader's own locale and counts it up
@@ -1114,7 +1149,7 @@ software release notes and the repository changelog.
   copy for each screen in one table. The screens still show their own single
   sentence; each adopts the component as it is reworked.
 
-## 2026-09-18, the app asks and reports in its own components
+### The app asks and reports in its own components
 
 * **Update**: Pruning a session now asks first. A confirmation dialog names the
   session, keeps on Esc or on its safe action, holds focus inside itself and
@@ -1139,7 +1174,7 @@ software release notes and the repository changelog.
   session listing route reports no byte count, and no number is shown that the
   hub has not given.
 
-## 2026-09-18, a kind is a shape, and the type scale stands up
+### A kind is a shape, and the type scale stands up
 
 * **Update**: Each event kind now draws its own mark inside the badge, and the
   row carries a hidden word for the kind, so nothing in a feed row is told
@@ -1155,7 +1190,7 @@ software release notes and the repository changelog.
   are checked against the token file, and a colour that is not a token fails
   the check.
 
-## 2026-09-18, a project decides what it asks of a protected artifact
+### A project decides what it asks of a protected artifact
 
 * **Update**: The artifact password policy is enforced where artifacts are
   written, so every writer meets it: a project set to require protection
@@ -1175,7 +1210,7 @@ software release notes and the repository changelog.
   artifact published under another policy stays as it is and stays readable;
   only its next version has to comply.
 
-## 2026-09-18, a project can be renamed and set up
+### A project can be renamed and set up
 
 * **Update**: A project is read on its own route and changed on a new one: its
   display name, and what it asks of a protected artifact (`off`, `optional` or
@@ -1188,7 +1223,7 @@ software release notes and the repository changelog.
   change it is refused. An agent's personal space can be renamed and set up
   like any other project, though deleting it is still refused.
 
-## 2026-09-18, a project feed remembers how far it was read
+### A project feed remembers how far it was read
 
 * **Update**: Each project carries one cursor, the newest event the human has
   seen. The feed read returns it, a route advances it when a feed is opened,
@@ -1206,7 +1241,7 @@ software release notes and the repository changelog.
   whole backlog. A project created afterwards starts with no cursor, so its
   first events are new.
 
-## 2026-09-18, the human can mark inbox items read
+### The human can mark inbox items read
 
 * **Update**: The inbox carries explicit read state. One entry is marked read
   or unread, and every unread entry can be marked read at once, optionally
@@ -1225,7 +1260,7 @@ software release notes and the repository changelog.
   the human opened or when. The inbox listing is ordered by event id rather
   than by update time, so reading an item never moves it or shifts a page.
 
-## 2026-09-18, every number the human surface shows has a route
+### Every number the human surface shows has a route
 
 * **Update**: The human surface reported bytes, counts and timings that no
   route carried. Each now has one: the volume's capacity and free space beside
@@ -1259,7 +1294,7 @@ software release notes and the repository changelog.
   exactly what it did before, which the [data model](architecture/data-model.md)
   states.
 
-## 2026-09-18, the app is one module per screen
+### The app is one module per screen
 
 * **Update**: The PWA is now a set of ES modules rather than one script: an
   entry that names the screens and wires the events, a shared core, and one
@@ -1275,7 +1310,7 @@ software release notes and the repository changelog.
   the audit it skips where the browser toolchain is absent. Listed in the
   [contributor guide](contribution/guide.md).
 
-## 2026-09-18, a session belongs to the agent that started it
+### A session belongs to the agent that started it
 
 * **Note**: Sessions started before this change keep the owner they were
   written with. A standalone `agent-hub mcp` records `HUB_AGENT_ID`, or `local`
@@ -1312,7 +1347,7 @@ software release notes and the repository changelog.
 * **Note**: Adopt, fork, reassign and end-with-handoff reach the human feed as
   ordinary session events. Nothing here waits on human approval.
 
-## 2026-09-18, a one-line read of the project knowledge base
+### A one-line read of the project knowledge base
 
 * **Update**: `agent-hub kb get|put|list|delete` reads and writes the project
   knowledge base without a quoted JSON object. `kb get` prints the page as
@@ -1325,7 +1360,7 @@ software release notes and the repository changelog.
 * **Note**: `HUB_PROJECT` joins the client settings, in the environment or in
   the config file, and supplies the project when no `--project` flag does.
 
-## 2026-09-18, reading another session's brain
+### Reading another session's brain
 
 * **Update**: `brain_get` and `brain_list` take an optional `session`, either
   `{session_id}` or `{agent, name}` with a `project_id`, and read that
@@ -1343,13 +1378,13 @@ software release notes and the repository changelog.
 * **Update**: `search` takes `session_id` to narrow results to one session's
   brain content, under the same project confinement as every other search.
 
-## 2026-09-18, a hook reads the project knowledge base
+### A hook reads the project knowledge base
 
 * **Update**: The served skill contract shows a one-shot call reading a
   project knowledge base page with no session, which is how a harness hook
   puts shared knowledge into context on any machine.
 
-## 2026-09-18, reaching the hub from another machine
+### Reaching the hub from another machine
 
 * **Update**: `agent-hub mcp` is a proxy to a running hub whenever `HUB_URL`
   names one: one connection for the life of the process, the hub's own tools,
@@ -1370,7 +1405,7 @@ software release notes and the repository changelog.
 * **Note**: A subcommand the binary does not know now exits 2 instead of
   starting a hub.
 
-## 2026-09-18, a durable knowledge base per project
+### A durable knowledge base per project
 
 * **Update**: The brain tools now reach two stores. `store: "session"` is the
   session's working state as before; `store: "project"` is a durable knowledge
@@ -1393,14 +1428,14 @@ software release notes and the repository changelog.
 * **Note**: Deleting a project removes its knowledge base with everything else
   it owns. That is the only thing that removes one.
 
-## 2026-09-18, what the artifact cap promises over HTTP
+### What the artifact cap promises over HTTP
 
 * **Note**: The served skill contract no longer reads as if 50 MiB of content
   always fits down the wire. The content cap is 50 MiB; over HTTP the whole
   tool call also has to fit the transport limit, so content that needs a lot
   of JSON escaping has less than 50 MiB of room. No limit changed.
 
-## 2026-09-18, the iteration range the artifact viewer accepts
+### The iteration range the artifact viewer accepts
 
 * **Update**: The protected-artifact envelope is accepted only with an
   `iterations` count between 100000 and 10000000; the client writes 600000.
@@ -1410,7 +1445,7 @@ software release notes and the repository changelog.
   report a wrong password, which sent the human back to a field that could
   never open it.
 
-## 2026-09-18, the node holds every brain
+### The node holds every brain
 
 * **Update**: The first invariant now reads "no vendor cloud, and no brain off
   the node" in place of "no remote brain", in the
@@ -1420,7 +1455,7 @@ software release notes and the repository changelog.
   as forbidding agents on other machines from reaching their brain on the
   node, which is what the hub is for.
 
-## 2026-09-18, what the published container port carries
+### What the published container port carries
 
 * **Note**: The [quickstart](usage/quickstart.md) compose section now states
   that the published port is plain HTTP on every interface, so the admin
@@ -1428,7 +1463,7 @@ software release notes and the repository changelog.
   supported ways to close that: a TLS-terminating reverse proxy with
   `HUB_PUBLIC_URL` set, or a tailnet. No default changed.
 
-## 2026-09-18, an external origin the operator can set
+### An external origin the operator can set
 
 * **Update**: `HUB_PUBLIC_URL` names the address callers reach the hub at.
   When set it is what the artifact frame policy, the artifact link previews,
@@ -1436,14 +1471,14 @@ software release notes and the repository changelog.
   the request headers and the bind. Documented in the
   [quickstart](usage/quickstart.md) with the other environment keys.
 
-## 2026-09-18, the identity trail is the human's to read
+### The identity trail is the human's to read
 
 * **Update**: Identity audit events stay out of the search corpus, and an
   agent's feed read never returns one. The admin still reads the trail
   through the project feed route by kind. Documented in the
   [data model](architecture/data-model.md).
 
-## 2026-09-18, session start stops returning a server path
+### Session start stops returning a server path
 
 * **Update**: `session_start` returns the session id alone. The brain file
   path it used to hand back named nothing any brain tool accepts and
@@ -1452,7 +1487,7 @@ software release notes and the repository changelog.
   [agent surface](architecture/agent-surface.md) and the served skill
   contract.
 
-## 2026-09-18, brain values carry a size ceiling
+### Brain values carry a size ceiling
 
 * **Update**: A single session brain value is capped at 4 MiB, matching the
   request body ceiling, and an oversized write is refused with
@@ -1460,7 +1495,7 @@ software release notes and the repository changelog.
   [agent surface](architecture/agent-surface.md) and the served skill
   contract.
 
-## 2026-09-18, readiness asks the engine
+### Readiness asks the engine
 
 * **Update**: `/readyz` now queries the store for its schema version instead
   of repeating the version cached at startup, and reports `503` problem
@@ -1469,14 +1504,14 @@ software release notes and the repository changelog.
   [human surface](architecture/human-surface.md) and in the
   [quickstart](usage/quickstart.md).
 
-## 2026-09-18, every REST refusal is problem details
+### Every REST refusal is problem details
 
 * **Update**: The [human surface](architecture/human-surface.md) states the
   status each refused request carries: an oversized body, a missing JSON
   content type, a bad query or path, and an unserved method are all problem
   details now, where the last four used to be plain text or an empty body.
 
-## 2026-09-18, request body limits per surface
+### Request body limits per surface
 
 * **Update**: The 4 MiB cap on a REST request body is stated on the
   [human surface](architecture/human-surface.md), and the served skill
@@ -1484,7 +1519,7 @@ software release notes and the repository changelog.
 * **Note**: The agent transport carries the artifact cap plus the call around
   it, so a 50 MiB artifact publishes over HTTP as well as over stdio.
 
-## 2026-09-18, corrections against shipped behaviour
+### Corrections against shipped behaviour
 
 * **Update**: The served skill guide now says plainly that local stdio opens
   the data directory itself as a standalone process, cannot attach to a data
@@ -1504,7 +1539,7 @@ software release notes and the repository changelog.
 * **Update**: The agent surface page's event kind family count and the human
   surface page's route table are corrected to match the code.
 
-## 2026-09-18, artifact viewer on the design foundation
+### Artifact viewer on the design foundation
 
 * **Update**: The public artifact page reuses the design tokens: warm
   canvas, humanist type, a header with back button, title, version line,
@@ -1514,7 +1549,7 @@ software release notes and the repository changelog.
   [artifacts guide](usage/artifacts.md) and the
   [human surface](architecture/human-surface.md).
 
-## 2026-09-18, comments on artifacts
+### Comments on artifacts
 
 * **Update**: Artifacts carry discussion with optional point or quote
   anchors, resolution state, and per-comment delete tokens. Documented in
@@ -1525,7 +1560,7 @@ software release notes and the repository changelog.
   contract. Quotes are refused on protected versions, and the public page
   shows the thread read-only, never on a protected artifact.
 
-## 2026-09-18, artifact viewer that runs, unlocks, and previews
+### Artifact viewer that runs, unlocks, and previews
 
 * **Update**: The public artifact page is a host shell around a sandboxed
   frame with a theme toggle and version picker, an unlock form for protected
@@ -1534,7 +1569,7 @@ software release notes and the repository changelog.
   [artifacts guide](usage/artifacts.md) and the
   [human surface](architecture/human-surface.md).
 
-## 2026-09-18, artifact versions, conflicts, and deletion
+### Artifact versions, conflicts, and deletion
 
 * **Update**: Artifacts carry display metadata (description, favicon mark,
   version label) and an immutable, addressable version history. Documented
@@ -1548,7 +1583,7 @@ software release notes and the repository changelog.
   versioned get and raw, `?version=N` on the public page) and
   `artifact_delete` are documented in the same pages.
 
-## 2026-09-18, usage guide and served skill
+### Usage guide and served skill
 
 * **Creation**: Added [artifacts](usage/artifacts.md), a usage guide for
   publishing, versioning, protecting, and reading artifacts, and a project and
@@ -1567,7 +1602,9 @@ software release notes and the repository changelog.
   the offline bootstrap and defers to the served document for the contract, so
   the two cannot drift.
 
-## 2026-09-17, inbox action-item cap
+## 2026-09-17
+
+### Inbox action-item cap
 
 * **Creation**: Added [the inbox action-item cap](adr/0017-inbox-action-item-cap.md):
   a question or an approval is an open item on the human, and the writer caps
@@ -1583,7 +1620,7 @@ software release notes and the repository changelog.
   grouped by actor so an agent that leaves many items is one block with its own
   count.
 
-## 2026-09-17, markdown rendering
+### Markdown rendering
 
 * **Update**: The public artifact route and the in-app viewer render a
   `markdown` artifact to HTML instead of showing its source. Raw HTML embedded
@@ -1599,7 +1636,7 @@ software release notes and the repository changelog.
   dependency to the binary and guarantees that every source character is
   escaped, which is why it is preferred over a full parser.
 
-## 2026-09-17, engine lock wait
+### Engine lock wait
 
 * **Update**: Every store connection now sets a bounded engine busy timeout, so
   a writer that loses the immediate-transaction race waits for the lock and
@@ -1610,7 +1647,7 @@ software release notes and the repository changelog.
   and answer proves that eight parallel writers serialise to one result and
   none surfaces the lock.
 
-## 2026-09-17, question id discoverability
+### Question id discoverability
 
 * **Update**: `question_post` now returns `question_id` alongside `event_id`
   and `thread_id`, all the same value, so a client has the id `answer_post`
@@ -1618,14 +1655,14 @@ software release notes and the repository changelog.
 * **Update**: The agent surface page documents the id relationship for the
   question and answer tools.
 
-## 2026-09-17, feed cursor
+### Feed cursor
 
 * **Update**: An empty forward feed poll returns the `since` cursor it was
   given rather than none, so a polling client keeps its place instead of
   losing it. A non-empty page, a backward (`before`) page, and a mixed query
   keep their existing cursors.
 
-## 2026-09-17, tailnet coverage
+### Tailnet coverage
 
 * **Update**: The embedded tailnet opt-in is now automatic. Setting
   `HUB_TAILNET` acknowledges the library's experimental guard, so the endpoint
@@ -1637,7 +1674,7 @@ software release notes and the repository changelog.
   feature-refusal paths. The live join and serve path stays a documented,
   manual test, because it needs a real tailnet.
 
-## 2026-09-17, accessibility gate
+### Accessibility gate
 
 * **Update**: The accessibility gate now runs in two layers. A hermetic
   contract check computes WCAG contrast for the theme token pairs, enforces the
@@ -1652,7 +1689,7 @@ software release notes and the repository changelog.
   of the focus and reduced-motion rules. Neither replaces a manual keyboard
   pass.
 
-## 2026-09-17, notifications descoped
+### Notifications descoped
 
 * **Update**: Background push is deferred beyond v1. Real delivery with the
   app closed needs a browser push service, a third party in the transport path
@@ -1665,7 +1702,7 @@ software release notes and the repository changelog.
 * **Note**: A later revision can add opt-in Web Push with a contentless,
   end-to-end encrypted payload if a vendor transport is accepted.
 
-## 2026-09-17, agent-surface hardening
+### Agent-surface hardening
 
 * **Update**: A non-admin caller no longer learns whether a project, artifact,
   or session exists. A missing resource and a denied one return the same
@@ -1675,7 +1712,7 @@ software release notes and the repository changelog.
   in browser local storage are accepted for a single-operator node, with the
   reasoning recorded in the blob module and the human surface page.
 
-## 2026-09-17, retry safety
+### Retry safety
 
 * **Update**: `artifact_publish` and `artifact_update` accept an optional
   idempotency key, so a retry after a dropped response returns the original
@@ -1687,7 +1724,7 @@ software release notes and the repository changelog.
   Prune keeps a key whose event still exists, so a keyed write that survives a
   prune still resolves.
 
-## 2026-09-17, feed design
+### Feed design
 
 * **Update**: The Project feed groups events by day (Today, Yesterday, or the
   date) and filters by kind with per-project chips; the Home recent list is
@@ -1704,7 +1741,7 @@ software release notes and the repository changelog.
   question, and a feed event carries its inbox status so a resolved item stops
   offering its action.
 
-## 2026-09-17, polish and reach
+### Polish and reach
 
 * **Creation**: A session opens into a detail view with its brain keys and
   files and its End and Prune actions, backed by an admin-gated
@@ -1727,7 +1764,7 @@ software release notes and the repository changelog.
   outstanding; notifications today are opt-in and raised while the app runs.
 * **Note**: The headless accessibility audit remains outstanding.
 
-## 2026-09-17, identity and access
+### Identity and access
 
 * **Creation**: Agents have a stable identity, one token at a time, a trust
   level, and a personal space. Issuing a token revokes the previous one in the
@@ -1751,7 +1788,9 @@ software release notes and the repository changelog.
 * **Note**: The session detail view, project deletion, push notifications, and
   a headless accessibility audit remain outstanding.
 
-## 2026-09-16, installable PWA
+## 2026-09-16
+
+### Installable PWA
 
 * **Creation**: Ship the interface as static assets from the binary: the design
   tokens, a vanilla app shell, a manifest, and a service worker. The screens
@@ -1765,7 +1804,7 @@ software release notes and the repository changelog.
 * **Note**: The Agents and access surface, the session detail view, and project
   deletion are still intended design; they land in a later change.
 
-## 2026-09-16, search
+### Search
 
 * **Creation**: Added the MCP `search` tool and the REST `GET /api/v1/search`
   route over the corpus already written by the feed, artifact, and brain
@@ -1775,7 +1814,7 @@ software release notes and the repository changelog.
   method recognises, so relevance ordering is live; project and type filters
   are applied after the ranked fetch.
 
-## 2026-09-16, artifacts and prune
+### Artifacts and prune
 
 * **Creation**: The MCP server adds `artifact_publish`, `artifact_update`,
   `artifact_get`, and `artifact_list`. Blobs live on the data volume; the
@@ -1792,7 +1831,7 @@ software release notes and the repository changelog.
   window, removes the session's indexed events, and is committed by a
   periodic sweep.
 
-## 2026-09-16, inbox and questions
+### Inbox and questions
 
 * **Creation**: The MCP server adds `question_post`, `answer_post`, and
   `inbox_read`. A question opens a thread, lands on the feed, and enters the
@@ -1807,7 +1846,7 @@ software release notes and the repository changelog.
   question.
 * **Update**: A malformed answer body is now a problem-details response.
 
-## 2026-09-16, brain and sessions
+### Brain and sessions
 
 * **Creation**: The MCP server adds session and brain tools: `session_start`
   and `session_end`, the `brain_get`, `brain_put`, `brain_list`, and
@@ -1823,7 +1862,7 @@ software release notes and the repository changelog.
 * **Update**: `make check` now runs the docs bundle check, so documentation
   cannot fall behind silently.
 
-## 2026-09-16, feed surface
+### Feed surface
 
 * **Creation**: The MCP server exposes the feed: `signal_append` writes an
   event, and `feed_read` pages a project feed with `next_since` and
@@ -1836,7 +1875,7 @@ software release notes and the repository changelog.
 * **Update**: Corrected the stale "not implemented yet" notes on the overview,
   the architecture index, the agent surface, and the human surface.
 
-## 2026-09-16, implementation and packaging
+### Implementation and packaging
 
 * **Creation**: Opened the [usage](usage/index.md) section with the
   [quickstart](usage/quickstart.md), covering the binary build, environment
@@ -1848,7 +1887,7 @@ software release notes and the repository changelog.
   said the bundle had no usage section and that a runnable binary did not
   exist.
 
-## 2026-09-16, grounding and design handoff
+### Grounding and design handoff
 
 * **Update**: Amended [0003](adr/0003-wrap-agentfs-per-session.md) to record
   that AgentFS is embedded as a crate and vendored, [0004](adr/0004-manual-pruning-in-v1.md)
@@ -1870,8 +1909,6 @@ software release notes and the repository changelog.
   and copy rules.
 * **Update**: Corrected the [overview](overview.md) to place artifact blobs on
   the data volume and note the centralised engine-native search index.
-
-## 2026-09-16
 
 * **Creation**: Opened the bundle with the operational baseline. Added the
   root [index](index.md), this log, the [overview](overview.md), the design

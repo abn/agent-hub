@@ -2391,8 +2391,9 @@ async fn the_usage_page_documents_every_route_and_its_refusals() {
     // newest first, so this entry moves down every time another is written.
     let log = std::fs::read_to_string(format!("{root}/log.md")).expect("read the log");
     assert!(
+        // The log's entry titles are subheadings under a bare date heading.
         log.lines()
-            .filter(|line| line.starts_with("## "))
+            .filter(|line| line.starts_with("##"))
             .any(|line| line.to_lowercase().contains("knowledge base backend")),
         "the log records the knowledge base backend"
     );

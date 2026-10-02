@@ -25,6 +25,8 @@ TYPE = re.compile(r"^type:[ \t]*\S", re.M)
 OKF_VERSION = re.compile(r'^okf_version:\s*["\']?0\.2["\']?[ \t]*$', re.M)
 TICKET_PREFIX = re.compile(r"^[A-Z]{1,6}\d+[-_]")
 SCRATCH_PATH = re.compile(r"\.agents/brain\b")
+LOG_HEADING = re.compile(r"^##\s+(\S.*)$", re.M)
+LOG_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def frontmatter(text: str) -> str | None:
@@ -88,6 +90,15 @@ def main() -> int:
 
     if not (DOCS / "log.md").is_file():
         errors.append("docs/log.md is missing")
+    else:
+        # A date heading is the date alone; the entry's title is a subheading.
+        # The OKF validator's okf/reserved/log-date-heading rule, kept here so
+        # the gate does not need the external binary.
+        for heading in LOG_HEADING.findall((DOCS / "log.md").read_text(encoding="utf-8")):
+            if not LOG_DATE.fullmatch(heading.strip()):
+                errors.append(
+                    f"docs/log.md: the date heading '## {heading.strip()}' is not a bare YYYY-MM-DD"
+                )
 
     for path in sorted(DOCS.rglob("*.md")):
         rel = path.relative_to(DOCS).as_posix()
