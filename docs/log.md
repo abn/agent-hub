@@ -6,6 +6,17 @@ software release notes and the repository changelog.
 
 ## 2026-10-02
 
+### The feed has a ceiling, ids survive a clock jump, and the hub drains
+
+* **Add**: [Operations](usage/operations.md) documents the project event ceiling
+  (`HUB_EVENTS_PER_PROJECT`), the graceful SIGTERM drain, and the `health`
+  subcommand the container healthcheck runs. [Agent surface](architecture/agent-surface.md)
+  notes the ceiling on `signal_append`; [quickstart](usage/quickstart.md) lists
+  the new keys.
+* **Fix**: event ids are clamped forward across a wall-clock step, and readiness
+  reflects a store that is newer than the binary.
+
+
 ### Backup, restore and honest readiness
 
 * **Add**: [Operations](usage/operations.md) is the runbook for backup, verify,

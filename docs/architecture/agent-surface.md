@@ -68,7 +68,7 @@ document.
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
-| `signal_append` | Append an event to a project feed. |
+| `signal_append` | Append an event to a project feed. A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; lifecycle and audit records do not count. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |

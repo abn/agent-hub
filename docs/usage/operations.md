@@ -67,6 +67,21 @@ backup from `backups/`, and start the older binary. Read the
 [data model](../architecture/data-model.md) before rolling back across a release
 that changed the schema.
 
+## The feed ceiling and shutdown
+
+A project's feed is bounded by `events_per_project` (`HUB_EVENTS_PER_PROJECT`,
+default one million). A write past it is refused with the cap named, so a
+runaway agent cannot fill the node; promote durable work to the knowledge base
+or prune the feed to make room. Lifecycle and audit records do not count.
+
+On `SIGTERM` or `SIGINT` the hub stops accepting, lets in-flight requests
+finish for a bounded window, then checkpoints the store and exits 0. `docker
+stop` and a service restart therefore drain rather than cut.
+
+`agent-hub health [--url URL]` asks `/readyz` and exits 0 when ready, non-zero
+otherwise. It is what the container healthcheck runs, because the runtime image
+is distroless and has no shell or curl.
+
 ## Readiness and disk space
 
 `GET /readyz` answers `200` only when the store is usable: the schema version is
