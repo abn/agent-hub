@@ -133,7 +133,7 @@ pub async fn usage(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let usage = state
+    let mut usage = state
         .stats
         .usage(
             &state.db,
@@ -144,5 +144,13 @@ pub async fn usage(
         )
         .await
         .map_err(|err| Problem::from_error(&err))?;
+
+    // The Home storage card's housekeeping line. One cached read per project.
+    let mut needs_review = 0;
+    for project in &usage.projects {
+        needs_review += crate::http::kb::needs_review_total(&state, &project.project_id).await;
+    }
+    usage.knowledge_needs_review = needs_review;
+
     Ok(Json(usage))
 }

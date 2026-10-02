@@ -87,6 +87,9 @@ pub struct StorageUsage {
     /// `by_kind.events`.
     pub events_shared_bytes: i64,
     pub prunable: Prunable,
+    /// Pages across every knowledge base that need review, for the Home
+    /// storage card's housekeeping line. The HTTP surface fills it in.
+    pub knowledge_needs_review: i64,
     pub projects: Vec<ProjectUsage>,
     /// The hub's own version, from `Cargo.toml`, and the short commit it was
     /// built from. The Settings Version row reads these; they are real build
@@ -370,6 +373,7 @@ pub async fn usage_from(
         by_kind,
         events_shared_bytes,
         prunable,
+        knowledge_needs_review: 0,
         projects: by_project,
         // Real build metadata, resolved at compile time: the version from
         // `Cargo.toml` and the short commit the build script read. The Version

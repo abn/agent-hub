@@ -4,6 +4,18 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-02, wiki comment threads, the page sheet and the Home review line
+
+* **Add**: [Project knowledge base](usage/knowledge-base.md) and the
+  [human interface](design/human-interface.md) record the shipped wiki surface
+  in full: comment threads on a page (open threads, a quoted anchor, resolved
+  threads folded under a count), the New page and Save to wiki sheet, the
+  full tree above 768px and the drill-in below, the stale clock glyph, the
+  agent-instruction empty state, and the project header overflow.
+* **Update**: The storage report carries `knowledge_needs_review`, the Home
+  storage card's one housekeeping line. The store's `kb_comments` table is
+  migration 18.
+
 ## 2026-10-02, the wiki reviews, promote and conflict path
 
 * **Update**: [Project knowledge base](usage/knowledge-base.md) adds the

@@ -180,6 +180,8 @@ function storageCard(storage, prunable) {
   const sliver = share !== null && used > 0 && used < capacity * SLIVER;
   const hints = [];
   if (share !== null) hints.push(sliver ? SLIVER_WORDS : `${Math.round(share * 100)}% used`);
+  const review = int(storage.knowledge_needs_review);
+  if (review) hints.push(`${count(review, "page", "pages")} need review`);
   const sessions = int(prunable.sessions);
   if (sessions) {
     hints.push(

@@ -609,6 +609,23 @@ pub async fn lint(
     })))
 }
 
+/// How many pages across a project's knowledge base need review. Zero when
+/// the project has no knowledge base. The Home storage card reads this.
+pub(crate) async fn needs_review_total(state: &AppState, project_id: &str) -> i64 {
+    let Ok(Some(brain)) = existing(state, project_id).await else {
+        return 0;
+    };
+    match get_or_compute_kb(state, project_id, &brain, false).await {
+        Ok(memo) => memo
+            .stats
+            .get("needs_review")
+            .and_then(|value| value.get("total"))
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0),
+        Err(_) => 0,
+    }
+}
+
 /// `GET /api/v1/projects/{id}/kb/stats`
 pub async fn stats(
     State(state): State<AppState>,

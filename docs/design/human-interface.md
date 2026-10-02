@@ -122,29 +122,36 @@ sync line when the hub is healthy.
 
 A project carries a fourth section, **Wiki**, beside Feed, Artifacts and
 Sessions, and its tab names the page count. The tree is one `meta=1` listing of
-the whole knowledge base, so directories, pages and their derived numbers
-arrive in one request, and it is one listing rather than a directory view. A
-page row carries its title and a mono line of its type, status and derived
-trust; a stale page adds the word "stale"; a directory row carries its child
-count. Selecting a page opens the reader in the stage: the frontmatter block is
-metadata, drawn as the page's type, status and tags rather than as body text,
-and the page's backlinks are listed under it. The reader offers **Review**,
-which stamps the bytes the human read and carries the version they read;
-**Edit** opens the editor, whose Save carries the version token the read
-carried. A page that changed under the editor is refused rather than
-overwritten, and the refusal is said in place with **Reload theirs** and **Keep
-mine**. The project's index header carries **New page**, which writes a page
-that is not there yet with `if_version: "absent"`.
+the whole knowledge base, drawn as a full tree from 768px up and one drill-in
+level with a breadcrumb below it. A page row carries its title and a mono line
+of its type, status and derived trust; a stale page adds the 12px clock glyph
+and the word "stale"; a directory row carries its child count. Selecting a page
+opens the reader in the stage: the frontmatter block is metadata, drawn as the
+page's type, status and tags rather than as body text, and the page's backlinks
+and comment threads are listed under it. A thread is one level; an anchored
+thread shows the quote, open threads are listed, and resolved threads fold under
+a count at the foot. The reader offers **Review**, which stamps the bytes the
+human read and carries the version they read; **Edit** opens the editor, whose
+Save carries the version token the read carried. A page that changed under the
+editor is refused rather than overwritten, and the refusal is said in place with
+**Reload theirs** and **Keep mine**.
+
+**New page** and **Save to wiki** are one sheet: a Location, a Title and a
+Description, the file name computed from the title, and a note naming the type,
+status and source. New page writes a page that is not there yet with
+`if_version: "absent"`; Save to wiki, offered on a session brain entry, copies it
+in through `kb/promote` and leaves the source where it was. The sheet is
+reachable in the index header on the desktop and in the tools row and the Wiki
+home on a phone, where the index control row is hidden.
 
 The Wiki home carries the page, needs-review and stale counts and holds the
 housekeeping screens: **Recent changes** (`kb/history`) reads who did what to
 which page and when, with rows that are not tappable in this version, and
 **Lint** (`kb/lint`) lists the whole tree's findings with a Re-check that walks
 it again. **Needs review** lists the pages the hub judges not human-reviewed,
-and a row opens the page. A session brain entry offers **Save to wiki**
-(`kb/promote`), which copies it into the knowledge base and leaves the source
-where it was. The routes and refusals are in
-[the project knowledge base](../usage/knowledge-base.md).
+and a row opens the page. The Home storage card carries one housekeeping line,
+how many pages need review, from the storage report's own count. The routes and
+refusals are in [the project knowledge base](../usage/knowledge-base.md).
 
 ## Interaction rules
 

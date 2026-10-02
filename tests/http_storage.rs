@@ -1100,3 +1100,33 @@ fn a_report_that_outlives_a_forget_does_not_put_its_weights_back() {
         "weights with no forget in between were dropped"
     );
 }
+
+/// The Home storage card's housekeeping line reads this: pages across every
+/// knowledge base that need review.
+#[tokio::test]
+async fn the_storage_report_counts_pages_that_need_review() {
+    let state = state().await;
+    assert_eq!(usage(&state).await["knowledge_needs_review"], 0);
+
+    let put = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/projects/proj/kb/pages/notes/a.md")
+                .method("PUT")
+                .header(header::AUTHORIZATION, "Bearer token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"content":"---\ntype: concept\nstatus: draft\n---\n# A\n"}"#,
+                ))
+                .expect("build request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(put.status(), StatusCode::OK, "the page is written");
+
+    let after = usage(&state).await;
+    assert_eq!(
+        after["knowledge_needs_review"], 1,
+        "one unverified page needs review"
+    );
+}
