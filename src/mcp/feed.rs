@@ -99,7 +99,7 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
-        let session_id = params.session.or(params.session_id);
+        let session_id = params.session;
         let mut query = FeedQuery {
             since: params.since,
             before: params.before,
@@ -147,8 +147,6 @@ struct FeedReadParams {
     project_id: String,
     #[serde(default)]
     session: Option<String>,
-    #[serde(default)]
-    session_id: Option<String>,
     #[serde(default)]
     since: Option<String>,
     #[serde(default)]

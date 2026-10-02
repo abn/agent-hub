@@ -88,7 +88,6 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
             "project_id": "proj",
             "subject": "Deploy tonight?",
             "body": "The release is ready.",
-            "to": "human",
         }),
     );
     let asked_result = structured(&asked);

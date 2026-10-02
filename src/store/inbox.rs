@@ -149,6 +149,17 @@ pub(crate) async fn enforce_open_cap(
     Ok(())
 }
 
+/// A page of inbox entries with the cursor to poll from.
+#[derive(Debug, Clone)]
+pub struct InboxPage {
+    /// The entries on this page.
+    pub items: Vec<InboxItem>,
+    /// The newest event this page accounts for: pass it as `since` to poll.
+    /// For a resolved entry it is the answer or decision event, so a caller
+    /// that has seen the answer is not shown the entry resolved again.
+    pub next_since: Option<String>,
+}
+
 /// List inbox entries, newest first, optionally filtered.
 pub async fn list(
     db: &Database,
@@ -171,7 +182,11 @@ pub async fn list_visible(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Vec<InboxItem>> {
-    list_as(db, status, project_id, limit, visible, false).await
+    Ok(
+        list_as(db, status, project_id, None, None, limit, visible, false)
+            .await?
+            .items,
+    )
 }
 
 /// The same listing as an agent may see it.
@@ -188,17 +203,47 @@ pub async fn list_for_agent(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Vec<InboxItem>> {
-    list_as(db, status, project_id, limit, visible, true).await
+    Ok(
+        page_for_agent(db, status, project_id, None, None, limit, visible)
+            .await?
+            .items,
+    )
 }
 
+/// A page of the same listing as an agent may see it, with a cursor.
+///
+/// `actor` keeps only entries written by that actor; `since` keeps only entries
+/// whose own event, or the answer or decision that resolved them, is newer than
+/// the cursor. The cursor covers the deciding event as well as the item itself,
+/// so an answer that arrives after the caller last looked is returned even
+/// though the item's own id is older. `next_since` points at the newest such
+/// event on the page, or back at `since` when the page is empty, so a poll that
+/// sees nothing does not lose its place.
+pub async fn page_for_agent(
+    db: &Database,
+    status: Option<&str>,
+    project_id: Option<&str>,
+    actor: Option<&str>,
+    since: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<InboxPage> {
+    list_as(db, status, project_id, actor, since, limit, visible, true).await
+}
+
+/// A listing with the agent's filters and cursor, shared by the plain list and
+/// the page. The parameters are the query the surfaces pass through.
+#[allow(clippy::too_many_arguments)]
 async fn list_as(
     db: &Database,
     status: Option<&str>,
     project_id: Option<&str>,
+    actor: Option<&str>,
+    since: Option<&str>,
     limit: i64,
     visible: Option<&[String]>,
     collapse_read: bool,
-) -> Result<Vec<InboxItem>> {
+) -> Result<InboxPage> {
     if let Some(status) = status {
         if collapse_read && status == "read" {
             return Err(Error::InvalidArgument(format!(
@@ -211,7 +256,10 @@ async fn list_as(
     if let Some(visible) = visible
         && visible.is_empty()
     {
-        return Ok(Vec::new());
+        return Ok(InboxPage {
+            items: Vec::new(),
+            next_since: since.map(str::to_string),
+        });
     }
 
     // A read entry reads as unread and keeps the time it entered the inbox, so
@@ -223,6 +271,13 @@ async fn list_as(
     } else {
         "i.status, e.created_at, i.updated_at"
     };
+    // The answer that decides the entry, when one has: an answer on the entry's
+    // own thread in the same project. A cursor counts it, so an answer that
+    // arrived after the caller's cursor is seen even though the entry's own id
+    // is older. A question has one answer; `MAX` takes the latest if data is
+    // odd, which is the safe choice for a cursor.
+    let effective = "(SELECT MAX(a.id) FROM events a
+         WHERE a.kind = 'answer' AND a.thread_id = e.id AND a.project_id = e.project_id)";
     let mut sql = format!(
         "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
                 {projection}
@@ -243,6 +298,10 @@ async fn list_as(
         params.push(Value::Text(project_id.to_string()));
         sql.push_str(&format!(" AND e.project_id = ?{}", params.len()));
     }
+    if let Some(actor) = actor {
+        params.push(Value::Text(actor.to_string()));
+        sql.push_str(&format!(" AND e.actor = ?{}", params.len()));
+    }
     if let Some(visible) = visible {
         let mut placeholders = Vec::with_capacity(visible.len());
         for id in visible {
@@ -254,12 +313,26 @@ async fn list_as(
             placeholders.join(", ")
         ));
     }
+    if let Some(since) = since {
+        params.push(Value::Text(since.to_string()));
+        sql.push_str(&format!(
+            " AND COALESCE({effective}, e.id) > ?{}",
+            params.len()
+        ));
+    }
     // Ordered by the event id, which is minted in commit order and never
     // changes. Ordering on the entry's update time would let reading an item
     // pull it to the head of the list, above work that is genuinely newer, and
-    // would shift the page a limit cuts.
+    // would shift the page a limit cuts. A forward poll from a cursor orders by
+    // the deciding event instead, so an answered question lands at the head it
+    // belongs at, above older entries.
     params.push(Value::Integer(limit));
-    sql.push_str(&format!(" ORDER BY e.id DESC LIMIT ?{}", params.len()));
+    let order = if since.is_some() {
+        format!("COALESCE({effective}, e.id) DESC")
+    } else {
+        "e.id DESC".to_string()
+    };
+    sql.push_str(&format!(" ORDER BY {order} LIMIT ?{}", params.len()));
 
     let conn = super::connect(db)?;
     let mut rows = conn.query(&sql, params).await.map_err(engine)?;
@@ -271,7 +344,28 @@ async fn list_as(
     attach_decisions(&conn, &mut items).await?;
     attach_answers(&conn, &mut items).await?;
     name_projects(&conn, &mut items).await?;
-    Ok(items)
+    let next_since = match items.first() {
+        Some(first) => Some(item_effective_id(first).to_string()),
+        None => since.map(str::to_string),
+    };
+    Ok(InboxPage { items, next_since })
+}
+
+/// The event id a cursor counts for one entry.
+///
+/// It is the entry's own event, or the answer or decision that resolved it
+/// when one has: the deciding event is minted after the item and so is always
+/// the newer id.
+pub(crate) fn item_effective_id(item: &InboxItem) -> &str {
+    item.answer
+        .as_ref()
+        .map(|answer| answer.event_id.as_str())
+        .or_else(|| {
+            item.decision
+                .as_ref()
+                .map(|decision| decision.event_id.as_str())
+        })
+        .unwrap_or(item.event_id.as_str())
 }
 
 /// Give each item on a page the name of its project, in one read for the page.

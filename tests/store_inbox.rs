@@ -26,7 +26,6 @@ fn question(subject: &str) -> NewQuestion<'_> {
         subject,
         body: None,
         context: None,
-        to: None,
         idempotency_key: None,
         session_id: None,
     }
@@ -39,7 +38,6 @@ fn question_by<'a>(actor: &'a str, subject: &'a str) -> NewQuestion<'a> {
         subject,
         body: None,
         context: None,
-        to: None,
         idempotency_key: None,
         session_id: None,
     }
@@ -258,7 +256,6 @@ async fn question_opens_a_thread_and_lands_in_the_inbox() {
     let db = open().await;
     let mut ask = question("Deploy tonight?");
     ask.body = Some("The release is ready.");
-    ask.to = Some("human");
     let question_id = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), ask)
         .await
         .expect("post question");

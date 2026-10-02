@@ -20,8 +20,6 @@ pub struct NewQuestion<'a> {
     pub body: Option<&'a str>,
     /// Optional context for the reader.
     pub context: Option<&'a str>,
-    /// Optional addressee, `human` or an agent id.
-    pub to: Option<&'a str>,
     /// Optional idempotency key.
     pub idempotency_key: Option<&'a str>,
     /// The session the asker had open, when it had one.
@@ -44,7 +42,6 @@ pub async fn post(
         subject,
         body,
         context,
-        to,
         idempotency_key,
         session_id,
     } = question;
@@ -62,10 +59,6 @@ pub async fn post(
             serde_json::Value::String(context.to_string()),
         );
     }
-    if let Some(to) = to {
-        payload.insert("to".to_string(), serde_json::Value::String(to.to_string()));
-    }
-
     let id = events::append_action(
         db,
         caps,

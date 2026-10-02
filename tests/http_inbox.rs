@@ -33,7 +33,6 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
             subject,
             body: None,
             context: None,
-            to: None,
             idempotency_key: None,
             session_id: None,
         },
