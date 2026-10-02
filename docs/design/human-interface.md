@@ -118,6 +118,34 @@ knowledge and one helper line with zero cells drawn as a dash, Agents and tokens
 is a list-and-item screen with an index beside a stage, and the rail hides its
 sync line when the hub is healthy.
 
+## The project knowledge base
+
+A project carries a fourth section, **Wiki**, beside Feed, Artifacts and
+Sessions, and its tab names the page count. The tree is one `meta=1` listing of
+the whole knowledge base, so directories, pages and their derived numbers
+arrive in one request, and it is one listing rather than a directory view. A
+page row carries its title and a mono line of its type, status and derived
+trust; a stale page adds the word "stale"; a directory row carries its child
+count. Selecting a page opens the reader in the stage: the frontmatter block is
+metadata, drawn as the page's type, status and tags rather than as body text,
+and the page's backlinks are listed under it. The reader offers **Review**,
+which stamps the bytes the human read and carries the version they read;
+**Edit** opens the editor, whose Save carries the version token the read
+carried. A page that changed under the editor is refused rather than
+overwritten, and the refusal is said in place with **Reload theirs** and **Keep
+mine**. The project's index header carries **New page**, which writes a page
+that is not there yet with `if_version: "absent"`.
+
+The Wiki home carries the page, needs-review and stale counts and holds the
+housekeeping screens: **Recent changes** (`kb/history`) reads who did what to
+which page and when, with rows that are not tappable in this version, and
+**Lint** (`kb/lint`) lists the whole tree's findings with a Re-check that walks
+it again. **Needs review** lists the pages the hub judges not human-reviewed,
+and a row opens the page. A session brain entry offers **Save to wiki**
+(`kb/promote`), which copies it into the knowledge base and leaves the source
+where it was. The routes and refusals are in
+[the project knowledge base](../usage/knowledge-base.md).
+
 ## Interaction rules
 
 - Every verb is reachable in two taps from Home: read, answer, approve, prune.

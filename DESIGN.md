@@ -86,9 +86,10 @@ The handoff's `glyphs/*.svg` files carry a provenance block added by the
 export pipeline. It is not design data and must not ship; `web/glyphs.mjs`
 holds the bare paths and inline markup only.
 
-The build's set now carries the twelve except `key`, which nothing draws yet,
-and keeps `close` and `send`, which round 15 draws into the set. A check holds
-that no two names draw the same path and that no drawn glyph is unused.
+The build's set carries the twelve except `key` and `link`, neither of which a
+screen draws, and keeps `close` and `send`, which round 15 draws into the set. A
+check holds that no two names draw the same path and that no drawn glyph is
+unused.
 
 ## Layout: the shell
 
