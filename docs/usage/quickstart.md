@@ -43,9 +43,9 @@ search paths, and validation status.
 | Key (`[hub]`) | Variable | Default | Purpose |
 |---|---|---|---|
 | `data_dir` | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
-| `bind` | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the `hub listening` log line names it |
+| `bind` | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the startup line names the bound address |
 | `public_url` | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
-| `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface; required when the bind is not loopback |
+| `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface. Required when the bind is not loopback; a loopback hub without one starts but its PWA control surface refuses every request, so set it before opening the app |
 | `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
 | `inbox_action_per_agent` | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
 | `inbox_action_per_project` | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
@@ -82,6 +82,10 @@ Point the process at a data directory and a bind address:
 HUB_DATA_DIR=./data HUB_BIND=127.0.0.1:8080 HUB_ADMIN_TOKEN=change-me \
   ./target/debug/agent-hub
 ```
+
+On start it prints one line naming the bound address, the data directory, and
+whether an admin token is configured, so a port `0` bind is readable without
+turning on logs. `RUST_LOG=info` turns on the rest of the tracing output.
 
 The release binary lives at `target/release/agent-hub`. Check the probes from
 another shell:

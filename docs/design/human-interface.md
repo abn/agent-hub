@@ -154,6 +154,20 @@ and a row opens the page. The Home storage card carries one housekeeping line,
 how many pages need review, from the storage report's own count. The routes and
 refusals are in [the project knowledge base](../usage/knowledge-base.md).
 
+## First run
+
+A fresh hub opens on Connect, where the token is checked against the hub before
+it is stored and the reader is returned to the route they were on. The Projects
+register is reachable from the rail's PROJECTS header on the desktop and from
+the tab bar on a phone, and a new hub's empty Home carries one call to action,
+create a project. Creating an agent issues its token once and reveals it; on a
+phone as well as a desktop the reveal offers the MCP setup for that agent with
+the token embedded, so the two halves are not spliced by hand. A pending
+enrolment reads in the inbox as "Pending enrolment" with the reason the agent
+gave, and the Access list marks a pending agent and shows its reason. A hub with
+no admin token configured says so on Connect and points at the startup fix,
+rather than repeating the refusal.
+
 ## Interaction rules
 
 - Every verb is reachable in two taps from Home: read, answer, approve, prune.

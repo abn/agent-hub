@@ -32,11 +32,15 @@ and session-bound work goes through the proxy.
 
 An agent arriving without credentials enrols via `agent-hub enrol`, or by calling
 `POST /api/v1/enrol` with a single-line explanation (under 200 characters) and
-long-polling `GET /api/v1/enrol/status?wait=30`. The operator approves or refuses
-the request from the inbox. Upon shared approval, the client records the issued
-token in `config.toml` at file mode `0600`. Pending tokens are refused by all
-ordinary routes with the exact same unauthenticated response as unrecognised
-tokens.
+long-polling `GET /api/v1/enrol/status?wait=30`. The operator approves or
+refuses the request from the inbox: deciding an `enrol_request` admits or refuses
+the enrolling agent in the same transaction, and the subject is read from the
+approval event (its actor must be a pending agent and the event must sit in that
+agent's own personal project), never from the payload, so an active agent cannot
+forge an admission. Upon shared approval, the client records the issued token and
+the hub URL in `config.toml` at file mode `0600`, so its next command needs no
+environment. Pending tokens are refused by all ordinary routes with the exact
+same unauthenticated response as unrecognised tokens.
 
 An enrolment is rate-limited by its **socket peer**. A caller cannot set that
 identity: a body field is ignored, and forwarded headers are honoured only when

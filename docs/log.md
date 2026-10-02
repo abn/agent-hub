@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-02, the first run works end to end
+
+* **Fix**: [Agent surface](architecture/agent-surface.md) records that deciding
+  an `enrol_request` admits or refuses the agent in the decision's own
+  transaction, with the subject read from the event so a forged approval admits
+  nobody, and that the enrol client records the hub URL beside the token.
+  [Quickstart](usage/quickstart.md) documents the startup line and that the
+  control surface needs an admin token even on loopback.
+* **Update**: [Human interface](design/human-interface.md) gains a First run
+  section: the rail route to Projects, the empty Home call to action, the token
+  issue on a phone, the setup in the reveal, the enrolment reason, and the
+  no-admin-token Connect state.
+
 ## 2026-10-02, wiki comment threads, the page sheet and the Home review line
 
 * **Add**: [Project knowledge base](usage/knowledge-base.md) and the
