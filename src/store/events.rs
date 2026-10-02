@@ -364,6 +364,10 @@ async fn append_in_tx_capped(
     .await
     .map_err(engine)?;
 
+    // One relaxed add on the path that just wrote the row. The registry is
+    // global because this transaction helper has no `AppState` in scope.
+    crate::metrics::record_event(&event.kind);
+
     // The corpus carries no event kind, so an audit event that reaches it can
     // no longer be held back from a search. It is kept out instead; the human
     // reads the trail through the feed, by kind.

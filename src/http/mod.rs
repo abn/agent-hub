@@ -29,6 +29,7 @@ pub mod feed;
 pub mod inbox;
 pub mod kb;
 pub mod kb_comments;
+pub mod metrics;
 pub mod origin;
 pub mod problem;
 pub mod projects;
@@ -64,6 +65,7 @@ pub fn router(state: AppState) -> Router {
         .route(web::MANIFEST_PATH, get(web::manifest))
         .route("/sw.js", get(web::service_worker))
         .route("/SKILL.md", get(skill::skill))
+        .route("/metrics", get(metrics::metrics))
         .route("/api/v1/agents", get(agents::list).post(agents::create))
         .route(
             "/api/v1/agents/{id}/token",

@@ -469,7 +469,11 @@ pub async fn run(config: Config) -> Result<()> {
         }
     });
 
-    let router = http::router(state.clone()).merge(mcp::http_router(state.clone()));
+    let router = http::router(state.clone())
+        .merge(mcp::http_router(state.clone()))
+        // Applied after the merge, so `/mcp` is counted too: `Router::layer`
+        // does not reach a router merged in later.
+        .layer(axum::middleware::from_fn(count_http));
 
     // An optional tailnet endpoint serves the same router on the device's
     // tailnet address, beside the plain listener.
@@ -546,9 +550,9 @@ pub async fn run(config: Config) -> Result<()> {
     // Stop the background writers before checkpointing, so the fold sees a
     // store no one else is touching.
     sweeper_task.abort();
-    // The tailnet listener is a separate serve with its own reconnect loop and
-    // no shutdown handle, so it is dropped here rather than drained. Stdio MCP
-    // is a different path entirely and never reaches this code.
+    // The tailnet endpoint is a separate serve with its own reconnect-and-rebuild
+    // loop and no shutdown handle, so it is dropped here rather than drained.
+    // Stdio MCP is a different path entirely and never reaches this code.
     if let Some(task) = tailnet_task {
         task.abort();
     }
@@ -567,6 +571,22 @@ pub async fn run(config: Config) -> Result<()> {
 
 /// How long a stopping hub waits for in-flight requests to finish.
 const SHUTDOWN_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Count one answered request by method and status class.
+///
+/// The layer wraps the whole router, so it counts every route including the
+/// merged `/mcp` service and a request the bearer gate refused. It reads the
+/// response status after the handler ran, so a 404 or a 500 is counted as
+/// itself rather than as the request that reached it.
+async fn count_http(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = request.method().as_str().to_owned();
+    let response = next.run(request).await;
+    crate::metrics::record_http(&method, response.status().as_u16() / 100);
+    response
+}
 
 /// Resolve when the process is asked to stop.
 ///

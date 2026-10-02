@@ -11,6 +11,7 @@ pub mod http;
 pub mod limits;
 pub mod markdown;
 pub mod mcp;
+pub mod metrics;
 pub mod net;
 pub mod okf;
 pub mod ops;

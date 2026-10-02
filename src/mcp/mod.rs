@@ -13,10 +13,11 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    ErrorCode as McpErrorCode, ErrorData, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode as McpErrorCode, ErrorData,
+    ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -137,6 +138,36 @@ fn guide_text(config: &Config, context: &RequestContext<RoleServer>) -> StdStrin
 
 #[tool_handler(router = self.tool_router, name = "agent-hub")]
 impl ServerHandler for HubServer {
+    /// Handle a `tools/call`.
+    ///
+    /// Overrides the macro's generated method (the macro skips generating one
+    /// when the impl defines it). It counts the call by tool, and for a name
+    /// the router does not know it answers with a tool-RESULT error carrying
+    /// the hub's own `not_found` object rather than a JSON-RPC error.
+    ///
+    /// A JSON-RPC error is what the SDK's router would raise for an unknown
+    /// name (`-32602`), and a modern peer remaps the SDK's
+    /// `RESOURCE_NOT_FOUND` back to `-32602`, so the numeric reply is the same
+    /// either way and carries no hub code. A tool result is the one reply that
+    /// reaches the caller with the hub object intact, which is what a hook
+    /// reads to decide its exit. A known name is delegated exactly as the
+    /// macro would.
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> std::result::Result<CallToolResponse, ErrorData> {
+        let name = request.name.clone();
+        if self.tool_router.get(name.as_ref()).is_none() {
+            crate::metrics::record_tool(crate::metrics::UNKNOWN_TOOL);
+            let error = Error::NotFound(format!("no tool named '{name}'"));
+            return Ok(CallToolResult::structured_error(error_object(&error)).into());
+        }
+        crate::metrics::record_tool(name.as_ref());
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
     /// Advertise the resource surface alongside the tools.
     ///
     /// Hand-written so the macro does not generate a tools-only `get_info`:
@@ -203,15 +234,25 @@ fn to_error_data(err: Error) -> ErrorData {
         ErrorCode::NotFound => McpErrorCode::RESOURCE_NOT_FOUND,
         ErrorCode::Unavailable | ErrorCode::Internal => McpErrorCode::INTERNAL_ERROR,
     };
-    let data = json!({
+    let data = error_object(&err);
+    ErrorData::new(wire, err.to_string(), Some(data))
+}
+
+/// The hub's error object, the one shape both a protocol error and a tool
+/// result carry.
+///
+/// It is a function of the error alone, so an unknown tool answered as a tool
+/// result and a known tool that returned `ErrorData` present the caller the
+/// same `code`, `message`, `retryable`, and `details`.
+fn error_object(err: &Error) -> serde_json::Value {
+    json!({
         "error": {
-            "code": code.as_str(),
+            "code": err.code().as_str(),
             "message": err.to_string(),
             "retryable": err.retryable(),
             "details": {},
         }
-    });
-    ErrorData::new(wire, err.to_string(), Some(data))
+    })
 }
 
 /// Serve the MCP tool surface over stdio.
