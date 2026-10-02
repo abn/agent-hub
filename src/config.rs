@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::limits::InboxCaps;
+use crate::limits::{EventCeiling, InboxCaps};
 
 /// Keys the client table carries.
 pub const CLIENT_KEYS: &[&str] = &["url", "token", "agent_id", "project", "timeout"];
@@ -20,6 +20,7 @@ pub const HUB_KEYS: &[&str] = &[
     "active_window_secs",
     "inbox_action_per_agent",
     "inbox_action_per_project",
+    "events_per_project",
     "enrol",
     "enrol_pending_max",
     "enrol_pending_ttl_secs",
@@ -156,6 +157,8 @@ pub struct Config {
     pub admin_token: Option<String>,
     /// Ceilings on the open action items an agent may leave on the human.
     pub inbox_caps: InboxCaps,
+    /// Ceiling on the events one project's feed may hold.
+    pub events_per_project: EventCeiling,
     /// How long after its last tool call a session still counts its owner as
     /// an agent at work.
     pub active_window: std::time::Duration,
@@ -244,6 +247,11 @@ impl Config {
         let inbox_project =
             Setting::resolved(env, "hub", "inbox_action_per_project", &files, Some("1000")).value;
         let inbox_caps = InboxCaps::parse(inbox_agent.as_deref(), inbox_project.as_deref())?;
+        let events_per_project = EventCeiling::parse(
+            Setting::resolved(env, "hub", "events_per_project", &files, Some("1000000"))
+                .value
+                .as_deref(),
+        )?;
 
         let active_window_str =
             Setting::resolved(env, "hub", "active_window_secs", &files, Some("900")).value;
@@ -287,6 +295,7 @@ impl Config {
             public_url,
             admin_token,
             inbox_caps,
+            events_per_project,
             active_window,
             node_name,
             enrol_enabled,
@@ -606,6 +615,7 @@ fn extract_value(
             "active_window_secs"
             | "inbox_action_per_agent"
             | "inbox_action_per_project"
+            | "events_per_project"
             | "enrol_pending_max"
             | "enrol_pending_ttl_secs"
             | "tailnet_port",
@@ -788,6 +798,7 @@ fn migrate_legacy_config(old_path: &Path, new_path: &Path) -> Result<()> {
                 "active_window_secs"
                     | "inbox_action_per_agent"
                     | "inbox_action_per_project"
+                    | "events_per_project"
                     | "enrol_pending_max"
                     | "enrol_pending_ttl_secs"
                     | "tailnet_port"
@@ -925,6 +936,13 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             "inbox_action_per_project",
             "HUB_INBOX_ACTION_PER_PROJECT",
             Some("1000"),
+            false,
+        ),
+        (
+            "hub",
+            "events_per_project",
+            "HUB_EVENTS_PER_PROJECT",
+            Some("1000000"),
             false,
         ),
         ("hub", "enrol", "HUB_ENROL", Some("on"), false),

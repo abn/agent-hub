@@ -68,6 +68,7 @@ impl HubServer {
             events::append_action_for_principal(
                 &self.state.db,
                 &self.state.config.inbox_caps,
+                self.state.config.events_per_project.per_project,
                 &principal,
                 params.idempotency_key.as_deref(),
                 event,
@@ -76,6 +77,7 @@ impl HubServer {
         } else {
             events::append_for_principal(
                 &self.state.db,
+                self.state.config.events_per_project.per_project,
                 &principal,
                 params.idempotency_key.as_deref(),
                 event,

@@ -562,6 +562,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
     for summary in ["first report", "second report"] {
         agent_hub::store::events::append(
             &state.db,
+            0,
             "agent-one",
             None,
             agent_hub::store::events::NewEvent {
@@ -579,6 +580,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
     }
     agent_hub::store::events::append(
         &state.db,
+        0,
         "agent-two",
         None,
         agent_hub::store::events::NewEvent {

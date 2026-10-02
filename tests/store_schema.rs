@@ -119,6 +119,7 @@ const TABLES: &[&str] = &[
     "search_docs",
     "project_feed_cursors",
     "artifact_shares",
+    "id_high_water",
 ];
 
 #[tokio::test]
@@ -938,6 +939,7 @@ async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
 
     agent_hub::store::events::append(
         &db,
+        0,
         "agent-one",
         None,
         agent_hub::store::events::NewEvent {
@@ -1374,4 +1376,147 @@ async fn migration_seventeen_creates_artifact_shares_table() {
 
     drop(conn);
     drop(db);
+}
+
+#[tokio::test]
+async fn migration_nineteen_adds_the_id_high_water_row() {
+    let dir = TempDir::new("store-schema-v19");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 19) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    let mut rows = conn
+        .query("SELECT singleton, millis FROM id_high_water", ())
+        .await
+        .expect("query high water");
+    let row = rows.next().await.expect("row").expect("one row");
+    assert_eq!(row.get::<i64>(0).expect("singleton"), 1);
+    assert_eq!(
+        row.get::<i64>(1).expect("millis"),
+        0,
+        "a store that predates the table starts with nothing clamped"
+    );
+    assert!(
+        rows.next().await.expect("row").is_none(),
+        "exactly one row is seeded"
+    );
+
+    drop(rows);
+    drop(conn);
+    drop(db);
+}
+
+/// A wall clock that stepped behind the last minted id must not hand out ids
+/// that sort below it, across a restart and through the persisted mark.
+#[tokio::test]
+async fn ids_clear_a_persisted_high_water_ahead_of_the_clock_across_restarts() {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use agent_hub::app::AppState;
+    use agent_hub::store::events::{self, NewEvent};
+
+    let dir = TempDir::new("store-schema-id-high-water");
+    let now_ms = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after the epoch")
+            .as_millis(),
+    )
+    .expect("fits in u64");
+    let future_ms = now_ms + 3_600_000;
+    // The id a previous process minted just before the clock stepped back an
+    // hour: its timestamp is what every new id has to clear.
+    let reference = ulid::Ulid::from_datetime(UNIX_EPOCH + Duration::from_millis(future_ms));
+
+    {
+        let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+        migrate(&db).await.expect("migrate");
+        let conn = db.connect().expect("connect");
+        conn.execute(
+            "INSERT INTO projects(id, display_name, created_at) VALUES ('proj', 'Proj', '2026-09-16T00:00:00Z')",
+            (),
+        )
+        .await
+        .expect("insert project");
+        conn.execute(
+            "INSERT INTO events(id, project_id, kind, actor, summary, created_at) \
+             VALUES (?1, 'proj', 'signal', 'agent', 'minted before the step back', '2026-09-16T00:00:00Z')",
+            [reference.to_string()],
+        )
+        .await
+        .expect("insert the reference event");
+        conn.execute(
+            "UPDATE id_high_water SET millis = ?1 WHERE singleton = 1",
+            (future_ms as i64,),
+        )
+        .await
+        .expect("record the high-water mark");
+        drop(conn);
+        drop(db);
+    }
+
+    let event = |summary: &str| NewEvent {
+        project_id: "proj".to_string(),
+        kind: "signal".to_string(),
+        summary: summary.to_string(),
+        payload: None,
+        needs_action: false,
+        thread_id: None,
+        session_id: None,
+    };
+
+    // First restart: the clock is an hour behind the mark the store carries.
+    let first = {
+        let state = AppState::open(common::state::config(dir.path()))
+            .await
+            .expect("open state");
+        let id = events::append(&state.db, 0, "agent", None, event("after the step back"))
+            .await
+            .expect("append");
+        agent_hub::store::persist_id_high_water(&state.db)
+            .await
+            .expect("persist the mark as a clean stop would");
+        id
+    };
+
+    // Second restart: the mark persisted above carries the clamp forward, so
+    // the id does not replay the same millisecond and fall back on random bits.
+    let second = {
+        let state = AppState::open(common::state::config(dir.path()))
+            .await
+            .expect("open state");
+        events::append(&state.db, 0, "agent", None, event("still behind the clock"))
+            .await
+            .expect("append")
+    };
+
+    assert!(
+        reference.to_string() < first,
+        "the mint clears the id from before the step back: {} !< {first}",
+        reference
+    );
+    assert!(
+        first < second,
+        "the second restart stays above the first: {first} !< {second}"
+    );
 }

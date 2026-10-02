@@ -176,6 +176,7 @@ async fn a_forged_enrolment_approval_from_an_active_agent_admits_nobody() {
     let forged_id = events::append_action(
         &state.db,
         &InboxCaps::disabled(),
+        0,
         "active-agent",
         None,
         NewEvent {

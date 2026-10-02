@@ -146,6 +146,45 @@ impl InboxCaps {
     }
 }
 
+/// Ceiling on the events one project's feed holds.
+///
+/// The inbox cap bounds the open items waiting on the human; it says nothing
+/// about ordinary signals, so a runaway agent can still fill the feed without
+/// bound. The ceiling is checked in the event writer, in the same transaction
+/// as the insert, and a cap of zero disables the check, the operator's valve,
+/// matching [`InboxCaps`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventCeiling {
+    /// Events one project may hold, the hub's own audit trail excluded.
+    pub per_project: i64,
+}
+
+impl EventCeiling {
+    /// Default events one project may hold.
+    pub const DEFAULT_PER_PROJECT: i64 = 1_000_000;
+
+    /// A ceiling that enforces nothing.
+    pub const fn disabled() -> Self {
+        Self { per_project: 0 }
+    }
+
+    /// Whether the check is live.
+    pub fn enabled(&self) -> bool {
+        self.per_project > 0
+    }
+
+    /// Parse the ceiling from its raw environment value.
+    ///
+    /// Absent or empty values take the default; a negative value or one that
+    /// is not a whole number is a startup error, so a typo fails loudly rather
+    /// than silently disabling the guard.
+    pub fn parse(value: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            per_project: parse_cap("HUB_EVENTS_PER_PROJECT", value, Self::DEFAULT_PER_PROJECT)?,
+        })
+    }
+}
+
 fn parse_cap(name: &str, value: Option<&str>, default: i64) -> Result<i64> {
     let Some(value) = value.filter(|value| !value.is_empty()) else {
         return Ok(default);

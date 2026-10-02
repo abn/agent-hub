@@ -23,6 +23,7 @@ fn config() -> Config {
         public_url: None,
         admin_token: Some(ADMIN_TOKEN.to_string()),
         inbox_caps: agent_hub::limits::InboxCaps::disabled(),
+        events_per_project: agent_hub::limits::EventCeiling::disabled(),
         active_window: std::time::Duration::from_secs(900),
         node_name: None,
         enrol_enabled: true,

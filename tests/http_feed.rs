@@ -33,12 +33,12 @@ fn event(summary: &str) -> NewEvent {
 async fn the_human_feed_hides_system_events() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
-    append(&state.db, "agent", None, event("a signal"))
+    append(&state.db, 0, "agent", None, event("a signal"))
         .await
         .expect("append signal");
     let mut audit = event("agent created");
     audit.kind = "system".to_string();
-    append(&state.db, "human", None, audit)
+    append(&state.db, 0, "human", None, audit)
         .await
         .expect("append system");
 
@@ -106,10 +106,10 @@ async fn missing_token_is_a_problem() {
 async fn bearer_token_reads_events_newest_first() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
-    append(&state.db, "agent", None, event("first"))
+    append(&state.db, 0, "agent", None, event("first"))
         .await
         .expect("append first");
-    append(&state.db, "agent", None, event("second"))
+    append(&state.db, 0, "agent", None, event("second"))
         .await
         .expect("append second");
 
@@ -178,10 +178,10 @@ async fn the_feed_says_how_far_the_human_has_read_it() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Proj").await;
     let _ = agent_hub::store::projects::create(&state.db, "other", "Other").await;
-    let first = append(&state.db, "agent", None, event("first"))
+    let first = append(&state.db, 0, "agent", None, event("first"))
         .await
         .expect("append first");
-    let second = append(&state.db, "agent", None, event("second"))
+    let second = append(&state.db, 0, "agent", None, event("second"))
         .await
         .expect("append second");
 
@@ -209,6 +209,7 @@ async fn the_feed_says_how_far_the_human_has_read_it() {
     // nothing all leave the cursor where it is.
     let elsewhere = append(
         &state.db,
+        0,
         "agent",
         None,
         NewEvent {
@@ -275,7 +276,7 @@ async fn feed_query_decoding_handles_repeated_kinds_and_percent_decoding() {
     agent_hub::store::projects::create(&state.db, "proj", "Proj")
         .await
         .expect("create project");
-    append(&state.db, "agent", None, event("sig"))
+    append(&state.db, 0, "agent", None, event("sig"))
         .await
         .expect("append");
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use agent_hub::app::AppState;
 use agent_hub::config::Config;
-use agent_hub::limits::InboxCaps;
+use agent_hub::limits::{EventCeiling, InboxCaps};
 
 use super::temp::TempDir;
 
@@ -25,6 +25,7 @@ pub fn config(data_dir: &Path) -> Config {
         public_url: None,
         admin_token: Some(ADMIN_TOKEN.to_string()),
         inbox_caps: InboxCaps::disabled(),
+        events_per_project: EventCeiling::disabled(),
         active_window: Duration::from_secs(900),
         node_name: None,
         enrol_enabled: true,

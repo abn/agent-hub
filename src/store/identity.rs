@@ -627,6 +627,7 @@ pub async fn enrol_agent(
     // Create approval event in inbox
     events::append_in_tx(
         &tx,
+        0,
         id,
         None,
         NewEvent {
@@ -1040,6 +1041,7 @@ async fn audit(
 ) -> Result<()> {
     events::append_in_tx(
         tx,
+        0,
         "human",
         None,
         NewEvent {

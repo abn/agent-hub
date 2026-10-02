@@ -43,6 +43,7 @@ async fn call_with_auth(
 async fn signal(state: &AppState, project_id: &str, summary: &str) -> String {
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -389,6 +390,7 @@ async fn project_stats_report_threads_agents_written_and_disk_bytes() {
 
     let q1 = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -406,6 +408,7 @@ async fn project_stats_report_threads_agents_written_and_disk_bytes() {
 
     events::append(
         &state.db,
+        0,
         "agent-two",
         None,
         NewEvent {
@@ -423,6 +426,7 @@ async fn project_stats_report_threads_agents_written_and_disk_bytes() {
 
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {

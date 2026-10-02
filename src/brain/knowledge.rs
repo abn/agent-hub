@@ -552,7 +552,7 @@ async fn signal(
         thread_id: None,
         session_id: session_id.map(str::to_string),
     };
-    match events::append(&state.db, actor, None, event).await {
+    match events::append(&state.db, 0, actor, None, event).await {
         Ok(_) => state.notify(),
         Err(err) => {
             tracing::warn!(project_id, error = %err, "could not append a knowledge base signal");
@@ -591,6 +591,7 @@ mod tests {
             public_url: None,
             admin_token: Some("token".to_string()),
             inbox_caps: crate::limits::InboxCaps::disabled(),
+            events_per_project: crate::limits::EventCeiling::disabled(),
             active_window: std::time::Duration::from_secs(900),
             node_name: None,
             enrol_enabled: true,

@@ -212,8 +212,14 @@ pub async fn update(
             thread_id: None,
             session_id: None,
         };
-        if let Err(err) =
-            crate::store::events::append(&state.db, &principal.actor, None, event).await
+        if let Err(err) = crate::store::events::append(
+            &state.db,
+            state.config.events_per_project.per_project,
+            &principal.actor,
+            None,
+            event,
+        )
+        .await
         {
             tracing::warn!(project_id = %id, error = %err, "could not append a confidentiality signal");
         }

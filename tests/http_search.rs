@@ -20,6 +20,7 @@ async fn state() -> TestState {
 async fn seed(state: &AppState) {
     append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -98,6 +99,7 @@ async fn results_carry_the_hit_count_and_how_long_the_query_took() {
     for summary in ["needle one", "needle two"] {
         append(
             &state.db,
+            0,
             "agent-one",
             None,
             NewEvent {
@@ -371,6 +373,7 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
     let state = state().await;
     append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {

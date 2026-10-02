@@ -159,16 +159,16 @@ async fn search_and_inbox_respect_the_confined_set() {
     let db = fresh("policy-scoping").await;
     projects::create(&db, "p1", "One").await.expect("p1");
     projects::create(&db, "p2", "Two").await.expect("p2");
-    events::append(&db, "agent", None, event("p1", "signal", "alpha one"))
+    events::append(&db, 0, "agent", None, event("p1", "signal", "alpha one"))
         .await
         .expect("append p1");
-    events::append(&db, "agent", None, event("p2", "signal", "alpha two"))
+    events::append(&db, 0, "agent", None, event("p2", "signal", "alpha two"))
         .await
         .expect("append p2");
-    events::append(&db, "agent", None, event("p1", "finished", "done p1"))
+    events::append(&db, 0, "agent", None, event("p1", "finished", "done p1"))
         .await
         .expect("finished p1");
-    events::append(&db, "agent", None, event("p2", "finished", "done p2"))
+    events::append(&db, 0, "agent", None, event("p2", "finished", "done p2"))
         .await
         .expect("finished p2");
 
@@ -218,6 +218,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
     for index in 0..25 {
         events::append(
             &db,
+            0,
             "agent",
             None,
             event(
@@ -231,6 +232,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
     }
     events::append(
         &db,
+        0,
         "agent",
         None,
         event("mine", "signal", "needle in my project"),
@@ -262,13 +264,14 @@ async fn a_confined_search_keeps_relevance_order() {
     projects::create(&db, "mine", "Mine").await.expect("mine");
     events::append(
         &db,
+        0,
         "agent",
         None,
         event("mine", "signal", "needle needle needle needle"),
     )
     .await
     .expect("relevant event");
-    events::append(&db, "agent", None, event("mine", "signal", "needle"))
+    events::append(&db, 0, "agent", None, event("mine", "signal", "needle"))
         .await
         .expect("newer but less relevant event");
 
@@ -366,6 +369,7 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
     }
     let hidden_event = events::append(
         &db,
+        0,
         "spy-agent",
         None,
         event("secret", "finished", "whispered plan"),

@@ -22,6 +22,7 @@ async fn events_append_fails_for_nonexistent_or_deleted_project() {
     // Writing to a nonexistent project must fail
     let res = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -48,6 +49,7 @@ async fn events_append_fails_for_nonexistent_or_deleted_project() {
     // Writing to a deleted project must fail
     let res = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -80,6 +82,7 @@ async fn writes_are_rejected_while_project_is_in_deleting_status() {
 
     let res = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -277,6 +280,7 @@ async fn policy_revocation_racing_event_write_is_rejected_at_write_barrier() {
     // Step 3: Write is attempted with principal context
     let res = events::append_for_principal(
         &state.db,
+        0,
         &principal,
         None,
         NewEvent {

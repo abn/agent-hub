@@ -116,17 +116,19 @@ async fn an_agent_reaches_open_projects_and_confidential_projects_require_grant(
         .token;
     events::append(
         &db,
+        0,
         "human",
         None,
         signal("confidential", "needle in confidential"),
     )
     .await
     .expect("confidential event");
-    events::append(&db, "human", None, signal("shared", "needle in shared"))
+    events::append(&db, 0, "human", None, signal("shared", "needle in shared"))
         .await
         .expect("shared event");
     events::append(
         &db,
+        0,
         "human",
         None,
         signal(&strict.personal_project_id, "needle in personal"),
@@ -636,6 +638,7 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
     // "the audit trail is hidden" from "the tool returned nothing".
     events::append(
         &db,
+        0,
         "human",
         None,
         signal(&watched.personal_project_id, "ordinary watched work"),
@@ -1199,11 +1202,12 @@ async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
 
     let mut finished = signal(&own, "needle in personal");
     finished.kind = "finished".to_string();
-    events::append(&db, "strict", None, finished)
+    events::append(&db, 0, "strict", None, finished)
         .await
         .expect("own event");
     events::append(
         &db,
+        0,
         "spy-agent",
         None,
         signal("hidden-vault", "needle in hiding"),

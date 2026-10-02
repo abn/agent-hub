@@ -77,7 +77,7 @@ fn approval(summary: &str) -> NewEvent {
 #[tokio::test]
 async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
@@ -97,7 +97,7 @@ async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
         .expect("list");
     assert_eq!(waiting.len(), 1, "the approval is an action item");
 
-    let decision = questions::decide(&db, "human", &approval_id, true, Some("ship it"), None)
+    let decision = questions::decide(&db, 0, "human", &approval_id, true, Some("ship it"), None)
         .await
         .expect("decide");
     let decision_event = events::get(&db, &decision)
@@ -129,7 +129,7 @@ async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
     let counts = inbox::counts(&db).await.expect("counts");
     assert_eq!(counts.waiting, 0, "the decision clears the waiting item");
 
-    let bad = questions::decide(&db, "human", "missing", true, None, None)
+    let bad = questions::decide(&db, 0, "human", "missing", true, None, None)
         .await
         .expect_err("unknown approval");
     assert_eq!(bad.code(), ErrorCode::NotFound);
@@ -138,15 +138,15 @@ async fn an_approval_is_decided_and_leaves_the_waiting_queue() {
 #[tokio::test]
 async fn an_approval_is_decided_once() {
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
-    questions::decide(&db, "human", &approval_id, true, None, None)
+    questions::decide(&db, 0, "human", &approval_id, true, None, None)
         .await
         .expect("first decision");
 
-    let again = questions::decide(&db, "human", &approval_id, false, None, None)
+    let again = questions::decide(&db, 0, "human", &approval_id, false, None, None)
         .await
         .expect_err("a second decision conflicts");
     assert_eq!(again.code(), ErrorCode::Conflict);
@@ -155,40 +155,72 @@ async fn an_approval_is_decided_once() {
 #[tokio::test]
 async fn a_decision_replays_on_its_idempotency_key() {
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
-    let first = questions::decide(&db, "human", &approval_id, true, None, Some("decision-key"))
-        .await
-        .expect("first decision");
-    let replay = questions::decide(&db, "human", &approval_id, true, None, Some("decision-key"))
-        .await
-        .expect("replay");
+    let first = questions::decide(
+        &db,
+        0,
+        "human",
+        &approval_id,
+        true,
+        None,
+        Some("decision-key"),
+    )
+    .await
+    .expect("first decision");
+    let replay = questions::decide(
+        &db,
+        0,
+        "human",
+        &approval_id,
+        true,
+        None,
+        Some("decision-key"),
+    )
+    .await
+    .expect("replay");
     assert_eq!(
         first, replay,
         "a retried decision returns the original answer"
     );
 
-    let conflict = questions::decide(&db, "human", &approval_id, false, None, Some("other-key"))
-        .await
-        .expect_err("a different key on a decided approval conflicts");
+    let conflict = questions::decide(
+        &db,
+        0,
+        "human",
+        &approval_id,
+        false,
+        None,
+        Some("other-key"),
+    )
+    .await
+    .expect_err("a different key on a decided approval conflicts");
     assert_eq!(conflict.code(), ErrorCode::Conflict);
 }
 
 #[tokio::test]
 async fn an_event_key_does_not_resolve_a_decision() {
     let db = open().await;
-    let signal = events::append(&db, "agent-one", Some("shared-key"), finished("done"))
+    let signal = events::append(&db, 0, "agent-one", Some("shared-key"), finished("done"))
         .await
         .expect("append keyed signal");
-    let approval_id = events::append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
-    let decision = questions::decide(&db, "human", &approval_id, true, None, Some("shared-key"))
-        .await
-        .expect("decide");
+    let decision = questions::decide(
+        &db,
+        0,
+        "human",
+        &approval_id,
+        true,
+        None,
+        Some("shared-key"),
+    )
+    .await
+    .expect("decide");
     assert_ne!(
         decision, signal,
         "a decision key is not the event key of another write"
@@ -208,10 +240,10 @@ async fn an_event_key_does_not_resolve_a_decision() {
 async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
     let db = open().await;
 
-    let padded = events::append(&db, "agent-one", None, approval("Ship it"))
+    let padded = events::append(&db, 0, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
-    let decision = questions::decide(&db, "human", &padded, true, Some("  go ahead  "), None)
+    let decision = questions::decide(&db, 0, "human", &padded, true, Some("  go ahead  "), None)
         .await
         .expect("decide");
     let payload = events::get(&db, &decision)
@@ -222,10 +254,10 @@ async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
         .expect("payload");
     assert_eq!(payload["body"], "Approved: go ahead", "the note is trimmed");
 
-    let blank = events::append(&db, "agent-one", None, approval("Roll it back"))
+    let blank = events::append(&db, 0, "agent-one", None, approval("Roll it back"))
         .await
         .expect("append approval");
-    let decision = questions::decide(&db, "human", &blank, false, Some("   "), None)
+    let decision = questions::decide(&db, 0, "human", &blank, false, Some("   "), None)
         .await
         .expect("decide");
     let payload = events::get(&db, &decision)
@@ -241,11 +273,11 @@ async fn a_decision_note_is_trimmed_and_a_decline_reads_plainly() {
 #[tokio::test]
 async fn a_non_approval_cannot_be_decided() {
     let db = open().await;
-    let signal = events::append(&db, "agent-one", None, finished("done"))
+    let signal = events::append(&db, 0, "agent-one", None, finished("done"))
         .await
         .expect("append");
 
-    let err = questions::decide(&db, "human", &signal, true, None, None)
+    let err = questions::decide(&db, 0, "human", &signal, true, None, None)
         .await
         .expect_err("not an approval");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
@@ -256,7 +288,7 @@ async fn question_opens_a_thread_and_lands_in_the_inbox() {
     let db = open().await;
     let mut ask = question("Deploy tonight?");
     ask.body = Some("The release is ready.");
-    let question_id = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), ask)
+    let question_id = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), 0, ask)
         .await
         .expect("post question");
 
@@ -285,12 +317,13 @@ async fn answer_closes_the_thread_and_resolves_the_item() {
     let question_id = questions::post(
         &db,
         &agent_hub::limits::InboxCaps::disabled(),
+        0,
         question("Ship it?"),
     )
     .await
     .expect("post");
 
-    let answer_id = questions::answer(&db, "human", &question_id, "Yes, ship it", None)
+    let answer_id = questions::answer(&db, 0, "human", &question_id, "Yes, ship it", None)
         .await
         .expect("answer");
 
@@ -320,7 +353,7 @@ async fn answer_closes_the_thread_and_resolves_the_item() {
 #[tokio::test]
 async fn finished_work_lands_as_unread_and_counts() {
     let db = open().await;
-    append(&db, "agent-one", None, finished("nightly report done"))
+    append(&db, 0, "agent-one", None, finished("nightly report done"))
         .await
         .expect("append");
 
@@ -349,6 +382,7 @@ async fn signals_do_not_land_in_the_inbox() {
     let db = open().await;
     append(
         &db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -371,10 +405,10 @@ async fn signals_do_not_land_in_the_inbox() {
 #[tokio::test]
 async fn answering_a_non_question_is_rejected() {
     let db = open().await;
-    let id = append(&db, "agent-one", None, finished("not a question"))
+    let id = append(&db, 0, "agent-one", None, finished("not a question"))
         .await
         .expect("append");
-    let err = questions::answer(&db, "human", &id, "nope", None)
+    let err = questions::answer(&db, 0, "human", &id, "nope", None)
         .await
         .expect_err("reject");
     assert_eq!(err.code(), agent_hub::error::ErrorCode::InvalidArgument);
@@ -386,11 +420,12 @@ async fn feed_still_reads_the_thread() {
     let question_id = questions::post(
         &db,
         &agent_hub::limits::InboxCaps::disabled(),
+        0,
         question("Anyone there?"),
     )
     .await
     .expect("post");
-    questions::answer(&db, "human", &question_id, "here", None)
+    questions::answer(&db, 0, "human", &question_id, "here", None)
         .await
         .expect("answer");
 
@@ -407,20 +442,20 @@ async fn question_and_answer_honour_idempotency_keys() {
 
     let mut first = question("repeatable?");
     first.idempotency_key = Some("q1");
-    let q1 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), first)
+    let q1 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), 0, first)
         .await
         .expect("post");
     let mut again = question("repeatable?");
     again.idempotency_key = Some("q1");
-    let q2 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), again)
+    let q2 = questions::post(&db, &agent_hub::limits::InboxCaps::disabled(), 0, again)
         .await
         .expect("post again");
     assert_eq!(q1, q2, "a repeated question key returns the same event");
 
-    let a1 = questions::answer(&db, "human", &q1, "yes", Some("a1"))
+    let a1 = questions::answer(&db, 0, "human", &q1, "yes", Some("a1"))
         .await
         .expect("answer");
-    let a2 = questions::answer(&db, "human", &q1, "yes", Some("a1"))
+    let a2 = questions::answer(&db, 0, "human", &q1, "yes", Some("a1"))
         .await
         .expect("answer again");
     assert_eq!(a1, a2, "a repeated answer key returns the same event");
@@ -437,6 +472,7 @@ async fn signal_append_question_still_lands_in_the_inbox() {
     let db = open().await;
     let id = append(
         &db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -474,6 +510,7 @@ async fn an_orphan_answer_is_rejected() {
     let db = open().await;
     let err = append(
         &db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -495,14 +532,14 @@ async fn an_orphan_answer_is_rejected() {
 async fn the_per_actor_cap_refuses_the_next_open_item_and_resolving_frees_a_slot() {
     let db = open().await;
     let cap = caps(2, 0);
-    questions::post(&db, &cap, question("first"))
+    questions::post(&db, &cap, 0, question("first"))
         .await
         .expect("first open item");
-    questions::post(&db, &cap, question("second"))
+    questions::post(&db, &cap, 0, question("second"))
         .await
         .expect("second open item");
 
-    let err = questions::post(&db, &cap, question("third"))
+    let err = questions::post(&db, &cap, 0, question("third"))
         .await
         .expect_err("the third open item is refused");
     assert_eq!(err.code(), ErrorCode::RateLimited);
@@ -513,10 +550,10 @@ async fn the_per_actor_cap_refuses_the_next_open_item_and_resolving_frees_a_slot
     assert_eq!(items.len(), 2, "a refused write leaves no item behind");
 
     let oldest = items.last().expect("an open item").event_id.clone();
-    questions::answer(&db, "human", &oldest, "done", None)
+    questions::answer(&db, 0, "human", &oldest, "done", None)
         .await
         .expect("answer frees a slot");
-    questions::post(&db, &cap, question("fourth"))
+    questions::post(&db, &cap, 0, question("fourth"))
         .await
         .expect("the freed slot admits a new item");
 }
@@ -525,14 +562,14 @@ async fn the_per_actor_cap_refuses_the_next_open_item_and_resolving_frees_a_slot
 async fn the_per_project_cap_holds_across_actors() {
     let db = open().await;
     let cap = caps(0, 2);
-    questions::post(&db, &cap, question_by("agent-one", "one"))
+    questions::post(&db, &cap, 0, question_by("agent-one", "one"))
         .await
         .expect("agent one");
-    questions::post(&db, &cap, question_by("agent-two", "two"))
+    questions::post(&db, &cap, 0, question_by("agent-two", "two"))
         .await
         .expect("agent two");
 
-    let err = questions::post(&db, &cap, question_by("agent-three", "three"))
+    let err = questions::post(&db, &cap, 0, question_by("agent-three", "three"))
         .await
         .expect_err("the project ceiling refuses a third actor");
     assert_eq!(err.code(), ErrorCode::RateLimited);
@@ -542,14 +579,14 @@ async fn the_per_project_cap_holds_across_actors() {
 async fn unread_work_does_not_count_toward_the_cap() {
     let db = open().await;
     let cap = caps(1, 0);
-    append(&db, "agent-one", None, finished("nightly done"))
+    append(&db, 0, "agent-one", None, finished("nightly done"))
         .await
         .expect("append finished work");
 
-    questions::post(&db, &cap, question("the only open item"))
+    questions::post(&db, &cap, 0, question("the only open item"))
         .await
         .expect("unread work does not fill a slot");
-    let err = questions::post(&db, &cap, question("over the cap"))
+    let err = questions::post(&db, &cap, 0, question("over the cap"))
         .await
         .expect_err("the second open item is refused");
     assert_eq!(err.code(), ErrorCode::RateLimited);
@@ -559,11 +596,11 @@ async fn unread_work_does_not_count_toward_the_cap() {
 async fn approvals_and_questions_share_the_cap() {
     let db = open().await;
     let cap = caps(1, 0);
-    append_action(&db, &cap, "agent-one", None, approval("deploy?"))
+    append_action(&db, &cap, 0, "agent-one", None, approval("deploy?"))
         .await
         .expect("an approval is an open item");
 
-    let err = questions::post(&db, &cap, question("also open"))
+    let err = questions::post(&db, &cap, 0, question("also open"))
         .await
         .expect_err("a question is refused behind the approval");
     assert_eq!(err.code(), ErrorCode::RateLimited);
@@ -575,13 +612,13 @@ async fn a_replayed_open_item_is_returned_at_the_cap() {
     let cap = caps(1, 0);
     let mut first = question("repeatable");
     first.idempotency_key = Some("q-key");
-    let q1 = questions::post(&db, &cap, first)
+    let q1 = questions::post(&db, &cap, 0, first)
         .await
         .expect("first write");
 
     let mut replay = question("repeatable");
     replay.idempotency_key = Some("q-key");
-    let q2 = questions::post(&db, &cap, replay)
+    let q2 = questions::post(&db, &cap, 0, replay)
         .await
         .expect("a replay is not refused at the cap");
     assert_eq!(q1, q2, "a replay returns the original id");
@@ -598,7 +635,7 @@ async fn two_writers_one_under_the_actor_cap_admit_exactly_one() {
         let barrier = barrier.clone();
         handles.push(tokio::spawn(async move {
             barrier.wait().await;
-            questions::post(&db, &cap, question_by("agent-one", subject))
+            questions::post(&db, &cap, 0, question_by("agent-one", subject))
                 .await
                 .map_err(|err| err.code())
         }));
@@ -620,7 +657,7 @@ async fn two_writers_one_under_the_actor_cap_admit_exactly_one() {
 #[tokio::test]
 async fn finished_work_is_read_and_unread_again() {
     let db = open().await;
-    let event_id = append(&db, "agent-one", None, finished("nightly report"))
+    let event_id = append(&db, 0, "agent-one", None, finished("nightly report"))
         .await
         .expect("append finished");
     assert_eq!(inbox::counts(&db).await.expect("counts").unread, 1);
@@ -645,7 +682,7 @@ async fn finished_work_is_read_and_unread_again() {
 #[tokio::test]
 async fn a_waiting_row_keeps_its_place_when_it_is_marked_read() {
     let db = open().await;
-    let approval_id = append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
@@ -672,15 +709,15 @@ async fn a_waiting_row_keeps_its_place_when_it_is_marked_read() {
 #[tokio::test]
 async fn marking_everything_read_stops_at_the_project_it_was_given() {
     let db = open().await;
-    let mine = append(&db, "agent-one", None, finished("here"))
+    let mine = append(&db, 0, "agent-one", None, finished("here"))
         .await
         .expect("append finished");
     let mut elsewhere = finished("there");
     elsewhere.project_id = "other".to_string();
-    let theirs = append(&db, "agent-one", None, elsewhere)
+    let theirs = append(&db, 0, "agent-one", None, elsewhere)
         .await
         .expect("append finished");
-    let approval_id = append(&db, "agent-one", None, approval("Deploy 0.4.2"))
+    let approval_id = append(&db, 0, "agent-one", None, approval("Deploy 0.4.2"))
         .await
         .expect("append approval");
 
@@ -714,6 +751,7 @@ async fn marking_an_event_read_that_has_no_inbox_row_is_not_found() {
     let db = open().await;
     let signal_id = append(
         &db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -743,10 +781,10 @@ async fn marking_an_event_read_that_has_no_inbox_row_is_not_found() {
 #[tokio::test]
 async fn reading_a_row_does_not_move_it_in_the_listing() {
     let db = open().await;
-    let older = append(&db, "agent-one", None, finished("older"))
+    let older = append(&db, 0, "agent-one", None, finished("older"))
         .await
         .expect("append finished");
-    let newer = append(&db, "agent-one", None, finished("newer"))
+    let newer = append(&db, 0, "agent-one", None, finished("newer"))
         .await
         .expect("append finished");
 
@@ -778,7 +816,7 @@ async fn reading_a_row_does_not_move_it_in_the_listing() {
 #[tokio::test]
 async fn an_agent_listing_cannot_tell_a_read_row_from_an_unread_one() {
     let db = open().await;
-    let event_id = append(&db, "agent-one", None, finished("nightly report"))
+    let event_id = append(&db, 0, "agent-one", None, finished("nightly report"))
         .await
         .expect("append finished");
 
@@ -837,11 +875,12 @@ async fn decision_payload(db: &turso::Database, event_id: &str) -> serde_json::V
 #[tokio::test]
 async fn a_decision_note_is_kept_beside_the_decision() {
     let db = open().await;
-    let noted = events::append(&db, "agent-one", None, approval("Ship it"))
+    let noted = events::append(&db, 0, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
     let decision = questions::decide(
         &db,
+        0,
         "human",
         &noted,
         false,
@@ -858,10 +897,10 @@ async fn a_decision_note_is_kept_beside_the_decision() {
     );
     assert_eq!(payload["body"], "Declined: not on a Friday");
 
-    let plain = events::append(&db, "agent-one", None, approval("Roll it back"))
+    let plain = events::append(&db, 0, "agent-one", None, approval("Roll it back"))
         .await
         .expect("append approval");
-    let decision = questions::decide(&db, "human", &plain, true, Some("   "), None)
+    let decision = questions::decide(&db, 0, "human", &plain, true, Some("   "), None)
         .await
         .expect("decide");
     let payload = decision_payload(&db, &decision).await;
@@ -874,14 +913,14 @@ async fn a_decision_note_is_kept_beside_the_decision() {
 #[tokio::test]
 async fn a_decision_note_over_the_cap_is_refused_and_decides_nothing() {
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
     let cap = agent_hub::limits::DECISION_NOTE_CHARS_MAX;
 
     // Characters, not bytes: a note of two-byte letters at the cap fits.
     let over = "\u{e9}".repeat(cap + 1);
-    let refused = questions::decide(&db, "human", &approval_id, true, Some(&over), None)
+    let refused = questions::decide(&db, 0, "human", &approval_id, true, Some(&over), None)
         .await
         .expect_err("a note over the cap");
     assert_eq!(refused.code(), ErrorCode::PayloadTooLarge, "{refused}");
@@ -891,7 +930,7 @@ async fn a_decision_note_over_the_cap_is_refused_and_decides_nothing() {
     assert_eq!(open_items.len(), 1, "the approval still waits");
 
     let fits = "\u{e9}".repeat(cap);
-    let decision = questions::decide(&db, "human", &approval_id, true, Some(&fits), None)
+    let decision = questions::decide(&db, 0, "human", &approval_id, true, Some(&fits), None)
         .await
         .expect("a note at the cap");
     assert_eq!(
@@ -903,20 +942,21 @@ async fn a_decision_note_over_the_cap_is_refused_and_decides_nothing() {
 #[tokio::test]
 async fn a_decided_approval_shows_its_decision_in_the_inbox() {
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
-    let waiting = events::append(&db, "agent-one", None, approval("Reboot the node"))
+    let waiting = events::append(&db, 0, "agent-one", None, approval("Reboot the node"))
         .await
         .expect("append approval");
-    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+    let asked = questions::post(&db, &InboxCaps::disabled(), 0, question("Deploy tonight?"))
         .await
         .expect("post");
-    questions::answer(&db, "human", &asked, "yes", None)
+    questions::answer(&db, 0, "human", &asked, "yes", None)
         .await
         .expect("answer");
     let decision = questions::decide(
         &db,
+        0,
         "human",
         &approval_id,
         false,
@@ -977,12 +1017,20 @@ async fn a_decision_is_read_from_the_approval_s_own_project_only() {
     // that names the same thread must never be shown as this approval's
     // outcome, or its actor and note cross a project boundary.
     let db = open().await;
-    let approval_id = events::append(&db, "agent-one", None, approval("Ship it"))
+    let approval_id = events::append(&db, 0, "agent-one", None, approval("Ship it"))
         .await
         .expect("append approval");
-    questions::decide(&db, "human", &approval_id, false, Some("not today"), None)
-        .await
-        .expect("decide");
+    questions::decide(
+        &db,
+        0,
+        "human",
+        &approval_id,
+        false,
+        Some("not today"),
+        None,
+    )
+    .await
+    .expect("decide");
 
     // Planted directly, since the write path refuses a thread in another
     // project. Its id sorts before every real one, so a lookup that ignored
@@ -1019,13 +1067,13 @@ async fn a_decision_is_read_from_the_approval_s_own_project_only() {
 #[tokio::test]
 async fn an_answered_question_shows_its_answer_in_the_inbox() {
     let db = open().await;
-    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+    let asked = questions::post(&db, &InboxCaps::disabled(), 0, question("Deploy tonight?"))
         .await
         .expect("post");
-    let waiting = questions::post(&db, &InboxCaps::disabled(), question("Which region?"))
+    let waiting = questions::post(&db, &InboxCaps::disabled(), 0, question("Which region?"))
         .await
         .expect("post");
-    let answer = questions::answer(&db, "human", &asked, "yes, after the backup", None)
+    let answer = questions::answer(&db, 0, "human", &asked, "yes, after the backup", None)
         .await
         .expect("answer");
     let answered_at = events::get(&db, &answer)
@@ -1071,10 +1119,10 @@ async fn an_answered_question_shows_its_answer_in_the_inbox() {
 #[tokio::test]
 async fn an_answer_is_read_from_the_question_s_own_project_only() {
     let db = open().await;
-    let asked = questions::post(&db, &InboxCaps::disabled(), question("Deploy tonight?"))
+    let asked = questions::post(&db, &InboxCaps::disabled(), 0, question("Deploy tonight?"))
         .await
         .expect("post");
-    let answer = questions::answer(&db, "human", &asked, "yes, after the backup", None)
+    let answer = questions::answer(&db, 0, "human", &asked, "yes, after the backup", None)
         .await
         .expect("answer");
 

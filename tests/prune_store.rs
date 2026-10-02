@@ -220,6 +220,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
     ] {
         events::append(
             &db,
+            0,
             "agent-one",
             None,
             NewEvent {
@@ -320,7 +321,7 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
         thread_id: None,
         session_id: None,
     };
-    let kept = events::append(&db, "agent-one", Some("keep-key"), event())
+    let kept = events::append(&db, 0, "agent-one", Some("keep-key"), event())
         .await
         .expect("append keyed event");
 
@@ -348,7 +349,7 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
     .expect("age");
     prune::sweep(&db, &dir).await.expect("sweep");
 
-    let retry = events::append(&db, "agent-one", Some("keep-key"), event())
+    let retry = events::append(&db, 0, "agent-one", Some("keep-key"), event())
         .await
         .expect("retry");
     assert_eq!(

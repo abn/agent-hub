@@ -106,6 +106,7 @@ async fn concurrent_same_key_questions_serialize() {
             questions::post(
                 &db,
                 &agent_hub::limits::InboxCaps::disabled(),
+                0,
                 NewQuestion {
                     actor: "agent-one",
                     project_id: "proj",
@@ -150,6 +151,7 @@ async fn concurrent_same_key_answers_serialize() {
     let question_id = questions::post(
         &db,
         &agent_hub::limits::InboxCaps::disabled(),
+        0,
         NewQuestion {
             actor: "agent-one",
             project_id: "proj",
@@ -168,7 +170,7 @@ async fn concurrent_same_key_answers_serialize() {
         let db = db.clone();
         let question_id = question_id.clone();
         handles.push(tokio::spawn(async move {
-            questions::answer(&db, "agent-two", &question_id, "yes", Some("a-key")).await
+            questions::answer(&db, 0, "agent-two", &question_id, "yes", Some("a-key")).await
         }));
     }
 

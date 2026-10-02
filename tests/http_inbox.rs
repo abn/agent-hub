@@ -27,6 +27,7 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
     questions::post(
         &state.db,
         &agent_hub::limits::InboxCaps::disabled(),
+        0,
         NewQuestion {
             actor: "agent-one",
             project_id: "proj",
@@ -44,6 +45,7 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
 async fn seed_finished(state: &AppState, summary: &str) -> String {
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -63,6 +65,7 @@ async fn seed_finished(state: &AppState, summary: &str) -> String {
 async fn seed_approval(state: &AppState, summary: &str) -> String {
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -492,6 +495,7 @@ async fn the_inbox_listing_honours_the_limit() {
     for index in 0..3 {
         events::append(
             &state.db,
+            0,
             "agent-one",
             None,
             NewEvent {
@@ -530,6 +534,7 @@ async fn the_inbox_listing_honours_the_limit() {
 async fn seed_finished_in(state: &AppState, project_id: &str, summary: &str) -> String {
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -932,6 +937,7 @@ async fn an_inbox_item_names_its_project() {
     let _ = agent_hub::store::projects::create(&state.db, "no-such-project", "Temporary").await;
     let orphan = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {

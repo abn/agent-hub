@@ -34,6 +34,7 @@ pub struct NewQuestion<'a> {
 pub async fn post(
     db: &Database,
     caps: &crate::limits::InboxCaps,
+    events_per_project: i64,
     question: NewQuestion<'_>,
 ) -> Result<String> {
     let NewQuestion {
@@ -62,6 +63,7 @@ pub async fn post(
     let id = events::append_action(
         db,
         caps,
+        events_per_project,
         actor,
         idempotency_key,
         NewEvent {
@@ -91,6 +93,7 @@ pub async fn post(
 /// without the question resolved.
 pub async fn answer(
     db: &Database,
+    events_per_project: i64,
     actor: &str,
     question_id: &str,
     body: &str,
@@ -146,6 +149,7 @@ pub async fn answer(
 
     let id = events::append_in_tx(
         &tx,
+        events_per_project,
         actor,
         None,
         NewEvent {
@@ -208,17 +212,24 @@ pub struct Decision {
 /// payload; see [`decide_reporting`].
 pub async fn decide(
     db: &Database,
+    events_per_project: i64,
     actor: &str,
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    Ok(
-        decide_reporting(db, actor, approval_id, approved, note, idempotency_key)
-            .await?
-            .event_id,
+    Ok(decide_reporting(
+        db,
+        events_per_project,
+        actor,
+        approval_id,
+        approved,
+        note,
+        idempotency_key,
     )
+    .await?
+    .event_id)
 }
 
 /// As [`decide`], reporting the subject admitted by an enrolment approval.
@@ -230,6 +241,7 @@ pub async fn decide(
 /// must never admit them. A mismatch is an invalid argument and admits no one.
 pub async fn decide_reporting(
     db: &Database,
+    events_per_project: i64,
     actor: &str,
     approval_id: &str,
     approved: bool,
@@ -353,6 +365,7 @@ pub async fn decide_reporting(
     }
     let id = events::append_in_tx(
         &tx,
+        events_per_project,
         actor,
         None,
         NewEvent {

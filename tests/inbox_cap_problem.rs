@@ -61,6 +61,7 @@ async fn post_action(
     let event_id = events::append_action(
         &state.db,
         &state.config.inbox_caps,
+        0,
         &payload.actor,
         None,
         NewEvent {

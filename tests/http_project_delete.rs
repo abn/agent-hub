@@ -29,6 +29,7 @@ async fn delete_project_cascades_its_data() {
         .expect("create project");
     let event = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -251,6 +252,7 @@ async fn delete_project_cascades_its_data() {
         .expect("recreate project");
     let reused = events::append(
         &state.db,
+        0,
         "agent-one",
         Some("retry-key"),
         NewEvent {
@@ -284,6 +286,7 @@ async fn delete_leaves_other_projects_untouched() {
             .expect("create project");
         events::append(
             &state.db,
+            0,
             "agent-one",
             None,
             NewEvent {
@@ -397,6 +400,7 @@ async fn delete_project_forgets_where_the_human_had_read_to() {
         .expect("create project");
     let event = events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {

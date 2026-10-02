@@ -135,6 +135,7 @@ pub async fn start_resumed(
     if created {
         events::append_in_tx(
             &tx,
+            0,
             agent,
             None,
             NewEvent {
@@ -280,6 +281,7 @@ pub async fn start_from(
 
     events::append_in_tx(
         &tx,
+        0,
         caller,
         None,
         NewEvent {
@@ -372,6 +374,7 @@ pub async fn insert_fork(
 
     events::append_in_tx(
         &tx,
+        0,
         caller,
         None,
         NewEvent {
@@ -476,6 +479,7 @@ pub async fn reassign(
 
     events::append_in_tx(
         &tx,
+        0,
         actor,
         None,
         NewEvent {
@@ -613,6 +617,7 @@ pub async fn end(
 
     events::append_in_tx(
         &tx,
+        0,
         actor,
         None,
         NewEvent {

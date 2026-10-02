@@ -34,6 +34,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     // Event in session 1 (signal)
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -52,6 +53,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     // Event in session 1 (finished)
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {
@@ -70,6 +72,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     // Event in session 2 (signal)
     events::append(
         &state.db,
+        0,
         "agent-two",
         None,
         NewEvent {
@@ -126,6 +129,7 @@ async fn feed_and_artifacts_return_empty_for_unknown_or_pruned_session() {
         .expect("start");
     events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         NewEvent {

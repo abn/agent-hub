@@ -744,3 +744,50 @@ fn an_active_window_no_clock_can_subtract_is_rejected() {
         "the ceiling itself is accepted"
     );
 }
+
+#[test]
+fn the_event_ceiling_defaults_and_is_read_from_env_and_file() {
+    let home = TempHome::new("events-ceiling-default");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    assert_eq!(
+        Config::resolve(&lookup)
+            .expect("resolve")
+            .events_per_project
+            .per_project,
+        1_000_000,
+        "the default ceiling"
+    );
+
+    let home = TempHome::new("events-ceiling-file").with_config("[hub]\nevents_per_project = 25\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    assert_eq!(
+        Config::resolve(&lookup)
+            .expect("resolve")
+            .events_per_project
+            .per_project,
+        25,
+        "the file sets the ceiling"
+    );
+
+    let lookup = env(&[("HUB_EVENTS_PER_PROJECT", "0")]);
+    assert_eq!(
+        Config::resolve(&lookup)
+            .expect("resolve")
+            .events_per_project
+            .per_project,
+        0,
+        "zero disables the ceiling"
+    );
+}
+
+#[test]
+fn a_negative_or_unparseable_event_ceiling_is_refused() {
+    for value in ["-1", "many", "1.5"] {
+        let err = Config::resolve(&env(&[("HUB_EVENTS_PER_PROJECT", value)])).expect_err("refused");
+        assert!(
+            err.to_string().contains("HUB_EVENTS_PER_PROJECT"),
+            "names the setting: {err}"
+        );
+        assert!(matches!(err, agent_hub::error::Error::Config(_)), "{value}");
+    }
+}

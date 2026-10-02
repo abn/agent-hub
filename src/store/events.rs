@@ -90,11 +90,12 @@ impl Default for FeedQuery {
 /// search row, and the idempotency record commit together.
 pub async fn append(
     db: &Database,
+    events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_with_caps(db, None, actor, idempotency_key, event).await
+    append_with_caps(db, None, events_per_project, actor, idempotency_key, event).await
 }
 
 /// Append an open item with the inbox cap applied.
@@ -108,35 +109,63 @@ pub async fn append(
 pub async fn append_action(
     db: &Database,
     caps: &crate::limits::InboxCaps,
+    events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_with_caps(db, Some(caps), actor, idempotency_key, event).await
+    append_with_caps(
+        db,
+        Some(caps),
+        events_per_project,
+        actor,
+        idempotency_key,
+        event,
+    )
+    .await
 }
 
 pub async fn append_for_principal(
     db: &Database,
+    events_per_project: i64,
     principal: &crate::principal::Principal,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_with_caps_and_principal(db, None, principal, idempotency_key, event).await
+    append_with_caps_and_principal(
+        db,
+        None,
+        events_per_project,
+        principal,
+        idempotency_key,
+        event,
+    )
+    .await
 }
 
 pub async fn append_action_for_principal(
     db: &Database,
     caps: &crate::limits::InboxCaps,
+    events_per_project: i64,
     principal: &crate::principal::Principal,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_with_caps_and_principal(db, Some(caps), principal, idempotency_key, event).await
+    append_with_caps_and_principal(
+        db,
+        Some(caps),
+        events_per_project,
+        principal,
+        idempotency_key,
+        event,
+    )
+    .await
 }
 
 async fn append_with_caps(
     db: &Database,
     caps: Option<&crate::limits::InboxCaps>,
+    events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
@@ -146,7 +175,8 @@ async fn append_with_caps(
         .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
         .await
         .map_err(engine)?;
-    let id = append_in_tx_capped(&tx, caps, actor, idempotency_key, event).await?;
+    let id =
+        append_in_tx_capped(&tx, caps, events_per_project, actor, idempotency_key, event).await?;
     tx.commit().await.map_err(engine)?;
     Ok(id)
 }
@@ -154,6 +184,7 @@ async fn append_with_caps(
 async fn append_with_caps_and_principal(
     db: &Database,
     caps: Option<&crate::limits::InboxCaps>,
+    events_per_project: i64,
     principal: &crate::principal::Principal,
     idempotency_key: Option<&str>,
     event: NewEvent,
@@ -170,7 +201,15 @@ async fn append_with_caps_and_principal(
         crate::policy::Access::Write,
     )
     .await?;
-    let id = append_in_tx_capped(&tx, caps, &principal.actor, idempotency_key, event).await?;
+    let id = append_in_tx_capped(
+        &tx,
+        caps,
+        events_per_project,
+        &principal.actor,
+        idempotency_key,
+        event,
+    )
+    .await?;
     tx.commit().await.map_err(engine)?;
     Ok(id)
 }
@@ -179,19 +218,22 @@ async fn append_with_caps_and_principal(
 ///
 /// Lets a related write, an identity change for instance, and its audit event
 /// commit together, so neither can survive without the other. The inbox cap is
-/// not applied here; an actionable write goes through [`append_action`].
+/// not applied here; an actionable write goes through [`append_action`]. A
+/// caller with no configured ceiling passes `0`.
 pub(crate) async fn append_in_tx(
     tx: &turso::transaction::Transaction<'_>,
+    events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_in_tx_capped(tx, None, actor, idempotency_key, event).await
+    append_in_tx_capped(tx, None, events_per_project, actor, idempotency_key, event).await
 }
 
 async fn append_in_tx_capped(
     tx: &turso::transaction::Transaction<'_>,
     caps: Option<&crate::limits::InboxCaps>,
+    events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
@@ -239,6 +281,28 @@ async fn append_in_tx_capped(
             crate::store::idempotency::lookup(tx, &event.project_id, &event.kind, key).await?
     {
         return Ok(existing);
+    }
+
+    // A project's feed is bounded so a runaway writer cannot fill the store one
+    // event at a time. The count runs on this transaction, so it sees the same
+    // committed state the insert below extends, and the hub's own audit trail is
+    // excluded exactly as `count_for_project` excludes it. A replay returned
+    // above is never refused. Zero disables the ceiling. An audit event is
+    // exempt because it is not counted in the first place.
+    if events_per_project > 0 && event.kind != AUDIT_KIND {
+        let count = count_on(
+            tx,
+            "SELECT COUNT(*) FROM events WHERE project_id = ?1 AND kind <> 'system'",
+            vec![Value::Text(event.project_id.clone())],
+        )
+        .await?;
+        if count >= events_per_project {
+            return Err(Error::Conflict(format!(
+                "project {} has reached its event ceiling of {} (HUB_EVENTS_PER_PROJECT); \
+                 promote durable work to the project knowledge base or prune the feed",
+                event.project_id, events_per_project
+            )));
+        }
     }
 
     // A question roots its own thread, whichever tool wrote it. An answer must

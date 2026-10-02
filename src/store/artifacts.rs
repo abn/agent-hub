@@ -1021,6 +1021,7 @@ async fn append_event(
 ) -> Result<String> {
     events::append_in_tx(
         tx,
+        0,
         actor,
         None,
         NewEvent {

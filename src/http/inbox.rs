@@ -249,6 +249,7 @@ pub async fn answer(
 
     let event_id = question_store::answer(
         &state.db,
+        state.config.events_per_project.per_project,
         &principal.actor,
         &question_id,
         &payload.body,
@@ -304,6 +305,7 @@ pub async fn decide(
 
     let decision = question_store::decide_reporting(
         &state.db,
+        state.config.events_per_project.per_project,
         &principal.actor,
         &approval_id,
         approved,

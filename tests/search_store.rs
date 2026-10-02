@@ -26,7 +26,9 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
         thread_id: None,
         session_id: None,
     };
-    append(db, "agent-one", None, event).await.expect("append");
+    append(db, 0, "agent-one", None, event)
+        .await
+        .expect("append");
 
     artifacts::publish(
         db,
@@ -225,6 +227,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
     // Older, but mentions the term three times.
     append(
         &db,
+        0,
         "a",
         None,
         NewEvent {
@@ -243,6 +246,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
     // Newer, but mentions the term once.
     append(
         &db,
+        0,
         "a",
         None,
         NewEvent {
@@ -674,6 +678,7 @@ fn a_made_safe_query_keeps_words_and_phrases_and_nothing_else() {
 async fn append_with(db: &turso::Database, summary: &str, payload: Option<serde_json::Value>) {
     append(
         db,
+        0,
         "agent-one",
         None,
         NewEvent {

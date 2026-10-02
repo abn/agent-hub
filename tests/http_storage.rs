@@ -699,6 +699,7 @@ async fn listed_names(state: &AppState) -> std::collections::HashMap<String, Str
 async fn signal_in(state: &AppState, project_id: &str, summary: &str) {
     agent_hub::store::events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         agent_hub::store::events::NewEvent {
@@ -871,6 +872,7 @@ async fn a_row_counts_its_events_and_the_rows_sum_to_the_kinds() {
     let payload = serde_json::json!({"body": "the kettle is on", "cups": 3});
     agent_hub::store::events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         agent_hub::store::events::NewEvent {
@@ -1038,6 +1040,7 @@ async fn weights_held_for_a_project_that_is_gone_list_nothing_for_it() {
         .expect("create");
     agent_hub::store::events::append(
         &state.db,
+        0,
         "agent-one",
         None,
         agent_hub::store::events::NewEvent {
