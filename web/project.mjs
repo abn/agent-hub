@@ -96,34 +96,29 @@ async function projectFootprint(projectId) {
 // where something is read against the stage. The section switcher lives in
 // the index header, so the stage's top edge never moves between sections.
 
-// The way into the project's own screen. The design's gear, drawn from the
-// markup its settings module owns; the project header has room for one 44px
-// control and no more.
-function projectGear(id) {
-  return `<a class="proj-gear" href="#/projects/${esc(encodeURIComponent(id))}/settings" aria-label="Project settings">
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M 19 12a7 7 0 0 0-.2-1.6l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.8-1.6L13.3 2h-2.6l-.4 2.9a7 7 0 0 0-2.8 1.6l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .5.1 1.1.2 1.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.8 1.6l.4 2.9h2.6l.4-2.9a7 7 0 0 0 2.8-1.6l2.3 1 2-3.4-2-1.5c.1-.5.2-1.1.2-1.6z"></path></svg>
-  </a>`;
-}
-
 export function projectLockBadge(project) {
   if (!project || !project.confidential) return "";
   return `<span class="project-lock" role="img" aria-label="confidential" style="display:inline-flex;align-items:center;gap:4px;flex:none;margin-right:8px;color:var(--ink-2);font-size:12px;white-space:nowrap">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`;
 }
 
-// The project's own actions, in the header overflow the design draws. The lock
-// item is the project's confidential state: an operator may go either way. The
-// copy and delete items are the ones the menu was designed with; a screen that
-// already owns delete passes full=false and gets the lock alone.
-export function projectOverflow(project, { full = true } = {}) {
-  const confidential = !!project.confidential;
-  const lockItem = confidential
-    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-public">Make public…</button>`
-    : `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-confidential">Make confidential…</button>`;
+// The project's own actions, in the header overflow the design draws. The
+// project header carries Project settings, Copy path and Delete project; the
+// project's own settings screen passes lock-only and gets the confidential
+// control instead. An operator may lock or unlock from there.
+export function projectOverflow(project, { lock = true, full = true } = {}) {
+  const name = project.display_name || project.id;
+  const lockItem = !lock
+    ? ""
+    : project.confidential
+      ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-public">Make public…</button>`
+      : `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-confidential">Make confidential…</button>`;
   const extras = full
-    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="copy-project-path">Copy path</button>
+    ? `<a role="menuitem" class="proj-menu-item" href="#/projects/${encodeURIComponent(project.id)}/settings">Project settings</a>
+      <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-project-path">Copy path</button>
       <div class="proj-menu-divider" role="separator"></div>
       <button type="button" role="menuitem" class="proj-menu-item proj-menu-delete" data-action="delete-project">Delete project</button>`
     : "";
+  void name;
   return `<span class="proj-overflow-wrap">
     <button type="button" class="proj-overflow-btn" aria-label="Project actions" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 20 })}</button>
     <div class="proj-overflow-menu" role="menu" hidden>
@@ -252,7 +247,12 @@ function projectToolsMobile(id, segment, stats, project) {
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
     </button>
-    ${projectGear(id)}
+    ${
+      segment === "wiki"
+        ? `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;height:36px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`
+        : ""
+    }
+    ${projectOverflow(project, { lock: false })}
   </div>`;
 }
 
@@ -433,7 +433,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   return shellHTML({
     segment,
-    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
+    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
     indexControls: shellIndexControls("Filter events", group),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -475,7 +475,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
@@ -547,7 +547,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Filter sessions"),
       indexBody: card,
       stageHead,
@@ -636,12 +636,12 @@ export async function projectScreen(params, gen, path) {
   let sessionSelected = null;
   if (segment === "wiki") {
     const selected = params?.get("page") || "";
-    const stage = await wikiStage(id, params, shellStageHead, stats);
-    const indexBody = await wikiIndexBody(id, selected);
-    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
+    const stage = await wikiStage(id, params, shellStageHead, stats, project?.display_name || id);
+    const indexBody = await wikiIndexBody(id, selected, project?.display_name || id, params?.get("dir") || "");
+    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
     shell = shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectGear(id)}</div>`,
+      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Search this wiki", "", newBtn),
       indexBody,
       stageHead: stage.head,

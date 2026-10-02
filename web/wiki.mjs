@@ -10,6 +10,7 @@
 // literal data, no trust ladder, no rename or move in this version.
 
 import { api } from "./api.mjs";
+import { slugify } from "./dialog.mjs";
 import { esc } from "./dom.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
 import { render } from "./router.mjs";
@@ -18,6 +19,13 @@ import { toast } from "./toast.mjs";
 
 const FILE_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>`;
 const FOLDER_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/></svg>`;
+const INPUT_CSS =
+  "height:44px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans)";
+const CLOCK_GLYPH = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
+const staleMark = (entry) =>
+  entry && entry.stale
+    ? `<span class="wiki-stale" style="display:inline-flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--ink-3)">${CLOCK_GLYPH}stale</span>`
+    : "";
 
 export function wikiPageApi(id, path) {
   const encoded = String(path || "")
@@ -29,6 +37,52 @@ export function wikiPageApi(id, path) {
 
 export function wikiPageHash(id, path, extra = "") {
   return `#/projects/${encodeURIComponent(id)}/wiki?page=${encodeURIComponent(path)}${extra}`;
+}
+
+// A page's comment threads. One level: a reply is a comment on the page, not on
+// another comment. Open threads are listed; resolved ones fold under a count.
+// The anchor line is the quote alone, clamped to two lines. The human cannot
+// delete an agent's comment, so there is no delete control here.
+async function commentsSection(id, path) {
+  let comments = [];
+  try {
+    const data = await api(
+      `/api/v1/projects/${encodeURIComponent(id)}/kb/comments?path=${encodeURIComponent(displayPath(path))}`,
+    );
+    comments = data.comments || [];
+  } catch {
+    comments = [];
+  }
+  const open = comments.filter((comment) => !comment.done);
+  const done = comments.filter((comment) => comment.done);
+  const thread = (comment, resolved) => `<div class="wiki-comment" style="padding:10px 0;border-top:1px solid var(--line)">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:13px;font-weight:600">${esc(comment.author)}</span>
+      <span class="mono" style="font-size:12px;color:var(--ink-3)">${esc(comment.created_at)}</span>
+      <span style="flex:1"></span>
+      ${resolved ? "" : `<button type="button" class="btn-outline" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}" style="flex:none;height:28px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 12px/1 var(--font-sans);cursor:pointer">Resolve</button>`}
+    </div>
+    ${
+      comment.anchor && comment.anchor.quote
+        ? `<p style="font-style:italic;font-size:13px;color:var(--ink-2);margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">\u201c${esc(comment.anchor.quote)}\u201d</p>`
+        : ""
+    }
+    <p style="font-size:14px;line-height:1.45;margin:4px 0 0;white-space:pre-wrap">${esc(comment.body)}</p>
+  </div>`;
+  return `<section class="wiki-comments" style="padding:16px;border-top:1px solid var(--line)">
+    <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:8px">COMMENTS · ${open.length}</div>
+    ${open.length ? open.map((comment) => thread(comment, false)).join("") : `<p class="empty" style="margin:0;font-size:13px">No comments yet.</p>`}
+    <div class="wiki-comment-composer" style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <label style="display:flex;flex-direction:column;gap:6px"><span class="sr-only">Comment</span>
+        <textarea data-wiki-comment-body rows="3" placeholder="Add a comment" style="box-sizing:border-box;padding:10px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:400 14px/1.45 var(--font-sans);resize:vertical"></textarea></label>
+      <button type="button" class="primary" data-action="wiki-comment-add" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" style="align-self:flex-start;height:34px;padding:0 14px">Comment</button>
+    </div>
+    ${
+      done.length
+        ? `<details style="margin-top:12px"><summary class="mono" style="font-size:12px;color:var(--ink-3);cursor:pointer">Resolved · ${done.length}</summary>${done.map((comment) => thread(comment, true)).join("")}</details>`
+        : ""
+    }
+  </section>`;
 }
 
 // The trust label is derived by the hub, never stored. It is a word, not a
@@ -60,30 +114,36 @@ function displayPath(path) {
     .replace(/^\//, "");
 }
 
-function rowHTML(entry, id, selected) {
+function rowHTML(entry, id, selected, narrow = false) {
   const path = entry.path;
   const depth = depthOf(path);
-  const pad = 16 + depth * 14;
+  const pad = 16 + depth * 20;
   const name = entry.title || path.split("/").pop();
   const on = path === selected ? ' aria-current="true"' : "";
+  const href =
+    narrow && entry.type === "dir"
+      ? `#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(displayPath(path))}`
+      : wikiPageHash(id, path);
   if (entry.type === "dir") {
-    return `<a class="row wiki-row wiki-dir" href="${wikiPageHash(id, path)}"${on} style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
+    return `<a class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
       <span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FOLDER_GLYPH}</span>
       <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path.split("/").pop())}</span>
+      ${staleMark(entry)}
       <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${entry.children ?? 0}</span>
     </a>`;
   }
   const meta = [entry.page_type || "concept", entry.status || "draft", trustWords(entry)].join(" · ");
-  return `<a class="row wiki-row" href="${wikiPageHash(id, path)}"${on} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 12px 6px ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
+  return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 12px 6px ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
     <span style="display:flex;align-items:center;gap:8px;min-width:0">
       <span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FILE_GLYPH}</span>
       <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+      ${staleMark(entry)}
     </span>
     <span class="mono" style="padding-left:24px;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</span>
   </a>`;
 }
 
-export async function wikiIndexBody(id, selected) {
+export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
   let data;
   try {
     data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/pages?meta=1`);
@@ -92,9 +152,37 @@ export async function wikiIndexBody(id, selected) {
   }
   const entries = data.entries || [];
   if (!entries.length) {
-    return `<p class="empty" style="padding:16px">No pages yet. A page arrives when an agent promotes one, or you write one here.</p>`;
+    return `<div class="wiki-empty" style="padding:24px 16px;max-width:640px">
+      <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · empty</div>
+      <h2 style="font-size:17px;font-weight:600;margin:6px 0">No wiki yet in ${esc(projectName || id)}.</h2>
+      <p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0 0 12px">Agents write durable knowledge here; sessions come and go, these pages stay. The first write creates index.md.</p>
+      <button type="button" class="btn-outline" data-action="wiki-instruction" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Copy agent instruction</button>
+    </div>`;
   }
-  return entries.map((entry) => rowHTML(entry, id, selected)).join("");
+  const narrow = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  if (narrow) {
+    const prefix = dir ? `${displayPath(dir)}/` : "";
+    const level = entries.filter((entry) => {
+      const path = displayPath(entry.path);
+      if (!path.startsWith(prefix)) return false;
+      const rest = path.slice(prefix.length);
+      return rest.length > 0 && !rest.includes("/");
+    });
+    const crumbs = [`<a href="#/projects/${encodeURIComponent(id)}/wiki" style="color:var(--accent);text-decoration:none">Wiki</a>`];
+    let acc = "";
+    for (const part of displayPath(dir).split("/").filter(Boolean)) {
+      acc = acc ? `${acc}/${part}` : part;
+      crumbs.push(
+        `<a href="#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(acc)}" style="color:var(--accent);text-decoration:none">${esc(part)}</a>`,
+      );
+    }
+    return `<div class="wiki-breadcrumb mono" style="padding:8px 16px;font-size:12px;color:var(--ink-3);display:flex;gap:6px;flex-wrap:wrap">${crumbs.join(
+      "<span>/</span>",
+    )}</div>${level.length ? `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${level.map((entry) => rowHTML(entry, id, selected, true)).join("")}</div>` : `<p class="empty" style="padding:16px">This directory is empty.</p>`}`;
+  }
+  return `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${entries
+    .map((entry) => rowHTML(entry, id, selected))
+    .join("")}</div>`;
 }
 
 async function readPage(id, path) {
@@ -174,8 +262,8 @@ async function pageStage(id, path, shellStageHead) {
       `<span style="display:inline-flex;gap:8px;flex:none">${reviewBtn}<a class="btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/28px var(--font-sans)">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span></div>`,
-    body: `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${fm.description ? `<p class="wiki-description" style="font-size:15px;color:var(--ink-2);margin-top:0">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}`,
+    controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span></div>`,
+    body: `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${fm.description ? `<p class="wiki-description" style="font-size:15px;color:var(--ink-2);margin-top:0">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
 
@@ -248,7 +336,7 @@ async function changesStage(id, shellStageHead) {
       </div>`,
         )
         .join("")
-    : `<p class="empty" style="padding:16px">No changes yet.</p>`;
+    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · recent changes</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No changes yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this wiki is logged here with who and when.</p></div>`;
   return simpleStage(shellStageHead, id, "Recent changes", `${rows.length} change${rows.length === 1 ? "" : "s"}`, `<div class="wiki-changes">${body}</div>`);
 }
 
@@ -277,7 +365,7 @@ async function lintStage(id, params, shellStageHead) {
       </div>`,
         )
         .join("")
-    : `<p class="empty" style="padding:16px">No findings. The tree is consistent.</p>`;
+    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · lint</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">Nothing to fix.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every page declares a type, every link resolves, and every page is listed in its index.</p></div>`;
   return {
     head: shellStageHead("Lint", `${findings.length} finding${findings.length === 1 ? "" : "s"}`, recheck, `#/projects/${encodeURIComponent(id)}/wiki`),
     controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">checked ${esc(data.checked_at || "")}</span></div>`,
@@ -310,7 +398,7 @@ async function reviewStage(id, shellStageHead) {
 
 // The Wiki home: the counts, and the housekeeping screens, which live here
 // and never in the inbox.
-async function homeStage(id, stats, shellStageHead) {
+async function homeStage(id, stats, shellStageHead, projectName = "") {
   let s = null;
   try {
     s = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/stats`);
@@ -323,6 +411,9 @@ async function homeStage(id, stats, shellStageHead) {
   const link = (view, label) =>
     `<a class="row" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}" style="display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">${label}</a>`;
   const body = `<div class="wiki-home">
+    <div style="padding:16px 16px 0">
+      <button type="button" class="primary" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="height:36px;padding:0 16px">New page</button>
+    </div>
     <div style="padding:16px;display:flex;gap:24px">
       <div><div class="mono" style="font-size:12px;color:var(--ink-3)">PAGES</div><div style="font-size:22px;font-weight:600">${pages}</div></div>
       <div><div class="mono" style="font-size:12px;color:var(--ink-3)">NEEDS REVIEW</div><div style="font-size:22px;font-weight:600">${review}</div></div>
@@ -335,7 +426,7 @@ async function homeStage(id, stats, shellStageHead) {
   return simpleStage(shellStageHead, id, "Wiki", `${pages} page${pages === 1 ? "" : "s"}`, body);
 }
 
-export async function wikiStage(id, params, shellStageHead, stats) {
+export async function wikiStage(id, params, shellStageHead, stats, projectName = "") {
   const selected = params?.get("page") || "";
   const editing = params?.get("edit") === "1";
   const isNew = params?.get("new") === "1";
@@ -349,7 +440,7 @@ export async function wikiStage(id, params, shellStageHead, stats) {
     return editorStage(id, selected, page.content || "", page.version || "absent", false, shellStageHead);
   }
   if (selected) return pageStage(id, selected, shellStageHead);
-  return homeStage(id, stats, shellStageHead);
+  return homeStage(id, stats, shellStageHead, projectName);
 }
 
 // The version token a Save carries back: the read's token for an edit, the
@@ -381,27 +472,70 @@ export async function wikiReview(button) {
   }
 }
 
-// The New page control: the editor opens empty, and the path is typed there.
-export function wikiNew(id) {
-  location.hash = `#/projects/${encodeURIComponent(id)}/wiki?new=1`;
+// Post a comment on the page. The body is the composer's text; an empty one
+// sends nothing.
+export async function wikiCommentAdd(button) {
+  const id = button.dataset.id || "";
+  const path = button.dataset.path || "";
+  const body = (document.querySelector("[data-wiki-comment-body]")?.value || "").trim();
+  if (!body) return;
+  button.disabled = true;
+  try {
+    await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/comments`, {
+      method: "POST",
+      body: JSON.stringify({ path, body }),
+    });
+    render();
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+  }
 }
 
-// Save a session brain entry into the wiki. The hub copies the entry and
-// patches its frontmatter; the brain entry is left as it is. A page whose
-// target already exists is refused unless the caller names the version, so the
-// dialog says the path and lets the hub speak.
-export function wikiPromote(button) {
+// Resolve a thread. Resolved threads fold under a count at the foot.
+export async function wikiCommentResolve(button) {
   const id = button.dataset.id || "";
-  const sessionId = button.dataset.session || "";
-  const sessionName = button.dataset.sessionName || sessionId;
-  const fromPath = button.dataset.path || "";
-  const base = fromPath.split("/").pop() || "page.md";
-  const defaultTo = base.endsWith(".md") ? base : `${base}.md`;
+  const comment = button.dataset.comment || "";
+  button.disabled = true;
+  try {
+    await api(
+      `/api/v1/projects/${encodeURIComponent(id)}/kb/comments/${encodeURIComponent(comment)}/done`,
+      { method: "POST", body: JSON.stringify({ done: true }) },
+    );
+    render();
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message);
+  }
+}
 
+// The one-line instruction an agent needs to start a wiki. Round 14 ships the
+// card without the code block until the `kb` command exists; the control still
+// copies the command for whoever wants it.
+export function wikiInstruction(button) {
+  const project = button.dataset.project || button.dataset.id || "";
+  const command = `hub wiki write ${project} --type concept`;
+  const done = () => toast("Agent instruction copied.");
+  try {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(command).then(done, done);
+      return;
+    }
+  } catch {}
+  done();
+}
+
+// The New page control: the editor opens empty, and the path is typed there.
+// The New page and Save to wiki sheet. One sheet, two entries: writing a page
+// that is not there yet, and copying a session brain entry in. The copy follows
+// the design: a Location, a Title and a Description, the file name computed from
+// the title, and a note naming the type, status and source.
+function openWikiSheet({ id, projectName = "", mode, sessionId = "", sessionName = "", fromPath = "" }) {
+  const isNew = mode === "new";
   const opener = document.activeElement;
   const el = document.createElement("dialog");
   el.className = "dialog";
-  const titleId = "wiki-promote-title";
+  const titleId = "wiki-sheet-title";
   el.setAttribute("aria-labelledby", titleId);
 
   const form = document.createElement("form");
@@ -410,33 +544,48 @@ export function wikiPromote(button) {
   const heading = document.createElement("h2");
   heading.className = "dialog-title";
   heading.id = titleId;
-  heading.textContent = "Save to wiki";
+  heading.textContent = isNew ? "New page" : "Save to wiki";
   form.appendChild(heading);
 
-  const body = document.createElement("p");
-  body.className = "dialog-body";
-  body.textContent = `Copies ${displayPath(fromPath)} from ${sessionName} into the project wiki. The brain entry is left as it is.`;
-  form.appendChild(body);
+  if (!isNew) {
+    const meta = document.createElement("p");
+    meta.className = "dialog-body";
+    meta.textContent = `from ${sessionName} · brain ${displayPath(fromPath)}`;
+    form.appendChild(meta);
+  }
 
-  const makeField = (name, label, value) => {
+  const field = (name, label, value) => {
     const wrap = document.createElement("label");
     wrap.className = "dialog-field-wrap";
-    const text = document.createElement("span");
-    text.className = "dialog-label";
-    text.textContent = label;
+    const span = document.createElement("span");
+    span.className = "dialog-label";
+    span.textContent = label;
     const input = document.createElement("input");
     input.name = name;
     input.value = value;
     input.autocomplete = "off";
-    input.style.cssText =
-      "height:36px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans)";
-    wrap.append(text, input);
+    input.style.cssText = INPUT_CSS;
+    wrap.append(span, input);
     form.appendChild(wrap);
     return input;
   };
-  const toInput = makeField("to_path", "Path", defaultTo);
-  const typeInput = makeField("type", "Type", "concept");
-  const titleInput = makeField("title", "Title", base.replace(/\.md$/, ""));
+
+  const defaultTitle = isNew ? "" : (fromPath.split("/").pop() || "").replace(/\.md$/, "");
+  const dirInput = field("dir", isNew ? "Location" : "Location", isNew ? "" : (fromPath.split("/").slice(1, -1).join("/") || ""));
+  const titleInput = field("title", "Title", defaultTitle);
+  const descInput = field("description", "Description", "");
+
+  const computed = document.createElement("p");
+  computed.className = "dialog-note mono";
+  computed.style.fontFamily = "var(--font-mono)";
+  form.appendChild(computed);
+
+  const note = document.createElement("p");
+  note.className = "dialog-note";
+  note.textContent = isNew
+    ? "Saved as type: concept · status: draft, unverified."
+    : "Saved as type: concept · status: draft, unverified, with the brain entry listed under sources. The brain file is not moved.";
+  form.appendChild(note);
 
   const problem = document.createElement("p");
   problem.className = "dialog-note";
@@ -452,35 +601,54 @@ export function wikiPromote(button) {
   const commit = document.createElement("button");
   commit.type = "button";
   commit.className = "dialog-commit";
-  commit.textContent = "Save to wiki";
+  commit.textContent = isNew ? "Create page" : "Save to wiki";
   actions.append(safe, commit);
   form.appendChild(actions);
 
+  const fileName = () => {
+    const dir = dirInput.value.trim().replace(/^\/+|\/+$/g, "");
+    const slug = slugify(titleInput.value.trim()) || "page";
+    return `${dir ? `${dir}/` : ""}${slug}.md`;
+  };
+  const paintName = () => {
+    computed.textContent = fileName();
+  };
+  titleInput.addEventListener("input", paintName);
+  dirInput.addEventListener("input", paintName);
+  paintName();
+
   safe.addEventListener("click", () => el.close("cancel"));
   commit.addEventListener("click", async () => {
-    const toPath = toInput.value.trim();
-    if (!toPath) {
-      problem.textContent = "A page needs a path.";
+    const title = titleInput.value.trim();
+    if (!title) {
+      problem.textContent = "A page needs a title.";
       problem.hidden = false;
-      toInput.focus();
+      titleInput.focus();
       return;
     }
+    const description = descInput.value.trim();
+    const toPath = fileName();
     commit.disabled = true;
     problem.hidden = true;
     try {
-      const result = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/promote`, {
-        method: "POST",
-        body: JSON.stringify({
-          from_session_id: sessionId,
-          from_path: fromPath,
-          to_path: toPath,
-          type: typeInput.value.trim() || undefined,
-          title: titleInput.value.trim() || undefined,
-        }),
-      });
+      if (isNew) {
+        const body = `---\ntype: concept\nstatus: draft\ntitle: ${JSON.stringify(title)}\n${description ? `description: ${JSON.stringify(description)}\n` : ""}---\n# ${title}\n${description ? `\n${description}\n` : ""}`;
+        await saveWikiPage(id, toPath, body, "absent");
+      } else {
+        await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/promote`, {
+          method: "POST",
+          body: JSON.stringify({
+            from_session_id: sessionId,
+            from_path: fromPath,
+            to_path: toPath,
+            title,
+            description: description || undefined,
+          }),
+        });
+      }
       el.close("saved");
-      toast("Saved to the wiki.");
-      location.hash = wikiPageHash(id, displayPath(result.path || toPath));
+      toast(isNew ? "Page created." : "Saved to the wiki.");
+      location.hash = wikiPageHash(id, toPath);
     } catch (error) {
       commit.disabled = false;
       problem.textContent = error.message;
@@ -502,8 +670,7 @@ export function wikiPromote(button) {
   document.body.appendChild(el);
   document.documentElement.classList.add("has-dialog");
   el.showModal();
-  toInput.focus();
-  toInput.select();
+  titleInput.focus();
 
   return new Promise((resolve) => {
     el.addEventListener(
@@ -521,9 +688,20 @@ export function wikiPromote(button) {
   });
 }
 
-// Save from the editor. A create takes the path from the field; an edit takes
-// it from the button. A page that changed under the reader comes back 409 and
-// the editor stays as it is with the hub's reason said in place.
+export function wikiNew(button) {
+  openWikiSheet({ id: button.dataset.id || "", projectName: button.dataset.project || "", mode: "new" });
+}
+
+export function wikiPromote(button) {
+  openWikiSheet({
+    id: button.dataset.id || "",
+    mode: "promote",
+    sessionId: button.dataset.session || "",
+    sessionName: button.dataset.sessionName || button.dataset.session || "",
+    fromPath: button.dataset.path || "",
+  });
+}
+
 export async function wikiSave(button) {
   const id = button.dataset.id || "";
   const isNew = button.dataset.new === "1";

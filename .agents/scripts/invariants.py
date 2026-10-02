@@ -2465,6 +2465,15 @@ def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
     if "Edited by the check." not in body:
         watch.fail("the wiki edit did not land in the reader")
 
+    if page.locator("[data-wiki-comment-body]").count():
+        page.fill("[data-wiki-comment-body]", "A comment from the check.")
+        page.click('[data-action="wiki-comment-add"]')
+        page.wait_for_timeout(900)
+        if "A comment from the check." not in page.inner_text(".wiki-comments"):
+            watch.fail("the page comment did not appear")
+        if page.locator('[data-action="wiki-comment-resolve"]').count() == 0:
+            watch.fail("a page comment offers no Resolve control")
+
     if page.locator('[data-action="wiki-review"]').count() == 0:
         watch.fail("the wiki reader offers no Review control")
     else:

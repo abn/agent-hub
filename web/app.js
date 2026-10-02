@@ -26,7 +26,15 @@ import {
 import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
 import { toggleKind } from "./feed.mjs";
-import { wikiNew, wikiPromote, wikiReview, wikiSave } from "./wiki.mjs";
+import {
+  wikiCommentAdd,
+  wikiCommentResolve,
+  wikiInstruction,
+  wikiNew,
+  wikiPromote,
+  wikiReview,
+  wikiSave,
+} from "./wiki.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
 import { installKeys } from "./keys.mjs";
@@ -121,10 +129,13 @@ main.addEventListener("click", (event) => {
   if (action === "artifact-open") openArtifact(id);
   if (action === "viewer-back") viewerBack();
   if (action === "project-back") projectBack();
-  if (action === "wiki-new") wikiNew(id);
+  if (action === "wiki-new") wikiNew(button);
   if (action === "wiki-save") acted(button, wikiSave(button));
   if (action === "wiki-review") acted(button, wikiReview(button));
+  if (action === "wiki-comment-add") wikiCommentAdd(button);
+  if (action === "wiki-comment-resolve") wikiCommentResolve(button);
   if (action === "wiki-promote") wikiPromote(button);
+  if (action === "wiki-instruction") wikiInstruction(button);
   if (action === "version-toggle") toggleVersionMenu(button);
   if (action === "version-pick") pickVersion(id, button.dataset.version);
   if (action === "viewer-raw") toggleRaw(button);

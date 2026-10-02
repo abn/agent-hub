@@ -2380,6 +2380,11 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 }
 .inbox-detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .inbox-detail-meta { margin-left: auto; font-size: var(--t-12); color: var(--ink-3); }
+/* The status pill and the meta share one line until the phone cannot hold
+   both; there the meta drops to its own line rather than crowding the pill. */
+@media (max-width: 480px) {
+  .inbox-detail-meta { flex-basis: 100%; margin-left: 0; }
+}
 .inbox-detail-body { margin: 0; font-size: var(--t-15); line-height: 1.45; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .inbox-detail .item-title { overflow-wrap: anywhere; }
 .inbox-answers { display: flex; gap: var(--s-2); flex-wrap: wrap; }

@@ -2856,6 +2856,14 @@ fn the_project_wiki_segment_is_wired() {
         "a session brain entry can be saved to the wiki"
     );
     assert!(
+        WIKI_JS.contains("kb/comments") && WIKI_JS.contains("wiki-comment-add"),
+        "a page carries a comment thread"
+    );
+    assert!(
+        WIKI_JS.contains("Resolved ·"),
+        "resolved threads fold under a count"
+    );
+    assert!(
         WIKI_JS.contains("changed while you were editing"),
         "the editor states a conflict in place"
     );
