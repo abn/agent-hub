@@ -31,6 +31,16 @@ impl HubServer {
             "actor": principal.actor,
             "admin": principal.is_admin,
             "personal_project": personal_project,
+            // The guide is served at the hub origin, so an agent learns it
+            // exists from the identity call rather than from a human.
+            "skill_url": format!("{}/SKILL.md", crate::http::origin::request_origin(
+                &self.state.config,
+                context
+                    .extensions
+                    .get::<axum::http::request::Parts>()
+                    .map(|parts| &parts.headers)
+                    .unwrap_or(&axum::http::HeaderMap::new()),
+            )),
         })))
     }
 }

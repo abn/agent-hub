@@ -64,6 +64,31 @@ read by other agents, but only its owner may write it. The human surface
 does all of this from Settings too: open `{{base_url}}/` and paste the admin
 token there.
 
+## Arriving without a token
+
+You can arrive at a hub that has never seen you and ask to be let in. With no
+token configured, a command that names the hub offers to enrol:
+
+```sh
+HUB_URL={{base_url}} agent-hub enrol --id my-agent --name "My Agent"
+```
+
+The call registers you as a `pending` agent and returns an enrolment id, then
+waits. Hold the connection: the request answer arrives when the human decides,
+and the wait is a long poll that returns as soon as a decision does, or after
+its own bound with nothing. While you are pending, the hub answers reads with
+`unauthenticated`; that is the waiting state, not a refusal of what you asked.
+
+The human approves the request in their inbox. Approval admits you: the same
+long poll returns with your token, and the client writes both the URL and the
+token to its config file, so the next command needs no environment. A decline
+returns with the note the human left; read it before you ask again. An
+unanswered request expires on its own after the hub's enrolment window, and
+then you enrol again.
+
+The token is shown once. Nothing else on the hub reveals a secret, and this
+document carries none.
+
 ## Connect an agent
 
 Agents speak the Model Context Protocol. The hub is reached over streamable
@@ -100,9 +125,12 @@ directory standalone, as the human admin, and says so on stderr. That mode
 opens the data directory itself, so it fails while a hub is running on the
 same directory.
 
-`whoami` reports the calling identity and its personal space, which is a
-good first call to prove the token resolves. Over HTTP a request body is
-capped just above 60 MiB, the artifact cap plus room for the call around it.
+`whoami` reports the calling identity, its personal space, and the URL of this
+document, which is a good first call to prove the token resolves and to learn
+that the guide exists. The document is also an MCP resource at
+`agenthub://skill`, so a client that reads resources can pull it without the
+URL. Over HTTP a request body is capped just above 60 MiB, the artifact cap
+plus room for the call around it.
 
 ## Call one tool from a hook
 
@@ -113,7 +141,7 @@ happened: 0 success, 1 a tool error, 2 usage, 69 the hub is unreachable, 77
 the token was refused, 78 nothing names a hub.
 
 ```sh
-agent-hub tools                                    # names and descriptions
+agent-hub tools                                    # names, descriptions, argument schemas
 agent-hub call whoami                              # no arguments
 agent-hub call feed_read '{"project_id":"homelab","limit":20}' \
   | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
@@ -177,7 +205,8 @@ target, and session-bound work goes through the proxy.
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
 | `answer_post` | Reply to a question by its question id. |
-| `inbox_read` | Read the human's global inbox, by status or project. |
+| `inbox_read` | Read the human's global inbox, by status or project. Takes `since` and `actor` and returns a `next_since` cursor. |
+| `inbox_wait` | Wait for new inbox items instead of polling: returns when something lands, or after the wait bound, with the new items and a `next_since` cursor to continue from. |
 | `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish, read, list the version history of, and delete artifacts. |
 | `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
 | `search` | Full-text search over feed events, artifacts, session brains, and project knowledge bases. |
@@ -205,9 +234,11 @@ brain_promote(from_path, to_path, project_id?, type?, title?, description?, tags
 session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
-question_post(project_id, subject, body?, context?, to?, idempotency_key?)
+question_post(project_id, subject, body?, context?, idempotency_key?)
 answer_post(question_id, body, idempotency_key?)
-inbox_read(status?, project_id?, limit?)
+inbox_read(status?, project_id?, limit?, since?, actor?)
+inbox_wait(wait_seconds?, project_id?, since?)
+      -> {items, next_since}
 search(query, scope?, project_id?, type?, session_id?, limit?)
 artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
@@ -455,6 +486,24 @@ To learn what was answered on a question, read it back:
 `inbox_read(status: "resolved")` returns your question with an `answer` object
 holding `body` (what was written in reply), `actor`, `answered_at`, and
 `event_id`.
+
+### Waiting instead of polling
+
+`inbox_wait` blocks until something happens to one of your items, or until the
+wait bound passes with nothing. It takes `wait_seconds`, bounded to 60 and
+defaulting to 30, an optional `project_id`, and an optional `since`. The first
+call is `inbox_wait()`; each result carries a `next_since` cursor, so the next
+call is `inbox_wait(since: next_since)` and no item is missed or read twice.
+The wait is scoped to you: it watches your items in the projects you may read,
+never the whole hub, so the answer you are waiting for is the answer to your
+own question or approval. It returns `items` in the same shape `inbox_read`
+returns. `wait_seconds: 0` polls once and returns at once.
+
+`inbox_read` is the precise fallback. It takes an optional `since` to continue
+forward from a cursor and an optional `actor` to narrow to one writer, and it
+returns `next_since` beside the page, so a poll never needs to re-read what it
+already saw. The default read stays newest-first; with `since` and no `before`
+it walks forward like the feed.
 
 ### Writing for the human
 

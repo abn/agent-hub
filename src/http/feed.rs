@@ -123,7 +123,7 @@ pub async fn seen(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
-    let payload = json_body(body, "the body must be JSON with an event_id field")?;
+    let payload = json_body(body, "body must be JSON with an event_id field")?;
 
     if crate::store::projects::get(&state.db, &project_id)
         .await

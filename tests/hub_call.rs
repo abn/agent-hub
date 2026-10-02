@@ -297,6 +297,49 @@ fn tools_lists_what_the_hub_offers() {
     );
 }
 
+#[test]
+fn tools_prints_the_argument_schema_so_cli_discovery_matches_mcp() {
+    let hub = Hub::start("call-tools-schema");
+
+    let output = run(&hub, &["tools"]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let listed = stdout_json(&output);
+    let tools = listed["tools"].as_array().expect("a list of tools");
+    let publish = tools
+        .iter()
+        .find(|tool| tool["name"] == "artifact_publish")
+        .unwrap_or_else(|| panic!("artifact_publish is listed: {listed}"));
+    let properties = publish["inputSchema"]["properties"]
+        .as_object()
+        .unwrap_or_else(|| panic!("artifact_publish carries its schema: {publish}"));
+    assert!(
+        properties.contains_key("project_id") && properties.contains_key("content"),
+        "the schema carries the real arguments: {publish}"
+    );
+    // The anti-forgery fields are accepted for compatibility but never
+    // advertised; discovery must not teach an agent to send them.
+    assert!(
+        !properties.contains_key("actor") && !properties.contains_key("session_id"),
+        "the schema hides the ignored fields: {publish}"
+    );
+}
+
+#[test]
+fn an_unknown_tool_is_a_caller_error_not_an_internal_one() {
+    let hub = Hub::start("call-unknown-tool");
+
+    let output = run(&hub, &["call", "does_not_exist", "{}"]);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "nothing on stdout: {output:?}");
+    let error = stderr_json(&output);
+    assert_eq!(
+        error["error"]["code"], "not_found",
+        "an unknown tool is the caller's mistake, not the hub breaking: {error}"
+    );
+}
+
 /// A port no unprivileged hub can bind and nothing is listening on.
 ///
 /// A hub told to bind it fails the way a hub fails on a port another process

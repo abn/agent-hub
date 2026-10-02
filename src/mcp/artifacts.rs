@@ -263,12 +263,17 @@ struct ArtifactPublishParams {
     #[serde(default)]
     envelope: Option<serde_json::Value>,
     /// Any supplied session_id is ignored to prevent forgery; lineage comes from principal.
+    ///
+    /// Deserialised for compatibility, never advertised: a field the tool
+    /// discards is not part of its contract.
     #[serde(default)]
     #[allow(dead_code)]
+    #[schemars(skip)]
     session_id: Option<String>,
     /// Any supplied actor is ignored to prevent forgery; lineage comes from principal.
     #[serde(default)]
     #[allow(dead_code)]
+    #[schemars(skip)]
     actor: Option<String>,
     /// Optional idempotency key, so a retried publish returns the original.
     #[serde(default)]
@@ -337,6 +342,9 @@ struct ArtifactListParams {
     project_id: String,
     #[serde(default)]
     session: Option<String>,
+    /// Duplicate spelling kept for compatibility; `session` is the advertised
+    /// field, so this one is accepted but not shown.
     #[serde(default)]
+    #[schemars(skip)]
     session_id: Option<String>,
 }

@@ -185,7 +185,10 @@ pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result
     Ok(value)
 }
 
-/// List the hub's tools, as name and description pairs.
+/// List the hub's tools, with the argument schema `tools/list` already carries.
+///
+/// The schema travels whole so CLI discovery matches MCP discovery: an agent
+/// reading this sees the same arguments it will send.
 pub async fn tools(config: &ClientConfig) -> Result<Value, Failure> {
     let hub = connect(config).await?;
     let tools = within(config, hub.peer().list_all_tools())
@@ -197,6 +200,7 @@ pub async fn tools(config: &ClientConfig) -> Result<Value, Failure> {
             json!({
                 "name": tool.name,
                 "description": tool.description.unwrap_or_default(),
+                "inputSchema": tool.input_schema,
             })
         })
         .collect();
@@ -236,15 +240,26 @@ fn result_json(result: CallToolResult) -> Value {
 /// Turn a failed call into the failure whose exit code the hook branches on.
 ///
 /// A tool error carries the hub's own error object, so it is passed through
-/// untouched and only its code decides the exit.
+/// untouched and only its code decides the exit. A protocol error without a
+/// hub object was raised by the transport or the SDK, not by a handler, so it
+/// is translated from the MCP numeric code into the hub vocabulary rather than
+/// reported as an internal fault: an unknown tool is a caller mistake, not the
+/// hub breaking.
 fn tool_failure(err: ServiceError) -> Failure {
     let ServiceError::McpError(data) = err else {
         return Failure::Unavailable(format!("the hub stopped answering: {err}"));
     };
-    let error = data
-        .data
-        .clone()
-        .unwrap_or_else(|| error_object("internal", &data.message));
+    let error = data.data.clone().unwrap_or_else(|| {
+        let code = match (data.code, data.message.as_ref()) {
+            // The SDK's router raises this for a name it has no route for,
+            // which is a missing tool rather than a malformed argument.
+            (rmcp::model::ErrorCode::INVALID_PARAMS, "tool not found") => "not_found",
+            (rmcp::model::ErrorCode::INVALID_PARAMS, _) => "invalid_argument",
+            (rmcp::model::ErrorCode::RESOURCE_NOT_FOUND, _) => "not_found",
+            _ => "internal",
+        };
+        error_object(code, &data.message)
+    });
     let code = error
         .get("error")
         .and_then(|error| error.get("code"))

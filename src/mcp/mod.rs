@@ -5,6 +5,7 @@
 //! store; the actor on every write comes from the resolved principal, never
 //! from tool arguments.
 
+use std::string::String as StdString;
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
@@ -12,7 +13,11 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::model::{ErrorCode as McpErrorCode, ErrorData};
+use rmcp::model::{
+    ErrorCode as McpErrorCode, ErrorData, ListResourcesResult, PaginatedRequestParams,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerConfig,
+};
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
@@ -103,8 +108,87 @@ impl HubServer {
     }
 }
 
+/// The agent guide, mirrored from `assets/SKILL.md`.
+///
+/// The same document is served over HTTP at `/SKILL.md`, so an agent that can
+/// reach the hub learns the conventions before it writes to the human, from
+/// the first call: `whoami` names the URL and MCP exposes the document as a
+/// resource.
+const SKILL_URI: &str = "agenthub://skill";
+const SKILL_TEXT: &str = include_str!("../../assets/SKILL.md");
+const PLACEHOLDER: &str = "{{base_url}}";
+
+/// The origin to name inside the served guide.
+///
+/// The streamable HTTP transport carries the request headers on the context,
+/// so the guide reads the hub's own address the caller actually used, as the
+/// public `/SKILL.md` route does. Stdio has no headers and falls back to the
+/// configured bind.
+fn guide_origin(config: &Config, context: &RequestContext<RoleServer>) -> StdString {
+    match context.extensions.get::<axum::http::request::Parts>() {
+        Some(parts) => crate::http::origin::request_origin(config, &parts.headers),
+        None => crate::http::origin::request_origin(config, &axum::http::HeaderMap::new()),
+    }
+}
+
+fn guide_text(config: &Config, context: &RequestContext<RoleServer>) -> StdString {
+    SKILL_TEXT.replace(PLACEHOLDER, &guide_origin(config, context))
+}
+
 #[tool_handler(router = self.tool_router, name = "agent-hub")]
-impl ServerHandler for HubServer {}
+impl ServerHandler for HubServer {
+    /// Advertise the resource surface alongside the tools.
+    ///
+    /// Hand-written so the macro does not generate a tools-only `get_info`:
+    /// providing our own leaves the macro's `get_info` out, and this one
+    /// enables both capabilities.
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(rmcp::model::Implementation::new(
+            "agent-hub",
+            env!("CARGO_PKG_VERSION"),
+        ))
+    }
+
+    /// List the hub's resources: the agent guide.
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ListResourcesResult, ErrorData> {
+        let text = guide_text(&self.state.config, &context);
+        let resource = Resource::new(SKILL_URI, "Agent guide")
+            .with_title("Agent Hub guide")
+            .with_description("How to connect, which tools exist, and how to write for the human.")
+            .with_mime_type("text/markdown")
+            .with_size(text.len() as u64);
+        Ok(ListResourcesResult::with_all_items(vec![resource]))
+    }
+
+    /// Read a resource by URI. The guide is the only one.
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ReadResourceResponse, ErrorData> {
+        if request.uri != SKILL_URI {
+            return Err(ErrorData::new(
+                McpErrorCode::RESOURCE_NOT_FOUND,
+                format!("unknown resource '{}'", request.uri),
+                None,
+            ));
+        }
+        let text = guide_text(&self.state.config, &context);
+        let contents =
+            ResourceContents::text(text, SKILL_URI).with_mime_type("text/markdown; charset=utf-8");
+        Ok(ReadResourceResult::new(vec![contents]).into())
+    }
+}
 
 /// Translate a hub error into an MCP tool error carrying the hub code.
 fn to_error_data(err: Error) -> ErrorData {
