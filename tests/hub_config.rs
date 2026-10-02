@@ -221,6 +221,63 @@ fn hub_config_replaces_both_levels() {
 }
 
 #[test]
+fn the_enrolment_and_proxy_keys_are_read_from_the_file() {
+    let home = TempHome::new("hub-enrol-keys").with_config(concat!(
+        "[hub]\n",
+        "trust_proxy = \"127.0.0.1,10.0.0.5\"\n",
+        "enrol_pending_max = 30\n",
+        "enrol_pending_ttl_secs = 3600\n",
+        "enrol = \"off\"\n",
+    ));
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let config = Config::resolve(&lookup).expect("the new hub keys are not unknown");
+    assert_eq!(
+        config.trusted_proxies,
+        vec![
+            "127.0.0.1".parse::<std::net::IpAddr>().expect("ip"),
+            "10.0.0.5".parse::<std::net::IpAddr>().expect("ip"),
+        ]
+    );
+    assert_eq!(config.enrol_pending_max, 30);
+    assert_eq!(
+        config.enrol_pending_ttl,
+        std::time::Duration::from_secs(3600)
+    );
+    assert!(
+        !config.enrol_enabled,
+        "enrol = \"off\" in the file disables enrolment"
+    );
+}
+
+#[test]
+fn enrol_is_on_by_default_and_off_only_for_off() {
+    let home = TempHome::new("hub-enrol-default");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    assert!(
+        Config::resolve(&lookup).expect("resolve").enrol_enabled,
+        "enrolment is on when the key is absent"
+    );
+
+    let home = TempHome::new("hub-enrol-on").with_config("[hub]\nenrol = \"on\"\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    assert!(
+        Config::resolve(&lookup).expect("resolve").enrol_enabled,
+        "enrol = \"on\" keeps enrolment on"
+    );
+
+    let home = TempHome::new("hub-enrol-env").with_config("[hub]\nenrol = \"off\"\n");
+    let lookup = env(&[
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_ENROL", "on"),
+    ]);
+    assert!(
+        Config::resolve(&lookup).expect("resolve").enrol_enabled,
+        "the environment beats the file"
+    );
+}
+
+#[test]
 fn xdg_user_file_shadows_fallback_user_file() {
     let home = TempDir::new("shadow-home");
     let xdg_dir = home.join(".config").join("agent-hub");
@@ -261,15 +318,32 @@ fn fallback_user_file_is_read_when_no_xdg_file_exists() {
 }
 
 #[test]
-fn client_key_under_hub_table_is_unknown_and_warns() {
+fn a_client_key_under_hub_is_an_unknown_key_and_fails() {
     let home = TempHome::new("wrong-table").with_config("[hub]\nurl = \"http://hub.lan:8080\"\n");
     let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
 
-    let config = ClientConfig::resolve(&lookup).expect("resolve");
-    assert_eq!(
-        config.url, None,
-        "a client key under [hub] is ignored, not applied"
+    let err = ClientConfig::resolve(&lookup).expect_err("a client key under [hub] is unknown");
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown key 'url'"),
+        "names the key: {message}"
     );
+    assert!(message.contains("[hub]"), "names the table: {message}");
+    assert!(matches!(err, agent_hub::error::Error::Config(_)), "{err}");
+}
+
+#[test]
+fn an_unknown_client_key_fails() {
+    let home = TempHome::new("unknown-client").with_config("[client]\nnot_a_key = \"x\"\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let err = ClientConfig::resolve(&lookup).expect_err("an unknown [client] key is an error");
+    let message = err.to_string();
+    assert!(
+        message.contains("unknown key 'not_a_key'"),
+        "names the key: {message}"
+    );
+    assert!(message.contains("[client]"), "names the table: {message}");
 }
 
 #[test]
@@ -410,6 +484,61 @@ fn migration_creates_config_toml_once_with_mode_0600_and_is_noop_on_second_run()
     // Second run: no-op, reads config.toml directly:
     let config2 = ClientConfig::resolve(&lookup).expect("second run succeeds");
     assert_eq!(config2.url.as_deref(), Some("http://legacy.lan:8080"));
+}
+
+#[test]
+fn migration_routes_the_enrolment_and_proxy_keys_to_the_hub_table() {
+    let home = TempHome::new("migrate-hub-keys").with_legacy_config(concat!(
+        "HUB_URL=http://legacy.lan:8080\n",
+        "HUB_ENROL=off\n",
+        "HUB_ENROL_PENDING_MAX=30\n",
+        "HUB_ENROL_PENDING_TTL_SECS=3600\n",
+        "HUB_TRUST_PROXY=127.0.0.1\n",
+    ));
+
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    // Parsing the migrated file is what proves the shapes are loadable, so the
+    // resolve has to succeed, not merely the migration.
+    let config = ClientConfig::resolve(&lookup).expect("resolve triggers migration");
+    assert_eq!(config.url.as_deref(), Some("http://legacy.lan:8080"));
+
+    let migrated = std::fs::read_to_string(home.0.join(".agent-hub").join("config.toml"))
+        .expect("migrated file");
+    let hub_start = migrated.find("[hub]").expect("[hub] table in the output");
+    let hub = &migrated[hub_start..];
+
+    assert!(hub.contains("enrol = \"off\""), "{migrated}");
+    assert!(hub.contains("enrol_pending_max = 30\n"), "{migrated}");
+    assert!(
+        hub.contains("enrol_pending_ttl_secs = 3600\n"),
+        "{migrated}"
+    );
+    assert!(hub.contains("trust_proxy = \"127.0.0.1\""), "{migrated}");
+    assert!(
+        !migrated[..hub_start].contains("enrol"),
+        "an enrolment key does not leak into [client]: {migrated}"
+    );
+}
+
+#[test]
+fn config_check_fails_on_an_unknown_key_naming_it() {
+    let home = TempHome::new("cli-check-unknown").with_config("[hub]\nnot_a_hub_key = \"x\"\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .args(["config", "--check"])
+        .env("HOME", home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", home.0.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", home.0.join("absent-system.toml"))
+        .output()
+        .expect("run agent-hub config --check");
+
+    assert_eq!(output.status.code(), Some(78), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown key 'not_a_hub_key'"),
+        "names the key: {stderr}"
+    );
+    assert!(stderr.contains("[hub]"), "names the table: {stderr}");
 }
 
 #[test]

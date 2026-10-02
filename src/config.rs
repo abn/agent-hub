@@ -20,6 +20,10 @@ pub const HUB_KEYS: &[&str] = &[
     "active_window_secs",
     "inbox_action_per_agent",
     "inbox_action_per_project",
+    "enrol",
+    "enrol_pending_max",
+    "enrol_pending_ttl_secs",
+    "trust_proxy",
     "tailnet",
     "tailnet_port",
     "tailnet_control_url",
@@ -250,7 +254,8 @@ impl Config {
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty());
 
-        let enrol_enabled = std::env::var("HUB_ENROL")
+        let enrol_enabled = Setting::resolved(env, "hub", "enrol", &files, None)
+            .value
             .map(|value| value.trim() != "off")
             .unwrap_or(true);
 
@@ -491,7 +496,9 @@ pub struct ParsedConfigFile {
     pub client: HashMap<String, String>,
 }
 
-/// Load and parse a config file, warning on unknown keys/tables and mode.
+/// Load and parse a config file. An unknown key under `[hub]` or `[client]` is
+/// an error naming the key; an unknown table warns and is ignored. A file that
+/// others can read and that holds a token warns.
 pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -527,11 +534,10 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
             };
             for (k, v) in subtable {
                 if !HUB_KEYS.contains(&k.as_str()) {
-                    eprintln!(
-                        "agent-hub: {}: unknown key '{k}' under '[hub]'",
+                    return Err(Error::Config(format!(
+                        "{}: unknown key '{k}' under '[hub]'",
                         path.display()
-                    );
-                    continue;
+                    )));
                 }
                 let val_str = extract_value(path, "hub", k, v)?;
                 if let Some(val) = val_str {
@@ -547,11 +553,10 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
             };
             for (k, v) in subtable {
                 if !CLIENT_KEYS.contains(&k.as_str()) {
-                    eprintln!(
-                        "agent-hub: {}: unknown key '{k}' under '[client]'",
+                    return Err(Error::Config(format!(
+                        "{}: unknown key '{k}' under '[client]'",
                         path.display()
-                    );
-                    continue;
+                    )));
                 }
                 let val_str = extract_value(path, "client", k, v)?;
                 if let Some(val) = val_str {
@@ -601,6 +606,8 @@ fn extract_value(
             "active_window_secs"
             | "inbox_action_per_agent"
             | "inbox_action_per_project"
+            | "enrol_pending_max"
+            | "enrol_pending_ttl_secs"
             | "tailnet_port",
         ) => match value {
             toml::Value::Integer(i) => Ok(Some(i.to_string())),
@@ -781,6 +788,8 @@ fn migrate_legacy_config(old_path: &Path, new_path: &Path) -> Result<()> {
                 "active_window_secs"
                     | "inbox_action_per_agent"
                     | "inbox_action_per_project"
+                    | "enrol_pending_max"
+                    | "enrol_pending_ttl_secs"
                     | "tailnet_port"
             ) && let Ok(num) = v.parse::<i64>()
             {
@@ -918,6 +927,22 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             Some("1000"),
             false,
         ),
+        ("hub", "enrol", "HUB_ENROL", Some("on"), false),
+        (
+            "hub",
+            "enrol_pending_max",
+            "HUB_ENROL_PENDING_MAX",
+            Some("20"),
+            false,
+        ),
+        (
+            "hub",
+            "enrol_pending_ttl_secs",
+            "HUB_ENROL_PENDING_TTL_SECS",
+            Some("86400"),
+            false,
+        ),
+        ("hub", "trust_proxy", "HUB_TRUST_PROXY", None, false),
         ("hub", "tailnet", "HUB_TAILNET", None, true),
         (
             "hub",
