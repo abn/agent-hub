@@ -88,11 +88,14 @@ and records a `deleted` event. The public page serves `?version=N` the same
 way.
 
 The two probes differ on purpose. `GET /healthz` is liveness: the process is
-up. `GET /readyz` is readiness: it queries the engine for its schema version
-and answers `200` with that version only when the store replies and is at the
-version the process opened. Otherwise it is a `503` problem, so an orchestrator
-takes the node out of rotation instead of holding it there while every call
-fails.
+up. `GET /readyz` is readiness, and it answers `200` only when the store is
+usable: the store's schema version is read, is not newer than the most this
+binary supports (`supported_max`), and matches the version the process opened;
+the data directory and `hub.db` still have the device and inode identity
+captured at open, so a removed or replaced store is caught; a cheap content
+read confirms the file is still a hub store; and the volume has free space above
+a safety margin. Any leg failing is a `503` problem, so an orchestrator takes the
+node out of rotation instead of holding it there while every call fails.
 
 The REST API is the operator's control surface. The destructive and privileged
 verbs on it, prune and undo, agent and token administration, grants, deleting a

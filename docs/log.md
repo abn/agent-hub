@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-10-02
 
+### Backup, restore and honest readiness
+
+* **Add**: [Operations](usage/operations.md) is the runbook for backup, verify,
+  restore, upgrade and roll back, and it is linked from the usage index.
+* **Update**: [Human surface](architecture/human-surface.md) states the readiness
+  probe's real legs (supported version, store identity, content, free space)
+  rather than the single version query it used to describe.
+
+
 ### Log headings are OKF-conformant
 
 * **Update**: `docs/log.md` gives each date a bare `YYYY-MM-DD` heading with the entry title as a subheading, so the bundle passes the OKF validator's `okf/reserved/log-date-heading` rule as well as the repository check.
