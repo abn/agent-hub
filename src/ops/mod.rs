@@ -1,4 +1,4 @@
-//! Offline data-lifecycle commands: backup, restore, and check.
+//! Offline data-lifecycle commands: backup, restore, check, and doctor.
 //!
 //! These commands run against the store on disk while no hub serves it. A
 //! running hub holds the engine's exclusive file lock, so every command here
@@ -15,6 +15,7 @@
 
 pub mod backup;
 pub mod check;
+pub mod doctor;
 pub mod manifest;
 pub mod restore;
 
@@ -22,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 pub use backup::{BackupReport, backup};
 pub use check::{CheckReport, check};
+pub use doctor::{DoctorReport, doctor};
 pub use manifest::{Entry, Manifest};
 pub use restore::{RestoreReport, restore};
 

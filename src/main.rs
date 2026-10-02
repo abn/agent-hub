@@ -16,6 +16,7 @@ usage:
   agent-hub backup --out DIR     back up the store while no hub serves it
   agent-hub restore --from DIR   restore the store from a backup
   agent-hub check                check store integrity, and any manifest present
+  agent-hub doctor [--data-dir DIR] report the store's health and identity
   agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 
 The hub is configured by config.toml and environment variables.
@@ -67,6 +68,18 @@ the URL already names it. Plain HTTP only, for a container health check with no
 shell to curl from.
 ";
 
+const DOCTOR_USAGE: &str = "\
+usage:
+  agent-hub doctor [--data-dir DIR]
+
+Report whether the store under the data directory is healthy: the applied
+schema version against what this binary supports, the data directory's device
+and inode, free space on its volume, the write-ahead log size, the persisted id
+high-water mark, and the engine's integrity check with any artifact blob the
+store names but the tree is missing. Exits non-zero on any failure, and refuses
+while a hub holds the store.
+";
+
 #[cfg(feature = "client")]
 const KB_USAGE: &str = "\
 usage:
@@ -111,6 +124,7 @@ fn main() -> ExitCode {
         Some("backup") => backup_cmd(&args[1..]),
         Some("restore") => restore_cmd(&args[1..]),
         Some("check") => check_cmd(&args[1..]),
+        Some("doctor") => doctor_cmd(&args[1..]),
         Some("health") => health_cmd(&args[1..]),
         Some("help" | "--help" | "-h") => {
             print!("{USAGE}");
@@ -198,6 +212,31 @@ fn ops_value(
     args.next()
         .map(String::to_string)
         .ok_or_else(|| format!("{flag} needs a value"))
+}
+
+/// The one flag `doctor` takes.
+#[derive(Default)]
+struct DoctorOptions {
+    data_dir: Option<String>,
+}
+
+impl DoctorOptions {
+    /// Parse the closed option list: only `--data-dir` is doctor's, so a flag
+    /// another offline command takes is refused rather than ignored.
+    fn parse(args: &[String], usage: &str) -> std::result::Result<Self, String> {
+        let mut options = Self::default();
+        let mut args = args.iter();
+        while let Some(argument) = args.next() {
+            match argument.as_str() {
+                "--data-dir" => options.data_dir = Some(ops_value(&mut args, "--data-dir")?),
+                flag @ ("--out" | "--from" | "--force") => {
+                    return Err(format!("doctor takes only --data-dir, not {flag}\n{usage}"));
+                }
+                other => return Err(format!("unknown option '{other}'\n{usage}")),
+            }
+        }
+        Ok(options)
+    }
 }
 
 /// The data directory the command acts on: the flag, or the configured one.
@@ -336,6 +375,75 @@ fn check_cmd(args: &[String]) -> ExitCode {
     };
     match runtime.block_on(agent_hub::ops::check(&data_dir)) {
         Ok(report) => {
+            for problem in &report.problems {
+                eprintln!("agent-hub: {problem}");
+            }
+            if report.is_ok() {
+                println!("checked {} engine files, no problems", report.checked);
+                ExitCode::SUCCESS
+            } else {
+                println!(
+                    "checked {} engine files, {} problems",
+                    report.checked,
+                    report.problems.len()
+                );
+                ExitCode::FAILURE
+            }
+        }
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Report whether the store under the data directory is healthy.
+fn doctor_cmd(args: &[String]) -> ExitCode {
+    let options = match DoctorOptions::parse(args, DOCTOR_USAGE) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("agent-hub doctor: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let data_dir = match ops_data_dir(options.data_dir) {
+        Ok(data_dir) => data_dir,
+        Err(message) => {
+            eprintln!("agent-hub: {message}");
+            return ExitCode::from(78);
+        }
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(agent_hub::ops::doctor(&data_dir)) {
+        Ok(report) => {
+            println!("data directory: {}", report.data_dir.display());
+            println!("identity: {}", report.identity);
+            if report.newer_than_binary {
+                println!(
+                    "schema: {} (binary supports up to {}; the store is newer)",
+                    report.schema_version, report.supported_max
+                );
+            } else {
+                println!(
+                    "schema: {} (binary supports up to {})",
+                    report.schema_version, report.supported_max
+                );
+            }
+            match report.free_bytes {
+                Some(bytes) => println!("free space: {bytes} bytes"),
+                None => println!("free space: unknown"),
+            }
+            println!("write-ahead log: {} bytes", report.wal_bytes);
+            match report.id_high_water {
+                Some(mark) => println!("id high-water mark: {mark}"),
+                None => println!("id high-water mark: none"),
+            }
             for problem in &report.problems {
                 eprintln!("agent-hub: {problem}");
             }
