@@ -976,6 +976,16 @@ pub fn print_config(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// The real user config path to name when a client has no hub URL. The file is
+/// the one enrolment writes and the one reads, so the message points at the
+/// path the operator actually has.
+pub fn client_config_hint(env: &dyn Fn(&str) -> Option<String>) -> String {
+    match user_config_target(env) {
+        Some(path) => format_path_display(&path, present(env("HOME")).as_deref()),
+        None => "config.toml".to_string(),
+    }
+}
+
 /// Print the configuration files that would be read, found or not.
 pub fn print_config_paths(env: &dyn Fn(&str) -> Option<String>) {
     let (hub_config, system_path, user_candidates) = resolve_paths(env);
@@ -1099,6 +1109,20 @@ pub fn user_config_target(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBu
 /// stores the token it is given here, and nothing else opens the file for
 /// writing.
 pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
+    write_client_pair(path, &[("token", token)])
+}
+
+/// Write or update the `[client]` settings in `path`, at file mode 0600.
+///
+/// Enrolment persists both `url` and `token` through here, so the next command
+/// reaches the hub without the operator setting anything again. Keys are
+/// trimmed, a URL keeps no trailing slash, and every other line in the file is
+/// left exactly as it was.
+pub fn write_client_config(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<()> {
+    write_client_pair(path, settings)
+}
+
+fn write_client_pair(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1109,7 +1133,7 @@ pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
         String::new()
     };
 
-    let updated = update_client_toml(&existing, token);
+    let updated = update_client_toml_settings(&existing, settings);
 
     // Write beside the target at 0600 and rename it into place: the token is
     // then never in a file with broader permissions, and never half-written.
@@ -1149,37 +1173,84 @@ pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
 }
 
 /// Replace the token in the `[client]` table, or add the table and the key.
+#[cfg(test)]
 fn update_client_toml(content: &str, token: &str) -> String {
+    update_client_toml_settings(content, &[("token", token)])
+}
+
+/// Replace the named keys in the `[client]` table, or add the table and the
+/// keys.
+///
+/// A key already present is rewritten in place so the file reads the same
+/// order it did; a key that is not present is inserted beside its neighbors. No
+/// key is ever appended twice, and lines outside the `[client]` table are
+/// untouched.
+fn update_client_toml_settings(content: &str, settings: &[(&str, &str)]) -> String {
+    let settings: Vec<(&str, String)> = settings
+        .iter()
+        .map(|(key, value)| {
+            // A URL is the one value where a trailing slash changes what the
+            // next command joins onto, so it is written without one.
+            let clean = if *key == "url" {
+                value.trim().trim_end_matches('/').to_string()
+            } else {
+                value.trim().to_string()
+            };
+            (*key, clean)
+        })
+        .collect();
+
     let mut lines: Vec<String> = content.lines().map(String::from).collect();
-    let mut client_section_idx = None;
-    let mut next_section_idx = None;
 
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            let section_name = trimmed[1..trimmed.len() - 1].trim();
-            if section_name == "client" {
-                client_section_idx = Some(i);
-            } else if client_section_idx.is_some() && next_section_idx.is_none() {
-                next_section_idx = Some(i);
-            }
-        }
-    }
-
-    if let Some(c_idx) = client_section_idx {
-        let end_idx = next_section_idx.unwrap_or(lines.len());
-        let mut token_line_idx = None;
-        for (i, line) in lines.iter().enumerate().take(end_idx).skip(c_idx + 1) {
+    // The `[client]` table's bounds, read fresh from the current lines so an
+    // insertion in one pass cannot leave a later key looking at a stale range.
+    let client_bounds = |lines: &[String]| -> Option<(usize, usize)> {
+        let mut start = None;
+        let mut end = None;
+        for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            if trimmed.split_once('=').map(|(k, _)| k.trim()) == Some("token") {
-                token_line_idx = Some(i);
-                break;
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                let section_name = trimmed[1..trimmed.len() - 1].trim();
+                if section_name == "client" {
+                    start = Some(i);
+                } else if start.is_some() && end.is_none() {
+                    end = Some(i);
+                }
             }
         }
-        if let Some(t_idx) = token_line_idx {
-            lines[t_idx] = format!("token = \"{token}\"");
-        } else {
-            lines.insert(c_idx + 1, format!("token = \"{token}\""));
+        start.map(|start| (start, end.unwrap_or(lines.len())))
+    };
+
+    if client_bounds(&lines).is_some() {
+        for (key, value) in &settings {
+            let (c_idx, end_idx) = client_bounds(&lines).expect("the client table exists");
+            let mut key_line_idx = None;
+            for (i, line) in lines.iter().enumerate().take(end_idx).skip(c_idx + 1) {
+                let trimmed = line.trim();
+                if trimmed.split_once('=').map(|(k, _)| k.trim()) == Some(*key) {
+                    key_line_idx = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = key_line_idx {
+                lines[idx] = format!("{key} = \"{value}\"");
+            } else {
+                // Insert after the table header and any keys the file already
+                // carried, so a re-run keeps the table contiguous.
+                let insert_at = lines
+                    .iter()
+                    .enumerate()
+                    .take(end_idx)
+                    .skip(c_idx + 1)
+                    .filter(|(_, line)| {
+                        let trimmed = line.trim();
+                        !trimmed.is_empty() && !trimmed.starts_with('#')
+                    })
+                    .map(|(i, _)| i + 1)
+                    .next_back()
+                    .unwrap_or(c_idx + 1);
+                lines.insert(insert_at, format!("{key} = \"{value}\""));
+            }
         }
         let mut out = lines.join("\n");
         if content.ends_with('\n') {
@@ -1194,7 +1265,10 @@ fn update_client_toml(content: &str, token: &str) -> String {
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(&format!("[client]\ntoken = \"{token}\"\n"));
+        out.push_str("[client]\n");
+        for (key, value) in &settings {
+            out.push_str(&format!("{key} = \"{value}\"\n"));
+        }
         out
     }
 }
@@ -1251,7 +1325,7 @@ pub fn private_file(path: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod token_tests {
-    use super::update_client_toml;
+    use super::{update_client_toml, update_client_toml_settings};
 
     #[test]
     fn toml_insertion_on_empty() {
@@ -1265,7 +1339,7 @@ mod token_tests {
         let updated = update_client_toml(existing, "secret");
         assert_eq!(
             updated,
-            "[client]\ntoken = \"secret\"\nurl = \"http://hub:4000\"\n"
+            "[client]\nurl = \"http://hub:4000\"\ntoken = \"secret\"\n"
         );
     }
 
@@ -1274,6 +1348,55 @@ mod token_tests {
         let existing = "[client]\ntoken = \"old\"\n";
         let updated = update_client_toml(existing, "secret");
         assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
+    }
+
+    #[test]
+    fn toml_url_and_token_written_beside_each_other() {
+        let updated =
+            update_client_toml_settings("", &[("url", "http://hub:4000/"), ("token", "secret")]);
+        assert_eq!(
+            updated,
+            "[client]\nurl = \"http://hub:4000\"\ntoken = \"secret\"\n"
+        );
+    }
+
+    #[test]
+    fn toml_url_is_trimmed_and_keeps_other_keys() {
+        let existing =
+            "[client]\nagent_id = \"me\"\nurl = \"http://old/\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n";
+        let updated = update_client_toml_settings(
+            existing,
+            &[("url", "  http://new:9/  "), ("token", " t ")],
+        );
+        assert_eq!(
+            updated,
+            "[client]\nagent_id = \"me\"\nurl = \"http://new:9\"\ntoken = \"t\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n"
+        );
+        assert!(!updated.contains("http://old/"));
+    }
+
+    #[test]
+    fn toml_repeat_write_does_not_duplicate_keys() {
+        let once =
+            update_client_toml_settings("", &[("url", "http://hub:4000"), ("token", "secret")]);
+        let twice =
+            update_client_toml_settings(&once, &[("url", "http://hub:4000"), ("token", "secret")]);
+        assert_eq!(once, twice);
+        assert_eq!(twice.matches("url =").count(), 1);
+        assert_eq!(twice.matches("token =").count(), 1);
+    }
+
+    #[test]
+    fn toml_url_and_token_inserted_inside_an_existing_client_table() {
+        let existing = "[client]\nagent_id = \"me\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n";
+        let updated =
+            update_client_toml_settings(existing, &[("url", "http://hub:9"), ("token", "secret")]);
+        // Both keys land after the key already in the table and before the
+        // next table, so no key leaks into `[hub]`.
+        assert_eq!(
+            updated,
+            "[client]\nagent_id = \"me\"\nurl = \"http://hub:9\"\ntoken = \"secret\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n"
+        );
     }
 }
 

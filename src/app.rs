@@ -267,7 +267,21 @@ pub async fn run(config: Config) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(bind).await?;
     // The address the listener got, which is not the configured one when the
     // operator asked for port 0.
-    tracing::info!(bind = %listener.local_addr()?, schema_version, "hub listening");
+    let address = listener.local_addr()?;
+    tracing::info!(bind = %address, schema_version, "hub listening");
+
+    // One line unconditionally, at whatever log level, so an operator who set
+    // nothing still sees the hub start and can read the address a port-0 bind
+    // was actually given.
+    let admin = if state.config.admin_token.is_some() {
+        "admin token configured"
+    } else {
+        "no admin token; the control surface will reject every request"
+    };
+    eprintln!(
+        "agent-hub serve: listening on http://{address}, data dir {}, {admin}",
+        state.config.data_dir.display()
+    );
 
     axum::serve(
         listener,

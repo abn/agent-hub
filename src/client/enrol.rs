@@ -19,8 +19,26 @@ pub struct EnrolOptions {
     pub force: bool,
 }
 
+/// What `agent-hub enrol` takes on its command line.
+const ENROL_USAGE: &str = "\
+usage:
+  agent-hub enrol [why]           request enrolment and wait for operator approval
+
+  --name <name>     the display name to register, defaulting to the agent id
+  --id <id>         the suggested agent id, defaulting to a slug of the name
+  --url <url>       the hub to enrol with, overriding HUB_URL
+  --why <why>       a one-line reason for the operator, at most 200 characters
+  --force           enrol again even when a token is already configured
+
+A successful enrolment saves the hub url and the token to the client config,
+so the next command reaches the hub with no environment set.";
+
 impl EnrolOptions {
     pub fn parse(args: &[String]) -> Result<Self, String> {
+        if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+            println!("{ENROL_USAGE}");
+            std::process::exit(0);
+        }
         let mut options = Self::default();
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
@@ -85,9 +103,10 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
         .as_deref()
         .or(config.url.as_deref())
         .ok_or_else(|| {
-            Failure::Config(
-                "no hub URL configured; set HUB_URL or write it to ~/.agent-hub/config".to_string(),
-            )
+            Failure::Config(format!(
+                "no hub URL configured; set HUB_URL or write [client] url to {}",
+                crate::config::client_config_hint(&|key| std::env::var(key).ok())
+            ))
         })?
         .trim_end_matches('/');
 
@@ -223,23 +242,46 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
 
             println!("Enrolment approved for agent '{final_agent_id}'.");
 
-            if share {
-                if let Some(config_path) = user_config_target() {
-                    if let Err(err) = write_client_token(&config_path, &token) {
-                        eprintln!(
-                            "agent-hub enrol: warning: could not write token to {}: {err}",
-                            config_path.display()
-                        );
-                        println!("Token: {token}");
-                    } else {
-                        println!("Token saved to {}.", config_path.display());
-                    }
-                } else {
-                    println!("Token: {token}");
+            // The token is shown once and only the hash is stored, so a client
+            // that leaves here without it has no way back. When the operator
+            // approved with sharing on, the client collects it and writes both
+            // the token and the url, so the next command needs no environment.
+            let saved = if share {
+                match user_config_target() {
+                    Some(config_path) => match write_client_config(&config_path, url, &token) {
+                        Ok(()) => {
+                            println!(
+                                "Token saved to {}, with the hub url.",
+                                config_path.display()
+                            );
+                            true
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "agent-hub enrol: warning: could not write token to {}: {err}",
+                                config_path.display()
+                            );
+                            false
+                        }
+                    },
+                    None => false,
                 }
             } else {
+                false
+            };
+
+            if !saved {
                 println!("Token: {token}");
             }
+
+            // Say what will now work, whether the token was saved or the
+            // operator has to wire it up themselves.
+            let prefix = if saved {
+                "The next command works with no environment set:"
+            } else {
+                "Set HUB_URL and HUB_TOKEN, then the next command works:"
+            };
+            println!("{prefix} agent-hub call whoami");
 
             return Ok(());
         }
@@ -257,6 +299,12 @@ pub fn user_config_target() -> Option<PathBuf> {
 /// Persist the issued token through the config module, which owns the file.
 pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
     crate::config::write_client_token(path, token)
+}
+
+/// Persist the hub url and token through the config module, which owns the
+/// file, so one successful enrolment configures the next command.
+pub fn write_client_config(path: &Path, url: &str, token: &str) -> std::io::Result<()> {
+    crate::config::write_client_config(path, &[("url", url), ("token", token)])
 }
 
 #[cfg(test)]
