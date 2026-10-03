@@ -34,9 +34,10 @@ usage:
   agent-hub backup --out DIR [--data-dir DIR]
 
 Copy the store offline: the hub database, every session brain and project
-knowledge file through the engine, and every artifact blob verbatim, with a
-manifest.json of each file's size and sha256. A running hub holds the engine
-lock, so stop it first, or snapshot the volume.
+knowledge file through the engine, every artifact blob verbatim, and the
+embedded tailnet's key state, with a manifest.json of each file's size and
+sha256. A running hub holds the engine lock, so stop it first, or snapshot the
+volume.
 ";
 
 const RESTORE_USAGE: &str = "\
@@ -104,8 +105,11 @@ fn main() -> ExitCode {
     // a failure (a failed sweep, a dropped tailnet, a failed checkpoint); the
     // other subcommands stay quiet unless RUST_LOG says otherwise, and every
     // log goes to stderr so the stdio MCP transport keeps stdout protocol-clean.
+    // The engine's own error level is included: a storage failure (a full disk,
+    // a bad page) is logged inside `turso_core`, and `agent_hub=info` alone
+    // would leave an unattended hub silent about the one fault it is failing on.
     let default_filter = match args.first().map(String::as_str) {
-        None | Some("serve") => "agent_hub=info",
+        None | Some("serve") => "agent_hub=info,turso_core=error",
         _ => "error",
     };
     let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| default_filter.to_string());
@@ -240,12 +244,15 @@ impl DoctorOptions {
 }
 
 /// The data directory the command acts on: the flag, or the configured one.
+///
+/// Only `data_dir` is resolved here, not the whole serve configuration: an
+/// offline command is a store-only operation, so it must not require the admin
+/// token a non-loopback serve needs. `agent-hub backup --out DIR` without
+/// `--data-dir` works on a host whose bind is not loopback.
 fn ops_data_dir(explicit: Option<String>) -> std::result::Result<PathBuf, String> {
     match explicit {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Config::from_env()
-            .map(|config| config.data_dir)
-            .map_err(|err| err.to_string()),
+        None => Config::data_dir_from_env().map_err(|err| err.to_string()),
     }
 }
 
@@ -611,10 +618,6 @@ fn embedded() -> Result<()> {
 /// Bridge stdio to the hub the settings name.
 #[cfg(feature = "client")]
 fn proxy(client: ClientConfig) -> ExitCode {
-    eprintln!(
-        "agent-hub mcp: proxying stdio to {}, as the agent the token resolves to",
-        client.url.as_deref().unwrap_or_default()
-    );
     let runtime = match runtime() {
         Ok(runtime) => runtime,
         Err(err) => return report(Err(err)),
@@ -651,7 +654,7 @@ fn call(args: &[String]) -> ExitCode {
             "call needs a tool name: agent-hub call <tool> [json]".to_string(),
         ));
     };
-    let arguments = match args.get(1).map(String::as_str) {
+    let mut arguments = match args.get(1).map(String::as_str) {
         None => serde_json::json!({}),
         Some(source) => {
             let text = match source {
@@ -678,6 +681,16 @@ fn call(args: &[String]) -> ExitCode {
         Ok(pair) => pair,
         Err(code) => return code,
     };
+    // A project named in the settings is the default for every call that takes
+    // one, matching `kb`, so a hook sets HUB_PROJECT once rather than repeating
+    // it on each call. A tool that does not take `project_id` ignores the extra
+    // field, and an argument already present wins.
+    if let Some(project) = config.project.as_deref()
+        && arguments.get("project_id").is_none()
+        && let Some(object) = arguments.as_object_mut()
+    {
+        object.insert("project_id".to_string(), serde_json::json!(project));
+    }
     emit(runtime.block_on(agent_hub::client::call(&config, tool, arguments)))
 }
 
@@ -1016,6 +1029,18 @@ fn without_client() -> ExitCode {
 /// The server configuration and the runtime, built in that order.
 fn server_runtime() -> Result<(Config, tokio::runtime::Runtime)> {
     let config = Config::from_env()?;
+
+    // The embedded tailnet is validated here, before the store opens: a key on
+    // a build without the feature, or an enabled endpoint with no admin token,
+    // is a configuration error and must not have the side effect of creating,
+    // migrating and backing up a data directory first. `app::run` reads the
+    // same value again after the store is open; this is the early gate.
+    let tailnet = config.tailnet_from_env()?;
+    if tailnet.enabled() && config.admin_token.is_none() {
+        return Err(Error::Config(
+            "HUB_ADMIN_TOKEN is required when the tailnet endpoint is enabled".to_string(),
+        ));
+    }
 
     // The embedded tailnet sits behind the library's own experimental guard.
     // Opt into it here, before the runtime starts, so enabling the feature is

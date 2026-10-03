@@ -142,6 +142,11 @@ where
 impl IntoResponse for Problem {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        // Every REST failure funnels through here, so one bump counts the whole
+        // surface by code without threading the registry into each handler.
+        if let Some(code) = code_from_wire(self.code) {
+            crate::metrics::record_error(code);
+        }
         let mut response = (status, Json(self)).into_response();
         response.headers_mut().insert(
             header::CONTENT_TYPE,
@@ -163,5 +168,70 @@ pub fn status_for(code: ErrorCode) -> StatusCode {
         ErrorCode::RateLimited => StatusCode::TOO_MANY_REQUESTS,
         ErrorCode::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
         ErrorCode::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+/// The hub error code a wire `code` value names.
+///
+/// A problem body carries the code as the string it was serialised from; the
+/// metrics counter keys on the [`ErrorCode`] itself, so it is read back here.
+/// A value outside the closed set yields nothing and is not counted.
+fn code_from_wire(value: &str) -> Option<ErrorCode> {
+    match value {
+        "invalid_argument" => Some(ErrorCode::InvalidArgument),
+        "unauthenticated" => Some(ErrorCode::Unauthenticated),
+        "forbidden" => Some(ErrorCode::Forbidden),
+        "not_found" => Some(ErrorCode::NotFound),
+        "conflict" => Some(ErrorCode::Conflict),
+        "payload_too_large" => Some(ErrorCode::PayloadTooLarge),
+        "rate_limited" => Some(ErrorCode::RateLimited),
+        "unavailable" => Some(ErrorCode::Unavailable),
+        "internal" => Some(ErrorCode::Internal),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The MCP token gate derives its status from this map, so a store failure
+    /// during token resolution is a 503 a caller retries, not a 401 that reads
+    /// as a bad token.
+    #[test]
+    fn a_store_failure_is_unavailable_not_unauthenticated() {
+        assert_eq!(
+            status_for(ErrorCode::Unavailable),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // A storage failure during token resolution carries `Engine`, whose
+        // code is `Unavailable`: the disk-full case the gate must not call 401.
+        assert_eq!(
+            status_for(Error::Engine(String::new()).code()),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            status_for(ErrorCode::Unauthenticated),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(status_for(ErrorCode::Forbidden), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn every_code_round_trips_through_its_wire_value() {
+        for code in [
+            ErrorCode::InvalidArgument,
+            ErrorCode::Unauthenticated,
+            ErrorCode::Forbidden,
+            ErrorCode::NotFound,
+            ErrorCode::Conflict,
+            ErrorCode::PayloadTooLarge,
+            ErrorCode::RateLimited,
+            ErrorCode::Unavailable,
+            ErrorCode::Internal,
+        ] {
+            assert_eq!(code_from_wire(code.as_str()), Some(code));
+        }
+        assert_eq!(code_from_wire("not_a_code"), None);
     }
 }

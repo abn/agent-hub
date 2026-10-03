@@ -26,12 +26,21 @@ pub async fn metrics(
         .require_admin(bearer_token(&headers).as_deref())
         .map_err(|err| Problem::from_error(&err))?;
 
+    // Counters from the registry, then the storage gauges read fresh for this
+    // scrape: free bytes on the data volume and the store and WAL sizes, so a
+    // time-series system can alert before the readiness margin trips.
+    let mut body = crate::metrics::render();
+    body.push_str(&crate::metrics::render_gauges(
+        &state.data_dir,
+        &state.config.hub_db_path(),
+    ));
+
     Ok((
         [(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        crate::metrics::render(),
+        body,
     )
         .into_response())
 }

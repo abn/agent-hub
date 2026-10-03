@@ -9,7 +9,6 @@ use std::string::String as StdString;
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -103,9 +102,13 @@ impl HubServer {
 
 #[tool_router]
 impl HubServer {
-    #[tool(description = "Report the Agent Hub server version.")]
-    fn version(&self) -> String {
-        format!("agent-hub {}", env!("CARGO_PKG_VERSION"))
+    #[tool(
+        description = "Report the Agent Hub server version. Returns an object with a `version` field, like every other tool."
+    )]
+    fn version(&self) -> CallToolResult {
+        CallToolResult::structured(json!({
+            "version": format!("agent-hub {}", env!("CARGO_PKG_VERSION")),
+        }))
     }
 }
 
@@ -318,17 +321,25 @@ async fn require_bearer(
             request.extensions_mut().insert(principal);
             next.run(request).await
         }
-        Err(err) => (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(json!({
-                "error": {
-                    "code": err.code().as_str(),
-                    "message": err.to_string(),
-                    "retryable": err.retryable(),
-                    "details": {},
-                }
-            })),
-        )
-            .into_response(),
+        // The status follows the error's own code, not a fixed 401: a token
+        // that resolves but whose touch write hits a full disk is a 503 the
+        // caller should retry, and calling it a bad token tells an agent to do
+        // the one wrong thing. The body's code is the same vocabulary, so the
+        // status and the body stay in sync.
+        Err(err) => {
+            crate::metrics::record_error(err.code());
+            (
+                crate::http::problem::status_for(err.code()),
+                axum::Json(json!({
+                    "error": {
+                        "code": err.code().as_str(),
+                        "message": err.to_string(),
+                        "retryable": err.retryable(),
+                        "details": {},
+                    }
+                })),
+            )
+                .into_response()
+        }
     }
 }

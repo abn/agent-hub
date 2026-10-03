@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::error::ErrorCode;
 use crate::store::events::KINDS;
 
 /// The fixed HTTP methods the counter distinguishes. Everything else, including
@@ -32,6 +33,21 @@ const METHODS: [&str; 8] = [
 /// Status classes 1xx through 5xx. The index is the class, so slot 0 is unused
 /// and a class outside 1 to 5 is not a series that can appear.
 const STATUS_CLASSES: usize = 6;
+
+/// Every hub error code, in the order the counter indexes them. A code outside
+/// this closed set cannot be minted, so the family cannot grow with caller
+/// input.
+const ERROR_CODES: [ErrorCode; 9] = [
+    ErrorCode::InvalidArgument,
+    ErrorCode::Unauthenticated,
+    ErrorCode::Forbidden,
+    ErrorCode::NotFound,
+    ErrorCode::Conflict,
+    ErrorCode::PayloadTooLarge,
+    ErrorCode::RateLimited,
+    ErrorCode::Unavailable,
+    ErrorCode::Internal,
+];
 
 /// The number of event kinds the counter distinguishes, matching
 /// [`KINDS`]. A kind the store does not know never reaches the append, and a
@@ -59,6 +75,10 @@ pub struct Metrics {
     http: [[AtomicU64; STATUS_CLASSES]; METHODS.len()],
     /// One slot per kind in [`KINDS`], same order.
     events: [AtomicU64; EVENT_KINDS],
+    /// One slot per code in [`ERROR_CODES`], same order. Every failed response
+    /// the HTTP and MCP layers answer is counted here, so a failing family
+    /// (storage `unavailable` above all) is visible on a scrape.
+    errors: [AtomicU64; ERROR_CODES.len()],
     /// Tool name to count. Bounded by [`TOOL_LABELS_MAX`].
     tools: Mutex<HashMap<String, u64>>,
 }
@@ -69,6 +89,7 @@ impl Metrics {
         Self {
             http: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
             events: std::array::from_fn(|_| AtomicU64::new(0)),
+            errors: std::array::from_fn(|_| AtomicU64::new(0)),
             tools: Mutex::new(HashMap::new()),
         }
     }
@@ -81,6 +102,14 @@ impl Metrics {
             return;
         }
         self.http[m][class].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Count one failed response by its hub error code. The code is a closed
+    /// set, so the family stays bounded.
+    pub fn record_error(&self, code: ErrorCode) {
+        if let Some(slot) = ERROR_CODES.iter().position(|candidate| *candidate == code) {
+            self.errors[slot].fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Count one appended event by kind. A kind outside the store's closed set
@@ -128,6 +157,16 @@ impl Metrics {
             ));
         }
 
+        out.push_str("# HELP agenthub_errors_total Failed responses, by hub error code.\n");
+        out.push_str("# TYPE agenthub_errors_total counter\n");
+        for (index, code) in ERROR_CODES.iter().enumerate() {
+            let value = self.errors[index].load(Ordering::Relaxed);
+            out.push_str(&format!(
+                "agenthub_errors_total{{code=\"{}\"}} {value}\n",
+                code.as_str()
+            ));
+        }
+
         out.push_str("# HELP agenthub_tool_calls_total MCP tool calls served, by tool name.\n");
         out.push_str("# TYPE agenthub_tool_calls_total counter\n");
         let tools = self.tools.lock().unwrap();
@@ -170,6 +209,11 @@ pub fn record_event(kind: &str) {
     global().record_event(kind);
 }
 
+/// Count one failed response in the global registry.
+pub fn record_error(code: ErrorCode) {
+    global().record_error(code);
+}
+
 /// Count one MCP tool call in the global registry.
 pub fn record_tool(tool: &str) {
     global().record_tool(tool);
@@ -178,6 +222,51 @@ pub fn record_tool(tool: &str) {
 /// Render the global registry as Prometheus text.
 pub fn render() -> String {
     global().render()
+}
+
+/// Render the storage gauges for a data directory.
+///
+/// These are point-in-time readings of the volume, not counters, so they are
+/// built fresh per scrape rather than kept in the registry: the free space
+/// changes with every write elsewhere on the volume, and the assessment needs a
+/// syscall. A value that cannot be measured is omitted, never reported as zero.
+pub fn render_gauges(data_dir: &std::path::Path, hub_db: &std::path::Path) -> String {
+    let mut out = String::new();
+
+    if let Some(free) = crate::store::free_space_bytes(data_dir) {
+        out.push_str("# HELP agenthub_data_volume_free_bytes Free bytes on the data volume.\n");
+        out.push_str("# TYPE agenthub_data_volume_free_bytes gauge\n");
+        out.push_str(&format!("agenthub_data_volume_free_bytes {free}\n"));
+    }
+
+    let store_bytes = file_len(hub_db);
+    out.push_str("# HELP agenthub_hub_db_bytes Size of the hub store file in bytes.\n");
+    out.push_str("# TYPE agenthub_hub_db_bytes gauge\n");
+    out.push_str(&format!("agenthub_hub_db_bytes {store_bytes}\n"));
+
+    // The write-ahead log is folded into the database at a clean shutdown and
+    // grows with writes in between; a large value next to a large store is the
+    // approach to a full volume an operator wants to trend.
+    let wal_bytes = file_len(&with_suffix(hub_db, "-wal"));
+    out.push_str(
+        "# HELP agenthub_hub_wal_bytes Size of the hub store's write-ahead log in bytes.\n",
+    );
+    out.push_str("# TYPE agenthub_hub_wal_bytes gauge\n");
+    out.push_str(&format!("agenthub_hub_wal_bytes {wal_bytes}\n"));
+
+    out
+}
+
+/// A file's length, or zero when it is absent.
+fn file_len(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+}
+
+/// A path with a sidecar suffix appended, such as `hub.db-wal`.
+fn with_suffix(path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    std::path::PathBuf::from(name)
 }
 
 /// The slot for an HTTP method, folding anything unknown into `OTHER`.
@@ -223,6 +312,7 @@ mod tests {
         metrics.record_http("post", 5);
         metrics.record_event("signal");
         metrics.record_event("signal");
+        metrics.record_error(ErrorCode::Unavailable);
         metrics.record_tool("whoami");
         metrics.record_tool(UNKNOWN_TOOL);
 
@@ -234,8 +324,25 @@ mod tests {
             text.contains("agenthub_http_requests_total{method=\"POST\",status_class=\"5xx\"} 1")
         );
         assert!(text.contains("agenthub_events_total{kind=\"signal\"} 2"));
+        assert!(text.contains("agenthub_errors_total{code=\"unavailable\"} 1"));
         assert!(text.contains("agenthub_tool_calls_total{tool=\"whoami\"} 1"));
         assert!(text.contains("agenthub_tool_calls_total{tool=\"<unknown>\"} 1"));
+    }
+
+    #[test]
+    fn every_error_code_has_a_series() {
+        let metrics = Metrics::new();
+        let text = metrics.render();
+        for code in ERROR_CODES {
+            assert!(
+                text.contains(&format!(
+                    "agenthub_errors_total{{code=\"{}\"}}",
+                    code.as_str()
+                )),
+                "{} is rendered",
+                code.as_str()
+            );
+        }
     }
 
     #[test]
