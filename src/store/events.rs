@@ -510,6 +510,121 @@ pub(crate) async fn forget_cursor_in_tx(
     Ok(())
 }
 
+/// An agent's own read position in one project's feed.
+///
+/// This is the durable, server-side cursor `feed_read` falls back to when the
+/// caller sends no `since`: the agent records no cursor itself and a restarted
+/// agent resumes where it stopped. The key is the resolved actor, the stable
+/// label on `events.actor` and `sessions.agent`, not the token.
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentSeen {
+    pub project_id: String,
+    pub agent: String,
+    /// The newest event this agent has read, absent until it has read a page.
+    pub last_seen: Option<String>,
+    /// Whether this call moved the cursor.
+    pub advanced: bool,
+}
+
+/// The last event id one agent has read in one project.
+pub async fn agent_cursor(db: &Database, project_id: &str, agent: &str) -> Result<Option<String>> {
+    let conn = super::connect(db)?;
+    agent_cursor_on(&conn, project_id, agent).await
+}
+
+async fn agent_cursor_on(
+    conn: &Connection,
+    project_id: &str,
+    agent: &str,
+) -> Result<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT last_seen_event_id FROM agent_feed_cursors
+             WHERE project_id = ?1 AND agent = ?2",
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(agent.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => text_at(&row, 0),
+        None => Ok(None),
+    }
+}
+
+/// Advance one agent's cursor in one project to an event it has read.
+///
+/// The cursor never moves backwards, and an id that is not an event of this
+/// project is ignored rather than trusted: it says nothing about this feed.
+/// The read and the write share an immediate transaction, so a cursor cannot
+/// step over an event committed between them. An empty id is likewise ignored,
+/// which lets a caller pass the `next_since` of an empty forward poll without
+/// moving the cursor or inserting an empty row.
+pub async fn advance_agent_cursor(
+    db: &Database,
+    project_id: &str,
+    agent: &str,
+    event_id: &str,
+) -> Result<AgentSeen> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let current = agent_cursor_on(&tx, project_id, agent).await?;
+    let belongs = !event_id.is_empty()
+        && get_on(&tx, event_id)
+            .await?
+            .is_some_and(|event| event.project_id == project_id);
+    let forward = belongs && current.as_deref().is_none_or(|seen| event_id > seen);
+    if !forward {
+        return Ok(AgentSeen {
+            project_id: project_id.to_string(),
+            agent: agent.to_string(),
+            last_seen: current,
+            advanced: false,
+        });
+    }
+
+    tx.execute(
+        "INSERT OR REPLACE INTO agent_feed_cursors(project_id, agent, last_seen_event_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(agent.to_string()),
+            Value::Text(event_id.to_string()),
+            Value::Text(crate::store::now_rfc3339()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+
+    Ok(AgentSeen {
+        project_id: project_id.to_string(),
+        agent: agent.to_string(),
+        last_seen: Some(event_id.to_string()),
+        advanced: true,
+    })
+}
+
+/// Forget every agent's cursor for one project inside a caller's transaction,
+/// so a deleted project takes them along with everything else scoped to it.
+pub(crate) async fn forget_agent_cursors_in_tx(
+    tx: &turso::transaction::Transaction<'_>,
+    project_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM agent_feed_cursors WHERE project_id = ?1",
+        vec![Value::Text(project_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
 /// How many events one project holds above its cursor.
 ///
 /// Both bounds are parameters, so the engine seeks into the feed index by

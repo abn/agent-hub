@@ -118,6 +118,7 @@ const TABLES: &[&str] = &[
     "idempotency",
     "search_docs",
     "project_feed_cursors",
+    "agent_feed_cursors",
     "artifact_shares",
     "id_high_water",
 ];
@@ -186,14 +187,12 @@ async fn migrate_creates_schema_and_search_index() {
     drop(idempotency);
 
     // Migration 4 adds display metadata to artifacts and the version
-    // history table.
+    // history table. The favicon column remains from that migration, so it
+    // is still insertable; the artifact surface no longer carries it.
     let mut meta = conn
-        .query(
-            "SELECT description, favicon, label FROM artifacts LIMIT 1",
-            (),
-        )
+        .query("SELECT description, label FROM artifacts LIMIT 1", ())
         .await
-        .expect("artifacts.description, favicon and label exist");
+        .expect("artifacts.description and label exist");
     assert!(meta.next().await.expect("row").is_none());
     drop(meta);
 
@@ -382,15 +381,11 @@ async fn migration_four_backfills_version_history() {
     drop(rows);
 
     let mut meta = conn
-        .query(
-            "SELECT description, favicon FROM artifacts WHERE id = 'art'",
-            (),
-        )
+        .query("SELECT description FROM artifacts WHERE id = 'art'", ())
         .await
         .expect("query metadata");
     let row = meta.next().await.expect("row").expect("artifact row");
     assert_eq!(row.get::<String>(0).expect("description"), "");
-    assert_eq!(row.get::<String>(1).expect("favicon"), "");
 
     drop(meta);
     drop(conn);
@@ -1420,6 +1415,83 @@ async fn migration_nineteen_adds_the_id_high_water_row() {
         rows.next().await.expect("row").is_none(),
         "exactly one row is seeded"
     );
+
+    drop(rows);
+    drop(conn);
+    drop(db);
+}
+
+#[tokio::test]
+async fn migration_twenty_adds_the_agent_feed_cursor_table() {
+    let dir = TempDir::new("store-schema-v20");
+    let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
+    let conn = db.connect().expect("connect");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+        (),
+    )
+    .await
+    .expect("schema_version table");
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 20) {
+        conn.execute_batch(migration.ddl)
+            .await
+            .expect("apply migration");
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            [migration.version],
+        )
+        .await
+        .expect("record version");
+    }
+
+    let version = migrate(&db).await.expect("migrate");
+    assert_eq!(version, latest());
+
+    // The table is keyed by project and the resolved actor, so two agents in
+    // one project hold separate cursors and one agent holds a cursor per
+    // project.
+    conn.execute(
+        "INSERT INTO agent_feed_cursors(project_id, agent, last_seen_event_id, updated_at)
+         VALUES ('p1', 'agent-a', 'e1', '2020-01-01T00:00:00Z'),
+                ('p1', 'agent-b', 'e2', '2020-01-01T00:00:00Z'),
+                ('p2', 'agent-a', 'e3', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("insert cursors");
+
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM agent_feed_cursors WHERE project_id = 'p1'",
+            (),
+        )
+        .await
+        .expect("query cursors");
+    let row = rows.next().await.expect("row").expect("one row");
+    assert_eq!(
+        row.get::<i64>(0).expect("count"),
+        2,
+        "two agents keep one cursor each in one project"
+    );
+
+    // A duplicate project and agent replaces the row rather than adding one.
+    conn.execute(
+        "INSERT OR REPLACE INTO agent_feed_cursors(project_id, agent, last_seen_event_id, updated_at)
+         VALUES ('p1', 'agent-a', 'e4', '2020-01-02T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("replace cursor");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM agent_feed_cursors WHERE project_id = 'p1'",
+            (),
+        )
+        .await
+        .expect("query cursors");
+    let row = rows.next().await.expect("row").expect("one row");
+    assert_eq!(row.get::<i64>(0).expect("count"), 2);
 
     drop(rows);
     drop(conn);

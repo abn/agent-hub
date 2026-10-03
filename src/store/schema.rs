@@ -90,6 +90,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 19,
         ddl: V19,
     },
+    Migration {
+        version: 20,
+        ddl: V20,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -524,4 +528,25 @@ CREATE TABLE IF NOT EXISTS id_high_water(
   millis INTEGER NOT NULL
 );
 INSERT OR IGNORE INTO id_high_water(singleton, millis) VALUES (1, 0);
+"#;
+
+/// Version 20: a durable server-side feed cursor per agent and project.
+///
+/// `feed_read` with no `since` reads the caller's cursor here and polls
+/// forward from it, advancing it to the returned `next_since`, so a restarted
+/// agent resumes where it stopped without keeping the cursor itself. The key
+/// is the resolved `principal.actor`, the same stable label `sessions.agent`
+/// and `events.actor` carry, never the token and never the nullable
+/// `agent_id`: an agent's identity is its actor, and a token is a credential
+/// that can be rotated without moving the read position. The reference to
+/// `projects` documents the relation; foreign keys are not enforced in this
+/// schema, so the project delete sweeps the rows rather than the engine.
+const V20: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_feed_cursors(
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  agent TEXT NOT NULL,
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, agent)
+);
 "#;

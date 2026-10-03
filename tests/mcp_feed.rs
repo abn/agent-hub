@@ -336,3 +336,217 @@ fn streamable_http_requires_a_bearer_token() {
         read.raw
     );
 }
+
+/// Seed two active agents and return their tokens, in a data directory that no
+/// process holds yet.
+fn seed_two_agents(data_dir: &Path) -> (String, String) {
+    common::seed::block_on(async {
+        let db = common::store::open(data_dir).await;
+        let first = common::seed::agent_token(&db, "agent-a", "Agent A").await;
+        let second = common::seed::agent_token(&db, "agent-b", "Agent B").await;
+        (first, second)
+    })
+}
+
+/// Open an MCP session over the hub's streamable HTTP transport with a token.
+fn mcp_session(port: u16, token: &str) -> String {
+    let response = http_post(
+        port,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "mcp-feed-cursor", "version": "0.0.0"},
+            },
+        })
+        .to_string(),
+        Some(token),
+        None,
+    );
+    assert_eq!(
+        response.status, 200,
+        "initialize with an agent token: {}",
+        response.raw
+    );
+    let session = response
+        .header("mcp-session-id")
+        .expect("initialize assigns a session id");
+    http_post(
+        port,
+        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
+        Some(token),
+        Some(&session),
+    );
+    session
+}
+
+/// Call a tool over the hub's MCP transport and return the structured result.
+fn tool_call(
+    port: u16,
+    token: &str,
+    session: &str,
+    name: &str,
+    arguments: serde_json::Value,
+) -> serde_json::Value {
+    let response = http_post(
+        port,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        })
+        .to_string(),
+        Some(token),
+        Some(session),
+    );
+    assert_eq!(response.status, 200, "{name}: {}", response.raw);
+    structured(&response.message()).clone()
+}
+
+/// Append an event directly, before the hub over the directory is started.
+fn seed_event(data_dir: &Path, project_id: &str, summary: &str) -> String {
+    common::seed::block_on(async {
+        let db = common::store::open(data_dir).await;
+        agent_hub::store::events::append(
+            &db,
+            0,
+            "seeder",
+            None,
+            agent_hub::store::events::NewEvent {
+                project_id: project_id.to_string(),
+                kind: "signal".to_string(),
+                summary: summary.to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("seed event")
+    })
+}
+
+#[test]
+fn feed_read_without_since_advances_a_per_agent_project_cursor() {
+    let data_dir = TempDir::new("feed-cursor");
+    common::seed::seed_project(data_dir.path(), "p1");
+    common::seed::seed_project(data_dir.path(), "p2");
+    let first_p1 = seed_event(data_dir.path(), "p1", "p1 first");
+    let second_p1 = seed_event(data_dir.path(), "p1", "p1 second");
+    let only_p2 = seed_event(data_dir.path(), "p2", "p2 only");
+    let (token_a, token_b) = seed_two_agents(data_dir.path());
+    let (_child, port) = serve(data_dir.path());
+
+    let session_a = mcp_session(port, &token_a);
+    // A first read with no `since` has no cursor to start from: it returns the
+    // newest page and records where it got to.
+    let first = tool_call(
+        port,
+        &token_a,
+        &session_a,
+        "feed_read",
+        json!({"project_id": "p1"}),
+    );
+    let events = first["events"].as_array().expect("events");
+    assert_eq!(events.len(), 2, "the first read sees the whole feed");
+    assert_eq!(
+        first["next_since"].as_str(),
+        Some(second_p1.as_str()),
+        "the cursor is the newest event on the page"
+    );
+
+    // A second read with no `since` resumes from the stored cursor: nothing is
+    // new, and it reports the same place rather than starting over.
+    let second = tool_call(
+        port,
+        &token_a,
+        &session_a,
+        "feed_read",
+        json!({"project_id": "p1"}),
+    );
+    assert!(
+        second["events"].as_array().expect("events").is_empty(),
+        "the second poll is past the stored cursor: {second}"
+    );
+    assert_eq!(
+        second["next_since"].as_str(),
+        Some(second_p1.as_str()),
+        "an empty forward poll keeps its place: {second}"
+    );
+    let _ = &first_p1;
+
+    // The cursor is per project: reading p2 starts from p2's own feed, not from
+    // p1's position.
+    let p2 = tool_call(
+        port,
+        &token_a,
+        &session_a,
+        "feed_read",
+        json!({"project_id": "p2"}),
+    );
+    assert_eq!(
+        p2["events"].as_array().expect("events").len(),
+        1,
+        "p2 has its own cursor: {p2}"
+    );
+    assert_eq!(p2["next_since"].as_str(), Some(only_p2.as_str()));
+
+    // A second agent starts fresh: agent A's cursor in p1 does not hide the
+    // feed from agent B.
+    let session_b = mcp_session(port, &token_b);
+    let agent_b = tool_call(
+        port,
+        &token_b,
+        &session_b,
+        "feed_read",
+        json!({"project_id": "p1"}),
+    );
+    assert_eq!(
+        agent_b["events"].as_array().expect("events").len(),
+        2,
+        "a second agent has its own cursor: {agent_b}"
+    );
+
+    // An explicit `since` wins over the stored cursor and is honoured as given.
+    let explicit = tool_call(
+        port,
+        &token_b,
+        &session_b,
+        "feed_read",
+        json!({"project_id": "p1", "since": first_p1}),
+    );
+    let events = explicit["events"].as_array().expect("events");
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["summary"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["p1 second"],
+        "an explicit since is honoured rather than the stored cursor: {explicit}"
+    );
+    assert_eq!(
+        explicit["next_since"].as_str(),
+        Some(second_p1.as_str()),
+        "an explicit read also records progress"
+    );
+
+    // Agent B's cursor moved to the explicit page's end, so a follow-up poll
+    // resumes from there.
+    let follow_up = tool_call(
+        port,
+        &token_b,
+        &session_b,
+        "feed_read",
+        json!({"project_id": "p1"}),
+    );
+    assert!(
+        follow_up["events"].as_array().expect("events").is_empty(),
+        "the explicit read advanced agent B's cursor: {follow_up}"
+    );
+    assert_eq!(follow_up["next_since"].as_str(), Some(second_p1.as_str()));
+}

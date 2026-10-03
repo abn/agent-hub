@@ -695,3 +695,97 @@ async fn a_replayed_write_is_returned_before_its_thread_is_checked() {
         .expect("a replay is not validated again");
     assert_eq!(first_ans, third);
 }
+
+#[tokio::test]
+async fn agent_cursor_reads_and_advances_per_project_and_agent() {
+    let db = open().await;
+    let _ = agent_hub::store::projects::create(&db, "other", "Other Project").await;
+
+    let first = append(&db, 0, "agent-one", None, event("one"))
+        .await
+        .expect("one");
+    let second = append(&db, 0, "agent-one", None, event("two"))
+        .await
+        .expect("two");
+
+    // A fresh agent has no cursor in either project.
+    assert_eq!(
+        events::agent_cursor(&db, "proj", "agent-one")
+            .await
+            .expect("read cursor"),
+        None
+    );
+    assert_eq!(
+        events::agent_cursor(&db, "other", "agent-one")
+            .await
+            .expect("read cursor"),
+        None
+    );
+
+    // Advancing in one project does not move the other, and a second agent
+    // keeps its own position.
+    let seen = events::advance_agent_cursor(&db, "proj", "agent-one", &second)
+        .await
+        .expect("advance");
+    assert!(seen.advanced);
+    assert_eq!(
+        events::agent_cursor(&db, "proj", "agent-one")
+            .await
+            .expect("read cursor"),
+        Some(second.clone())
+    );
+    assert_eq!(
+        events::agent_cursor(&db, "proj", "agent-two")
+            .await
+            .expect("read cursor"),
+        None
+    );
+    assert_eq!(
+        events::agent_cursor(&db, "other", "agent-one")
+            .await
+            .expect("read cursor"),
+        None
+    );
+
+    // A backwards move is refused: the cursor never steps back over an event.
+    let stalled = events::advance_agent_cursor(&db, "proj", "agent-one", &first)
+        .await
+        .expect("advance backwards");
+    assert!(!stalled.advanced);
+    assert_eq!(
+        events::agent_cursor(&db, "proj", "agent-one")
+            .await
+            .expect("read cursor"),
+        Some(second)
+    );
+
+    // An id that is not an event of this project, and an empty id, move
+    // nothing and insert no row.
+    let other = append(
+        &db,
+        0,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "other".to_string(),
+            ..event("elsewhere")
+        },
+    )
+    .await
+    .expect("append elsewhere");
+    let crossed = events::advance_agent_cursor(&db, "proj", "agent-one", &other)
+        .await
+        .expect("advance with a foreign event");
+    assert!(!crossed.advanced);
+    let empty = events::advance_agent_cursor(&db, "proj", "agent-three", "")
+        .await
+        .expect("advance with an empty id");
+    assert!(!empty.advanced);
+    assert_eq!(
+        events::agent_cursor(&db, "proj", "agent-three")
+            .await
+            .expect("read cursor"),
+        None,
+        "an empty id must not create a cursor row"
+    );
+}

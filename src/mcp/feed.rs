@@ -92,7 +92,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read a page of a project feed. Cursors are exclusive event ids: since walks forward, before walks back. A page holds 50 by default and 500 at most. The returned next_since and next_before continue in either direction, and an empty forward poll returns the since it was given so a poll keeps its place."
+        description = "Read a page of a project feed. This is a stateful read: with no `since` the hub reads the caller's own durable server-side cursor for this project and polls forward from it, advancing that cursor to the returned `next_since`, so a restarted agent resumes where it stopped without carrying a cursor itself. An explicit `since` is honoured and also advances the stored cursor to the returned `next_since`, so a targeted read records progress. Cursors are exclusive event ids: since walks forward, before walks back. A page holds 50 by default and 500 at most. The returned next_since and next_before continue in either direction, and an empty forward poll returns the since it was given so a poll keeps its place."
     )]
     async fn feed_read(
         &self,
@@ -113,9 +113,23 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
+        // With no `since` and no `before`, this is a forward poll from the
+        // caller's stored cursor. A missing cursor means the agent has never
+        // read this feed, so the poll starts from nothing and the first page
+        // records where it got to.
+        let since = match (&params.since, &params.before) {
+            (Some(since), _) => Some(since.clone()),
+            (None, None) => {
+                events::agent_cursor(&self.state.db, &params.project_id, &principal.actor)
+                    .await
+                    .map_err(to_error_data)?
+            }
+            (None, Some(_)) => None,
+        };
+
         let session_id = params.session;
         let mut query = FeedQuery {
-            since: params.since,
+            since,
             before: params.before,
             kinds: params.kinds,
             session_id,
@@ -132,6 +146,22 @@ impl HubServer {
         let page = events::read_feed(&self.state.db, &params.project_id, &query)
             .await
             .map_err(to_error_data)?;
+
+        // A page records progress for the agent that read it, whether the
+        // cursor came from storage or was passed explicitly. An empty forward
+        // poll returns the cursor it was given, so advancing to it is a no-op
+        // and the poll keeps its place. A backward read returns no `next_since`
+        // and moves nothing.
+        if let Some(next_since) = &page.next_since {
+            events::advance_agent_cursor(
+                &self.state.db,
+                &params.project_id,
+                &principal.actor,
+                next_since,
+            )
+            .await
+            .map_err(to_error_data)?;
+        }
 
         Ok(CallToolResult::structured(json!({
             "events": page.events,
@@ -165,7 +195,9 @@ struct FeedReadParams {
     #[serde(default)]
     session: Option<String>,
     /// Exclusive cursor: return events newer than this event id, walking
-    /// forward. The returned `next_since` continues from here.
+    /// forward. The returned `next_since` continues from here. When absent,
+    /// the read starts from this agent's stored cursor for the project, so it
+    /// resumes where it stopped; any page returned advances that cursor.
     #[serde(default)]
     since: Option<String>,
     /// Exclusive cursor: return events older than this event id, walking back.
