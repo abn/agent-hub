@@ -24,6 +24,133 @@ fn seed_store(data: &std::path::Path) {
     });
 }
 
+/// Build a store, write real data into several pages, then corrupt one interior
+/// page so a check walks into it. The engine is closed first, because the
+/// corruption is a raw write underneath it.
+///
+/// Returns the page size and offset it corrupted, so the test can name what it
+/// did if the check still passes.
+fn seed_corrupt_store(data: &std::path::Path) -> (u64, u64) {
+    use std::io::{Seek, SeekFrom, Write};
+
+    const PAGE_SIZE: u64 = 4096;
+    std::fs::create_dir_all(data).expect("create the data directory");
+    let path = data.join("hub.db");
+    block_on(async {
+        let db = agent_hub::store::open_engine(&path)
+            .await
+            .expect("open hub store");
+        agent_hub::store::migrate(&db).await.expect("migrate");
+        agent_hub::store::projects::create(&db, "homelab", "Homelab")
+            .await
+            .expect("create project");
+        // A large payload per event pushes the committed image across several
+        // pages, so there is an interior page to damage rather than only page 1.
+        let blob = "x".repeat(64 * 1024);
+        for index in 0..16 {
+            agent_hub::store::events::append(
+                &db,
+                1_000_000,
+                "corrupt-seed",
+                None,
+                agent_hub::store::events::NewEvent {
+                    project_id: "homelab".to_string(),
+                    kind: "signal".to_string(),
+                    summary: format!("filler {index}"),
+                    payload: Some(serde_json::json!({"blob": blob})),
+                    needs_action: false,
+                    thread_id: None,
+                    session_id: None,
+                },
+            )
+            .await
+            .expect("append filler event");
+        }
+        agent_hub::store::checkpoint_hub(&db)
+            .await
+            .expect("checkpoint the seed");
+        drop(db);
+    });
+
+    let meta = std::fs::metadata(&path).expect("store metadata");
+    assert!(
+        meta.len() > PAGE_SIZE * 4,
+        "the store is large enough to damage: {} bytes",
+        meta.len()
+    );
+
+    // Damage the second-to-last page, so the corruption is in real data and not
+    // in a page the engine reads during startup (schema, header, freelist).
+    let offset = (meta.len() / PAGE_SIZE - 2) * PAGE_SIZE + PAGE_SIZE / 2;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .expect("open the store for corruption");
+    file.seek(SeekFrom::Start(offset)).expect("seek");
+    file.write_all(&[0xff; 256]).expect("overwrite a page");
+    file.sync_all().expect("flush the corruption");
+    (PAGE_SIZE, offset)
+}
+
+#[test]
+fn a_corrupt_store_records_a_failing_integrity_sample_without_hanging() {
+    let root = TempDir::new("ops-integrity-corrupt");
+    let data = root.join("data");
+    let (page_size, offset) = seed_corrupt_store(&data);
+
+    // A one-second sample cadence so the test does not wait a real interval.
+    let hub = common::process::HubProcess::serve(
+        &data,
+        "admin-token",
+        &[
+            ("HUB_SWEEP_INTERVAL_SECS", "1"),
+            ("HUB_INTEGRITY_SAMPLE_SECS", "1"),
+        ],
+    );
+    let port = hub.port();
+
+    // The sample either times out or reports a problem; either way it records a
+    // failure. Poll for the gauge to flip to 0, with a hard deadline so a hang
+    // fails the test instead of blocking forever.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut text;
+    loop {
+        text = common::wire::rest(port, "GET", "/metrics", Some("admin-token"), None)
+            .body()
+            .to_string();
+        if text.contains("agenthub_integrity_ok 0") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the corrupt store did not record a failing sample (page_size={page_size}, offset={offset}):\n{text}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    let failures = text
+        .lines()
+        .find(|line| line.starts_with("agenthub_integrity_failures_total "))
+        .expect("the failure counter is rendered");
+    let count: u64 = failures
+        .rsplit(' ')
+        .next()
+        .and_then(|value| value.parse().ok())
+        .expect("a counter value");
+    assert!(count >= 1, "the failure counter moved: {failures}");
+    assert!(
+        text.contains("agenthub_integrity_ok 0"),
+        "the gauge reads fail: {text}"
+    );
+
+    // The hub is still serving after the failing sample.
+    let ready = common::wire::rest(port, "GET", "/healthz", None, None);
+    assert_eq!(ready.status, 200, "the hub keeps serving: {}", ready.raw);
+
+    drop(hub);
+}
+
 #[test]
 fn backup_without_data_dir_ignores_a_non_loopback_bind() {
     let root = TempDir::new("ops-backup-nonloopback");

@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use crate::error::ErrorCode;
 use crate::store::events::KINDS;
@@ -81,6 +81,12 @@ pub struct Metrics {
     errors: [AtomicU64; ERROR_CODES.len()],
     /// Tool name to count. Bounded by [`TOOL_LABELS_MAX`].
     tools: Mutex<HashMap<String, u64>>,
+    /// 1 when the last background integrity sample passed, 0 when it failed.
+    /// Negative means no sample has run yet, so a scrape before the first
+    /// interval does not report a failure the hub never had.
+    integrity_ok: AtomicI64,
+    /// Integrity samples that failed, by timeout or error or a reported issue.
+    integrity_failures: AtomicU64,
 }
 
 impl Metrics {
@@ -91,6 +97,8 @@ impl Metrics {
             events: std::array::from_fn(|_| AtomicU64::new(0)),
             errors: std::array::from_fn(|_| AtomicU64::new(0)),
             tools: Mutex::new(HashMap::new()),
+            integrity_ok: AtomicI64::new(-1),
+            integrity_failures: AtomicU64::new(0),
         }
     }
 
@@ -129,6 +137,15 @@ impl Metrics {
             return;
         }
         *tools.entry(tool.to_string()).or_insert(0) += 1;
+    }
+
+    /// Record one completed background integrity sample. A pass sets the gauge
+    /// to 1; a failure sets it to 0 and moves the failure counter.
+    pub fn record_integrity(&self, ok: bool) {
+        self.integrity_ok.store(i64::from(ok), Ordering::Relaxed);
+        if !ok {
+            self.integrity_failures.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Render every counter as Prometheus text, family by family.
@@ -181,6 +198,27 @@ impl Metrics {
             ));
         }
 
+        // The integrity gauge is 1 or 0 once a sample has run. Before the first
+        // sample the family is omitted rather than read as a failure, so a hub
+        // that just started is not reported as broken.
+        let integrity = self.integrity_ok.load(Ordering::Relaxed);
+        if integrity >= 0 {
+            out.push_str(
+                "# HELP agenthub_integrity_ok Result of the last background store integrity sample: 1 pass, 0 fail.\n",
+            );
+            out.push_str("# TYPE agenthub_integrity_ok gauge\n");
+            out.push_str(&format!("agenthub_integrity_ok {integrity}\n"));
+
+            out.push_str(
+                "# HELP agenthub_integrity_failures_total Background integrity samples that failed.\n",
+            );
+            out.push_str("# TYPE agenthub_integrity_failures_total counter\n");
+            out.push_str(&format!(
+                "agenthub_integrity_failures_total {}\n",
+                self.integrity_failures.load(Ordering::Relaxed)
+            ));
+        }
+
         out
     }
 }
@@ -217,6 +255,11 @@ pub fn record_error(code: ErrorCode) {
 /// Count one MCP tool call in the global registry.
 pub fn record_tool(tool: &str) {
     global().record_tool(tool);
+}
+
+/// Record one completed background integrity sample in the global registry.
+pub fn record_integrity(ok: bool) {
+    global().record_integrity(ok);
 }
 
 /// Render the global registry as Prometheus text.
@@ -361,5 +404,40 @@ mod tests {
     #[test]
     fn a_label_value_is_escaped() {
         assert_eq!(escape_label("a\"b\\c"), "a\\\"b\\\\c");
+    }
+
+    #[test]
+    fn integrity_is_omitted_before_the_first_sample() {
+        let metrics = Metrics::new();
+        assert!(
+            !metrics.render().contains("agenthub_integrity_ok"),
+            "no sample has run, so no gauge is claimed"
+        );
+    }
+
+    #[test]
+    fn integrity_samples_move_the_gauge_and_failure_counter() {
+        let metrics = Metrics::new();
+        metrics.record_integrity(true);
+        let text = metrics.render();
+        assert!(
+            text.contains("agenthub_integrity_ok 1"),
+            "a pass reads 1: {text}"
+        );
+        assert!(
+            text.contains("agenthub_integrity_failures_total 0"),
+            "a pass does not move the failure counter: {text}"
+        );
+
+        metrics.record_integrity(false);
+        let text = metrics.render();
+        assert!(
+            text.contains("agenthub_integrity_ok 0"),
+            "a fail reads 0: {text}"
+        );
+        assert!(
+            text.contains("agenthub_integrity_failures_total 1"),
+            "a fail moves the counter: {text}"
+        );
     }
 }

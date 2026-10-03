@@ -24,6 +24,7 @@ pub const HUB_KEYS: &[&str] = &[
     "enrol",
     "enrol_pending_max",
     "enrol_pending_ttl_secs",
+    "integrity_sample_secs",
     "trust_proxy",
     "tailnet",
     "tailnet_port",
@@ -360,8 +361,43 @@ impl Config {
         Ok(std::time::Duration::from_secs(secs))
     }
 
-    /// Read the peers whose forwarded client header the hub trusts. The socket
-    /// peer is not part of this: with none configured, no header is trusted.
+    /// Read how often the background store integrity sample runs. Zero
+    /// disables it; the interval is bounded so a fast sample cannot spin.
+    pub fn parse_integrity_sample_secs(value: Option<&str>) -> Result<std::time::Duration> {
+        const DEFAULT_SECS: u64 = 0;
+        const MAX_SECS: u64 = 7 * 24 * 60 * 60;
+        let secs = match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => DEFAULT_SECS,
+            Some(value) => match value.parse::<u64>() {
+                Ok(secs) if secs <= MAX_SECS => secs,
+                _ => {
+                    return Err(Error::Config(format!(
+                        "HUB_INTEGRITY_SAMPLE_SECS must be a whole number of seconds from 0 (disabled) to {MAX_SECS}, got '{value}'"
+                    )));
+                }
+            },
+        };
+        Ok(std::time::Duration::from_secs(secs))
+    }
+
+    /// Resolve the background integrity sample cadence from the environment and
+    /// the layered config files. Kept off [`Config`] because only the sweeper
+    /// reads it, and the sweeper resolves its own cadence the same way.
+    pub fn integrity_sample_from_env() -> Result<std::time::Duration> {
+        Self::integrity_sample_resolve(&|key| std::env::var(key).ok())
+    }
+
+    /// Resolve the integrity sample cadence from an environment lookup and the
+    /// layered config files.
+    pub fn integrity_sample_resolve(
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<std::time::Duration> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+        let value = Setting::resolved(env, "hub", "integrity_sample_secs", &files, Some("0")).value;
+        Self::parse_integrity_sample_secs(value.as_deref())
+    }
+
     pub fn parse_trusted_proxies(value: Option<&str>) -> Result<Vec<std::net::IpAddr>> {
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(Vec::new());
@@ -639,6 +675,7 @@ fn extract_value(
             | "events_per_project"
             | "enrol_pending_max"
             | "enrol_pending_ttl_secs"
+            | "integrity_sample_secs"
             | "tailnet_port",
         ) => match value {
             toml::Value::Integer(i) => Ok(Some(i.to_string())),
@@ -822,6 +859,7 @@ fn migrate_legacy_config(old_path: &Path, new_path: &Path) -> Result<()> {
                     | "events_per_project"
                     | "enrol_pending_max"
                     | "enrol_pending_ttl_secs"
+                    | "integrity_sample_secs"
                     | "tailnet_port"
             ) && let Ok(num) = v.parse::<i64>()
             {
@@ -979,6 +1017,13 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             "enrol_pending_ttl_secs",
             "HUB_ENROL_PENDING_TTL_SECS",
             Some("86400"),
+            false,
+        ),
+        (
+            "hub",
+            "integrity_sample_secs",
+            "HUB_INTEGRITY_SAMPLE_SECS",
+            Some("0"),
             false,
         ),
         ("hub", "trust_proxy", "HUB_TRUST_PROXY", None, false),

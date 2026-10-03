@@ -792,6 +792,51 @@ fn a_negative_or_unparseable_event_ceiling_is_refused() {
     }
 }
 
+#[test]
+fn the_integrity_sample_interval_is_read_and_zero_disables_it() {
+    assert_eq!(
+        Config::integrity_sample_resolve(&env(&[])).expect("resolve"),
+        std::time::Duration::ZERO,
+        "the sample is off by default"
+    );
+
+    let home =
+        TempHome::new("hub-integrity-file").with_config("[hub]\nintegrity_sample_secs = 600\n");
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    assert_eq!(
+        Config::integrity_sample_resolve(&lookup).expect("the key is not unknown"),
+        std::time::Duration::from_secs(600),
+        "the file sets the interval"
+    );
+
+    assert_eq!(
+        Config::integrity_sample_resolve(&env(&[("HUB_INTEGRITY_SAMPLE_SECS", "0")]))
+            .expect("resolve"),
+        std::time::Duration::ZERO,
+        "zero disables the sample"
+    );
+
+    assert_eq!(
+        Config::integrity_sample_resolve(&env(&[("HUB_INTEGRITY_SAMPLE_SECS", "30")]))
+            .expect("resolve"),
+        std::time::Duration::from_secs(30),
+        "the environment sets the interval"
+    );
+}
+
+#[test]
+fn an_unparseable_integrity_sample_interval_is_refused() {
+    for value in ["-1", "soon", "1.5", "604801"] {
+        let err = Config::integrity_sample_resolve(&env(&[("HUB_INTEGRITY_SAMPLE_SECS", value)]))
+            .expect_err("refused");
+        assert!(
+            err.to_string().contains("HUB_INTEGRITY_SAMPLE_SECS"),
+            "names the setting: {err}"
+        );
+        assert!(matches!(err, agent_hub::error::Error::Config(_)), "{value}");
+    }
+}
+
 /// `config --check` verifies the data directory, so a bad path is one clear
 /// line rather than a failure at first write.
 #[test]

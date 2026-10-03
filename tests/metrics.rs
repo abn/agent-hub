@@ -313,6 +313,48 @@ fn the_storage_gauges_render() {
 }
 
 #[test]
+fn the_integrity_sample_writes_a_pass_on_a_healthy_store() {
+    // A one-second sample cadence, with the sweeper's own cadence also brought
+    // in so the interval the sample falls on is short. The hub samples, then the
+    // scrape reads the gauge the sample raised.
+    let data_dir = TempDir::new("metrics-integrity");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let hub = HubProcess::serve(
+        data_dir.path(),
+        ADMIN_TOKEN,
+        &[
+            ("HUB_SWEEP_INTERVAL_SECS", "1"),
+            ("HUB_INTEGRITY_SAMPLE_SECS", "1"),
+        ],
+    );
+    let port = hub.port();
+
+    // The sample runs on the first sweep tick. Wait for it, and let it fail
+    // loudly rather than hang if the gauge never appears.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let text = loop {
+        let text = scrape(port);
+        if text.contains("agenthub_integrity_ok") {
+            break text;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the integrity sample did not write its gauge in time:\n{text}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+
+    assert!(
+        text.contains("agenthub_integrity_ok 1"),
+        "a healthy store passes the sample: {text}"
+    );
+    assert!(
+        text.contains("agenthub_integrity_failures_total 0"),
+        "a passing sample does not move the failure counter: {text}"
+    );
+}
+
+#[test]
 fn errors_are_counted_by_code() {
     let (_dir, _hub, port) = serve("metrics-errors");
 

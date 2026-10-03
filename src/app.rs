@@ -41,6 +41,8 @@ pub struct AppState {
     pub ticker: tokio::sync::broadcast::Sender<()>,
     /// Share flag recorded during enrolment approvals.
     pub enrol_shares: Arc<std::sync::Mutex<std::collections::HashMap<String, bool>>>,
+    /// How often the background store integrity sample runs. Zero disables it.
+    pub integrity_sample: std::time::Duration,
     /// The data directory and hub store as they were when the store opened.
     /// The readiness probe compares against this so a removed or replaced path
     /// is unavailable even while the open file descriptor still answers.
@@ -381,6 +383,7 @@ impl AppState {
         let auth = Arc::new(Auth::from_config(&config));
         let activity = Arc::new(store::sessions::Activity::new());
         let host = store::storage::host_name(config.node_name.as_deref());
+        let integrity_sample = Config::integrity_sample_from_env()?;
         let (ticker, _) = tokio::sync::broadcast::channel(16);
         Ok(Self {
             config: Arc::new(config),
@@ -396,6 +399,7 @@ impl AppState {
             host,
             ticker,
             enrol_shares: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            integrity_sample,
             store_identity,
         })
     }
@@ -464,6 +468,11 @@ pub async fn run(config: Config) -> Result<()> {
     let sweeper = state.clone();
     let sweeper_task = tokio::spawn(async move {
         let interval = sweep_interval();
+        // The integrity sample is a separate cadence (its own hub setting),
+        // so this tick count decides when its turn falls due. The loop is the
+        // single place that runs either background writer.
+        let integrity_every = integrity_ticks(&sweeper.integrity_sample, interval);
+        let mut tick: u64 = 0;
         loop {
             match sweeper.sweep_prunes().await {
                 Ok(_) => {}
@@ -481,6 +490,16 @@ pub async fn run(config: Config) -> Result<()> {
                 Ok(expired) => tracing::info!(expired, "expired abandoned enrolment requests"),
                 Err(err) => tracing::warn!(error = %err, "could not expire pending enrolments"),
             }
+            if let Some(every) = integrity_every
+                && tick.is_multiple_of(every)
+            {
+                // Bounded so a large or damaged store cannot pin the loop; a
+                // timeout or an error records a failing sample and returns.
+                if let Err(err) = sample_integrity_within(&sweeper.db, INTEGRITY_SAMPLE_CAP).await {
+                    tracing::warn!(error = %err, "the integrity sample failed");
+                }
+            }
+            tick = tick.wrapping_add(1);
             tokio::time::sleep(interval).await;
         }
     });
@@ -651,4 +670,73 @@ fn sweep_interval() -> std::time::Duration {
         .filter(|secs| *secs > 0)
         .unwrap_or(store::prune::UNDO_WINDOW_SECS as u64);
     std::time::Duration::from_secs(secs)
+}
+
+/// The wall-clock cap on one integrity sample. A store too large or damaged to
+/// answer inside this is recorded as a failing sample rather than allowed to
+/// hold the sweeper loop.
+const INTEGRITY_SAMPLE_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How often the integrity sample falls due, as a whole number of sweeper
+/// ticks. `None` disables it (`integrity_sample_secs = 0`). A cadence shorter
+/// than one tick runs every tick rather than never.
+fn integrity_ticks(sample: &std::time::Duration, tick: std::time::Duration) -> Option<u64> {
+    let secs = sample.as_secs();
+    if secs == 0 {
+        return None;
+    }
+    Some((secs / tick.as_secs().max(1)).max(1))
+}
+
+/// Run one background integrity sample and record its result.
+///
+/// `PRAGMA quick_check` is bounded and cheaper than `integrity_check`; it skips
+/// cross-index verification only. It runs on its own connection, a read
+/// snapshot like the readiness probe, and never inside a request. The wall-clock
+/// cap bounds the wait, and any timeout or error - or a check that reports
+/// anything besides `ok` - is recorded as a failing sample rather than
+/// propagated to the caller or allowed to block the loop.
+async fn sample_integrity_within(db: &turso::Database, cap: std::time::Duration) -> Result<()> {
+    let probe = tokio::time::timeout(cap, integrity_quick_check(db)).await;
+    match probe {
+        Ok(Ok(true)) => {
+            crate::metrics::record_integrity(true);
+            Ok(())
+        }
+        Ok(Ok(false)) => {
+            crate::metrics::record_integrity(false);
+            Err(crate::error::Error::Engine(
+                "quick_check reported a problem".to_string(),
+            ))
+        }
+        Ok(Err(err)) => {
+            crate::metrics::record_integrity(false);
+            Err(err)
+        }
+        Err(_) => {
+            crate::metrics::record_integrity(false);
+            Err(crate::error::Error::Engine(format!(
+                "quick_check did not answer within {cap:?}"
+            )))
+        }
+    }
+}
+
+/// Run `PRAGMA quick_check` on a fresh connection and report whether it said
+/// `ok`. A row that reports anything else is a failure; the check is stepped to
+/// completion so a multi-row answer is fully read.
+async fn integrity_quick_check(db: &turso::Database) -> Result<bool> {
+    let conn = store::connect(db)?;
+    let mut rows = conn
+        .query("PRAGMA quick_check", ())
+        .await
+        .map_err(store::engine)?;
+    let mut ok = true;
+    while let Some(row) = rows.next().await.map_err(store::engine)? {
+        match row.get_value(0).map_err(store::engine)? {
+            turso::Value::Text(line) if line == "ok" => {}
+            _ => ok = false,
+        }
+    }
+    Ok(ok)
 }

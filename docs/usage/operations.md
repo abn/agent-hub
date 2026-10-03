@@ -174,6 +174,18 @@ margin trips rather than only when the node is nearly out of room. The route is
 admin-gated like the rest of the control surface, so the scraper carries the
 admin token in `Authorization: Bearer`. There is no separate scrape credential.
 
+Set `integrity_sample_secs` (`HUB_INTEGRITY_SAMPLE_SECS`, default `0`, disabled)
+to a number of seconds to have the hub sample the store's own integrity in the
+background, on the sweeper's cadence. Each sample runs `PRAGMA quick_check` on
+its own connection, never inside a request, bounded by a wall-clock cap and
+skipped while the previous one has not finished, so a large or damaged store
+cannot pin the loop. It raises two series: `agenthub_integrity_ok`, a gauge that
+is `1` for a passing sample and `0` for a failing one (absent until the first
+sample runs), and `agenthub_integrity_failures_total`, a counter of samples that
+timed out, errored, or reported a problem. A failed sample is what tells you a
+zeroed page has appeared between offline `check` runs; the offline commands still
+walk the store with the full `PRAGMA integrity_check`.
+
 ## Doctor
 
 ```sh
