@@ -271,9 +271,17 @@ pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Re
 }
 
 /// Delete one comment. Replies are flat, so nothing else hangs off it.
+///
+/// The comment's idempotency rows go in the same transaction, so a retry of a
+/// key recorded for the deleted comment records fresh rather than resolving to
+/// a missing row as if the engine had faulted.
 pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
-    let conn = super::connect(db)?;
-    let changed = conn
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+    let changed = tx
         .execute(
             "DELETE FROM comments WHERE id = ?1",
             vec![Value::Text(comment_id.to_string())],
@@ -283,6 +291,13 @@ pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
     if changed == 0 {
         return Err(Error::NotFound(format!("comment {comment_id} not found")));
     }
+    tx.execute(
+        "DELETE FROM idempotency WHERE comment_id = ?1",
+        vec![Value::Text(comment_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
     Ok(())
 }
 
