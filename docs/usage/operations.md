@@ -53,6 +53,13 @@ It verifies every checksum before touching anything, refuses while a hub holds
 the store, and refuses a non-empty data directory unless you pass `--force`. It
 stages beside the destination and swaps by rename.
 
+The swap is two renames: the live directory is moved to
+`.agent-hub-replaced-<token>` beside it, then the staged tree is moved into
+place. A crash between them leaves no data directory at all while the real data
+sits in the sibling, so the next start would create a fresh empty one. If a
+restore is interrupted that way, move the sibling back before starting the hub:
+`mv /path/to/.agent-hub-replaced-<token> /path/to/data`.
+
 ## Upgrade and roll back
 
 Migrations run on startup, forward only, each in one transaction that records
@@ -72,7 +79,12 @@ that changed the schema.
 A project's feed is bounded by `events_per_project` (`HUB_EVENTS_PER_PROJECT`,
 default one million). A write past it is refused with the cap named, so a
 runaway agent cannot fill the node; promote durable work to the knowledge base
-or prune the feed to make room. Lifecycle and audit records do not count.
+or prune the feed to make room. The ceiling bounds every agent-surface writer:
+signals, questions, answers, artifact publish and update, and the knowledge
+base's lifecycle signal. Session lifecycle records and the hub's audit trail
+are exempt, so a full feed can never refuse `session_start`; a knowledge base
+write itself still succeeds, because its feed signal is best-effort and is
+dropped when the feed is full.
 
 On `SIGTERM` or `SIGINT` the hub stops accepting, lets in-flight requests
 finish for a bounded window, then checkpoints the store and exits 0. `docker
@@ -105,7 +117,11 @@ they are is how you decide when to prune.
 - **Events.** A project's feed holds `events_per_project`
   (`HUB_EVENTS_PER_PROJECT`, default one million). A write past it is refused
   and names the cap; promote durable work to the knowledge base or prune the
-  feed to make room. Lifecycle and audit records do not count.
+  feed to make room. The ceiling bounds signals, questions, answers, artifact
+  publish and update, and the knowledge base's lifecycle signal. Session
+  lifecycle records and the hub's audit trail are exempt, so a full feed never
+  refuses `session_start`; a knowledge base write still succeeds, its feed
+  signal dropping when the feed is full.
 - **Knowledge base.** One page is capped at 1 MiB and one path at 512 bytes. A
   project's knowledge base file warns past 256 MiB and is refused at 1 GiB, so
   its page count follows that file's size rather than a count of its own.
