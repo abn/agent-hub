@@ -25,7 +25,9 @@ It refuses while a hub holds the store, telling you to stop the hub or snapshot
 the volume. With the store free it copies every engine file through the engine
 itself (`VACUUM INTO`) and every blob verbatim, and writes a `manifest.json`
 holding the schema version, a timestamp, and each file's size and SHA-256. A
-backup is the whole set of files the manifest names.
+backup is the whole set of files the manifest names. When the embedded tailnet
+is in use its key state, `tailnet/keys.json`, is part of the set, so a restore
+keeps the node's tailnet identity instead of re-registering.
 
 On a NAS or a virtual machine the alternative is a filesystem snapshot of the
 data directory, which is consistent without stopping the hub. Either way the
@@ -41,7 +43,15 @@ agent-hub check --data-dir /path/to/data
 It verifies every file the manifest names (present, right size, right digest),
 runs `PRAGMA integrity_check` on the store and every brain and knowledge file,
 and cross-checks artifact rows against the blobs on disk. It exits non-zero on
-any problem.
+any problem. A store older than this binary's artifact history is checked
+without the cross-check, because there are no version rows to read.
+
+A partially corrupt store is found here, not by `/readyz`. The readiness probe
+runs the cheap legs only (the schema version, a content read, the store
+identity, free space); a zeroed page in a table the probe does not touch leaves
+it answering `200` while the routes that read that page fail with `503`. The
+offline `check`, and `doctor`, walk the store with `PRAGMA integrity_check` and
+name the damage, so run them on a schedule or after an unclean shutdown.
 
 ## Restore
 
@@ -69,8 +79,23 @@ upgrade that goes wrong has a recent store to restore.
 
 A binary refuses to open a store whose schema is newer than the most it
 supports, and says which versions those are, so an older binary will not quietly
-run against a newer store. To roll back: stop the hub, restore the pre-migration
-backup from `backups/`, and start the older binary. Read the
+run against a newer store. To roll back: stop the hub, replace `hub.db` with the
+pre-migration `.db` from `backups/`, and start the older binary. This is a manual
+file copy, not `agent-hub restore`: a pre-migration backup is a bare `.db` with
+no `manifest.json`, and `restore` refuses a set it cannot verify. Copy the
+sidecars with it, because `hub.db` alone omits whatever is still in the
+write-ahead log:
+
+```sh
+docker compose -f deploy/compose.yaml down          # or: systemctl stop the unit
+cp backups/pre-migration-v<from>-<stamp>.db data/hub.db
+cp backups/pre-migration-v<from>-<stamp>.db-wal data/hub.db-wal   # only if present
+cp backups/pre-migration-v<from>-<stamp>.db-shm data/hub.db-shm   # only if present
+# start the older binary against data/
+```
+
+Remove a `hub.db-wal` or `hub.db-shm` the backup did not carry, so the store is
+not opened over a stale log. Read the
 [data model](../architecture/data-model.md) before rolling back across a release
 that changed the schema.
 
@@ -141,10 +166,13 @@ they are is how you decide when to prune.
 ## Metrics
 
 `GET /metrics` reports the hub's own counters in Prometheus text: HTTP requests
-by method and status class, events appended by kind, and MCP tool calls by tool.
-It is admin-gated like the rest of the control surface, so the scraper carries
-the admin token in `Authorization: Bearer`. There is no separate scrape
-credential.
+by method and status class, failed responses by hub error code, events appended
+by kind, and MCP tool calls by tool. It also carries storage gauges read fresh
+for each scrape: free bytes on the data volume, the `hub.db` size, and the
+write-ahead log size, so a time-series system can alert before the readiness
+margin trips rather than only when the node is nearly out of room. The route is
+admin-gated like the rest of the control surface, so the scraper carries the
+admin token in `Authorization: Bearer`. There is no separate scrape credential.
 
 ## Doctor
 

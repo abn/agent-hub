@@ -150,7 +150,16 @@ url = "http://hub.lan:8080"
 token = "..."
 agent_id = "my-agent"
 project = "homelab"
+timeout = 120
 ```
+
+| Key (`[client]`) | Variable | Default | Purpose |
+|---|---|---|---|
+| `url` | `HUB_URL` | unset | Base URL of a running hub; with none the proxy serves the local data directory standalone |
+| `token` | `HUB_TOKEN` | unset | Bearer token the hub resolves to an agent |
+| `agent_id` | `HUB_AGENT_ID` | unset | Advisory agent label; the hub derives the actor from the token |
+| `project` | `HUB_PROJECT` | unset | Project the knowledge-base shorthands act on when no flag names one |
+| `timeout` | `HUB_TIMEOUT` | `120` | Seconds one call may take, handshake to answer; a number above zero, fractional allowed (for example `2.5`) |
 
 A harness that speaks only stdio MCP runs the proxy, which forwards every
 request to the hub over one connection held for the life of the process:
@@ -167,7 +176,9 @@ already serving fails at startup with `a hub is already using this directory; se
 A hook has no MCP client, so it calls one tool at a time. The result is JSON
 on stdout and nothing else; logs and errors go to stderr, and the exit code is
 0 for success, 1 for a tool error, 2 for usage, 69 when the hub is unreachable,
-77 when the token is refused, and 78 when nothing names a hub.
+77 when the token itself was refused, and 78 when nothing names a hub. A denied
+project or a missing resource is a tool error (1): the token was accepted, so
+only an unrecognised token is 77, the code a hook re-enrols on.
 
 ```sh
 agent-hub tools

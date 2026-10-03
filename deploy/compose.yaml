@@ -23,6 +23,12 @@ services:
     tmpfs:
       - /tmp
     restart: unless-stopped
+    # The hub drains in-flight requests for SHUTDOWN_DRAIN (10s) after SIGTERM,
+    # then checkpoints the store and exits 0. Docker's default stop timeout is
+    # 10s, so a stop with an agent holding a long-poll open would SIGKILL the
+    # process mid-drain and skip the checkpoint. The grace period is set above
+    # the drain so the clean stop the runbook promises is what actually happens.
+    stop_grace_period: 20s
     # The image is distroless, so the probe is the binary's own health
     # subcommand against the hub's readiness endpoint on the container's own
     # loopback. It exits non-zero the moment the store stops answering.
