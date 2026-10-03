@@ -534,7 +534,9 @@ fn doc_id(project_id: &str, path: &str) -> String {
 /// Append a lifecycle signal to the project feed.
 ///
 /// The page operation already happened, so a feed that cannot take the event
-/// is logged and does not fail it.
+/// is logged and does not fail it. The configured per-project ceiling applies
+/// here too, so a full feed drops the signal under the same bound the feed
+/// writers are held to while the page write still succeeds.
 async fn signal(
     state: &AppState,
     project_id: &str,
@@ -552,7 +554,15 @@ async fn signal(
         thread_id: None,
         session_id: session_id.map(str::to_string),
     };
-    match events::append(&state.db, 0, actor, None, event).await {
+    match events::append(
+        &state.db,
+        state.config.events_per_project.per_project,
+        actor,
+        None,
+        event,
+    )
+    .await
+    {
         Ok(_) => state.notify(),
         Err(err) => {
             tracing::warn!(project_id, error = %err, "could not append a knowledge base signal");

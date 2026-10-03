@@ -153,6 +153,14 @@ impl InboxCaps {
 /// bound. The ceiling is checked in the event writer, in the same transaction
 /// as the insert, and a cap of zero disables the check, the operator's valve,
 /// matching [`InboxCaps`].
+///
+/// It bounds every writer on the agent surface: `signal_append`, questions and
+/// answers, artifact publish and update, and the knowledge base's lifecycle
+/// signal. The hub's own lifecycle (`session started`, `ended`, and the like)
+/// and its audit trail (`system`) are exempt, so a full feed can never refuse
+/// `session_start`; the knowledge base write itself is never refused, because
+/// its signal is best-effort by contract and is dropped and logged when the
+/// feed is full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventCeiling {
     /// Events one project may hold, the hub's own audit trail excluded.

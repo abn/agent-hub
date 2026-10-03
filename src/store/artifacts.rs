@@ -145,6 +145,10 @@ enum Written {
 /// is never held across a transfer of up to the artifact cap. The id is minted
 /// here and no row names it yet, so nothing else can reach that path, and a
 /// transaction that does not commit takes the blob with it.
+///
+/// The feed event is appended with the ceiling disabled, which is right for the
+/// store's own callers; the agent surface reaches [`publish_capped`] so a
+/// configured ceiling bounds this writer too.
 pub async fn publish(
     db: &Database,
     data_dir: &Path,
@@ -154,10 +158,37 @@ pub async fn publish(
     publish_for_principal(db, data_dir, None, artifact, idempotency_key).await
 }
 
+/// Publish an artifact under a configured per-project event ceiling.
+///
+/// The ceiling bounds the feed event this write appends; `0` disables it. The
+/// agent surface passes the hub's configured value, so the ceiling covers
+/// artifact writes and not only `signal_append`.
+pub async fn publish_capped(
+    db: &Database,
+    data_dir: &Path,
+    ceiling: i64,
+    artifact: NewArtifact<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
+    publish_for_principal_capped(db, data_dir, None, ceiling, artifact, idempotency_key).await
+}
+
 pub async fn publish_for_principal(
     db: &Database,
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
+    artifact: NewArtifact<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
+    publish_for_principal_capped(db, data_dir, principal, 0, artifact, idempotency_key).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn publish_for_principal_capped(
+    db: &Database,
+    data_dir: &Path,
+    principal: Option<&crate::principal::Principal>,
+    ceiling: i64,
     artifact: NewArtifact<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
@@ -311,6 +342,7 @@ pub async fn publish_for_principal(
         .await?;
         let event_id = append_event(
             &tx,
+            ceiling,
             artifact.actor,
             artifact.project_id,
             "published",
@@ -384,11 +416,71 @@ pub async fn update(
     .await
 }
 
+/// Publish a new version under a configured per-project event ceiling.
+///
+/// The ceiling bounds the feed event this write appends; `0` disables it. The
+/// agent surface passes the hub's configured value, so the ceiling covers
+/// artifact writes and not only `signal_append`.
+#[allow(clippy::too_many_arguments)]
+pub async fn update_capped(
+    db: &Database,
+    data_dir: &Path,
+    ceiling: i64,
+    actor: &str,
+    artifact_id: &str,
+    content: &[u8],
+    envelope: EnvelopeUpdate,
+    opts: UpdateOptions<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
+    update_for_principal_capped(
+        db,
+        data_dir,
+        None,
+        ceiling,
+        actor,
+        artifact_id,
+        content,
+        envelope,
+        opts,
+        idempotency_key,
+    )
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn update_for_principal(
     db: &Database,
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
+    actor: &str,
+    artifact_id: &str,
+    content: &[u8],
+    envelope: EnvelopeUpdate,
+    opts: UpdateOptions<'_>,
+    idempotency_key: Option<&str>,
+) -> Result<Artifact> {
+    update_for_principal_capped(
+        db,
+        data_dir,
+        principal,
+        0,
+        actor,
+        artifact_id,
+        content,
+        envelope,
+        opts,
+        idempotency_key,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_for_principal_capped(
+    db: &Database,
+    data_dir: &Path,
+    principal: Option<&crate::principal::Principal>,
+    ceiling: i64,
     actor: &str,
     artifact_id: &str,
     content: &[u8],
@@ -553,6 +645,7 @@ pub async fn update_for_principal(
         .await?;
         let event_id = append_event(
             &tx,
+            ceiling,
             actor,
             &existing.project_id,
             "updated",
@@ -605,12 +698,10 @@ pub async fn update_for_principal(
     // remove: nobody else can name it. Once the rename ran, the version path
     // is left alone even on failure, because another update may already have
     // been granted the same number, renamed its own content onto that path and
-    // committed. An unreferenced version file is harmless, and the next update
-    // renames over it.
+    // committed. An unreferenced version file is harmless here and is swept by
+    // `blob::reconcile` at the next startup.
     let cleanup = || {
-        if let Some(ref rel) = promoted {
-            let _ = blob::remove(data_dir, rel);
-        } else {
+        if promoted.is_none() {
             let _ = blob::remove(data_dir, &pending);
         }
     };
@@ -692,6 +783,7 @@ pub async fn delete(
     .map_err(engine)?;
     append_event(
         &tx,
+        0,
         actor,
         &existing.project_id,
         "deleted",
@@ -791,7 +883,11 @@ pub async fn get_at_version(
     let actor = text_at(&row, 12)?;
     let comments_count = int_at(&row, 13)?;
     let comments_open = int_at(&row, 14)?;
-    let bytes = blob::read(data_dir, &path)?;
+    let bytes = blob::read_named(
+        data_dir,
+        &path,
+        &format!("artifact {artifact_id} version {version} content"),
+    )?;
     Ok((
         Artifact {
             id: artifact_id.to_string(),
@@ -1008,6 +1104,7 @@ async fn insert_version(
 #[allow(clippy::too_many_arguments)]
 async fn append_event(
     tx: &turso::transaction::Transaction<'_>,
+    events_per_project: i64,
     actor: &str,
     project_id: &str,
     action: &str,
@@ -1021,7 +1118,7 @@ async fn append_event(
 ) -> Result<String> {
     events::append_in_tx(
         tx,
-        0,
+        events_per_project,
         actor,
         None,
         NewEvent {
@@ -1289,16 +1386,36 @@ pub struct ArtifactShare {
 /// If `version` is specified, checks that the version exists; otherwise pins to the
 /// artifact's current version. Mints a unique, unguessable token and invalidates any
 /// previous token by rotating the row.
+///
+/// The read that chooses the version and the upsert share one immediate
+/// transaction, so a concurrent update cannot move the current version between
+/// them: a share pins the version the caller's transaction saw, and an explicit
+/// version is validated against the same rows.
 pub async fn create_or_rotate_share(
     db: &Database,
     artifact_id: &str,
     version: Option<i64>,
 ) -> Result<ArtifactShare> {
-    let art = metadata(db, artifact_id).await?;
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(engine)?;
+
+    let art = match row_on(&tx, artifact_id).await? {
+        Some(art) => art,
+        None => return Err(Error::NotFound(format!("artifact {artifact_id} not found"))),
+    };
     let ver = match version {
         Some(v) => {
-            let versions = list_versions(db, artifact_id).await?;
-            if !versions.iter().any(|item| item.version == v) {
+            let mut rows = tx
+                .query(
+                    "SELECT 1 FROM artifact_versions WHERE artifact_id = ?1 AND version = ?2",
+                    vec![Value::Text(artifact_id.to_string()), Value::Integer(v)],
+                )
+                .await
+                .map_err(engine)?;
+            if rows.next().await.map_err(engine)?.is_none() {
                 return Err(Error::NotFound(format!(
                     "version {v} not found for artifact {artifact_id}"
                 )));
@@ -1311,8 +1428,7 @@ pub async fn create_or_rotate_share(
     let token = generate_share_token();
     let created_at = crate::store::now_rfc3339();
 
-    let conn = super::connect(db)?;
-    conn.execute(
+    tx.execute(
         "INSERT INTO artifact_shares(artifact_id, token, version, created_at, revoked_at)
          VALUES (?1, ?2, ?3, ?4, NULL)
          ON CONFLICT(artifact_id) DO UPDATE SET
@@ -1329,6 +1445,7 @@ pub async fn create_or_rotate_share(
     )
     .await
     .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
 
     Ok(ArtifactShare {
         artifact_id: artifact_id.to_string(),
