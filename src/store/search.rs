@@ -203,42 +203,26 @@ async fn query_limited(
         scopes.push_str(&format!(" AND project_id IN ({})", holes.join(", ")));
     }
     // Brain entries for soft-pruned sessions are excluded from search immediately.
+    // This predicate is always present, so the query never has an empty scope
+    // list and the engine's index method never orders or pages it: the branch
+    // below always reads the scores and ranks and cuts in the process.
     scopes.push_str(" AND (type != 'brain' OR session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL))");
 
-    let sql = if scopes.is_empty() {
-        params.push(Value::Integer(limit));
-        format!(
-            "SELECT {COLUMNS} FROM search_docs WHERE fts_match(title, body, ?1)
-             ORDER BY fts_score(title, body, ?1) DESC LIMIT ?{}",
-            params.len()
-        )
-    } else {
-        // No ORDER BY or LIMIT here on purpose. The index method declines both
-        // once the query carries a predicate it does not cover, and the
-        // `fts_score` left in an ORDER BY then scores every row zero, which
-        // reads as a ranked page and is not one. The score in the column list
-        // is the one the index method still fills in.
-        format!(
-            "SELECT {COLUMNS}, fts_score(title, body, ?1) FROM search_docs
-             WHERE fts_match(title, body, ?1){scopes}"
-        )
-    };
+    // No ORDER BY or LIMIT here on purpose. The index method declines both
+    // once the query carries a predicate it does not cover, and the
+    // `fts_score` left in an ORDER BY then scores every row zero, which
+    // reads as a ranked page and is not one. The score in the column list is
+    // the one the index method still fills in.
+    let sql = format!(
+        "SELECT {COLUMNS}, fts_score(title, body, ?1) FROM search_docs
+         WHERE fts_match(title, body, ?1){scopes}"
+    );
 
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(&sql, params)
         .await
         .map_err(crate::store::engine)?;
-    if scopes.is_empty() {
-        // The engine ranked and paged this one.
-        let mut hits = Vec::new();
-        while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
-            hits.push(hit_from_row(&row)?);
-        }
-        drop(rows);
-        enrich(&conn, &mut hits).await?;
-        return Ok(hits);
-    }
 
     let mut scored = Vec::new();
     while let Some(row) = rows.next().await.map_err(crate::store::engine)? {
