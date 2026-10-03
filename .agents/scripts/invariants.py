@@ -1714,6 +1714,91 @@ def check_phone_home(page, watch: Watch, port: int, project: str) -> None:
     watch.drain_rejections()
 
 
+def check_session_reassign_control(page, watch: Watch, port: int, project: str) -> None:
+    """The session detail carries a Reassign control that moves the owner.
+
+    The move is the human's: the Reassign control opens the agent menu, the
+    chosen agent is named in the confirmation dialog, and the committed route
+    moves the session so the detail reads the new owner. The control sits in
+    the header side, not on the Prune/End slot.
+    """
+    watch.enter("session: reassign moves the owner")
+    # A session of its own and a fresh agent, so the move is hermetic and no
+    # other check reads this session's owner.
+    target = "reassign-probe"
+    harness.request(port, "POST", "/api/v1/agents", {"id": target, "display_name": "Reassign probe"})
+    session: list[str] = []
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "checks", "version": "0.0.0"},
+            },
+        },
+    )
+    harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    started = harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "session_start",
+                "arguments": {"project_id": project, "session_name": "reassign-check"},
+            },
+        },
+    )
+    session_id = (started.get("result", {}).get("structuredContent", {}) or {}).get("session_id", "")
+    if not session_id:
+        watch.fail("the reassign check could not start a session to move")
+        return
+
+    goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}", None)
+    page.wait_for_timeout(400)
+
+    control = '[data-action="reassign-open"]'
+    if page.locator(control).count() == 0:
+        watch.fail("the session detail has no Reassign control")
+        return
+    owner_before = page.locator(".session-detail-header .meta[data-owner]").get_attribute("data-owner")
+    if owner_before == target:
+        watch.fail("the probe session already belongs to the target agent")
+
+    page.click(control)
+    item = f'[data-action="reassign"][data-agent="{target}"]'
+    try:
+        page.wait_for_selector(item, timeout=5000)
+    except PlaywrightTimeoutError:
+        watch.fail("the Reassign control offered no agent to move the session to")
+        return
+    page.click(item)
+
+    dialog = "dialog.dialog[open]"
+    try:
+        page.wait_for_selector(dialog, timeout=5000)
+    except PlaywrightTimeoutError:
+        watch.fail("choosing an agent opened no confirmation dialog")
+        return
+    body = page.inner_text(dialog)
+    if target not in body:
+        watch.fail(f"the confirmation dialog does not name the agent it moves to: {body[:80]!r}")
+    page.click(f"{dialog} .dialog-commit")
+    page.wait_for_timeout(700)
+
+    owner_after = page.locator(".session-detail-header .meta[data-owner]").get_attribute("data-owner")
+    if owner_after != target:
+        watch.fail(f"the owner reads {owner_after!r} after the move, expected {target!r}")
+    watch.drain_rejections()
+
+
 def check_session_detail_single_title(page, watch: Watch, project: str, session_id: str) -> None:
     watch.enter("session: exactly one title on screen")
     goto(page, f"#/projects/{quote(project)}/sessions?id={quote(session_id)}", harness.SESSION_NAME)
@@ -2585,6 +2670,7 @@ def run() -> int:
                 # 8. Project features
                 run_step(watch, check_project_tools_row, page, watch, project)
                 run_step(watch, check_session_detail_single_title, page, watch, project, session_id)
+                run_step(watch, check_session_reassign_control, page, watch, port, project)
                 run_step(watch, check_brain_kv_in_aside_not_stage, page, watch, project, session_id)
                 run_step(watch, check_brain_fs_in_stage_rendered, page, watch, project, session_id)
                 run_step(watch, check_brain_entry_missing_and_dir_words, page, watch, project, session_id)

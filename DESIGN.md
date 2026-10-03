@@ -267,7 +267,11 @@ Agents and access, Connect, and the knowledge base.
   drawn, so the same value opens as one bottom sheet, opened by the tree leaf
   and closed by its own control, its backdrop or Esc. Never both. An `fs` file
   opens in the stage rendered by the same parser as an artifact, read-only, with
-  a back control and a mono provenance line.
+  a back control and a mono provenance line. The header side carries the owner,
+  the handoff note and the lineage, with a Reassign control beside the copy-id
+  glyph: a secondary menu trigger that names the agent a session moves to in the
+  confirmation dialog. Reassign never takes the Prune/End slot, which belongs to
+  the session's own life.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents

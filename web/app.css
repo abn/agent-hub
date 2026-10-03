@@ -3086,6 +3086,35 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
     padding: 0 12px;
   }
 }
+/* Reassign sits beside the copy-id control as a secondary action. It is a menu
+   trigger: the agent it moves the session to is chosen from the menu, and the
+   confirmation dialog then names that agent. It never takes the Prune/End slot,
+   which belongs to the session's own life. */
+.session-reassign {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.session-reassign-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink);
+  font: 600 12px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .session-reassign-btn {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+  .shell-group-menu.session-reassign-menu button {
+    min-height: 44px;
+  }
+}
 .session-back-bar {
   display: flex;
   align-items: center;

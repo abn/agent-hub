@@ -329,11 +329,13 @@ it.
 The session listing route carries the agent that owns each session, the
 handoff note its last owner left, and its lineage: whether the work was adopted
 or forked, from which session and which agent, and whether that source has since
-been pruned. The PWA does not render those fields yet; that is intended design.
-A session opens into a detail view that lists its brain keys and files
-and offers End and Prune. Reassigning a session to another agent is the
-human's move for an agent that is not coming back, over the reassign route; the
-PWA has no control for it yet. Agents pick work up themselves and ask nobody. Project deletion is a destructive action on the project's own settings screen and from the project header overflow menu, behind a typed confirmation dialog and count manifest; an agent's personal space cannot be deleted. Inbox notifications are configured from Settings under Alerts, request permission only on explicit enable action, and carry only waiting-on-you items; without permission or support they degrade silently. True background push is deferred, by
+been pruned. The session detail renders all three: the owner, the handoff note
+and the lineage line. A session opens into a detail view that lists its brain
+keys and files and offers End and Prune. Reassigning a session to another agent
+is the human's move for an agent that is not coming back, over the reassign
+route. The detail header carries a Reassign control beside the copy-id control:
+it opens a menu of the hub's agents, and choosing one opens a confirmation
+dialog naming that agent before the move is made. Agents pick work up themselves and ask nobody. Project deletion is a destructive action on the project's own settings screen and from the project header overflow menu, behind a typed confirmation dialog and count manifest; an agent's personal space cannot be deleted. Inbox notifications are configured from Settings under Alerts, request permission only on explicit enable action, and carry only waiting-on-you items; without permission or support they degrade silently. True background push is deferred, by
 [decision](../adr/0016-push-notifications-deferred.md); an open app reads the
 freshness stream and refreshes its waiting badge on a tick, with a slow poll
 as the fallback.
