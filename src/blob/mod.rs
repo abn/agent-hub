@@ -102,6 +102,26 @@ pub fn read(data_dir: &Path, rel: &str) -> Result<Vec<u8>> {
     blocking(move || -> Result<Vec<u8>> { Ok(std::fs::read(path)?) })
 }
 
+/// Read a blob by its relative path, reporting an absent file as a not-found
+/// naming `label` rather than as an IO fault.
+///
+/// A committed row whose file is gone is an inconsistent store, which `check`
+/// reports; the read that hits it names what is missing and says so plainly
+/// instead of surfacing an internal error a caller could only retry.
+pub fn read_named(data_dir: &Path, rel: &str, label: &str) -> Result<Vec<u8>> {
+    let label = label.to_string();
+    let path = resolve(data_dir, rel)?;
+    blocking(move || -> Result<Vec<u8>> {
+        match std::fs::read(path) {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(Error::NotFound(
+                format!("{label} is not on the data volume; the store is inconsistent"),
+            )),
+            Err(err) => Err(err.into()),
+        }
+    })
+}
+
 /// Remove a blob. A missing blob is not an error.
 pub fn remove(data_dir: &Path, rel: &str) -> Result<()> {
     let path = resolve(data_dir, rel)?;
