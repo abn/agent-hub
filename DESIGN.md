@@ -209,14 +209,23 @@ structure, not to line length.
   nowrap`. Primary is ink fill, secondary an outline, Approve the action tone,
   danger an outline on a screen and a fill only inside a dialog that deletes.
   Disabled is the inset surface with meta ink. A destructive action is never a
-  swipe.
+  swipe. Danger is the deletion tone: revoking a token, removing a grant,
+  revoking a link, signing out and discarding unsaved edits remove access or
+  work but delete no bytes, so this round draws them neutral or in the action
+  tone. Deleting a project, deleting an artifact, deleting a comment and
+  pruning bytes keep the danger tone, and it fills only inside the dialog that
+  confirms them.
 - **Menu.** A trigger's label is a fixed word, not its current value. A select
   earns its place at about six options.
 - **Dialog.** Trap focus, focus the safe action first, Esc keeps.
 - **Toast.** Ink fill, inverse text, one at a time. Auto-dismiss at 30s when it
   carries an undo, 5s otherwise. It is a live region.
 - **Empty state.** The screen's name in mono, a title, one line, at most one
-  way to act, no illustration.
+  way to act, no illustration. The one exception to "no Copy label" is this
+  single way to act where the string it copies is the whole point and there is
+  no row to carry a glyph: the project feed's empty state may read **Copy MCP
+  setup**. The wiki's empty state does not take the exception: it shows the
+  command on a row and the copy glyph sits on that row.
 - **Filter field.** Every index over about eight rows carries a 28px
   pill-radius `type="search"` field in its control row, naming the list it
   filters ("Filter artifacts"). It filters in place and does not navigate.
@@ -242,7 +251,10 @@ Agents and access, Connect, and the knowledge base.
 - **Inbox.** Same shell, one index. Groups WAITING ON YOU, UNREAD, EARLIER.
   Waiting rows carry an action dot and a heavier title. The stage is the item:
   pill, title, body, its buttons, its thread, and a card naming what it points
-  at. The thread is in the stage, not a panel.
+  at. The thread is in the stage, not a panel. Snoozing a row for an hour moves
+  it to a SNOOZED group and is remembered per device, not on the hub: a second
+  device still shows the row as waiting. The limit is the device's, and the
+  group says so.
 - **Project.** The index header carries Feed, Artifacts, Sessions as a
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
@@ -251,9 +263,11 @@ Agents and access, Connect, and the knowledge base.
   comments on a fine pointer; on a coarse pointer the same thread is one bottom
   sheet. Never both.
 - **Session detail.** The brain tree in the stage. A `kv` key is read in the
-  aside, named in mono with the copy glyph. An `fs` file opens in the stage
-  rendered by the same parser as an artifact, read-only, with a back control
-  and a mono provenance line.
+  aside, named in mono with the copy glyph. On a coarse pointer the aside is not
+  drawn, so the same value opens as one bottom sheet, opened by the tree leaf
+  and closed by its own control, its backdrop or Esc. Never both. An `fs` file
+  opens in the stage rendered by the same parser as an artifact, read-only, with
+  a back control and a mono provenance line.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents

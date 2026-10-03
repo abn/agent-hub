@@ -30,6 +30,7 @@ import {
   errorAsideHTML,
   fetchBrainEntry,
   kvAsideHTML,
+  kvSheetHTML,
   renderMarkdown,
   sessionDetailView,
   sessionRows,
@@ -105,13 +106,16 @@ export function projectLockBadge(project) {
 // project header carries Project settings, Copy path and Delete project; the
 // project's own settings screen passes lock-only and gets the confidential
 // control instead. An operator may lock or unlock from there.
-export function projectOverflow(project, { lock = true, full = true } = {}) {
+export function projectOverflow(project, { lock = true, full = true, newPage = false } = {}) {
   const name = project.display_name || project.id;
   const lockItem = !lock
     ? ""
     : project.confidential
       ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-public">Make public…</button>`
       : `<button type="button" role="menuitem" class="proj-menu-item" data-action="project-make-confidential">Make confidential…</button>`;
+  const newPageItem = newPage
+    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="wiki-new" data-id="${esc(project.id)}" data-project="${esc(name)}">New page</button>`
+    : "";
   const extras = full
     ? `<a role="menuitem" class="proj-menu-item" href="#/projects/${encodeURIComponent(project.id)}/settings">Project settings</a>
       <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-project-path">Copy path</button>
@@ -122,6 +126,7 @@ export function projectOverflow(project, { lock = true, full = true } = {}) {
   return `<span class="proj-overflow-wrap">
     <button type="button" class="proj-overflow-btn" aria-label="Project actions" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 20 })}</button>
     <div class="proj-overflow-menu" role="menu" hidden>
+      ${newPageItem}
       ${lockItem}
       ${extras}
     </div>
@@ -162,9 +167,15 @@ const PROJECT_MOBILE_STYLE = `<style>
   .project-tools-mobile {
     display: flex !important;
     padding: 0 16px;
+    gap: 8px;
+    min-width: 0;
   }
+  /* The switcher takes what is left and scrolls sideways rather than squeezing
+     its tabs into collisions; the tabs keep their drawn width. The 44px tools
+     row then always holds the filter and the overflow inside 390. */
   .project-tools-mobile > .project-tools-seg {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     height: 36px;
     background: var(--surface-2);
@@ -172,20 +183,41 @@ const PROJECT_MOBILE_STYLE = `<style>
     padding: 2px;
     box-sizing: border-box;
     align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .project-tools-mobile > .project-tools-seg::-webkit-scrollbar {
+    display: none;
   }
   .project-tools-seg a {
-    flex: 1;
+    position: relative;
+    flex: none;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
     height: 100%;
+    padding: 0 8px;
     font-size: 14px;
     font-weight: 500;
     color: var(--ink-2);
     text-decoration: none;
     border-radius: 5px;
     white-space: nowrap;
+  }
+  /* The tabs are 32px drawn inside the 36px switcher, so under a coarse pointer
+     each one grows to a 44px target with the same pseudo-element expansion the
+     chips and glyph buttons use. */
+  @media (pointer: coarse) {
+    .project-tools-seg a::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 44px;
+      transform: translateY(-50%);
+    }
   }
   .project-tools-seg a[aria-selected="true"],
   .project-tools-seg a[aria-current="page"] {
@@ -247,12 +279,7 @@ function projectToolsMobile(id, segment, stats, project) {
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
     </button>
-    ${
-      segment === "wiki"
-        ? `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;height:36px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`
-        : ""
-    }
-    ${projectOverflow(project, { lock: false })}
+    ${projectOverflow(project, { lock: false, newPage: segment === "wiki" })}
   </div>`;
 }
 
@@ -337,6 +364,13 @@ export function wireProjectHeader(project, stats, footprint) {
         close();
         btn.focus();
       }
+    });
+
+    // A menu item that carries its own document-level action (New page) still
+    // closes the menu it was chosen from; the delegated handler on `main` runs
+    // as usual because nothing here stops the event.
+    menu.addEventListener("click", (e) => {
+      if (e.target.closest(".proj-menu-item")) close();
     });
 
     const setConfidential = (next, title, body, commitLabel) => async (e) => {
@@ -513,6 +547,8 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   let stageBody = detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`;
   let aside = "";
   let hasSelection = Boolean(selectedId || filePath);
+  const coarse =
+    typeof window === "undefined" || window.matchMedia("(pointer: coarse)").matches;
 
   if (selectedSession && filePath) {
     const entryRes = await fetchBrainEntry(selectedSession.id, filePath);
@@ -537,10 +573,24 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
         aside = "";
         hasSelection = true;
       } else {
-        aside = kvAsideHTML(filePath, entryRes.entry.content);
+        // One surface per thing: a fine pointer reads the value in the aside,
+        // a coarse pointer gets one bottom sheet and the aside is left empty.
+        if (coarse) {
+          stageBody += kvSheetHTML(filePath, entryRes.entry.content);
+          aside = "";
+        } else {
+          aside = kvAsideHTML(filePath, entryRes.entry.content);
+        }
       }
     } else {
-      aside = errorAsideHTML(filePath, entryRes.error);
+      // The aside is hidden on a coarse pointer, so an error about the entry
+      // is said in the stage there rather than in a panel nobody can see.
+      if (coarse) {
+        stageBody += `<div class="shell-pad"><p class="empty">${esc(entryRes.error)}</p></div>`;
+        aside = "";
+      } else {
+        aside = errorAsideHTML(filePath, entryRes.error);
+      }
     }
   }
 

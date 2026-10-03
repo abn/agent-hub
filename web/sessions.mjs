@@ -163,7 +163,7 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
 
   const primaryButton = isEnded
     ? `<button type="button" class="btn-primary danger" data-action="prune" data-id="${esc(session.id)}" data-agent="${esc(session.agent)}">Prune session</button>`
-    : `<button type="button" class="btn-primary" data-action="end" data-id="${esc(session.id)}">End session</button>`;
+    : `<button type="button" class="btn-outline end-session" data-action="end" data-id="${esc(session.id)}">End session…</button>`;
 
   const helperNote = isEnded
     ? `Session ended ${relative(session.last_activity ?? session.created_at)}. Brain and logs can be pruned.`
@@ -309,6 +309,7 @@ export async function endSession(id) {
     note: "Once ended, its brain can be pruned to reclaim the space.",
     safe: "Keep",
     danger: "End session",
+    tone: "action",
     commit: async () => {
       await api(`/api/v1/sessions/${encodeURIComponent(id)}/end`, { method: "POST" });
       await render();
@@ -606,6 +607,30 @@ export function kvAsideHTML(path, content) {
   `;
 }
 
+// The same value on a coarse pointer, where the aside is not drawn at all: one
+// bottom sheet, the precedent the comments drawer sets. It is mounted only
+// where the aside is not, so no code path mounts both (one surface per thing).
+export function kvSheetHTML(path, content) {
+  const copyGlyph = glyphSvg("copy", { size: 16 });
+  return `
+    <div class="kv-sheet-backdrop" data-action="kv-sheet-close"></div>
+    <div class="kv-sheet" role="dialog" aria-labelledby="kv-sheet-title">
+      <div class="hub-sheet-handle" aria-hidden="true"></div>
+      <div class="hub-sheet-head">
+        <span class="hub-sheet-title" id="kv-sheet-title">Key</span>
+        <span class="shell-meta mono kv-sheet-path">${esc(path)}</span>
+        <button type="button" class="hub-btn-glyph kv-sheet-copy" data-action="copy-kv-value" data-value="${esc(content)}" aria-label="Copy key value">
+          ${copyGlyph}
+        </button>
+        <button type="button" class="hub-sheet-close" data-action="kv-sheet-close" aria-label="Close key value">
+          ${glyphSvg("close", { size: 18 })}
+        </button>
+      </div>
+      <pre class="mono session-kv-value kv-sheet-value">${esc(content)}</pre>
+    </div>
+  `;
+}
+
 export function errorAsideHTML(path, message) {
   return `
     <div class="shell-head">
@@ -622,6 +647,17 @@ export function errorAsideHTML(path, message) {
 }
 
 if (typeof document !== "undefined") {
+  // Esc closes the coarse-pointer key sheet, the same way it closes the
+  // comments drawer, so the sheet is not a trap on a keyboard.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const sheet = document.querySelector(".kv-sheet:not([hidden])");
+    if (!sheet) return;
+    sheet.hidden = true;
+    const backdrop = document.querySelector(".kv-sheet-backdrop");
+    if (backdrop) backdrop.hidden = true;
+  });
+
   document.addEventListener("click", async (event) => {
     const copyBtn = event.target.closest?.('[data-action="copy-id"], .session-copy-id');
     if (copyBtn) {
@@ -663,6 +699,21 @@ if (typeof document !== "undefined") {
         } catch {}
         toast("Copied key value.");
       }
+      return;
+    }
+
+    // The coarse-pointer kv sheet closes on its backdrop or its own close
+    // control, and either way the reader stays on the sessions screen with the
+    // tree behind it.
+    const closeKv = event.target.closest?.('[data-action="kv-sheet-close"]');
+    if (closeKv) {
+      const sheet = document.querySelector(".kv-sheet");
+      if (sheet) {
+        sheet.hidden = true;
+        sheet.setAttribute("aria-hidden", "true");
+      }
+      const backdrop = document.querySelector(".kv-sheet-backdrop");
+      if (backdrop) backdrop.hidden = true;
       return;
     }
   });

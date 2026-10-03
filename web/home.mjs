@@ -416,6 +416,18 @@ const HOME_STYLE = `<style>
   color: inherit;
   text-decoration: none;
 }
+/* The desktop storage summary sits on the canvas between hairlines, not in a
+   card. Only the phone keeps the card, which is the one card on Home. */
+@media (min-width: 720px) {
+  .home-storage.card {
+    padding: 14px 0;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+  }
+}
 .home-waiting .row:first-of-type,
 .home-newest .row:first-of-type {
   border-top: 1px solid var(--line);

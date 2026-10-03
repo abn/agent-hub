@@ -7,6 +7,7 @@ use agent_hub::store::{prune, sessions};
 mod common;
 
 use common::store::TestDb;
+use common::temp::TempDir;
 
 async fn open() -> TestDb {
     let db = common::store::fresh("sessions").await;
@@ -670,5 +671,94 @@ async fn an_ended_or_pruned_session_makes_no_agent_active() {
             .expect("count"),
         1,
         "only the agent still running a session counts"
+    );
+}
+
+/// The session-side twin of the artifact reconcile: a brain file no session
+/// row references is removed at startup, while one a row names survives. A
+/// `.tmp` or `.quarantine` file belongs to a fork or a prune and is left alone.
+#[tokio::test]
+async fn reconcile_removes_an_orphan_session_file_and_keeps_a_referenced_one() {
+    let dir = TempDir::new("session-reconcile");
+    let db = common::store::open(&dir).await;
+    agent_hub::store::projects::create(&db, "proj", "Project")
+        .await
+        .expect("create project");
+    let live = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let project_dir = dir.join("sessions").join("proj");
+    std::fs::create_dir_all(&project_dir).expect("create sessions project dir");
+    let referenced = dir.join(&live.brain_path);
+    std::fs::write(&referenced, b"live brain").expect("write referenced file");
+    // A live session's write-ahead log rides the same stem and must survive.
+    let referenced_wal = project_dir.join(format!("{}.db-wal", live.id));
+    std::fs::write(&referenced_wal, b"live wal").expect("write referenced sidecar");
+    let orphan = project_dir.join("01ORPHANSESSION0000000000.db");
+    std::fs::write(&orphan, b"orphan brain").expect("write orphan file");
+    let orphan_wal = project_dir.join("01ORPHANSESSION0000000000.db-wal");
+    std::fs::write(&orphan_wal, b"orphan wal").expect("write orphan sidecar");
+    let fork_tmp = project_dir.join("01FORKSESSION000000000000.db.tmp");
+    std::fs::write(&fork_tmp, b"fork in flight").expect("write tmp file");
+    let quarantine = project_dir.join("01PRUNEDSESSION0000000000.db.quarantine");
+    std::fs::write(&quarantine, b"pruned").expect("write quarantine file");
+
+    let removed = agent_hub::brain::reconcile_sessions(&db, &dir)
+        .await
+        .expect("reconcile");
+
+    assert!(!orphan.exists(), "an orphan brain file is reclaimed");
+    assert!(!orphan_wal.exists(), "its sidecar goes with it");
+    assert!(referenced.exists(), "a referenced brain file survives");
+    assert!(
+        referenced_wal.exists(),
+        "a referenced session's write-ahead log survives"
+    );
+    assert!(fork_tmp.exists(), "an in-flight fork's tmp is left alone");
+    assert!(
+        quarantine.exists(),
+        "a prune's quarantine is left to the prune recovery"
+    );
+    assert_eq!(removed, 1, "the orphan file, its sidecar going with it");
+}
+
+/// A failed activity write is retried on the next call rather than skipped for
+/// the coalescing window: the window is recorded only once the write lands.
+#[tokio::test]
+async fn a_failed_activity_write_is_not_marked_as_served() {
+    let db = open().await;
+    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let activity = sessions::Activity::new();
+    let now = time::OffsetDateTime::now_utc();
+
+    // Make the write fail, then restore the table so the retry can land.
+    let conn = db.connect().expect("connect");
+    conn.execute("DROP TABLE sessions", ()).await.expect("drop");
+    let failed = activity.touch_at(&db, &session.id, now).await;
+    assert!(failed.is_err(), "the write failed against a missing table");
+
+    conn.execute(
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY, last_activity TEXT)",
+        (),
+    )
+    .await
+    .expect("recreate a minimal sessions table");
+
+    assert!(
+        activity
+            .touch_at(&db, &session.id, now)
+            .await
+            .expect("retry"),
+        "a failed write leaves the window unserved, so the next call retries"
+    );
+    assert!(
+        !activity
+            .touch_at(&db, &session.id, now)
+            .await
+            .expect("second"),
+        "a landed write serves the window, so the next call coalesces"
     );
 }

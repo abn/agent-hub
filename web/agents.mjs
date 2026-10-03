@@ -247,7 +247,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
       ${
         liveToken
           ? `<button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
-      <button type="button" class="btn-hairline danger" data-action="agent-revoke" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>`
+      <button type="button" class="btn-hairline" data-action="agent-revoke" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>`
           : `<span style="flex:1;font-size:13px;color:var(--ink-2)">No live token</span>
       <button type="button" class="btn-hairline" data-action="agent-issue" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Issue token</button>`
       }
@@ -267,7 +267,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
         <div class="row" style="display:flex;align-items:center;gap:8px;min-height:48px;padding:0 8px 0 16px;border-bottom:1px solid var(--line);background:var(--surface)">
           ${lead}
           <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(projName)}</span>
-          <button type="button" class="btn-hairline danger" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 12px/1 var(--font-sans);cursor:pointer">Remove access</button>
+          <button type="button" class="btn-hairline" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 12px/1 var(--font-sans);cursor:pointer">Remove access</button>
         </div>
       `;
         })
@@ -1096,6 +1096,7 @@ export async function ungrant(id, project) {
     note: "Removing a grant cannot be undone.",
     safe: "Keep",
     danger: "Remove grant",
+    tone: "primary",
     commit: async () => {
       await api(`/api/v1/agents/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
         method: "DELETE",

@@ -11,6 +11,7 @@ import { esc, main, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { deleteProject } from "./settings.mjs";
 import { projectLockBadge, projectOverflow, wireProjectHeader } from "./project.mjs";
+import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { toast } from "./toast.mjs";
 
 const NOT_FOUND = {
@@ -81,6 +82,7 @@ window.addEventListener("hashchange", async (event) => {
     body: "The edits to this project have not been saved.",
     safe: "Keep editing",
     danger: "Discard changes",
+    tone: "primary",
   });
   asking = false;
   if (!leave) return;
@@ -104,17 +106,11 @@ function localDate(timestamp) {
 
 function skeleton(projectId, deletable, project) {
   const back = `#/projects/${esc(encodeURIComponent(projectId))}/feed`;
-  return `
-    <div class="proj-head">
-      <a class="proj-back" href="${back}" aria-label="Back to the project">
-        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>
-      </a>
-      <div class="grow">
-        <h1>Project settings</h1>
-        <p class="proj-head-meta">${projectLockBadge(project)}<span class="pset-sub mono"></span></p>
-      </div>
-      ${projectOverflow(project, { full: false })}
-    </div>
+  // Project settings is rail and stage in the one shell, like Settings: it
+  // reserves the 52/40 header and control row so its content starts at the same
+  // y as every other screen, and on a phone it carries the 76px header. The
+  // form is the stage body.
+  const body = `
     <form class="pset" data-action="project-settings" novalidate>
       <div class="pset-field">
         <label for="pset-name">Name</label>
@@ -134,6 +130,18 @@ function skeleton(projectId, deletable, project) {
         ${deletable ? '<button type="button" class="pset-delete">Delete project…</button>' : ""}
       </div>
     </form>`;
+  return shellHTML({
+    segment: "settings",
+    noIndex: true,
+    stageHead: shellStageHead(
+      "Project settings",
+      "",
+      `${projectLockBadge(project)}${projectOverflow(project, { full: false })}`,
+      back,
+    ),
+    stageControls: `<div class="shell-controls"><span class="pset-sub shell-meta mono"></span></div>`,
+    stageBody: `<div class="pset-body">${body}</div>`,
+  });
 }
 
 function say(field, box, message) {
@@ -157,8 +165,15 @@ export async function projectSettingsScreen(gen, path) {
     if (error.status !== 404) throw error;
     paint(
       gen,
-      `<h1>Project settings</h1>${emptyStateHTML(NOT_FOUND, { project: projectId }, { href: "#/projects" })}`,
+      shellHTML({
+        segment: "settings",
+        noIndex: true,
+        stageHead: shellStageHead("Project settings", "", "", "#/projects"),
+        stageControls: `<div class="shell-controls"></div>`,
+        stageBody: `<div class="pset-body">${emptyStateHTML(NOT_FOUND, { project: projectId }, { href: "#/projects" })}</div>`,
+      }),
     );
+    installShellLayout(main);
     return;
   }
   if (stale(gen)) return;
@@ -166,6 +181,7 @@ export async function projectSettingsScreen(gen, path) {
   // An agent's personal space is settable but not deletable: it goes with the
   // agent, so the control the hub would refuse is not offered.
   paint(gen, skeleton(saved.id, !saved.owner_agent, saved));
+  installShellLayout(main);
   document.title = "Project settings · Agent Hub";
   wireProjectHeader(saved, null, "");
 

@@ -13,6 +13,7 @@ import { api } from "./api.mjs";
 import { slugify } from "./dialog.mjs";
 import { esc } from "./dom.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { toast } from "./toast.mjs";
@@ -152,11 +153,18 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
   }
   const entries = data.entries || [];
   if (!entries.length) {
+    // The instruction the agent needs is a literal string, so it is shown on
+    // the row that owns it and the copy control is a glyph on that row, which
+    // is what the design's copy component is (no visible "Copy" label).
+    const command = `hub wiki write ${projectName || id} --type concept`;
     return `<div class="wiki-empty" style="padding:24px 16px;max-width:640px">
       <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · empty</div>
       <h2 style="font-size:17px;font-weight:600;margin:6px 0">No wiki yet in ${esc(projectName || id)}.</h2>
       <p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0 0 12px">Agents write durable knowledge here; sessions come and go, these pages stay. The first write creates index.md.</p>
-      <button type="button" class="btn-outline" data-action="wiki-instruction" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Copy agent instruction</button>
+      <div class="wiki-instruction-row" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 4px 0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface-2)">
+        <code class="mono" style="flex:1;min-width:0;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(command)}</code>
+        <button type="button" class="hub-btn-glyph" data-action="wiki-instruction" data-id="${esc(id)}" data-project="${esc(projectName || id)}" aria-label="Copy agent instruction">${glyphSvg("copy", { size: 16 })}</button>
+      </div>
     </div>`;
   }
   const narrow = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;

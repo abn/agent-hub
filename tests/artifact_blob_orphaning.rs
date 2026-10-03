@@ -7,7 +7,7 @@ use common::temp::TempDir;
 mod common;
 
 #[tokio::test]
-async fn update_failure_after_promotion_removes_promoted_file() {
+async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
     let dir = TempDir::new("blob-orphaning-update");
     let db = common::store::open(&dir).await;
     projects::create(&db, "proj", "Project")
@@ -67,16 +67,27 @@ async fn update_failure_after_promotion_removes_promoted_file() {
         "update must fail due to conflicting version row"
     );
 
-    // Check if v2.md exists on disk.
-    // In unfixed code, cleanup() skipped removal when promoted.is_some(), leaving v2.md orphaned!
+    // The promoted version path is another update's to win once the write lock
+    // is released, so the failed call leaves it alone and reconcile sweeps it.
     let v2_path = dir
         .join("artifacts")
         .join("proj")
         .join(&art.id)
         .join("v2.md");
     assert!(
+        v2_path.exists(),
+        "the promoted final path is left for reconcile, not removed here: {:?}",
+        v2_path
+    );
+
+    // Reconcile removes it, since no committed version row names it.
+    let reaped = agent_hub::blob::reconcile(&db, &dir)
+        .await
+        .expect("reconcile");
+    assert!(reaped >= 1, "reconcile reaps the unreferenced version file");
+    assert!(
         !v2_path.exists(),
-        "final-path blob v2.md must NOT be left on disk after update transaction failure: {:?}",
+        "reconcile reclaims the unreferenced final path: {:?}",
         v2_path
     );
 }

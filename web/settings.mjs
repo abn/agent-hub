@@ -689,6 +689,7 @@ export async function signOut() {
     note: "You need the token to get back in.",
     safe: "Keep",
     danger: "Sign out",
+    tone: "primary",
   });
   if (!confirmed) return;
   const forgotten = saveToken("");

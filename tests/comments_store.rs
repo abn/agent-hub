@@ -171,6 +171,54 @@ async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
 }
 
 #[tokio::test]
+async fn a_key_records_fresh_after_its_comment_is_deleted() {
+    let dir = TempDir::new("comment-key-delete");
+    let db = open(&dir).await;
+    let artifact_id = publish(&db, &dir).await;
+
+    let (first, replayed) = comments::add_comment(
+        &db,
+        &artifact_id,
+        "agent-one",
+        "First note.",
+        None,
+        None,
+        None,
+        Some("retried-key"),
+    )
+    .await
+    .expect("post");
+    assert!(!replayed);
+
+    comments::delete_comment(&db, &first.id)
+        .await
+        .expect("delete");
+
+    // Retrying the same key after the comment is gone must record a fresh
+    // comment, never resolve to a dead id as an internal, retryable fault.
+    let (second, replayed) = comments::add_comment(
+        &db,
+        &artifact_id,
+        "agent-one",
+        "Second note.",
+        None,
+        None,
+        None,
+        Some("retried-key"),
+    )
+    .await
+    .expect("a retry after delete records fresh");
+    assert!(!replayed, "the key was cleared with the comment");
+    assert_ne!(first.id, second.id);
+
+    let listed = comments::list_comments(&db, &artifact_id)
+        .await
+        .expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, second.id);
+}
+
+#[tokio::test]
 async fn missing_artifacts_and_comments_are_not_found() {
     let dir = TempDir::new("comment-missing");
     let db = open(&dir).await;

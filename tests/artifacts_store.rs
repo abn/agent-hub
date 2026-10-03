@@ -484,6 +484,34 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
 }
 
 #[tokio::test]
+async fn a_missing_version_blob_is_not_found_and_names_the_version() {
+    let dir = TempDir::new("artifact-missing-blob");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish migration v1");
+
+    // Remove the committed blob out from under the row, the state a crash can
+    // leave; a version read must name it, not report an internal fault.
+    let blob = dir
+        .join("artifacts")
+        .join("proj")
+        .join(&artifact.id)
+        .join("v1.html");
+    std::fs::remove_file(&blob).expect("remove blob");
+
+    let err = artifacts::get_at_version(&db, &dir, &artifact.id, 1)
+        .await
+        .expect_err("the blob is gone");
+    assert_eq!(err.code(), ErrorCode::NotFound);
+    let message = err.to_string();
+    assert!(
+        message.contains(&artifact.id) && message.contains("version 1"),
+        "the refusal names the artifact and version: {message}"
+    );
+}
+
+#[tokio::test]
 async fn versions_carry_their_own_envelopes() {
     let dir = TempDir::new("artifact-envelopes");
     let db = open(&dir).await;
@@ -610,6 +638,55 @@ async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
     assert_ne!(
         republished.id, artifact.id,
         "the replay mints a new artifact"
+    );
+}
+
+#[tokio::test]
+async fn a_share_pins_the_current_version_and_refuses_an_unknown_one() {
+    let dir = TempDir::new("artifact-share-version");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("update");
+
+    // No explicit version pins the artifact's current version.
+    let current = artifacts::create_or_rotate_share(&db, &artifact.id, None)
+        .await
+        .expect("share current");
+    assert_eq!(current.version, 2);
+
+    // An explicit version that exists is honoured.
+    let explicit = artifacts::create_or_rotate_share(&db, &artifact.id, Some(1))
+        .await
+        .expect("share version 1");
+    assert_eq!(explicit.version, 1);
+
+    // A version that does not exist is refused, and the stored share is
+    // untouched by the refused attempt.
+    let unknown = artifacts::create_or_rotate_share(&db, &artifact.id, Some(99))
+        .await
+        .expect_err("version 99 does not exist");
+    assert_eq!(unknown.code(), ErrorCode::NotFound);
+    let stored = artifacts::get_share_for_artifact(&db, &artifact.id)
+        .await
+        .expect("read share")
+        .expect("a share row");
+    assert_eq!(
+        (stored.version, stored.token.as_str()),
+        (1, explicit.token.as_str()),
+        "the refused attempt did not rotate the share"
     );
 }
 
