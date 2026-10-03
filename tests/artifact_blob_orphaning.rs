@@ -23,7 +23,6 @@ async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
             project_id: "proj",
             title: "Artifact Title",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"version 1 content",
@@ -39,8 +38,8 @@ async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
     // so that insert_version() fails on PRIMARY KEY constraint after blob::promote has already run.
     let conn = db.connect().expect("connect");
     conn.execute(
-        "INSERT INTO artifact_versions(artifact_id, version, title, description, favicon, kind, encrypted, size_bytes, path, created_at)
-         VALUES (?1, 2, 'Conflicting', '', '', 'markdown', 0, 10, 'dummy', '2026-09-25T00:00:00Z')",
+        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, encrypted, size_bytes, path, created_at)
+         VALUES (?1, 2, 'Conflicting', '', 'markdown', 0, 10, 'dummy', '2026-09-25T00:00:00Z')",
         [art.id.clone()],
     )
     .await
@@ -109,7 +108,6 @@ async fn startup_reconcile_removes_unreferenced_version_blobs() {
             project_id: "proj",
             title: "Legit Artifact",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"version 1 legit",

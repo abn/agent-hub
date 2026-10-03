@@ -25,10 +25,6 @@ use crate::store::search::{SearchDoc, index_doc};
 pub const TITLE_CHARS_MAX: usize = 500;
 /// Maximum characters of an artifact description.
 pub const DESCRIPTION_CHARS_MAX: usize = 2000;
-/// Maximum characters of an artifact favicon. Lenient on purpose: a single
-/// emoji is one code point, a compound one is several, and the render
-/// escapes it either way.
-pub const FAVICON_CHARS_MAX: usize = 8;
 /// Maximum UTF-8 bytes of a version label.
 pub const LABEL_BYTES_MAX: usize = 60;
 
@@ -41,7 +37,6 @@ pub struct Artifact {
     pub actor: Option<String>,
     pub title: String,
     pub description: String,
-    pub favicon: String,
     pub label: Option<String>,
     pub kind: String,
     pub version: i64,
@@ -62,7 +57,6 @@ pub struct ArtifactVersion {
     pub version: i64,
     pub title: String,
     pub description: String,
-    pub favicon: String,
     pub kind: String,
     pub label: Option<String>,
     pub protected: bool,
@@ -77,7 +71,6 @@ pub struct NewArtifact<'a> {
     pub project_id: &'a str,
     pub title: &'a str,
     pub description: &'a str,
-    pub favicon: &'a str,
     pub label: Option<&'a str>,
     pub kind: &'a str,
     pub content: &'a [u8],
@@ -195,7 +188,6 @@ pub async fn publish_for_principal_capped(
     limits::check_artifact(artifact.content.len())?;
     let title = resolve_title(artifact.title, artifact.kind, artifact.content)?;
     let description = check_description(artifact.description)?;
-    let favicon = check_favicon(artifact.favicon)?;
     let label = check_label(artifact.label)?;
 
     let mut conn = super::connect(db)?;
@@ -275,7 +267,6 @@ pub async fn publish_for_principal_capped(
             actor: Some(artifact.actor.to_string()),
             title: title.clone(),
             description: description.clone(),
-            favicon: favicon.clone(),
             label: label.clone(),
             kind: artifact.kind.to_string(),
             version: 1,
@@ -290,14 +281,13 @@ pub async fn publish_for_principal_capped(
         };
 
         tx.execute(
-            "INSERT INTO artifacts(id, project_id, title, description, favicon, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?11, ?12, ?13)",
+            "INSERT INTO artifacts(id, project_id, title, description, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?10, ?11, ?12)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(artifact.project_id.to_string()),
                 Value::Text(title.clone()),
                 Value::Text(description.clone()),
-                Value::Text(favicon.clone()),
                 optional_text(label.as_deref()),
                 Value::Text(artifact.kind.to_string()),
                 optional_text(envelope_json.as_deref()),
@@ -316,7 +306,6 @@ pub async fn publish_for_principal_capped(
             1,
             &title,
             &description,
-            &favicon,
             artifact.kind,
             label.as_deref(),
             protected,
@@ -615,7 +604,6 @@ pub async fn update_for_principal_capped(
             version,
             &existing.title,
             &existing.description,
-            &existing.favicon,
             &existing.kind,
             label.as_deref(),
             protected,
@@ -678,7 +666,6 @@ pub async fn update_for_principal_capped(
             actor: existing.actor,
             title: existing.title,
             description: existing.description,
-            favicon: existing.favicon,
             label,
             kind: existing.kind,
             version,
@@ -841,7 +828,7 @@ pub async fn get_at_version(
     let mut rows = conn
         .query(
             "SELECT a.project_id,
-                    v.title, v.description, v.favicon, v.kind, v.label,
+                    v.title, v.description, v.kind, v.label,
                     v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path,
                     a.session_id, a.actor,
                     (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1) AS comments_count,
@@ -865,24 +852,23 @@ pub async fn get_at_version(
     let project_id = required_text(&row, 0)?;
     let title = required_text(&row, 1)?;
     let description = text_at(&row, 2)?.unwrap_or_default();
-    let favicon = text_at(&row, 3)?.unwrap_or_default();
-    let kind = required_text(&row, 4)?;
-    let label = text_at(&row, 5)?;
-    let protected = int_at(&row, 6)? != 0;
-    let envelope = match text_at(&row, 7)? {
+    let kind = required_text(&row, 3)?;
+    let label = text_at(&row, 4)?;
+    let protected = int_at(&row, 5)? != 0;
+    let envelope = match text_at(&row, 6)? {
         Some(json) => Some(
             serde_json::from_str(&json)
                 .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
         ),
         None => None,
     };
-    let size_bytes = int_at(&row, 8)?;
-    let created_at = required_text(&row, 9)?;
-    let path = required_text(&row, 10)?;
-    let session_id = text_at(&row, 11)?;
-    let actor = text_at(&row, 12)?;
-    let comments_count = int_at(&row, 13)?;
-    let comments_open = int_at(&row, 14)?;
+    let size_bytes = int_at(&row, 7)?;
+    let created_at = required_text(&row, 8)?;
+    let path = required_text(&row, 9)?;
+    let session_id = text_at(&row, 10)?;
+    let actor = text_at(&row, 11)?;
+    let comments_count = int_at(&row, 12)?;
+    let comments_open = int_at(&row, 13)?;
     let bytes = blob::read_named(
         data_dir,
         &path,
@@ -896,7 +882,6 @@ pub async fn get_at_version(
             actor,
             title,
             description,
-            favicon,
             label,
             kind,
             version,
@@ -931,7 +916,7 @@ pub async fn list_versions(db: &Database, artifact_id: &str) -> Result<Vec<Artif
     }
     let mut rows = conn
         .query(
-            "SELECT version, title, description, favicon, kind, label, encrypted, envelope, size_bytes, created_at
+            "SELECT version, title, description, kind, label, encrypted, envelope, size_bytes, created_at
              FROM artifact_versions WHERE artifact_id = ?1 ORDER BY version ASC",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -967,7 +952,7 @@ pub async fn list_with_session(
     let conn = super::connect(db)?;
     let (sql, params) = match session_id {
         Some(sid) => (
-            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+            "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
@@ -979,7 +964,7 @@ pub async fn list_with_session(
             vec![Value::Text(project_id.to_string()), Value::Text(sid.to_string())],
         ),
         None => (
-            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+            "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
@@ -1011,7 +996,7 @@ pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Art
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+            "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
@@ -1044,7 +1029,7 @@ async fn row(db: &Database, artifact_id: &str) -> Result<Option<Artifact>> {
 async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Artifact>> {
     let mut rows = conn
         .query(
-            "SELECT a.id, a.project_id, a.title, a.description, a.favicon, a.label, a.kind,
+            "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
@@ -1069,7 +1054,6 @@ async fn insert_version(
     version: i64,
     title: &str,
     description: &str,
-    favicon: &str,
     kind: &str,
     label: Option<&str>,
     protected: bool,
@@ -1079,14 +1063,13 @@ async fn insert_version(
     created_at: &str,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO artifact_versions(artifact_id, version, title, description, favicon, kind, label, encrypted, envelope, size_bytes, path, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, label, encrypted, envelope, size_bytes, path, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         vec![
             Value::Text(artifact_id.to_string()),
             Value::Integer(version),
             Value::Text(title.to_string()),
             Value::Text(description.to_string()),
-            Value::Text(favicon.to_string()),
             Value::Text(kind.to_string()),
             optional_text(label),
             Value::Integer(i64::from(protected)),
@@ -1181,7 +1164,7 @@ async fn replay(
 }
 
 /// Resolve and check display metadata: title with its markdown fallback,
-/// description, favicon, and label.
+/// description, and label.
 fn resolve_title(title: &str, kind: &str, content: &[u8]) -> Result<String> {
     let trimmed = title.trim();
     if !trimmed.is_empty() {
@@ -1213,15 +1196,6 @@ fn check_description(description: &str) -> Result<String> {
         )));
     }
     Ok(description.to_string())
-}
-
-fn check_favicon(favicon: &str) -> Result<String> {
-    if favicon.chars().count() > FAVICON_CHARS_MAX {
-        return Err(Error::InvalidArgument(format!(
-            "artifact favicon exceeds {FAVICON_CHARS_MAX} characters"
-        )));
-    }
-    Ok(favicon.to_string())
 }
 
 fn check_label(label: Option<&str>) -> Result<Option<String>> {
@@ -1259,7 +1233,7 @@ fn first_heading(content: &[u8]) -> Option<String> {
 }
 
 fn artifact_from_row(row: &Row) -> Result<Artifact> {
-    let envelope = match text_at(row, 8)? {
+    let envelope = match text_at(row, 7)? {
         Some(json) => Some(
             serde_json::from_str(&json)
                 .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
@@ -1271,25 +1245,24 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         project_id: required_text(row, 1)?,
         title: required_text(row, 2)?,
         description: text_at(row, 3)?.unwrap_or_default(),
-        favicon: text_at(row, 4)?.unwrap_or_default(),
-        label: text_at(row, 5)?,
-        kind: required_text(row, 6)?,
-        version: int_at(row, 7)?,
+        label: text_at(row, 4)?,
+        kind: required_text(row, 5)?,
+        version: int_at(row, 6)?,
         protected: envelope.is_some(),
         envelope,
-        size_bytes: int_at(row, 9)?,
-        created_at: required_text(row, 10)?,
-        updated_at: required_text(row, 11)?,
-        path: required_text(row, 12)?,
-        session_id: text_at(row, 13)?,
-        actor: text_at(row, 14)?,
-        comments_count: int_at(row, 15)?,
-        comments_open: int_at(row, 16)?,
+        size_bytes: int_at(row, 8)?,
+        created_at: required_text(row, 9)?,
+        updated_at: required_text(row, 10)?,
+        path: required_text(row, 11)?,
+        session_id: text_at(row, 12)?,
+        actor: text_at(row, 13)?,
+        comments_count: int_at(row, 14)?,
+        comments_open: int_at(row, 15)?,
     })
 }
 
 fn version_from_row(row: &Row) -> Result<ArtifactVersion> {
-    let envelope = match text_at(row, 7)? {
+    let envelope = match text_at(row, 6)? {
         Some(json) => Some(
             serde_json::from_str(&json)
                 .map_err(|err| Error::Engine(format!("stored envelope is not JSON: {err}")))?,
@@ -1300,13 +1273,12 @@ fn version_from_row(row: &Row) -> Result<ArtifactVersion> {
         version: int_at(row, 0)?,
         title: required_text(row, 1)?,
         description: text_at(row, 2)?.unwrap_or_default(),
-        favicon: text_at(row, 3)?.unwrap_or_default(),
-        kind: required_text(row, 4)?,
-        label: text_at(row, 5)?,
-        protected: int_at(row, 6)? != 0,
+        kind: required_text(row, 3)?,
+        label: text_at(row, 4)?,
+        protected: int_at(row, 5)? != 0,
         envelope,
-        size_bytes: int_at(row, 8)?,
-        created_at: required_text(row, 9)?,
+        size_bytes: int_at(row, 7)?,
+        created_at: required_text(row, 8)?,
     })
 }
 

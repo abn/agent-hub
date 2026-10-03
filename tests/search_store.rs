@@ -41,7 +41,6 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
             content: b"# engine notes\nstate and search",
             envelope: None,
             description: "",
-            favicon: "",
             label: None,
             session_id: None,
         },

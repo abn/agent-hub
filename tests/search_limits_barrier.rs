@@ -27,7 +27,6 @@ async fn search_body_truncation_is_enforced_at_indexing_boundary() {
             project_id: "proj",
             title: "Large Report",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: large_body.as_bytes(),

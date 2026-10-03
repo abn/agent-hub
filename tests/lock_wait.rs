@@ -58,7 +58,6 @@ async fn concurrent_same_key_publishes_serialize() {
                     content: b"body",
                     envelope: None,
                     description: "",
-                    favicon: "",
                     label: None,
                     session_id: None,
                 },

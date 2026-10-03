@@ -24,7 +24,6 @@ fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
         project_id: "proj",
         title,
         description: "",
-        favicon: "",
         label: None,
         kind: "html",
         content,
@@ -190,7 +189,6 @@ async fn a_protected_artifact_is_not_searchable_by_body() {
             content: b"ciphertextbytes",
             envelope: Some(envelope.clone()),
             description: "",
-            favicon: "",
             label: None,
             session_id: None,
         },
@@ -331,7 +329,6 @@ async fn publish_round_trips_display_metadata() {
         &dir,
         NewArtifact {
             description: "Quarterly numbers",
-            favicon: "chart",
             label: Some("q3"),
             ..public("Report", b"<h1>hits</h1>")
         },
@@ -340,7 +337,6 @@ async fn publish_round_trips_display_metadata() {
     .await
     .expect("publish");
     assert_eq!(artifact.description, "Quarterly numbers");
-    assert_eq!(artifact.favicon, "chart");
     assert_eq!(artifact.label.as_deref(), Some("q3"));
 
     let listed = artifacts::list(&db, "proj").await.expect("list");
@@ -721,19 +717,6 @@ async fn validation_rejects_bad_metadata() {
     .expect_err("long description");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
 
-    let err = artifacts::publish(
-        &db,
-        &dir,
-        NewArtifact {
-            favicon: "too-many-emoji-here",
-            ..public("Report", b"body")
-        },
-        None,
-    )
-    .await
-    .expect_err("long favicon");
-    assert_eq!(err.code(), ErrorCode::InvalidArgument);
-
     let long_label = "l".repeat(61);
     let err = artifacts::publish(
         &db,
@@ -774,7 +757,6 @@ async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
             kind: "markdown",
             content: b"intro\n\n# Real Title\n\nbody",
             description: "",
-            favicon: "",
             label: None,
             actor: "agent-one",
             project_id: "proj",
@@ -933,7 +915,6 @@ async fn publish_and_update_return_the_metadata_they_committed() {
         &dir,
         NewArtifact {
             description: "Quarterly numbers",
-            favicon: "chart",
             label: Some("q3"),
             ..public("Report", b"<h1>hits</h1>")
         },
@@ -1415,7 +1396,6 @@ async fn artifact_records_publishing_actor_and_retains_across_updates() {
             project_id: "proj",
             title: "Actor Test",
             description: "",
-            favicon: "",
             label: None,
             kind: "html",
             content: b"<h1>v1</h1>",

@@ -213,7 +213,7 @@ target, and session-bound work goes through the proxy.
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write goes only to your own active session, which is the only one it may name. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
-| `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
+| `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from your own durable server-side cursor for the project and advances it to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
 | `answer_post` | Reply to a question by its question id. |
@@ -252,7 +252,7 @@ inbox_read(status?, project_id?, limit?, since?, actor?)
 inbox_wait(wait_seconds?, project_id?, since?)
       -> {items, next_since}
 search(query, scope?, project_id?, type?, session_id?, limit?)
-artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
+artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
@@ -559,7 +559,7 @@ has to fit the transport limit as well, so content that needs a lot of JSON
 escaping, such as minified markup full of quotes, has less than 50 MiB of room.
 
 ```
-artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
+artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
@@ -571,7 +571,7 @@ comment_resolve(artifact_id, comment_id, done, delete_token?)
 comment_delete(artifact_id, comment_id, delete_token?)
 ```
 
-A publish carries a description, a favicon mark, and a version label. An
+A publish carries a description and a version label. An
 update keeps the existing label when omitted; an explicit null or empty string
 clears it. Pass the version the edit is based on as `base_version`: a stale base
 is refused with a conflict naming the current version unless `force` is set.
@@ -632,7 +632,11 @@ new version.
 Feed cursors are exclusive event ids: `since` walks forward and `before` walks
 back, with a page default of 50 and a cap of 500. A page returns `next_since`
 and `next_before` for continuing in either direction, and an empty forward poll
-returns the `since` it was given so a polling client keeps its place.
+returns the `since` it was given so a polling client keeps its place. `feed_read`
+is a stateful read: with no `since` it polls forward from your durable
+server-side cursor for the project and advances it to the returned `next_since`,
+so a restarted agent resumes where it stopped without carrying a cursor itself.
+An explicit `since` wins and also advances the stored cursor.
 
 Tool errors are structured with `code`, `message`, `retryable`, and `details`.
 The codes are `invalid_argument`, `unauthenticated`, `forbidden`, `not_found`,

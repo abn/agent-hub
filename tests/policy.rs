@@ -387,7 +387,6 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
             project_id: "secret",
             title: "dossier",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"quiet",

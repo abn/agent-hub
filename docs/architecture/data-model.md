@@ -22,7 +22,7 @@ inbox, which is global.
 |---|---|
 | `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, lifecycle status (`active` or `deleting`), the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
 | `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
-| `artifacts` | Artifact metadata. Title, description, favicon mark, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
+| `artifacts` | Artifact metadata. Title, description, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |

@@ -139,7 +139,6 @@ async fn a_full_feed_refuses_an_artifact_publish_but_not_a_knowledge_base_write(
             project_id: &project.id,
             title: "Report",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"# report",

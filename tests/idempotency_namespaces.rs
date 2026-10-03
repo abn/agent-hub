@@ -182,7 +182,6 @@ async fn artifact_publish_key_does_not_suppress_update() {
             project_id: "proj",
             title: "Artifact Title",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"version 1",

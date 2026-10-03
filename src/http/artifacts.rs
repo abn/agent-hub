@@ -119,8 +119,6 @@ pub struct ArtifactContent {
     pub version: i64,
     /// Artifact description.
     pub description: String,
-    /// Artifact favicon.
-    pub favicon: String,
     /// The label of the version read, when set.
     pub label: Option<String>,
     /// Total comments on the artifact across all versions.
@@ -200,7 +198,6 @@ pub async fn content(
         content,
         version: artifact.version,
         description: artifact.description,
-        favicon: artifact.favicon,
         label: artifact.label,
         comments_count: artifact.comments_count,
         comments_open: artifact.comments_open,

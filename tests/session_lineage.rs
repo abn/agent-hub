@@ -332,7 +332,6 @@ async fn pruning_preserves_artifacts_and_search_index() {
             project_id: "proj",
             title: "Durable Report",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"# Important conclusions",

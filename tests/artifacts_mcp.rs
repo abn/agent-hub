@@ -155,7 +155,6 @@ fn artifact_versioning_round_trip_over_stdio() {
             "kind": "html",
             "content": "<h1>v1</h1>",
             "description": "A longer summary",
-            "favicon": "R",
             "label": "v1-label",
         }),
     );
@@ -169,7 +168,6 @@ fn artifact_versioning_round_trip_over_stdio() {
     let response = server.call_tool("artifact_get", json!({"artifact_id": artifact_id}));
     let got = structured(&response);
     assert_eq!(got["description"], "A longer summary");
-    assert_eq!(got["favicon"], "R");
     assert_eq!(got["label"], "v1-label");
     assert_eq!(got["content"], "<h1>v1</h1>");
     assert_eq!(got["version"], 1);

@@ -396,7 +396,6 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
             project_id: "proj",
             title: "needle chart",
             description: "",
-            favicon: "",
             label: None,
             kind: "markdown",
             content: b"first",

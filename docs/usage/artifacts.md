@@ -33,7 +33,7 @@ The blob is capped at 50 MiB.
 Publishing uses the MCP tools:
 
 ```
-artifact_publish(project_id, title, kind, content, description?, favicon?, label?, envelope?, idempotency_key?)
+artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
@@ -47,7 +47,7 @@ id never changes. Both accept an optional `idempotency_key`, so a retry after a
 dropped connection returns the original result instead of a duplicate version.
 
 A publish carries display metadata: a `description` (2000 characters at most),
-a `favicon` (a short emoji mark), and a `label` naming the version (60 bytes at
+and a `label` naming the version (60 bytes at
 most). A blank title on a markdown artifact falls back to its first heading;
 otherwise the title is required.
 

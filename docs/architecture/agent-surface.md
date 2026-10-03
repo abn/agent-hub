@@ -73,7 +73,7 @@ document.
 | `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. Returns the handoff note the previous owner left. With `from`, it picks up another agent's session. |
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
-| `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
+| `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from the caller's own durable server-side cursor for the project and advances that cursor to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
@@ -98,7 +98,7 @@ document.
 | `whoami` | Report the calling identity, its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
 
-A publish carries a description, a favicon mark, and a version label. It
+A publish carries a description and a version label. It
 also records the publishing agent identity as `actor`, resolved directly from
 the authenticated caller principal. A caller cannot set or spoof `actor` in the
 publish payload; the server ignores any client-supplied actor field. The
@@ -200,7 +200,13 @@ Feed cursors are exclusive event ids; `since` walks forward and `before` walks
 back, with a default page of 50 and a cap of 500. A page returns `next_since`
 (the newest id, for polling forward) and `next_before` (the oldest id, for
 paging back). An empty forward poll returns the `since` cursor it was given,
-so a polling client keeps its place instead of losing it. Tool errors are
+so a polling client keeps its place instead of losing it. `feed_read` is a
+stateful read: with no `since` it polls forward from the caller's own durable
+server-side cursor for the project, keyed on the resolved actor, and advances
+that cursor to the returned `next_since`, so a restarted agent resumes where it
+stopped. An explicit `since` is honoured and also advances the stored cursor to
+the returned `next_since`, so a targeted read records progress. A backward read
+returns no `next_since` and moves nothing. Tool errors are
 structured (`code`, `message`, `retryable`, `details`) rather than prose. A
 resource a caller may not reach returns the same error whether it is missing
 or denied, so an agent cannot use an error as an existence check. A write that

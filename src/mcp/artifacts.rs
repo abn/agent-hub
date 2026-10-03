@@ -46,7 +46,6 @@ impl HubServer {
                 project_id: &params.project_id,
                 title: &params.title,
                 description: &params.description,
-                favicon: &params.favicon,
                 label: params.label.as_deref(),
                 kind: &params.kind,
                 content: params.content.as_bytes(),
@@ -161,7 +160,6 @@ impl HubServer {
             "actor": artifact.actor,
             "title": artifact.title,
             "description": artifact.description,
-            "favicon": artifact.favicon,
             "label": artifact.label,
             "kind": artifact.kind,
             "version": artifact.version,
@@ -258,8 +256,6 @@ struct ArtifactPublishParams {
     content: String,
     #[serde(default)]
     description: String,
-    #[serde(default)]
-    favicon: String,
     #[serde(default)]
     label: Option<String>,
     #[serde(default)]
