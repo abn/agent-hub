@@ -205,6 +205,27 @@ impl Config {
         Self::resolve(&|key| std::env::var(key).ok())
     }
 
+    /// Read only the data directory, without the serve-time checks.
+    ///
+    /// The offline data-lifecycle commands (`backup`, `restore`, `check`,
+    /// `doctor`) act on the store alone, so they must not depend on a
+    /// serve-time credential: a non-loopback bind needs an admin token to
+    /// serve, but resolving where the store is does not. This reads the
+    /// layered config files and `HUB_DATA_DIR` for `data_dir` only.
+    pub fn data_dir_from_env() -> Result<PathBuf> {
+        Self::resolve_data_dir(&|key| std::env::var(key).ok())
+    }
+
+    /// Resolve `data_dir` from an environment lookup and layered config files.
+    pub fn resolve_data_dir(env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+        let data_dir = Setting::resolved(env, "hub", "data_dir", &files, Some("./data"))
+            .value
+            .unwrap_or_else(|| "./data".to_string());
+        Ok(PathBuf::from(data_dir))
+    }
+
     /// Resolve configuration from environment lookup and layered config files.
     pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
         let loaded = load_layered_configs(env)?;
