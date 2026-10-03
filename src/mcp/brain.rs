@@ -82,6 +82,11 @@ impl HubServer {
         self.state.notify();
         // The brain is reached only through the namespaced tool paths, so the
         // server's file layout is not the agent's business.
+        //
+        // The recovery document is a convention nothing writes for the agent,
+        // so the row's own handoff note, left by the previous owner at
+        // `session_end`, travels beside the path. A resumed agent reads what
+        // its predecessor left without a second call.
         Ok(CallToolResult::structured(json!({
             "session_id": session.id,
             "project_id": session.project_id,
@@ -92,6 +97,7 @@ impl HubServer {
             "pickup": pickup,
             "namespaces": { "kv": "/kv", "fs": "/fs" },
             "recovery_path": RECOVERY_PATH,
+            "handoff": session.handoff,
             "brain_bytes": self.brain_bytes(&session),
         })))
     }
@@ -748,8 +754,10 @@ fn discard(path: &std::path::Path) {
 
 /// Where an agent is expected to leave the note that orients its successor.
 ///
-/// Returned by `session_start` so the bootstrap convention describes itself
-/// rather than living only in a skill file.
+/// A convention, not a stored document: nothing seeds it, and a resumed agent
+/// that wants what its predecessor left reads the row handoff `session_start`
+/// returns beside this path. It stays here so the bootstrap convention
+/// describes itself rather than living only in a skill file.
 const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
 
 /// The handoff note as a listing carries it, with whether it was cut short.

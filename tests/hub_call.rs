@@ -405,6 +405,56 @@ fn an_unknown_tool_is_a_caller_error_not_an_internal_one() {
     );
 }
 
+/// The documented one-shot recipe: start a session, then read its recovery
+/// document by naming the session explicitly.
+///
+/// A call is its own connection, so this is the claim the guide makes for a
+/// hook with no MCP client: the session brain is reachable one-shot when the
+/// read names the session it wants.
+#[test]
+fn a_one_shot_hook_starts_a_session_and_reads_its_brain() {
+    let hub = Hub::start("call-session-recipe");
+
+    let started = run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{started:?}");
+    let result = stdout_json(&started);
+    assert_eq!(
+        result["recovery_path"], "/fs/RECOVERY.md",
+        "the recipe's first command answers with the recovery path: {result}"
+    );
+    assert!(
+        result["handoff"].is_null(),
+        "a fresh session has no predecessor note: {result}"
+    );
+
+    // A later call still reaches that session's brain, because it names the
+    // session. A missing page is the ordinary not-found, not a no-session
+    // conflict, which is exactly what distinguishes the named read.
+    let read = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(
+                r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+            ),
+        ],
+    );
+    assert_eq!(read.status.code(), Some(1), "{read:?}");
+    assert_eq!(
+        stderr_json(&read)["error"]["code"],
+        "not_found",
+        "the named session resolved and its recovery document is simply empty"
+    );
+}
+
 /// A port no unprivileged hub can bind and nothing is listening on.
 ///
 /// A hub told to bind it fails the way a hub fails on a port another process

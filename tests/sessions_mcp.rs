@@ -846,6 +846,42 @@ async fn a_listing_summarises_a_long_handoff_note() {
 }
 
 #[tokio::test]
+async fn session_start_reports_the_recovery_path_and_the_handoff() {
+    let fleet = Fleet::new("recovery-handoff", &["agent-one"]).await;
+
+    let started = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "resume-me"}),
+    );
+    assert_eq!(
+        text(&started, "recovery_path"),
+        "/fs/RECOVERY.md",
+        "the conventional recovery path travels with the session"
+    );
+    assert!(
+        started.get("handoff").is_some_and(Value::is_null),
+        "a fresh session has no predecessor note: {started}"
+    );
+
+    // The owner ends with a note, then resumes the same named session.
+    let session_id = text(&started, "session_id");
+    fleet.agent(0).call(
+        "session_end",
+        json!({"session_id": session_id, "handoff": "half applied, read /fs/RECOVERY.md"}),
+    );
+
+    let resumed = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "resume-me"}),
+    );
+    assert_eq!(text(&resumed, "session_id"), session_id, "same brain");
+    assert_eq!(
+        resumed["handoff"], "half applied, read /fs/RECOVERY.md",
+        "the resume carries what the predecessor left, no second call needed"
+    );
+}
+
+#[tokio::test]
 async fn a_confined_agent_lists_only_the_sessions_it_may_read() {
     let fleet =
         Fleet::with_confidential("confined-listing", &["agent-one", "stranger"], true).await;
