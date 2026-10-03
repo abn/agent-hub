@@ -113,12 +113,23 @@ impl HubServer {
         Ok(CallToolResult::structured(json!({ "event_id": event_id })))
     }
 
-    #[tool(description = "Read the human's inbox, newest first.")]
+    #[tool(
+        description = "Read the human's inbox, newest first. Cursors are exclusive event ids, so since returns items whose own event or the answer or decision that resolved them is newer than the cursor. A page holds 50 by default and 500 at most; the returned next_since continues from here and, when the page is empty, returns the since it was given so a poll keeps its place."
+    )]
     async fn inbox_read(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<InboxReadParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        // A non-positive limit looks like a request for everything and behaves
+        // like an ordinary page, so it is refused rather than silently clamped.
+        if let Some(limit) = params.limit
+            && limit < 1
+        {
+            return Err(to_error_data(Error::InvalidArgument(format!(
+                "limit must be at least 1, got {limit}"
+            ))));
+        }
         let principal = self.principal(&context);
         let visible = policy::visibility(&self.state.db, &principal)
             .await
@@ -254,6 +265,8 @@ struct QuestionPostParams {
     body: Option<String>,
     #[serde(default)]
     context: Option<String>,
+    /// Scoped per project and per operation: a retry with the same value
+    /// returns the first question instead of posting a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
 }
@@ -263,6 +276,8 @@ struct QuestionPostParams {
 struct AnswerPostParams {
     question_id: String,
     body: String,
+    /// Scoped per project and per operation: a retry with the same value
+    /// returns the first answer instead of posting a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
 }
@@ -276,8 +291,12 @@ struct InboxReadParams {
     project_id: Option<String>,
     #[serde(default)]
     actor: Option<String>,
+    /// Exclusive cursor: return items whose own event, or the answer or
+    /// decision that resolved them, is newer than this event id. The returned
+    /// `next_since` continues from here.
     #[serde(default)]
     since: Option<String>,
+    /// Page size: 50 by default, 500 at most, at least 1.
     #[serde(default)]
     limit: Option<i64>,
 }

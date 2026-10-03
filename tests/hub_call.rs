@@ -171,15 +171,19 @@ fn a_tool_error_is_the_hubs_own_object_on_stderr() {
 }
 
 #[test]
-fn a_refused_call_exits_77() {
+fn a_denied_project_is_a_tool_error_exit_1_not_a_refused_token() {
     let hub = Hub::start("call-forbidden");
 
+    // Concealment returns the same `forbidden` for a missing project and one
+    // the caller may not reach. Either way the token was accepted, so 77 (the
+    // token-refused code a hook re-enrols on) would be wrong: this is an
+    // ordinary tool failure and exits 1.
     let output = run(&hub, &["call", "feed_read", r#"{"project_id":"ghost"}"#]);
 
     assert_eq!(
         output.status.code(),
-        Some(77),
-        "a refusal is a configuration problem for the hook, not a tool bug"
+        Some(1),
+        "a denied project is a tool error, not a refused token: {output:?}"
     );
     assert_eq!(stderr_json(&output)["error"]["code"], "forbidden");
 }
@@ -272,6 +276,67 @@ fn a_call_with_no_tool_name_is_a_usage_error() {
     let output = run(&hub, &["call"]);
 
     assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+#[test]
+fn version_is_a_structured_result_like_every_other_tool() {
+    let hub = Hub::start("call-version");
+
+    let output = run(&hub, &["call", "version"]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let result = stdout_json(&output);
+    assert!(
+        result["version"]
+            .as_str()
+            .is_some_and(|version| version.starts_with("agent-hub ")),
+        "version is named like every other field rather than wrapped as text: {result}"
+    );
+}
+
+#[test]
+fn the_configured_project_fills_a_missing_project_argument() {
+    let hub = Hub::start("call-project");
+
+    // HUB_PROJECT is set once, as the guide suggests, and the call names no
+    // project of its own. The write lands in the configured project.
+    let output = run_with(
+        &hub,
+        &[
+            "call",
+            "signal_append",
+            r#"{"kind":"signal","summary":"filled from the settings"}"#,
+        ],
+        &[
+            ("HUB_TOKEN", hub.agent_token.clone()),
+            ("HUB_PROJECT", PROJECT.to_string()),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let feed = hub.admin_get(&format!("/api/v1/projects/{PROJECT}/feed"));
+    assert!(
+        feed.contains("filled from the settings"),
+        "the call reached the configured project's feed: {feed}"
+    );
+}
+
+#[test]
+fn a_non_positive_feed_limit_is_refused_not_ignored() {
+    let hub = Hub::start("call-limit");
+
+    let output = run(
+        &hub,
+        &[
+            "call",
+            "feed_read",
+            &format!(r#"{{"project_id":"{PROJECT}","limit":-3}}"#),
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let error = stderr_json(&output);
+    assert_eq!(error["error"]["code"], "invalid_argument", "{error}");
 }
 
 #[test]

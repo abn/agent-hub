@@ -14,7 +14,9 @@ use super::{HubServer, to_error_data};
 
 #[tool_router(router = identity_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Report the calling identity and its personal space.")]
+    #[tool(
+        description = "Report the calling identity, its personal space, whether the caller is the admin, and the URL of the agent guide. The discovery call: it proves the token resolves and points an agent at the guide."
+    )]
     async fn whoami(
         &self,
         context: RequestContext<RoleServer>,

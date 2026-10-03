@@ -17,10 +17,14 @@ use super::{HubServer, to_error_data};
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SearchParams {
     query: String,
+    /// `project` (the default) or `global`. `global` searches every project the
+    /// caller can see; any other value falls back to `project_id`.
     #[serde(default)]
     scope: Option<String>,
+    /// The project to search when `scope` is not `global`.
     #[serde(default)]
     project_id: Option<String>,
+    /// Restrict to one family: `feed`, `artifact`, `brain`, or `kb`.
     #[serde(default, rename = "type")]
     kind: Option<String>,
     /// Restrict the results to one session's brain content.
@@ -33,7 +37,7 @@ struct SearchParams {
 #[tool_router(router = search_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Search feed events, artifacts, session brain content, and project knowledge base pages. type filters by family: \"feed\", \"artifact\", \"brain\", or \"kb\". session_id narrows the results to one session's brain."
+        description = "Search feed events, artifacts, session brain content, and project knowledge base pages. scope is \"project\" (the default) or \"global\", which searches every project the caller can see. type filters by family: \"feed\", \"artifact\", \"brain\", or \"kb\". session_id narrows the results to one session's brain."
     )]
     async fn search(
         &self,

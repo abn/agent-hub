@@ -79,6 +79,15 @@ fn signal_append_refuses_hub_owned_kinds() {
             response["error"]["data"]["error"]["code"], "invalid_argument",
             "kind {kind} must not be writable through signal_append: {response}"
         );
+        // A caller that guessed an intuitive wrong kind learns the allowed set
+        // from the refusal rather than having to fetch the guide.
+        let message = response["error"]["data"]["error"]["message"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(
+            message.contains("signal, finished, approval"),
+            "the refusal names the writable kinds: {response}"
+        );
     }
 
     // The refused writes left no events behind.

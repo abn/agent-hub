@@ -120,18 +120,49 @@ pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient,
 /// response body into its error text, so a refusal the hub explained comes
 /// back as the hub's object. Anything else is the hub being out of reach.
 fn connect_failure(endpoint: &str, message: &str) -> Failure {
+    // Only a refused token is the 77 case. A `forbidden` the hub named is a
+    // denied project or a missing resource, which is an ordinary tool failure,
+    // so it keeps the hub's object and exits 1 like any other.
     if let Some((code, error)) = embedded_error(message)
-        && matches!(code.as_str(), "unauthenticated" | "forbidden")
+        && code == "unauthenticated"
     {
         return Failure::Denied(error);
     }
-    if message.contains("401 Unauthorized") || message.contains("403 Forbidden") {
+    if message.contains("401 Unauthorized") {
         return Failure::Denied(error_object(
             "unauthenticated",
             &format!("{endpoint} refused the token"),
         ));
     }
-    Failure::Unavailable(format!("{endpoint} is unreachable: {message}"))
+    Failure::Unavailable(format!(
+        "{endpoint} is unreachable: {}",
+        short_cause(message)
+    ))
+}
+
+/// A cause a reader can act on, with the transport's own type names removed.
+///
+/// The transport folds its `Debug` into the message, which carries crate paths
+/// that change with a dependency bump. A hook greps this text, so it gets the
+/// endpoint and a short classification instead. An unrecognised error keeps its
+/// first line, which is the transport's own sentence rather than the dump.
+fn short_cause(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("connection refused") {
+        return "connection refused".to_string();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "timed out".to_string();
+    }
+    if lower.contains("error sending request") {
+        return "could not connect".to_string();
+    }
+    message
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 /// The hub's error object inside a transport error's text, with its code.
@@ -266,7 +297,7 @@ fn tool_failure(err: ServiceError) -> Failure {
         .and_then(Value::as_str)
         .unwrap_or_default();
     match code {
-        "unauthenticated" | "forbidden" => Failure::Denied(error),
+        "unauthenticated" => Failure::Denied(error),
         _ => Failure::Tool(error),
     }
 }

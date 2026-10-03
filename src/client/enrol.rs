@@ -155,9 +155,10 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
 
     let status = res.status();
     if status == StatusCode::FORBIDDEN {
-        return Err(Failure::Denied(error_object(
-            "forbidden",
-            "agent enrolment is disabled on this hub",
+        // Enrolment being disabled is a refused request, not a bad token, so
+        // it exits 1 rather than the token-refused 77 a hook re-enrols on.
+        return Err(Failure::Failed(format!(
+            "{enrol_endpoint} refused the request: agent enrolment is disabled on this hub"
         )));
     }
     if status == StatusCode::TOO_MANY_REQUESTS {

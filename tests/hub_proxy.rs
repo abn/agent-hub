@@ -59,6 +59,44 @@ fn the_proxy_answers_with_the_hub_and_its_identity() {
 }
 
 #[test]
+fn the_proxy_serves_the_agent_guide_as_a_resource() {
+    let hub = Hub::start("proxy-skill");
+    let mut proxy = proxy(&hub);
+    let init = proxy.initialize();
+
+    // The capabilities the handshake advertises are the hub's, resources
+    // included, so the proxy that advertises them has to serve them.
+    assert!(
+        init["result"]["capabilities"]["resources"].is_object(),
+        "the proxy advertises the hub's resources capability: {init}"
+    );
+
+    let listed = proxy.call("resources/list", json!({}));
+    let uris: Vec<&str> = listed["result"]["resources"]
+        .as_array()
+        .unwrap_or_else(|| panic!("resources/list returns an array: {listed}"))
+        .iter()
+        .filter_map(|resource| resource["uri"].as_str())
+        .collect();
+    assert!(
+        uris.contains(&"agenthub://skill"),
+        "the guide is listed: {listed}"
+    );
+
+    let read = proxy.call("resources/read", json!({"uri": "agenthub://skill"}));
+    let text = read["result"]["contents"]
+        .as_array()
+        .and_then(|contents| contents.first())
+        .and_then(|content| content["text"].as_str())
+        .unwrap_or_else(|| panic!("resources/read returns the guide text: {read}"));
+    assert!(
+        text.starts_with("# Agent Hub"),
+        "the guide itself comes through the proxy: {}",
+        &text[..text.len().min(40)]
+    );
+}
+
+#[test]
 fn a_proxy_outlives_a_hub_restart() {
     let mut hub = Hub::start("proxy-restart");
     let mut proxy = proxy(&hub);

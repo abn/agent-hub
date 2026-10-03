@@ -25,7 +25,8 @@ data directory itself and so cannot run beside a hub on it. See
 Hooks are shell commands with no MCP client, so the binary also makes one-shot
 calls: `agent-hub call <tool> [json]` prints the tool's JSON result on stdout
 and exits 0, or prints the hub's error object on stderr and exits non-zero
-(1 a tool error, 2 usage, 69 unreachable, 77 refused, 78 unconfigured).
+(1 a tool error, including a denied project or a missing resource, 2 usage,
+69 unreachable, 77 the token itself refused, 78 unconfigured).
 `agent-hub tools` lists the hub's tools. A call is its own connection, so it
 holds no session: it is for stateless reads and writes that name their target,
 and session-bound work goes through the proxy.

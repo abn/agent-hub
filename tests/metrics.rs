@@ -291,6 +291,44 @@ fn tool_calls_move_the_tool_counter() {
     );
 }
 
+#[test]
+fn the_storage_gauges_render() {
+    let (_dir, _hub, port) = serve("metrics-gauges");
+
+    let text = scrape(port);
+    for name in [
+        "agenthub_data_volume_free_bytes",
+        "agenthub_hub_db_bytes",
+        "agenthub_hub_wal_bytes",
+    ] {
+        assert!(
+            text.contains(&format!("# TYPE {name} gauge")),
+            "the gauge family is declared: {name}\n{text}"
+        );
+        assert!(
+            series(&text, name).rsplit(' ').next().is_some(),
+            "the gauge has a value: {name}"
+        );
+    }
+}
+
+#[test]
+fn errors_are_counted_by_code() {
+    let (_dir, _hub, port) = serve("metrics-errors");
+
+    // A 404 problem carries the not_found code, which funnels through the
+    // problem response and moves the error counter.
+    let missing = rest(port, "GET", "/no/such/route", Some(ADMIN_TOKEN), None);
+    assert_eq!(missing.status, 404, "{}", missing.raw);
+
+    let text = scrape(port);
+    let not_found = series(&text, "agenthub_errors_total{code=\"not_found\"}");
+    assert!(
+        counter(not_found) >= 1,
+        "the 404 is counted by code: {not_found}"
+    );
+}
+
 /// The trailing integer of a rendered series line.
 fn counter(line: &str) -> u64 {
     line.rsplit(' ')

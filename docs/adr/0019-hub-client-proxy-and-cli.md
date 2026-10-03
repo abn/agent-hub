@@ -36,7 +36,9 @@ The CLI exists for hooks. `agent-hub call <tool> [json]` makes one call and
 prints the tool's JSON result on stdout and nothing else; the hub's own error
 object goes to stderr, and the exit code follows `sysexits.h` so a hook can
 tell a down hub (69) from a refused token (77) from a missing setting (78)
-without parsing text. A call is its own connection and holds no session.
+without parsing text. A denied project or a missing resource is a tool error
+(1): the token was accepted, so 77 is reserved for an unrecognised token. A
+call is its own connection and holds no session.
 
 Settings are an env-style file. `~/.agent-hub/config` carries `HUB_URL`,
 `HUB_TOKEN`, and `HUB_AGENT_ID`, the same names as the environment, parsed by

@@ -9,8 +9,9 @@
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, ErrorData, ListToolsResult, PaginatedRequestParams,
-    ServerConfig, ServerPeerInfo,
+    CallToolRequestParams, CallToolResponse, ErrorData, ListResourcesResult, ListToolsResult,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerConfig,
+    ServerPeerInfo,
 };
 use rmcp::service::{Peer, RequestContext, RoleClient, ServiceError};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
@@ -45,6 +46,30 @@ impl ServerHandler for HubProxy {
     ) -> Result<CallToolResponse, ErrorData> {
         self.peer.call_tool_once(request).await.map_err(upstream)
     }
+
+    /// Forward resource listing, so the `resources` capability `hub_info`
+    /// copies from the hub is one the proxy can actually serve.
+    async fn list_resources(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        self.peer.list_resources(request).await.map_err(upstream)
+    }
+
+    /// Forward a resource read, for the same reason: the agent guide the hub
+    /// serves at `agenthub://skill` has to arrive through the proxy.
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        self.peer
+            .read_resource(request)
+            .await
+            .map(Into::into)
+            .map_err(upstream)
+    }
 }
 
 /// Present the hub's handshake as this server's own, so the caller sees the
@@ -73,6 +98,12 @@ fn upstream(err: ServiceError) -> ErrorData {
 /// Serve stdio MCP as a proxy to the hub the settings name.
 pub async fn serve_stdio(config: ClientConfig) -> Result<(), Failure> {
     let hub = connect(&config).await?;
+    // Said only after the handshake, so the line names a hub the token actually
+    // reached rather than one it is about to be refused by.
+    eprintln!(
+        "agent-hub mcp: proxying stdio to {}, as the agent the token resolves to",
+        config.url.as_deref().unwrap_or_default()
+    );
     let proxy = HubProxy {
         peer: hub.peer().clone(),
         info: hub_info(hub.peer_info()),

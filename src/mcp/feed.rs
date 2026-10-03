@@ -21,15 +21,15 @@ use crate::store::events::{self, FeedQuery, NewEvent};
 
 use super::{HubServer, to_error_data};
 
-/// The kinds an agent may write through `signal_append`. The rest are owned by
-/// a dedicated tool or the hub: `question` and `answer` by the question tools,
-/// `session` and `artifact` by the hub's own lifecycle, and `system` by the
-/// identity audit.
+/// The kinds an agent may write through `signal_append`, named in the refusal
+/// so a caller that guessed `session` or `artifact` learns the allowed set.
 const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval"];
 
 #[tool_router(router = feed_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Append an event to a project feed and return its id.")]
+    #[tool(
+        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", or \"approval\"; the kinds owned by other surfaces are refused."
+    )]
     async fn signal_append(
         &self,
         context: RequestContext<RoleServer>,
@@ -37,8 +37,9 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         if !SIGNAL_KINDS.contains(&params.kind.as_str()) {
             return Err(to_error_data(Error::InvalidArgument(format!(
-                "kind '{}' is not writable through signal_append",
-                params.kind
+                "kind '{}' is not writable through signal_append; the writable kinds are {}",
+                params.kind,
+                SIGNAL_KINDS.join(", ")
             ))));
         }
         let principal = self.principal(&context);
@@ -90,12 +91,23 @@ impl HubServer {
         Ok(CallToolResult::structured(json!({ "event_id": event_id })))
     }
 
-    #[tool(description = "Read a page of a project feed.")]
+    #[tool(
+        description = "Read a page of a project feed. Cursors are exclusive event ids: since walks forward, before walks back. A page holds 50 by default and 500 at most. The returned next_since and next_before continue in either direction, and an empty forward poll returns the since it was given so a poll keeps its place."
+    )]
     async fn feed_read(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<FeedReadParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        // A non-positive limit looks like a request for everything and behaves
+        // like an ordinary page, so it is refused rather than silently clamped.
+        if let Some(limit) = params.limit
+            && limit < 1
+        {
+            return Err(to_error_data(Error::InvalidArgument(format!(
+                "limit must be at least 1, got {limit}"
+            ))));
+        }
         let principal = self.principal(&context);
         policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
             .await
@@ -133,12 +145,15 @@ impl HubServer {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SignalAppendParams {
     project_id: String,
+    /// One of `signal`, `finished`, or `approval`.
     kind: String,
     summary: String,
     #[serde(default)]
     payload: Option<serde_json::Value>,
     #[serde(default)]
     thread_id: Option<String>,
+    /// Scoped per project and per operation: a retry with the same value
+    /// returns the first call's event instead of appending a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
 }
@@ -149,10 +164,14 @@ struct FeedReadParams {
     project_id: String,
     #[serde(default)]
     session: Option<String>,
+    /// Exclusive cursor: return events newer than this event id, walking
+    /// forward. The returned `next_since` continues from here.
     #[serde(default)]
     since: Option<String>,
+    /// Exclusive cursor: return events older than this event id, walking back.
     #[serde(default)]
     before: Option<String>,
+    /// Page size: 50 by default, 500 at most, at least 1.
     #[serde(default)]
     limit: Option<i64>,
     #[serde(default)]

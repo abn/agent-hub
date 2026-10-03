@@ -55,7 +55,13 @@ curl -sS -X POST "$HUB/api/v1/agents/my-agent/token" -H "$ADMIN"
 ```
 
 The token call returns the agent's token once. Reissuing replaces it and
-revokes the previous one. Ordinary projects are open to any authenticated token;
+revokes the previous one. Project lifecycle is REST only: there is no MCP tool
+to create or list a project, but any valid agent token works on those routes,
+not just the admin token. An agent with its own token can
+`POST /api/v1/projects` with a body of `{"id":"new-project","display_name":"New
+Project"}` and read the visible set with `GET /api/v1/projects`. The examples
+above use the admin token because that is who bootstraps the first agent.
+Ordinary projects are open to any authenticated token;
 confidential projects are reached only by tokens with an explicit grant, added with
 `POST /api/v1/agents/my-agent/grants` and a body of
 `{"project_id":"homelab","access":"read"}`. To callers without a grant, a
@@ -137,8 +143,9 @@ plus room for the call around it.
 A harness hook is a shell command with no MCP client, so the same binary makes
 one-shot calls with the same settings. The tool's JSON goes to stdout and
 nothing else does, logs and errors go to stderr, and the exit code says what
-happened: 0 success, 1 a tool error, 2 usage, 69 the hub is unreachable, 77
-the token was refused, 78 nothing names a hub.
+happened: 0 success, 1 a tool error (a denied project or missing resource
+included), 2 usage, 69 the hub is unreachable, 77 the token itself was
+refused, 78 nothing names a hub.
 
 ```sh
 agent-hub tools                                    # names, descriptions, argument schemas
@@ -164,9 +171,10 @@ agent-hub kb delete notes.md
 ```
 
 Every command takes `--project <id>`, or reads `HUB_PROJECT` from the same
-settings. `kb get` prints the page itself rather than JSON, so it pipes
-straight into context, and a missing page prints nothing at all and exits
-non-zero.
+settings. That default reaches `call` too: a tool argument without a
+`project_id` gets the configured project, the same as `kb`. A `kb get` prints
+the page itself rather than JSON, so it pipes straight into context, and a
+missing page prints nothing at all and exits non-zero.
 
 This is what replaces a notes file kept under a tool's home directory: every
 agent on every machine reads and writes the same page. A session-start hook

@@ -43,13 +43,14 @@ fn initialize_list_and_call_over_stdio() {
     );
 
     let called = server.call("tools/call", json!({"name": "version", "arguments": {}}));
-    let content = called["result"]["content"]
-        .as_array()
-        .expect("tools/call returns content");
-    let text = content[0]["text"].as_str().expect("text content");
+    // Like every other tool, version returns a structured object rather than a
+    // bare string, so a hook reads a named field instead of special-casing it.
+    let version = called["result"]["structuredContent"]["version"]
+        .as_str()
+        .unwrap_or_else(|| panic!("version returns a structured result: {called}"));
     assert!(
-        text.starts_with("agent-hub "),
-        "the version tool reports the hub version, got {text:?}"
+        version.starts_with("agent-hub "),
+        "the version tool reports the hub version, got {version:?}"
     );
 }
 
