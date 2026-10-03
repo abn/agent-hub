@@ -7,11 +7,12 @@
 //! stopped or quiesced volume.
 //!
 //! The set a backup holds is the whole store: `hub.db`, every session brain
-//! and project knowledge file under `sessions/` and `kb/`, and every artifact
-//! blob under `artifacts/`. Engine files are copied through the engine's own
-//! `VACUUM INTO`, so the result is one consistent file with no sidecar; only
-//! when the engine refuses that is a byte copy of the file and its write-ahead
-//! log taken instead, and the report says so.
+//! and project knowledge file under `sessions/` and `kb/`, every artifact blob
+//! under `artifacts/`, and the embedded tailnet's key state under `tailnet/`.
+//! Engine files are copied through the engine's own `VACUUM INTO`, so the
+//! result is one consistent file with no sidecar; only when the engine refuses
+//! that is a byte copy of the file and its write-ahead log taken instead, and
+//! the report says so.
 
 pub mod backup;
 pub mod check;
@@ -38,13 +39,41 @@ pub const HUB_DB: &str = "hub.db";
 /// The engine sidecars a byte-copied store file may have beside it.
 pub(crate) const SIDECAR_SUFFIXES: [&str; 2] = ["-wal", "-shm"];
 
-/// The one refusal every command gives when a hub holds the store.
+/// Whether a table exists in the opened store.
+///
+/// An offline command runs against a store at whatever schema it was left at,
+/// including one older than this binary's newest migration. A table a later
+/// migration adds is absent there, and a query against it is a parse error the
+/// operator would see as damage. Checking the catalogue first lets the command
+/// treat the table as absent rather than broken.
+pub(crate) async fn table_present(db: &turso::Database, name: &str) -> Result<bool> {
+    let conn = crate::store::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [name],
+        )
+        .await
+        .map_err(crate::store::engine)?;
+    Ok(rows.next().await.map_err(crate::store::engine)?.is_some())
+}
+
+/// The one refusal every command gives when a hub holds the store. Shared so
+/// the per-file loop can recognise a refusal that surfaced as a message.
+pub(crate) const LOCKED_MESSAGE: &str = "a hub is using this data directory; stop it, or \
+     snapshot the volume, before running this offline command";
+
+/// The locked refusal as an error.
 pub(crate) fn locked() -> Error {
-    Error::Conflict(
-        "a hub is using this data directory; stop it, or snapshot the volume, before running \
-         this offline command"
-            .to_string(),
-    )
+    Error::Conflict(LOCKED_MESSAGE.to_string())
+}
+
+/// Whether an error already carries the shared held-lock refusal.
+///
+/// The open maps a held lock to [`locked`], so this is a `Conflict` with the
+/// shared wording rather than an engine error by the time a caller sees it.
+pub(crate) fn is_locked_refusal(err: &Error) -> bool {
+    err.is_locked() || matches!(err, Error::Conflict(msg) if msg == LOCKED_MESSAGE)
 }
 
 /// Open the hub store and map a held lock to the shared refusal.

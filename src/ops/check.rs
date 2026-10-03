@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 
 use super::manifest::Manifest;
-use super::{HUB_DB, join_rel, relative, sha256_file, walk_files, with_engine};
+use super::{HUB_DB, join_rel, relative, sha256_file, table_present, walk_files, with_engine};
 
 /// What a check found.
 #[derive(Debug, Default)]
@@ -75,20 +75,26 @@ pub async fn check(dir: &Path) -> Result<CheckReport> {
                 Err(err) => problems.push(err.to_string()),
             }
             // A data directory's artifact rows name bytes the tree must hold;
-            // a backup has no store connection to cross-check.
+            // a backup has no store connection to cross-check. A store older
+            // than the version table has no rows to cross-check, so the query
+            // is skipped rather than reported as a missing table.
             if manifest.is_none() && path == &hub_db {
-                match referenced_artifacts(db).await {
-                    Ok(paths) => {
-                        for blob in paths {
-                            match join_rel(dir, &blob) {
-                                Ok(blob_path) if !blob_path.is_file() => {
-                                    problems.push(format!("missing artifact blob {blob}"));
+                match table_present(db, "artifact_versions").await {
+                    Ok(true) => match referenced_artifacts(db).await {
+                        Ok(paths) => {
+                            for blob in paths {
+                                match join_rel(dir, &blob) {
+                                    Ok(blob_path) if !blob_path.is_file() => {
+                                        problems.push(format!("missing artifact blob {blob}"));
+                                    }
+                                    Err(err) => problems.push(err.to_string()),
+                                    _ => {}
                                 }
-                                Err(err) => problems.push(err.to_string()),
-                                _ => {}
                             }
                         }
-                    }
+                        Err(err) => problems.push(err.to_string()),
+                    },
+                    Ok(false) => {}
                     Err(err) => problems.push(err.to_string()),
                 }
             }
@@ -98,9 +104,21 @@ pub async fn check(dir: &Path) -> Result<CheckReport> {
         match outcome {
             Ok(problems) => {
                 for problem in problems {
+                    // A lock that surfaced mid-query is caught inside the
+                    // closure as a problem string; the shared refusal is still
+                    // a usage condition, so it propagates rather than counting
+                    // as damage.
+                    if problem.contains(super::LOCKED_MESSAGE) {
+                        return Err(super::locked());
+                    }
                     report.problems.push(format!("{rel}: {problem}"));
                 }
             }
+            // A held lock is a usage condition, not store damage: the hub is
+            // serving this store, so the command cannot run. It propagates as
+            // the one shared refusal the other offline commands give, rather
+            // than being counted as an integrity problem under one file.
+            Err(err) if super::is_locked_refusal(&err) => return Err(super::locked()),
             Err(err) => report.problems.push(format!("{rel}: {err}")),
         }
     }

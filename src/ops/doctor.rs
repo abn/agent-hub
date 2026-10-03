@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 
 use super::check::check;
-use super::{HUB_DB, with_engine, with_suffix};
+use super::{HUB_DB, table_present, with_engine, with_suffix};
 
 /// What a doctor run found.
 #[derive(Debug, Default)]
@@ -73,7 +73,14 @@ pub async fn doctor(data_dir: &Path) -> Result<DoctorReport> {
 
     let (schema_version, id_high_water) = with_engine(&hub_db, async |db| {
         let schema_version = crate::store::schema_version(db).await?;
-        let id_high_water = crate::store::read_id_high_water(db).await?;
+        // The high-water table is added by a later migration than the oldest
+        // store this binary reads, so a store that predates it has no table to
+        // query. Absent reads as no mark rather than as a parse error.
+        let id_high_water = if table_present(db, "id_high_water").await? {
+            crate::store::read_id_high_water(db).await?
+        } else {
+            None
+        };
         Ok((schema_version, id_high_water))
     })
     .await?;

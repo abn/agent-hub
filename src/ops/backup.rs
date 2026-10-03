@@ -111,6 +111,18 @@ async fn backup_inner(data_dir: &Path, out_dir: &Path, hub_db: &Path) -> Result<
         entries.push(entry_for(&dest, &rel)?);
     }
 
+    // The embedded tailnet keeps its device identity and private key in
+    // `tailnet/keys.json`, under the data directory. It is not engine state and
+    // the store does not name it, but a restore that dropped it would leave the
+    // node re-registering with a new identity, so it is part of the set when
+    // present.
+    for source in walk_files(&data_dir.join("tailnet"))? {
+        let rel = relative(data_dir, &source)?;
+        let dest = out_dir.join(&rel);
+        copy_file(&source, &dest)?;
+        entries.push(entry_for(&dest, &rel)?);
+    }
+
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     let bytes = entries.iter().map(|entry| entry.size).sum();
     let manifest = Manifest {

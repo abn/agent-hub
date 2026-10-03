@@ -191,6 +191,39 @@ fn backup_and_restore_round_trip_the_store() {
 }
 
 #[test]
+fn backup_includes_the_tailnet_key_state() {
+    let root = TempDir::new("tailnet-backup");
+    let data = root.join("data");
+    let out = root.join("backup");
+    seed_store(&data);
+
+    let keys = data.join("tailnet/keys.json");
+    std::fs::create_dir_all(keys.parent().expect("tailnet parent")).expect("create tailnet dir");
+    std::fs::write(&keys, br#"{"device":"example"}"#).expect("write the key state");
+
+    let report = block_on(agent_hub::ops::backup(&data, &out)).expect("back up the store");
+    assert_eq!(report.files, 5, "hub, brain, knowledge, blob, tailnet key");
+
+    let manifest = agent_hub::ops::Manifest::read(&out).expect("read the manifest");
+    assert!(
+        manifest
+            .files
+            .iter()
+            .any(|entry| entry.path == "tailnet/keys.json"),
+        "the manifest names the tailnet key state: {:?}",
+        manifest
+            .files
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        out.join("tailnet/keys.json").is_file(),
+        "the key state is in the backup"
+    );
+}
+
+#[test]
 fn a_corrupted_backup_is_refused() {
     let root = TempDir::new("corrupt");
     let data = root.join("data");
@@ -268,21 +301,44 @@ fn the_offline_commands_refuse_while_a_hub_holds_the_store() {
         block_on(agent_hub::ops::backup(data.path(), &root.join("refused"))).expect_err("refused");
     assert!(matches!(err, Error::Conflict(_)), "{err}");
 
-    let checked = block_on(agent_hub::ops::check(data.path())).expect("check runs");
-    assert!(!checked.is_ok(), "check reports the running hub");
-    assert!(
-        checked
-            .problems
-            .iter()
-            .any(|problem| problem.contains("hub is using")),
-        "{:?}",
-        checked.problems
-    );
+    // `check` gives the same shared refusal as a usage condition, not a
+    // per-file integrity problem, so a script cannot mistake a held lock for
+    // store damage.
+    let err = block_on(agent_hub::ops::check(data.path())).expect_err("refused");
+    assert!(matches!(err, Error::Conflict(_)), "{err}");
+    assert!(err.to_string().contains("hub is using"), "{err}");
 
     let err = block_on(agent_hub::ops::restore(&out, data.path(), true)).expect_err("refused");
     assert!(matches!(err, Error::Conflict(_)), "{err}");
 
     drop(hub);
+}
+
+#[test]
+fn check_skips_the_artifact_cross_check_on_an_old_store() {
+    let dir = TempDir::new("check-old-store");
+    seed_store(dir.path());
+
+    // A store older than the artifact history table has no rows to
+    // cross-check, so the query must be skipped rather than reported as a
+    // missing table.
+    block_on(async {
+        let db = agent_hub::store::open_engine(&dir.join("hub.db"))
+            .await
+            .expect("open hub store");
+        let conn = db.connect().expect("connect");
+        conn.execute("DROP TABLE artifact_versions", ())
+            .await
+            .expect("drop the version table");
+    });
+
+    let checked = block_on(agent_hub::ops::check(&dir)).expect("check runs");
+    assert!(
+        checked.is_ok(),
+        "an old store checks clean: {:?}",
+        checked.problems
+    );
+    assert_eq!(checked.checked, 3);
 }
 
 #[test]

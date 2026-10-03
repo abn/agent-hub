@@ -171,6 +171,41 @@ fn doctor_names_a_missing_artifact_blob() {
 }
 
 #[test]
+fn doctor_reports_an_old_store_schema_instead_of_erroring() {
+    let dir = TempDir::new("doctor-old-schema");
+    seed_store(dir.path());
+
+    // Simulate a store older than this binary's newest migration: the tables a
+    // later migration adds are absent, so a query against them would be a parse
+    // error. Doctor must report the version, not fail on a missing table.
+    block_on(async {
+        let db = agent_hub::store::open_engine(&dir.join("hub.db"))
+            .await
+            .expect("open hub store");
+        let conn = db.connect().expect("connect");
+        conn.execute("DROP TABLE id_high_water", ())
+            .await
+            .expect("drop the high-water table");
+        conn.execute("UPDATE schema_version SET version = 2", ())
+            .await
+            .expect("rewrite the schema version");
+    });
+
+    let report = block_on(agent_hub::ops::doctor(dir.path())).expect("doctor runs");
+
+    assert_eq!(report.schema_version, 2, "the old schema is reported");
+    assert_eq!(
+        report.id_high_water, None,
+        "a store with no high-water table has no mark"
+    );
+    assert!(
+        report.is_ok(),
+        "a healthy old store is clean: {:?}",
+        report.problems
+    );
+}
+
+#[test]
 fn doctor_reports_a_corrupt_store_as_a_failure() {
     let data = TempDir::new("doctor-corrupt");
     seed_store(data.path());
