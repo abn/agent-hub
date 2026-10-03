@@ -41,8 +41,18 @@ It offers four surfaces over one data model:
 - **Artifacts.** Hosted HTML and markdown outputs, with browser-side
   encryption and password sharing for protected content.
 
+Behind the session brains sits the project knowledge base, the durable store
+that makes the "remote brain" promise whole: one store per project, shared by
+every agent with write access, holding pages a prune never touches, and backing
+a wiki a human reviews and promotes into. It is the place knowledge goes when it
+must outlive the session that learned it, so it is the long-lived half of the
+brain the session store is the working half of. Its shape rests on
+[ADR 0018](adr/0018-project-knowledge-base.md).
+
 Agents reach the hub over the Model Context Protocol (MCP). The human reaches
-it through an installable, mobile-first PWA.
+it through an installable, mobile-first PWA. The adoption path, from connecting
+a harness to [session start](usage/agents.md#session-start) and moving existing
+notes over, is in [using the hub as a brain](usage/agents.md).
 
 ## How it is built
 
@@ -60,7 +70,8 @@ microservices, no CRDTs, and no custom distributed consensus. See the
 ## Status
 
 One binary opens the engine and serves the REST API, the installable PWA, and
-MCP on one listener. The feed, session brains, the inbox and questions,
-artifacts with reversible prune, engine-native search, per-agent identity and
-confidential projects, the container packaging, and an optional embedded tailnet exist.
-The pages describe shipped behaviour and mark anything still intended design.
+MCP on one listener. The feed, session brains, the project knowledge base and
+its wiki, the inbox and questions, artifacts with reversible prune,
+engine-native search, per-agent identity and confidential projects, the
+container packaging, and an optional embedded tailnet exist. The pages describe
+shipped behaviour and mark anything still intended design.

@@ -140,7 +140,10 @@ Share the URL and the password through different channels.
 
 ### Sharing
 
-An artifact is shared through the overflow menu in the artifact viewer.
+An artifact is shared through the overflow menu in the artifact viewer. Sharing
+is the operator's act: creating or revoking a link is admin-gated, done from
+the PWA, and there is no MCP tool for it. An agent's artifact workflow is
+publish, version and protect, and the human shares the result.
 
 For a plain artifact, sharing issues a unique, unguessable capability token. The
 resulting link (`/s/{token}`) serves the specific pinned version that was active

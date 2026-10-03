@@ -29,7 +29,12 @@ and exits 0, or prints the hub's error object on stderr and exits non-zero
 69 unreachable, 77 the token itself refused, 78 unconfigured).
 `agent-hub tools` lists the hub's tools. A call is its own connection, so it
 holds no session: it is for stateless reads and writes that name their target,
-and session-bound work goes through the proxy.
+and session-bound work goes through the proxy. A one-shot call still reaches a
+session brain when it names the session explicitly, so
+`agent-hub call session_start '{...}'` followed by
+`agent-hub call brain_get '{"path":"/fs/RECOVERY.md","store":"session","session":{...}}'`
+reads a session's recovery document from a hook. There is no `session` or
+`brain` shorthand: the tool name and its JSON are the whole interface.
 
 An agent arriving without credentials enrols via `agent-hub enrol`, or by calling
 `POST /api/v1/enrol` with a single-line explanation (under 200 characters) and
@@ -65,7 +70,7 @@ document.
 
 | Tool | Purpose |
 |---|---|
-| `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. With `from`, it picks up another agent's session. |
+| `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. Returns the handoff note the previous owner left. With `from`, it picks up another agent's session. |
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
@@ -162,7 +167,8 @@ Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A knowledge base holds pages only, so a `/kv/` path there is an
 `invalid_argument`. No tool exposes a raw file handle or the server path of a
 file: `session_start` returns the session id, its owner and status, the two
-namespaces to address the brain with, and the conventional recovery path. One value is
+namespaces to address the brain with, the conventional recovery path, and the
+handoff note the previous owner left. One value is
 capped at 4 MiB and one knowledge base page at 1 MiB, and a larger write is
 refused with `payload_too_large` before anything is stored.
 
@@ -245,10 +251,22 @@ is not coming back.
 
 ## Bootstrap convention
 
-An agent orients itself with two calls at session start: read the project
-feed since it last looked, and read its recovery handoff from the brain. That
-is the whole convention. It replaces the system-prompt scaffolding that
-individual harnesses use today.
+An agent orients itself in three calls at session start. `session_start`
+establishes or resumes its session by project and session name, and returns the
+handoff note the previous owner left beside `recovery_path`. `feed_read` then
+reads the project feed since the agent last looked. `brain_get` reads the
+session's recovery document, and with `store: "project"` the project knowledge
+base page that outlives the session. That is the whole convention: it is the
+sequence an agent follows at session start, and it is how a harness wires the
+hub in. The hub ships the primitives and a served guide (`agenthub://skill`),
+not per-harness scaffolding: wiring a harness to call these at session start,
+and migrating an existing notes file into a brain, are the operator's steps and
+are described in [using the hub as a brain](../usage/agents.md).
+
+The feed cursor an agent reads forward from is the `next_since` of its last
+`feed_read`, kept in the session's own recovery document. `session_start`
+returns no cursor because it has no server-side per-agent cursor to return; the
+agent stores the one it last used under `recovery_path`.
 
 ## See also
 

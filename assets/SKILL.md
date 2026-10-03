@@ -176,9 +176,13 @@ settings. That default reaches `call` too: a tool argument without a
 the page itself rather than JSON, so it pipes straight into context, and a
 missing page prints nothing at all and exits non-zero.
 
-This is what replaces a notes file kept under a tool's home directory: every
-agent on every machine reads and writes the same page. A session-start hook
-that puts it into the context window needs three settings and no paths:
+This is the durable project knowledge store: every agent on every machine
+reads and writes the same page. It does not replace a tool's notes file by
+itself. Wiring a harness to pull the page into context on startup, and moving
+an existing `~/.claude`, `~/.opencode` or `~/.gemini` style file into a brain,
+are steps the operator takes; the repository's usage guide, "Using the hub as a
+brain", describes them. A session-start hook that puts the page into the
+context window needs three settings and no paths:
 
 ```sh
 #!/bin/sh
@@ -204,7 +208,7 @@ target, and session-bound work goes through the proxy.
 
 | Tool | What it does |
 |---|---|
-| `session_start` | Start or resume your own session by project and session name; the agent is the authenticated identity. Resuming the same name reuses your brain. With `from`, pick up another agent's session: the hub adopts it or forks it. |
+| `session_start` | Start or resume your own session by project and session name; the agent is the authenticated identity. Resuming the same name reuses your brain, and the result carries the handoff note the previous owner left. With `from`, pick up another agent's session: the hub adopts it or forks it. |
 | `session_end` | Mark the session ended, with an optional `handoff` note for whoever picks the work up. Only the owner may end a session. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write goes only to your own active session, which is the only one it may name. Every write is indexed for search. |
@@ -225,7 +229,7 @@ The argument shapes, with a trailing `?` for optional:
 ```
 session_start(project_id, session_name, from?)
       -> {session_id, project_id, agent, session_name, status, resumed, pickup,
-          namespaces, recovery_path, brain_bytes}
+          namespaces, recovery_path, handoff, brain_bytes}
 session_end(session_id, handoff?)
 session_list(project_id?, status?, agent?, limit?)
       -> sessions: [{session_id, project_id, session_name, agent, status,
@@ -288,7 +292,11 @@ other payload field is still searched and never shown.
 
 `session_start` takes a `project_id` and a `session_name` and returns a
 `session_id`, the namespaces to address the brain with, and `recovery_path`,
-the file where a session leaves the note that orients whoever comes next. The
+the file where a session leaves the note that orients whoever comes next. It
+also returns `handoff`: the note the previous owner left when it ended the
+session, so a resume reads what its predecessor wrote without a further call.
+`session_start` returns no feed cursor; keep the `next_since` from your last
+`feed_read` under `recovery_path` yourself. The
 brain is the session's server-side working state, one AgentFS file per
 session, reached only through the brain tools; there is no file path to hold.
 It survives same-session compaction and a resume of the same name, and is
@@ -577,6 +585,10 @@ A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
 with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown
 artifacts are rendered in the browser by the viewer, with raw HTML in the
 source escaped; the viewer frames every artifact without same-origin access.
+
+Sharing is the operator's act, not yours: an agent publishes, versions and
+protects an artifact, and the human issues or revokes a share link from the
+PWA. There is no MCP tool to create or revoke a link.
 
 For protected content, encrypt in the client and send the ciphertext as
 `content` with its `envelope`:

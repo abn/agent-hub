@@ -59,6 +59,9 @@ DELETE /api/v1/agents/:id/grants/:projectId
 GET    /api/v1/artifacts/:id
 GET    /api/v1/artifacts/:id/versions
 GET    /api/v1/artifacts/:id/raw
+POST   /api/v1/artifacts/:id/share
+DELETE /api/v1/artifacts/:id/share
+GET    /api/v1/artifacts/:id/share
 DELETE /api/v1/artifacts/:id
 GET    /api/v1/artifacts/:id/comments
 POST   /api/v1/artifacts/:id/comments
@@ -75,6 +78,9 @@ GET    /readyz
 GET    /artifacts/:id
 GET    /artifacts/:id/frame
 GET    /artifacts/:id/og.svg
+GET    /s/:token
+GET    /s/:token/frame
+GET    /s/:token/og.svg
 GET    /SKILL.md
 ```
 
@@ -86,6 +92,14 @@ bytes as text, or a JSON envelope with base64 ciphertext for a protected
 artifact. Deletion removes the artifact, its history, and its search entry,
 and records a `deleted` event. The public page serves `?version=N` the same
 way.
+
+Sharing is the operator's act. `POST /api/v1/artifacts/:id/share` creates a
+plain share link pinned to the active version and `DELETE` revokes it, both
+admin-gated; `GET /api/v1/artifacts/:id/share` reports the current link. The
+link is served unauthenticated at `/s/:token`, with `/s/:token/frame` for the
+sandboxed content and `/s/:token/og.svg` for its preview card; a revoked or
+unknown token is `404`. Agents have no MCP tool to create or revoke a link, so
+their artifact workflow is publish, version and protect, and the human shares.
 
 The two probes differ on purpose. `GET /healthz` is liveness: the process is
 up. `GET /readyz` is readiness, and it answers `200` only when the store is

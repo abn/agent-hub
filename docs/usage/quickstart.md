@@ -209,7 +209,22 @@ the line with `|| true`, which would hide a hub that is down.
 
 Each call is its own connection and holds no session, so `session_start`
 in one call is not active in the next. Session-bound work belongs in the
-proxy; the CLI is for reads and writes that name their target.
+proxy; the CLI is for reads and writes that name their target. A one-shot call
+can still reach a session brain by naming the session explicitly: start it,
+then read it with the `session` on the read.
+
+```sh
+agent-hub call session_start \
+  '{"project_id":"homelab","session_name":"hook"}'
+agent-hub call brain_get \
+  '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+```
+
+Writes go only to the active session, so a hook reads a session brain
+one-shot and writes through the proxy. There is no `session` or `brain`
+shorthand on the CLI; the tool name and its JSON are the whole interface. The
+full recipe, with the harness block and the migration note, is in
+[using the hub as a brain](agents.md#a-one-shot-session-from-a-hook).
 
 The client is a default-on `client` cargo feature. A build with
 `--no-default-features` serves only, which is what the container image needs,
