@@ -442,7 +442,13 @@ fn remove_if_present(path: &Path) -> Result<bool> {
 /// Dead locks are dropped on lookup so the table does not accumulate one entry
 /// per session ever seen.
 fn lock_for(path: &Path) -> Arc<AsyncMutex<()>> {
-    let mut locks = locks().lock().expect("brain lock table poisoned");
+    // Recover a poisoned table rather than propagating a panic: the critical
+    // section is a map probe and an insert, so the table is consistent however
+    // a panicking holder left it, and one poisoned mutex must not turn every
+    // later brain open down until restart.
+    let mut locks = locks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     locks.retain(|_, weak| weak.strong_count() > 0);
     if let Some(existing) = locks.get(path).and_then(|weak| weak.upgrade()) {
         return existing;
@@ -1313,6 +1319,119 @@ pub fn knowledge_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("kb")
 }
 
+/// Remove session brain files that no session row references, the
+/// session-side twin of [`crate::blob::reconcile`].
+///
+/// A crash between a fork's file copy and its row write, or between a project
+/// delete's metadata commit and its file removal, leaves `sessions/<project>/
+/// <id>.db` that no row points at. Ids are ULIDs, so such a file is never
+/// reused, is counted by no storage figure, and would otherwise grow the disk
+/// silently. Called at startup, where the engine lock rules out another hub
+/// over the same directory and no write is in flight, so every unreferenced
+/// file is dead. `.tmp` (an in-flight fork) and `.quarantine` (a prune) are
+/// left to the code that owns them.
+pub async fn reconcile_sessions(db: &turso::Database, data_dir: &Path) -> Result<usize> {
+    let conn = crate::store::connect(db)?;
+    let mut rows = conn
+        .query("SELECT project_id, id FROM sessions", ())
+        .await
+        .map_err(|err| Error::Engine(err.to_string()))?;
+    let mut referenced = std::collections::HashSet::new();
+    while let Some(row) = rows
+        .next()
+        .await
+        .map_err(|err| Error::Engine(err.to_string()))?
+    {
+        let project = match row
+            .get_value(0)
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            turso::Value::Text(project) => project,
+            _ => continue,
+        };
+        let id = match row
+            .get_value(1)
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            turso::Value::Text(id) => id,
+            _ => continue,
+        };
+        referenced.insert(format!("{project}/{id}.db"));
+    }
+
+    let sessions = data_dir.join("sessions");
+    let mut removed = 0;
+    for project in sessions_of(&sessions)? {
+        let project_name = match project.file_name().and_then(|name| name.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        for entry in std::fs::read_dir(&project)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = match entry.file_name().into_string() {
+                Ok(name) => name,
+                Err(_) => continue,
+            };
+            if !is_session_file(&file_name) {
+                continue;
+            }
+            let rel = format!("{project_name}/{file_name}");
+            if referenced.contains(&rel) {
+                continue;
+            }
+            std::fs::remove_file(entry.path())?;
+            removed += 1;
+            // The engine's write-ahead log sits beside the brain file. It is
+            // not a candidate of its own (it is named by no row), so it goes
+            // with the file it belongs to, as a prune removes it.
+            let mut sidecar = std::ffi::OsString::from(&file_name);
+            sidecar.push("-wal");
+            let _ = std::fs::remove_file(project.join(sidecar));
+        }
+        if is_empty_dir(&project)? {
+            let _ = std::fs::remove_dir(&project);
+        }
+    }
+    Ok(removed)
+}
+
+/// Whether a sessions-directory name is a session brain file.
+///
+/// `.tmp` and `.quarantine` belong to a fork and a prune and are not swept
+/// here.
+fn is_session_file(name: &str) -> bool {
+    name.ends_with(".db") && !name.ends_with(".tmp") && !name.ends_with(".quarantine")
+}
+
+/// The directories directly under the sessions root. A missing directory
+/// yields none.
+fn sessions_of(path: &Path) -> Result<Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err.into()),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            dirs.push(entry.path());
+        }
+    }
+    Ok(dirs)
+}
+
+fn is_empty_dir(path: &Path) -> Result<bool> {
+    match std::fs::read_dir(path) {
+        Ok(mut entries) => Ok(entries.next().is_none()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(err) => Err(err.into()),
+    }
+}
+
 /// Refuse when what is stored is not what the caller expects to replace.
 fn ensure_expected(path: &str, expected: &str, current: Option<&[u8]>) -> Result<()> {
     let current = current.map_or_else(|| VERSION_ABSENT.to_string(), version);
@@ -1383,4 +1502,32 @@ fn fs_path(rest: &str) -> String {
 /// The SDK error carries the detail; the hub reports it as an engine failure.
 fn engine_error(err: agentfs_sdk::error::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A panic while the lock table is held must not turn every later brain
+    /// open down: the table is recovered, as the id generator already does.
+    #[test]
+    fn a_poisoned_lock_table_is_recovered() {
+        let poisoner = std::thread::spawn(|| {
+            let _guard = locks().lock().expect("first lock");
+            panic!("poison the lock table on purpose");
+        });
+        assert!(poisoner.join().is_err(), "the holder panicked");
+        assert!(
+            locks().lock().is_err(),
+            "the table is poisoned, so recovery is what makes the call safe"
+        );
+
+        // No panic, and a usable lock comes back.
+        let lock = lock_for(Path::new("/nonexistent/brain-poison-test.db"));
+        assert_eq!(Arc::strong_count(&lock), 1);
+
+        // The recovery leaves the table usable for subsequent opens.
+        let again = lock_for(Path::new("/nonexistent/brain-poison-test.db"));
+        assert_eq!(Arc::strong_count(&again), 2);
+    }
 }

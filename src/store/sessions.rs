@@ -689,33 +689,61 @@ impl Activity {
         // The guard keeps the timestamp monotonic: a server clock that reads
         // behind an earlier touch must not move a session back out of the
         // active window.
-        conn.execute(
-            "UPDATE sessions SET last_activity = ?1 WHERE id = ?2 AND last_activity < ?1",
-            vec![Value::Text(stamp), Value::Text(session_id.to_string())],
-        )
-        .await
-        .map_err(engine)?;
+        if let Err(err) = conn
+            .execute(
+                "UPDATE sessions SET last_activity = ?1 WHERE id = ?2 AND last_activity < ?1",
+                vec![Value::Text(stamp), Value::Text(session_id.to_string())],
+            )
+            .await
+            .map_err(engine)
+        {
+            // The window is recorded only for a write that landed, so a failed
+            // write is retried on the next call rather than skipped for a
+            // minute. The record is a write-rate hint, so a rollback costs one
+            // update and never correctness.
+            self.roll_back(session_id);
+            return Err(err);
+        }
+        self.record(session_id, now);
         Ok(true)
     }
 
-    /// Whether this session's next write is due, recording it when it is.
+    /// Whether this session's next write is due, without recording it.
     fn due(&self, session_id: &str, now: time::OffsetDateTime) -> bool {
-        let mut last = match self.last.lock() {
+        let last = match self.last.lock() {
             Ok(last) => last,
             // A poisoned lock means a panic while holding it. The record is a
             // write-rate hint, so losing it costs one extra update.
             Err(poisoned) => poisoned.into_inner(),
         };
-        if let Some(at) = last.get(session_id)
-            && (now - *at).whole_seconds() < ACTIVITY_COALESCE_SECS
-        {
-            return false;
-        }
+        !last
+            .get(session_id)
+            .is_some_and(|at| (now - *at).whole_seconds() < ACTIVITY_COALESCE_SECS)
+    }
+
+    /// Record a served window for a session whose write landed.
+    fn record(&self, session_id: &str, now: time::OffsetDateTime) {
+        let mut last = self.lock_last();
         // Runs at most once per session per window, so the sweep of sessions
         // that have gone quiet costs nothing on the hot path.
         last.retain(|_, at| (now - *at).whole_seconds() < ACTIVITY_COALESCE_SECS * 2);
         last.insert(session_id.to_string(), now);
-        true
+    }
+
+    /// Drop a recorded window after its write failed, so the next call retries.
+    fn roll_back(&self, session_id: &str) {
+        let mut last = self.lock_last();
+        last.remove(session_id);
+    }
+
+    /// The activity map under its lock, recovering a poisoned one.
+    fn lock_last(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, time::OffsetDateTime>> {
+        match self.last.lock() {
+            Ok(last) => last,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 }
 

@@ -334,6 +334,22 @@ impl AppState {
             ),
         }
 
+        // The session-side twin of the artifact reconcile: a fork or a delete
+        // that crashed between its file and its row leaves a brain file no
+        // session names. Runs after the prune and project recovery, so a file
+        // those two are about to reclaim is not mistaken for an orphan.
+        match crate::brain::reconcile_sessions(&db, &config.data_dir).await {
+            Ok(0) => {}
+            Ok(reaped) => tracing::info!(
+                reaped,
+                "reconciled unreferenced session brain files left by an interrupted write"
+            ),
+            Err(err) => tracing::warn!(
+                error = %err,
+                "could not reconcile unreferenced session brain files"
+            ),
+        }
+
         // Fold the log of every finished session into its file once, so a brain
         // that ended while this was not yet automatic is consolidated too. Best
         // effort: a brain that cannot be consolidated is left as it is.
