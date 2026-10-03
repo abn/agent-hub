@@ -4,6 +4,31 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-03
+
+### Using the hub as a brain, and the honest harness claims
+
+* **Add**: [Using the hub as a brain](usage/agents.md) is the adoption path for
+  the remote-brain use case: the MCP server block per harness, the
+  session-start sequence, the one-shot hook form, a migration note for notes
+  kept under a harness home, and a plain statement of what is manual.
+* **Update**: [Agent surface](architecture/agent-surface.md) describes the
+  bootstrap convention as one an agent follows rather than one that replaces
+  harness scaffolding, states where the feed cursor lives, and lists the
+  share routes on the human surface. `session_start` reports the session
+  row's handoff beside the recovery path. [Overview](overview.md) names the
+  knowledge base's use case.
+
+### The reviewed edges: store, surface, and operations
+
+* **Update**: the event ceiling bounds artifact writes and the knowledge
+  base's lifecycle signal as well as feed posts; a missing artifact version
+  names itself; orphan session brain files are reconciled at startup.
+  [Operations](usage/operations.md) documents the practical ceilings, the
+  interrupted-restore recovery, and the manual rollback. The MCP gate answers
+  a storage failure with its real status. [Agent surface](architecture/agent-surface.md)
+  documents the retry and paging contracts the tool schemas now carry.
+
 ## 2026-10-02
 
 ### Metrics, doctor, and the tailnet rebuild
