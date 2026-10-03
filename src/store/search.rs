@@ -7,6 +7,17 @@
 //! ordering. Add any other predicate and the ordering is silently dropped
 //! while `fts_score` stays readable per row, so a filtered query asks the
 //! engine to match and filter, reads the scores, and ranks here.
+//!
+//! Every query this module builds carries a predicate beyond the match: the
+//! soft-prune exclusion, and whatever scope the caller named. So the engine's
+//! ranked path is never taken and this is the shipped design, not a
+//! regression. The engine's optimizer rejects every ORDER BY/LIMIT pattern
+//! unless the WHERE is a single term the index covers
+//! (`turso_core` `translate/optimizer/mod.rs`, `where_covered_completely`),
+//! and a column cannot fold the exclusion into that one term. The fallback is
+//! therefore bounded by `SEARCH_FETCH_MAX` rows and scored here; raising or
+//! removing that bound is the lever that changes relevance, not a schema
+//! column. See ADR 0022.
 
 use turso::{Connection, Database, Row, Value};
 

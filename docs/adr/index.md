@@ -30,3 +30,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0020](0020-sessions-belong-to-their-agent.md) - Sessions belong to their
   agent
 * [0021](0021-the-token-is-the-identity.md) - The token is the identity
+* [0022](0022-search-ranks-in-the-hub.md) - Search ranks in the hub, bounded by
+  a fetch cap
