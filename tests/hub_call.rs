@@ -321,6 +321,108 @@ fn the_configured_project_fills_a_missing_project_argument() {
     );
 }
 
+/// The configured project fills a project call, and never reaches the session
+/// store, which the hub refuses a project on.
+///
+/// A hook that exports HUB_PROJECT for its project pages would otherwise not be
+/// able to read its own session brain one-shot at all, and the recipe the guide
+/// gives would answer `invalid_argument` about a project nobody passed.
+#[test]
+fn the_configured_project_is_never_sent_to_the_session_store() {
+    let hub = Hub::start("call-project-session-store");
+
+    let started = run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{started:?}");
+
+    // The documented one-shot read of a session brain, with the setting set and
+    // without it.
+    let named_read = format!(
+        r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+    );
+    let with_project = run_with(
+        &hub,
+        &["call", "brain_get", &named_read],
+        &project_settings(&hub),
+    );
+    let without_project = run(&hub, &["call", "brain_get", &named_read]);
+
+    for output in [&with_project, &without_project] {
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty(), "nothing on stdout: {output:?}");
+        // `not_found` means the named session resolved and its recovery document
+        // is simply empty. `invalid_argument` about a project means the setting
+        // reached the store that refuses one.
+        let error = stderr_json(output);
+        assert_eq!(error["error"]["code"], "not_found", "{error}");
+    }
+    assert_eq!(
+        stderr_json(&with_project),
+        stderr_json(&without_project),
+        "the setting changed nothing about a session-store read"
+    );
+
+    // With no session named there is nothing to read, which is a conflict about
+    // the active session rather than a complaint about a project.
+    let active = run_with(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            r#"{"path":"/kv/cursor","store":"session"}"#,
+        ],
+        &project_settings(&hub),
+    );
+    assert_eq!(active.status.code(), Some(1), "{active:?}");
+    assert_eq!(
+        stderr_json(&active)["error"]["code"],
+        "conflict",
+        "{active:?}"
+    );
+
+    // The convenience itself is untouched: a project-store call that names no
+    // project of its own still takes the configured one.
+    let wrote = run_with(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            r##"{"store":"project","path":"/fs/index.md","content":"# Homelab\n"}"##,
+        ],
+        &project_settings(&hub),
+    );
+    assert_eq!(wrote.status.code(), Some(0), "{wrote:?}");
+
+    let read = run_with(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            r#"{"store":"project","path":"/fs/index.md"}"#,
+        ],
+        &project_settings(&hub),
+    );
+    assert_eq!(read.status.code(), Some(0), "{read:?}");
+    assert_eq!(stdout_json(&read)["store"], "project", "{read:?}");
+}
+
+/// The settings a hook exports once: the agent's token and the project.
+///
+/// A run needs the token of its own account rather than the administrator's, so
+/// this is the pairing the session-store read has to carry to mean anything.
+fn project_settings(hub: &Hub) -> Vec<(&'static str, String)> {
+    vec![
+        ("HUB_TOKEN", hub.agent_token.clone()),
+        ("HUB_PROJECT", PROJECT.to_string()),
+    ]
+}
+
 #[test]
 fn a_non_positive_feed_limit_is_refused_not_ignored() {
     let hub = Hub::start("call-limit");

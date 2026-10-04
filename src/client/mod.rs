@@ -178,6 +178,53 @@ fn embedded_error(message: &str) -> Option<(String, Value)> {
     Some((code, error))
 }
 
+/// The tools whose target is named by `store`, and so by the store a call
+/// selects rather than by its project.
+const STORE_TOOLS: [&str; 4] = ["brain_get", "brain_put", "brain_list", "brain_delete"];
+
+/// Fill a missing `project_id` from the configured project, where the call
+/// selects a project at all.
+///
+/// `HUB_PROJECT` is a hook's shorthand for "the project I am working in", so a
+/// call that names no project of its own takes it. It is not a claim about every
+/// tool, and the session store cannot honour one: it acts on the active session
+/// and refuses a `project_id` outright, so a hook that exported the setting for
+/// its project pages could not read its own session brain at all. So the setting
+/// fills the argument for a call that selects a project and is left out of one
+/// that selects a session. An argument the caller wrote always wins.
+pub fn fill_project(tool: &str, arguments: &mut Value, project: Option<&str>) {
+    let Some(project) = project else {
+        return;
+    };
+    if !selects_a_project(tool, arguments) {
+        return;
+    }
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if object.contains_key("project_id") {
+        return;
+    }
+    object.insert("project_id".to_string(), Value::String(project.to_string()));
+}
+
+/// Whether a call's target is chosen by project.
+///
+/// A named store decides it: the project knowledge base is addressed by
+/// project, and a session brain is not, so a session store takes no project and
+/// an unknown one is refused by the hub anyway. A tool that takes no `store`
+/// names a project when it takes a project at all, `session_start` and
+/// `brain_promote` included. A brain tool with no `store` reaches the active
+/// session, which a read defaults to and a write is refused for the missing
+/// store.
+fn selects_a_project(tool: &str, arguments: &Value) -> bool {
+    match arguments.get("store").and_then(Value::as_str) {
+        Some("project") => true,
+        Some(_) => false,
+        None => !STORE_TOOLS.contains(&tool),
+    }
+}
+
 /// Call one tool and return its result as JSON.
 pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result<Value, Failure> {
     let Value::Object(arguments) = arguments else {
