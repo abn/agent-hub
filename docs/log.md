@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-10-04
 
+### The wiki tree's directory rows stop addressing pages
+
+* **Fix**: a wiki directory row no longer points at a page. On a desktop the
+  full tree already draws what the directory holds, so the row is a label and
+  does not navigate; on a phone it drills in through the directory address. A
+  row that kept a page address requested a page that does not exist and answered
+  "That page is not in the wiki" for a folder drawn in the tree beside it. The
+  browser invariants hold the row to a directory address, or none at all.
+
 ### Storage and Settings reach the places they name
 
 * **Fix**: the desktop Storage table's PROJECT name opens its project. The name

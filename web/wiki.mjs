@@ -121,18 +121,23 @@ function rowHTML(entry, id, selected, narrow = false) {
   const pad = 16 + depth * 20;
   const name = entry.title || path.split("/").pop();
   const on = path === selected ? ' aria-current="true"' : "";
-  const href =
-    narrow && entry.type === "dir"
-      ? `#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(displayPath(path))}`
-      : wikiPageHash(id, path);
   if (entry.type === "dir") {
-    return `<a class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
-      <span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FOLDER_GLYPH}</span>
+    // A directory is structure, not a page. On a phone it drills in; on a
+    // desktop the full tree already shows what it holds, so it is a label and
+    // does not navigate. Either way it must never address a page, which is what
+    // sent the reader to a 404 for a folder that was in the tree beside it.
+    const inner = `<span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FOLDER_GLYPH}</span>
       <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path.split("/").pop())}</span>
       ${staleMark(entry)}
-      <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${entry.children ?? 0}</span>
-    </a>`;
+      <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${entry.children ?? 0}</span>`;
+    const itemStyle = `display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);box-sizing:border-box`;
+    if (narrow) {
+      const dirHref = `#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(displayPath(path))}`;
+      return `<a class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" href="${dirHref}"${on} style="${itemStyle};text-decoration:none">${inner}</a>`;
+    }
+    return `<div class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" style="${itemStyle}">${inner}</div>`;
   }
+  const href = wikiPageHash(id, path);
   const meta = [entry.page_type || "concept", entry.status || "draft", trustWords(entry)].join(" · ");
   return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 12px 6px ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
     <span style="display:flex;align-items:center;gap:8px;min-width:0">
