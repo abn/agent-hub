@@ -11,6 +11,7 @@ usage:
   agent-hub call <tool> [json]   call one tool and print its JSON result
   agent-hub tools                list the hub's tools
   agent-hub kb <command>         read and write the project knowledge base
+  agent-hub project <command>    create, list, and delete projects
   agent-hub config [flags]       inspect and validate configuration
   agent-hub enrol [why]          request enrolment and wait for operator approval
   agent-hub backup --out DIR     back up the store while no hub serves it
@@ -208,6 +209,7 @@ fn main() -> ExitCode {
         Some("call") => call(&args[1..]),
         Some("tools") => tools(&args[1..]),
         Some("kb") => kb(&args[1..]),
+        Some("project") => project(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
         Some("enrol") => enrol(&args[1..]),
         Some("backup") => backup_cmd(&args[1..]),
@@ -246,6 +248,8 @@ fn usage_of(command: &str) -> Option<&'static str> {
         "call" => CALL_USAGE,
         "tools" => TOOLS_USAGE,
         "kb" => KB_USAGE,
+        #[cfg(feature = "client")]
+        "project" => agent_hub::client::projects::PROJECT_USAGE,
         "config" => CONFIG_USAGE,
         #[cfg(feature = "client")]
         "enrol" => agent_hub::client::enrol::ENROL_USAGE,
@@ -952,6 +956,166 @@ fn kb(args: &[String]) -> ExitCode {
     }
 }
 
+/// Create, list, and delete projects from a flag-shaped command line.
+///
+/// The project routes are the one part of the hub with no MCP tool, so an agent
+/// that had to reach them read its token out of the config and handed it to
+/// curl. These verbs are that reach, and the same settings, failure object and
+/// exit codes the one-shot calls already use.
+#[cfg(feature = "client")]
+fn project(args: &[String]) -> ExitCode {
+    use agent_hub::client::Failure;
+    use agent_hub::client::projects::PROJECT_USAGE;
+
+    let Some(command) = args.first().map(String::as_str) else {
+        return fail(&Failure::Usage(format!(
+            "project needs a command\n{PROJECT_USAGE}"
+        )));
+    };
+    let options = match ProjectOptions::parse(&args[1..]) {
+        Ok(options) => options,
+        Err(message) => return fail(&Failure::Usage(format!("{message}\n{PROJECT_USAGE}"))),
+    };
+
+    // An option a command accepts and then ignores misleads: a --plain on a
+    // create reads as a request for output the command never chose to shape.
+    let unused = [
+        (
+            options.id.is_some() && !matches!(command, "create" | "delete"),
+            "--id",
+        ),
+        (options.name.is_some() && command != "create", "--name"),
+        (options.plain && command != "list", "--plain"),
+    ]
+    .into_iter()
+    .find_map(|(given, name)| given.then_some(name));
+    if let Some(option) = unused {
+        return fail(&Failure::Usage(format!(
+            "project {command} does not take {option}\n{PROJECT_USAGE}"
+        )));
+    }
+
+    let (config, runtime) = match client_runtime() {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    match command {
+        "create" => {
+            let Some(id) = options.id.as_deref() else {
+                return fail(&Failure::Usage(format!(
+                    "project create needs the id it creates\n{PROJECT_USAGE}"
+                )));
+            };
+            // The hub wants a display name and has no default for one, so the
+            // id is the name until the caller says otherwise.
+            let name = options.name.as_deref().unwrap_or(id);
+            emit(runtime.block_on(agent_hub::client::projects::create(&config, id, name)))
+        }
+        "list" => {
+            let listed = runtime.block_on(agent_hub::client::projects::list(&config));
+            if options.plain {
+                emit_lines(listed)
+            } else {
+                emit(listed)
+            }
+        }
+        // With no --id the configured project is the target, which is what a
+        // hook that exported HUB_PROJECT means. Whether this caller may delete
+        // at all is the hub's answer, passed through as it arrived.
+        "delete" => {
+            let Some(id) = options.id.or_else(|| config.project.clone()) else {
+                return fail(&Failure::Usage(
+                    "project delete needs the project it deletes: pass --id <id> or set \
+                     HUB_PROJECT"
+                        .to_string(),
+                ));
+            };
+            match runtime.block_on(agent_hub::client::projects::delete(&config, &id)) {
+                Ok(()) => {
+                    println!("deleted {id}");
+                    ExitCode::SUCCESS
+                }
+                Err(failure) => fail(&failure),
+            }
+        }
+        other => fail(&Failure::Usage(format!(
+            "unknown project command '{other}'\n{PROJECT_USAGE}"
+        ))),
+    }
+}
+
+/// What a `project` command line carried besides its command.
+#[cfg(feature = "client")]
+#[derive(Default)]
+struct ProjectOptions {
+    id: Option<String>,
+    name: Option<String>,
+    plain: bool,
+}
+
+#[cfg(feature = "client")]
+impl ProjectOptions {
+    /// Parse the closed list of long options, with no positional form: the
+    /// project an option names is written out, so a hook's line is legible.
+    fn parse(args: &[String]) -> std::result::Result<Self, String> {
+        let mut options = Self::default();
+        let mut args = args.iter();
+        while let Some(argument) = args.next() {
+            match argument.as_str() {
+                "--id" => options.id = Some(flag_value(&mut args, "--id")?),
+                "--name" | "--display-name" => {
+                    options.name = Some(flag_value(&mut args, "--name")?)
+                }
+                "--plain" => options.plain = true,
+                flag if flag.starts_with('-') => return Err(format!("unknown flag '{flag}'")),
+                extra => return Err(format!("unexpected argument '{extra}'")),
+            }
+        }
+        Ok(options)
+    }
+}
+
+/// Print one project per line, the way `kb list` prints one page per line.
+///
+/// The listing is the hub's own body, so the plain form reads the one array it
+/// names. The id leads, because that is what every later command names, and the
+/// display name follows it; a project with no name yet is its id alone rather
+/// than a line with a hole in it. A body that names no array is not an empty
+/// listing, so it is reported rather than printed as nothing.
+#[cfg(feature = "client")]
+fn emit_lines(
+    listed: std::result::Result<serde_json::Value, agent_hub::client::Failure>,
+) -> ExitCode {
+    use agent_hub::client::Failure;
+
+    let listing = match listed {
+        Ok(listing) => listing,
+        Err(failure) => return fail(&failure),
+    };
+    let Some(projects) = listing
+        .get("projects")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return fail(&Failure::Failed(
+            "the hub's project listing named no projects".to_string(),
+        ));
+    };
+    for project in projects {
+        let id = project
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        match project
+            .get("display_name")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(name) if !name.is_empty() => println!("{id}  {name}"),
+            _ => println!("{id}"),
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 /// The page a `kb get` with no path reads: the bundle's own entry point, which
 /// is a curated listing, so a hook needs to know no paths at all.
 #[cfg(feature = "client")]
@@ -1145,6 +1309,11 @@ fn call(_args: &[String]) -> ExitCode {
 
 #[cfg(not(feature = "client"))]
 fn kb(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn project(_args: &[String]) -> ExitCode {
     without_client()
 }
 

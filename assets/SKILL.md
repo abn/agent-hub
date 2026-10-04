@@ -55,12 +55,23 @@ curl -sS -X POST "$HUB/api/v1/agents/my-agent/token" -H "$ADMIN"
 ```
 
 The token call returns the agent's token once. Reissuing replaces it and
-revokes the previous one. Project lifecycle is REST only: there is no MCP tool
-to create or list a project, but any valid agent token works on those routes,
-not just the admin token. An agent with its own token can
-`POST /api/v1/projects` with a body of `{"id":"new-project","display_name":"New
-Project"}` and read the visible set with `GET /api/v1/projects`. The examples
-above use the admin token because that is who bootstraps the first agent.
+revokes the previous one. There is no MCP tool to create or list a project, but
+the CLI covers it, so a token never has to be lifted out of the config to hand
+to curl:
+
+```sh
+agent-hub project create --id homelab --name Homelab   # prints the project
+agent-hub project list                                  # prints the visible set
+agent-hub project delete --id homelab                   # the admin's alone
+```
+
+`HUB_URL` and `HUB_TOKEN`, or the `[client]` table, name the hub and the token,
+the same settings `call` and `kb` read. Any valid token works on create and
+list, not just the admin token, and the routes behind them take
+`{"id":"new-project","display_name":"New Project"}` on `POST /api/v1/projects`
+and answer `GET /api/v1/projects` the same way. Delete is the admin's, so a
+caller without that token gets the hub's own refusal. The examples above use
+the admin token because that is who bootstraps the first agent.
 Ordinary projects are open to any authenticated token;
 confidential projects are reached only by tokens with an explicit grant, added with
 `POST /api/v1/agents/my-agent/grants` and a body of

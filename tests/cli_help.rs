@@ -19,13 +19,14 @@ use common::temp::TempDir;
 ///
 /// The empty entry is the binary on its own, which is how an operator who forgot
 /// the subcommand asks.
-const COMMANDS: [(&str, &str); 13] = [
+const COMMANDS: [(&str, &str); 14] = [
     ("", "agent-hub [serve]"),
     ("serve", "agent-hub serve"),
     ("mcp", "agent-hub mcp"),
     ("call", "agent-hub call"),
     ("tools", "agent-hub tools"),
     ("kb", "agent-hub kb get"),
+    ("project", "agent-hub project create"),
     ("config", "agent-hub config"),
     ("enrol", "agent-hub enrol"),
     ("backup", "agent-hub backup"),

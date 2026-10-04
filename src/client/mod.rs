@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use crate::config::ClientConfig;
 
 pub mod enrol;
+pub mod projects;
 mod proxy;
 
 pub use enrol::enrol;
@@ -179,7 +180,10 @@ fn connect_failure(endpoint: &str, message: &str) -> Failure {
 /// that change with a dependency bump. A hook greps this text, so it gets the
 /// endpoint and a short classification instead. An unrecognised error keeps its
 /// first line, which is the transport's own sentence rather than the dump.
-fn short_cause(message: &str) -> String {
+///
+/// The project routes are read over plain HTTP rather than through a tool, and
+/// their client failures are classified the same way.
+pub(crate) fn short_cause(message: &str) -> String {
     let lower = message.to_ascii_lowercase();
     if lower.contains("connection refused") {
         return "connection refused".to_string();
