@@ -121,6 +121,11 @@ changes, re-run the whole set so the bundle stays consistent.
   hostname, which the always-public rule forbids in a committed bundle. This
   was caught in the first capture: every header read the host's real name until
   the harness set one.
+- The scratch hub **must** use a deployment-shaped data directory. Settings
+  shows the hub's data path, so the default scratch directory put an absolute
+  home path in a public bundle. The capture passes a relative `data`, which
+  renders as exactly that; a path that leaks a home or a build tree is a defect
+  the text-scanning hooks cannot catch, because a PNG is not text.
 - Seed the token with an init script, never with `page.evaluate` after the
   first load: the app reads `localStorage` once at module load (`web/prefs.mjs`),
   so a token written later is invisible and every data screen renders empty.

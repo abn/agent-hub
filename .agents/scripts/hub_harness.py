@@ -799,13 +799,25 @@ def scratch_root() -> str:
 
 
 @contextmanager
-def running_hub(name: str):
-    """A hub on a free port over a throwaway data directory, seeded."""
+def running_hub(name: str, override: str | None = None, cwd: str | None = None):
+    """A hub on a free port over a throwaway data directory, seeded.
+
+    `override` gives the hub a caller-named data directory instead of a
+    throwaway one, so a caller that photographs the hub (the wiki capture) can
+    present a deployment-shaped path rather than a scratch one under the build
+    tree. The caller owns that directory and cleans it up.
+
+    `cwd` starts the hub in that directory, so a relative `override` resolves
+    there and the path the hub reports is the relative one it was given.
+
+    `HUB_BIN` may name a wrapper command, split on spaces, so the hub can run
+    under a launcher; the last token is the binary.
+    """
     binary = os.environ.get("HUB_BIN", "target/debug/agent-hub")
-    if not os.path.isfile(binary):
-        skip(name, f"the hub binary is not built at {binary}")
+    if not os.path.isfile(binary.split()[-1]):
+        skip(name, f"the hub binary is not built at {binary.split()[-1]}")
     port = free_port()
-    data_dir = tempfile.mkdtemp(prefix="agent-hub-check-", dir=scratch_root())
+    data_dir = override or tempfile.mkdtemp(prefix="agent-hub-check-", dir=scratch_root())
     env = dict(
         os.environ,
         HUB_DATA_DIR=data_dir,
@@ -815,14 +827,29 @@ def running_hub(name: str):
         # own hostname: the wiki bundle is public, and the header renders it.
         HUB_NODE_NAME="local",
     )
-    hub = subprocess.Popen([binary], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # An absolute binary, so a `cwd` does not rebase a relative HUB_BIN.
+    if cwd:
+        command = binary.split()
+        command[-1] = str(Path(command[-1]).resolve())
+    else:
+        command = binary.split()
+    hub = subprocess.Popen(
+        command,
+        env=env,
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     try:
         wait_for_hub(name, port)
         yield port, seed(port)
     finally:
         hub.terminate()
         hub.wait(timeout=10)
-        shutil.rmtree(data_dir, ignore_errors=True)
+        # The default throwaway directory is ours to remove; an overriding one
+        # belongs to the caller, which cleans it up in its own way.
+        if override is None:
+            shutil.rmtree(data_dir, ignore_errors=True)
 
 
 def launch_browser(playwright, name: str):

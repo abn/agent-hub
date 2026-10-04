@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -224,7 +225,15 @@ def capture(page, route: str, selector: str, stem: str, width: str, theme: str) 
 def run() -> int:
     written: list[Path] = []
     failures: list[str] = []
-    with harness.running_hub(NAME) as (port, seeded):
+    # A deployment-shaped data directory, not the scratch path the harness
+    # defaults to: Settings shows the hub's data path, and the wiki bundle is
+    # public, so a home path or a build-tree path must never reach a capture.
+    # A relative `data` renders as exactly that, which is what a deployment
+    # names, and it is truthful: it is the directory the hub was given.
+    data_dir = ROOT / "target" / "tmp" / "wiki-screens-data"
+    shutil.rmtree(data_dir, ignore_errors=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    with harness.running_hub(NAME, override="data", cwd=str(data_dir.parent)) as (port, seeded):
         seed_wiki(port)
         from playwright.sync_api import sync_playwright
 
