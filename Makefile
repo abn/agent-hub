@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -90,6 +90,13 @@ endef
 web/a11y: build ## Run the headless accessibility audit
 	$(call browser_check,web/a11y,.agents/scripts/a11y.py)
 
+# The focus ring is a shadow, so a wrapper that draws it and a control inside it
+# that draws the same token put two concentric rings on screen, and no geometric
+# check sees it. This walks the screens with a real Tab key and counts them, and
+# it holds the Connect form's rhythm while it is there.
+web/focus: build ## Run the focus ring and control spacing checks
+	$(call browser_check,web/focus,.agents/scripts/focus-rings.py)
+
 # The behavioural invariants: race conditions, request counts, crypto gates,
 # text escaping and single-decision guarantees. Nothing here depends on
 # screen layout or geometry.
@@ -119,7 +126,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
