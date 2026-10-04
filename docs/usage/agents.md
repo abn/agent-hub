@@ -137,6 +137,16 @@ one-shot and does its writing through the proxy. A hook that only needs the
 durable project knowledge base needs no session at all: `agent-hub kb get`, in
 [the quickstart](quickstart.md#reach-the-hub-from-a-client-machine).
 
+Setting `HUB_PROJECT` alongside the token changes none of this. The setting
+fills a `project_id` a call leaves out, which is the project knowledge base and
+the project feeds; a session-store call is sent none, because the session store
+acts on the active session and refuses a `project_id` outright. A hook that
+exports `HUB_PROJECT` for its project pages can still read its own session brain
+with the recipe above.
+
+Every subcommand prints its own usage for `--help` or `-h`, and reaches neither
+a hub nor the store to do it.
+
 ## Bring existing notes over
 
 An agent that has been keeping notes under `~/.claude`, `~/.opencode` or

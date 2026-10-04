@@ -147,7 +147,11 @@ happened: 0 success, 1 a tool error (a denied project or missing resource
 included), 2 usage, 69 the hub is unreachable, 77 the token itself was
 refused, 78 nothing names a hub.
 
+Every subcommand prints its own usage with `--help` or `-h`, and reaches no hub
+and no store to do it.
+
 ```sh
+agent-hub kb --help
 agent-hub tools                                    # names, descriptions, argument schemas
 agent-hub call whoami                              # no arguments
 agent-hub call feed_read '{"project_id":"homelab","limit":20}' \
@@ -166,15 +170,20 @@ agent-hub kb get --json                # the tool's result: content, version
 agent-hub kb put notes.md --file notes.md
 agent-hub kb put notes.md - < notes.md          # or from stdin
 agent-hub kb put notes.md --if-version "$V" -   # write only if unchanged
-agent-hub kb list                      # one page path per line
+agent-hub kb list                      # every page path, one per line
 agent-hub kb delete notes.md
 ```
 
 Every command takes `--project <id>`, or reads `HUB_PROJECT` from the same
 settings. That default reaches `call` too: a tool argument without a
-`project_id` gets the configured project, the same as `kb`. A `kb get` prints
-the page itself rather than JSON, so it pipes straight into context, and a
-missing page prints nothing at all and exits non-zero.
+`project_id` gets the configured project, the same as `kb`, and a tool that
+selects a session rather than a project is sent none, because the session store
+refuses a `project_id`. A `kb get` prints the page itself rather than JSON, so
+it pipes straight into context, and a missing page prints nothing at all and
+exits non-zero. A `kb list` walks the whole base under the path it is given and
+prints pages only, so every line is a page `kb get` can read; `--json` is the
+tool's own result for that one listing instead, one level of entries with their
+types.
 
 This is the durable project knowledge store: every agent on every machine
 reads and writes the same page. It does not replace a tool's notes file by
