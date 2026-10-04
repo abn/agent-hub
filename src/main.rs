@@ -19,7 +19,50 @@ usage:
   agent-hub doctor [--data-dir DIR] report the store's health and identity
   agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 
+Every command prints its own usage with --help or -h, and reads no settings
+and reaches nothing to do it.
+
 The hub is configured by config.toml and environment variables.
+";
+
+const SERVE_USAGE: &str = "\
+usage:
+  agent-hub serve
+
+Serve the hub over HTTP. With no subcommand, this is what runs. The bind, the
+data directory, the admin token and the optional tailnet come from config.toml
+and the environment; there are no flags, so an operator who asks a serving hub
+for help gets its usage rather than a second process on the data directory.
+";
+
+const MCP_USAGE: &str = "\
+usage:
+  agent-hub mcp
+
+Serve MCP on stdio. With HUB_URL set, this bridges stdio to that hub and holds
+one connection for the life of the process, which is what keeps a session
+active across calls. With no HUB_URL, it serves the local data directory
+standalone as the human admin, which fails while a hub is serving that
+directory.
+";
+
+const CALL_USAGE: &str = "\
+usage:
+  agent-hub call <tool> [json]
+  agent-hub call <tool> -        read the arguments from stdin
+
+Call one tool and print its JSON result on stdout. A tool that takes no
+arguments needs neither, so a hook is not left reading a stdin nobody closes.
+The exit code says what happened: 0 success, 1 a tool error, 2 usage, 69 the
+hub is unreachable, 77 the token was refused, 78 nothing names a hub.
+";
+
+const TOOLS_USAGE: &str = "\
+usage:
+  agent-hub tools
+
+List the hub's tools with their descriptions and argument schemas, so CLI
+discovery matches MCP discovery.
 ";
 
 const CONFIG_USAGE: &str = "\
@@ -81,7 +124,6 @@ store names but the tree is missing. Exits non-zero on any failure, and refuses
 while a hub holds the store.
 ";
 
-#[cfg(feature = "client")]
 const KB_USAGE: &str = "\
 usage:
   agent-hub kb get [path]        print a page, /fs/index.md by default
@@ -96,10 +138,24 @@ usage:
 
 A path is a page of the knowledge base, so a path outside /fs is taken as
 relative to it: 'runbooks/deploy.md' is '/fs/runbooks/deploy.md'.
+
+kb list walks the whole base under the path it is given, or the whole base when
+it is given none, and prints pages only: every line is a page kb get can read.
+--json is the tool's own result for that one listing instead, one level of
+entries with their types, directories included.
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // A help flag is a question about the command, not an argument to it, so it
+    // is answered here, before anything else runs: no subcommand starts a hub,
+    // opens the engine on the data directory or reaches the network to print its
+    // own usage. One owner means every command answers the same way.
+    if let Some(usage) = usage_for(&args) {
+        print!("{usage}");
+        return ExitCode::SUCCESS;
+    }
 
     // A serving hub defaults to info, so an operator who set nothing still sees
     // a failure (a failed sweep, a dropped tailnet, a failed checkpoint); the
@@ -130,10 +186,6 @@ fn main() -> ExitCode {
         Some("check") => check_cmd(&args[1..]),
         Some("doctor") => doctor_cmd(&args[1..]),
         Some("health") => health_cmd(&args[1..]),
-        Some("help" | "--help" | "-h") => {
-            print!("{USAGE}");
-            ExitCode::SUCCESS
-        }
         // An unknown subcommand must not start a hub: a typo would otherwise
         // become a second engine process on the data directory.
         Some(other) => {
@@ -142,6 +194,40 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// The usage a help flag asks for, or `None` when there is no help flag.
+///
+/// `--help` or `-h` anywhere in the arguments answers for the subcommand in
+/// front of it, and on its own answers for the binary. A name that is not a
+/// subcommand gets no usage from here: a typo is a typo with a help flag on it,
+/// and the refusal says so beside the top-level usage.
+fn usage_for(args: &[String]) -> Option<&'static str> {
+    let is_help = |argument: &String| argument == "--help" || argument == "-h";
+    let (command, rest) = args.split_first()?;
+    let usage = usage_of(command)?;
+    (command == "help" || is_help(command) || rest.iter().any(is_help)).then_some(usage)
+}
+
+/// The usage text for one subcommand, or `None` when the name is not one.
+fn usage_of(command: &str) -> Option<&'static str> {
+    Some(match command {
+        "serve" => SERVE_USAGE,
+        "mcp" => MCP_USAGE,
+        "call" => CALL_USAGE,
+        "tools" => TOOLS_USAGE,
+        "kb" => KB_USAGE,
+        "config" => CONFIG_USAGE,
+        #[cfg(feature = "client")]
+        "enrol" => agent_hub::client::enrol::ENROL_USAGE,
+        "backup" => BACKUP_USAGE,
+        "restore" => RESTORE_USAGE,
+        "check" => CHECK_USAGE,
+        "doctor" => DOCTOR_USAGE,
+        "health" => HEALTH_USAGE,
+        "help" | "--help" | "-h" => USAGE,
+        _ => return None,
+    })
 }
 
 fn config_cmd(args: &[String]) -> ExitCode {
@@ -170,10 +256,6 @@ fn config_cmd(args: &[String]) -> ExitCode {
                 ExitCode::from(78)
             }
         },
-        Some("--help" | "-h") => {
-            print!("{CONFIG_USAGE}");
-            ExitCode::SUCCESS
-        }
         Some(other) => {
             eprintln!("agent-hub config: unknown option '{other}'");
             eprint!("{CONFIG_USAGE}");
@@ -486,10 +568,6 @@ fn health_cmd(args: &[String]) -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
-            "--help" | "-h" => {
-                print!("{HEALTH_USAGE}");
-                return ExitCode::SUCCESS;
-            }
             other => {
                 eprintln!("agent-hub health: unknown option '{other}'\n{HEALTH_USAGE}");
                 return ExitCode::from(2);
@@ -681,16 +759,12 @@ fn call(args: &[String]) -> ExitCode {
         Ok(pair) => pair,
         Err(code) => return code,
     };
-    // A project named in the settings is the default for every call that takes
-    // one, matching `kb`, so a hook sets HUB_PROJECT once rather than repeating
-    // it on each call. A tool that does not take `project_id` ignores the extra
-    // field, and an argument already present wins.
-    if let Some(project) = config.project.as_deref()
-        && arguments.get("project_id").is_none()
-        && let Some(object) = arguments.as_object_mut()
-    {
-        object.insert("project_id".to_string(), serde_json::json!(project));
-    }
+    // A project named in the settings is the default for a call that selects a
+    // project, matching `kb`, so a hook sets HUB_PROJECT once rather than
+    // repeating it on each call. It is not added to a session-store call, which
+    // the hub refuses a project on; a tool that takes no project at all ignores
+    // the field.
+    agent_hub::client::fill_project(tool, &mut arguments, config.project.as_deref());
     emit(runtime.block_on(agent_hub::client::call(&config, tool, arguments)))
 }
 
@@ -788,18 +862,29 @@ fn kb(args: &[String]) -> ExitCode {
             emit(runtime.block_on(agent_hub::client::call(&config, "brain_put", arguments)))
         }
         "list" => {
-            // A listing with no path is the whole base, which the tool reads as
-            // an absent path rather than a root one.
-            if let Some(page) = page {
-                arguments["path"] = page.into();
-            }
-            let result =
-                runtime.block_on(agent_hub::client::call(&config, "brain_list", arguments));
+            // The tool's own result is one level of entries with their types,
+            // which is what `--json` prints and what the plain form is not.
             if options.json {
-                emit(result)
-            } else {
-                emit_paths(result)
+                let mut listing = arguments.clone();
+                // A listing with no path is the whole base, which the tool reads
+                // as an absent path rather than a root one.
+                if let Some(page) = &page {
+                    listing["path"] = page.clone().into();
+                }
+                return emit(runtime.block_on(agent_hub::client::call(
+                    &config,
+                    "brain_list",
+                    listing,
+                )));
             }
+            let pages = match kb_pages(&config, &runtime, &arguments, page.as_deref()) {
+                Ok(pages) => pages,
+                Err(failure) => return fail(&failure),
+            };
+            for path in pages {
+                println!("{path}");
+            }
+            ExitCode::SUCCESS
         }
         "delete" => {
             let Some(page) = page else {
@@ -934,26 +1019,41 @@ fn emit_page(
     }
 }
 
-/// Print one listed page path per line.
+/// Every page under `root`, or under the whole base when it names none.
+///
+/// `brain_list` returns the immediate children of one path and marks each as a
+/// file or a directory, so a plain listing is a walk: a page is a line, and a
+/// directory is a step into the level below it. Printing a directory would hand
+/// a hook a path `kb get` cannot read, and stopping at the first level would
+/// hide every page under one. A directory the hub lists as neither a file nor a
+/// directory is left out rather than guessed at; `--json` shows what came back.
+///
+/// Each level is one call in the order the hub lists it, so the pages read in
+/// the order the base is written in.
 #[cfg(feature = "client")]
-fn emit_paths(
-    result: std::result::Result<serde_json::Value, agent_hub::client::Failure>,
-) -> ExitCode {
-    match result {
-        Ok(value) => {
-            let entries = value.get("entries").and_then(serde_json::Value::as_array);
-            for path in entries
-                .into_iter()
-                .flatten()
-                .filter_map(|entry| entry.get("path"))
-                .filter_map(serde_json::Value::as_str)
-            {
-                println!("{path}");
-            }
-            ExitCode::SUCCESS
-        }
-        Err(failure) => fail(&failure),
+fn kb_pages(
+    config: &ClientConfig,
+    runtime: &tokio::runtime::Runtime,
+    arguments: &serde_json::Value,
+    root: Option<&str>,
+) -> std::result::Result<Vec<String>, agent_hub::client::Failure> {
+    let mut listing = arguments.clone();
+    if let Some(path) = root {
+        listing["path"] = path.into();
     }
+    let listed = runtime.block_on(agent_hub::client::call(config, "brain_list", listing))?;
+    let mut pages = Vec::new();
+    for entry in listed["entries"].as_array().into_iter().flatten() {
+        let Some(path) = entry.get("path").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        match entry.get("type").and_then(serde_json::Value::as_str) {
+            Some("file") => pages.push(path.to_string()),
+            Some("dir") => pages.extend(kb_pages(config, runtime, arguments, Some(path))?),
+            _ => {}
+        }
+    }
+    Ok(pages)
 }
 
 /// The client settings and a runtime, or the code that says why not.

@@ -299,6 +299,76 @@ fn list_prints_one_path_per_line_and_json_on_request() {
     );
 }
 
+/// A plain listing is a walk: a page is a line, a directory is a step.
+///
+/// Printing a directory hands a hook a path `kb get` cannot read, and stopping at
+/// the first level hides every page under one, so neither is a line.
+#[test]
+fn a_listing_walks_into_directories_and_prints_only_pages() {
+    let hub = Hub::start("kb-list-walk");
+    let pages = [
+        ("/fs/index.md", "# Index\n"),
+        ("/fs/alpha.md", "# Alpha\n"),
+        ("/fs/guide/one.md", "# One\n"),
+        ("/fs/guide/deep/two.md", "# Two\n"),
+    ];
+    for (path, body) in pages {
+        assert_eq!(put(&hub, path, body).status.code(), Some(0), "{path}");
+    }
+
+    let listed = run(&hub, &["kb", "list", "--project", PROJECT]);
+    assert_eq!(listed.status.code(), Some(0), "{listed:?}");
+    let printed: Vec<String> = stdout(&listed).lines().map(str::to_string).collect();
+    let mut expected: Vec<String> = pages.iter().map(|(path, _)| path.to_string()).collect();
+    expected.sort();
+    let mut sorted = printed.clone();
+    sorted.sort();
+    assert_eq!(sorted, expected, "every page, no directory: {printed:?}");
+
+    // Every printed line is a page the hook's next command can read. A
+    // directory on this list is what a shell loop would fail on.
+    for path in &printed {
+        let read = run(&hub, &["kb", "get", path, "--project", PROJECT]);
+        assert_eq!(
+            read.status.code(),
+            Some(0),
+            "{path} is not readable: {read:?}"
+        );
+    }
+
+    // --json stays the tool's own result for the one listing it was given: the
+    // types, the sizes, and a directory the walk steps into instead of printing.
+    let json = run(&hub, &["kb", "list", "--project", PROJECT, "--json"]);
+    assert_eq!(json.status.code(), Some(0), "{json:?}");
+    let result = stdout_json(&json);
+    let entries = result["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the entry objects: {result}"));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["path"] == "/fs/guide" && entry["type"] == "dir"),
+        "the listing marks the directory: {result}"
+    );
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| entry["path"] == "/fs/guide/one.md"),
+        "the walk is the plain form's business, not the tool's: {result}"
+    );
+
+    // A path is a subtree, not a level: naming one walks below it.
+    let subtree = run(&hub, &["kb", "list", "guide", "--project", PROJECT]);
+    assert_eq!(subtree.status.code(), Some(0), "{subtree:?}");
+    let mut under: Vec<String> = stdout(&subtree).lines().map(str::to_string).collect();
+    under.sort();
+    assert_eq!(
+        under,
+        ["/fs/guide/deep/two.md", "/fs/guide/one.md"],
+        "the pages under the named directory"
+    );
+}
+
 #[test]
 fn delete_removes_the_page() {
     let hub = Hub::start("kb-delete");
