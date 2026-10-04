@@ -316,6 +316,12 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(agentCountText)}</span>
             ${NAV_CHEVRON}
           </a>
+          <a class="form-row" href="#/connect">
+            <div class="form-row-main">
+              <span class="form-row-title">Connect</span>
+            </div>
+            ${NAV_CHEVRON}
+          </a>
           <div class="form-row" style="padding-right: 36px">
             <div class="form-row-main">
               <span class="form-row-title">Version</span>
@@ -399,6 +405,10 @@ export async function settingsScreen(gen) {
         <a href="#/access" class="settings-flat-row row settings-nav-row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">Agents and tokens</span>
           <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
+          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+        </a>
+        <a href="#/connect" class="settings-flat-row row settings-nav-row">
+          <span class="title" style="flex:1;font-size:15px;font-weight:500">Connect</span>
           <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <div class="settings-flat-row row" style="padding-right: 36px">

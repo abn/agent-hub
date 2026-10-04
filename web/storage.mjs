@@ -448,6 +448,7 @@ function desktopTable(usage) {
     const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
     dot.setAttribute("aria-hidden", "true");
     const link = el("a", "storage-proj-link", projectName(project));
+    link.href = projectHref(project);
     const inner = el("div", "storage-proj-inner");
     inner.append(dot, link);
     tdProject.appendChild(inner);

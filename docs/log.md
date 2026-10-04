@@ -6,6 +6,20 @@ software release notes and the repository changelog.
 
 ## 2026-10-04
 
+### Storage and Settings reach the places they name
+
+* **Fix**: the desktop Storage table's PROJECT name opens its project. The name
+  was an anchor with no destination, so it was outside the keyboard path and
+  clicking it left the hash on `#/storage`. The phone row already linked to the
+  project, so the desktop table now uses the same project address and one
+  address serves both widths.
+* **Fix**: Settings carries a Connect row at both widths, in the THIS HUB group
+  beside Storage and Agents and tokens. [Human surface](architecture/human-surface.md)
+  says of Connect, "Settings has no field of its own; it links here to change a
+  token", but the row was absent, so the only ways back to Connect were a
+  refused request or signing out, and changing a token cost the session first.
+  The row only navigates: the token is still entered on Connect and nowhere else.
+
 ### The v1 release: install paths, changelog and release runbook
 
 * **Add**: [Quickstart](usage/quickstart.md) opens with an install section: the

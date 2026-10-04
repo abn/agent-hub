@@ -275,8 +275,9 @@ Agents and access, Connect, and the knowledge base.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents
-  and tokens, and Version, a value row reading the version and short commit the
-  binary was built from, with no destination, no chevron and no tab stop. One
+  and tokens, Connect, and Version, a value row reading the version and short
+  commit the binary was built from, with no destination, no chevron and no tab
+  stop. One
   helper line in the whole screen. No paragraph explains a toggle.
 - **Storage.** The summary and the by-project rows. Never touches feed events
   or artifacts.
