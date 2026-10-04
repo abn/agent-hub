@@ -207,6 +207,13 @@ structure, not to line length.
 
 ## Components
 
+- **Focus ring.** The ring is the shadow `--focus` carries, and it is drawn
+  once. A field or a row that takes the ring on `:focus-within` is the one
+  object, so the control inside it does not draw a second. What is left under
+  every ring is a transparent 2px outline at 2px offset, because a browser in
+  forced colours drops every shadow and has only that outline to colour in. A
+  ring without it is a ring that vanishes in that mode, which is the one mode
+  where a reader cannot be given a colour to find it by.
 - **Row.** Flex, 12px gap, row padding, a bottom hairline, a minimum height of
   56px on mobile and 44 comfortable / 36 compact on the desktop, on the row
   surface. Hover raises the surface one step.

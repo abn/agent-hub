@@ -38,6 +38,13 @@ const CONNECT_STYLE = `<style>
   background: var(--bg);
   box-sizing: border-box;
 }
+/* The form is a stack of its own, so the gap between the field and the button
+   is the same 16 the container puts between the intro and the form. */
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .connect-intro {
   margin: 0;
   font-size: var(--t-15);
@@ -66,9 +73,19 @@ const CONNECT_STYLE = `<style>
   border-radius: var(--r-1);
   background: var(--surface);
 }
+/* The ring is the field box's, as the search field draws it, so nothing inside
+   the box draws a second one. The transparent outlines are what a browser in
+   forced colours has left to colour in, where every shadow is gone. */
 .connect-field-wrap:focus-within {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
+}
+.connect-field-wrap .connect-field:focus-visible,
+.connect-field-wrap .connect-eye-btn:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: none;
 }
 .connect-field {
   flex: 1;
@@ -99,10 +116,6 @@ const CONNECT_STYLE = `<style>
 .connect-eye-btn:hover {
   color: var(--ink);
 }
-.connect-eye-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
 .connect-error {
   margin: 0;
   font-size: var(--t-13);
@@ -124,7 +137,8 @@ const CONNECT_STYLE = `<style>
   opacity: 0.92;
 }
 .connect-submit-btn:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   box-shadow: var(--focus);
 }
 .connect-tools-text {
@@ -189,7 +203,7 @@ export async function connectScreen(params, gen) {
     : `
     <div class="connect connect-container">
       <p class="connect-intro">Paste the hub's admin token, the value of <span class="mono">HUB_ADMIN_TOKEN</span> at startup. It stays on this device.</p>
-      <form data-action="connect" data-next="${esc(next)}">
+      <form class="connect-form" data-action="connect" data-next="${esc(next)}">
         <input class="sr-only" type="text" name="username" value="hub" autocomplete="username" tabindex="-1" aria-hidden="true">
         <div class="connect-group">
           <label class="connect-label" for="hub-token">Access token</label>
