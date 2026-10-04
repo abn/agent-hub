@@ -2,12 +2,12 @@
 // that close or reclaim a session.
 
 import { api } from "./api.mjs";
-import { unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
+import { focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { pickProject, withProject } from "./projects.mjs";
-import { render } from "./router.mjs";
+import { render, restoreFocusAfterRender } from "./router.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -45,6 +45,8 @@ export function sessionRow(s, current, isSelected = false) {
 
   const href = current
     ? `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(s.id)}`
+    // With no project to name, the compatibility entry resolves one and hands
+    // the reader the same screen inside it.
     : `#/session?id=${encodeURIComponent(s.id)}`;
 
   return `<div class="row session-row${isSelected ? " selected" : ""}" data-id="${esc(s.id)}">
@@ -238,13 +240,18 @@ export function wireSessionDetail(container, current, sessionId) {
     wireTreeKeyboard(tree, io);
     tree.addEventListener("openfile", (event) => {
       const path = event.detail?.node?.dataset?.path;
-      if (path) {
-        if (location.hash.startsWith("#/session?")) {
-          location.hash = `#/session?project=${encodeURIComponent(current)}&id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(path)}`;
-        } else {
-          location.hash = `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(sessionId)}&file=${encodeURIComponent(path)}`;
-        }
-      }
+      if (!path) return;
+      const query = new URLSearchParams({ id: sessionId, file: path });
+      const next = `#/projects/${encodeURIComponent(current)}/sessions?${query}`;
+      if (next === location.hash) return;
+      // The paint that follows replaces the tree, so the item the reader
+      // activated goes with it and the browser drops focus to the body. Their
+      // place is the path they activated, which is what the new tree renders:
+      // focus goes back to it, or to the nearest ancestor that survived. The
+      // router's route focus then stays off, because this is the same screen
+      // with another selection rather than a new place.
+      restoreFocusAfterRender(() => focusTreePath(main.querySelector('[role="tree"]'), path));
+      location.hash = next;
     });
   }
 }
@@ -272,21 +279,33 @@ export async function sessionDetailView(project, id, gen) {
   return sessionDetailHTML(detail, project, kv.entries, fs.entries);
 }
 
-export async function sessionDetail(project, id, gen) {
-  const { current } = await pickProject(project);
-  if (stale(gen)) return;
-  if (!current || !id) {
+// The compatibility entry for `#/session?...`, the address older links carry.
+// A session is read inside its project, where the index and the section
+// switcher are, so this resolves the project the session belongs to and hands
+// over to that project's sessions segment rather than painting a bare detail.
+// It asks for nothing but the project list: the session itself is fetched by
+// the screen it forwards to, so a link naming a session this hub no longer
+// holds still lands on a working list instead of an empty screen.
+export async function sessionInProject(params, gen) {
+  const id = params.get("id");
+  if (!id) {
     location.hash = "#/sessions";
     return;
   }
-  const detailHTML = await sessionDetailView(current, id, gen);
+  const named = params.get("project");
+  const { projects } = await pickProject(named);
   if (stale(gen)) return;
-  if (!detailHTML) {
+  // A saved link may name a project this hub no longer has. The session is
+  // read in a project, so it lands in the one the hub does have.
+  const project = (projects.find((p) => p.id === named) || projects[0])?.id || "";
+  if (!project) {
     location.hash = "#/sessions";
     return;
   }
-  paint(gen, detailHTML);
-  wireSessionDetail(main, current, id);
+  const query = new URLSearchParams({ id });
+  const file = params.get("file");
+  if (file) query.set("file", file);
+  location.hash = `#/projects/${encodeURIComponent(project)}/sessions?${query}`;
 }
 
 // A fetcher the tree uses to lazy-load a folder's children on first expand.
@@ -434,21 +453,10 @@ export async function pruneSession(id, agent) {
   const token = await api(`/api/v1/storage/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-  const currentHash = location.hash;
-  const params = new URLSearchParams(currentHash.split("?")[1] || "");
-  const currentProject = params.get("project");
-  if (currentHash.startsWith("#/session")) {
-    const target = currentProject ? `#/projects/${encodeURIComponent(currentProject)}/sessions` : "#/sessions";
-    history.replaceState(null, "", target);
-  }
   await render();
   toast("Pruned 1 session.", async () => {
     await api(`/api/v1/prune/undo/${encodeURIComponent(token.undo_token)}`, { method: "POST" });
-    if (currentHash.startsWith("#/session")) {
-      location.hash = currentHash;
-    } else {
-      await render();
-    }
+    await render();
   });
 }
 

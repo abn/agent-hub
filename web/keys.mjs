@@ -156,9 +156,11 @@ function focusSearch(event) {
 }
 
 function openRow(event) {
-  // A control handles its own Enter. Only a row that has focus as a row is the
-  // map's to open.
-  if (event.target.closest?.('a[href], button, [role="button"], summary')) return;
+  // A control handles its own Enter, and so does a tree: its roving items open
+  // the entry they name and move through the tree themselves. Without the tree
+  // in this list the map opens the index row behind it as well, which sends the
+  // reader back to the session they were already reading.
+  if (event.target.closest?.('a[href], button, [role="button"], summary, [role="tree"], [role="treeitem"]')) return;
   const row = chosen();
   const target = row && BEHAVIOUR.open(row);
   if (!target) return;

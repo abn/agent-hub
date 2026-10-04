@@ -21,6 +21,23 @@ export function focusAfterRender(kind) {
   pendingFocus = kind;
 }
 
+// The path the last render painted. A change that keeps it and only moves the
+// query is the same screen with a different selection, not a new place: the
+// reader is already there, so the route focus below would take them out of
+// what they were reading.
+let lastPath = null;
+
+// Where focus goes after a paint that happens under a reader who is already on
+// the screen. The screen names it by a lookup rather than by a node, because
+// the node it means is painted by the render in flight and is not in the page
+// yet. A lookup that finds nothing leaves focus where the browser dropped it,
+// and the route focus below takes it from there.
+let pendingRestore = null;
+
+export function restoreFocusAfterRender(resolve) {
+  pendingRestore = resolve;
+}
+
 function setCurrent(screen, path = "") {
   // The project-owned screens sit under the Projects tab: the segmented
   // project view has that tab on every segment, and the artifact viewer is
@@ -69,6 +86,8 @@ export async function render() {
   const [path, query = ""] = hash.split("?");
   const params = new URLSearchParams(query);
   const screen = path.split("/")[1] || "home";
+  const sameScreen = path === lastPath;
+  lastPath = path;
   setCurrent(screen, path);
   try {
     // The path is handed over so a route with an id of its own, such as the
@@ -86,8 +105,17 @@ export async function render() {
     paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
   }
   const focus = pendingFocus;
+  const restore = pendingRestore;
   pendingFocus = null;
+  pendingRestore = null;
   const chip = focus && main.querySelector(`[data-action="kind"][data-kind="${CSS.escape(focus)}"]`);
+  // Only a change that kept the screen is handed to the screen's own restore.
+  // After a real route change the reader has moved, and the route focus below
+  // is what tells them where they landed. A restore that finds its item puts
+  // focus back inside the screen, which is also what keeps the route focus from
+  // taking the reader to the heading over another selection on the screen they
+  // are already on.
+  if (restore && sameScreen) restore();
   if (chip) {
     chip.focus({ preventScroll: true });
   } else if (!main.contains(document.activeElement) || document.activeElement === main) {

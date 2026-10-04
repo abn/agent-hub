@@ -225,6 +225,37 @@ export function collapseNode(node) {
   if (chev) chev.classList.remove("open");
 }
 
+// Put the roving selection on the item at this path, or on the nearest
+// ancestor the tree currently renders. A leaf under a folder the brain route
+// only walks one level at a time is not in the paint until that folder is
+// expanded, so the reader keeps the place they can see rather than losing the
+// row. Returns the item it settled on, or null when the tree renders no part
+// of the path at all.
+export function focusTreePath(tree, path) {
+  if (!tree || !path) return null;
+  let rest = path;
+  let item = null;
+  while (!item && rest.length > 1) {
+    item = tree.querySelector(`[role="treeitem"][data-path="${CSS.escape(rest)}"]`);
+    rest = rest.slice(0, rest.lastIndexOf("/"));
+  }
+  if (!item) return null;
+  // The roving state is the same one the arrows keep: the selected item is the
+  // tree's single tab stop, and the ring follows it.
+  for (const other of tree.querySelectorAll('[role="treeitem"]')) {
+    const on = other === item;
+    if (on) {
+      other.setAttribute("aria-selected", "true");
+      other.setAttribute("tabindex", "0");
+    } else {
+      other.removeAttribute("aria-selected");
+      other.setAttribute("tabindex", "-1");
+    }
+  }
+  item.focus({ preventScroll: true });
+  return item;
+}
+
 // The tree's keyboard: ArrowDown/Up move, ArrowRight expands a folder,
 // ArrowLeft collapses it, Home/End jump, and Enter opens a folder or, on a
 // leaf, dispatches an `openfile` event the module owning the tree handles.

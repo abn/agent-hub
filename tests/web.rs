@@ -41,6 +41,10 @@ const FEED_JS: &str = include_str!("../web/feed.mjs");
 const EVENTS_JS: &str = include_str!("../web/events.mjs");
 const PREFS_JS: &str = include_str!("../web/prefs.mjs");
 const SESSIONS_JS: &str = include_str!("../web/sessions.mjs");
+const SEARCH_JS: &str = include_str!("../web/search.mjs");
+const ROUTER_JS: &str = include_str!("../web/router.mjs");
+const KEYS_JS: &str = include_str!("../web/keys.mjs");
+const BRAIN_TREE_JS: &str = include_str!("../web/brain-tree.mjs");
 
 async fn state() -> TestState {
     state_with_public_url(None).await
@@ -2652,6 +2656,118 @@ fn ending_a_session_asks_first() {
     let ask = end.find("confirmAction(").expect("the ask exists");
     let post = end.find("/end").expect("the post exists");
     assert!(ask < post, "the ask comes before the request, not after it");
+}
+
+/// A session is read inside its project. A brain search hit, a session row and
+/// the brain tree's own openfile all address the project's sessions segment, so
+/// a deep link lands in the shell with its index and section switcher, and the
+/// `#/session` address older links carry forwards there rather than painting a
+/// bare detail.
+#[test]
+fn a_session_address_opens_inside_the_project_shell() {
+    assert!(
+        SEARCH_JS
+            .contains("`#/projects/${project}/sessions?id=${encodeURIComponent(hit.session_id)}`"),
+        "a brain search hit opens the project's sessions segment"
+    );
+    assert!(
+        !SEARCH_JS.contains("#/session?project="),
+        "a brain hit no longer links the bare session address, which painted a \
+         detail with no index and no switcher around it"
+    );
+    assert!(
+        SESSIONS_JS.contains("export async function sessionInProject(")
+            && APP_JS.contains("sessionInProject(params, gen)"),
+        "the bare address is kept as a compatibility entry the router routes to, \
+         so a saved link still lands in the shell"
+    );
+    assert!(
+        !SESSIONS_JS.contains("export async function sessionDetail("),
+        "nothing paints the bare session detail any more"
+    );
+
+    let forward = SESSIONS_JS
+        .split("export async function sessionInProject(")
+        .nth(1)
+        .expect("sessions has the compatibility entry")
+        .split("\n}\n")
+        .next()
+        .expect("the compatibility entry closes");
+    assert!(
+        forward.contains("/sessions?${query}"),
+        "the entry forwards to the project's sessions segment"
+    );
+    assert!(
+        forward.contains("projects[0]"),
+        "an address naming a project this hub does not have lands in one it does"
+    );
+    assert!(
+        forward.contains("location.hash = \"#/sessions\""),
+        "an address that resolves no project at all lands on a working list, \
+         never on a dead route"
+    );
+    assert!(
+        !forward.contains("sessionDetailView("),
+        "the entry asks for nothing but the project list: the screen it forwards \
+         to owns the session, so a stale render cannot paint over it"
+    );
+
+    let openfile = SESSIONS_JS
+        .split("tree.addEventListener(\"openfile\"")
+        .nth(1)
+        .expect("the tree wires openfile")
+        .split("\n    });")
+        .next()
+        .expect("the openfile listener closes");
+    assert!(
+        openfile.contains("#/projects/${encodeURIComponent(current)}/sessions?${query}"),
+        "opening a brain entry stays inside the project shell"
+    );
+    assert!(
+        !SESSIONS_JS.contains("location.hash.startsWith(\"#/session?\")"),
+        "the tree no longer branches on the bare session address"
+    );
+}
+
+/// Opening a brain entry repaints the screen, which replaces the tree, so the
+/// item the reader activated goes with it and the browser drops focus to the
+/// body. The route focus then takes them to the heading, which is a new place
+/// announcement for what is only another selection on the same screen. The
+/// screen hands the router a lookup by path instead, and the router runs it
+/// ahead of its own focus, and only while the screen has not changed.
+#[test]
+fn opening_a_brain_entry_keeps_the_tree_focus() {
+    assert!(
+        SESSIONS_JS.contains("restoreFocusAfterRender(() => focusTreePath("),
+        "the tree's openfile asks for focus back by the path the reader activated"
+    );
+    assert!(
+        BRAIN_TREE_JS.contains("export function focusTreePath(")
+            && BRAIN_TREE_JS.contains("rest.slice(0, rest.lastIndexOf(\"/\"))"),
+        "the restore falls back to the nearest ancestor the new tree renders, for \
+         a path the paint does not carry whole"
+    );
+    assert!(
+        ROUTER_JS.contains("export function restoreFocusAfterRender(")
+            && ROUTER_JS.contains("if (restore && sameScreen) restore();"),
+        "the router runs the screen's restore before it decides where focus goes, \
+         and only for a change that kept the screen"
+    );
+
+    // Enter inside the tree belongs to the tree. The row map opens the index row
+    // it finds, so without this the same Enter both opened the entry and sent the
+    // reader back to the session they were already reading.
+    let open_row = KEYS_JS
+        .split("function openRow(")
+        .nth(1)
+        .expect("keys has an openRow")
+        .split("\n}\n")
+        .next()
+        .expect("openRow closes");
+    assert!(
+        open_row.contains("[role=\"tree\"]") && open_row.contains("[role=\"treeitem\"]"),
+        "the row map leaves Enter inside the brain tree to the tree"
+    );
 }
 
 // The inbox swipe and pull searched for `.inbox-screen`, which no screen

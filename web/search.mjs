@@ -214,7 +214,11 @@ function destination(hit) {
   if (hit.kind === "feed") return `#/projects/${project}/feed`;
   if (hit.kind === "artifact") return `#/artifacts/${encodeURIComponent(hit.ref_id)}?project=${project}`;
   if (hit.kind === "brain" && hit.session_id) {
-    return `#/session?project=${project}&id=${encodeURIComponent(hit.session_id)}`;
+    // A session is read inside its project, so a brain hit opens the project's
+    // sessions segment with the session selected rather than a bare address.
+    return project
+      ? `#/projects/${project}/sessions?id=${encodeURIComponent(hit.session_id)}`
+      : `#/session?id=${encodeURIComponent(hit.session_id)}`;
   }
   return "";
 }

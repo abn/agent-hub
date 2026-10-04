@@ -46,7 +46,7 @@ import { projectFromHash, projectScreen } from "./project.mjs";
 import { projectSettingsScreen } from "./project-settings.mjs";
 import { render, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
-import { endSession, pruneSession, sessionDetail } from "./sessions.mjs";
+import { endSession, pruneSession, sessionInProject } from "./sessions.mjs";
 import { deleteProject, enableNotifications, settingsScreen, signOut } from "./settings.mjs";
 import { installShell } from "./shell.mjs";
 import { pruneProject, storageScreen } from "./storage.mjs";
@@ -85,7 +85,10 @@ setScreens({
     else if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/artifacts`;
     else toFirstProject("artifacts", gen)();
   },
-  session: (params, gen) => sessionDetail(params.get("project"), params.get("id"), gen),
+  // `#/session?...` is the address older links carry. A session is read
+  // inside its project, so the entry resolves the project and forwards to that
+  // project's sessions segment instead of painting a bare detail.
+  session: (params, gen) => sessionInProject(params, gen),
   search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
