@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-10-04
 
+### Search announces its match position
+
+* **Fix**: the count beside a search result's Next and Previous buttons is now a
+  live status. Stepping through matches moves the counter and the current match,
+  but nothing a screen reader announced, so the reader was given no position.
+  The counter carries `role="status"` and `aria-live="polite"`.
+
 ### The wiki tree's directory rows stop addressing pages
 
 * **Fix**: a wiki directory row no longer points at a page. On a desktop the

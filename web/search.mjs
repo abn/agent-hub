@@ -381,6 +381,11 @@ function renderPreview(stagePane, hit, words) {
   const head = el("div", "search-stage-head");
   const path = el("span", "search-stage-path", previewPath(hit));
   const counter = el("span", "search-match-counter", "");
+  // The count is the reader's position in the result they are stepping through,
+  // and stepping the match buttons moves nothing else that is announced, so it
+  // is a live status rather than a value only a sighted reader can see.
+  counter.setAttribute("role", "status");
+  counter.setAttribute("aria-live", "polite");
 
   const prevBtn = el("button", "search-step-btn");
   prevBtn.type = "button";
