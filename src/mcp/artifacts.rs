@@ -252,6 +252,13 @@ impl HubServer {
 struct ArtifactPublishParams {
     project_id: String,
     title: String,
+    /// What the artifact holds: `html` for a page the browser renders,
+    /// `markdown` for a document the viewer renders.
+    ///
+    /// The schema carries the two kinds rather than a bare string, so an agent
+    /// reads them off the tool instead of guessing and being refused. The list
+    /// is the one the store holds them against, so the two cannot drift.
+    #[schemars(extend("enum" = crate::blob::KINDS))]
     kind: String,
     content: String,
     #[serde(default)]

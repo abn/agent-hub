@@ -23,6 +23,14 @@ use crate::error::{Error, Result};
 /// Name prefix of content whose version number is not yet allocated.
 const PENDING_PREFIX: &str = "pending-";
 
+/// The kinds an artifact can be published as.
+///
+/// One list, so the three places that have to agree cannot drift: [`extension`]
+/// maps a kind to the file extension its blob is stored under, the refusal for
+/// anything else names them, and `artifact_publish` advertises them as the
+/// values its `kind` argument takes.
+pub const KINDS: [&str; 2] = ["html", "markdown"];
+
 /// The relative path of a blob, without writing it.
 pub fn blob_path(project_id: &str, artifact_id: &str, version: i64, kind: &str) -> Result<String> {
     let ext = extension(kind)?;
@@ -314,7 +322,8 @@ fn extension(kind: &str) -> Result<&'static str> {
         "html" => Ok("html"),
         "markdown" => Ok("md"),
         other => Err(Error::InvalidArgument(format!(
-            "unknown artifact kind '{other}'"
+            "unknown artifact kind '{other}'; the kinds are {}",
+            KINDS.join(" and ")
         ))),
     }
 }

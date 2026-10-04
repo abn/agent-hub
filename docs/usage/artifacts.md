@@ -15,7 +15,10 @@ session brains.
 
 ## Kinds
 
-An artifact kind is `html` or `markdown`.
+An artifact kind is `html` or `markdown`. `artifact_publish` carries the two in
+its argument schema, so an agent reads them off `tools/list` or
+`agent-hub tools` rather than guessing, and a kind that is neither is refused
+with `invalid_argument` naming both.
 
 - A `markdown` artifact is rendered to HTML by the hub. Raw HTML in the
   markdown source is escaped, so a published note cannot script or load

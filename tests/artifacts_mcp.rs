@@ -140,6 +140,64 @@ fn tool_error_code(response: &Value) -> String {
         .to_string()
 }
 
+fn tool_error_message(response: &Value) -> String {
+    response
+        .get("error")
+        .and_then(|error| error.get("data"))
+        .and_then(|data| data.get("error"))
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("tool error carries a message: {response}"))
+        .to_string()
+}
+
+/// A kind an agent can only learn by being told: the tool schema lists the two,
+/// and a refusal names them.
+///
+/// `kind` is the one argument of the tool set that is a closed set of words
+/// rather than free text, and it reached a fresh agent as `{"type":"string"}`
+/// with the only way to learn the values being a refusal that named none of
+/// them. The schema and the refusal have to agree with what the store accepts,
+/// so both are checked against the one list the store holds them in.
+#[test]
+fn the_publish_schema_lists_the_kinds_and_a_refusal_names_them() {
+    let data_dir = TempDir::new("artifact-kinds");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
+    server.initialize();
+
+    let listed = server.call("tools/list", json!({}));
+    let tools = listed["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("tools/list returns an array: {listed}"));
+    let publish = tools
+        .iter()
+        .find(|tool| tool["name"] == "artifact_publish")
+        .unwrap_or_else(|| panic!("artifact_publish is listed: {listed}"));
+    let kinds = &publish["inputSchema"]["properties"]["kind"]["enum"];
+    assert_eq!(
+        kinds,
+        &json!(agent_hub::blob::KINDS),
+        "the schema offers the kinds the store accepts, and nothing else"
+    );
+
+    let refused = server.call_tool(
+        "artifact_publish",
+        json!({
+            "project_id": "proj",
+            "title": "Note",
+            "kind": "note",
+            "content": "not a page and not a document",
+        }),
+    );
+    assert_eq!(tool_error_code(&refused), "invalid_argument", "{refused}");
+    let message = tool_error_message(&refused);
+    assert!(
+        message.contains("html") && message.contains("markdown"),
+        "the refusal names the kinds to send instead: {message}"
+    );
+}
+
 #[test]
 fn artifact_versioning_round_trip_over_stdio() {
     let data_dir = TempDir::new("versioned");
