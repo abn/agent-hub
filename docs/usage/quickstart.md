@@ -35,17 +35,17 @@ publish 8080 that way.
 
 ### The container image
 
-`OWNER` is the GitHub account or organisation the release is published under.
-The image is distroless and runs as a non-root user, so it needs no shell and
-answers a healthcheck with the binary's own `health` subcommand.
+Pull it from `ghcr.io/abn/agent-hub`, published under `abn`. The image is
+distroless and runs as a non-root user, so it needs no shell and answers a
+healthcheck with the binary's own `health` subcommand.
 
 ```sh
-podman pull ghcr.io/OWNER/agent-hub:1.0.0
+podman pull ghcr.io/abn/agent-hub:1.0.0
 podman run --detach --name agent-hub \
   --publish 8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
-  ghcr.io/OWNER/agent-hub:1.0.0
+  ghcr.io/abn/agent-hub:1.0.0
 ```
 
 `docker run` takes the same arguments. To add TLS in front, publish to loopback

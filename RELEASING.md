@@ -35,12 +35,12 @@ The change itself must already be on `main`:
   caught in review.
 
 Record the version and the image name once, and use them in every command below.
-`OWNER` is the GitHub account or organisation the repository lives under, so
-`ghcr.io/$OWNER/agent-hub` is the image the tag publishes:
+The repository lives under `abn`, so `ghcr.io/$OWNER/agent-hub` is the image the
+tag publishes; change `OWNER` if the repository moves:
 
 ```sh
 VERSION=1.0.0
-OWNER=OWNER
+OWNER=abn
 IMAGE=ghcr.io/$OWNER/agent-hub
 ```
 
@@ -118,8 +118,8 @@ git branch --delete chore/release-$VERSION
 
 Pushing the tag starts `.github/workflows/release.yml`. It builds the
 `Containerfile` with `GIT_COMMIT` set to the tagged commit, pushes the image to
-`ghcr.io/<owner>/<repository>` as both `1.0.0` and `latest`, runs the image and
-probes its readiness, then creates the GitHub release with the matching
+`ghcr.io/abn/agent-hub` as both `1.0.0` and `latest`, runs the image and probes
+its readiness, then creates the GitHub release with the matching
 `CHANGELOG.md` section as its body.
 
 The workflow is the whole release. The manual path below exists for the times

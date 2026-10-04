@@ -44,16 +44,16 @@ browsers reach it over the LAN or a tailnet.
 ### Run the container
 
 The image is distroless and non-root, keeps its data in a named volume, and
-takes the `HUB_ADMIN_TOKEN` the PWA's control surface needs. `OWNER` below is
-the GitHub account or organisation the release is published under.
+takes the `HUB_ADMIN_TOKEN` the PWA's control surface needs. It is published
+under `abn`, so the image is `ghcr.io/abn/agent-hub`.
 
 ```sh
-podman pull ghcr.io/OWNER/agent-hub:1.0.0
+podman pull ghcr.io/abn/agent-hub:1.0.0
 podman run --detach --name agent-hub \
   --publish 8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
-  ghcr.io/OWNER/agent-hub:1.0.0
+  ghcr.io/abn/agent-hub:1.0.0
 ```
 
 Build the same image from a checkout instead, with the commit stamped into the
