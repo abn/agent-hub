@@ -59,10 +59,13 @@ hub is unreachable, 77 the token was refused, 78 nothing names a hub.
 
 const TOOLS_USAGE: &str = "\
 usage:
-  agent-hub tools
+  agent-hub tools [--compact]
 
 List the hub's tools with their descriptions and argument schemas, so CLI
-discovery matches MCP discovery.
+discovery matches MCP discovery. The listing is printed indented, one tool per
+block, because it is every schema in the hub and one line of it is unreadable.
+--compact prints the same listing on one line, for a hook that wants it that
+way.
 ";
 
 const CONFIG_USAGE: &str = "\
@@ -177,7 +180,7 @@ fn main() -> ExitCode {
         None | Some("serve") => report(serve()),
         Some("mcp") => mcp(),
         Some("call") => call(&args[1..]),
-        Some("tools") => tools(),
+        Some("tools") => tools(&args[1..]),
         Some("kb") => kb(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
         Some("enrol") => enrol(&args[1..]),
@@ -769,13 +772,37 @@ fn call(args: &[String]) -> ExitCode {
 }
 
 /// List the hub's tools and their descriptions.
+///
+/// The listing is read by an agent as often as by a person, and the schema of
+/// every tool in the hub is too much of it to take in as one line, so the
+/// indented shape is what this prints. `--compact` is the one-line shape a hook
+/// pipes onward.
 #[cfg(feature = "client")]
-fn tools() -> ExitCode {
+fn tools(args: &[String]) -> ExitCode {
+    let shape = match agent_hub::client::tools_shape(args) {
+        Ok(shape) => shape,
+        Err(message) => {
+            eprintln!("agent-hub tools: {message}\n{TOOLS_USAGE}");
+            return ExitCode::from(2);
+        }
+    };
     let (config, runtime) = match client_runtime() {
         Ok(pair) => pair,
         Err(code) => return code,
     };
-    emit(runtime.block_on(agent_hub::client::tools(&config)))
+    match runtime.block_on(agent_hub::client::tools(&config)) {
+        Ok(listing) => {
+            println!("{}", shape.json(&listing));
+            ExitCode::SUCCESS
+        }
+        Err(failure) => fail(&failure),
+    }
+}
+
+#[cfg(not(feature = "client"))]
+fn tools(args: &[String]) -> ExitCode {
+    let _ = args;
+    without_client()
 }
 
 /// Read and write the project knowledge base from a flag-shaped command line.
@@ -1091,7 +1118,7 @@ fn call(_args: &[String]) -> ExitCode {
 }
 
 #[cfg(not(feature = "client"))]
-fn tools() -> ExitCode {
+fn tools(_args: &[String]) -> ExitCode {
     without_client()
 }
 

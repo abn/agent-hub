@@ -851,6 +851,55 @@ fn a_one_shot_write_naming_no_session_still_conflicts() {
     );
 }
 
+/// The listing is something a reader can read, and a machine can still parse.
+///
+/// `agent-hub tools` printed the whole hub's tool set as one line of about
+/// 20 KB, which a terminal wraps into noise and a model reads as a single
+/// unreadable token. The data is unchanged: the indented listing parses to the
+/// same tools as the one-line shape, which `--compact` still produces for a hook
+/// that pipes it onward.
+#[test]
+fn tools_prints_an_indented_listing_and_keeps_the_one_line_shape() {
+    let hub = Hub::start("call-tools-shape");
+
+    let readable = run(&hub, &["tools"]);
+    assert_eq!(readable.status.code(), Some(0), "{readable:?}");
+    let listed = stdout_json(&readable);
+    let tools = listed["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a list of tools: {listed}"));
+    assert!(
+        tools.len() > 1,
+        "the listing is the whole tool set, not one tool: {listed}"
+    );
+    let lines = String::from_utf8_lossy(&readable.stdout).lines().count();
+    assert!(
+        lines > tools.len(),
+        "{lines} lines for {} tools: one line of the whole hub is not readable",
+        tools.len()
+    );
+
+    let compact = run(&hub, &["tools", "--compact"]);
+    assert_eq!(compact.status.code(), Some(0), "{compact:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&compact.stdout).lines().count(),
+        1,
+        "the one-line shape is one line"
+    );
+    assert_eq!(
+        stdout_json(&compact),
+        listed,
+        "the shape changes and the data does not"
+    );
+
+    let refused = run(&hub, &["tools", "--compacted"]);
+    assert_eq!(refused.status.code(), Some(2), "{refused:?}");
+    assert!(
+        refused.stdout.is_empty(),
+        "a refused option prints no listing: {refused:?}"
+    );
+}
+
 /// A port no unprivileged hub can bind and nothing is listening on.
 ///
 /// A hub told to bind it fails the way a hub fails on a port another process

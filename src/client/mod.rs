@@ -286,6 +286,54 @@ pub async fn tools(config: &ClientConfig) -> Result<Value, Failure> {
     Ok(json!({ "tools": listed }))
 }
 
+/// The shape a JSON result is printed in.
+///
+/// The indented one is the default because the tool listing is every tool with
+/// its whole argument schema: on one line it is a wall, and neither a terminal
+/// nor a model reading it line by line can find a tool in it. The one-line
+/// shape is what a hook that pipes the listing into something else wants, and
+/// it is byte-for-byte what this command printed before the shape was a choice.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// Indented, one line per value.
+    Indented,
+    /// One line, for a machine that reads the whole document at once.
+    OneLine,
+}
+
+impl Shape {
+    /// The value as text in this shape.
+    ///
+    /// A value that arrived as JSON serialises back without failing, so the
+    /// fallback is the compact shape rather than a lost result: whatever is
+    /// printed still parses.
+    pub fn json(self, value: &Value) -> String {
+        let text = match self {
+            Self::Indented => serde_json::to_string_pretty(value),
+            Self::OneLine => serde_json::to_string(value),
+        };
+        text.unwrap_or_else(|_| value.to_string())
+    }
+}
+
+/// The shape `agent-hub tools` prints in.
+///
+/// The closed option list is parsed here rather than in the binary, so the two
+/// shapes and the flag that asks for one live beside the command that prints
+/// them. An option the listing does not have is refused rather than ignored: a
+/// hook that misspelled `--compact` would otherwise get the indented output and
+/// read it as the one line it asked for.
+pub fn tools_shape(args: &[String]) -> Result<Shape, String> {
+    let mut shape = Shape::Indented;
+    for argument in args {
+        match argument.as_str() {
+            "--compact" => shape = Shape::OneLine,
+            other => return Err(format!("unknown option '{other}'")),
+        }
+    }
+    Ok(shape)
+}
+
 /// Bound one request by the configured limit.
 ///
 /// The transport only times out its own control traffic, so without this a
