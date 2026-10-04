@@ -1,21 +1,83 @@
 ---
 type: Guide
 title: Quickstart
-description: Build, run, and configure a local Agent Hub instance.
-tags: [usage, quickstart, container, configuration]
+description: Install, run, and configure a local Agent Hub instance.
+tags: [usage, quickstart, install, container, configuration]
 status: draft
 ---
 
 # Quickstart
 
-This page covers building the hub, running it locally as a binary or through
+This page covers installing the hub, running it locally as a binary or through
 the container and compose file, and connecting the first agent. The REST API,
 the installable PWA, and the MCP surface all ship; the
 [agent surface](../architecture/agent-surface.md) and
 [human surface](../architecture/human-surface.md) pages describe their
 contracts, and [artifacts](artifacts.md) covers authoring.
 
-## Build the binary
+Two things are intended design rather than shipped behaviour. Background push
+notifications are deferred: a fully closed installed app raises nothing, and
+the hub keeps an in-app notification and a freshness stream instead
+([ADR 0016](../adr/0016-push-notifications-deferred.md)). The embedded tailnet
+endpoint is experimental
+([ADR 0014](../adr/0014-optional-embedded-tailnet.md)).
+
+## Install
+
+Every path needs `HUB_ADMIN_TOKEN`. The PWA's control surface refuses every
+request without one, and the store is created with owner-only permissions, so
+set a token of your own rather than the examples here.
+
+The published port carries plain HTTP on every interface of the host, so the
+token and every response cross the network unencrypted. Read
+[what the published port carries](#what-the-published-port-carries) before you
+publish 8080 that way.
+
+### The container image
+
+`OWNER` is the GitHub account or organisation the release is published under.
+The image is distroless and runs as a non-root user, so it needs no shell and
+answers a healthcheck with the binary's own `health` subcommand.
+
+```sh
+podman pull ghcr.io/OWNER/agent-hub:1.0.0
+podman run --detach --name agent-hub \
+  --publish 8080:8080 \
+  --env HUB_ADMIN_TOKEN=change-me \
+  --volume agent-hub-data:/data \
+  ghcr.io/OWNER/agent-hub:1.0.0
+```
+
+`docker run` takes the same arguments. To add TLS in front, publish to loopback
+instead (`--publish 127.0.0.1:8080:8080`) and set `HUB_PUBLIC_URL` to the
+address callers use.
+
+Build the same image from a checkout instead of pulling it. The image context
+carries no `.git`, so pass the commit in, and the Settings Version row reads
+the version and that commit:
+
+```sh
+podman build -f Containerfile \
+  --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+  --tag agent-hub:1.0.0 .
+```
+
+Under compose the file builds the image, mounts a named volume at `/data`, keeps
+the rest of the filesystem read-only and stops with a grace period above the
+hub's drain. It refuses to render without the token in the environment:
+
+```sh
+HUB_ADMIN_TOKEN=change-me docker compose -f deploy/compose.yaml up --build
+```
+
+That file is covered in [run with compose](#run-with-compose) below.
+
+### From source
+
+A stable Rust toolchain, 1.97 or newer. Continue with
+[build from source](#build-from-source) and [run the binary](#run-the-binary).
+
+## Build from source
 
 The project builds with a recent stable Rust toolchain (1.97 or newer).
 `make build` produces a debug binary:
@@ -248,9 +310,10 @@ docker compose -f deploy/compose.yaml up --build
 ```
 
 The container runs as a non-root user and writes only to the mounted volume,
-so the rest of the filesystem can be read-only. Pass `HUB_ADMIN_TOKEN` in the
-environment if the control surface needs it. Stop the stack with
-`docker compose -f deploy/compose.yaml down`; the named volume keeps the data.
+so the rest of the filesystem can be read-only. The compose file refuses to
+render without `HUB_ADMIN_TOKEN` in the environment or a `.env` file beside it.
+Stop the stack with `docker compose -f deploy/compose.yaml down`; the named
+volume keeps the data.
 
 ### What the published port carries
 
