@@ -6,6 +6,32 @@ software release notes and the repository changelog.
 
 ## 2026-10-04
 
+### The v1 release: install paths, changelog and release runbook
+
+* **Add**: [Quickstart](usage/quickstart.md) opens with an install section: the
+  container image with a `podman run` line and the required `HUB_ADMIN_TOKEN`, a
+  local `podman build` that stamps the commit into the Version row, the compose
+  file, and the from-source path. It states the two honest limits up front:
+  background push notifications are deferred and the embedded tailnet endpoint
+  is experimental. `README.md` carries the same install path and a status
+  paragraph that names them.
+* **Add**: `CHANGELOG.md` at the repository root records the release in Keep a
+  Changelog form, grouped into Added, Changed and Fixed and drawn from the
+  conventional-commit history. The repository had no tagged release before this
+  one, so the 1.0.0 section covers the project to date.
+* **Add**: `RELEASING.md` is the runbook: preconditions, the version bump, the
+  annotated tag, the image build and push, the GitHub release and its notes
+  taken from the changelog section, post-release verification against the
+  published image, and the rollback of the image, the release and the store.
+* **Add**: `.github/workflows/release.yml` publishes on a `v*` tag. It builds
+  the `Containerfile` with `GIT_COMMIT` set to the tagged commit, pushes the
+  image to GitHub Container Registry as the version and as `latest`, probes the
+  pushed image's readiness, then creates the GitHub release with the matching
+  changelog section as its body.
+* **Update**: the shipped version moves to 1.0.0 in `Cargo.toml` and
+  `Cargo.lock`. The build script already stamps the commit, so nothing about the
+  release is written by hand.
+
 ### The wiki gains product screenshots
 
 * **Add**: `docs/assets/screens/` holds the main feature screens at desktop
