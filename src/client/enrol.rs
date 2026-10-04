@@ -20,7 +20,11 @@ pub struct EnrolOptions {
 }
 
 /// What `agent-hub enrol` takes on its command line.
-const ENROL_USAGE: &str = "\
+///
+/// The binary prints this for a help flag before it parses anything, so the
+/// text lives here with the options it describes and is reached through the one
+/// help owner in `main`.
+pub const ENROL_USAGE: &str = "\
 usage:
   agent-hub enrol [why]           request enrolment and wait for operator approval
 
@@ -35,10 +39,6 @@ so the next command reaches the hub with no environment set.";
 
 impl EnrolOptions {
     pub fn parse(args: &[String]) -> Result<Self, String> {
-        if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-            println!("{ENROL_USAGE}");
-            std::process::exit(0);
-        }
         let mut options = Self::default();
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
