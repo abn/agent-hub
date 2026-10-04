@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -96,6 +96,13 @@ web/a11y: build ## Run the headless accessibility audit
 web/invariants: build ## Run the behavioral invariant checks
 	$(call browser_check,web/invariants,.agents/scripts/invariants.py)
 
+# What a filter leaves on screen and what the single-key verbs reach: the rows
+# a query keeps under the groups that hold them, a and r on a row whose verbs sit
+# beside it, where / lands, and what a filter chip's number counts. Behavioural
+# too, and on the same grounds.
+web/interaction: build ## Run the list filter and single-key verb checks
+	$(call browser_check,web/interaction,.agents/scripts/interaction.py)
+
 # A reverse proxy that mounts the hub on a path strips the prefix before
 # forwarding, so the hub never sees it; only the client-side references have
 # to survive that. This drives a real browser through a small prefix-
@@ -112,7 +119,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 ##@ Container
