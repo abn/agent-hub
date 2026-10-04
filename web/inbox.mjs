@@ -788,10 +788,10 @@ main.addEventListener("click", (event) => {
   } else if (action === "inbox-tray-approve" || action === "inbox-detail-approve") {
     work = approve(id, summary);
   } else if (action === "inbox-tray-answer") {
-    const item = button.closest(".inbox-item");
+    // The tray is the row's own Reply: a question row carries no second one, so
+    // the button that was pressed opens the composer under the row it belongs to.
     conceal();
-    const reply = item && item.querySelector('.inbox-row [data-action="answer"]');
-    if (reply) work = answer(id, reply);
+    work = answer(id, button);
   }
   if (work) work.catch(failed);
 });

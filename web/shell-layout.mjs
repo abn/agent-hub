@@ -254,6 +254,10 @@ export function shellIndexControls(placeholder, group = "", right = "") {
   </div>`;
 }
 
+// What a filter judges a group by: the day heading on a feed-style screen, and
+// the block the inbox draws its rows inside.
+const GROUPS = ".day, .hub-group-header, .inbox-group";
+
 // The index filter: a pill field that filters the list in place. It replaces
 // the group headers with one mono count line while a query is live, and
 // restores them when it is cleared. It never navigates.
@@ -269,12 +273,33 @@ export function installIndexFilter(shell) {
   body.prepend(count);
 
   const rows = () => [...body.querySelectorAll(".row")];
+  // Whether a node still holds a row the query kept, at any depth. The inbox
+  // wraps its rows in a block inside the group, so a group is asked about
+  // itself before it is asked about what follows it.
+  const holds = (node) =>
+    node.classList.contains("row") ? !node.hidden : !!node.querySelector(".row:not([hidden])");
+  // The inbox names a group with a heading of its own, drawn beside the block
+  // for a flat group and inside it for a folded one. A heading over an empty
+  // block is the empty group the reader must not be shown, so the two are
+  // decided together.
+  const labelOf = (head) => {
+    if (head.matches(".inbox-label")) return head;
+    const before = head.previousElementSibling;
+    if (before?.matches(".inbox-label")) return before;
+    return head.querySelector(".inbox-label");
+  };
+  const setGroup = (head, showing) => {
+    head.hidden = !showing;
+    const label = labelOf(head);
+    if (label) label.hidden = !showing;
+  };
   const apply = () => {
     const q = field.value.trim().toLowerCase();
     const all = rows();
+    const heads = [...body.querySelectorAll(GROUPS)];
     if (!q) {
       for (const row of all) row.hidden = false;
-      for (const head of body.querySelectorAll(".day, .hub-group-header, .inbox-group")) head.hidden = false;
+      for (const head of heads) setGroup(head, true);
       count.hidden = true;
       return;
     }
@@ -284,16 +309,17 @@ export function installIndexFilter(shell) {
       row.hidden = !match;
       if (match) shown++;
     }
-    // A group header stays only while it still heads a visible row.
-    for (const head of body.querySelectorAll(".day, .hub-group-header, .inbox-group")) {
-      let node = head.nextElementSibling;
+    // A group header stays only while it still heads a visible row, whether
+    // that row is its own or one of the rows beside it.
+    for (const head of heads) {
+      let node = head;
       let any = false;
-      while (node && !node.matches(".day, .hub-group-header, .inbox-group")) {
-        if (node.classList?.contains("row") && !node.hidden) { any = true; break; }
-        if (node.querySelector?.(".row:not([hidden])")) { any = true; break; }
+      while (node && !any) {
+        if (node !== head && node.matches(GROUPS)) break;
+        if (holds(node)) any = true;
         node = node.nextElementSibling;
       }
-      head.hidden = !any;
+      setGroup(head, any);
     }
     count.textContent = `${shown} of ${all.length} match "${field.value.trim()}"`;
     count.hidden = false;

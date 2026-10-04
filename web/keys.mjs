@@ -9,10 +9,19 @@ import { prefs } from "./prefs.mjs";
 // What a key does to a row, found in the markup the screens already paint: the
 // row's own link is what Enter follows, and the two verbs are the buttons the
 // delegated click handler already owns.
+//
+// A verb is looked for on the row first and on the block that holds the row
+// second. The inbox keeps Approve and Reply in the tray a swipe uncovers, which
+// is a sibling of the row rather than a child of it, so a row drawn without a
+// verb of its own still has one the key can press.
+const verb = (row, action) =>
+  row.querySelector(`[data-action="${action}"]`) ||
+  row.closest(".inbox-item")?.querySelector(`[data-action="inbox-tray-${action}"]`);
+
 const BEHAVIOUR = {
   open: (row) => row.querySelector("a[href]"),
-  approve: (row) => row.querySelector('[data-action="approve"]'),
-  reply: (row) => row.querySelector('[data-action="answer"]'),
+  approve: (row) => verb(row, "approve"),
+  reply: (row) => verb(row, "answer"),
 };
 
 // The screens the selection moves through. The other screens are fields and
@@ -123,18 +132,21 @@ function move(step) {
   place(list, next, true);
 }
 
+// A field the screen keeps out of the layout cannot be focused: `.focus()` on it
+// is accepted and does nothing, which swallows the key without saying so.
+function onScreen(el) {
+  return !!el && el.getClientRects().length > 0;
+}
+
 function focusSearch(event) {
   event.preventDefault();
-  // The design's `/` goes to the list's own filter field when the screen has
-  // one, and only falls through to the Search screen when it does not.
-  const filter = document.querySelector("[data-index-filter]");
-  if (filter) {
-    filter.focus();
-    filter.select?.();
-    return;
-  }
-  const field = document.getElementById("q");
-  if (field) {
+  // The design's `/` goes to the list's own filter field when the screen has one
+  // on screen, and only falls through to the Search screen when it does not. A
+  // phone keeps a project's filter in the DOM but out of the layout until its
+  // own control opens it, so the field is asked whether it is rendered before
+  // it is used.
+  for (const field of [document.querySelector("[data-index-filter]"), document.getElementById("q")]) {
+    if (!onScreen(field)) continue;
     field.focus();
     field.select?.();
     return;

@@ -473,15 +473,14 @@ export async function home(gen) {
   const unread = int(data.unread);
   const quiet = !waiting && !unread && !unseen.size;
   const node = [data.node?.host, data.node?.mode].filter((part) => typeof part === "string" && part);
-  const cards = quiet
-    ? quietCard(data)
-    : waitingCard(waiting, data.waiting_items || []) +
-      newestCard(
-        recent.filter((event) => !isOpen(event)),
-        unseen,
-      );
+  const newest = recent.filter((event) => !isOpen(event));
+  const cards = quiet ? quietCard(data) : waitingCard(waiting, data.waiting_items || []) + newestCard(newest, unseen);
   const status = statusSentence(data);
-  const chips = chipsHTML(waiting, unread);
+  // A chip is a filter, so its number counts the rows it reveals. The Unread
+  // chip keeps the newest rows carrying the unread dot, which is what sits above
+  // a project's cursor; the hub's own unread queue is a different set, and it is
+  // the status line above that counts it.
+  const chips = chipsHTML(waiting, newest.filter((event) => unseen.has(event.id)).length);
   // On the phone the bar carries the greeting itself, so the same string
   // shrinks from 22/600 to 15/600 as the bar collapses (RULE 12.1); the body's
   // copy of it fades out underneath. On a desktop the header title is "Home",
