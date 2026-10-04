@@ -34,11 +34,14 @@ The change itself must already be on `main`:
   release workflow does not touch the wiki bundle, so a missing entry is only
   caught in review.
 
-Record the version and the image name once, and use them in every command below:
+Record the version and the image name once, and use them in every command below.
+`OWNER` is the GitHub account or organisation the repository lives under, so
+`ghcr.io/$OWNER/agent-hub` is the image the tag publishes:
 
 ```sh
 VERSION=1.0.0
-IMAGE=ghcr.io/abn/agent-hub        # ghcr.io/<owner>/<repository>
+OWNER=OWNER
+IMAGE=ghcr.io/$OWNER/agent-hub
 ```
 
 ## The version bump
@@ -102,7 +105,7 @@ git push origin chore/release-$VERSION
 git push origin main
 ```
 
-Tag the merge commit on `main`, then move the branch pointer and drop it:
+Tag the commit on `main` that carries the release, then drop the branch:
 
 ```sh
 git switch main
@@ -110,12 +113,18 @@ git pull --ff-only
 git tag -a "v$VERSION" -m "Agent Hub $VERSION"
 git tag -n99 -l "v$VERSION"    # read the message back before pushing
 git push origin "v$VERSION"
+git branch --delete chore/release-$VERSION
 ```
 
 Pushing the tag starts `.github/workflows/release.yml`. It builds the
 `Containerfile` with `GIT_COMMIT` set to the tagged commit, pushes the image to
-`ghcr.io/${{ github.repository }}` under the tag and `latest`, and creates the
-GitHub release with the matching `CHANGELOG.md` section as its body.
+`ghcr.io/<owner>/<repository>` as both `1.0.0` and `latest`, runs the image and
+probes its readiness, then creates the GitHub release with the matching
+`CHANGELOG.md` section as its body.
+
+The workflow is the whole release. The manual path below exists for the times
+it cannot run, and it is also what you run to verify a published image from a
+second machine.
 
 ## The container image
 
@@ -135,12 +144,12 @@ on. Log in to the registry first; the token needs `write:packages` and
 `read:packages`.
 
 ```sh
-podman login ghcr.io -u "$(gh api user --jq .login)" --password-stdin \
-  < <(gh auth token)
+printf '%s' "$(gh auth token)" | podman login ghcr.io \
+  --username "$(gh api user --jq .login)" --password-stdin
 podman build -f Containerfile \
   --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
-  -t "$IMAGE:$VERSION" \
-  -t "$IMAGE:latest" \
+  --tag "$IMAGE:$VERSION" \
+  --tag "$IMAGE:latest" \
   .
 podman push "$IMAGE:$VERSION"
 podman push "$IMAGE:latest"
@@ -181,6 +190,17 @@ podman run --detach --name agent-hub-verify \
   --env HUB_ADMIN_TOKEN=release-check \
   --volume agent-hub-verify-data:/data \
   "$IMAGE:$VERSION"
+```
+
+The container may need a moment to migrate an empty data directory before it
+answers. Poll the probe rather than sleeping a fixed time:
+
+```sh
+for attempt in $(seq 30); do
+  podman exec agent-hub-verify \
+    /usr/local/bin/agent-hub health --url http://127.0.0.1:8080 && break
+  sleep 1
+done
 ```
 
 The image runs as a non-root user and writes only to `/data`, so the rest of
