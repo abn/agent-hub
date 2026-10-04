@@ -2580,6 +2580,63 @@ def check_wiki_phone_breadcrumb(page, watch: Watch, port: int, project: str) -> 
     watch.drain_rejections()
 
 
+# The wiki tree's directory rows and what each points at: the element and its
+# address, if it has one.
+WIKI_DIR_ROWS = r"""
+() => [...document.querySelectorAll('.shell-index .wiki-dir')].map((a) => ({
+  tag: a.tagName,
+  href: a.getAttribute('href'),
+}))
+"""
+
+
+def check_wiki_directory_row(page, watch: Watch, port: int, project: str) -> None:
+    """A directory row never addresses a page.
+
+    The tree draws a folder as a row of its own. At a phone width it drills in
+    through the directory address, and at a desktop width the full tree already
+    shows what it holds, so it is a label and does not navigate. A row that kept
+    a page address asked the reader for a page that does not exist, and answered
+    404 for a folder that was on the screen beside it.
+    """
+    watch.enter("wiki: a directory row never addresses a page")
+    harness.request(
+        port,
+        "PUT",
+        f"/api/v1/projects/{quote(project)}/kb/pages/notes/field.md",
+        {"content": "---\ntype: note\n---\n# Field\n\nA page under a directory.\n"},
+    )
+    previous = page.viewport_size
+
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki", "Wiki")
+    if not settle(page, "document.querySelector('.shell-index .wiki-dir')"):
+        watch.fail("the desktop wiki index rendered no directory row")
+    else:
+        for row in page.evaluate(WIKI_DIR_ROWS):
+            href = row["href"] or ""
+            if "page=" in href:
+                watch.fail(f"a desktop wiki directory row addresses a page ({row})")
+            if href and "dir=" not in href:
+                watch.fail(f"a desktop wiki directory row has an unexpected address ({row})")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki", "Wiki")
+    if settle(page, "document.querySelector('.shell-index .wiki-dir')"):
+        for row in page.evaluate(WIKI_DIR_ROWS):
+            href = row["href"] or ""
+            if "page=" in href:
+                watch.fail(f"a phone wiki directory row addresses a page ({row})")
+            if not href or "dir=" not in href:
+                watch.fail(f"a phone wiki directory row has no directory address ({row})")
+
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 # The project's four section tabs and the geometry that decides whether the
 # last one is readable: the scroll region, every tab's box, the overflow button
 # beside it, and whether a count is painted. A count is only a count while it is
@@ -2860,6 +2917,7 @@ def run() -> int:
                 run_step(watch, check_round14, page, watch, port, project, artifact_id, protected_id)
                 run_step(watch, check_wiki_read_write, page, watch, port, project)
                 run_step(watch, check_wiki_phone_breadcrumb, page, watch, port, project)
+                run_step(watch, check_wiki_directory_row, page, watch, port, project)
                 run_step(watch, check_section_switcher_fits_the_index, page, watch, project)
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
