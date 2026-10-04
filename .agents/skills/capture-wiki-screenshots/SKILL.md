@@ -56,6 +56,27 @@ python3 .agents/scripts/wiki_screens.py    # the interpreter that can import pla
 It writes into a bundle that is checked in, so it must be run from the repo
 root and it must not touch anything outside `docs/assets/screens/`.
 
+### Which browser it drives
+
+The script launches a bundled Chromium by default. It drives **Obscura** over
+CDP instead when `OBSCURA_CDP` names an endpoint that answers as Obscura, so a
+capture need not contend for a Chromium with another agent on the machine:
+
+```sh
+OBSCURA_ALLOW_PRIVATE_NETWORK=1 obscura serve --port 9222 &
+OBSCURA_CDP=http://127.0.0.1:9222 python3 .agents/scripts/wiki_screens.py
+```
+
+Obscura needs `OBSCURA_ALLOW_PRIVATE_NETWORK=1` (its server flag) for the
+scratch hub on loopback. Over CDP it exposes one context and no
+`Target.createTarget`, and it does **not** keep `localStorage` across pages, so
+the token must be seeded by an init script that runs before the app module
+reads it, on a page whose viewport is set before the first navigation. The
+script does exactly that; a capture that renders the chrome but no data is the
+sign the token was seeded too late. The resulting set is byte-for-byte close to
+the Chromium set, so either browser is acceptable.
+
+
 ## Wiring an image into a page
 
 A screenshot is never one edit. In the same commit:
@@ -100,6 +121,9 @@ changes, re-run the whole set so the bundle stays consistent.
   hostname, which the always-public rule forbids in a committed bundle. This
   was caught in the first capture: every header read the host's real name until
   the harness set one.
+- Seed the token with an init script, never with `page.evaluate` after the
+  first load: the app reads `localStorage` once at module load (`web/prefs.mjs`),
+  so a token written later is invisible and every data screen renders empty.
 - No PII, no hostnames, no tailnet names, no `.agents/brain` paths.
 - No emoji in a filename or a caption. No em-dashes in prose.
 - The set stays small: the main feature screens, both widths, both themes.

@@ -241,31 +241,26 @@ def run() -> int:
             )
             for width, viewport in WIDTHS:
                 for theme in THEMES:
-                    # A CDP connection hands us no context of its own and
-                    # refuses new_context; pages are created on the connection
-                    # and their viewport and emulation are set per width and
-                    # theme. A launched browser gets a fresh context as before.
+                    # Obscura's CDP exposes one context and no
+                    # Target.createTarget, and it does not keep localStorage
+                    # across pages, so the token must be seeded by an init
+                    # script that runs before the app's module reads it, on a
+                    # page whose viewport is set before the first navigation.
+                    # A launched browser gets a fresh context as before, where
+                    # the same init script has the same effect.
                     if started:
-                        # Obscura's CDP exposes one context and no
-                        # Target.createTarget, so use that context and close
-                        # each page when its width and theme are done.
                         context = browser.contexts[0]
                         page = context.new_page()
                         page.set_viewport_size(viewport)
-                        # The token and theme must be in localStorage before
-                        # the app's first paint; an init script added after the
-                        # page exists may not run on the current document, so
-                        # land on the origin, seed storage, then reload.
-                        page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-                        page.evaluate(
-                            "(theme) => { localStorage.setItem('hub.token', %s);"
-                            "localStorage.setItem('hub.theme', theme);"
-                            "localStorage.setItem('hub.density', 'comfortable'); }"
-                            % json.dumps(harness.ADMIN_TOKEN),
-                            theme,
+                        page.emulate_media(
+                            color_scheme=theme, reduced_motion="no-preference"
                         )
-                        page.emulate_media(color_scheme=theme, reduced_motion="no-preference")
-                        page.reload(wait_until="load")
+                        page.add_init_script(
+                            "localStorage.setItem('hub.token', %s);"
+                            "localStorage.setItem('hub.theme', %s);"
+                            "localStorage.setItem('hub.density', 'comfortable');"
+                            % (json.dumps(harness.ADMIN_TOKEN), json.dumps(theme))
+                        )
                     else:
                         context = browser.new_context(
                             viewport=viewport,
