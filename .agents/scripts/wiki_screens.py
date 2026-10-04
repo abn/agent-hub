@@ -230,7 +230,11 @@ def run() -> int:
     # public, so a home path or a build-tree path must never reach a capture.
     # A relative `data` renders as exactly that, which is what a deployment
     # names, and it is truthful: it is the directory the hub was given.
-    data_dir = ROOT / "target" / "tmp" / "wiki-screens-data"
+    # `override="data"` is a path relative to the hub's cwd, so the directory
+    # that must be cleared is the one the hub will actually open, `data` under
+    # `target/tmp`, not a second name beside it. Clearing the wrong one left the
+    # seeded store in place and every re-run failed seeding with a 409.
+    data_dir = ROOT / "target" / "tmp" / "data"
     shutil.rmtree(data_dir, ignore_errors=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     with harness.running_hub(NAME, override="data", cwd=str(data_dir.parent)) as (port, seeded):
