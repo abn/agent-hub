@@ -6,6 +6,18 @@ software release notes and the repository changelog.
 
 ## 2026-10-04
 
+### The v1 fixes repaint the captures
+
+* **Update**: the seeded captures are refreshed after the v1 fix round, at both
+  widths in both themes. The screens that moved are the project feed, artifacts
+  and sessions (the section switcher now reads all four labels at the default
+  index width), the wiki index and reader, the phone wiki index, Storage (the
+  project name is a link), Settings (the Connect row, and the Version row at
+  1.0.0), the phone session detail (it now opens inside the project shell), and
+  Home (the Unread chip's number). The capture script also clears the data
+  directory the hub actually opens, so a second run no longer seeds into an
+  existing store and fails.
+
 ### Search announces its match position
 
 * **Fix**: the count beside a search result's Next and Previous buttons is now a
