@@ -109,6 +109,18 @@ The project's section switcher is a segmented control inside the index header,
 not a tab strip above the panes. It selects what the index lists and never
 changes the shell. The inbox is the same shell with one index and no switcher.
 
+**Deviation: the switcher drops counts below a 360px index pane.** The handoff's
+rule is that counts drop on a narrow control, measured against the control. The
+project's four tabs with their counts are 284px wide, which is exactly what a
+360px index pane leaves the switcher, so the rule is carried over to the pane:
+below 360 the counts go and the tabs take 6px of padding instead of 10, and at
+360 or above both come back. The query is on the pane rather than the window,
+because the pane is draggable and a narrow pane on a wide window has the same
+room problem. Below the compact threshold the switcher may still scroll at the
+260px minimum; the 300px default is what has to read in full. A count is the
+first thing a reader can lose and the last they want back, which is why it goes
+before the padding does.
+
 An index exists only where items are opened one at a time. Settings is the one
 screen with no index: a short form is not a list. It is rail and stage, with no
 aside and no aside toggle.

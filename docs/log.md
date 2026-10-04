@@ -46,6 +46,21 @@ software release notes and the repository changelog.
   `Cargo.lock`. The build script already stamps the commit, so nothing about the
   release is written by hand.
 
+### The wiki index and the section switcher, at the sizes they actually get
+
+* **Fix**: on a phone the wiki index at its root drew a breadcrumb whose only
+  crumb was Wiki, which the tools row above already names. The breadcrumb now
+  appears only inside a directory, where there is something to go back from.
+* **Fix**: on the desktop the project's four section tabs were 284px wide with
+  their counts, and the default 300px index pane leaves the switcher 224px, so
+  Sessions was clipped to "Se" and butted against the overflow button. The
+  index pane is a query container: below 360px the counts drop and the tabs
+  take 6px of padding instead of 10, so all four read in full at the default
+  width, and at 360 and above the counts come back. At the 260px minimum the
+  switcher still scrolls.
+* **Update**: [Human interface](design/human-interface.md) states both rules.
+  The switcher rule is recorded as a departure in `DESIGN.md`.
+
 ### The wiki gains product screenshots
 
 * **Add**: `docs/assets/screens/` holds the main feature screens at desktop

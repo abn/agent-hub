@@ -176,7 +176,12 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
       const rest = path.slice(prefix.length);
       return rest.length > 0 && !rest.includes("/");
     });
-    const crumbs = [`<a href="#/projects/${encodeURIComponent(id)}/wiki" style="color:var(--accent);text-decoration:none">Wiki</a>`];
+    // A trail is worth drawing only once there is somewhere to come back from.
+    // At the root the crumb would say one word, "Wiki", which the tools row
+    // above already says, so the index body is the tree and nothing else.
+    const crumbs = displayPath(dir)
+      ? [`<a href="#/projects/${encodeURIComponent(id)}/wiki" style="color:var(--accent);text-decoration:none">Wiki</a>`]
+      : [];
     let acc = "";
     for (const part of displayPath(dir).split("/").filter(Boolean)) {
       acc = acc ? `${acc}/${part}` : part;
@@ -184,9 +189,12 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
         `<a href="#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(acc)}" style="color:var(--accent);text-decoration:none">${esc(part)}</a>`,
       );
     }
-    return `<div class="wiki-breadcrumb mono" style="padding:8px 16px;font-size:12px;color:var(--ink-3);display:flex;gap:6px;flex-wrap:wrap">${crumbs.join(
-      "<span>/</span>",
-    )}</div>${level.length ? `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${level.map((entry) => rowHTML(entry, id, selected, true)).join("")}</div>` : `<p class="empty" style="padding:16px">This directory is empty.</p>`}`;
+    const trail = crumbs.length
+      ? `<div class="wiki-breadcrumb mono" style="padding:8px 16px;font-size:12px;color:var(--ink-3);display:flex;gap:6px;flex-wrap:wrap">${crumbs.join(
+          "<span>/</span>",
+        )}</div>`
+      : "";
+    return `${trail}${level.length ? `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${level.map((entry) => rowHTML(entry, id, selected, true)).join("")}</div>` : `<p class="empty" style="padding:16px">This directory is empty.</p>`}`;
   }
   return `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${entries
     .map((entry) => rowHTML(entry, id, selected))

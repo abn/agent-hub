@@ -85,8 +85,12 @@ line. Pushed screens from More retain More as the current tab and offer a back
 chevron in the 48px leading slot. A
 project is its own address: the feed, the artifact gallery and the sessions
 list sit under the project as segmented tabs, each with its own route, and
-each section is the same project view. The artifact viewer is itself a route,
-so reload and the browser's Back keep the artifact on screen. A desktop list
+each section is the same project view. The tabs sit in the index header and
+carry their counts; the index pane is 300px by default and draggable to 480,
+and below a 360px pane the counts drop and the tabs take 6px of padding rather
+than 10, so all four labels read in full at the default width. The artifact
+viewer is itself a route, so reload and the browser's Back keep the artifact on
+screen. A desktop list
 plus detail layout is a layout primitive screens opt into; Sessions is the
 first to use it, with a 420px list beside a detail pane.
 
@@ -168,12 +172,15 @@ sync line when the hub is healthy.
 A project carries a fourth section, **Wiki**, beside Feed, Artifacts and
 Sessions, and its tab names the page count. The tree is one `meta=1` listing of
 the whole knowledge base, drawn as a full tree from 768px up and one drill-in
-level with a breadcrumb below it. A page row carries its title and a mono line
-of its type, status and derived trust; a stale page adds the 12px clock glyph
-and the word "stale"; a directory row carries its child count. Selecting a page
-opens the reader in the stage: the frontmatter block is metadata, drawn as the
-page's type, status and tags rather than as body text, and the page's backlinks
-and comment threads are listed under it. A thread is one level; an anchored
+level below that. Inside a directory the drill-in level carries a breadcrumb,
+Wiki first and then each path part as a link; at the root it carries none, the
+tools row above already names the section. A page row carries its title and a
+mono line of its type, status and derived trust; a stale page adds the 12px
+clock glyph and the word "stale"; a directory row carries its child count.
+Selecting a page opens the reader in the stage: the frontmatter block is
+metadata, drawn as the page's type, status and tags rather than as body text,
+and the page's backlinks and comment threads are listed under it. A thread is
+one level; an anchored
 thread shows the quote, open threads are listed, and resolved threads fold under
 a count at the foot. The reader offers **Review**, which stamps the bytes the
 human read and carries the version they read; **Edit** opens the editor, whose

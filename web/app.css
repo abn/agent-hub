@@ -7007,6 +7007,16 @@ dialog.dialog-project-delete {
 .shell-seg a .shell-seg-count { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
 .shell-seg a[aria-selected="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-1); }
 .shell-seg a[aria-selected="true"] .shell-seg-count { color: var(--ink-2); }
+/* The project's four sections carry counts, and at 284px they fill a 360px index
+   pane exactly. Below that they cannot, so the counts go and the tabs take less
+   padding: a count is the first thing a reader can lose and the last they want
+   back. The query is on the pane and not the window, because the pane is
+   draggable and a narrow pane on a wide window has the same room problem. */
+.shell-index { container-type: inline-size; container-name: index-pane; }
+@container index-pane (width < 360px) {
+  .shell-head.project-seg-head .shell-seg a { padding: 0 6px; }
+  .shell-head.project-seg-head .shell-seg-count { display: none; }
+}
 /* The project's four sections do not fit the index pane at its narrowest, so
    the switcher scrolls sideways rather than clipping the last tab; the gear
    beside it stays put. */

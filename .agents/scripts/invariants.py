@@ -2505,6 +2505,200 @@ def check_round14(page, watch: Watch, port: int, project: str, artifact_id: str,
     harness.request(port, "DELETE", f"/api/v1/agents/{agent}/token")
 
 
+# What the wiki index body has put on the phone screen: how many breadcrumbs,
+# what the first crumb says, and whether the tree behind them rendered.
+WIKI_INDEX_SHAPE = r"""
+() => {
+  const crumbs = [...document.querySelectorAll('.shell-index .wiki-breadcrumb')];
+  return {
+    crumbs: crumbs.length,
+    firstCrumb: crumbs.length
+      ? (crumbs[0].querySelector('a') || {}).textContent || ''
+      : null,
+    tree: !!document.querySelector('.shell-index .wiki-tree'),
+    rows: document.querySelectorAll('.shell-index .wiki-row').length,
+  };
+}
+"""
+
+
+def check_wiki_phone_breadcrumb(page, watch: Watch, port: int, project: str) -> None:
+    """The phone wiki index: the tree alone at the root, a trail inside a directory.
+
+    The phone header's tools row already names the section, so a breadcrumb
+    whose only crumb is "Wiki" is a second label for the same thing and a blue
+    line painted above the tree for nothing. A directory earns the trail,
+    because there is somewhere above it to go back to.
+    """
+    watch.enter("wiki on a phone: no trail at the root, a trail inside a directory")
+    harness.request(
+        port,
+        "PUT",
+        f"/api/v1/projects/{quote(project)}/kb/pages/notes/field.md",
+        {"content": "---\ntype: note\n---\n# Field\n\nA page under a directory.\n"},
+    )
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    # Away first, or a hash the screen is already at paints nothing.
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki", "Wiki")
+    if not settle(page, "document.querySelector('.shell-index .wiki-row')"):
+        watch.fail("the phone wiki index rendered no rows at its root")
+    else:
+        root = page.evaluate(WIKI_INDEX_SHAPE)
+        if root["crumbs"] != 0:
+            watch.fail(
+                "the phone wiki index draws a breadcrumb at its root"
+                f" ({root['crumbs']} found, first crumb {root['firstCrumb']!r})"
+            )
+        if not root["tree"] or root["rows"] == 0:
+            watch.fail(
+                f"the phone wiki index rendered no tree at its root ({root})"
+            )
+
+    # The same screen inside a directory, where the trail is the way back. The
+    # heading is "Wiki" either way, so the trail itself is what the wait is on.
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki?dir=notes", "Wiki")
+    if not settle(page, "document.querySelector('.shell-index .wiki-breadcrumb')"):
+        watch.fail("the phone wiki index draws no breadcrumb inside a directory")
+    else:
+        inside = page.evaluate(WIKI_INDEX_SHAPE)
+        if inside["crumbs"] < 1:
+            watch.fail("the phone wiki index inside a directory has no crumb to go back from")
+        elif inside["firstCrumb"] != "Wiki":
+            watch.fail(
+                "the phone wiki trail does not start at Wiki"
+                f" (first crumb {inside['firstCrumb']!r})"
+            )
+        if inside["rows"] == 0:
+            watch.fail(f"the phone wiki directory rendered no rows ({inside})")
+
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+# The project's four section tabs and the geometry that decides whether the
+# last one is readable: the scroll region, every tab's box, the overflow button
+# beside it, and whether a count is painted. A count is only a count while it is
+# visible, so a `display: none` one is absent here rather than dropped.
+SECTION_SWITCHER = r"""
+() => {
+  const head = document.querySelector('.shell-head.project-seg-head');
+  const seg = head && head.querySelector('.shell-seg');
+  if (!seg) return { error: 'the index header has no .shell-seg' };
+  const box = seg.getBoundingClientRect();
+  const wrap = head.querySelector('.proj-overflow-wrap');
+  const shown = (el) => el.getClientRects().length > 0;
+  const counts = [...seg.querySelectorAll('.shell-seg-count')];
+  const tabs = [...seg.querySelectorAll('a')].map((a) => {
+    const r = a.getBoundingClientRect();
+    return {
+      text: (a.textContent || '').trim(),
+      right: Math.round(r.right * 10) / 10,
+      // The scroll region is what clips, so a tab is cut when it reaches past
+      // the region's visible edge, not when its own box is narrow. A tab that
+      // cannot ellipsise itself is only cut that way, so both are asked.
+      truncated: a.scrollWidth > a.clientWidth + 1,
+      pastScrollEdge: r.right > box.right + 1,
+    };
+  });
+  return {
+    paneWidth: Math.round(
+      document.querySelector('.shell-index').getBoundingClientRect().width),
+    segRight: Math.round(box.right * 10) / 10,
+    scrollWidth: seg.scrollWidth,
+    clientWidth: seg.clientWidth,
+    overflows: seg.scrollWidth > seg.clientWidth + 1,
+    // The overflow button is a sibling, not a child, so it never scrolls away.
+    overflowLeft: wrap ? Math.round(wrap.getBoundingClientRect().left * 10) / 10 : null,
+    countsShown: counts.filter(shown).length,
+    countsDrawn: counts.length,
+    tabCount: tabs.length,
+    tabs,
+  };
+}
+"""
+
+
+def check_section_switcher_fits_the_index(page, watch: Watch, project: str) -> None:
+    """The section switcher reads in full at the index pane's default width.
+
+    Four tabs with their counts need 284px, and the default index pane leaves the
+    switcher 224 of them, so the last tab was clipped to "Se" and butted against
+    the overflow button. Below a 360px pane the counts go and the tabs take less
+    padding; at or above it they come back and the switcher has the room again.
+    """
+    watch.enter("project: the section switcher fits the index pane it is in")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki", "Wiki")
+
+    for width, want_counts in ((300, False), (480, True)):
+        # The pane is draggable, so its width is set the way a drag sets it: on
+        # the shell's own custom property, and taken off again at the end.
+        page.evaluate(
+            "w => { const shell = document.querySelector('.shell');"
+            " shell.style.setProperty('--w-index', w + 'px'); }",
+            width,
+        )
+        if not settle(page, "document.querySelector('.shell-head.project-seg-head .shell-seg')"):
+            watch.fail(f"at a {width}px index pane the section switcher did not render")
+            continue
+        page.wait_for_timeout(200)
+        got = page.evaluate(SECTION_SWITCHER)
+        if "error" in got:
+            watch.fail(f"at a {width}px index pane, {got['error']}")
+            continue
+        if got["paneWidth"] != width:
+            watch.fail(f"the index pane measured {got['paneWidth']}px, expected {width}px")
+            continue
+        if got["tabCount"] != 4:
+            watch.fail(f"the section switcher drew {got['tabCount']} tabs, expected 4")
+        if got["overflows"]:
+            watch.fail(
+                f"at a {width}px index pane the switcher clips its last tab:"
+                f" scrollWidth {got['scrollWidth']} > clientWidth {got['clientWidth']}"
+            )
+        for tab in got["tabs"]:
+            if tab["truncated"]:
+                watch.fail(f"at a {width}px index pane the {tab['text']!r} tab is truncated")
+            if tab["pastScrollEdge"]:
+                watch.fail(
+                    f"at a {width}px index pane the {tab['text']!r} tab runs past the"
+                    f" switcher edge: right {tab['right']} > {got['segRight']}"
+                )
+            if tab["right"] > got["overflowLeft"] + 0.5:
+                watch.fail(
+                    f"at a {width}px index pane the {tab['text']!r} tab reaches to"
+                    f" {tab['right']}, over the overflow button at {got['overflowLeft']}"
+                )
+        if got["segRight"] >= got["overflowLeft"]:
+            watch.fail(
+                f"at a {width}px index pane the switcher touches the overflow button:"
+                f" {got['segRight']} against {got['overflowLeft']}"
+            )
+        # Every count is dropped below the threshold and every one is back above
+        # it, which is the rule, without pinning how many the tree happens to hold.
+        if want_counts and got["countsShown"] != got["countsDrawn"]:
+            watch.fail(
+                f"at a {width}px index pane the switcher shows {got['countsShown']} of"
+                f" {got['countsDrawn']} counts"
+            )
+        if not want_counts and got["countsShown"]:
+            watch.fail(
+                f"at a {width}px index pane the switcher still shows"
+                f" {got['countsShown']} count(s), expected none"
+            )
+    page.evaluate("() => document.querySelector('.shell').style.removeProperty('--w-index')")
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
     """The wiki segment: one meta tree, a reader that strips frontmatter, and an
     editor that writes back the version it read."""
@@ -2665,6 +2859,8 @@ def run() -> int:
                 run_step(watch, check_desktop_agents_list_and_item, page, watch, "reveal-probe")
                 run_step(watch, check_round14, page, watch, port, project, artifact_id, protected_id)
                 run_step(watch, check_wiki_read_write, page, watch, port, project)
+                run_step(watch, check_wiki_phone_breadcrumb, page, watch, port, project)
+                run_step(watch, check_section_switcher_fits_the_index, page, watch, project)
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features
