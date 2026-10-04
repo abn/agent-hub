@@ -1,0 +1,129 @@
+name: release
+
+# A tag is the release. `v1.0.0` publishes image tag `1.0.0` and moves `latest`.
+"on":
+  push:
+    tags:
+      - "v*"
+
+# Nothing is read from the repository by this workflow beyond the checkout, and
+# nothing is written outside the release and the registry.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the annotated tag already exists; this publishes the release
+      packages: write # the image is pushed to the registry the workflow runs in
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Read the release version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$version" != "$GITHUB_REF_NAME" || {
+            printf 'the tag must be v<version>, got %s\n' "$GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          test -f CHANGELOG.md || {
+            printf 'CHANGELOG.md is missing\n' >&2
+            exit 1
+          }
+          grep -qF "## [$version]" CHANGELOG.md || {
+            printf 'CHANGELOG.md has no section for %s\n' "$version" >&2
+            exit 1
+          }
+          # The changelog section is the release body, so the notes and the file
+          # cannot drift. A missing section is a failed release, not an empty
+          # one. The heading carries its date, so the match is a prefix.
+          mkdir -p target/tmp
+          awk -v heading="## [$version]" '
+            substr($0, 1, length(heading)) == heading { inside = 1; next }
+            inside && /^## \[/ { exit }
+            inside { print }
+          ' CHANGELOG.md > target/tmp/release-notes.md
+          test -s target/tmp/release-notes.md
+          # The Version row shows a short commit, so the build is given the
+          # short form of the tagged commit rather than the full sha.
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to the registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile
+          push: true
+          # The image context has no .git, so the build script is told which
+          # commit it is building. Without it the Version row would report an
+          # empty commit rather than invent one.
+          build-args: |
+            GIT_COMMIT=${{ steps.version.outputs.commit }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the pushed image serves
+        run: |
+          image="ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}"
+          token="verify-$(date +%s)"
+          name="release-verify-$$"
+          # The published port is a loopback one so the run does not answer to
+          # anything outside this runner. The store is a throwaway volume.
+          podman run --detach --name "$name" \
+            --publish 127.0.0.1:18080:8080 \
+            --env HUB_ADMIN_TOKEN="$token" \
+            --volume "$name-data:/data" \
+            "$image"
+          # The runtime is distroless: no shell, no curl. The probe is the
+          # binary's own health subcommand against the readiness endpoint, and
+          # it is polled rather than slept, because an empty data directory
+          # takes a moment to migrate.
+          ready=""
+          for attempt in $(seq 30); do
+            if podman exec "$name" /usr/local/bin/agent-hub health --url http://127.0.0.1:8080; then
+              ready=yes
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = yes
+          curl -fsS http://127.0.0.1:18080/readyz
+          curl -fsS http://127.0.0.1:18080/SKILL.md > /dev/null
+          # The Version row must read the released version and the tagged
+          # commit, so the tag and the artefact cannot disagree.
+          payload=$(curl -fsS -H "Authorization: Bearer $token" \
+            http://127.0.0.1:18080/api/v1/storage)
+          printf '%s\n' "$payload" \
+            | grep -q "\"version\":\"${{ steps.version.outputs.version }}\""
+          printf '%s\n' "$payload" \
+            | grep -q "\"commit\":\"${{ steps.version.outputs.commit }}\""
+          podman rm --force --volumes "$name"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Agent Hub ${GITHUB_REF_NAME#v}" \
+            --notes-file target/tmp/release-notes.md
