@@ -23,7 +23,7 @@ An MCP-capable harness reaches the hub over streamable HTTP at
 run `agent-hub mcp` as a stdio proxy when the harness speaks only stdio. The
 proxy holds one connection for the life of the process, which is what keeps a
 session active across calls; a one-shot `agent-hub call` opens its own
-connection and holds no session.
+connection and holds no session, and names the session it acts on instead.
 
 Create an agent and issue its token first, as in
 [the quickstart](quickstart.md#create-a-project-and-connect-an-agent). Then
@@ -119,8 +119,8 @@ its `next_since` and every later run continues forward from there.
 
 A hook is a shell command with no MCP client, so it makes one-shot calls with
 `agent-hub call`. A call opens its own connection and holds no session, so a
-hook that names the session explicitly still reaches the brain. Start a
-session, then read it by its explicit `session`:
+hook that names the session explicitly still reaches the brain, to read it and
+to write it. Start a session, then name it on every call that touches it:
 
 ```sh
 agent-hub call session_start \
@@ -128,21 +128,29 @@ agent-hub call session_start \
 
 agent-hub call brain_get \
   '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
+
+agent-hub call brain_put \
+  '{"path":"/fs/RECOVERY.md","store":"session","content":"cursor: 42\nwhat this session is doing","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
 ```
 
-The `session` on the read is what makes this work without a held connection:
-`brain_get` resolves the named session and reads its brain like any other.
-Writes still go only to the active session, so a hook reads the session brain
-one-shot and does its writing through the proxy. A hook that only needs the
-durable project knowledge base needs no session at all: `agent-hub kb get`, in
+The `session` is what makes this work without a held connection: `brain_get`
+and `brain_put` resolve the named session and use its brain like any other, and
+the same JSON serves both. A write may only name the session its own agent
+owns; another agent's is refused, because a working state has one writer. A
+call that names no session at all is still about the active session, and a
+one-shot call has none, so that stays a `conflict`: naming the session is the
+way round it, never a silent fallback to some other one.
+
+A hook that only needs the durable project knowledge base needs no session at
+all: `agent-hub kb get`, in
 [the quickstart](quickstart.md#reach-the-hub-from-a-client-machine).
 
 Setting `HUB_PROJECT` alongside the token changes none of this. The setting
 fills a `project_id` a call leaves out, which is the project knowledge base and
 the project feeds; a session-store call is sent none, because the session store
-acts on the active session and refuses a `project_id` outright. A hook that
-exports `HUB_PROJECT` for its project pages can still read its own session brain
-with the recipe above.
+acts on a session and refuses a `project_id` outright. A hook that exports
+`HUB_PROJECT` for its project pages still names its project inside the
+`session` it passes, as the recipe above does.
 
 Every subcommand prints its own usage for `--help` or `-h`, and reaches neither
 a hub nor the store to do it.

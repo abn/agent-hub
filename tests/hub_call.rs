@@ -557,6 +557,300 @@ fn a_one_shot_hook_starts_a_session_and_reads_its_brain() {
     );
 }
 
+/// The other half of the one-shot recipe: a hook writes its own session brain
+/// by naming the session, in two separate calls with no connection between
+/// them.
+///
+/// A call holds no session, so the write cannot go through an active one. The
+/// session it started is its own, and naming it is what reaches it.
+#[test]
+fn a_one_shot_hook_writes_its_own_session_brain_naming_the_session_id() {
+    let hub = Hub::start("call-session-write-id");
+
+    let started = run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{started:?}");
+    let session_id = stdout_json(&started)["session_id"]
+        .as_str()
+        .expect("session_start returns a session id")
+        .to_string();
+
+    // A second process, so nothing of the first call's connection is left: this
+    // is a write made with no active session at all.
+    let wrote = run(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            &format!(
+                r#"{{"store":"session","path":"/kv/cursor","content":"next_since=42","session":{{"session_id":"{session_id}"}}}}"#
+            ),
+        ],
+    );
+    assert_eq!(wrote.status.code(), Some(0), "{wrote:?}");
+    let written = stdout_json(&wrote);
+    assert_eq!(written["ok"], true, "the named write lands: {written}");
+    assert!(
+        written["version"]
+            .as_str()
+            .is_some_and(|version| !version.is_empty()),
+        "the write returns a version: {written}"
+    );
+
+    // And the same argument reads it back from a third process.
+    let read = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(
+                r#"{{"store":"session","path":"/kv/cursor","session":{{"session_id":"{session_id}"}}}}"#
+            ),
+        ],
+    );
+    assert_eq!(read.status.code(), Some(0), "{read:?}");
+    assert_eq!(
+        stdout_json(&read)["content"],
+        "next_since=42",
+        "one JSON argument reads and writes the same session: {read:?}"
+    );
+}
+
+/// The same one-shot write, naming the session by owner and name.
+///
+/// A hook knows its own agent id and the name it asked for, and never has to
+/// carry a session id between processes to use them.
+#[test]
+fn a_one_shot_hook_writes_its_own_session_brain_naming_agent_and_name() {
+    let hub = Hub::start("call-session-write-name");
+
+    let started = run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{started:?}");
+
+    let named = format!(r#"{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}"#);
+    let wrote = run(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            &format!(
+                r#"{{"store":"session","path":"/kv/cursor","content":"next_since=7","session":{named}}}"#
+            ),
+        ],
+    );
+    assert_eq!(wrote.status.code(), Some(0), "{wrote:?}");
+    let written = stdout_json(&wrote);
+    assert_eq!(written["ok"], true, "the named write lands: {written}");
+    assert!(
+        written["version"]
+            .as_str()
+            .is_some_and(|version| !version.is_empty()),
+        "the write returns a version: {written}"
+    );
+
+    let read = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(r#"{{"store":"session","path":"/kv/cursor","session":{named}}}"#),
+        ],
+    );
+    assert_eq!(read.status.code(), Some(0), "{read:?}");
+    assert_eq!(
+        stdout_json(&read)["content"],
+        "next_since=7",
+        "the agent and name that wrote the session read it back: {read:?}"
+    );
+
+    // A delete names it the same way, because a session write is a session
+    // write whichever of the two tools it is.
+    let deleted = run(
+        &hub,
+        &[
+            "call",
+            "brain_delete",
+            &format!(r#"{{"store":"session","path":"/kv/cursor","session":{named}}}"#),
+        ],
+    );
+    assert_eq!(deleted.status.code(), Some(0), "{deleted:?}");
+
+    let gone = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(r#"{{"store":"session","path":"/kv/cursor","session":{named}}}"#),
+        ],
+    );
+    assert_eq!(gone.status.code(), Some(1), "{gone:?}");
+    assert_eq!(
+        stderr_json(&gone)["error"]["code"],
+        "not_found",
+        "the entry the one-shot delete removed is gone: {gone:?}"
+    );
+}
+
+/// Naming a session to write it reaches only the agent that owns it.
+///
+/// The argument is what makes a one-shot call work, so the one writer rule
+/// cannot rest on the active session alone: a second agent names the same
+/// session and is refused, and nothing it sent is written.
+#[test]
+fn a_second_agent_cannot_write_a_session_it_names() {
+    let hub = Hub::start("call-session-write-other");
+    let other = hub.enrol_agent("second-agent");
+
+    let started = run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(0), "{started:?}");
+    let session_id = stdout_json(&started)["session_id"]
+        .as_str()
+        .expect("session_start returns a session id")
+        .to_string();
+
+    let by_id = run_with(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            &format!(
+                r#"{{"store":"session","path":"/kv/plan","content":"not yours","session":{{"session_id":"{session_id}"}}}}"#
+            ),
+        ],
+        &[("HUB_TOKEN", other.clone())],
+    );
+    assert_eq!(by_id.status.code(), Some(1), "{by_id:?}");
+    let refused = stderr_json(&by_id);
+    assert_eq!(refused["error"]["code"], "forbidden", "{refused}");
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("owner=my-agent")),
+        "the refusal names the owner whose session it is: {refused}"
+    );
+
+    // The same agent naming the session by owner and name is refused the same
+    // way, on a write and on a delete.
+    for (tool, arguments) in [
+        (
+            "brain_put",
+            format!(
+                r#"{{"store":"session","path":"/kv/plan","content":"not yours","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+            ),
+        ),
+        (
+            "brain_delete",
+            format!(
+                r#"{{"store":"session","path":"/kv/plan","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+            ),
+        ),
+    ] {
+        let output = run_with(
+            &hub,
+            &["call", tool, &arguments],
+            &[("HUB_TOKEN", other.clone())],
+        );
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert_eq!(
+            stderr_json(&output)["error"]["code"],
+            "forbidden",
+            "{tool} into another agent's session: {output:?}"
+        );
+    }
+
+    // Nothing landed, and the owner still writes.
+    let still_empty = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            &format!(
+                r#"{{"store":"session","path":"/kv/plan","session":{{"session_id":"{session_id}"}}}}"#
+            ),
+        ],
+    );
+    assert_eq!(still_empty.status.code(), Some(1), "{still_empty:?}");
+    assert_eq!(
+        stderr_json(&still_empty)["error"]["code"],
+        "not_found",
+        "the refused writes created nothing: {still_empty:?}"
+    );
+}
+
+/// A one-shot write that names no session is still a write against an active
+/// session, and there is none.
+///
+/// Naming the session is the way round it, never a silent fallback to some
+/// other session, so the conflict a caller gets is the one it always got.
+#[test]
+fn a_one_shot_write_naming_no_session_still_conflicts() {
+    let hub = Hub::start("call-session-write-unnamed");
+
+    run(
+        &hub,
+        &[
+            "call",
+            "session_start",
+            &format!(r#"{{"project_id":"{PROJECT}","session_name":"hook"}}"#),
+        ],
+    );
+
+    let unnamed = run(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            r#"{"store":"session","path":"/kv/cursor","content":"next_since=42"}"#,
+        ],
+    );
+    assert_eq!(unnamed.status.code(), Some(1), "{unnamed:?}");
+    let error = stderr_json(&unnamed);
+    assert_eq!(error["error"]["code"], "conflict", "{unnamed:?}");
+    assert_eq!(
+        error["error"]["message"], "no active session; call session_start first",
+        "the conflict is the one a caller has always been given: {unnamed:?}"
+    );
+
+    // A session that does not exist is still a conflict too, not a new file
+    // under a name nobody asked for.
+    let absent = run(
+        &hub,
+        &[
+            "call",
+            "brain_put",
+            &format!(
+                r#"{{"store":"session","path":"/kv/cursor","content":"x","session":{{"agent":"{AGENT}","name":"never-started","project_id":"{PROJECT}"}}}}"#
+            ),
+        ],
+    );
+    assert_eq!(absent.status.code(), Some(1), "{absent:?}");
+    assert_eq!(
+        stderr_json(&absent)["error"]["code"],
+        "not_found",
+        "a named session that is not there is not created by writing to it: {absent:?}"
+    );
+}
+
 /// A port no unprivileged hub can bind and nothing is listening on.
 ///
 /// A hub told to bind it fails the way a hub fails on a port another process

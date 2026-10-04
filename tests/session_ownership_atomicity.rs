@@ -189,6 +189,88 @@ async fn ended_session_refuses_brain_writes() {
     );
 }
 
+/// A write that names a session reaches only the agent that owns it.
+///
+/// Naming a session is how a caller with no active session of its own writes,
+/// so the one-writer rule cannot rest on the active session alone: the second
+/// agent names the first agent's session and is refused, and nothing it sent is
+/// stored. The same call against its own session lands, which is what makes the
+/// refusal about ownership and not about naming.
+#[tokio::test]
+async fn another_agents_session_refuses_a_named_write() {
+    let fleet = TestFleet::new("named-write-owner", &["agent-one", "agent-two"]).await;
+
+    let started = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "worker"}),
+    );
+    let session_id = started["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    fleet.agent(0).call(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/plan", "content": "the plan"}),
+    );
+
+    // The second agent may read the session: project read is the read rule.
+    let read = fleet.agent(1).call(
+        "brain_get",
+        json!({"store": "session", "path": "/kv/plan", "session": {"session_id": session_id}}),
+    );
+    assert_eq!(read["content"], "the plan", "the sibling reads it: {read}");
+
+    for (tool, arguments) in [
+        (
+            "brain_put",
+            json!({"store": "session", "path": "/kv/plan", "content": "not yours",
+                   "session": {"session_id": session_id}}),
+        ),
+        (
+            "brain_put",
+            json!({"store": "session", "path": "/kv/plan", "content": "not yours",
+                   "session": {"agent": "agent-one", "name": "worker", "project_id": PROJECT}}),
+        ),
+        (
+            "brain_delete",
+            json!({"store": "session", "path": "/kv/plan",
+                   "session": {"session_id": session_id}}),
+        ),
+    ] {
+        let (code, msg) = fleet.agent(1).refusal(tool, arguments);
+        assert_eq!(
+            code, "forbidden",
+            "{tool} into another agent's session must fail with forbidden, got code={code} msg={msg}"
+        );
+        assert!(
+            msg.contains("owner=agent-one"),
+            "the refusal names the owner, got: {msg}"
+        );
+    }
+
+    // Nothing landed: the owner's entry is as it was, and the sibling's own
+    // session, which it names to prove naming works for it, holds its own write.
+    let unchanged = fleet
+        .agent(0)
+        .call("brain_get", json!({"store": "session", "path": "/kv/plan"}));
+    assert_eq!(
+        unchanged["content"], "the plan",
+        "the refused writes changed nothing: {unchanged}"
+    );
+
+    let own = fleet.agent(1).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "worker-two"}),
+    );
+    let own_id = own["session_id"].as_str().expect("session id").to_string();
+    let wrote = fleet.agent(1).call(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/plan", "content": "mine",
+               "session": {"session_id": own_id}}),
+    );
+    assert_eq!(wrote["ok"], true, "its own session writes: {wrote}");
+}
+
 #[tokio::test]
 async fn reassigned_session_clears_stale_lineage_in_session_in() {
     let fleet = TestFleet::new("stale-lineage", &["agent-one", "agent-two"]).await;

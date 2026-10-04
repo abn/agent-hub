@@ -211,7 +211,20 @@ would tell the agent something false.
 
 Each call is its own connection, so a session started in one call is not
 active in the next: the CLI is for stateless reads and writes that name their
-target, and session-bound work goes through the proxy.
+target, and a hook writes its own session brain the same way, by naming that
+session:
+
+```sh
+agent-hub call session_start '{"project_id":"homelab","session_name":"hook"}'
+agent-hub call brain_put \
+  '{"store":"session","path":"/kv/cursor","content":"next_since=42","session":{"agent":"<your agent id>","name":"hook","project_id":"homelab"}}'
+```
+
+The write goes to the session the first call started, because the second call
+names it. Only your own session answers to that, and a write that names no
+session at all is still about the active session, which a one-shot call has
+none of. Through the proxy, the connection holds the session and the argument
+is not needed.
 
 ## Tools
 
@@ -220,7 +233,7 @@ target, and session-bound work goes through the proxy.
 | `session_start` | Start or resume your own session by project and session name; the agent is the authenticated identity. Resuming the same name reuses your brain, and the result carries the handoff note the previous owner left. With `from`, pick up another agent's session: the hub adopts it or forks it. |
 | `session_end` | Mark the session ended, with an optional `handoff` note for whoever picks the work up. Only the owner may end a session. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
-| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write goes only to your own active session, which is the only one it may name. Every write is indexed for search. |
+| `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write takes one to name your own session, and without one writes the connection's active session. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from your own durable server-side cursor for the project and advances it to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
@@ -330,12 +343,16 @@ is working from, and reading needs no session of your own. A read never creates
 anything. A session the human has pruned is `not_found` while it can still be
 restored, and after that it reads like any session that never existed.
 
-Writes go only to your own active session: `brain_put` and `brain_delete`
-accept a `session` only when it names that session, and refuse any other with
-`forbidden`. Two agents writing one working-state file clobber each other,
-which is the whole reason a session has one owner. Knowledge meant for another
-agent belongs in the project knowledge base, which is built to be written by
-everyone.
+A write names your own session, or takes the one your connection is working:
+`brain_put` and `brain_delete` take an optional `session`, by `{session_id}` or
+by `{agent, name}`, and write the session it names. That is how a one-shot call
+writes, since it holds no connection to keep a session active on. Another
+agent's session is refused with `forbidden` and an `owner=` tail: two agents
+writing one working-state file clobber each other, which is the whole reason a
+session has one owner. Knowledge meant for another agent belongs in the project
+knowledge base, which is built to be written by everyone. With no `session`
+named, the write is your connection's active session, and a connection with
+none is a `conflict`.
 
 ## Picking up another agent's work
 

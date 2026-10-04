@@ -244,7 +244,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names another session to read, by session_id or by agent and name; omitted, it is this session. Returns the content and its version token."
+        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names a session to read, by session_id or by agent and name; omitted, it is this session. Returns the content and its version token."
     )]
     async fn brain_get(
         &self,
@@ -295,7 +295,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Write one value and index it for search. store is required: \"session\" keeps working state that is pruned with the session, \"project\" writes a page of the durable project knowledge base every agent on the project reads and writes. Pass if_version with the version you read to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+        description = "Write one value and index it for search. store is required: \"session\" keeps working state that is pruned with the session, \"project\" writes a page of the durable project knowledge base every agent on the project reads and writes. session names your own session to write, by session_id or by agent and name, and a call that names it needs no active session; omitted, it is this connection's active session. Pass if_version with the version you read to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
     )]
     async fn brain_put(
         &self,
@@ -467,7 +467,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Delete one value and its index row. store is required: \"session\" for this session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent."
+        description = "Delete one value and its index row. store is required: \"session\" for a session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent. session names your own session to delete from, by session_id or by agent and name; omitted, it is this connection's active session."
     )]
     async fn brain_delete(
         &self,
@@ -691,13 +691,12 @@ impl Store {
 const SESSION_REF: &str = "session names one session, either by session_id or \
                            by agent and name";
 
-/// Why a write reaches only the caller's own active session.
+/// Why a write reaches only the session's own agent.
 ///
 /// One session file has one writer. Two agents writing one working state clobber
 /// each other, and what they meant to share belongs in the project knowledge
 /// base, which is built for it.
-const SESSION_READ_ONLY: &str =
-    "a session brain is written only through its owner's active session";
+const SESSION_OWNER_ONLY: &str = "a session brain is written only by the agent that owns it";
 
 /// `session` names a session brain, so it says nothing about the project store.
 const SESSION_WITH_PROJECT: &str =
@@ -709,7 +708,7 @@ const SESSION_WITH_PROJECT: &str =
 fn check_session_project_id(project_id: Option<&str>) -> Result<()> {
     if project_id.is_some() {
         return Err(Error::InvalidArgument(
-            "project_id selects a project knowledge base; the session store acts on the active session".to_string(),
+            "project_id selects a project knowledge base; the session store acts on a session, and a named one carries its own project_id".to_string(),
         ));
     }
     Ok(())
@@ -1143,6 +1142,49 @@ impl HubServer {
         Ok(session)
     }
 
+    /// The caller's own session a write names.
+    ///
+    /// The active-session lease says which session a held MCP connection is
+    /// working, and a one-shot call has no connection to hold it. Naming the
+    /// session is the other way to reach the same file: one working state has
+    /// one writer, and that is the agent that owns the session, lease or no
+    /// lease. Everything else a write needs is the same as the active path, so
+    /// it is checked the same way: write access to the project's store, an
+    /// owner, and a session still running.
+    async fn own_session(
+        &self,
+        principal: &Principal,
+        reference: &SessionRef,
+    ) -> Result<sessions::Session> {
+        // A pruned session is gone from a caller's point of view, undo window
+        // or not, the same as it is for a read that names it.
+        let session = self.referenced_session(principal, reference).await?;
+        policy::authorize(
+            &self.state.db,
+            principal,
+            &session.project_id,
+            Access::Write,
+        )
+        .await?;
+        // The owner rule holds whoever asks, the administrator included: an
+        // admin has its own sessions to work in, and a session belongs to the
+        // agent doing the work rather than to the hub.
+        if session.agent != principal.actor {
+            return Err(Error::Forbidden(format!(
+                "{SESSION_OWNER_ONLY} owner={}",
+                session.agent
+            )));
+        }
+        if session.status == "ended" {
+            return Err(Error::Conflict(format!(
+                "session {} has ended; call session_start to begin or resume a session of your own",
+                session.id
+            )));
+        }
+        self.touch_activity(&session.id).await;
+        Ok(session)
+    }
+
     /// Authorize and open the session brain a write acts on.
     ///
     /// A write to the project store does not come through here: the knowledge
@@ -1153,21 +1195,14 @@ impl HubServer {
         project_id: Option<&str>,
         session_ref: Option<&SessionRef>,
     ) -> Result<Target> {
-        let session = self
-            .session_target(principal, project_id, Access::Write)
-            .await?;
-        // A named session is honoured only when it is the one the caller is
-        // already writing, so one client can pass the same argument to a read
-        // and a write without branching.
-        if let Some(reference) = session_ref {
-            let named = self.resolve_session(principal, reference, None).await?;
-            if named.id != session.id {
-                return Err(Error::Forbidden(format!(
-                    "{SESSION_READ_ONLY} owner={}",
-                    named.agent
-                )));
-            }
-        }
+        check_session_project_id(project_id)?;
+        // A named session is written as itself, so one client passes the same
+        // argument to a read and a write. With none named the write is the
+        // connection's active session, and says so when there is not one.
+        let session = match session_ref {
+            Some(reference) => self.own_session(principal, reference).await?,
+            None => self.session_for(principal, Access::Write).await?,
+        };
         let session_id = session.id.clone();
         // A sweep takes the same lock to remove the file, so the liveness
         // check above is only ordered against it when it is made again here.
@@ -1380,11 +1415,13 @@ struct SessionListParams {
     limit: Option<i64>,
 }
 
-/// How a call names the session it reads.
+/// How a call names the session it reads or writes.
 ///
 /// Either a hub session id, or the agent that owns the session and the name it
 /// runs under, inside a project. Exactly one form, so a call that names a
-/// session names one session.
+/// session names one session. A read may name anyone's; a write may only name
+/// the caller's own, and naming it is how a caller with no active session of
+/// its own reaches it.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SessionRef {
     /// The hub session id, on its own.
@@ -1426,7 +1463,8 @@ struct BrainPutParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
-    /// The session written, which must be the caller's own active session.
+    /// The session written, which must be the caller's own session. Naming it
+    /// is how a one-shot call writes: it holds no active session.
     #[serde(default)]
     session: Option<SessionRef>,
 }
@@ -1455,7 +1493,8 @@ struct BrainDeleteParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
-    /// The session written, which must be the caller's own active session.
+    /// The session the entry is removed from, which must be the caller's own
+    /// session. Naming it is how a one-shot call deletes.
     #[serde(default)]
     session: Option<SessionRef>,
 }

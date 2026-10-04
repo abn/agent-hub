@@ -276,21 +276,22 @@ not answer or refused the token. A hook should branch on that rather than end
 the line with `|| true`, which would hide a hub that is down.
 
 Each call is its own connection and holds no session, so `session_start`
-in one call is not active in the next. Session-bound work belongs in the
-proxy; the CLI is for reads and writes that name their target. A one-shot call
-can still reach a session brain by naming the session explicitly: start it,
-then read it with the `session` on the read.
+in one call is not active in the next. A call reaches a session by naming it:
+start it, then read or write that session with the `session` argument, and
+your own agent's session is the one that answers.
 
 ```sh
 agent-hub call session_start \
   '{"project_id":"homelab","session_name":"hook"}'
 agent-hub call brain_get \
   '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+agent-hub call brain_put \
+  '{"path":"/fs/RECOVERY.md","store":"session","content":"cursor: 42\nwhat this session is doing","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
 ```
 
-Writes go only to the active session, so a hook reads a session brain
-one-shot and writes through the proxy. There is no `session` or `brain`
-shorthand on the CLI; the tool name and its JSON are the whole interface. The
+A call that names no session is still about the active session, so a one-shot
+write needs the argument. There is no `session` or `brain` shorthand on the
+CLI; the tool name and its JSON are the whole interface. The
 full recipe, with the harness block and the migration note, is in
 [using the hub as a brain](agents.md#a-one-shot-session-from-a-hook).
 

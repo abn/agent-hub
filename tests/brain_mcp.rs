@@ -1170,99 +1170,134 @@ fn a_pruned_session_is_not_readable() {
     );
 }
 
+/// A write that names the caller's own session lands with no active session
+/// anywhere.
+///
+/// The named argument is what a one-shot call has and an active session is not:
+/// every call is its own connection, so a write that cannot name a session can
+/// never reach one, which left a hook unable to write its own brain. A session
+/// still has one writer, so the caller may name only its own; the refusal a
+/// second agent gets is held where there are two of them, in
+/// `session_ownership_atomicity.rs`.
 #[test]
-fn a_write_cannot_name_another_session() {
-    let data_dir = TempDir::new("cross-write");
+fn a_write_names_the_callers_own_session_with_no_active_session() {
+    let data_dir = TempDir::new("named-write");
     common::seed::seed_project(data_dir.path(), "proj");
+
+    let writer_id = {
+        let mut server = McpServer::mcp(data_dir.path(), &[]);
+        server.initialize();
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": "writer"}),
+        );
+        let id = structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string();
+        let put = server.call_tool(
+            "brain_put",
+            json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
+        );
+        assert_eq!(structured(&put)["ok"], true, "the first write lands");
+        id
+    };
+
+    // This connection has never started a session, so nothing is active on it
+    // and there is nothing to write to but what it names.
     let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
-
-    let started = server.call_tool(
-        "session_start",
-        json!({"project_id": "proj", "session_name": "writer"}),
-    );
-    let writer_id = structured(&started)["session_id"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-    server.call_tool(
-        "brain_put",
-        json!({"path": "/kv/plan", "content": "the plan", "store": "session"}),
-    );
-
-    let started = server.call_tool(
-        "session_start",
-        json!({"project_id": "proj", "session_name": "reader"}),
-    );
-    let reader_id = structured(&started)["session_id"]
-        .as_str()
-        .expect("session id")
-        .to_string();
-
-    let refused = server.call_tool(
+    let wrote = server.call_tool(
         "brain_put",
         json!({
             "path": "/kv/plan",
-            "content": "overwritten",
+            "content": "the revised plan",
             "store": "session",
             "session": {"session_id": writer_id},
         }),
     );
     assert_eq!(
-        error_code(&refused),
-        "forbidden",
-        "a write into another session is refused, got {refused}"
+        structured(&wrote)["ok"],
+        true,
+        "a write naming the caller's own session lands, got {wrote}"
     );
     assert!(
-        error_message(&refused).contains("owner="),
-        "the refusal names the session's owner, got {refused}"
+        structured(&wrote)["version"]
+            .as_str()
+            .is_some_and(|version| !version.is_empty()),
+        "the write returns a version, got {wrote}"
     );
 
-    let deleted = server.call_tool(
-        "brain_delete",
-        json!({"path": "/kv/plan", "store": "session", "session": {"session_id": writer_id}}),
-    );
-    assert_eq!(
-        error_code(&deleted),
-        "forbidden",
-        "a delete in another session is refused, got {deleted}"
-    );
-
+    // The read takes the same argument, so one client passes one JSON to both.
     let read = server.call_tool(
         "brain_get",
         json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
     );
     assert_eq!(
         structured(&read)["content"],
-        "the plan",
-        "the refused write changed nothing, got {read}"
-    );
-    assert!(
-        !data_dir
-            .path()
-            .join("sessions")
-            .join("proj")
-            .join(format!("{reader_id}.db"))
-            .exists(),
-        "a refused write creates no brain file for the caller"
+        "the revised plan",
+        "the named write is what the named read returns, got {read}"
     );
 
-    // Naming the session the caller is already writing is the caller's own
-    // active session, so a client that passes the same argument to a read and
-    // a write does not have to branch.
-    let own = server.call_tool(
+    // And by the other form, which is the one a hook knows without carrying an
+    // id between processes.
+    let by_name = server.call_tool(
         "brain_put",
         json!({
-            "path": "/kv/plan",
-            "content": "mine",
+            "path": "/kv/other",
+            "content": "second entry",
             "store": "session",
-            "session": {"session_id": reader_id},
+            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
         }),
     );
     assert_eq!(
-        structured(&own)["ok"],
+        structured(&by_name)["ok"],
         true,
-        "a write naming the caller's own active session lands, got {own}"
+        "an agent and a name name the same session for a write, got {by_name}"
+    );
+
+    // A delete names it the same way, because a session write is one whichever
+    // of the two tools it is.
+    let deleted = server.call_tool(
+        "brain_delete",
+        json!({
+            "path": "/kv/other",
+            "store": "session",
+            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
+        }),
+    );
+    assert_eq!(
+        structured(&deleted)["ok"],
+        true,
+        "a named delete lands, got {deleted}"
+    );
+    let gone = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/other", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        error_code(&gone),
+        "not_found",
+        "the named delete removed the entry, got {gone}"
+    );
+
+    // The other entry is untouched, so the delete named its own path.
+    assert_eq!(
+        structured(&read)["content"],
+        "the revised plan",
+        "the rest of the session is as it was"
+    );
+
+    // A write naming no session is still the connection's active session, and
+    // there is none to name.
+    let unnamed = server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/plan", "content": "nowhere", "store": "session"}),
+    );
+    assert_eq!(
+        error_code(&unnamed),
+        "conflict",
+        "a write that names no session is still about the active one, got {unnamed}"
     );
 }
 

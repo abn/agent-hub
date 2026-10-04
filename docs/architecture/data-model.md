@@ -152,8 +152,9 @@ same-session compaction and resume of that name by its owner, can be adopted or
 forked by another agent, and is removed only when the human prunes the session.
 Durable knowledge leaves it only by explicit promotion.
 
-A brain is written only through its owner's active session, and read by anyone
-who may read the session's project. Session end and reassignment are atomic
+A brain is written only by the agent that owns its session, whether through that
+session's active connection or by naming it, and read by anyone who may read
+the session's project. Session end and reassignment are atomic
 guarded transitions in the store; once ended, active leases clear and brain
 mutations under the file lock are refused. The single writer is what keeps one working
 state coherent; the open read is what lets a fleet of agents see what a sibling

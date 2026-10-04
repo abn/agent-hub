@@ -121,6 +121,41 @@ impl Hub {
     pub fn admin_get(&self, path: &str) -> String {
         wire::rest(self.port, "GET", path, Some(ADMIN_TOKEN), None).raw
     }
+
+    /// Enrol a second agent through the admin API and return its token.
+    ///
+    /// One agent is seeded before the hub starts; a test about who may write
+    /// whose session needs another caller, and a token minted by the running
+    /// hub is the only way to be one.
+    pub fn enrol_agent(&self, id: &str) -> String {
+        let created = wire::rest(
+            self.port,
+            "POST",
+            "/api/v1/agents",
+            Some(ADMIN_TOKEN),
+            Some(&format!(r#"{{"id":"{id}","display_name":"{id}"}}"#)),
+        );
+        assert_eq!(
+            created.status, 201,
+            "the agent was created: {}",
+            created.raw
+        );
+        let issued = wire::rest(
+            self.port,
+            "POST",
+            &format!("/api/v1/agents/{id}/token"),
+            Some(ADMIN_TOKEN),
+            None,
+        );
+        assert_eq!(issued.status, 201, "the token was issued: {}", issued.raw);
+        let token = serde_json::from_str::<Value>(issued.body())
+            .expect("the issued token is one JSON object")["token"]
+            .as_str()
+            .expect("the issued token is returned once")
+            .to_string();
+        assert_eq!(token.len(), 64, "a hub-issued token: {token}");
+        token
+    }
 }
 
 /// Create the project, the agent, and the agent's token before the hub starts.

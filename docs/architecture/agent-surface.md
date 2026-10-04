@@ -90,7 +90,7 @@ document.
 | `comment_resolve` | Mark a comment done or reopen it. |
 | `comment_delete` | Delete a comment. |
 | `brain_get` | Read a path from a session brain, the caller's own or another named by `session`, or from a project knowledge base. |
-| `brain_put` | Write a path into the active session brain, or a page into a project knowledge base. |
+| `brain_put` | Write a path into a session brain, the caller's own active one or its own named by `session`, or a page into a project knowledge base. |
 | `brain_list` | List a store's entries, each with its type and size. |
 | `brain_delete` | Remove a path from either store. |
 | `brain_promote` | Copy an entry from the caller's active session brain into a project knowledge base page that cites the session it came from. |
@@ -148,11 +148,16 @@ which project it belonged to, and it answers as it does for any session that
 never existed. An agent without access cannot tell a session it may not
 read from one that does not exist: both are the same `forbidden`.
 
-Writes stay with the owner's active session. `brain_put` and `brain_delete`
-accept a `session` only when it names that session, and refuse any other with
-`forbidden` and an `owner=` tail, because one working-state file has one writer
-and two would clobber each other. Knowledge meant for another agent belongs in
-the project knowledge base.
+Writes stay with the session's owner. `brain_put` and `brain_delete` take an
+optional `session`, the same argument a read takes, and write the session it
+names; that is how a caller with no active session of its own reaches its own
+brain, which a one-shot `agent-hub call` has to be. The named session must be
+one the calling agent owns and must still be running, and another agent's is
+refused with `forbidden` and an `owner=` tail, because one working-state file
+has one writer and two would clobber each other. With no `session` named the
+write is the connection's active session, and a connection that has none is a
+`conflict`. Knowledge meant for another agent belongs in the project knowledge
+base.
 
 `search` takes `session_id` to narrow results to one session's brain content,
 under the same project confinement as every other search. A hit carries its
