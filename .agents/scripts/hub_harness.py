@@ -811,6 +811,9 @@ def running_hub(name: str):
         HUB_DATA_DIR=data_dir,
         HUB_BIND=f"127.0.0.1:{port}",
         HUB_ADMIN_TOKEN=ADMIN_TOKEN,
+        # A fixed node name, so no check ever photographs or reads the machine's
+        # own hostname: the wiki bundle is public, and the header renders it.
+        HUB_NODE_NAME="local",
     )
     hub = subprocess.Popen([binary], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

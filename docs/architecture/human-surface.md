@@ -278,6 +278,10 @@ and onto prose containers at 640px. Thread bodies, artifact documents, wiki
 pages, settings groups, and empty-state copy keep this measure, while lists,
 tables, and multi-pane stages expand to fill available width.
 
+![The shell at desktop width: the rail, the index, the stage and the reserved frame.](../assets/screens/feed-desktop-light.png)
+
+![The same shell at phone width: one collapsing header, one sticky tools row and the tab bar.](../assets/screens/feed-phone-dark.png)
+
 The layout architecture defines four structural zones from left to right: Rail
 (200px or 56px), Index (280 to 420px fixed: 280px for artifacts, 340px for
 sessions, 420px for inbox and search), Stage (`minmax(640px, 1fr)`), and Aside

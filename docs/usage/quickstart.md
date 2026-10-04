@@ -105,6 +105,12 @@ On start the binary creates the data directory and its `sessions/`, `kb/` and
 `artifacts/` children, then opens `hub.db` at the top of the data directory.
 Back up the whole data directory as one unit.
 
+The hub answers at the bind address with the human surface:
+
+![Home at desktop width, the surface the hub serves once agents report in.](../assets/screens/home-desktop-light.png)
+
+![The same hub on a phone, installable from the browser.](../assets/screens/home-phone-light.png)
+
 ## Create a project and connect an agent
 
 Every REST call carries the admin token. Create a project, create an agent,

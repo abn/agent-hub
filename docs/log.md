@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-04
+
+### The wiki gains product screenshots
+
+* **Add**: `docs/assets/screens/` holds the main feature screens at desktop
+  (1440x900) and phone (390x844) width in both themes, captured from a seeded
+  scratch hub with dummy data, and embedded in
+  [Human interface](design/human-interface.md),
+  [Human surface](architecture/human-surface.md) and
+  [Quickstart](usage/quickstart.md). They are refreshed by
+  `.agents/scripts/wiki_screens.py`, whose skill is
+  `capture-wiki-screenshots`.
+
 ## 2026-10-03
 
 ### Using the hub as a brain, and the honest harness claims

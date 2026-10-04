@@ -118,7 +118,14 @@ any access rule.
   can enforce.
 - **Tool-specific assets stay out of the repository.** Assistant shims and the
   scratch area under `.agents/brain/` are git-ignored. `.agents/bootstrap.sh`
-  regenerates the shims; it is idempotent and safe to re-run.
+  regenerates the shims; it is idempotent and safe to re-run. **One exception:**
+  reusable project skills live under `.agents/skills/` and are committed, since
+  they are part of how the project is maintained, not a tool's local state.
+- **The wiki carries product screenshots.** `docs/assets/screens/` holds the
+  main feature screens at both widths in both themes, captured with dummy data
+  from a seeded scratch hub by `.agents/scripts/wiki_screens.py`; the skill is
+  `.agents/skills/capture-wiki-screenshots/`. Re-run and commit the captures
+  when a screen changes, in the same commit as the change.
 - **Makefile** is the single automation entrypoint. Bare `make` shows the
   targets. `make check` is the gate that hooks and CI both reuse.
 - **Commits** follow Conventional Commits, summary first, no trailers (no

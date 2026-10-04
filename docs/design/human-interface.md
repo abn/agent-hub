@@ -106,6 +106,51 @@ The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.
 This page records what ships; that file records what is designed.
 
+## The screens
+
+The figures below are captured from a seeded scratch hub at both widths and in
+both themes; they are the surface this page describes rather than a mockup.
+
+Home, desktop and phone:
+
+![Home at desktop width: the greeting, the waiting-on-you list and the newest events across projects.](../assets/screens/home-desktop-light.png)
+
+![Home at phone width: the greeting over the same lists in one column.](../assets/screens/home-phone-light.png)
+
+Inbox and an open item:
+
+![The inbox at desktop width, grouped into waiting, unread and earlier.](../assets/screens/inbox-desktop-light.png)
+
+![An open inbox item at phone width, with the whole item in the stage.](../assets/screens/inbox-item-phone-light.png)
+
+A project feed and its sessions:
+
+![A project feed at desktop width, day-grouped with kind badges.](../assets/screens/feed-desktop-light.png)
+
+![The session detail at desktop width: the brain tree, the handoff note and the lineage.](../assets/screens/session-detail-desktop-light.png)
+
+Artifacts and the viewer:
+
+![The artifact index at desktop width.](../assets/screens/artifacts-desktop-light.png)
+
+![An artifact open in the sandboxed viewer.](../assets/screens/artifact-viewer-desktop-light.png)
+
+The knowledge base wiki, search, storage and settings:
+
+![The project wiki at desktop width with its page tree.](../assets/screens/wiki-desktop-light.png)
+
+![Search results at desktop width, grouped by family.](../assets/screens/search-desktop-light.png)
+
+![Storage at desktop width: the stacked bars and the prune review.](../assets/screens/storage-desktop-light.png)
+
+![Settings at desktop width, rows under quiet group labels.](../assets/screens/settings-desktop-light.png)
+
+The dark theme draws the same surfaces from the same tokens:
+
+![Home at desktop width in the dark theme.](../assets/screens/home-desktop-dark.png)
+
+![The session detail at phone width in the dark theme.](../assets/screens/session-detail-phone-dark.png)
+
 Round 12 splits the interface into content rules and chrome rules. The content
 rules, which say what a list, a summary, a settings row and a storage breakdown
 are, hold at both widths. The chrome rules, which are the collapsing phone
