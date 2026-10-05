@@ -86,10 +86,11 @@ endef
 
 # The Node toolchain. The PWA is served as vanilla ES modules with no bundler,
 # so the tree holds development tools only and the shipped binary and image
-# never read it. The lockfile is committed and the tree is not, so a clean
-# checkout installs it from the lockfile once.
+# never read it. The lockfile is committed and the tree is not, and the install
+# runs every time rather than on a missing tree: a dependency added to the
+# lockfile has to land in `node_modules` or the next target runs without it.
 node_tree:
-	@[ -d node_modules ] || npm ci --no-audit --no-fund
+	@npm ci --no-audit --no-fund
 
 # The pure client functions, held directly rather than through a rendered page
 # the tests then read geometry out of. A rename no longer fails one of these,
