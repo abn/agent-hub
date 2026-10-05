@@ -129,7 +129,7 @@ any access rule.
   record, and the toolchain is dev-only: no bundler, and no runtime dependency
   in the shipped binary or container.
 - **Tool-specific assets stay out of the repository.** Assistant shims and the
-  scratch area under `.agents/brain/` are git-ignored. `.agents/bootstrap.sh`
+  scratch area under `.agents/brain/` are git-ignored. `make setup`
   regenerates the shims; it is idempotent and safe to re-run. **One exception:**
   reusable project skills live under `.agents/skills/` and are committed, since
   they are part of how the project is maintained, not a tool's local state.

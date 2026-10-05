@@ -6,8 +6,17 @@ BIN := agent-hub
 
 ##@ Bootstrap
 
-setup: ## Install git hooks and write local tool shims
-	./.agents/bootstrap.sh
+setup: ## Install git hooks, write local shims, create the scratch area
+	@mkdir -p .agents/brain/inbox .agents/brain/outbox .agents/brain/tasks .agents/brain/assets
+	@for shim in CLAUDE.md GEMINI.md ANTIGRAVITY.md CURSOR.md PI.md .cursorrules; do \
+	  printf 'Read AGENTS.md and follow it.\n' > "$$shim"; \
+	done
+	@command -v pre-commit >/dev/null || { \
+	  printf 'make setup: pre-commit is not installed (for example "pipx install pre-commit")\n' >&2; \
+	  exit 1; \
+	}
+	pre-commit install --install-hooks
+	@printf 'make setup: hooks installed, scratch area ready, shims written\n'
 
 ##@ Build & Quality
 

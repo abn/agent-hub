@@ -8,7 +8,7 @@ Read the [contributor guide](docs/contribution/guide.md) for the workflow,
 conventions, and the verification gate. In short:
 
 ```
-./.agents/bootstrap.sh
+make setup
 make check
 ```
 

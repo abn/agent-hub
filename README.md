@@ -99,13 +99,13 @@ the hub over a tailnet.
 ## Development
 
 ```
-./.agents/bootstrap.sh
+make setup
 make check
 ```
 
-The bootstrap script installs the git hooks and writes the local assistant
-shims. It is idempotent and safe to re-run. `make check` is the quality gate
-that hooks and CI both reuse.
+`make setup` installs the git hooks, creates the scratch area, and writes the
+local assistant shims. It is idempotent and safe to re-run. `make check` is the
+quality gate that hooks and CI both reuse.
 
 ## Documentation
 

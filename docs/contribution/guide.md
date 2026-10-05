@@ -14,12 +14,13 @@ how-to for making a change.
 ## Setup
 
 ```
-./.agents/bootstrap.sh
+make setup
 make check
 ```
 
-The bootstrap script installs the git hooks and writes the local assistant
-shims. It is idempotent, so re-run it whenever hooks or tooling change.
+`make setup` installs the git hooks, creates the scratch area, and writes the
+local assistant shims. It is idempotent, so re-run it whenever hooks or tooling
+change.
 
 ## Development targets
 
