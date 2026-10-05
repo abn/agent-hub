@@ -34,6 +34,12 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
   `HUB_REQUIRE_BROWSER=1` turns that skip into a failure.
 - `make web/units`: unit tests over the pure client functions, imported from
   `web/` where they live. Node only, no browser.
+- `make web/styles`: the stylesheet's design contract, held against a `css-tree`
+  parse of `web/*.css` rather than against the source text. It reads the
+  token-only colour rule, the 12px type floor, the 44px target, the transition
+  bound, reduced motion, token resolution and the focus ring as parsed
+  declarations, so a renamed selector passes and a changed value fails. Node
+  only, no browser.
 - `make web/types`: type-checks the client sources with `tsc --noEmit` over
   `checkJs`. It is not in `make check` yet: it lists the errors the JSDoc phase
   has to clear, and a target that cannot pass is not a gate. As of 2026-10-05
@@ -59,15 +65,34 @@ in `package.json` as devDependencies with the lockfile committed and
 | Concern | Tool | Where |
 |---|---|---|
 | Pure client logic | Vitest | `make web/units` |
+| Stylesheet rules and tokens | `css-tree` AST walk under Vitest | `make web/styles` |
 | Client types | `tsc --noEmit` over `checkJs` | `make web/types` |
 | Browser behaviour and layout | Playwright Test | not wired yet |
-| Stylesheet rules and tokens | Stylelint and `css-tree` | not wired yet |
 | Accessibility | `@axe-core/playwright` | not wired yet |
 
 The unit tests import the modules from `web/` directly, so a test and the page
 cannot drift apart, and jsdom supplies the document and the media query the
 modules read at import time. A rename no longer fails a test, and a branch that
 is dropped does.
+
+The stylesheet gate reads the same way: it parses `web/*.css` with `css-tree`
+and asserts parsed declarations, so a check names the property and the value it
+means rather than a substring of a file. Two consequences are worth knowing
+before writing one:
+
+- **A selector is a convenience, not the thing matched.** A rule is found by the
+  declaration it carries, so renaming a class or moving a rule to the end of the
+  file keeps passing. An assertion that has to name a screen's own class is
+  telling you it is a screen rule, not a design gate, and belongs in the next
+  porting phase rather than here.
+- **A waiver is held, not assumed.** Where the design waives a rule (the 9px
+  card preview, a scrim over content the hub does not draw), the gate reads the
+  condition that earns the waiver rather than trusting the name, so the waiver
+  cannot outlive the thing that justified it.
+
+`check-web.py` still holds a regex version of the type floor, the tap target
+and the token gate. The two now overlap; the regex versions are the next
+phase's deletion, and a new gate should not be added in both places.
 
 ## The workflow
 

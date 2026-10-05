@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/types web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -97,6 +97,15 @@ node_tree:
 web/units: node_tree ## Run the client unit tests
 	npx vitest run
 
+# The stylesheet's design contract, held against a `css-tree` parse rather than
+# against the source text. A token-only colour, the 12px floor, the 44px target,
+# the transition bound, reduced motion and the focus ring are read as parsed
+# declarations, so a renamed selector passes and a changed value fails. The
+# `.contains()` blocks in `tests/web.rs` that this replaces are deleted as it
+# lands, not left beside it.
+web/styles: node_tree ## Run the stylesheet gate over the parsed CSS
+	npx vitest run .agents/js-tests/styles.test.mjs
+
 # The client types, over the JSDoc the modules already carry. It is not a gate
 # in `check` yet: the first run lists the outstanding errors, which are counted
 # in the contributor guide until the JSDoc phase brings the count to zero.
@@ -145,7 +154,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first
