@@ -42,11 +42,14 @@ the optional embedded tailnet endpoint, which is experimental.
 - `search` over feed events, artifacts, session brains and knowledge base
   pages, scoped to a project, a session, or global.
 - `whoami` and `version`.
-- The agent guide served two ways: as an MCP resource, `agenthub://skill`, and
-  at `GET /SKILL.md` with its own address filled in. The initialize handshake
-  advertises the `resources` capability and `agent-hub tools` prints every
-  input schema, so an agent wired only to MCP can discover the surface without a
-  human handing it a document.
+- The agent bootstrap served at `GET /bootstrap/SKILL.md` with its own address
+  filled in, and the installable `agent-hub` skill served over MCP under the
+  Skills extension (`io.modelcontextprotocol/skills`): `skills/list` and
+  `skills/get` carry the frontmatter and a complete manifest, and the files read
+  as resources under `skill://agent-hub/`. The initialize handshake advertises
+  the `resources` capability and `agent-hub tools` prints every input schema, so
+  an agent wired only to MCP can discover the surface without a human handing it
+  a document.
 - Agent self-enrolment: `agent-hub enrol`, or `POST /api/v1/enrol` with a
   one-line explanation and a long-polled status. The operator decides from the
   inbox, and the decision is read from the approval event rather than the

@@ -109,7 +109,7 @@ jobs:
           done
           test "$ready" = yes
           curl -fsS http://127.0.0.1:18080/readyz
-          curl -fsS http://127.0.0.1:18080/SKILL.md > /dev/null
+          curl -fsS http://127.0.0.1:18080/bootstrap/SKILL.md > /dev/null
           # The Version row must read the released version and the tagged
           # commit, so the tag and the artefact cannot disagree.
           payload=$(curl -fsS -H "Authorization: Bearer $token" \

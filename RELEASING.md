@@ -222,7 +222,7 @@ From the host, the same answers are visible over the published port:
 ```sh
 curl -sS http://127.0.0.1:18080/healthz     # ok
 curl -sS http://127.0.0.1:18080/readyz      # the schema version
-curl -sS http://127.0.0.1:18080/SKILL.md    # the agent guide, address filled in
+curl -sS http://127.0.0.1:18080/bootstrap/SKILL.md    # the agent bootstrap, address filled in
 ```
 
 ### The version is the released one
