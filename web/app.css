@@ -4582,7 +4582,10 @@ a.session-back {
   flex: 1;
   min-width: 0;
   border: 0;
-  outline: none;
+  /* The ring is this input's own; the transparent outline is what a browser in
+     forced colours has left to colour in, where the shadow is gone. */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
   background: transparent;
   font: 500 15px/1 var(--font-mono);
   color: var(--ink);

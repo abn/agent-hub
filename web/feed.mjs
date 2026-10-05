@@ -142,8 +142,10 @@ export const SUBJECT_MAX = 100;
 // A summary, split into the subject a heading can carry and the message that
 // belongs under it. The two are disjoint and together hold every character of
 // the summary, so a long one loses nothing when it stops being a heading. The
-// subject is marked with an ellipsis wherever it was cut rather than ended, so
-// the reader can tell a shortened subject from a whole one.
+// subject stops where the text itself offers a boundary, so it ends on a phrase
+// rather than inside one, and it is marked with an ellipsis wherever it was cut
+// rather than ended, so the reader can tell a shortened subject from a whole
+// one.
 export function subjectAndMessage(summary) {
   const text = String(summary == null ? "" : summary).trim();
   if (!text) return { subject: "", message: "" };
@@ -156,17 +158,33 @@ export function subjectAndMessage(summary) {
     return { subject: clampSubject(text.slice(0, split).trim()), message: text.slice(split + 1).trim() };
   }
 
-  // One line, too long to be a subject. Its leading sentence is, where a
-  // sentence ends inside the budget. Where none does, the subject is the
-  // opening words clamped at the budget, and the message picks up at that same
-  // point so no word is dropped or read twice.
+  // One line, too long to be a subject. It is titled by the last sentence that
+  // ends inside the budget, or by the last clause boundary inside it, or failing
+  // both by the opening words clamped at the budget. Whichever point it stops
+  // at, the message picks up there, so no word is dropped or read twice.
   const stop = text.slice(0, SUBJECT_MAX).search(/[.!?](?=\s|$)/);
   if (stop !== -1) {
     return { subject: `${text.slice(0, stop + 1).trim()}…`, message: text.slice(stop + 1).trim() };
   }
+  const clause = lastClauseBoundary(text.slice(0, SUBJECT_MAX));
   const space = text.lastIndexOf(" ", SUBJECT_MAX);
-  const cut = space > 0 ? space : SUBJECT_MAX;
+  const cut = clause > 0 ? clause : space > 0 ? space : SUBJECT_MAX;
   return { subject: `${text.slice(0, cut).trimEnd()}…`, message: text.slice(cut).trim() };
+}
+
+// The last point inside the window where the text itself pauses: a colon, a
+// semicolon, a comma, or a dash standing on its own between spaces. A hyphen
+// inside a word is not one of them, so the dash has to hold a space on each
+// side. The cut is just past the punctuation, so the subject keeps it.
+function lastClauseBoundary(window) {
+  const marks = /[:;,]|\s[\u2013\u2014-]\s/g;
+  let cut = 0;
+  for (let at = marks.exec(window); at; at = marks.exec(window)) {
+    // Just past the clause mark, so the subject keeps its punctuation and the
+    // message starts after it; a spaced dash leaves a space that trimEnd drops.
+    if (at.index > 0) cut = at.index + at[0].length;
+  }
+  return cut;
 }
 
 // A subject cut to the budget, on a word boundary where there is one.
