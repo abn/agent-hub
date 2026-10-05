@@ -600,28 +600,30 @@ export async function searchScreen(term, gen) {
   }
   renderProjectChip();
 
-  const line = el("p", isDesktop ? "search-line mono" : "search-line shell-meta mono", first.line);
+  const line = el("p", isDesktop ? "search-count mono" : "search-line shell-meta mono", first.line);
   line.setAttribute("role", "status");
   line.setAttribute("aria-live", "polite");
 
   const styleEl = el("style");
   styleEl.textContent = SEARCH_STYLE;
 
+  // The phone has a 76px header and the field and the count line both fit under
+  // it, so the line stays in the head there. The desktop header is 52px and
+  // holds the field alone, so the line reads at the top of the results column
+  // instead, on the same 16px gutter as the group labels under it. Either way
+  // it is out of the control row: beside the scope chips it took 227 of the
+  // pane's 276px, which left the strip 41px and laid three of the four chips
+  // out past the pane's edge, where the pane's own overflow clipped them and a
+  // pointer could not reach them.
+  const slot = el("span", "shell-slot");
+  if (!isDesktop) slot.appendChild(icon(20, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"));
+  const headColumn = el("div", "shell-title");
+  headColumn.append(title, form);
+  if (!isDesktop) headColumn.append(line);
   const indexHead = el("div", "shell-head");
-  let indexControls;
-  if (isDesktop) {
-    indexHead.append(styleEl, el("span", "shell-slot"), title, form);
-    indexControls = el("div", "shell-controls");
-    indexControls.append(line, scopes);
-  } else {
-    const slot = el("span", "shell-slot");
-    slot.appendChild(icon(20, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"));
-    const shellTitle = el("div", "shell-title");
-    shellTitle.append(title, form, line);
-    indexHead.append(styleEl, slot, shellTitle);
-    indexControls = el("div", "shell-controls");
-    indexControls.append(scopes);
-  }
+  indexHead.append(styleEl, slot, headColumn);
+  const indexControls = el("div", "shell-controls");
+  indexControls.append(line, scopes);
 
   const indexBody = el("div", "shell-body");
   const indexCol = el("div", "shell-index");
@@ -673,6 +675,10 @@ export async function searchScreen(term, gen) {
     updateScopeChips(state.data);
     const nextResults = resultsNode(state);
     indexPane.innerHTML = "";
+    // On a desktop the count line is not in the header, so it is painted above
+    // the groups it counts, and it is the same node each time: a live region
+    // that is torn down and rebuilt announces nothing.
+    if (isDesktop) indexPane.appendChild(line);
     indexPane.appendChild(nextResults);
 
     allHits = (state.data?.groups || []).flatMap((g) => g.hits);

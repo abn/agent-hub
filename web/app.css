@@ -7402,8 +7402,11 @@ dialog.dialog-project-delete {
 
 /* Search in the one shell: the results are the index, the preview the stage. */
 .shell-head .search-title { margin: 0; font-size: var(--t-15); font-weight: 600; }
+/* The count line under the field takes the head's own gutter, so it lines up
+   with the field's left edge and with the text of the results below it. */
 .shell-head .search-line {
   margin: 0;
+  padding: 0;
   font-family: var(--font-mono);
   font-size: var(--t-12);
   color: var(--ink-3);
@@ -7411,11 +7414,10 @@ dialog.dialog-project-delete {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.shell-head .search-form { flex: 1; min-width: 120px; }
+.shell-head .search-form { flex: 1; min-width: 0; }
 .shell-index .shell-head .shell-title { flex: 0 1 auto; }
 .shell-head .search-field { height: 32px; border-radius: var(--r-pill); }
 .shell-head .search-field input { height: 32px; font-size: var(--t-13); }
-.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
 .shell-stage .search-stage { height: 100%; }
 
 /* The comments aside is part of the layout on a fine pointer. */
@@ -7543,11 +7545,30 @@ dialog.dialog-project-delete {
 .home-pad { padding: 20px 16px 48px; }
 .home-pad > * { max-width: 640px; }
 
-/* Search: the field is the head, the result line and the chips are the row
-   under it, which is the shape the design draws. */
-.shell-head .search-form { flex: 1; min-width: 0; }
-.shell-controls .search-line { flex: none; margin: 0; }
-.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
+/* Search in the one shell: the field and the scope chips are the chrome, the
+   count line and the groups are the index body. The head's own field, title,
+   field height and count-line rules are above. */
+.shell-controls .search-scopes {
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  overflow-x: auto;
+}
+/* The count line sits above the groups on the desktop, so it takes the pane's
+   16px gutter rather than the control row's 12px. */
+.shell-index .search-count {
+  margin: 0;
+  padding: 10px 16px 4px;
+  font-family: var(--font-mono);
+  font-size: var(--t-12);
+  font-weight: 500;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Search results are a flat list too. */
 .shell-index .search-results,
@@ -7558,9 +7579,9 @@ dialog.dialog-project-delete {
   border-radius: 0;
 }
 .shell-index .search-group .row:last-child { border-bottom: 0; }
-.shell-head .search-form { flex: 1; min-width: 0; }
-.shell-controls .search-line { flex: none; margin: 0; }
-.shell-controls .search-scopes { flex: 1; min-width: 0; overflow-x: auto; }
+/* The group label heads the rows under it, so it takes the 16px gutter every
+   other index label takes. */
+.shell-index .search-results .section-label { padding-left: 16px; }
 
 /* The rail's foot carries the sync line wherever the rail is shown, so the
    inbox's own copy is for the phone, where the rail is not. Without this the

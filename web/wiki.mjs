@@ -139,13 +139,21 @@ function rowHTML(entry, id, selected, narrow = false) {
   }
   const href = wikiPageHash(id, path);
   const meta = [entry.page_type || "concept", entry.status || "draft", trustWords(entry)].join(" · ");
+  // The row is a column flexbox that inherits the row base's `align-items:
+  // flex-start`, so a child is sized by its own content and may run past the
+  // row rather than ellipsising inside it. The meta line asked for both halves
+  // of the fix and needed both: `align-self:stretch` takes the row's width
+  // instead of its content's, and `min-width:0` lets the no-wrap text shrink
+  // inside that width. Without them its box ended 8.84px past a 300px index
+  // pane, the pane's overflow cut the last glyph of "unverified", and the
+  // ellipsis this span asks for never fired.
   return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 12px 6px ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
     <span style="display:flex;align-items:center;gap:8px;min-width:0">
       <span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FILE_GLYPH}</span>
       <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
       ${staleMark(entry)}
     </span>
-    <span class="mono" style="padding-left:24px;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</span>
+    <span class="mono" style="align-self:stretch;min-width:0;padding-left:24px;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</span>
   </a>`;
 }
 
@@ -255,7 +263,12 @@ async function pageStage(id, path, shellStageHead) {
     entry = null;
   }
   const needsReview = !entry || entry.trust !== "human_reviewed";
-  const reviewBtn = `<button type="button" class="btn-outline" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${needsReview ? "Review" : "Review again"}</button>`;
+  // The reader's two header controls share one box. Review and Edit were both
+  // written `height:30px`, but only the button carries the base rule's 44px
+  // minimum, so it painted 44px tall beside a 30px anchor: same class, same
+  // row, tops level, bottoms 14px apart. Both declare 44 and both are in the
+  // 52px header band, which holds it.
+  const reviewBtn = `<button type="button" class="btn-outline" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${needsReview ? "Review" : "Review again"}</button>`;
   const last = page.last_write ? `${page.last_write.actor} · ${page.last_write.at}` : "no write recorded";
   const meta = [
     displayPath(page.path),
@@ -280,7 +293,7 @@ async function pageStage(id, path, shellStageHead) {
     head: shellStageHead(
       fm.title || displayPath(page.path).split("/").pop(),
       meta,
-      `<span style="display:inline-flex;gap:8px;flex:none">${reviewBtn}<a class="btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/28px var(--font-sans)">Edit</a></span>`,
+      `<span style="display:inline-flex;gap:8px;flex:none;align-items:center">${reviewBtn}<a class="btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="flex:none;display:inline-flex;align-items:center;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/1 var(--font-sans)">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
     controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span></div>`,
