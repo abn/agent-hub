@@ -72,14 +72,15 @@ const COPY_PATH_SVG = glyphSvg("copy", { size: 17 });
 
 const CHECK_SVG = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>`;
 
+// The phone's three-way theme group. Its box is declared in app.css beside the
+// desktop group's, so one rule draws both widths and the segmented rhythm is 32
+// at both, with the coarse pointer's 44 reached around it.
 function themeSegment(value, current) {
   const labels = { system: "System", light: "Light", dark: "Dark" };
   const isCurrent = current === value;
   return `<button type="button" role="radio" class="settings-theme-btn" data-theme-val="${value}" aria-checked="${
     isCurrent ? "true" : "false"
-  }" aria-label="${labels[value]}" style="width:36px;min-width:36px;height:30px;min-height:30px;border:0;border-radius:5px;${
-    isCurrent ? "background:var(--surface);box-shadow:var(--shadow-1);color:var(--ink);" : "background:none;color:var(--ink-2);"
-  }display:grid;place-items:center;cursor:pointer">${THEME_GLYPHS[value]}</button>`;
+  }" aria-label="${labels[value]}">${THEME_GLYPHS[value]}</button>`;
 }
 
 function desktopThemeSegment(value, current) {
@@ -375,7 +376,7 @@ export async function settingsScreen(gen) {
         <div class="settings-group-title">THIS DEVICE</div>
         <div class="settings-flat-row row">
           <span class="title" style="flex:1;font-size:15px;font-weight:500">Theme</span>
-          <div role="radiogroup" aria-label="Theme" style="flex:none;display:flex;height:34px;padding:2px;box-sizing:border-box;border-radius:var(--r-1);background:var(--surface-2)">
+          <div role="radiogroup" aria-label="Theme" class="settings-theme-track">
             ${themeSegment("system", currentTheme)}
             ${themeSegment("light", currentTheme)}
             ${themeSegment("dark", currentTheme)}

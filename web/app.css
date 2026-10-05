@@ -1523,21 +1523,26 @@ button.empty-link {
 .storage-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; forced-color-adjust: none; }
 
 /* Round 12, desktop Storage: the summary is the same four-segment bar the phone
-   draws, in the stage's 640 column, with its legend and the one helper line.
-   The four tiles below it are the pre-round-12 summary and stay until the
-   designer says whether they retire. */
+   draws, in the stage's 640 column, with its legend and the one helper line. */
 .storage-desktop-summary {
-  max-width: 640px;
-  /* Sits on the canvas between hairlines, not a boxed card (C8): the card
-     border and radius are cleared, the top hairline comes from the row above
-     and only the bottom edge is drawn. */
+  /* Sits on the canvas between hairlines, not in a card (C8): the ground is the
+     canvas, so the band is drawn by a hairline above and below rather than by a
+     surface of its own. The band spans the column and the content inside it
+     keeps the stage's 640, so the figure does not drift to a wider measure than
+     the prose beside it. */
   border: 0;
+  border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   border-radius: 0;
-  background: var(--surface);
-  padding: 20px 24px;
+  background: transparent;
+  padding: 20px 0;
   box-sizing: border-box;
   margin: var(--s-4) 0;
+}
+.storage-summary-column {
+  max-width: 640px;
+  padding: 0 var(--s-4) 0 24px;
+  box-sizing: border-box;
 }
 .storage-summary-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); }
 .storage-summary-amount { font-family: var(--font-mono); font-size: var(--t-28); font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
@@ -1628,17 +1633,23 @@ button.empty-link {
 }
 /* The view is a flex column with the shared 16px gap, which pushed the control
    row 16px below the header. The chrome is flush (CHECK 13.D), so only that one
-   gap is cancelled; every other spacing is untouched. */
+   gap is cancelled; every other spacing is untouched. The row also carries
+   `.shell-controls`, whose own padding is 12px, so the stage gutter is named
+   here where it wins. */
 .storage-desktop-view > .storage-controls {
   margin-top: calc(-1 * var(--s-4));
+  padding: 0 var(--s-4) 0 24px;
 }
+/* One gutter per pane, and the trailing one is the stage's 16 (Layout, "One
+   gutter per pane"). Every pane on this screen takes it, so the trailing
+   control in the header and in the control row both end at the same x. */
 .storage-head {
   display: flex;
   align-items: center;
   gap: 10px;
   height: 52px;
   box-sizing: border-box;
-  padding: 0 12px 0 24px;
+  padding: 0 var(--s-4) 0 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   margin-bottom: 0;
@@ -1662,10 +1673,14 @@ button.empty-link {
   font-weight: 500;
   color: var(--ink-3);
 }
+/* The re-measure glyph is square like every other glyph button in the build.
+   Its box is its own 36, and the 44px floor is touch's, so under a coarse
+   pointer the hit area grows around it instead of the box growing taller. */
 .storage-remeasure-btn {
   flex: none;
   width: 36px;
   height: 36px;
+  min-height: 36px;
   display: grid;
   place-items: center;
   background: none;
@@ -1673,6 +1688,7 @@ button.empty-link {
   border-radius: var(--r-1);
   color: var(--ink-2);
   cursor: pointer;
+  position: relative;
 }
 .storage-remeasure-btn:hover {
   background: var(--surface-2);
@@ -1687,7 +1703,6 @@ button.empty-link {
   gap: 10px;
   height: 40px;
   box-sizing: border-box;
-  padding: 0 12px 0 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
@@ -1697,11 +1712,16 @@ button.empty-link {
   font-size: var(--t-13);
   color: var(--ink-2);
 }
+/* A 44px control cannot sit inside the 40px control row without crossing its
+   hairline, so the prune button is drawn at the design's inline-in-a-row 32 and
+   its hit area grows to 44 under touch with a pseudo-element, the same two-step
+   `.chip` uses. The row's table-cell twin below is a glyph on its own row and
+   follows the same rule. */
 .storage-prune-all-btn {
   flex: none;
   white-space: nowrap;
-  height: 30px;
-  min-height: 30px;
+  height: 32px;
+  min-height: 32px;
   padding: 0 12px;
   border-radius: var(--r-1);
   border: 1px solid var(--danger);
@@ -1709,6 +1729,7 @@ button.empty-link {
   color: var(--danger);
   font: 600 var(--t-13)/1 var(--font-sans);
   cursor: pointer;
+  position: relative;
 }
 .storage-prune-all-btn:hover {
   background: var(--danger-bg);
@@ -1716,6 +1737,24 @@ button.empty-link {
 .storage-prune-all-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus);
+}
+/* The control row centres what it holds, so the stacked card's own top margin
+   does not follow the prune button into the band. */
+.storage-controls .storage-review,
+.storage-mobile-tools .storage-review {
+  margin-top: 0;
+}
+@media (pointer: coarse) {
+  .storage-remeasure-btn::after,
+  .storage-prune-all-btn::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -4px;
+    right: -4px;
+    height: 44px;
+    transform: translateY(-50%);
+  }
 }
 .storage-desktop-legend,
 .storage-legend-wrap {
@@ -1834,9 +1873,12 @@ button.empty-link {
 .storage-table td.cell-action {
   text-align: right;
 }
+/* The row's own prune sits in a 44px table row, so 32 is the inline height here
+   as everywhere else, and the coarse-pointer hit area below grows to 44 around
+   it. Its 12px label and 12px horizontal padding stay the row's own. */
 .storage-table .storage-prune {
-  min-height: 28px;
-  height: 28px;
+  min-height: 32px;
+  height: 32px;
   padding: 0 12px;
   font-size: var(--t-12);
   font-weight: 600;
@@ -1858,7 +1900,11 @@ button.empty-link {
   .storage-table .storage-prune::after {
     content: "";
     position: absolute;
-    inset: -8px -4px;
+    top: 50%;
+    left: -4px;
+    right: -4px;
+    height: 44px;
+    transform: translateY(-50%);
   }
 }
 .storage-totals-row td {
@@ -1871,12 +1917,34 @@ button.empty-link {
   color: var(--ink);
 }
 .storage-footnote {
-  padding: 0 24px;
+  padding: 0 var(--s-4) 0 24px;
   margin: var(--s-3) 0 0;
   font-family: var(--font-sans);
   font-size: var(--t-13);
   color: var(--ink-3);
   line-height: 1.5;
+}
+
+/* The phone Storage tools row is the frame's own 44px band, so a 44px control
+   in it would sit on its hairline. The button is drawn at the same inline 32 the
+   desktop control row uses and its hit area is grown to 44 around it, which is
+   what the project filter and overflow controls beside it on other screens
+   already do. */
+.storage-tools-prune-btn {
+  min-height: 32px;
+  height: 32px;
+  position: relative;
+}
+@media (pointer: coarse) {
+  .storage-tools-prune-btn::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -4px;
+    right: -4px;
+    height: 44px;
+    transform: translateY(-50%);
+  }
 }
 /* end component: storage */
 /* component: home */
@@ -7372,13 +7440,16 @@ dialog.dialog-project-delete {
   padding: 2px;
   background: var(--surface-2);
   border-radius: var(--r-1);
-  height: 34px;
+  /* 32 is the segmented rhythm the project's switcher and Search's chips
+     already hold at 390, so the track is that plus its own 2px padding either
+     side. */
+  height: 36px;
   box-sizing: border-box;
 }
 .settings-glyph-seg {
   width: 36px;
-  height: 30px;
-  min-height: 30px;
+  height: 32px;
+  min-height: 32px;
   display: grid;
   place-items: center;
   background: transparent;
@@ -7386,6 +7457,20 @@ dialog.dialog-project-delete {
   border-radius: 5px;
   color: var(--ink-2);
   cursor: pointer;
+  position: relative;
+}
+/* The drawn segment is 32 in the rhythm; a coarse pointer's 44 is reached with
+   a pseudo-element around it, the same step `.chip` takes. */
+@media (pointer: coarse) {
+  .settings-glyph-seg::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+  }
 }
 .settings-glyph-seg[aria-pressed="true"],
 .settings-glyph-seg[aria-checked="true"] {
@@ -7394,6 +7479,49 @@ dialog.dialog-project-delete {
   border-radius: 5px;
   color: var(--ink);
   box-shadow: var(--shadow-1);
+}
+/* The phone draws the same three-way group through `themeSegment`, which hands
+   its own size inline. Those numbers are what the rhythm above sets, so they
+   are declared here instead and the markup carries the class alone: one rule
+   draws the group at both widths. */
+.settings-theme-btn {
+  width: 36px;
+  min-width: 36px;
+  height: 32px;
+  min-height: 32px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  position: relative;
+}
+.settings-theme-btn[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+.settings-theme-track {
+  flex: none;
+  display: flex;
+  height: 36px;
+  padding: 2px;
+  box-sizing: border-box;
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+}
+@media (pointer: coarse) {
+  .settings-theme-btn::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+  }
 }
 .agents-add-btn {
   height: 32px;

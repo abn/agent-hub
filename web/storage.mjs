@@ -598,7 +598,7 @@ function renderMobileHTML(usage) {
   const prunableBytes = usage.prunable?.bytes || 0;
   const prunableLabel = prunableSessions === 1 ? "1 ended session" : `${prunableSessions} ended sessions`;
   const pruneBtn = prunableSessions > 0
-    ? `<button type="button" class="storage-tools-prune-btn danger storage-review" data-action="storage-prune-all" style="flex:none;white-space:nowrap;height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Prune <span class="mono" style="font-family:var(--font-mono);font-weight:500">${esc(formatBytes(prunableBytes))}</span></button>`
+    ? `<button type="button" class="storage-tools-prune-btn danger storage-review" data-action="storage-prune-all" style="flex:none;white-space:nowrap;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--danger);background:none;color:var(--danger);font:600 14px/1 var(--font-sans);cursor:pointer">Prune <span class="mono" style="font-family:var(--font-mono);font-weight:500">${esc(formatBytes(prunableBytes))}</span></button>`
     : "";
 
   const stageControls = `
@@ -732,8 +732,12 @@ function desktopSummary(usage) {
     ["knowledge", knBytes, "--k-knowledge"],
   ];
 
+  // The band is the canvas between two hairlines and spans the column; the
+  // content inside it holds the stage's 640, so the figure reads at the same
+  // measure as the prose and the table's project column beside it.
   const wrap = el("section", "storage-summary storage-desktop-summary");
   wrap.setAttribute("aria-label", "Storage breakdown");
+  const column = el("div", "storage-summary-column");
 
   const head = el("div", "storage-summary-head");
   const amountNode = el("span", "mono storage-summary-amount");
@@ -742,7 +746,7 @@ function desktopSummary(usage) {
   if (capacityText) {
     head.appendChild(el("span", "mono storage-summary-capacity", capacityText));
   }
-  wrap.appendChild(head);
+  column.appendChild(head);
 
   const bar = el("div", "storage-summary-bar");
   bar.setAttribute("role", "img");
@@ -757,7 +761,7 @@ function desktopSummary(usage) {
     seg.style.background = `var(${tone})`;
     bar.appendChild(seg);
   }
-  wrap.appendChild(bar);
+  column.appendChild(bar);
 
   const legend = el("div", "storage-desktop-legend storage-legend-wrap");
   for (const [kind, bytes, tone] of parts) {
@@ -769,16 +773,17 @@ function desktopSummary(usage) {
     item.append(sw, kind, " ", el("span", "mono storage-legend-val", formatBytes(bytes)));
     legend.appendChild(item);
   }
-  wrap.appendChild(legend);
+  column.appendChild(legend);
 
   // The one helper line: the only consequence the reader cannot see.
-  wrap.appendChild(
+  column.appendChild(
     el(
       "div",
       "storage-helper-line",
       `${formatBytes(sharedEventsBytes)} of events is the shared hub database, not in any row below.`,
     ),
   );
+  wrap.appendChild(column);
   return wrap;
 }
 
