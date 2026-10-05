@@ -13,10 +13,10 @@ use axum::response::Response;
 use crate::app::AppState;
 use crate::http::origin::request_origin;
 
-const SKILL: &str = include_str!("../../assets/SKILL.md");
+const SKILL: &str = include_str!("../../skills/agent-hub/bootstrap.md");
 const PLACEHOLDER: &str = "{{base_url}}";
 
-/// `GET /SKILL.md`
+/// `GET /bootstrap/SKILL.md`
 ///
 /// The base URL is the hub's own origin, so the document is correct behind a
 /// reverse proxy as well as on a direct bind.

@@ -15,7 +15,7 @@ routes below. Both surfaces share one write path, so a page gets the same path
 rules, the same size limit, the same log row, the same search row and the same
 feed signal whoever wrote it. The decision behind the store is in
 [the project knowledge base](../adr/0018-project-knowledge-base.md), and the
-agent tools are described in the served skill document, `GET /SKILL.md`.
+agent tools are described in the served bootstrap document, `GET /bootstrap/SKILL.md`.
 
 ## The shape of a page
 

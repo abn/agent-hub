@@ -112,21 +112,22 @@ impl HubServer {
     }
 }
 
-/// The agent guide, mirrored from `assets/SKILL.md`.
+/// The agent bootstrap, mirrored from `skills/agent-hub/bootstrap.md`.
 ///
-/// The same document is served over HTTP at `/SKILL.md`, so an agent that can
-/// reach the hub learns the conventions before it writes to the human, from
-/// the first call: `whoami` names the URL and MCP exposes the document as a
-/// resource.
+/// The same document is served over HTTP at `/bootstrap/SKILL.md`, so an agent
+/// that can reach the hub learns the connection details before it writes to the
+/// human, from the first call: `whoami` names the URL and MCP exposes the
+/// document as a resource. The workflow guide is served separately as the
+/// `agent-hub` skill.
 const SKILL_URI: &str = "agenthub://skill";
-const SKILL_TEXT: &str = include_str!("../../assets/SKILL.md");
+const SKILL_TEXT: &str = include_str!("../../skills/agent-hub/bootstrap.md");
 const PLACEHOLDER: &str = "{{base_url}}";
 
 /// The origin to name inside the served guide.
 ///
 /// The streamable HTTP transport carries the request headers on the context,
 /// so the guide reads the hub's own address the caller actually used, as the
-/// public `/SKILL.md` route does. Stdio has no headers and falls back to the
+/// public `/bootstrap/SKILL.md` route does. Stdio has no headers and falls back to the
 /// configured bind.
 fn guide_origin(config: &Config, context: &RequestContext<RoleServer>) -> StdString {
     match context.extensions.get::<axum::http::request::Parts>() {

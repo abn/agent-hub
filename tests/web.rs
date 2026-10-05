@@ -62,10 +62,10 @@ async fn the_skill_tells_an_agent_how_to_write_for_the_human() {
     // The hub is the only thing an agent reads before it writes to a person.
     // Mechanics alone produce inbox rows that bury the ask in a paragraph, so
     // the document that teaches the tools teaches the voice with them.
-    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/SKILL.md"))
+    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/skills/agent-hub/SKILL.md"))
         .expect("read the skill document");
     let guidance = skill
-        .split_once("### Writing for the human")
+        .split_once("## Writing for the human")
         .expect("the skill document tells an agent how to write for the human")
         .1;
     let guidance: String = guidance
@@ -609,7 +609,7 @@ async fn serves_the_skill_with_the_request_host() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "hub.example:8080")
         .body(Body::empty())
@@ -639,7 +639,7 @@ async fn the_skill_prefers_forwarded_headers() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "internal:8080")
         .header("x-forwarded-proto", "https")
@@ -663,7 +663,7 @@ async fn the_skill_prefers_the_configured_public_url() {
     let state = state_with_public_url(Some("https://hub.example")).await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "internal:8080")
         .header("x-forwarded-host", "other.example")
@@ -685,7 +685,7 @@ async fn the_skill_prefers_the_configured_public_url() {
 async fn the_skill_falls_back_to_the_configured_bind() {
     let state = state().await;
     let app = router(state.clone());
-    let response = app.oneshot(get("/SKILL.md", None)).await.expect("request");
+    let response = app.oneshot(get("/bootstrap/SKILL.md", None)).await.expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
         text(response).await.contains("http://127.0.0.1:0"),
@@ -698,7 +698,7 @@ async fn an_unsafe_forwarded_host_falls_through_to_the_request_host() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "hub.example:8080")
         .header("x-forwarded-host", "http://evil.example/path")
@@ -718,7 +718,7 @@ async fn a_forwarded_scheme_applies_to_the_request_host() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "hub.example")
         .header("x-forwarded-proto", "https")
@@ -736,7 +736,7 @@ async fn an_invalid_forwarded_scheme_is_not_echoed() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "hub.example")
         .header("x-forwarded-proto", "ftp")
@@ -754,7 +754,7 @@ async fn an_unsafe_host_falls_back_to_the_bind() {
     let state = state().await;
     let app = router(state.clone());
     let request = Request::builder()
-        .uri("/SKILL.md")
+        .uri("/bootstrap/SKILL.md")
         .method("GET")
         .header("host", "http://evil.example/path")
         .body(Body::empty())
@@ -2592,11 +2592,11 @@ fn browser_urls_resolve_against_the_document_base() {
     );
     assert!(
         FEED_JS.contains(r#"new URL("mcp", base)"#)
-            && FEED_JS.contains(r#"new URL("SKILL.md", base)"#),
+            && FEED_JS.contains(r#"new URL("bootstrap/SKILL.md", base)"#),
         "the MCP setup resolves against the document base"
     );
     assert!(
-        !FEED_JS.contains("${origin}/mcp") && !FEED_JS.contains("${origin}/SKILL.md"),
+        !FEED_JS.contains("${origin}/mcp") && !FEED_JS.contains("${origin}/bootstrap/SKILL.md"),
         "the MCP setup no longer hardcodes the origin root"
     );
 }

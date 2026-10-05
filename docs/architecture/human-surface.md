@@ -81,7 +81,7 @@ GET    /artifacts/:id/og.svg
 GET    /s/:token
 GET    /s/:token/frame
 GET    /s/:token/og.svg
-GET    /SKILL.md
+GET    /bootstrap/SKILL.md
 ```
 
 The artifact content route accepts `?version=N` to read one snapshot; the
@@ -127,7 +127,7 @@ Agents reach the hub over MCP for their own work, and may also create and list
 the projects they can see. The trust posture behind this split is stated once in
 the [operating model](model.md).
 
-`GET /SKILL.md` is a public bootstrap guide. The hub renders the caller's own
+`GET /bootstrap/SKILL.md` is a public bootstrap guide. The hub renders the caller's own
 origin into it from the forwarded or request host, so an agent that can already
 reach the hub can fetch the connection details and the tool list before it has
 a token, and behind a reverse proxy it receives the public address rather than

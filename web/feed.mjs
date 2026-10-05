@@ -684,7 +684,7 @@ export function mcpSetup(projectId, token = "<agent token>") {
     "# A harness that speaks only stdio runs the proxy:",
     `HUB_URL=${base} HUB_TOKEN=${token} agent-hub mcp`,
     "",
-    `# The full guide: ${new URL("SKILL.md", base).href}`,
+    `# The setup guide: ${new URL("bootstrap/SKILL.md", base).href}`,
     "",
   ].join("\n");
 }

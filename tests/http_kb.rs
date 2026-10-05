@@ -2274,7 +2274,7 @@ async fn backlinks_name_other_pages_in_a_stable_order_and_lint_rows_carry_the_pa
 
 #[tokio::test]
 async fn the_skill_document_describes_the_promote_tool_that_exists() {
-    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/SKILL.md"))
+    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/skills/agent-hub/references/tools.md"))
         .expect("read the skill document");
     // The signature is one line and what it returns is on the next.
     let signature: String = skill

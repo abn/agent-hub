@@ -133,6 +133,11 @@ any access rule.
   regenerates the shims; it is idempotent and safe to re-run. **One exception:**
   reusable project skills live under `.agents/skills/` and are committed, since
   they are part of how the project is maintained, not a tool's local state.
+- **The installable skill is a product artifact.** `skills/agent-hub/` is the
+  progressive `agent-hub` skill that users and agents install with
+  `npx skills add abn/agent-hub`. Its `bootstrap.md` is the canonical setup
+  document, and the binary embeds it and serves it at `GET /bootstrap/SKILL.md`.
+  This is distinct from the project skills under `.agents/skills/`.
 - **The wiki carries product screenshots.** `docs/assets/screens/` holds the
   main feature screens at both widths in both themes, captured with dummy data
   from a seeded scratch hub by `.agents/scripts/wiki_screens.py`; the skill is

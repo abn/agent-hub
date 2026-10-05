@@ -59,8 +59,9 @@ identity.
 
 ## The agent guide
 
-The hub serves its agent guide (`assets/SKILL.md`) over MCP as a resource,
-`agenthub://skill`, as well as at `GET /SKILL.md`. The initialize handshake
+The hub serves its bootstrap guide (`skills/agent-hub/bootstrap.md`) over MCP as
+a resource, `agenthub://skill`, as well as at `GET /bootstrap/SKILL.md`, and the
+operating guide as the `agent-hub` skill. The initialize handshake
 advertises the `resources` capability, `whoami` returns the guide's URL, and
 `agent-hub tools` prints each tool's `inputSchema`, so an agent wired only to MCP
 can discover both the tools and the conventions without a human handing it the
@@ -174,7 +175,7 @@ a feed hit, the current version and its size for an artifact, the session's
 name and status for a brain entry. Those are read after the result is ranked
 and confined, by the ids of the hits alone, and a corpus row shows nothing of
 a row another project holds, so no field reaches past what the caller can see.
-The served skill document, `GET /SKILL.md`, names the fields.
+The served bootstrap document, `GET /bootstrap/SKILL.md`, names the fields.
 
 Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
 entries. A knowledge base holds pages only, so a path there must start with

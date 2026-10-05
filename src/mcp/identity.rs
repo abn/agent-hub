@@ -35,7 +35,7 @@ impl HubServer {
             "personal_project": personal_project,
             // The guide is served at the hub origin, so an agent learns it
             // exists from the identity call rather than from a human.
-            "skill_url": format!("{}/SKILL.md", crate::http::origin::request_origin(
+            "skill_url": format!("{}/bootstrap/SKILL.md", crate::http::origin::request_origin(
                 &self.state.config,
                 context
                     .extensions

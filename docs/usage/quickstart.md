@@ -127,7 +127,7 @@ reverse proxy rewrites the host to the upstream address, since the address the
 hub then sees is not the one callers use. It takes a bare origin, scheme and
 host with an optional port and no path, and a bad value fails startup. The
 value is what the artifact frame policy names, what a shared artifact link
-carries in its preview tags, and what `GET /SKILL.md` hands a bootstrapping
+carries in its preview tags, and what `GET /bootstrap/SKILL.md` hands a bootstrapping
 agent.
 
 The embedded tailnet endpoint is experimental and needs a binary built with
@@ -198,7 +198,7 @@ Authorization: Bearer <agent token>
 ```
 
 Open `http://127.0.0.1:8080/` for the human surface and paste the admin token
-in Settings. The hub also serves `GET /SKILL.md`, a bootstrap guide with its
+in Settings. The hub also serves `GET /bootstrap/SKILL.md`, a bootstrap guide with its
 own address filled in, so an agent that can already reach the hub can fetch
 the connection details and the tool list. Grants are managed
 under Settings or through the agent routes; see the

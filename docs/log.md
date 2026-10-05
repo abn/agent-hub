@@ -6,6 +6,19 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The skill splits into a served bootstrap and an installable guide
+
+* **Change**: one served document was doing two jobs with two lifecycles. It is
+  now a thin bootstrap at `GET /bootstrap/SKILL.md` (the hub's address, how to
+  get a token, connect, wire a harness, and prove it), and a progressive
+  operating guide under `skills/agent-hub/` with a small `SKILL.md` and
+  `references/` read on demand, installed with `npx skills add abn/agent-hub`.
+  The bootstrap file is the canonical source and the binary embeds it at build
+  time, so a user who installs the skill first can still bootstrap from it.
+  [Agent surface](architecture/agent-surface.md) and
+  [Human surface](architecture/human-surface.md) name the new path, and
+  [Using the hub as a brain](usage/agents.md) points at the installable guide.
+
 ### The project artifact stage's More button opens its menu
 
 * **Fix**: the More control in a project's own Artifacts segment drew a
