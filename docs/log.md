@@ -6,6 +6,16 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The captures repaint across every screen
+
+* **Update**: the seeded capture set is re-run in full and committed, so the
+  images match the code as it stands. The previous set had drifted since its own
+  repaint and 49 of 68 frames no longer matched the current build. Every feature
+  screen at both widths and both themes: home, inbox and an open item, projects,
+  the project feed, sessions and the session detail, artifacts and the artifact
+  viewer, wiki and a reader page, search, storage, settings, access, connect, and
+  More.
+
 ### The viewer's menu hangs from its trigger and the sheet shows one head
 
 * **Fix**: the artifact viewer's overflow menu was anchored to the viewer's own
