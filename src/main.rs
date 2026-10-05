@@ -1144,11 +1144,6 @@ fn call(_args: &[String]) -> ExitCode {
 }
 
 #[cfg(not(feature = "client"))]
-fn tools(_args: &[String]) -> ExitCode {
-    without_client()
-}
-
-#[cfg(not(feature = "client"))]
 fn kb(_args: &[String]) -> ExitCode {
     without_client()
 }
