@@ -14,7 +14,9 @@
 // the Unread chip is asked before anything reads a project feed because the hub
 // draws its dots from what is still above the reader's cursor. Serial execution
 // is what keeps that order, and a hub per project keeps the two widths from
-// moving each other's data.
+// moving each other's data. The accessibility audit reads every screen,
+// including a feed, so it runs in its own projects against their own hubs: its
+// feed read must not advance the cursor the Unread chip counts.
 
 import { defineConfig } from "@playwright/test";
 
@@ -43,8 +45,16 @@ export default defineConfig({
     colorScheme: "light",
     trace: "on-first-retry",
   },
-  projects: Object.entries(WIDTHS).map(([name, viewport]) => ({
-    name,
-    use: { viewport },
-  })),
+  projects: [
+    ...Object.entries(WIDTHS).map(([name, viewport]) => ({
+      name,
+      use: { viewport },
+      testIgnore: /a11y\.spec\.mjs/,
+    })),
+    ...Object.entries(WIDTHS).map(([name, viewport]) => ({
+      name: `a11y-${name}`,
+      use: { viewport },
+      testMatch: /a11y\.spec\.mjs/,
+    })),
+  ],
 });

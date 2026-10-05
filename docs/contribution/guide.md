@@ -48,11 +48,10 @@ change.
   clear before it becomes a gate. Most are one class: a DOM property read off
   an element a `querySelector` returned, which wants a JSDoc type on the
   lookup rather than a cast at every use.
-- `make web/a11y`: the headless accessibility audit over the rendered screens,
-  at 390px and 1100px in both themes. It walks every screen the router
-  registers plus the states a route alone does not show (a dialog, the
-  comments drawer, a toast, the public artifact page and its password gate),
-  and measures the contrast axe leaves undecided.
+- `make web/e2e` also runs the accessibility audit: `e2e/a11y.spec.mjs` walks
+  the main screens with `@axe-core/playwright` and asserts no WCAG A or AA
+  violation. It replaced the standalone `a11y.py`, so the audit runs in the same
+  browser pass as the behaviour checks.
 - `make web/e2e`: the browser behaviour checks, on Playwright Test. Two
   projects, one per width (1440x900 and 390x844), each against its own seeded
   hub. It holds the list filter, the single-key verbs, the search key and the
@@ -73,7 +72,7 @@ in `package.json` as devDependencies with the lockfile committed and
 | Stylesheet rules and tokens | `css-tree` AST walk under Vitest | `make web/styles` |
 | Client types | `tsc --noEmit` over `checkJs` | `make web/types` |
 | Browser behaviour and layout | Playwright Test | `make web/e2e` |
-| Accessibility | `@axe-core/playwright` | not wired yet |
+| Accessibility | `@axe-core/playwright` under Playwright Test | `make web/e2e` (`e2e/a11y.spec.mjs`) |
 
 The unit tests import the modules from `web/` directly, so a test and the page
 cannot drift apart, and jsdom supplies the document and the media query the

@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/a11y web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -123,12 +123,6 @@ web/styles: node_tree ## Run the stylesheet gate over the parsed CSS
 web/types: node_tree ## Type-check the client sources
 	npx tsc --noEmit
 
-# The headless accessibility audit over the rendered screens. It needs
-# Playwright, a browser, and an axe build; the static checks in web/check
-# always run.
-web/a11y: build ## Run the headless accessibility audit
-	$(call browser_check,web/a11y,.agents/scripts/a11y.py)
-
 # The focus ring is a shadow, so a wrapper that draws it and a control inside it
 # that draws the same token put two concentric rings on screen, and no geometric
 # check sees it. This walks the screens with a real Tab key and counts them, and
@@ -178,7 +172,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/a11y web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first

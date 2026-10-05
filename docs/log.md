@@ -6,6 +6,17 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The scripts fold into skills, and the accessibility audit moves to Playwright
+
+* **Change**: `.agents/scripts/` is being reduced to the checks that still have
+  no standard tool. `hub_harness.py` is the `seeded-hub` skill and
+  `wiki_screens.py` moved into the `capture-wiki-screenshots` skill. The bundle
+  is validated with `okf validate` rather than a bespoke script, and the emoji,
+  agent-work-identifier and hook-fixture scripts and hooks are gone.
+* **Change**: the accessibility audit is `e2e/a11y.spec.mjs`, on
+  `@axe-core/playwright` under Playwright Test, replacing `a11y.py`. The
+  [contributor guide](contribution/guide.md) records the tooling.
+
 ### The wiki publishes to GitHub Pages
 
 * **Add**: `.github/workflows/pages.yml` renders the bundle with the okf-wiki
