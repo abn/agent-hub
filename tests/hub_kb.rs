@@ -551,3 +551,62 @@ fn a_subcommand_kb_does_not_know_is_a_usage_error() {
         "a write needs the page it writes"
     );
 }
+
+/// A page carries frontmatter the knowledge base reads, and a writer who has
+/// never seen one is not left to guess: the usage names the fields, and the
+/// write still takes the page and says what to add.
+#[test]
+fn a_page_shape_is_named_where_it_is_written_and_what_is_missing() {
+    let hub = Hub::start("kb-page-shape");
+
+    let help = run(&hub, &["kb", "put", "--help"]);
+    assert_eq!(help.status.code(), Some(0), "{help:?}");
+    let usage = stdout(&help);
+    for field in [
+        "type:",
+        "title:",
+        "description:",
+        "status:",
+        "tags:",
+        "stale_after:",
+    ] {
+        assert!(usage.contains(field), "the usage names {field}: {usage}");
+    }
+
+    let written = put(&hub, "/fs/notes.md", "# Notes\n\nStart here.\n");
+    assert_eq!(written.status.code(), Some(0), "{written:?}");
+    let result = stdout_json(&written);
+    let lint = result["lint"].as_array().expect("the write carries lint");
+    let finding = lint
+        .iter()
+        .find(|finding| finding["code"] == "missing_frontmatter")
+        .unwrap_or_else(|| panic!("no missing_frontmatter finding: {result}"));
+    let message = finding["message"].as_str().expect("a message");
+    assert!(
+        message.contains("type: Concept"),
+        "the finding names the minimum to add: {message}"
+    );
+
+    // Lenient, so nothing is lost and nothing has to be retyped: the page is
+    // stored as it was sent.
+    let read = run(&hub, &["kb", "get", "/fs/notes.md", "--project", PROJECT]);
+    assert_eq!(read.status.code(), Some(0), "{read:?}");
+    assert_eq!(stdout(&read), "# Notes\n\nStart here.\n");
+
+    let typed = put(
+        &hub,
+        "/fs/typed.md",
+        "---\ntype: Runbook\ntitle: Deploy\n---\n# Deploy\n",
+    );
+    assert_eq!(typed.status.code(), Some(0), "{typed:?}");
+    let codes: Vec<String> = stdout_json(&typed)["lint"]
+        .as_array()
+        .expect("the write carries lint")
+        .iter()
+        .map(|finding| finding["code"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        !codes.contains(&"missing_frontmatter".to_string()),
+        "a page with a block is not flagged: {codes:?}"
+    );
+}
