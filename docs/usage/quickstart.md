@@ -59,7 +59,7 @@ the version and that commit:
 ```sh
 podman build -f Containerfile \
   --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
-  --tag agent-hub:1.0.0 .
+  --tag ghcr.io/abn/agent-hub:1.0.0 .
 ```
 
 Under compose the file builds the image, mounts a named volume at `/data`, keeps

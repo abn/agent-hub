@@ -1,5 +1,6 @@
 services:
   hub:
+    image: ghcr.io/abn/agent-hub:local
     build:
       context: ..
       dockerfile: Containerfile

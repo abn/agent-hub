@@ -16,8 +16,9 @@ COPY build.rs ./
 COPY vendor ./vendor
 COPY src ./src
 COPY web ./web
-# The served skill guide is embedded into the binary at build time.
-COPY assets ./assets
+# The served bootstrap and the installable skill are embedded into the binary
+# at build time.
+COPY skills ./skills
 
 # The image context excludes .git, so the commit is passed in at build time.
 # With no argument the row reports "unknown" rather than inventing a value.
