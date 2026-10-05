@@ -167,11 +167,17 @@ fn main() -> ExitCode {
     // The engine's own error level is included: a storage failure (a full disk,
     // a bad page) is logged inside `turso_core`, and `agent_hub=info` alone
     // would leave an unattended hub silent about the one fault it is failing on.
-    let default_filter = match args.first().map(String::as_str) {
-        None | Some("serve") => "agent_hub=info,turso_core=error",
-        _ => "error",
+    // A client subcommand asks for less, because its stderr is the operator's
+    // and carries what went wrong: its filter is the one that keeps the
+    // transport's line about its own teardown out of it.
+    let filter = match args.first().map(String::as_str) {
+        None | Some("serve") => std::env::var("RUST_LOG")
+            .unwrap_or_else(|_| "agent_hub=info,turso_core=error".to_string()),
+        #[cfg(feature = "client")]
+        _ => agent_hub::client::client_log_directives(std::env::var("RUST_LOG").ok()),
+        #[cfg(not(feature = "client"))]
+        _ => std::env::var("RUST_LOG").unwrap_or_else(|_| "error".to_string()),
     };
-    let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| default_filter.to_string());
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)

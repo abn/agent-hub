@@ -936,3 +936,229 @@ fn a_hub_whose_port_was_taken_under_it_starts_on_another() {
     );
     assert_eq!(listed.status.code(), Some(0), "{listed:?}");
 }
+
+/// A call that succeeded reports nothing on stderr, even when its teardown
+/// fails.
+///
+/// Ending the MCP session is the client's own best-effort housekeeping, done
+/// after the result is in hand, and the transport behind it logs a failed
+/// session delete at ERROR. On a call that worked, that line reads as the call
+/// failing, on the stream the contract reserves for real errors. The listener
+/// below is the case a healthy hub cannot be relied on to produce on demand: a
+/// connection that answers the handshake and the call, then refuses the delete.
+#[test]
+fn a_successful_call_reports_nothing_when_its_teardown_fails() {
+    let port = broken_teardown::listen();
+
+    // A hook's own run, and a hook that exports RUST_LOG to quieten a harness,
+    // both have to come out with stderr empty. A cap that a common setting
+    // switched off would not be a cap.
+    for asked in [None, Some("error")] {
+        let output = call_with_log(port, asked);
+
+        assert_eq!(output.status.code(), Some(0), "{asked:?}: {output:?}");
+        assert_eq!(
+            stdout_json(&output)["actor"],
+            "fake-agent",
+            "{asked:?}: the call itself was answered: {output:?}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.trim().is_empty(),
+            "{asked:?}: a call that succeeded has nothing to report, and stderr is where the \
+             operator looks: {stderr}"
+        );
+    }
+
+    // A looser level is the operator's own choice, so the client's lifecycle
+    // lines may appear, but the transport's teardown line never does: it is the
+    // one that reads as the call failing.
+    let loose = call_with_log(port, Some("info"));
+    assert_eq!(loose.status.code(), Some(0), "{loose:?}");
+    let stderr = String::from_utf8_lossy(&loose.stderr);
+    assert!(
+        !stderr.contains("fail to delete session"),
+        "the transport's teardown line stays out at info: {stderr}"
+    );
+
+    // Asking for that transport by name is asking for its teardown line, and
+    // the answer is then in the log rather than in the exit code.
+    let asked = call_with_log(port, Some("rmcp::transport::streamable_http_client=debug"));
+    assert_eq!(asked.status.code(), Some(0), "{asked:?}");
+    let stderr = String::from_utf8_lossy(&asked.stderr);
+    assert!(
+        stderr.contains("fail to delete session"),
+        "the transport's own line is available to an operator who asks for it: {stderr}"
+    );
+}
+
+/// One `agent-hub call whoami` against the listener, logging at `asked`.
+fn call_with_log(port: u16, asked: Option<&str>) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
+    command.args(["call", "whoami"]);
+    match asked {
+        Some(level) => command.env("RUST_LOG", level),
+        None => command.env_remove("RUST_LOG"),
+    };
+    command
+        .env("HUB_URL", format!("http://127.0.0.1:{port}"))
+        .env("HUB_TOKEN", "irrelevant")
+        .env("HUB_CONFIG", common::no_client_config())
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the binary")
+}
+
+/// A listener that speaks just enough MCP to answer one call, then fails to end
+/// the session.
+///
+/// It is not a hub and makes no claim to be: it answers the handshake, answers
+/// `tools/call` with a fixed identity, and refuses the DELETE the client's
+/// teardown sends. Answering the client's own ids and protocol version is the
+/// one thing it has to agree about, since a response the client cannot match is
+/// a timeout rather than the case under test.
+mod broken_teardown {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+
+    /// The session id the handshake hands out, which the delete has to name.
+    const SESSION: &str = "test-session";
+
+    /// The identity the call answers with.
+    const ACTOR: &str = "fake-agent";
+
+    /// Start the listener and return its port. It runs until the test process
+    /// ends, which is all the one call it serves needs.
+    pub fn listen() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free port");
+        let port = listener
+            .local_addr()
+            .expect("local addr")
+            .port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else {
+                    return;
+                };
+                std::thread::spawn(move || serve(stream));
+            }
+        });
+        port
+    }
+
+    /// Answer requests on one connection, which the client keeps alive for the
+    /// length of the call.
+    fn serve(mut stream: TcpStream) {
+        let mut reader = BufReader::new(stream.try_clone().expect("clone the stream"));
+        while let Some((method, body)) = read_request(&mut reader) {
+            let response = answer(&method, &body);
+            if stream.write_all(response.as_bytes()).is_err() || stream.flush().is_err() {
+                return;
+            }
+        }
+    }
+
+    /// One request as its method and body, or `None` once the client is done.
+    fn read_request(reader: &mut BufReader<TcpStream>) -> Option<(String, String)> {
+        let mut request_line = String::new();
+        if reader.read_line(&mut request_line).ok()? == 0 {
+            return None;
+        }
+        let method = request_line.split_whitespace().next()?.to_string();
+        let mut length = 0usize;
+        loop {
+            let mut header = String::new();
+            if reader.read_line(&mut header).ok()? == 0 {
+                return None;
+            }
+            let header = header.trim_end();
+            if header.is_empty() {
+                break;
+            }
+            if let Some(value) = header
+                .split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .map(|(_, value)| value.trim())
+            {
+                length = value.parse().ok()?;
+            }
+        }
+        let mut body = vec![0u8; length];
+        reader.read_exact(&mut body).ok()?;
+        Some((method, String::from_utf8_lossy(&body).into_owned()))
+    }
+
+    /// The answer to one request.
+    fn answer(method: &str, body: &str) -> String {
+        let method_name = text(body, "method").unwrap_or_default();
+        match (method, method_name.as_str()) {
+            ("POST", "initialize") => {
+                let version = text(body, "protocolVersion").unwrap_or_default();
+                json(
+                    "200 OK",
+                    &format!(
+                        r#"{{"jsonrpc":"2.0","id":{},"result":{{"protocolVersion":"{version}","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"fake-hub","version":"0.0.0"}}}}}}"#,
+                        id(body)
+                    ),
+                    Some(SESSION),
+                )
+            }
+            ("POST", "tools/call") => json(
+                "200 OK",
+                &format!(
+                    r#"{{"jsonrpc":"2.0","id":{},"result":{{"content":[{{"type":"text","text":"{{\"actor\":\"{ACTOR}\"}}"}}]}}}}"#,
+                    id(body)
+                ),
+                None,
+            ),
+            // A notification carries no answer body, and 202 is what it takes.
+            ("POST", _) => "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\n\r\n".to_string(),
+            // The client opens no event stream here: it says so once and
+            // carries on with the same session.
+            ("GET", _) | ("HEAD", _) => empty(405, "Method Not Allowed"),
+            // The teardown. Refusing it is the case under test: the client has
+            // its result already, and must not report the refusal as a failure.
+            ("DELETE", _) => empty(500, "Internal Server Error"),
+            _ => empty(405, "Method Not Allowed"),
+        }
+    }
+
+    /// A JSON response, carrying the session header when one is handed out.
+    fn json(status: &str, body: &str, session: Option<&str>) -> String {
+        let session = session.map_or(String::new(), |session| {
+            format!("mcp-session-id: {session}\r\n")
+        });
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n{session}content-length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// A response with no body at all.
+    fn empty(status: u16, reason: &str) -> String {
+        format!("HTTP/1.1 {status} {reason}\r\ncontent-length: 0\r\n\r\n")
+    }
+
+    /// The request id, echoed back so the client recognises its own answer.
+    fn id(body: &str) -> i64 {
+        number(body, "id").unwrap_or_default()
+    }
+
+    /// The value of a string field in the request, as the client wrote it.
+    fn text(body: &str, key: &str) -> Option<String> {
+        let start = body.find(&format!("\"{key}\":\""))? + key.len() + 4;
+        let rest = &body[start..];
+        let end = rest.find('"')?;
+        Some(rest[..end].to_string())
+    }
+
+    /// The value of a number field in the request.
+    fn number(body: &str, key: &str) -> Option<i64> {
+        let start = body.find(&format!("\"{key}\":"))? + key.len() + 3;
+        let rest = &body[start..];
+        let end = rest
+            .find(|character: char| !character.is_ascii_digit())
+            .unwrap_or(rest.len());
+        rest[..end].parse().ok()
+    }
+}

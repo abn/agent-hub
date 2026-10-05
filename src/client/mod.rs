@@ -31,6 +31,39 @@ pub use proxy::serve_stdio;
 /// quickly and say so rather than hang until the harness gives up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The log directives a client subcommand runs under, as `RUST_LOG` would.
+///
+/// stderr is where the operator and a hook's log reader look for what went
+/// wrong, and the exit code is what they branch on, so an ERROR line there is a
+/// claim about the call. rmcp's streamable-HTTP client logs a failed session
+/// delete at ERROR while tearing a connection down, which a client subcommand
+/// always does after its result is in hand: the call succeeded, and the line
+/// blames the transport for the call anyway. That target is off rather than
+/// capped, because any level that includes ERROR prints it and only OFF leaves
+/// it out. Nothing is lost: the transport returns its failures to the caller
+/// rather than only logging them, so the call's own report is stdout, the hub's
+/// error object on stderr, and the exit code.
+pub const CLIENT_LOG_DIRECTIVES: &str = "error,rmcp::transport::streamable_http_client=off";
+
+/// The target whose own lines a client subcommand does not report.
+const TRANSPORT: &str = "rmcp::transport::streamable_http_client";
+
+/// The filter a client subcommand runs under, given what `RUST_LOG` asked for.
+///
+/// `None` is the default, and is [`CLIENT_LOG_DIRECTIVES`]. A `RUST_LOG` that
+/// names the transport is the operator asking for it by name and is used as
+/// written. Any other `RUST_LOG` is theirs with the same cap applied, since
+/// `RUST_LOG=error` is what a hook exports without asking to read a failed
+/// session delete as if the call had failed, and a cap a common setting
+/// switched off would not be a cap.
+pub fn client_log_directives(asked: Option<String>) -> String {
+    match asked {
+        Some(asked) if asked.contains(TRANSPORT) => asked,
+        Some(asked) => format!("{asked},{TRANSPORT}=off"),
+        None => CLIENT_LOG_DIRECTIVES.to_string(),
+    }
+}
+
 /// A client run that stopped, carrying the exit code a hook branches on.
 ///
 /// The codes follow `sysexits.h` so a hook can tell "misconfigured" from

@@ -30,7 +30,13 @@ impl StdioClient {
     /// `RUST_LOG` is `error` unless `env` says otherwise.
     pub fn spawn(args: &[&str], env: &[(&str, String)]) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
-        command.args(args).env("RUST_LOG", "error");
+        command
+            .args(args)
+            .env("RUST_LOG", "error")
+            .env("HUB_CONFIG", super::no_client_config())
+            .env_remove("HUB_URL")
+            .env_remove("HUB_TOKEN")
+            .env_remove("HUB_PROJECT");
         for (key, value) in env {
             command.env(key, value);
         }
