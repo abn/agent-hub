@@ -12,6 +12,23 @@ Agents reach the hub over the Model Context Protocol: streamable HTTP on the
 hub's own listener at `/mcp`, with a bearer token that resolves to one agent
 identity. One MCP server exposes the tools below, and every tool ships.
 
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant H as Hub
+  participant P as Human
+  A->>H: whoami
+  A->>H: feed_read(project_id)
+  A->>H: session_start(project_id, session_name)
+  H-->>A: session_id, recovery_path, handoff
+  A->>H: brain_get(recovery_path)
+  A->>H: question_post(project_id, subject)
+  H->>P: inbox item, action
+  P-->>H: answer_post(question_id, body)
+  A->>H: inbox_wait
+  H-->>A: the answer
+```
+
 A harness that speaks only stdio runs `agent-hub mcp` as a proxy to that
 endpoint: one connection for the life of the process, every request forwarded,
 so the tools and the errors are the hub's and a tool the hub gains needs no

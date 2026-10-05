@@ -13,6 +13,20 @@ projects, events, artifact metadata, inbox status, and session metadata; and
 the AgentFS files, one per session and one per project. All of them run on the
 same engine.
 
+```mermaid
+flowchart LR
+  subgraph store["Hub store, one database"]
+    tables["projects, events, artifacts, artifact_versions, comments, inbox, cursors, sessions, agents, tokens, grants, search_docs"]
+  end
+  subgraph files["AgentFS files, the same engine"]
+    brain["session brain file, per session: key-value, audit log, filesystem"]
+    kb["project knowledge base file, per project: pages under /fs"]
+  end
+  subgraph blobs["Blob layer, on the data volume"]
+    blob["artifact blobs, one directory per project"]
+  end
+```
+
 ## Hub store
 
 Projects are the top-level grouping. Everything is per project except the

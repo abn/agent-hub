@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The wiki gains diagrams
+
+* **Add**: mermaid diagrams where a picture carries more than the prose: the
+  one-process shape in [Overview](overview.md), the endpoint and wrapper
+  boundaries in [Components](architecture/components.md), the two kinds of
+  durable state in [Data model](architecture/data-model.md), and the session
+  start and question sequence in
+  [Agent surface](architecture/agent-surface.md).
+
 ### The container can be deployed as a service
 
 * **Creation**: added [Deploy the hub as a service](usage/deploy.md), a guide to

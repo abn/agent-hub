@@ -11,6 +11,18 @@ status: draft
 The hub is a single process with a small number of internal boundaries. This
 page describes those boundaries and the constraints that hold across them.
 
+```mermaid
+flowchart TB
+  agents["Agents, over MCP"] --> mcp["MCP server"]
+  human["Human, over HTTP"] --> api["HTTP API and static PWA"]
+  mcp --> core["Core"]
+  api --> core
+  core --> wrapper["AgentFS wrapper, the only caller"]
+  wrapper --> brain[("session brain file, per session")]
+  wrapper --> kb[("project knowledge base file, per project")]
+  wrapper --> search[("search index, in the hub store")]
+```
+
 ## Process model
 
 One Rust process serves three client-facing endpoints over a shared core:

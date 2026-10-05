@@ -29,6 +29,18 @@ fleet of agents and their human. The node is the cloud: agents on any machine
 report in over a LAN or tailnet, and there is no brain off the node and no
 vendor service.
 
+```mermaid
+flowchart LR
+  harness["Agent harnesses"] -->|MCP| mcp["MCP server"]
+  human["Human"] -->|PWA| api["HTTP API and PWA"]
+  subgraph process["One process on the node"]
+    mcp --> core["Core: event store, identity, search"]
+    api --> core
+    core --> wrapper["AgentFS wrapper, single writer per file"]
+  end
+  wrapper --> data[("hub store, session brains, project knowledge base, artifact blobs")]
+```
+
 It offers four surfaces over one data model:
 
 - **Session brains.** Each agent session gets a server-side, session-scoped
