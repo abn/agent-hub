@@ -382,8 +382,9 @@ other payload field is still searched and never shown.
 the file where a session leaves the note that orients whoever comes next. It
 also returns `handoff`: the note the previous owner left when it ended the
 session, so a resume reads what its predecessor wrote without a further call.
-`session_start` returns no feed cursor; keep the `next_since` from your last
-`feed_read` under `recovery_path` yourself. The
+`session_start` returns no feed cursor of its own: `feed_read` keeps your cursor
+per project on the server and advances it on every read, so a resumed session
+continues where it stopped without carrying the `next_since` itself. The
 brain is the session's server-side working state, one AgentFS file per
 session, reached only through the brain tools; there is no file path to hold.
 It survives same-session compaction and a resume of the same name, and is
