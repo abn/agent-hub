@@ -306,6 +306,7 @@ impl HubServer {
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
         if store == Store::Project {
             check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
+            store.check_namespace(&params.path).map_err(to_error_data)?;
             let project_id = self
                 .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
                 .await
@@ -478,6 +479,7 @@ impl HubServer {
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
         if store == Store::Project {
             check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
+            store.check_namespace(&params.path).map_err(to_error_data)?;
             let project_id = self
                 .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
                 .await
@@ -591,6 +593,11 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
+        // The target is a knowledge base page, so it is held to the project's
+        // namespace, for the same reason a put is.
+        Store::Project
+            .check_namespace(&params.to_path)
+            .map_err(to_error_data)?;
         let written = knowledge::promote(
             &self.state,
             &project_id,
@@ -673,8 +680,29 @@ impl Store {
     /// write does. A session brain takes the path as given.
     fn read_path(self, path: &str) -> Result<String> {
         match self {
-            Self::Project => knowledge::page_path(path),
+            Self::Project => {
+                self.check_namespace(path)?;
+                knowledge::page_path(path)
+            }
             Self::Session => Ok(path.to_string()),
+        }
+    }
+
+    /// Refuse a path that names no namespace of the store it was sent to.
+    ///
+    /// The two stores do not hold the same paths: a session brain has a
+    /// key-value namespace and a filesystem one, and the knowledge base has
+    /// pages under `/fs/` only. So the check is the store's own, and its
+    /// refusal names the namespace that store has rather than both of them.
+    /// Without it a path like `notes.md` came back naming `/kv/`, which the
+    /// knowledge base has no part of.
+    fn check_namespace(self, path: &str) -> Result<()> {
+        match self {
+            Self::Session => Ok(()),
+            Self::Project if path == "/fs" || path.starts_with("/fs/") => Ok(()),
+            Self::Project => Err(Error::InvalidArgument(format!(
+                "the project knowledge base holds pages under /fs/, so '{path}' has no meaning there; use an /fs/ path"
+            ))),
         }
     }
 

@@ -598,6 +598,62 @@ fn the_project_store_refuses_a_key_path() {
     }
 }
 
+/// A path naming no namespace at all is the case that used to answer with the
+/// brain's own refusal, which offered `/kv/` and `/fs/`: the knowledge base has
+/// no `/kv/`, so a caller that took the message at its word had nowhere to go.
+/// The refusal names the namespace this store has.
+#[test]
+fn the_project_store_names_its_own_namespace_in_a_path_refusal() {
+    let data_dir = TempDir::new("project-namespace");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
+    server.initialize();
+    server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "named"}),
+    );
+
+    for call in [
+        server.call_tool(
+            "brain_put",
+            json!({"path": "notes.md", "content": "x", "store": "project"}),
+        ),
+        server.call_tool("brain_get", json!({"path": "notes.md", "store": "project"})),
+        server.call_tool(
+            "brain_list",
+            json!({"path": "notes.md", "store": "project"}),
+        ),
+        server.call_tool(
+            "brain_delete",
+            json!({"path": "notes.md", "store": "project"}),
+        ),
+    ] {
+        assert_eq!(error_code(&call), "invalid_argument", "got {call}");
+        let message = error_message(&call);
+        assert!(
+            message.contains("/fs/"),
+            "the refusal names the namespace the project store has, got {message}"
+        );
+        assert!(
+            !message.contains("/kv/"),
+            "and names no namespace it does not have, got {message}"
+        );
+    }
+
+    // A session brain holds both namespaces, so its refusal keeps naming both:
+    // the message follows the store, not a fixed string.
+    let session = server.call_tool(
+        "brain_put",
+        json!({"path": "notes.md", "content": "x", "store": "session"}),
+    );
+    assert_eq!(error_code(&session), "invalid_argument", "got {session}");
+    let message = error_message(&session);
+    assert!(
+        message.contains("/kv/") && message.contains("/fs/"),
+        "the session store names both its namespaces, got {message}"
+    );
+}
+
 #[test]
 fn a_project_that_does_not_exist_gets_no_knowledge_base() {
     let data_dir = TempDir::new("project-missing");
