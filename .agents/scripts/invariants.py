@@ -3024,6 +3024,269 @@ def check_wiki_directory_row(page, watch: Watch, port: int, project: str) -> Non
     watch.drain_rejections()
 
 
+# The status pill on a feed row, measured rather than read. The pill is a fixed
+# 22px box, so a wrap does not change the box it measures: it shows as text
+# spilling out of it. What tells the two apart is the text itself, counted as
+# line boxes through a Range over the pill's own text nodes, and the pill's
+# scroll height against its client height.
+#
+# `getClientRects()` is not the instrument here: the pill is a flex child of the
+# row's title bar, so it is blockified and reports one rect whether its words
+# are on one line or three.
+PILL_ROWS = r"""
+() => {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const lineBoxes = (el) => {
+    const range = document.createRange();
+    let lines = 0;
+    for (const node of el.childNodes) {
+      if (node.nodeType !== 3 || !node.textContent.trim()) continue;
+      range.selectNodeContents(node);
+      lines += range.getClientRects().length;
+    }
+    return lines;
+  };
+  return [...document.querySelectorAll('.feed-row')]
+    .filter((row) => row.querySelector('.pill-status'))
+    .map((row) => {
+      const pill = row.querySelector('.pill-status');
+      const title = row.querySelector('.title');
+      const bar = row.querySelector('.feed-row-title-bar');
+      return {
+        id: row.dataset.id || '',
+        title: (title.textContent || '').replace(/\s+/g, ' ').trim(),
+        pillText: (pill.textContent || '').replace(/\s+/g, ' ').trim(),
+        height: r2(pill.getBoundingClientRect().height),
+        clientHeight: pill.clientHeight,
+        scrollHeight: pill.scrollHeight,
+        textLines: lineBoxes(pill),
+        width: r2(pill.getBoundingClientRect().width),
+        clientWidth: pill.clientWidth,
+        scrollWidth: pill.scrollWidth,
+        whiteSpace: getComputedStyle(pill).whiteSpace,
+        titleScroll: title.scrollWidth,
+        titleClient: title.clientWidth,
+        titleTextOverflow: getComputedStyle(title).textOverflow,
+        titleWhiteSpace: getComputedStyle(title).whiteSpace,
+        barOverflow: bar ? r2(bar.scrollWidth - bar.clientWidth) : null,
+      };
+    });
+}
+"""
+
+
+def check_feed_status_pill_is_one_line(page, watch: Watch, port: int, project: str) -> None:
+    """The "Waiting on you" pill is one line in a feed row, at both widths.
+
+    The row's title and the pill share one line of a 300px index pane, and the
+    pill is the one that gave way: its words broke across two lines inside a box
+    whose height never moved, so the overflow spilled out of a 22px pill. The
+    title is the reader's own text and the pill is a fixed state, so the title
+    truncates and the pill keeps its width.
+
+    The question is asked of a row seeded here, because an approval or a
+    question seeded for another check may have been decided by the time this
+    one runs.
+    """
+    watch.enter("feed: the status pill stays on one line")
+    subject = "Rotate the staging certificate on the edge host"
+    event = one_off_question(port, project, subject)
+    if not event:
+        watch.fail("the seeded question never reached the feed")
+        return
+    row = f'main [data-id="{event}"]'
+    previous = page.viewport_size
+    try:
+        for width, height in ((1440, 900), (390, 844)):
+            page.set_viewport_size({"width": width, "height": height})
+            goto(page, "#/settings", "Settings")
+            goto(page, f"#/projects/{quote(project)}/feed", None)
+            if not settle(page, f"!!document.querySelector({json.dumps(row)})"):
+                watch.fail(f"at {width}px the seeded row is not in the feed")
+                continue
+            page.wait_for_timeout(300)
+            for measured in page.evaluate(PILL_ROWS):
+                what = (
+                    f"at {width}px the row {measured['title']!r} carries a pill"
+                    f" {measured['pillText']!r} that"
+                )
+                if measured["textLines"] != 1:
+                    watch.fail(
+                        f"{what} runs on {measured['textLines']} lines, not one"
+                        f" (white-space {measured['whiteSpace']})"
+                    )
+                if measured["scrollHeight"] > measured["clientHeight"]:
+                    watch.fail(
+                        f"{what} spills {measured['scrollHeight']}px of content into a"
+                        f" {measured['clientHeight']}px box"
+                    )
+                if round(measured["height"], 2) != round(measured["clientHeight"], 2):
+                    watch.fail(
+                        f"{what} renders {measured['height']}px tall against a"
+                        f" {measured['clientHeight']}px single-line box"
+                    )
+                if measured["scrollWidth"] > measured["clientWidth"]:
+                    watch.fail(
+                        f"{what} overflows its own width:"
+                        f" scrollWidth {measured['scrollWidth']} > clientWidth"
+                        f" {measured['clientWidth']}"
+                    )
+                if measured["barOverflow"] > 0.5:
+                    watch.fail(
+                        f"{what} pushed the row's title bar out:"
+                        f" {measured['barOverflow']}px past its width"
+                    )
+            rows = page.evaluate(PILL_ROWS)
+            the_row = next((m for m in rows if m["id"] == event), None)
+            if the_row is None:
+                continue
+            if the_row["titleTextOverflow"] != "ellipsis":
+                watch.fail(
+                    f"at {width}px the row's title does not ellipsise"
+                    f" (text-overflow {the_row['titleTextOverflow']})"
+                )
+            if the_row["titleScroll"] <= the_row["titleClient"]:
+                watch.fail(
+                    f"at {width}px the row's title was not the element that truncated:"
+                    f" {the_row['titleScroll']}px of text in {the_row['titleClient']}px"
+                    f" (title {the_row['title']!r}, pill {the_row['width']}px)"
+                )
+    finally:
+        try:
+            harness.request(
+                port, "POST", f"/api/v1/questions/{event}/answer", {"body": "answered by the check"}
+            )
+        except Exception:
+            pass
+        if previous:
+            page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+# A search result row and the search preview, read as the reader reads them: the
+# title text and the address the row points at.
+SEARCH_ROWS = r"""
+() => [...document.querySelectorAll('.search-row')].map((row) => {
+  const link = row.querySelector('.search-link');
+  return {
+    title: ((row.querySelector('.title') || {}).textContent || '').trim(),
+    tag: link ? link.tagName : '',
+    href: link ? link.getAttribute('href') : null,
+  };
+})
+"""
+
+SEARCH_PREVIEW = r"""
+() => ({
+  path: ((document.querySelector('.search-stage-path') || {}).textContent || '').trim(),
+  title: ((document.querySelector('.search-preview-title') || {}).textContent || '').trim(),
+})
+"""
+
+
+def check_search_kb_hit_reads_as_a_display_path(
+    page, watch: Watch, port: int, project: str
+) -> None:
+    """A wiki search hit reads the page's path, not the namespace it is stored in.
+
+    A knowledge base page is written under `/fs/`, and the index takes the doc
+    title from the page's frontmatter or, with none, from that path, so a hit
+    read `/fs/notes.md` in the result row and again in the preview while the
+    wiki index beside it read `notes.md`. The reader is given the wiki's display
+    path, and only the display: the path the hit carries and the query that
+    found it are the hub's answer, untouched.
+
+    The term is one nothing else on the hub carries, so every row on screen is
+    a wiki hit. A session brain's own `/fs/` path stays, because that namespace
+    is what addresses a brain.
+    """
+    watch.enter("search: a wiki hit reads its display path")
+    term = "marmoset"
+    api = f"/api/v1/projects/{quote(project)}/kb/pages"
+    # One page with no title in its frontmatter, so the path is the title the
+    # index keeps, and one with a title, so a real title is still shown as one.
+    harness.request(
+        port,
+        "PUT",
+        f"{api}/runbooks/{term}-untitled.md",
+        {"content": f"---\ntype: note\n---\n# Field\n\nA {term} page with no title of its own.\n"},
+    )
+    harness.request(
+        port,
+        "PUT",
+        f"{api}/runbooks/{term}-titled.md",
+        {"content": f"---\ntitle: Deploy the {term}\ntype: note\n---\n# Field\n\nA {term} page.\n"},
+    )
+    previous = page.viewport_size
+    try:
+        for width, height in ((1440, 900), (390, 844)):
+            page.set_viewport_size({"width": width, "height": height})
+            goto(page, "#/settings", "Settings")
+            before = len(watch.calls)
+            goto(page, f"#/search?q={term}", "Search")
+            if not settle(page, "!!document.querySelector('.search-row')"):
+                watch.fail(f"at {width}px the search for {term!r} drew no result row")
+                continue
+            page.wait_for_timeout(400)
+            rows = page.evaluate(SEARCH_ROWS)
+            titles = [row["title"] for row in rows]
+            if not titles:
+                watch.fail(f"at {width}px the search for {term!r} drew no result row")
+                continue
+            for row in rows:
+                if "/fs/" in row["title"] or row["title"].startswith("/"):
+                    watch.fail(
+                        f"at {width}px a wiki hit shows its stored path {row['title']!r}"
+                        " where the wiki index shows the display path"
+                    )
+            if f"runbooks/{term}-untitled.md" not in titles:
+                watch.fail(
+                    f"at {width}px no hit reads the display path"
+                    f" {f'runbooks/{term}-untitled.md'!r} (got {titles})"
+                )
+            if f"Deploy the {term}" not in titles:
+                watch.fail(
+                    f"at {width}px a wiki hit with a title of its own lost it:"
+                    f" got {titles}"
+                )
+            asked = [call for call in watch.calls[before:] if "/api/v1/search?" in call]
+            if not asked or f"q={term}" not in asked[0]:
+                watch.fail(f"the query was not sent as typed ({asked})")
+            if width == 390:
+                continue
+            # `document.querySelector` takes plain CSS, so the row is found by
+            # its title text in JS rather than with a Playwright pseudo-class.
+            target = f"runbooks/{term}-untitled.md"
+            finder = (
+                "() => [...document.querySelectorAll('.search-row')].find("
+                "(r) => ((r.querySelector('.title') || {}).textContent || '').trim() === "
+                f"{json.dumps(target)})"
+            )
+            if not settle(page, f"({finder})()"):
+                watch.fail("the wiki hit with no title of its own is not on screen")
+                continue
+            # A real click, not a synthetic one: the row's own handler is what
+            # moves the preview, and a dispatched `.click()` did not reach it.
+            page.locator(".search-row", has_text=target).first.click()
+            page.wait_for_timeout(300)
+            preview = page.evaluate(SEARCH_PREVIEW)
+            # The stored namespace is `/fs/`; the display path is the same path
+            # without it, so only the namespace's presence is the defect.
+            if "/fs/" in preview["path"]:
+                watch.fail(
+                    f"the search preview path shows the stored path ({preview['path']!r})"
+                )
+            if preview["title"] != f"runbooks/{term}-untitled.md":
+                watch.fail(
+                    f"the search preview title reads {preview['title']!r},"
+                    f" expected {f'runbooks/{term}-untitled.md'!r}"
+                )
+    finally:
+        if previous:
+            page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 # The project's four section tabs and the geometry that decides whether the
 # last one is readable: the scroll region, every tab's box, the overflow button
 # beside it, and whether a count is painted. A count is only a count while it is
@@ -3563,6 +3826,8 @@ def run() -> int:
                 run_step(watch, check_artifacts_group_by_agent, page, watch, port, project)
                 run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
                 run_step(watch, check_inbox_and_search_phone, page, watch, port, project)
+                run_step(watch, check_feed_status_pill_is_one_line, page, watch, port, project)
+                run_step(watch, check_search_kb_hit_reads_as_a_display_path, page, watch, port, project)
                 run_step(watch, capture_b7_screenshots, page, watch, port, project, session_id, artifact_id)
                 # 8a. A long summary is body prose, the inbox card holds the
                 # gutter, the version sheet clears contrast in both themes, and
