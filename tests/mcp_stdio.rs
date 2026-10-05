@@ -94,7 +94,10 @@ fn embedded_stdio_against_running_hub_refuses() {
         .env("RUST_LOG", "error")
         .env("HUB_DATA_DIR", data_dir.path())
         .env_remove("HUB_URL")
-        .env_remove("HUB_CONFIG")
+        // A config file of whoever runs the suite must not turn this into a
+        // proxy: point HUB_CONFIG at a path in the test's own directory that
+        // does not exist, so the binary reads no user file.
+        .env("HUB_CONFIG", data_dir.path().join("client-config"))
         .stdin(Stdio::null())
         .output()
         .expect("run the binary");

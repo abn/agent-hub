@@ -73,6 +73,15 @@ impl StdioClient {
     /// Run the stdio MCP server over a data directory.
     pub fn mcp(data_dir: &Path, env: &[(&str, &str)]) -> Self {
         let mut all = vec![("HUB_DATA_DIR", data_dir.to_string_lossy().into_owned())];
+        // The config file of whoever runs the suite must never decide this
+        // binary's mode: a `url` in it makes `mcp` proxy to that hub instead of
+        // serving this data directory, and the suite then calls a hub it never
+        // seeded. Point HUB_CONFIG at a path inside the test's own directory
+        // that does not exist, so no user file is read at all.
+        all.push((
+            "HUB_CONFIG",
+            data_dir.join("client-config").to_string_lossy().into_owned(),
+        ));
         all.extend(env.iter().map(|(key, value)| (*key, value.to_string())));
         Self::spawn(&["mcp"], &all)
     }
