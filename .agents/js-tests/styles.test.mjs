@@ -40,17 +40,13 @@ const SHELL = "artifact-shell.css";
 const FIRST_PARTY = [APP, TOKENS, SHELL];
 
 /**
- * A defect the walk found and no substring check could have, held open rather
- * than left to fail the gate on a lane that cannot fix it.
- *
- * `--r-3` is referenced by the composer's field and declared in no stylesheet,
- * so `border-radius: var(--r-3)` is invalid at computed-value time and the
- * field draws the initial `0`: square corners where the design says "a rounded
- * container". The fix belongs in the token file, which is another lane's file,
- * so the reference is listed here and the list is deleted with the fix. Delete
- * the entry as part of that change, not after it.
+ * A token reference the walk cannot resolve and that is an accepted defect
+ * rather than a design decision. Empty: the one entry it held, `--r-3`
+ * referenced by the composer's field and declared nowhere, is fixed by pointing
+ * that rule at the container radius `--r-2`. Add an entry only with the reason
+ * it is accepted, and delete it as part of the fix.
  */
-const KNOWN_UNRESOLVED = new Set(["--r-3"]);
+const KNOWN_UNRESOLVED = new Set();
 
 describe("the stylesheet parses", () => {
   it.each(FIRST_PARTY)("web/%s is a stylesheet a walk can read", (name) => {

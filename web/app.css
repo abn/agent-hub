@@ -5257,7 +5257,9 @@ a.session-back {
   display: flex;
   align-items: flex-end;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-3);
+  /* The container radius. This read `--r-3`, a token no stylesheet declares, so
+     the field computed to square corners instead. */
+  border-radius: var(--r-2);
   background: var(--bg);
   padding: 4px;
   /* The send control is a 44px touch target and it lives inside this box, so
