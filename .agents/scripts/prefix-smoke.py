@@ -37,6 +37,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urljoin
 
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".agents" / "skills" / "seeded-hub" / "scripts"))
+
 import hub_harness as harness
 
 NAME = "prefix-smoke"

@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".agents" / "skills" / "seeded-hub" / "scripts"))
+
 import hub_harness as harness
 
 NAME = "web-invariants"

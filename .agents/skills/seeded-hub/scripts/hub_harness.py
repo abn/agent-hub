@@ -772,7 +772,7 @@ def router_screens() -> list[str]:
     The checks that must cover every screen read the list from here, so a new
     screen is a failure until it is covered rather than a gap nobody sees.
     """
-    app_js = (Path(__file__).resolve().parents[3] / "web" / "app.js").read_text(encoding="utf-8")
+    app_js = (Path(__file__).resolve().parents[4] / "web" / "app.js").read_text(encoding="utf-8")
     # One table is read, so one table is all there may be: a second call, or
     # one handed something other than a literal, registers screens unseen.
     code = re.sub(r"/\*.*?\*/", "", app_js, flags=re.S)
@@ -793,7 +793,7 @@ def scratch_root() -> str:
     its data there for good. The build tree is a disk and `cargo clean` empties
     it.
     """
-    root = Path(__file__).resolve().parents[3] / "target" / "tmp"
+    root = Path(__file__).resolve().parents[4] / "target" / "tmp"
     root.mkdir(parents=True, exist_ok=True)
     return str(root)
 
