@@ -286,7 +286,7 @@ agent-hub call session_start \
 agent-hub call brain_get \
   '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
 agent-hub call brain_put \
-  '{"path":"/fs/RECOVERY.md","store":"session","content":"cursor: 42\nwhat this session is doing","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+  '{"path":"/fs/RECOVERY.md","store":"session","content":"what this session is doing","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
 ```
 
 A call that names no session is still about the active session, so a one-shot

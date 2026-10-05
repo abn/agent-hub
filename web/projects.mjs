@@ -295,7 +295,9 @@ export async function projectsIndexScreen(gen, passedProjects) {
 
   const unseenMap = new Map((homeData?.unseen || []).map((u) => [u.project_id, u.events || 0]));
 
-  const isPersonal = (p) => p.id.startsWith("space-") || p.display_name.endsWith(" (personal)");
+  // The hub marks a personal space on the project payload; the id prefix is
+  // not a contract to read it from.
+  const isPersonal = (p) => p.is_personal === true;
   const regularProjects = projects.filter((p) => !isPersonal(p));
   const agentSpaces = projects.filter(isPersonal);
 
