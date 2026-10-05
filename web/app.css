@@ -7440,10 +7440,9 @@ dialog.dialog-project-delete {
   padding: 2px;
   background: var(--surface-2);
   border-radius: var(--r-1);
-  /* 32 is the segmented rhythm the project's switcher and Search's chips
-     already hold at 390, so the track is that plus its own 2px padding either
-     side. */
-  height: 36px;
+  /* The 34px track the design states for this control, not the 32px rhythm the
+     project switcher and Search chips hold. */
+  height: 34px;
   box-sizing: border-box;
 }
 .settings-glyph-seg {
@@ -7487,8 +7486,8 @@ dialog.dialog-project-delete {
 .settings-theme-btn {
   width: 36px;
   min-width: 36px;
-  height: 32px;
-  min-height: 32px;
+  height: 30px;
+  min-height: 30px;
   display: grid;
   place-items: center;
   background: none;
@@ -7506,7 +7505,7 @@ dialog.dialog-project-delete {
 .settings-theme-track {
   flex: none;
   display: flex;
-  height: 36px;
+  height: 34px;
   padding: 2px;
   box-sizing: border-box;
   border-radius: var(--r-1);
