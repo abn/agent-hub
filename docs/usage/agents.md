@@ -227,8 +227,9 @@ Be clear about the boundary. The hub ships the server-side session brains, the
 durable project knowledge base, the MCP endpoint and the stdio proxy, the
 one-shot `call` and `kb` commands, and the served guide at `agenthub://skill`.
 It does not ship a harness plugin, a session-start hook, or a bulk importer.
-Wiring the calls above into a harness's startup, choosing and moving the notes
-to bring over, and keeping the feed cursor are steps the operator takes. The
+Wiring the calls above into a harness's startup and choosing and moving the
+notes to bring over are steps the operator takes. The feed cursor is not among
+them: the hub keeps it, so an agent that reads the feed carries nothing. The
 hub exposes the primitives; the integration is yours.
 
 ## See also
