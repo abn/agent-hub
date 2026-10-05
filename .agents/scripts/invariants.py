@@ -2023,7 +2023,18 @@ def check_project_tools_row(page, watch: Watch, project: str) -> None:
             watch.fail(f"filter-and-group button is not 44x44px, got {box['width']}x{box['height']}")
 def check_projects_register_segmented_and_rows(page, watch: Watch, port: int) -> None:
     watch.enter("projects register: rows, no storage card, and the switcher by width")
-    harness.request(port, "POST", "/api/v1/projects", {"id": "space-test-agent", "display_name": "Test Space (personal)"})
+    # A real agent space, so the register is read from the hub's own mark
+    # (`is_personal`) rather than from a project's name: creating the agent
+    # makes the space, and its id is what the register must file as a space.
+    agent = json.loads(
+        harness.request(
+            port,
+            "POST",
+            "/api/v1/agents",
+            {"id": "space-test-agent", "display_name": "Test Space"},
+        )
+    )
+    space_id = agent["personal_project_id"]
 
     goto(page, "#/projects", "Projects")
     page.wait_for_timeout(300)
@@ -2071,13 +2082,13 @@ def check_projects_register_segmented_and_rows(page, watch: Watch, port: int) ->
 
         spaces_tab.first.click()
         page.wait_for_timeout(200)
-        visible_spaces = page.locator('.project-row:visible[data-id="space-test-agent"]')
+        visible_spaces = page.locator(f'.project-row:visible[data-id="{space_id}"]')
         if visible_spaces.count() == 0:
             watch.fail("Agent spaces tab did not show agent spaces")
 
         proj_tab.first.click()
         page.wait_for_timeout(200)
-        visible_spaces_after = page.locator('.project-row:visible[data-id="space-test-agent"]')
+        visible_spaces_after = page.locator(f'.project-row:visible[data-id="{space_id}"]')
         if visible_spaces_after.count() > 0:
             watch.fail("Projects tab unexpectedly shows agent space rows")
 
