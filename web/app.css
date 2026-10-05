@@ -141,9 +141,13 @@ h3.group {
 }
 /* end component: kind glyph */
 
+/* A pill is a value in one line, and it keeps its own width: it never shrinks
+   as a flex child, so a row too narrow for it truncates the title beside it
+   rather than breaking the pill's words across two lines. */
 .pill {
   display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
   font-size: 12px; font-weight: 600; background: var(--action-bg); color: var(--action);
+  white-space: nowrap; flex: none;
 }
 /* The status pill ("Waiting on you") carries a dot, so it is a flex box at the
    same 22px height as the live token pill rather than the padded text pill. */
@@ -152,6 +156,7 @@ h3.group {
   height: 22px; padding: 0 8px; border-radius: var(--r-pill);
   background: var(--action-bg); color: var(--action);
   font-size: 12px; font-weight: 600;
+  white-space: nowrap; flex: none;
 }
 .pill-status .pill-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--action); }
 /* A value pill that marks a state rather than an alert: neutral surface, so it

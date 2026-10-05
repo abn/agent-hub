@@ -225,6 +225,17 @@ function destination(hit) {
 
 const said = (value) => (typeof value === "string" && value ? value : "");
 
+// A knowledge base page is stored under the `/fs/` namespace, and the index
+// takes the doc title from the page's frontmatter or, failing that, from that
+// path. So a wiki hit reads `/fs/notes.md` where the wiki index beside it reads
+// `notes.md`. This is the wiki's own display path (web/wiki.mjs) applied to the
+// display string only: the path the hit carries, and the query that found it,
+// are left exactly as the hub answered.
+function displayTitle(text, kind) {
+  const shown = said(text);
+  return kind === "kb" ? shown.replace(/^\/fs\//, "").replace(/^\//, "") : shown;
+}
+
 // Where the hit lives and what it is, in words: the project, then what only
 // its family carries. A feed hit names who wrote it; an artifact its current
 // version and size; a brain hit its session by name and whether that session
@@ -264,7 +275,7 @@ function resultRow(hit, words) {
   if (href) body.href = href;
   const head = el("span", "search-head");
   const titleSpan = el("span", "title");
-  titleSpan.appendChild(highlighted(hit.title || hit.ref_id, words));
+  titleSpan.appendChild(highlighted(displayTitle(hit.title || hit.ref_id, hit.kind), words));
   head.appendChild(titleSpan);
   const changed = Date.parse(hit.updated_at);
   if (Number.isFinite(changed)) head.appendChild(el("span", "search-time mono", relative(changed)));
@@ -366,7 +377,7 @@ export function previewHighlighted(text, words) {
 function previewPath(hit) {
   const p = projectName(hit) || hit.project_id;
   const fam = FAMILIES[hit.kind] ? FAMILIES[hit.kind].label.toLowerCase() : (hit.kind || "feed");
-  const name = hit.title || hit.session_name || hit.ref_id || "untitled";
+  const name = displayTitle(hit.title || hit.session_name || hit.ref_id, hit.kind) || "untitled";
   return `${p} / ${fam} / ${name}`;
 }
 
@@ -406,7 +417,7 @@ function renderPreview(stagePane, hit, words) {
   const content = el("div", "search-stage-content");
   const article = el("article", "search-preview-article prose");
 
-  const titleText = hit.title || hit.ref_id || hit.session_name || "Untitled";
+  const titleText = displayTitle(hit.title || hit.ref_id || hit.session_name, hit.kind) || "Untitled";
   const title = el("h2", "search-preview-title");
   title.appendChild(previewHighlighted(titleText, words));
 
