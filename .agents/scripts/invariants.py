@@ -925,6 +925,53 @@ def check_gate_in_the_app(page, watch: Watch, project: str, artifact: str) -> No
     watch.drain_rejections()
 
 
+def check_shared_artifact_renders_for_the_owner(
+    page, watch: Watch, port: int, project: str, artifact: str
+) -> None:
+    """A live share link must not break the owner's own reader.
+
+    The plain artifact's page is concealed while a link is live, so the frame
+    reads it with a pass instead. Without one the stage painted the 404 body
+    next to an artifact and a thread that had loaded, which is what sharing
+    used to do to the person who shared it.
+    """
+    watch.enter("artifacts: a shared artifact still reads in the app")
+    harness.request(port, "POST", f"/api/v1/artifacts/{artifact}/share")
+    try:
+        goto(page, f"#/artifacts/{quote(artifact)}?project={quote(project)}", None)
+        if not settle(page, "!!document.querySelector('main iframe#hub-frame')", timeout=8000):
+            watch.fail("the viewer opened no frame for the shared artifact")
+            return
+        inner = gate_of(page)
+        document = inner.frame_locator("#hub-frame")
+        try:
+            document.get_by_text("check").first.wait_for(timeout=15000)
+        except Exception as error:
+            shown = ""
+            try:
+                shown = inner.locator("body").inner_text()[:200]
+            except Exception:
+                pass
+            watch.fail(f"the shared artifact did not render in the stage: {error} {shown!r}")
+            return
+        page_text = inner.locator("body").inner_text()
+        if "Not Found" in page_text or "not found" in page_text:
+            watch.fail(
+                f"the stage painted the concealed page instead of the document: {page_text[:200]!r}"
+            )
+        rendered = document.locator("body").inner_text()
+        output_dir = Path("target/tmp/screenshots")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        shot = output_dir / "shared_artifact_viewer.png"
+        page.screenshot(path=str(shot))
+        print(f"shared artifact rendered text: {rendered.strip()[:200]!r}")
+        print(f"shared artifact screenshot: {shot.resolve()}")
+    finally:
+        harness.request(port, "DELETE", f"/api/v1/artifacts/{artifact}/share")
+        goto(page, f"#/projects/{quote(project)}/artifacts", "Artifacts")
+    watch.drain_rejections()
+
+
 def check_public_gate_remembers_and_forgets(port: int, context, project: str, artifact: str) -> list[str]:
     """The public page is a top-level document, so the store works there.
 
@@ -2886,6 +2933,9 @@ def run() -> int:
                         watch.fail(failure)
 
                 run_step(watch, check_public_gate, port, context, project, protected_id)
+                run_step(
+                    watch, check_shared_artifact_renders_for_the_owner, page, watch, port, project, artifact_id
+                )
 
                 # 6. One decision
                 run_step(watch, check_inbox_one_decision, page, watch, port, project)

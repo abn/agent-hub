@@ -687,6 +687,49 @@ async fn a_share_pins_the_current_version_and_refuses_an_unknown_one() {
 }
 
 #[tokio::test]
+async fn a_share_stops_being_live_when_it_is_revoked() {
+    let dir = TempDir::new("artifact-share-active");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+
+    assert!(
+        !artifacts::has_active_share(&db, &artifact.id)
+            .await
+            .expect("read shares"),
+        "an artifact nobody has shared has no live share"
+    );
+
+    artifacts::create_or_rotate_share(&db, &artifact.id, None)
+        .await
+        .expect("share");
+    assert!(
+        artifacts::has_active_share(&db, &artifact.id)
+            .await
+            .expect("read shares"),
+        "a share row is live while it is not revoked"
+    );
+
+    artifacts::revoke_share(&db, &artifact.id)
+        .await
+        .expect("revoke");
+    assert!(
+        !artifacts::has_active_share(&db, &artifact.id)
+            .await
+            .expect("read shares"),
+        "the revoked row is history, not access"
+    );
+    assert!(
+        artifacts::get_share_for_artifact(&db, &artifact.id)
+            .await
+            .expect("read share")
+            .is_some(),
+        "the row itself is kept, so the link that was withdrawn stays known"
+    );
+}
+
+#[tokio::test]
 async fn validation_rejects_bad_metadata() {
     let dir = TempDir::new("artifact-validation");
     let db = open(&dir).await;

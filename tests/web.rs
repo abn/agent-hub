@@ -974,8 +974,9 @@ fn viewer_module_renders_unlocks_and_themes() {
         "the shared loader matches the frozen loader contract"
     );
     assert!(
-        VIEWER_JS.contains("?version="),
-        "the picker navigates with ?version=N"
+        VIEWER_JS.contains("picker.value") && VIEWER_JS.contains("URLSearchParams"),
+        "the picker navigates with ?version=N, rebuilt from this page's own query \
+         so the theme and the owner pass survive the switch"
     );
     assert!(
         VIEWER_JS.contains("Wrong password. Nothing was sent anywhere."),

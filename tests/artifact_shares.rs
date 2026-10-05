@@ -248,6 +248,339 @@ async fn plain_artifact_with_share_token_is_not_served_at_raw_artifacts_id() {
     );
 }
 
+/// The three states of the id address for a plain artifact: public before a
+/// share, concealed while one is live, and public again once it is revoked.
+///
+/// A revoke withdraws the link, not the artifact: the owner's own address
+/// stopped answering, so withdrawing a link left the document unreachable at
+/// every address except a dead token. The share token itself keeps working
+/// only while it is live, so the concealment does not outlive the revoke.
+#[tokio::test]
+async fn revoking_a_share_restores_the_public_page_and_kills_the_token() {
+    let state = state().await;
+    let id = publish_artifact(&state, "Plain Doc", "Plain Content", false).await;
+    let app = router(state.clone());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "an artifact nobody has shared is public"
+    );
+    assert!(text_body(res).await.contains("Plain Content"));
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/artifacts/{id}/share"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let token = json_body(res).await["token"].as_str().unwrap().to_string();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "a live share makes the token the only way in"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/s/{token}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "the link serves the recipient"
+    );
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/v1/artifacts/{id}/share"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a revoked link leaves the page public again"
+    );
+    let html = text_body(res).await;
+    assert!(html.contains("Plain Content"));
+    assert!(
+        html.contains("hub-markdown-body"),
+        "the restored page is the reader shell again, not an error body"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/s/{token}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "the revoked token is dead even though the page is public"
+    );
+}
+
+/// A pass is the owner's own way to read a page an active share conceals,
+/// because the app's frame cannot carry the bearer token. It reads that one
+/// artifact's page and body, and nothing else: a pass for one artifact opens no
+/// other, and a pass nobody minted is refused.
+#[tokio::test]
+async fn an_owner_pass_reads_the_page_and_body_a_live_share_conceals() {
+    let state = state().await;
+    let id = publish_artifact(&state, "Shared Doc", "Shared Content", false).await;
+    let art = artifacts::publish(
+        &state.db,
+        &state.data_dir,
+        NewArtifact {
+            actor: "agent-writer",
+            project_id: "proj",
+            title: "Shared Page",
+            kind: "html",
+            content: b"<h1>Hello From The Page</h1>",
+            envelope: None,
+            description: "",
+            label: None,
+            session_id: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish html artifact");
+    let app = router(state.clone());
+
+    // An artifact whose page is public anyway is handed no credential to carry.
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(res).await["pass"],
+        "",
+        "nothing is concealed yet, so the frame address needs no pass"
+    );
+
+    for target in [id.as_str(), art.id.as_str()] {
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/artifacts/{target}/share"))
+            .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let pass = json_body(res).await["pass"].as_str().unwrap().to_string();
+    assert!(
+        pass.len() >= 16 && !pass.contains(ADMIN_TOKEN),
+        "a pass is its own value, not the admin token: {pass}"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}?pass={pass}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "the owner's own pass reads the page the share conceals"
+    );
+    assert!(text_body(res).await.contains("Shared Content"));
+
+    // The inner frame is the same artifact, so the page hands the pass on.
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{}/frame?pass={pass}", art.id))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "a pass is bound to the artifact it was minted for"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{}/viewer-pass", art.id))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let own = json_body(res).await["pass"].as_str().unwrap().to_string();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{}/frame?pass={own}", art.id))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "an HTML artifact's body is concealed like its page"
+    );
+    assert!(text_body(res).await.contains("Hello From The Page"));
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id_}?pass={own}", id_ = art.id))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let html = text_body(res).await;
+    assert!(
+        html.contains(&format!("pass={own}")),
+        "the page hands its own pass to the frame it loads: {html}"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}?pass=not-a-pass"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "a guessed pass is no better than none"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/artifacts/{id}/og.svg?pass={pass}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "the preview card stays concealed: it names the artifact to anyone who asks"
+    );
+}
+
+/// The pass is minted from the admin token and nothing else, so a caller with
+/// no admin token cannot have one.
+#[tokio::test]
+async fn minting_a_pass_needs_the_admin_token() {
+    let state = state().await;
+    let id = publish_artifact(&state, "Plain Doc", "Plain Content", false).await;
+    let app = router(state.clone());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    identity::create_agent(&state.db, "agent-one", "Agent")
+        .await
+        .unwrap();
+    let issued = identity::issue_token(&state.db, "agent-one").await.unwrap();
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", issued.token))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "an agent token is not the owner's token"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/artifacts/no-such-artifact/viewer-pass")
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "there is nothing to mint a pass for"
+    );
+}
+
+/// A protected artifact's page is never concealed, because the password is its
+/// gate, so it is handed no pass either. A credential in a frame address is a
+/// credential nobody needed.
+#[tokio::test]
+async fn a_protected_artifact_is_handed_no_pass() {
+    let state = state().await;
+    let id = publish_artifact(&state, "Encrypted Doc", "Y2lwaGVyLXRleHQ=", true).await;
+    let app = router(state.clone());
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/artifacts/{id}/share"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
+        .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(res).await["pass"],
+        "",
+        "the locked page is public, so there is nothing to pass"
+    );
+}
+
 #[tokio::test]
 async fn share_link_is_version_pinned_after_artifact_update() {
     let state = state().await;
