@@ -28,3 +28,6 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# Node toolchain for the PWA. The lockfile is committed; the tree is not.
+/node_modules/

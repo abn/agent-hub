@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/types web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -84,6 +84,25 @@ define browser_check
 	"$$found" $(2)
 endef
 
+# The Node toolchain. The PWA is served as vanilla ES modules with no bundler,
+# so the tree holds development tools only and the shipped binary and image
+# never read it. The lockfile is committed and the tree is not, so a clean
+# checkout installs it from the lockfile once.
+node_tree:
+	@[ -d node_modules ] || npm ci --no-audit --no-fund
+
+# The pure client functions, held directly rather than through a rendered page
+# the tests then read geometry out of. A rename no longer fails one of these,
+# and a branch that is dropped fails one of them.
+web/units: node_tree ## Run the client unit tests
+	npx vitest run
+
+# The client types, over the JSDoc the modules already carry. It is not a gate
+# in `check` yet: the first run lists the outstanding errors, which are counted
+# in the contributor guide until the JSDoc phase brings the count to zero.
+web/types: node_tree ## Type-check the client sources
+	npx tsc --noEmit
+
 # The headless accessibility audit over the rendered screens. It needs
 # Playwright, a browser, and an axe build; the static checks in web/check
 # always run.
@@ -126,8 +145,13 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
+
+# `web/types` is listed here rather than in `check` because it is red: the first
+# `tsc` run lists the type errors the pattern matchers could not see, and the
+# contributor guide counts them. It joins `check` when that count is zero, so
+# the gate cannot be quietly dropped.
 
 ##@ Container
 

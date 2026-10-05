@@ -32,6 +32,15 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
 - `make web/check`: static checks over the PWA assets. The script syntax pass
   needs Node; without it the pass is skipped and says so, and
   `HUB_REQUIRE_BROWSER=1` turns that skip into a failure.
+- `make web/units`: unit tests over the pure client functions, imported from
+  `web/` where they live. Node only, no browser.
+- `make web/types`: type-checks the client sources with `tsc --noEmit` over
+  `checkJs`. It is not in `make check` yet: it lists the errors the JSDoc phase
+  has to clear, and a target that cannot pass is not a gate. As of 2026-10-05
+  it reports 273 errors over 31 files, so the JSDoc phase has that many to
+  clear before it becomes a gate. Most are one class: a DOM property read off
+  an element a `querySelector` returned, which wants a JSDoc type on the
+  lookup rather than a cast at every use.
 - `make web/a11y`: the headless accessibility audit over the rendered screens,
   at 390px and 1100px in both themes. It walks every screen the router
   registers plus the states a route alone does not show (a dialog, the
@@ -39,6 +48,26 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
   and measures the contrast axe leaves undecided.
 - `make web/smoke`: drives the PWA in a browser against a seeded hub
 - `make check`: the full gate: hooks, linter, formatting, and tests
+
+## The client toolchain
+
+The PWA is served as vanilla ES modules with no bundler, so there is nothing to
+compile and nothing to bundle. The Node tree is development tooling only, held
+in `package.json` as devDependencies with the lockfile committed and
+`node_modules/` ignored. The shipped binary and container never read it.
+
+| Concern | Tool | Where |
+|---|---|---|
+| Pure client logic | Vitest | `make web/units` |
+| Client types | `tsc --noEmit` over `checkJs` | `make web/types` |
+| Browser behaviour and layout | Playwright Test | not wired yet |
+| Stylesheet rules and tokens | Stylelint and `css-tree` | not wired yet |
+| Accessibility | `@axe-core/playwright` | not wired yet |
+
+The unit tests import the modules from `web/` directly, so a test and the page
+cannot drift apart, and jsdom supplies the document and the media query the
+modules read at import time. A rename no longer fails a test, and a branch that
+is dropped does.
 
 ## The workflow
 

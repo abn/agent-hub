@@ -231,7 +231,7 @@ const said = (value) => (typeof value === "string" && value ? value : "");
 // `notes.md`. This is the wiki's own display path (web/wiki.mjs) applied to the
 // display string only: the path the hit carries, and the query that found it,
 // are left exactly as the hub answered.
-function displayTitle(text, kind) {
+export function displayTitle(text, kind) {
   const shown = said(text);
   return kind === "kb" ? shown.replace(/^\/fs\//, "").replace(/^\//, "") : shown;
 }

@@ -26,6 +26,27 @@ software release notes and the repository changelog.
   wiki row overflow and search-index gutter, the inbox gutter, and the
   long-summary subject and message. Both widths, both themes.
 
+### The client toolchain arrives, and the pure functions are held directly
+
+* **Creation**: the PWA gains a Node toolchain of development tools only, in a
+  `package.json` of devDependencies with the lockfile committed. There is no
+  bundler and no runtime dependency, so the shipped binary and the container do
+  not read it. Vitest holds the pure client functions directly, imported from
+  `web/` where they live: a summary's split into subject and message, the
+  reading of an event's kind into a sentence, and the display path a wiki hit is
+  shown under. A rename no longer fails one of these tests, and a branch that is
+  dropped does.
+* **Creation**: `make web/units` runs that suite and is part of `make check`
+  beside the browser gates. `make web/types` type-checks the client sources with
+  `tsc --noEmit` over `checkJs`.
+* **Update**: [the contributor guide](contribution/guide.md) records the
+  targets and the client toolchain. `make web/types` is not a gate yet: the
+  first run reports 273 errors over 31 files, and it joins `check` when that
+  count reaches zero.
+* **Note**: the client browser checks and the pattern-matching source-text
+  assertions are unchanged. They are replaced by the phases that port them, and
+  deleted as their replacements land.
+
 ## 2026-10-04
 
 ### The v1 fixes repaint the captures
