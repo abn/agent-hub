@@ -3141,6 +3141,246 @@ def check_section_switcher_fits_the_index(page, watch: Watch, project: str) -> N
     watch.drain_rejections()
 
 
+# The search scope chips at the default index width: the pane, the strip, and
+# each chip's box and what a pointer at its centre actually hits. The strip's
+# scrollWidth against its clientWidth says whether it has to scroll, and the hit
+# test says whether the reader can reach a chip at all: a chip laid out past the
+# pane's edge is clipped by the pane's own overflow, so nothing of it is hit,
+# however much of it the reader can scroll the strip to see.
+SEARCH_SCOPE_CHIPS = r"""
+() => {
+  const pane = document.querySelector('.shell-index');
+  const strip = document.querySelector('.search-scopes');
+  if (!pane || !strip) return { error: 'the search index drew no scope strip' };
+  const paneBox = pane.getBoundingClientRect();
+  const stripBox = strip.getBoundingClientRect();
+  const band = strip.closest('.shell-controls');
+  const bandBox = band ? band.getBoundingClientRect() : null;
+  return {
+    paneWidth: Math.round(paneBox.width),
+    paneRight: Math.round(paneBox.right * 10) / 10,
+    scrollWidth: strip.scrollWidth,
+    clientWidth: strip.clientWidth,
+    scrolls: strip.scrollWidth > strip.clientWidth + 1,
+    // The strip's own padding and height are what pushed a 40px control band
+    // over its edges, so both are read here rather than inferred from a chip.
+    stripTop: Math.round(stripBox.top * 10) / 10,
+    stripBottom: Math.round(stripBox.bottom * 10) / 10,
+    bandTop: bandBox ? Math.round(bandBox.top * 10) / 10 : null,
+    bandBottom: bandBox ? Math.round(bandBox.bottom * 10) / 10 : null,
+    chips: [...strip.querySelectorAll('button[data-scope]')].map((chip) => {
+      const box = chip.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return {
+        label: (chip.textContent || '').trim(),
+        left: Math.round(box.left * 10) / 10,
+        right: Math.round(box.right * 10) / 10,
+        pastPane: box.right > paneBox.right + 0.5,
+        // A chip whose text is clipped is unreadable even when it is reachable.
+        truncated: chip.scrollWidth > chip.clientWidth + 1,
+        hitIsChip: !!(hit && (hit === chip || chip.contains(hit))),
+        hit: hit
+          ? hit.tagName.toLowerCase() + '.' + String(hit.className || '').split(/\s+/)[0]
+          : null,
+      };
+    }),
+  };
+}
+"""
+
+
+def check_search_scope_chips_reachable(page, watch: Watch, project: str) -> None:
+    """Every search scope chip is reachable and readable at the default index width.
+
+    The four chips are 272px and the default 300px index pane leaves them 276,
+    so they fit on their own. Beside the count line they did not: the line took
+    227px, the strip shrank to 41, and three of the four chips were laid out
+    past the pane's edge and clipped by its overflow, so a pointer at their
+    centres hit the stage behind the pane. A strip that has to scroll is allowed
+    below the default pane width, where the pane is at its 260px minimum; at the
+    default it must not.
+    """
+    watch.enter("search: every scope chip is reachable at the default index width")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/search?q={harness.SEARCH_TERM}", None)
+    if not settle(page, "document.querySelector('.search-scopes button[data-scope]')"):
+        watch.fail("the search index drew no scope chips")
+        if previous:
+            page.set_viewport_size(previous)
+        return
+
+    for width in (300, 260):
+        # The pane is draggable, so its width is set the way a drag sets it: on
+        # the shell's own custom property, and taken off again at the end.
+        page.evaluate(
+            "w => { document.querySelector('.shell').style.setProperty('--w-index', w + 'px'); }",
+            width,
+        )
+        page.wait_for_timeout(250)
+        got = page.evaluate(SEARCH_SCOPE_CHIPS)
+        if "error" in got:
+            watch.fail(f"at a {width}px index pane, {got['error']}")
+            continue
+        if got["paneWidth"] != width:
+            watch.fail(f"the index pane measured {got['paneWidth']}px, expected {width}px")
+            continue
+        for chip in got["chips"]:
+            if chip["truncated"]:
+                watch.fail(f"at a {width}px index pane the {chip['label']!r} chip is truncated")
+            if width == 300:
+                if chip["pastPane"]:
+                    watch.fail(
+                        f"at a {width}px index pane the {chip['label']!r} chip runs to"
+                        f" {chip['right']}, past the pane's edge at {got['paneRight']}"
+                    )
+                if not chip["hitIsChip"]:
+                    watch.fail(
+                        f"at a {width}px index pane a pointer on the {chip['label']!r}"
+                        f" chip hits {chip['hit']}, not the chip"
+                    )
+            # A chip outside the strip's own scroll region is clipped by it, so a
+            # pointer cannot reach it however the strip is scrolled.
+            if not chip["hitIsChip"] and width > 260:
+                watch.fail(
+                    f"at a {width}px index pane the {chip['label']!r} chip cannot be hit"
+                    f" ({chip['hit']})"
+                )
+        if width == 300 and got["scrolls"]:
+            watch.fail(
+                f"at a {width}px index pane the scope strip has to scroll:"
+                f" scrollWidth {got['scrollWidth']} > clientWidth {got['clientWidth']}"
+            )
+        # The strip is the control row's one control, so it must not grow past
+        # the 40px band the frame reserves.
+        if (
+            got["bandTop"] is not None
+            and (got["stripTop"] < got["bandTop"] - 0.5 or got["stripBottom"] > got["bandBottom"] + 0.5)
+        ):
+            watch.fail(
+                f"at a {width}px index pane the scope strip runs from {got['stripTop']}"
+                f" to {got['stripBottom']}, outside the control band"
+                f" {got['bandTop']} to {got['bandBottom']}"
+            )
+
+    page.evaluate("() => document.querySelector('.shell').style.removeProperty('--w-index')")
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+# A wiki tree row's two lines and the pane they live in. The row is a column
+# flexbox, so the question is whether its meta line is the row's width or its
+# content's, and whether a line that has more to say than fits ends in an
+# ellipsis rather than a glyph cut by the pane's edge.
+WIKI_TREE_ROWS = r"""
+() => {
+  const pane = document.querySelector('.shell-index');
+  if (!pane) return { error: 'the wiki index drew no pane' };
+  const paneBox = pane.getBoundingClientRect();
+  return {
+    paneRight: Math.round(paneBox.right * 10) / 10,
+    paneClientWidth: pane.clientWidth,
+    paneScrollWidth: pane.scrollWidth,
+    rows: [...pane.querySelectorAll('.wiki-row')].map((row) => {
+      const box = row.getBoundingClientRect();
+      // The meta line is the row's second child and the only one that can be
+      // wider than the row: the title beside it is already min-width:0.
+      const meta = row.querySelector('span.mono');
+      const metaBox = meta ? meta.getBoundingClientRect() : null;
+      return {
+        name: (row.querySelector('span') || {}).textContent?.trim().slice(0, 30) || '',
+        scrollWidth: row.scrollWidth,
+        clientWidth: row.clientWidth,
+        right: Math.round(box.right * 10) / 10,
+        pastPane: box.right > paneBox.right + 0.5,
+        metaRight: metaBox ? Math.round(metaBox.right * 10) / 10 : null,
+        metaScrollWidth: meta ? meta.scrollWidth : null,
+        metaClientWidth: meta ? meta.clientWidth : null,
+        metaOverflows: meta ? meta.scrollWidth > meta.clientWidth : False,
+        metaText: meta ? (meta.textContent || '').trim() : None,
+      };
+    }),
+  };
+}
+"""
+
+
+def check_wiki_tree_rows_stay_in_the_pane(page, watch: Watch, port: int, project: str) -> None:
+    """A wiki tree row never runs past the index pane, and its meta line ellipsises.
+
+    The row is a column flexbox, and the base row rule aligns a column's children
+    to their own content width. A no-wrap meta line then held the row's width
+    open: its box ended 8.84px past a 300px pane, the pane's overflow cut the
+    last glyph of "unverified" mid-stroke, and the ellipsis the line asks for
+    never fired, because nothing inside it was overflowing. The row has to
+    scrollWidth what it can show, and a line with more to say has to say so.
+    """
+    watch.enter("wiki: a tree row's meta line stays inside the index pane")
+    # A page under a directory, so the meta line carries its indentation and is
+    # long enough to need an ellipsis at the default pane width.
+    harness.request(
+        port,
+        "PUT",
+        f"/api/v1/projects/{quote(project)}/kb/pages/notes/agent.md",
+        {
+            "content": (
+                "---\ntype: Overview\nstatus: draft\ntitle: Agent notes\n---\n"
+                "# Agent notes\n\nA page the check reads.\n"
+            )
+        },
+    )
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, "#/settings", "Settings")
+    goto(page, f"#/projects/{quote(project)}/wiki", "Wiki")
+    if not settle(page, "document.querySelector('.shell-index .wiki-row')"):
+        watch.fail("the desktop wiki index rendered no rows")
+    else:
+        page.wait_for_timeout(300)
+        got = page.evaluate(WIKI_TREE_ROWS)
+        if "error" in got:
+            watch.fail(got["error"])
+        else:
+            meta_seen = False
+            for row in got["rows"]:
+                if row["scrollWidth"] > row["clientWidth"]:
+                    watch.fail(
+                        f"a wiki tree row scrolls horizontally:"
+                        f" scrollWidth {row['scrollWidth']} > clientWidth {row['clientWidth']}"
+                        f" ({row['name']!r})"
+                    )
+                if row["pastPane"]:
+                    watch.fail(
+                        f"a wiki tree row runs to {row['right']}, past the pane's edge"
+                        f" at {got['paneRight']} ({row['name']!r})"
+                    )
+                if row["metaRight"] is not None and row["metaRight"] > got["paneRight"] + 0.5:
+                    watch.fail(
+                        f"a wiki tree row's meta line runs to {row['metaRight']}, past the"
+                        f" pane's edge at {got['paneRight']} ({row['metaText']!r})"
+                    )
+                # A meta line with more to say than its box holds has to end in an
+                # ellipsis rather than a glyph cut by the pane. Not every row's
+                # meta is long, so what is asked is that at least one row in the
+                # tree needed the ellipsis and every line that needed it has it.
+                if row["metaText"] and "·" in row["metaText"] and row["metaOverflows"]:
+                    meta_seen = True
+            if not meta_seen:
+                watch.fail(
+                    "no wiki tree row's meta line was long enough to need an ellipsis,"
+                    " so nothing here can prove the line truncates inside the pane"
+                )
+
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 def check_wiki_read_write(page, watch: Watch, port: int, project: str) -> None:
     """The wiki segment: one meta tree, a reader that strips frontmatter, and an
     editor that writes back the version it read."""
@@ -3306,7 +3546,9 @@ def run() -> int:
                 run_step(watch, check_wiki_read_write, page, watch, port, project)
                 run_step(watch, check_wiki_phone_breadcrumb, page, watch, port, project)
                 run_step(watch, check_wiki_directory_row, page, watch, port, project)
+                run_step(watch, check_wiki_tree_rows_stay_in_the_pane, page, watch, port, project)
                 run_step(watch, check_section_switcher_fits_the_index, page, watch, project)
+                run_step(watch, check_search_scope_chips_reachable, page, watch, project)
                 harness.request(port, "DELETE", "/api/v1/agents/reveal-probe/token")
 
                 # 8. Project features
