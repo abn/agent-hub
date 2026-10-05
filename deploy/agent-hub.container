@@ -1,0 +1,41 @@
+# Agent Hub as a Podman Quadlet unit.
+#
+# Copy to ~/.config/containers/systemd/agent-hub.container for a per-user
+# service, or to /etc/containers/systemd/ for a system-wide one (and change the
+# [Install] target to multi-user.target). Then:
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-hub
+#   loginctl enable-linger "$USER"     # so it starts at boot with no login
+#
+# The unit reads ~/.config/agent-hub/hub.env, mode 0600, holding at least
+# HUB_ADMIN_TOKEN and, behind a proxy, HUB_PUBLIC_URL. See docs/usage/deploy.md.
+
+[Unit]
+Description=Agent Hub
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/abn/agent-hub:1.0.0
+ContainerName=agent-hub
+PublishPort=127.0.0.1:8080:8080
+Volume=agent-hub-data:/data
+EnvironmentFile=%h/.config/agent-hub/hub.env
+Environment=HUB_DATA_DIR=/data
+Environment=HUB_BIND=0.0.0.0:8080
+ReadOnly=true
+Tmpfs=/tmp
+HealthCmd=/usr/local/bin/agent-hub health --url http://127.0.0.1:8080
+HealthInterval=30s
+HealthStartPeriod=10s
+HealthRetries=3
+
+[Service]
+Restart=always
+# The hub drains in-flight requests for ten seconds on SIGTERM, so the stop
+# timeout is above the drain and the store checkpoints on a clean stop.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

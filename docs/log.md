@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-06
+
+### The container can be deployed as a service
+
+* **Creation**: added [Deploy the hub as a service](usage/deploy.md), a guide to
+  running the container under systemd with Podman Quadlet or Docker, with an
+  auto-start policy, `loginctl enable-linger` so a per-user service starts on
+  boot with no login, and the compose file. The repository ships the Quadlet
+  unit as `deploy/agent-hub.container`.
+
 ## 2026-10-05
 
 ### The guide is served over MCP as a skill
