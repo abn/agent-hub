@@ -4920,11 +4920,15 @@ a.session-back {
   cursor: pointer;
 }
 
+/* The expansion is measured from the padding box, and this is the one control
+   in the set that draws its own 1px border, so 4px of it is spent inside that
+   border and the target lands on 42. Five reaches the 44 the floor asks for,
+   and leaves the drawn box at 36 beside its 36px siblings. */
 @media (pointer: coarse) {
   .hub-comments-head-add::after {
     content: "";
     position: absolute;
-    inset: -4px;
+    inset: -5px;
   }
 }
 

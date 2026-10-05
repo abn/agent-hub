@@ -147,6 +147,15 @@ list-and-item screen, an index beside a stage, like the inbox. The rail's sync
 line is hidden when healthy. The artifact viewer's chrome band is a 52px header
 like every other pane's, and every control in it is 36px.
 
+**Deviation: the artifact viewer is the one phone screen with no phone frame.**
+Every other phone screen is the 76px header and the 44px tools row, with its
+content starting at y 120 at rest. The viewer's band already carries the back
+and every tool the screen has, so it was left where it is: it paints at y 28
+and its document at y 96, with the tab bar below it. Giving the viewer the
+phone frame means deciding what a tools row for it would hold, which is a
+design question and not a sizing one, so the band stays as built until that is
+answered.
+
 ### The frame does not move, on a desktop
 
 - On a fine pointer at desktop widths, every pane reserves a 52px header and a

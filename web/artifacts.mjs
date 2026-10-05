@@ -935,7 +935,7 @@ export async function viewerRoute(params, gen, path) {
   }
   indexCol.appendChild(indexList);
 
-  // Top header (Screen 01): 44px back chevron, mono path, 3 glyph buttons (36x36 drawn, 44x44 coarse hit)
+  // Top header (Screen 01): 52px band, mono path, 36px back and three 36px glyphs, each with a 44x44 coarse hit
   const bar = document.createElement("div");
   bar.className = "hub-viewer-bar";
 
