@@ -62,8 +62,11 @@ async fn the_skill_tells_an_agent_how_to_write_for_the_human() {
     // The hub is the only thing an agent reads before it writes to a person.
     // Mechanics alone produce inbox rows that bury the ask in a paragraph, so
     // the document that teaches the tools teaches the voice with them.
-    let skill = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/skills/agent-hub/SKILL.md"))
-        .expect("read the skill document");
+    let skill = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/skills/agent-hub/SKILL.md"
+    ))
+    .expect("read the skill document");
     let guidance = skill
         .split_once("## Writing for the human")
         .expect("the skill document tells an agent how to write for the human")
@@ -685,7 +688,10 @@ async fn the_skill_prefers_the_configured_public_url() {
 async fn the_skill_falls_back_to_the_configured_bind() {
     let state = state().await;
     let app = router(state.clone());
-    let response = app.oneshot(get("/bootstrap/SKILL.md", None)).await.expect("request");
+    let response = app
+        .oneshot(get("/bootstrap/SKILL.md", None))
+        .await
+        .expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
         text(response).await.contains("http://127.0.0.1:0"),

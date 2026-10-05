@@ -6,6 +6,18 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The guide is served over MCP as a skill
+
+* **Add**: the hub declares the final Skills extension
+  (`io.modelcontextprotocol/skills`) with `directoryRead`, and serves the
+  installable `agent-hub` skill over MCP. `skills/list` and `skills/get` return
+  the frontmatter and a complete manifest with per-file SHA-256 digests and
+  sizes, `resources/read` serves the files under `skill://agent-hub/`, and
+  `resources/directory/read` lists the tree. A client that reads the extension
+  loads the guide from the hub; one that does not reads the same files as
+  ordinary resources. [Agent surface](architecture/agent-surface.md) states it,
+  so a bootstrap can hand off to a skill over MCP.
+
 ### The skill splits into a served bootstrap and an installable guide
 
 * **Change**: one served document was doing two jobs with two lifecycles. It is

@@ -155,8 +155,107 @@ fn resources_list_and_read_the_agent_guide() {
         .expect("resources/read returns contents");
     let text = contents[0]["text"].as_str().expect("text contents");
     assert!(
-        text.contains("Arriving without a token"),
-        "the guide carries the arrival section"
+        text.contains("Get a token"),
+        "the bootstrap carries the token section"
     );
-    assert!(text.contains("inbox_wait"), "the guide names the wait tool");
+    assert!(
+        text.contains("/mcp"),
+        "the bootstrap names the MCP endpoint"
+    );
+    assert!(
+        resources
+            .iter()
+            .any(|resource| resource["uri"] == "skill://agent-hub/SKILL.md"),
+        "the skill's files are listed as resources"
+    );
+}
+
+#[test]
+fn skills_extension_lists_and_reads_the_installable_guide() {
+    // The Skills extension is how a client loads the workflow guide over MCP
+    // rather than installing it with npx skills. The handshake declares it, the
+    // entry carries the frontmatter and a complete manifest, and the files read
+    // as ordinary resources.
+    let data_dir = TempDir::new("mcp-stdio-skills");
+    let mut server = McpServer::mcp(&data_dir, &[]);
+
+    let init = server.call(
+        "initialize",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "mcp-stdio-skills", "version": "0.0.0"},
+        }),
+    );
+    let declared = &init["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/skills"];
+    assert_eq!(
+        declared["directoryRead"], true,
+        "the skills extension is declared with directory reads"
+    );
+
+    server.notify("notifications/initialized");
+
+    let listed = server.call("skills/list", json!({}));
+    let skills = listed["result"]["skills"]
+        .as_array()
+        .expect("skills/list returns an array");
+    assert_eq!(skills.len(), 1, "one skill is served");
+    let skill = &skills[0];
+    assert_eq!(skill["uri"], "skill://agent-hub/SKILL.md");
+    assert_eq!(skill["frontmatter"]["name"], "agent-hub");
+    let manifest = skill["resources"].as_array().expect("a complete manifest");
+    assert!(
+        manifest.iter().any(|entry| {
+            entry["uri"] == "skill://agent-hub/SKILL.md"
+                && entry["digest"]
+                    .as_str()
+                    .is_some_and(|digest| digest.starts_with("sha256:"))
+                && entry["size"].as_u64().is_some_and(|size| size > 0)
+        }),
+        "the manifest carries SKILL.md with a digest and size"
+    );
+    assert!(
+        manifest
+            .iter()
+            .any(|entry| entry["uri"] == "skill://agent-hub/references/tools.md"),
+        "the manifest carries the references"
+    );
+
+    let got = server.call("skills/get", json!({"uri": "skill://agent-hub/SKILL.md"}));
+    assert_eq!(got["result"]["skill"]["uri"], "skill://agent-hub/SKILL.md");
+    let missing = server.call(
+        "skills/get",
+        json!({"uri": "skill://agent-hub/nope/SKILL.md"}),
+    );
+    assert_eq!(
+        missing["error"]["code"], -32602,
+        "an unknown skill is invalid params"
+    );
+
+    let dir = server.call(
+        "resources/directory/read",
+        json!({"uri": "skill://agent-hub"}),
+    );
+    let children = dir["result"]["resources"]
+        .as_array()
+        .expect("directory read returns children");
+    assert!(
+        children
+            .iter()
+            .any(|child| child["uri"] == "skill://agent-hub/references"
+                && child["mimeType"] == "inode/directory"),
+        "the references directory is listed"
+    );
+
+    let read = server.call(
+        "resources/read",
+        json!({"uri": "skill://agent-hub/SKILL.md"}),
+    );
+    let text = read["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("the skill file reads as text");
+    assert!(
+        text.starts_with("---\nname: agent-hub"),
+        "the served SKILL.md carries its frontmatter"
+    );
 }

@@ -14,9 +14,10 @@ use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode as McpErrorCode, ErrorData,
-    ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-    ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, CustomRequest, CustomResult,
+    ErrorCode as McpErrorCode, ErrorData, ExtensionCapabilities, ListResourcesResult,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+    Resource, ResourceContents, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -140,6 +141,183 @@ fn guide_text(config: &Config, context: &RequestContext<RoleServer>) -> StdStrin
     SKILL_TEXT.replace(PLACEHOLDER, &guide_origin(config, context))
 }
 
+/// The installable skill, served over MCP as individual resources and
+/// enumerated through the Skills extension (`io.modelcontextprotocol/skills`).
+///
+/// The bytes are embedded at build time from `skills/agent-hub/`, the same
+/// source `npx skills add abn/agent-hub` installs, so the entry's manifest and
+/// digests always describe what is served. Only `SKILL.md` and its references
+/// are the skill; the bootstrap is a separate resource.
+struct SkillFile {
+    rel: &'static str,
+    body: &'static str,
+}
+
+const SKILL_FILES: &[SkillFile] = &[
+    SkillFile {
+        rel: "SKILL.md",
+        body: include_str!("../../skills/agent-hub/SKILL.md"),
+    },
+    SkillFile {
+        rel: "references/artifacts.md",
+        body: include_str!("../../skills/agent-hub/references/artifacts.md"),
+    },
+    SkillFile {
+        rel: "references/errors.md",
+        body: include_str!("../../skills/agent-hub/references/errors.md"),
+    },
+    SkillFile {
+        rel: "references/feed-inbox.md",
+        body: include_str!("../../skills/agent-hub/references/feed-inbox.md"),
+    },
+    SkillFile {
+        rel: "references/knowledge-base.md",
+        body: include_str!("../../skills/agent-hub/references/knowledge-base.md"),
+    },
+    SkillFile {
+        rel: "references/sessions.md",
+        body: include_str!("../../skills/agent-hub/references/sessions.md"),
+    },
+    SkillFile {
+        rel: "references/tools.md",
+        body: include_str!("../../skills/agent-hub/references/tools.md"),
+    },
+];
+
+/// The skill namespace. Its final segment is the skill's `name`, as the
+/// extension requires.
+const SKILL_ROOT_URI: &str = "skill://agent-hub";
+const SKILL_MD_URI: &str = "skill://agent-hub/SKILL.md";
+const SKILL_EXTENSION_ID: &str = "io.modelcontextprotocol/skills";
+/// The freshness hint the extension requires on `skills/list` and `skills/get`.
+const SKILL_TTL_MS: u64 = 300_000;
+
+fn skill_file(rel: &str) -> Option<&'static str> {
+    SKILL_FILES.iter().find(|f| f.rel == rel).map(|f| f.body)
+}
+
+fn skill_digest(bytes: &[u8]) -> StdString {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+/// The skill's `name` and `description`, parsed from `SKILL.md` itself so the
+/// entry stays faithful to the bytes served.
+fn skill_frontmatter() -> (StdString, StdString) {
+    let body = skill_file("SKILL.md").unwrap_or_default();
+    let (mut name, mut description) = (StdString::new(), StdString::new());
+    let mut lines = body.lines();
+    if lines.next().map(str::trim_end) == Some("---") {
+        for line in lines {
+            if line.trim_end() == "---" {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                let value = value.trim().trim_matches('"').to_string();
+                match key.trim() {
+                    "name" => name = value,
+                    "description" => description = value,
+                    _ => {}
+                }
+            }
+        }
+    }
+    (name, description)
+}
+
+/// The `Skill` entry the extension returns, with a complete manifest of the
+/// skill's files and the digest and size of each.
+fn skill_entry() -> serde_json::Value {
+    let (name, description) = skill_frontmatter();
+    let resources: Vec<serde_json::Value> = SKILL_FILES
+        .iter()
+        .map(|f| {
+            json!({
+                "uri": format!("{SKILL_ROOT_URI}/{}", f.rel),
+                "digest": skill_digest(f.body.as_bytes()),
+                "size": f.body.len(),
+            })
+        })
+        .collect();
+    json!({
+        "uri": SKILL_MD_URI,
+        "frontmatter": { "name": name, "description": description },
+        "resources": resources,
+    })
+}
+
+/// The `uri` param of an extension request, or an empty string.
+fn param_uri(request: &CustomRequest) -> &str {
+    request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("uri"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+}
+
+fn skills_list_result() -> CustomResult {
+    CustomResult(json!({
+        "resultType": "complete",
+        "skills": [skill_entry()],
+        "ttlMs": SKILL_TTL_MS,
+        "cacheScope": "public",
+    }))
+}
+
+fn skills_get_result(uri: &str) -> std::result::Result<CustomResult, ErrorData> {
+    if uri != SKILL_MD_URI {
+        return Err(ErrorData::new(
+            McpErrorCode::INVALID_PARAMS,
+            format!("No skill is served at {uri}"),
+            None,
+        ));
+    }
+    Ok(CustomResult(json!({
+        "resultType": "complete",
+        "skill": skill_entry(),
+        "ttlMs": SKILL_TTL_MS,
+        "cacheScope": "public",
+    })))
+}
+
+/// The direct children of a directory in the skill namespace.
+fn skill_directory(uri: &str) -> std::result::Result<CustomResult, ErrorData> {
+    let children: Vec<serde_json::Value> = match uri {
+        SKILL_ROOT_URI => vec![
+            json!({ "uri": SKILL_MD_URI, "name": "SKILL.md", "mimeType": "text/markdown" }),
+            json!({
+                "uri": format!("{SKILL_ROOT_URI}/references"),
+                "name": "references",
+                "mimeType": "inode/directory",
+            }),
+        ],
+        "skill://agent-hub/references" => SKILL_FILES
+            .iter()
+            .filter(|f| f.rel.starts_with("references/"))
+            .map(|f| {
+                json!({
+                    "uri": format!("{SKILL_ROOT_URI}/{}", f.rel),
+                    "name": f.rel.trim_start_matches("references/"),
+                    "mimeType": "text/markdown",
+                })
+            })
+            .collect(),
+        other => {
+            return Err(ErrorData::new(
+                McpErrorCode::INVALID_PARAMS,
+                format!("{other} is not a directory resource"),
+                None,
+            ));
+        }
+    };
+    Ok(CustomResult(
+        json!({ "resultType": "complete", "resources": children }),
+    ))
+}
+
 #[tool_handler(router = self.tool_router, name = "agent-hub")]
 impl ServerHandler for HubServer {
     /// Handle a `tools/call`.
@@ -178,10 +356,17 @@ impl ServerHandler for HubServer {
     /// defining it here keeps the macro from emitting one, and this one enables
     /// both capabilities.
     fn get_info(&self) -> ServerConfig {
+        let mut extensions = ExtensionCapabilities::new();
+        extensions.insert(
+            SKILL_EXTENSION_ID.to_string(),
+            serde_json::from_value(json!({ "directoryRead": true }))
+                .expect("the skills extension settings are a static object"),
+        );
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_extensions_with(extensions)
                 .build(),
         )
         .with_server_info(rmcp::model::Implementation::new(
@@ -190,38 +375,75 @@ impl ServerHandler for HubServer {
         ))
     }
 
-    /// List the hub's resources: the agent guide.
+    /// List the hub's resources: the bootstrap, and the installable skill's
+    /// files. A client that supports the Skills extension uses `skills/list`
+    /// for the manifest; this is the base-Resources view.
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourcesResult, ErrorData> {
         let text = guide_text(&self.state.config, &context);
-        let resource = Resource::new(SKILL_URI, "Agent guide")
-            .with_title("Agent Hub guide")
-            .with_description("How to connect, which tools exist, and how to write for the human.")
-            .with_mime_type("text/markdown")
-            .with_size(text.len() as u64);
-        Ok(ListResourcesResult::with_all_items(vec![resource]))
+        let mut items = vec![
+            Resource::new(SKILL_URI, "Agent bootstrap")
+                .with_title("Agent Hub bootstrap")
+                .with_description("How to connect to this hub and get a token.")
+                .with_mime_type("text/markdown")
+                .with_size(text.len() as u64),
+        ];
+        for f in SKILL_FILES {
+            items.push(
+                Resource::new(format!("{SKILL_ROOT_URI}/{}", f.rel), f.rel)
+                    .with_mime_type("text/markdown")
+                    .with_size(f.body.len() as u64),
+            );
+        }
+        Ok(ListResourcesResult::with_all_items(items))
     }
 
-    /// Read a resource by URI. The guide is the only one.
+    /// Read a resource by URI: the bootstrap, or one file of the skill.
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<ReadResourceResponse, ErrorData> {
-        if request.uri != SKILL_URI {
-            return Err(ErrorData::new(
-                McpErrorCode::RESOURCE_NOT_FOUND,
-                format!("unknown resource '{}'", request.uri),
-                None,
-            ));
+        if request.uri == SKILL_URI {
+            let text = guide_text(&self.state.config, &context);
+            let contents = ResourceContents::text(text, SKILL_URI)
+                .with_mime_type("text/markdown; charset=utf-8");
+            return Ok(ReadResourceResult::new(vec![contents]).into());
         }
-        let text = guide_text(&self.state.config, &context);
-        let contents =
-            ResourceContents::text(text, SKILL_URI).with_mime_type("text/markdown; charset=utf-8");
-        Ok(ReadResourceResult::new(vec![contents]).into())
+        let prefix = format!("{SKILL_ROOT_URI}/");
+        if let Some(body) = request.uri.strip_prefix(&prefix).and_then(skill_file) {
+            let contents = ResourceContents::text(body, request.uri.clone())
+                .with_mime_type("text/markdown; charset=utf-8");
+            return Ok(ReadResourceResult::new(vec![contents]).into());
+        }
+        Err(ErrorData::new(
+            McpErrorCode::RESOURCE_NOT_FOUND,
+            format!("unknown resource '{}'", request.uri),
+            None,
+        ))
+    }
+
+    /// The Skills extension methods. rmcp has no typed request for them, so
+    /// they arrive as custom requests and answer with the extension's own
+    /// result shape.
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<CustomResult, ErrorData> {
+        match request.method.as_str() {
+            "skills/list" => Ok(skills_list_result()),
+            "skills/get" => skills_get_result(param_uri(&request)),
+            "resources/directory/read" => skill_directory(param_uri(&request)),
+            other => Err(ErrorData::new(
+                McpErrorCode::METHOD_NOT_FOUND,
+                other.to_string(),
+                None,
+            )),
+        }
     }
 }
 

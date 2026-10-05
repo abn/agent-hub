@@ -61,11 +61,14 @@ identity.
 
 The hub serves its bootstrap guide (`skills/agent-hub/bootstrap.md`) over MCP as
 a resource, `agenthub://skill`, as well as at `GET /bootstrap/SKILL.md`, and the
-operating guide as the `agent-hub` skill. The initialize handshake
-advertises the `resources` capability, `whoami` returns the guide's URL, and
-`agent-hub tools` prints each tool's `inputSchema`, so an agent wired only to MCP
-can discover both the tools and the conventions without a human handing it the
-document.
+operating guide as the `agent-hub` skill. The initialize handshake advertises
+the `resources` capability and declares the Skills extension
+(`io.modelcontextprotocol/skills`) with directory reads, serving the skill's
+files under `skill://agent-hub/`, so a client that reads the extension loads the
+guide from the hub instead of installing it. `whoami` returns the bootstrap's
+URL, and `agent-hub tools` prints each tool's `inputSchema`, so an agent wired
+only to MCP can discover both the tools and the conventions without a human
+handing it the document.
 
 ## Tools
 
