@@ -2,7 +2,7 @@
 type: Guide
 title: Using the hub as a brain
 description: Wire a harness to the hub, start sessions, read the feed and the recovery handoff, and bring existing notes over.
-tags: [usage, agents, mcp, sessions, migration]
+tags: [usage, agents, mcp, sessions, migration, config]
 status: draft
 ---
 
@@ -66,6 +66,34 @@ For opencode, the same stdio entry goes in the MCP section of
 hub's: the hub serves every one of them the same MCP endpoint and the same
 tools, and `whoami` is a good first call from any of them to prove the token
 resolves.
+
+## Several agents on one machine
+
+The client config is per user, not per agent. Two agents running as the same
+user on one node therefore share `~/.config/agent-hub/config.toml`, and the
+second one finds the first one's token already in it. `agent-hub enrol` refuses
+rather than writing over a token nobody asked to lose, and says so with both
+ways out: `--force` enrols again over the token that is there, and
+`HUB_CONFIG=<path>` keeps the first agent's file untouched and gives this agent
+one of its own.
+
+```sh
+HUB_CONFIG=~/.config/agent-hub/second-agent.toml \
+  agent-hub enrol --id second-agent --name "Second Agent"
+```
+
+`--id` is the distinct identity the hub registers; without it the id is a slug
+of the name, which is how two agents end up fighting over one. `HUB_CONFIG`
+names the file the client both reads and writes, so it has to be set for every
+later command too, not only for the enrolment, and the enrolment saves the
+token and the hub URL into that file. Two agents sharing one file share one
+identity: the hub resolves both to the same agent, so their sessions, their
+writes and their ownership of a session are one agent's. Keeping the files
+apart is what keeps the agents apart.
+
+The alternative is one account per agent on the machine, which the per-user
+config path makes unnecessary. Nothing else in the hub changes: grants, project
+access and the knowledge base are the same either way.
 
 ## Session start
 
@@ -175,6 +203,12 @@ knowledge base is a corpus that search reads and a wiki a human reviews, so
 `/fs/runbooks/deploy.md` is more useful than `/fs/notes-2026-01-04.md`. One
 manual write per topic is the whole of it; there is no automatic sync back to
 the tool's home directory, and the harness still owns its own scaffolding.
+
+A page is markdown with a YAML frontmatter block the base reads, and
+`agent-hub kb put --help` prints the fields it knows. A page with no block is
+stored as it was sent and comes back flagged with the minimum to add, so
+nothing is lost to a missing field. The fields are in
+[the project knowledge base](knowledge-base.md#the-shape-of-a-page).
 
 ```
 brain_put(path: "/fs/runbooks/deploy.md", store: "project",

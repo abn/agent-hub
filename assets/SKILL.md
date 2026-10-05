@@ -95,6 +95,26 @@ then you enrol again.
 The token is shown once. Nothing else on the hub reveals a secret, and this
 document carries none.
 
+### Several agents on one machine
+
+The client config is per user, not per agent, so a second agent on one machine
+finds the first agent's token already in it. `agent-hub enrol` refuses rather
+than writing over a token nobody asked to lose, and names both ways out:
+`--force` enrols again over it, and `HUB_CONFIG=<path>` keeps the other agent's
+token where it is while this one gets a file of its own.
+
+```sh
+# The second agent enrols through a file of its own and keeps its own token.
+HUB_CONFIG=~/.config/agent-hub/second-agent.toml \
+  agent-hub enrol --id second-agent --name "Second Agent"
+```
+
+`HUB_CONFIG` is the file the client both reads and writes, so it has to be set
+for every later command too, not only for the enrolment. `--id` names the
+distinct agent the hub registers; without it the id is a slug of the name.
+Two agents that share one file share one identity, and their sessions and
+writes are that identity's.
+
 ## Connect an agent
 
 Agents speak the Model Context Protocol. The hub is reached over streamable
@@ -184,6 +204,40 @@ exits non-zero. A `kb list` walks the whole base under the path it is given and
 prints pages only, so every line is a page `kb get` can read; `--json` is the
 tool's own result for that one listing instead, one level of entries with their
 types.
+
+### The shape of a page
+
+A page is markdown with a YAML frontmatter block. The hub reads it, and the
+human's wiki shows it as the page's type, status and tags rather than as body
+text:
+
+```
+---
+type: Runbook
+title: Deploy the hub
+description: How the hub is deployed on the node
+status: draft
+tags: [usage, ops]
+stale_after: 2027-01-01
+---
+# Deploy the hub
+```
+
+`type` is the one field a page needs, and the hub's own bundle uses `Concept`,
+`Guide`, `Runbook`, `Reference`, `Decision` and `Decision Record`. `status` is
+`draft` or `stable`. `tags` is free-form, written as a flow list
+(`[usage, ops]`) or as one `- item` a line. `title` is what a listing shows,
+`description` is the one line a reader gets, and `stale_after` is a date after
+which the page reads as stale. Any other top-level key is kept and ignored, so
+a page can carry its own.
+
+The block opens when the page's first line is exactly `---`, never
+`--- # comment` or `---yaml`, and holds plain `key: value` lines. A write is
+lenient: a page with no block is stored as it was sent, and the result comes
+back with a `missing_frontmatter` finding that names the minimum to add. So the
+page is never lost to a missing field, and never silently untyped either. Only
+the bundle root (`/fs/index.md`) carries `okf_version`, and `verified` and
+`sources` are blocks the hub's own review and promote write.
 
 This is the durable project knowledge store: every agent on every machine
 reads and writes the same page. It does not replace a tool's notes file by

@@ -17,6 +17,45 @@ feed signal whoever wrote it. The decision behind the store is in
 [the project knowledge base](../adr/0018-project-knowledge-base.md), and the
 agent tools are described in the served skill document, `GET /SKILL.md`.
 
+## The shape of a page
+
+A page is markdown with a YAML frontmatter block. The hub reads it, and the
+wiki shows it as the page's type, status and tags rather than as body text.
+These are the keys the reader knows:
+
+| Key | Value |
+|---|---|
+| `type` | what the page is: `Concept`, `Guide`, `Runbook`, `Reference`, `Decision`, `Decision Record`. The one field a concept page needs, and the only one lint requires |
+| `title` | what a listing shows, and the page's backlink label |
+| `description` | one line on what a reader gets here |
+| `status` | `draft` or `stable` |
+| `tags` | free-form; a flow list (`[usage, ops]`) or one `- item` a line |
+| `stale_after` | a `YYYY-MM-DD` date after which the page reads as stale |
+| `okf_version` | the bundle format, and only `/fs/index.md` may carry it |
+| `verified` | `{by, at}` entries the human's review appends |
+| `sources` | `{title, resource}` entries a promote adds |
+
+Any other top-level key is kept as a custom key and ignored, so a page can
+carry fields of its own. The block opens when the page's first line is exactly
+`---`, never `--- # comment` or `---yaml`, and holds plain `key: value` lines;
+a `|` or `>` block scalar is read as one folded line.
+
+```
+---
+type: Runbook
+title: Deploy the hub
+description: How the hub is deployed on the node
+status: draft
+tags: [usage, ops]
+stale_after: 2027-01-01
+---
+# Deploy the hub
+```
+
+A write is lenient. A page with no block is stored as it was sent, and the
+result carries a `missing_frontmatter` finding that names the minimum to add,
+so nothing is lost to a missing field and no page is silently untyped.
+
 ## Paths
 
 A page path is `/fs/<directories>/<name>`. In a URL the leading slash is
@@ -126,11 +165,12 @@ Returns `{ok, path, version, size_bytes, lint[], warnings[]}`. `lint` is
 advisory and never fails a write: `missing_frontmatter`, `missing_type`,
 `unparsed_frontmatter`, `okf_version_misplaced`, `link_escapes_bundle`, and
 `broken_link` for a link whose target is not a page anywhere in the tree. A
-page with no block at all is `missing_frontmatter`; a page whose first line
-only looks like the opener (`--- # comment`, `---yaml`) or whose block cannot
-be read safely is `unparsed_frontmatter`, and a review or a promote of it is
-refused until the first line is exactly `---`. The hub stores the bytes as
-sent.
+page with no block at all is `missing_frontmatter`, and its message carries
+the minimum to add (a block opening with `---` that sets `type`, or
+`okf_version` on the root); a page whose first line only looks like the opener
+(`--- # comment`, `---yaml`) or whose block cannot be read safely is
+`unparsed_frontmatter`, and a review or a promote of it is refused until the
+first line is exactly `---`. The hub stores the bytes as sent.
 
 ### `DELETE /api/v1/projects/{id}/kb/pages/{path}`
 

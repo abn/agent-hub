@@ -35,7 +35,11 @@ usage:
   --force           enrol again even when a token is already configured
 
 A successful enrolment saves the hub url and the token to the client config,
-so the next command reaches the hub with no environment set.";
+so the next command reaches the hub with no environment set.
+
+That config file is per user, so a second agent on one machine keeps its own by
+naming the file with HUB_CONFIG=<path>. Enrolling over the token already
+configured is refused; --force replaces it.";
 
 impl EnrolOptions {
     pub fn parse(args: &[String]) -> Result<Self, String> {
@@ -89,12 +93,29 @@ impl EnrolOptions {
     }
 }
 
+/// The refusal for a config file that already holds a token.
+///
+/// The second agent on one machine is the case this exists for: it reaches the
+/// same per-user file as the first, and a bare "a token is already configured"
+/// names no way forward. Both remedies are here, and neither is a silent
+/// success: `--force` replaces the token, `HUB_CONFIG` keeps the other one
+/// where it is.
+const ALREADY_CONFIGURED: &str = "\
+agent-hub enrol: a token is already configured for another identity
+  to enrol over it:    agent-hub enrol --force --id <id> --name <name>
+  to keep both tokens: HUB_CONFIG=<path> agent-hub enrol --id <id> --name <name>
+The config file is per user, so a second agent on one machine names its own.";
+
 /// Request agent enrolment on the hub and long-poll until operator decision.
 pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure> {
     let options = EnrolOptions::parse(args).map_err(Failure::Usage)?;
 
     if config.token.is_some() && !options.force {
-        println!("agent-hub enrol: a token is already configured");
+        // The config file is per user, so a token already sitting in it is
+        // another agent's. Naming that, and the two ways out, is the whole of
+        // this refusal: it stays one, because writing over a token nobody
+        // asked to lose is worse than a second file.
+        println!("{}", ALREADY_CONFIGURED);
         return Ok(());
     }
 

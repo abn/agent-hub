@@ -142,6 +142,26 @@ usage:
 A path is a page of the knowledge base, so a path outside /fs is taken as
 relative to it: 'runbooks/deploy.md' is '/fs/runbooks/deploy.md'.
 
+A page is markdown with a YAML frontmatter block, which the knowledge base reads
+and the human's wiki shows as the page's type, status and tags:
+
+  ---
+  type: Runbook              Concept, Guide, Runbook, Reference, Decision,
+  title: Deploy the hub      Decision Record; the one field a page needs
+  description: One line      what a reader gets here
+  status: draft              draft or stable
+  tags: [usage, ops]         free-form; a flow list, or one '- item' a line
+  stale_after: 2027-01-01    optional; the page reads as stale after this date
+  ---
+  # Deploy the hub
+
+The block opens when the page's first line is exactly ---, never '--- # comment'
+or '---yaml', and holds plain 'key: value' lines. A page with no block is
+stored as it was sent and comes back flagged with the minimum to add, so the
+write stays lenient and nothing is lost to a missing field. Only the bundle
+root carries okf_version; 'verified' and 'sources' are blocks the hub's own
+review and promote write.
+
 kb list walks the whole base under the path it is given, or the whole base when
 it is given none, and prints pages only: every line is a page kb get can read.
 --json is the tool's own result for that one listing instead, one level of

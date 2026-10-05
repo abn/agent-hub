@@ -55,6 +55,44 @@ impl BacklinkGraph {
     }
 }
 
+/// Whether a page says what it is.
+///
+/// The bundle root, a section index and the log are located by where they sit
+/// rather than by what they say about themselves, so they are the three pages a
+/// concept page is everything else to.
+fn is_concept(path: &str) -> bool {
+    path != "/fs/index.md" && path != "/fs/log.md" && !path.ends_with("/index.md")
+}
+
+/// The finding for a page that carries no frontmatter block at all, or
+/// `None` for a page that is asked for none.
+///
+/// A write is lenient, so a page with no block is stored as it was sent. That
+/// leniency is the discoverability problem this carries the answer to: the
+/// finding is the only place a writer is told the shape the knowledge base
+/// reads, so it names the minimum to add rather than only what is absent.
+fn missing_frontmatter(path: &str) -> Option<LintFinding> {
+    let (subject, hint) = if path == "/fs/index.md" {
+        (
+            "root index.md",
+            "the minimum is a block opening with --- that sets okf_version: 0.2",
+        )
+    } else if is_concept(path) {
+        (
+            "concept page",
+            "the minimum is a block opening with --- that sets type: Concept",
+        )
+    } else {
+        return None;
+    };
+    Some(LintFinding {
+        code: "missing_frontmatter".to_string(),
+        path: path.to_string(),
+        message: format!("{subject} has no YAML frontmatter; {hint}"),
+        line: None,
+    })
+}
+
 /// Check lint rules on a single page during write.
 ///
 /// Evaluates frontmatter requirements and link target existence against the
@@ -62,28 +100,9 @@ impl BacklinkGraph {
 pub fn lint_page_write(path: &str, content: &str, existing_pages: &[String]) -> Vec<LintFinding> {
     let mut findings = Vec::new();
     let is_root_index = path == "/fs/index.md";
-    let is_log = path == "/fs/log.md";
-    let is_section_index = path.ends_with("/index.md");
-    let is_concept = !is_root_index && !is_log && !is_section_index;
 
     match parse_frontmatter(content) {
-        Ok(None) => {
-            if is_concept {
-                findings.push(LintFinding {
-                    code: "missing_frontmatter".to_string(),
-                    path: path.to_string(),
-                    message: "concept page has no YAML frontmatter".to_string(),
-                    line: None,
-                });
-            } else if is_root_index {
-                findings.push(LintFinding {
-                    code: "missing_frontmatter".to_string(),
-                    path: path.to_string(),
-                    message: "root index.md has no YAML frontmatter".to_string(),
-                    line: None,
-                });
-            }
-        }
+        Ok(None) => findings.extend(missing_frontmatter(path)),
         Err(msg) => {
             findings.push(LintFinding {
                 code: "unparsed_frontmatter".to_string(),
@@ -93,7 +112,7 @@ pub fn lint_page_write(path: &str, content: &str, existing_pages: &[String]) -> 
             });
         }
         Ok(Some(fm)) => {
-            if is_concept {
+            if is_concept(path) {
                 let has_type = fm
                     .page_type
                     .as_deref()
@@ -197,28 +216,11 @@ pub fn lint_bundle(pages: &HashMap<String, String>) -> (Vec<LintFinding>, Backli
 
     for (path, content) in pages {
         let is_root_index = path == "/fs/index.md";
-        let is_log = path == "/fs/log.md";
-        let is_section_index = path.ends_with("/index.md");
-        let is_concept = !is_root_index && !is_log && !is_section_index;
 
         let fm_res = parse_frontmatter(content);
         match &fm_res {
             Ok(None) => {
-                if is_concept {
-                    findings.push(LintFinding {
-                        code: "missing_frontmatter".to_string(),
-                        path: path.clone(),
-                        message: "concept page has no YAML frontmatter".to_string(),
-                        line: None,
-                    });
-                } else if is_root_index {
-                    findings.push(LintFinding {
-                        code: "missing_frontmatter".to_string(),
-                        path: path.clone(),
-                        message: "root index.md has no YAML frontmatter".to_string(),
-                        line: None,
-                    });
-                }
+                findings.extend(missing_frontmatter(path));
                 page_titles.insert(path.clone(), path.clone());
             }
             Err(msg) => {
@@ -238,7 +240,7 @@ pub fn lint_bundle(pages: &HashMap<String, String>) -> (Vec<LintFinding>, Backli
                     .unwrap_or(path);
                 page_titles.insert(path.clone(), title.to_string());
 
-                if is_concept {
+                if is_concept(path) {
                     let has_type = fm.page_type.as_ref().is_some_and(|t| !t.trim().is_empty());
                     if !has_type {
                         findings.push(LintFinding {
@@ -311,12 +313,7 @@ pub fn lint_bundle(pages: &HashMap<String, String>) -> (Vec<LintFinding>, Backli
 
     // 3. Orphan page check (concept pages with no incoming links)
     for path in &all_paths {
-        let is_root_index = *path == "/fs/index.md";
-        let is_log = *path == "/fs/log.md";
-        let is_section_index = path.ends_with("/index.md");
-        let is_concept = !is_root_index && !is_log && !is_section_index;
-
-        if is_concept {
+        if is_concept(path) {
             let count = incoming_count.get(*path).copied().unwrap_or(0);
             if count == 0 {
                 findings.push(LintFinding {
@@ -450,5 +447,52 @@ mod tests {
             ["/fs/alone.md"],
             "a link to itself does not bring a page into the bundle"
         );
+    }
+
+    /// The write stays lenient, so a page with no block is stored as it was
+    /// sent. The finding is the only place a writer learns the shape, so it
+    /// carries the minimum to add rather than only what is missing.
+    #[test]
+    fn a_page_with_no_frontmatter_is_told_the_minimum_to_add() {
+        let concept = lint_page_write("/fs/notes.md", "# Notes\n", &[]);
+        assert_eq!(concept.len(), 1);
+        assert_eq!(concept[0].code, "missing_frontmatter");
+        assert!(
+            concept[0].message.contains("type: Concept"),
+            "a concept page is told the field it needs: {}",
+            concept[0].message
+        );
+
+        let root = lint_page_write("/fs/index.md", "# Root\n", &[]);
+        assert_eq!(root.len(), 1);
+        assert_eq!(root[0].code, "missing_frontmatter");
+        assert!(
+            root[0].message.contains("okf_version"),
+            "the bundle root is told the field only it carries: {}",
+            root[0].message
+        );
+
+        // A page that says nothing about itself is asked for nothing, and the
+        // whole-bundle walk says the same thing the write does.
+        let mut pages = HashMap::new();
+        pages.insert("/fs/notes.md".to_string(), "# Notes\n".to_string());
+        let (findings, _) = lint_bundle(&pages);
+        let missing: Vec<&LintFinding> = findings
+            .iter()
+            .filter(|finding| finding.code == "missing_frontmatter")
+            .collect();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].message, concept[0].message);
+    }
+
+    #[test]
+    fn a_section_index_and_the_log_are_not_asked_for_frontmatter() {
+        for path in ["/fs/log.md", "/fs/runbooks/index.md"] {
+            assert_eq!(
+                lint_page_write(path, "# Plain\n", &[]),
+                vec![],
+                "{path} is located by its place in the bundle, not by its own fields"
+            );
+        }
     }
 }
