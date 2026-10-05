@@ -32,3 +32,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0021](0021-the-token-is-the-identity.md) - The token is the identity
 * [0022](0022-search-ranks-in-the-hub.md) - Search ranks in the hub, bounded by
   a fetch cap
+* [0023](0023-prove-the-interface-with-standard-tools.md) - Prove the interface
+  with standard tools

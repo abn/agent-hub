@@ -116,6 +116,18 @@ any access rule.
 - **Prefer automation over manual conformance.** `pre-commit` and `make check`
   own style, conventions, and quality gates. Do not hand-polish what a tool
   can enforce.
+- **Tests assert behaviour, not source text.** A check holds a rendered value, a
+  behaviour, or a parsed property of the stylesheet, never a substring of a
+  source file. Use the standard tool for the concern: Playwright Test with role
+  locators and auto-waiting for browser behaviour, `toHaveScreenshot` for
+  visuals, `@axe-core/playwright` for accessibility, Vitest for client logic,
+  Stylelint and `css-tree` for the stylesheet and its tokens, TypeScript and
+  `tsc --noEmit` for types, and mutation testing (`cargo-mutants`, Stryker) for
+  coverage. A check that cannot be shown failing on a real defect and passing
+  after a rename is not a gate: rewrite it with the tool or remove it.
+  [ADR 0023](docs/adr/0023-prove-the-interface-with-standard-tools.md) is the
+  record, and the toolchain is dev-only: no bundler, and no runtime dependency
+  in the shipped binary or container.
 - **Tool-specific assets stay out of the repository.** Assistant shims and the
   scratch area under `.agents/brain/` are git-ignored. `.agents/bootstrap.sh`
   regenerates the shims; it is idempotent and safe to re-run. **One exception:**
