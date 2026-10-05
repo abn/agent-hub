@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / ".agents" / "scripts"))
+sys.path.insert(0, str(ROOT / ".agents" / "skills" / "seeded-hub" / "scripts"))
 
 import hub_harness as harness
 

@@ -56,7 +56,8 @@ fmt/check: ## Fail if formatting differs from rustfmt output
 	cargo fmt --check
 
 docs/check: ## Validate the docs bundle against OKF v0.2
-	./.agents/scripts/check-okf.py
+	@command -v okf >/dev/null || { printf 'docs/check: okf is not installed. Install it with:\n  GOBIN="$$HOME/.local/bin" GOTOOLCHAIN=auto go install github.com/okfcli/okf/cmd/okf@latest\n' >&2; exit 1; }
+	okf validate docs
 
 web/check: ## Static checks for the PWA assets
 	./.agents/scripts/check-web.py

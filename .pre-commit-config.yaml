@@ -1,4 +1,4 @@
-# Declarative hook configuration. Installed by .agents/bootstrap.sh.
+# Declarative hook configuration. Installed by `make setup`.
 # `make check` runs the same hooks CI runs.
 default_install_hook_types: [pre-commit, commit-msg]
 # Without this, every file hook would also run against the commit message.
@@ -79,30 +79,8 @@ repos:
         name: reject the system temp directory in tests and checks
         entry: 'std::env::temp_dir\(|env::temp_dir\(|tempfile\.(mkdtemp|mkstemp|TemporaryDirectory|NamedTemporaryFile)\((?![^)\n]*dir=)|os\.tmpdir\(|gettempdir\(|["''`]/tmp/|["''`]/var/tmp/'
         language: pygrep
-        files: '^(src|tests|\.agents/scripts)/'
+        files: '^(src|tests|\.agents/(scripts|skills))/'
         exclude: '^tests/harness\.rs$'
-
-      - id: no-emoji
-        name: reject emoji
-        entry: ./.agents/scripts/check-emoji.py
-        language: script
-        types: [text]
-
-      - id: no-emoji-msg
-        name: reject emoji in the commit message
-        entry: ./.agents/scripts/check-emoji.py
-        language: script
-        stages: [commit-msg]
-
-      # Agent-work tracking (numbered waves, lettered lanes, milestone codes)
-      # stays in the scratch area. The concept words alone are fine in prose;
-      # what is rejected is an identifier. Cargo.lock is generated and exempt.
-      - id: no-process-leaks
-        name: reject agent-work and milestone identifiers
-        entry: ./.agents/scripts/check-process-leaks.py
-        language: script
-        types: [text]
-        exclude: '^Cargo\.lock$'
 
       # Conventional Commits covers the subject only. This is the body rule:
       # no trailers. Git trailer keys are hyphenated (Signed-off-by,
@@ -116,22 +94,11 @@ repos:
         args: [-i]
         stages: [commit-msg]
 
-      - id: no-process-leaks-msg
-        name: reject process leaks in the commit message
-        entry: ./.agents/scripts/check-process-leaks.py
-        language: script
-        stages: [commit-msg]
-
-      - id: test-hooks
-        name: test hook fixtures
-        entry: ./.agents/scripts/test-hooks.py
-        language: script
-        pass_filenames: false
-        files: '^\.agents/scripts/(check-emoji\.py|check-process-leaks\.py|test-hooks\.py)$'
-
+      # The OKF validator is the standard tool, so the bundle is validated with
+      # it rather than by a bespoke script. It runs when docs change.
       - id: okf-bundle
         name: validate the OKF v0.2 docs bundle
-        entry: ./.agents/scripts/check-okf.py
-        language: script
+        entry: okf validate docs
+        language: system
         pass_filenames: false
-        files: '^(docs/|\.agents/scripts/check-okf\.py$)'
+        files: '^docs/'

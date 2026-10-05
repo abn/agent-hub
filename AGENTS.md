@@ -103,8 +103,8 @@ any access rule.
 - **No internal process leaks.** Committed files and assets never reference
   internal process or tracking identifiers, task or ticket numbers, agent-work
   references, milestone identifiers, or scratch paths. Internal and agent-work
-  tracking belongs in the scratch area only. A hook rejects the obvious
-  identifier patterns; review covers the rest.
+  tracking belongs in the scratch area only. This is a review rule: the hooks
+  do not check it, so a leak is caught in review or not at all.
 - **Always-public-ready docs.** `docs/` is an OKF v0.2 bundle. No internal
   names, codenames, hostnames, absolute paths, tokens, or task identifiers.
 - **Tightly scoped changes.** Every change is the smallest clean change that
@@ -140,9 +140,10 @@ any access rule.
   This is distinct from the project skills under `.agents/skills/`.
 - **The wiki carries product screenshots.** `docs/assets/screens/` holds the
   main feature screens at both widths in both themes, captured with dummy data
-  from a seeded scratch hub by `.agents/scripts/wiki_screens.py`; the skill is
-  `.agents/skills/capture-wiki-screenshots/`. Re-run and commit the captures
-  when a screen changes, in the same commit as the change.
+  from a seeded scratch hub. The capture script and its skill live under
+  `.agents/skills/capture-wiki-screenshots/`, and the seeded hub it drives is
+  the `seeded-hub` skill. Re-run and commit the captures when a screen changes,
+  in the same commit as the change.
 - **Makefile** is the single automation entrypoint. Bare `make` shows the
   targets. `make check` is the gate that hooks and CI both reuse.
 - **Commits** follow Conventional Commits, summary first, no trailers (no

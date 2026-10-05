@@ -11,7 +11,7 @@ in both themes.
 It writes only under `docs/assets/screens/`. Run it from the repository root
 with the interpreter that can import playwright:
 
-    python3 .agents/scripts/wiki_screens.py    # needs the playwright package
+    python3 .agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py    # needs the playwright package
 
 The run is deterministic and idempotent: the same filenames each time, so a
 refresh is a byte-level diff rather than a new set. A screen the router
@@ -28,10 +28,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / ".agents" / "skills" / "seeded-hub" / "scripts"))
+
 import hub_harness as harness
 
 NAME = "wiki_screens"
-ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "docs" / "assets" / "screens"
 
 

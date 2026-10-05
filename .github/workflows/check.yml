@@ -33,6 +33,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The docs gate is `okf validate`, the standard validator, so CI installs
+      # it. GOTOOLCHAIN=auto so the install works even when the pinned Go is
+      # older than okf requires.
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27"
+
+      - name: Install the OKF validator
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" GOTOOLCHAIN=auto \
+            go install github.com/okfcli/okf/cmd/okf@latest
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       - name: Cache Cargo dependencies and build artifacts
         uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
         with:

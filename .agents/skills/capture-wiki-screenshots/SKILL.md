@@ -18,11 +18,11 @@ claim against.
 ## What good looks like
 
 - A written capture script a reviewer can re-run, not a folder of mystery
-  bytes: `.agents/scripts/wiki_screens.py`.
+  bytes: `.agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py`.
 - Four images per feature screen: desktop light and dark at 1440x900, phone
   light and dark at 390x844, so a reader on either theme at either width sees
   the real surface.
-- Dummy data from `.agents/scripts/hub_harness.py` (`running_hub(name)`,
+- Dummy data from `.agents/skills/seeded-hub/scripts/hub_harness.py` (`running_hub(name)`,
   `seed(port)`), which seeds a `checks` project with a feed, a session with a
   brain, artifacts, an inbox and a knowledge base. Never a real hub, never the
   live `data/`, never a real token.
@@ -32,7 +32,7 @@ claim against.
 
 ## The capture script
 
-`.agents/scripts/wiki_screens.py` is the single source of truth for the set.
+`.agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py` is the single source of truth for the set.
 It:
 
 1. Starts a seeded hub through `hub_harness.running_hub`.
@@ -50,7 +50,7 @@ the brain tree, `artifacts` and the artifact viewer, `wiki` and a reader page,
 Run it with the interpreter that can import playwright:
 
 ```sh
-python3 .agents/scripts/wiki_screens.py    # the interpreter that can import playwright
+python3 .agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py    # the interpreter that can import playwright
 ```
 
 It writes into a bundle that is checked in, so it must be run from the repo
@@ -64,7 +64,7 @@ capture need not contend for a Chromium with another agent on the machine:
 
 ```sh
 OBSCURA_ALLOW_PRIVATE_NETWORK=1 obscura serve --port 9222 &
-OBSCURA_CDP=http://127.0.0.1:9222 python3 .agents/scripts/wiki_screens.py
+OBSCURA_CDP=http://127.0.0.1:9222 python3 .agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py
 ```
 
 Obscura needs `OBSCURA_ALLOW_PRIVATE_NETWORK=1` (its server flag) for the
