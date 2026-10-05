@@ -95,6 +95,10 @@ pub fn router(state: AppState) -> Router {
                 .get(artifacts::share_get),
         )
         .route("/api/v1/artifacts/{id}/versions", get(artifacts::versions))
+        .route(
+            "/api/v1/artifacts/{id}/viewer-pass",
+            get(artifacts::viewer_pass),
+        )
         .route("/api/v1/artifacts/{id}/raw", get(artifacts::raw))
         .route(
             "/api/v1/artifacts/{id}/comments",

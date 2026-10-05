@@ -226,6 +226,13 @@ function showMarkdown(frame, meta, source, theme) {
   });
 }
 
+// The owner pass, when this page was opened with one. An iframe navigation
+// carries no bearer token, so the app mints a pass to read a page an active
+// share conceals; the inner frame is the same artifact, so it rides along.
+function viewerPass() {
+  return new URLSearchParams(window.location.search).get("pass");
+}
+
 // `frame.src = ...` resolves against this document's own URL, which is
 // always this artifact's own page ("/artifacts/{id}"), so the sibling
 // "frame" route is reached without naming "artifacts" or the id's directory
@@ -237,6 +244,8 @@ function frameUrl(meta, theme) {
   const params = new URLSearchParams();
   if (meta.version != null) params.set("version", String(meta.version));
   params.set("theme", theme);
+  const pass = viewerPass();
+  if (pass) params.set("pass", pass);
   return `${base}?${params.toString()}`;
 }
 
@@ -445,11 +454,16 @@ function init() {
   const picker = document.getElementById("hub-version-select");
   if (pickerWrap && picker) {
     picker.addEventListener("change", () => {
-      const version = picker.value;
-      const target = version
-        ? `${window.location.pathname}?version=${encodeURIComponent(version)}`
+      // Rebuilt from this page's own query rather than from the path alone:
+      // the theme the app asked for and the pass that read this page both have
+      // to survive the switch, or the reader lands on a page it cannot open.
+      const params = new URLSearchParams(window.location.search);
+      if (picker.value) params.set("version", picker.value);
+      else params.delete("version");
+      const query = params.toString();
+      window.location.href = query
+        ? `${window.location.pathname}?${query}`
         : window.location.pathname;
-      window.location.href = target;
     });
   }
 

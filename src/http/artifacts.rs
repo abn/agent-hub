@@ -134,13 +134,24 @@ pub struct VersionQuery {
     pub version: Option<i64>,
 }
 
-/// The `?version=N&theme=light|dark` selector of the frame route.
+/// The `?version=N&pass=...` selector of the public host page.
+#[derive(Debug, Default, Deserialize)]
+pub struct HostQuery {
+    /// The version to read. Omitted, the current version is read.
+    pub version: Option<i64>,
+    /// The owner pass, which reads a page an active share conceals.
+    pub pass: Option<String>,
+}
+
+/// The `?version=N&theme=light|dark&pass=...` selector of the frame route.
 #[derive(Debug, Default, Deserialize)]
 pub struct FrameQuery {
     /// The version to read. Omitted, the current version is read.
     pub version: Option<i64>,
     /// The frame theme. Only `dark` selects dark; anything else is light.
     pub theme: Option<String>,
+    /// The owner pass, which reads a body an active share conceals.
+    pub pass: Option<String>,
 }
 
 /// The version history of one artifact, oldest first.
@@ -434,6 +445,136 @@ pub async fn raw(
     }
 }
 
+/// A viewer pass for one artifact, as the app embeds its page.
+#[derive(Debug, Serialize)]
+pub struct ViewerPassResponse {
+    /// The pass, or empty when this artifact's page needs none.
+    pub pass: String,
+}
+
+/// The width of a pass's window in seconds. A pass is recomputed when it is
+/// checked rather than stored, so a window is how long one stays open.
+const VIEWER_PASS_WINDOW: u64 = 60;
+
+/// How many windows a pass is accepted in, its own included. Two covers a frame
+/// that loads the host page and the host page's own inner frame a moment later,
+/// and keeps a pass in a history entry worthless within a couple of minutes.
+const VIEWER_PASS_WINDOWS: u64 = 2;
+
+/// The window this request falls in.
+fn pass_window() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() / VIEWER_PASS_WINDOW)
+        .unwrap_or(0)
+}
+
+/// The pass for one artifact in one window.
+///
+/// A keyed digest rather than a stored row: nothing to keep, nothing to expire
+/// in a background pass, and nothing to garbage collect. The key is the admin
+/// token, so a pass cannot be computed without it, and the artifact id is in
+/// the digest, so a pass for one artifact reads no other. Sixteen bytes of
+/// digest is a value nobody guesses.
+fn derive_viewer_pass(secret: &str, artifact_id: &str, window: u64) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [secret, artifact_id, &window.to_string()] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Whether a presented value is a live pass for this artifact.
+fn viewer_pass_holds(state: &AppState, artifact_id: &str, presented: Option<&str>) -> bool {
+    let Some(presented) = presented else {
+        return false;
+    };
+    // A hub with no admin token has no control surface to mint a pass from, so
+    // there is nothing for a pass to stand in for.
+    let Some(secret) = state.config.admin_token.as_deref() else {
+        return false;
+    };
+    let current = pass_window();
+    (0..VIEWER_PASS_WINDOWS).any(|back| {
+        // Compared as a value equality on a digest rather than byte by byte:
+        // the pass is not the admin token, and a wrong one is refused on the
+        // first differing byte.
+        presented == derive_viewer_pass(secret, artifact_id, current.saturating_sub(back))
+    })
+}
+
+/// Whether this caller must not see this artifact on the public routes.
+///
+/// A share link is the only way in to a plain artifact that has one, so every
+/// other caller gets the same 404 an unknown artifact gets. The owner's own
+/// viewer is not that caller: it reads the page with a pass, because an iframe
+/// navigation cannot carry the bearer token the app reads everything else with.
+async fn concealed(
+    state: &AppState,
+    artifact: &Artifact,
+    pass: Option<&str>,
+) -> std::result::Result<bool, Problem> {
+    if artifact.protected || viewer_pass_holds(state, &artifact.id, pass) {
+        return Ok(false);
+    }
+    artifact_store::has_active_share(&state.db, &artifact.id)
+        .await
+        .map_err(|err| Problem::from_error(&err))
+}
+
+/// `GET /api/v1/artifacts/{id}/viewer-pass`
+///
+/// Admin only. The pass the app needs to read this artifact's public page, which
+/// it embeds in a frame. An iframe navigation carries no bearer token, so a page
+/// an active share conceals is otherwise unreachable from the owner's own
+/// viewer. An artifact whose page is public anyway answers an empty pass, so the
+/// address a reader ends up with carries a credential only where one is needed.
+/// A pass reads the one artifact it was minted for, for as long as its window
+/// lasts, and is not the share token: it grants nothing a recipient of a share
+/// link does not already have, and opens nothing the admin token does not
+/// already open.
+pub async fn viewer_pass(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<ViewerPassResponse>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let artifact = artifact_store::metadata(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    // A protected artifact's page is never concealed: the password is the gate.
+    // So is a plain one nobody has shared. Either way there is nothing to pass,
+    // and no reason to put a credential in a frame address.
+    if artifact.protected || !artifact_store::has_active_share(&state.db, &artifact_id).await.map_err(
+        |err| Problem::from_error(&err),
+    )? {
+        return Ok(Json(ViewerPassResponse {
+            pass: String::new(),
+        }));
+    }
+
+    let secret = state.config.admin_token.as_deref().ok_or_else(|| {
+        Problem::from_error(&Error::InvalidArgument(
+            "no admin token is configured, so no pass can be minted".to_string(),
+        ))
+    })?;
+    Ok(Json(ViewerPassResponse {
+        pass: derive_viewer_pass(secret, &artifact_id, pass_window()),
+    }))
+}
+
 /// `GET /artifacts/{id}`
 ///
 /// Public: a recipient opens the link without a token. The host shell carries
@@ -441,12 +582,13 @@ pub async fn raw(
 /// a plain markdown artifact renders in the host page from the inlined
 /// source, and a protected artifact shows the unlock form with the envelope
 /// and ciphertext. With `?version=N`, serves that version instead of the
-/// current one. All logic lives in the viewer module and the vendor scripts;
-/// the shell itself has no inline scripts.
+/// current one, and `?pass=` is a pass from the viewer-pass route, which is how
+/// the app reads a page an active share conceals. All logic lives in the viewer
+/// module and the vendor scripts; the shell itself has no inline scripts.
 pub async fn host(
     State(state): State<AppState>,
     ProblemPath(artifact_id): ProblemPath<String>,
-    ProblemQuery(query): ProblemQuery<VersionQuery>,
+    ProblemQuery(query): ProblemQuery<HostQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
     let (artifact, bytes) = match query.version {
@@ -460,11 +602,7 @@ pub async fn host(
             .map_err(|err| Problem::from_error(&err))?,
     };
 
-    if !artifact.protected
-        && artifact_store::has_share_record(&state.db, &artifact.id)
-            .await
-            .map_err(|err| Problem::from_error(&err))?
-    {
+    if concealed(&state, &artifact, query.pass.as_deref()).await? {
         return Err(Problem::from_error(&Error::NotFound(format!(
             "artifact {artifact_id} not found"
         ))));
@@ -491,7 +629,15 @@ pub async fn host(
             .await
             .map_err(|err| Problem::from_error(&err))?;
         reader_shell(
-            &artifact, &bytes, shown, pinned, &versions, &thread, &origin, None,
+            &artifact,
+            &bytes,
+            shown,
+            pinned,
+            &versions,
+            &thread,
+            &origin,
+            None,
+            query.pass.as_deref(),
         )
     };
     Ok(host_response(document))
@@ -503,8 +649,9 @@ pub async fn host(
 /// markdown artifact renders in the host page, so this route refuses it with
 /// `invalid_argument`; a protected artifact has no servable plaintext and is
 /// refused the same way. With `?version=N`, serves that version instead of
-/// the current one. With `?theme=dark`, stamps the dark theme; anything else
-/// is light.
+/// the current one, and `?pass=` is a pass from the viewer-pass route, which
+/// the host page carries into this frame. With `?theme=dark`, stamps the dark
+/// theme; anything else is light.
 pub async fn frame(
     State(state): State<AppState>,
     ProblemPath(artifact_id): ProblemPath<String>,
@@ -522,11 +669,7 @@ pub async fn frame(
             .map_err(|err| Problem::from_error(&err))?,
     };
 
-    if !artifact.protected
-        && artifact_store::has_share_record(&state.db, &artifact.id)
-            .await
-            .map_err(|err| Problem::from_error(&err))?
-    {
+    if concealed(&state, &artifact, query.pass.as_deref()).await? {
         return Err(Problem::from_error(&Error::NotFound(format!(
             "artifact {artifact_id} not found"
         ))));
@@ -567,7 +710,9 @@ pub async fn frame(
 ///
 /// Public: a static preview card with the escaped title and description plus
 /// the hub wordmark. No external references. With `?version=N`, cards that
-/// version instead of the current one.
+/// version instead of the current one. A card names the artifact in a link any
+/// reader can follow, so it stays concealed behind a live share like the page
+/// itself, and takes no pass: the owner's own reader never asks for one.
 pub async fn og_svg(
     State(state): State<AppState>,
     ProblemPath(artifact_id): ProblemPath<String>,
@@ -584,11 +729,7 @@ pub async fn og_svg(
             .map_err(|err| Problem::from_error(&err))?,
     };
 
-    if !artifact.protected
-        && artifact_store::has_share_record(&state.db, &artifact.id)
-            .await
-            .map_err(|err| Problem::from_error(&err))?
-    {
+    if concealed(&state, &artifact, None).await? {
         return Err(Problem::from_error(&Error::NotFound(format!(
             "artifact {artifact_id} not found"
         ))));
@@ -764,6 +905,7 @@ pub async fn share_host(
             &thread,
             &origin,
             Some(&token),
+            None,
         )
     };
     Ok(host_response(document))
@@ -993,6 +1135,7 @@ fn reader_shell(
     thread: &[Comment],
     origin: &str,
     share_token: Option<&str>,
+    pass: Option<&str>,
 ) -> String {
     let title = escape_html(&artifact.title);
     let with_history = versions.len() > 1 && share_token.is_none();
@@ -1005,9 +1148,17 @@ fn reader_shell(
         // Relative to this page's own URL ("/artifacts/{id}" or "/s/{token}"), not the
         // origin root: a leading slash here would collapse to the origin
         // root under a reverse proxy that mounts the hub on a path.
+        //
+        // The owner pass rides along into the inner frame: it is what read this
+        // page, so without it an HTML artifact behind a live share would load
+        // a frame the hub conceals.
         let frame_path = match share_token {
             Some(token) => format!("{token}/frame?version={shown}&amp;theme=light"),
             None => format!("{}/frame?version={shown}&amp;theme=light", artifact.id),
+        };
+        let frame_path = match pass {
+            Some(pass) => format!("{frame_path}&amp;pass={}", escape_html(pass)),
+            None => frame_path,
         };
         format!(
             "<iframe id=\"hub-frame\" title=\"{title}\" sandbox=\"allow-scripts\" src=\"{frame_path}\"></iframe>\n"

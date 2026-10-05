@@ -101,12 +101,17 @@ export async function artifactStage(id, projectId) {
     <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}" aria-label="Copy raw">${rawGlyph}</button>`;
 
   const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  // A plain artifact with a live share link is concealed at its id address, so
+  // the frame asks for a pass and reads the page with it.
+  const pass = await viewerPass(id);
   // The artifact's own host page. It carries the document and, for a protected
   // artifact, the gate and the client-side decryptor, so the app never renders
   // agent bytes in its own origin.
-  const body = `<div class="hub-viewer-doc"><iframe id="hub-frame" sandbox="allow-scripts" title="${esc(
-    current.title || slug,
-  )}" src="${esc(frameSrc(id, newest, theme))}"></iframe></div>`;
+  const body = `<div class="hub-viewer-doc"><iframe id="hub-frame" sandbox="allow-scripts" data-pass="${esc(
+    pass,
+  )}" title="${esc(current.title || slug)}" src="${esc(
+    frameSrc(id, newest, theme, pass),
+  )}"></iframe></div>`;
 
   const aside = `
     <div class="shell-head">
@@ -330,24 +335,44 @@ export function viewerBack() {
   location.hash = project ? `#/projects/${encodeURIComponent(project)}/artifacts` : "#/projects";
 }
 
-const viewer = { id: null, version: null, kind: null, raw: false, project: null };
+const viewer = { id: null, version: null, kind: null, raw: false, project: null, pass: "" };
 
 // The framed page cannot remember a theme (a sandboxed frame has no store),
 // so the viewer names the one it wants in the address. Relative to this
 // document (the app shell), not the origin root, so it still lands on the
 // artifact page under whatever prefix a proxy mounts the app on.
-function frameSrc(id, version, theme) {
+function frameSrc(id, version, theme, pass) {
   const params = new URLSearchParams();
   if (version) params.set("version", String(version));
   if (theme) params.set("theme", theme);
+  if (pass) params.set("pass", pass);
   const query = params.toString();
   const address = `artifacts/${encodeURIComponent(id)}`;
   return query ? `${address}?${query}` : address;
 }
 
+// A shared plain artifact's page is 404 for everyone but the token holder, and
+// an iframe navigation carries no bearer token, so the frame asks for a pass
+// before it names the page. The hub answers an empty pass for an artifact whose
+// page is public anyway, so the address a reader ends up with carries a
+// credential only where one is needed.
+async function viewerPass(id) {
+  try {
+    const minted = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/viewer-pass`);
+    return minted?.pass || "";
+  } catch {
+    return "";
+  }
+}
+
 function viewerSource(frame) {
   if (!frame) return;
-  return frameSrc(frame.dataset.id, viewer.version, frame.getAttribute("data-theme"));
+  return frameSrc(
+    frame.dataset.id,
+    viewer.version,
+    frame.getAttribute("data-theme"),
+    frame.dataset.pass,
+  );
 }
 
 // Navigating the sandboxed frame in place pushes a history entry, which would
@@ -455,6 +480,9 @@ export function toggleViewerTheme() {
     const params = new URLSearchParams();
     if (viewer.version) params.set("version", String(viewer.version));
     params.set("theme", next);
+    // The frame route is the same artifact the pass was minted for, so the
+    // pass rides along; without it a shared artifact's body is concealed too.
+    if (frame.dataset.pass) params.set("pass", frame.dataset.pass);
     src = `artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
   } else {
     src = viewerSource(frame);
@@ -842,6 +870,10 @@ export async function viewerRoute(params, gen, path) {
   } catch {}
   if (stale(gen)) return;
 
+  // A shared plain artifact's page needs a pass before the frame can name it.
+  viewer.pass = await viewerPass(id);
+  if (stale(gen)) return;
+
   let projectArtifacts = [];
   try {
     const listRes = await api(`/api/v1/projects/${encodeURIComponent(projDisplay)}/artifacts`);
@@ -1023,7 +1055,7 @@ export async function viewerRoute(params, gen, path) {
       action: "open-in-browser",
       run: () => {
         const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-        window.open(frameSrc(id, viewer.version, opened), "_blank");
+        window.open(frameSrc(id, viewer.version, opened, viewer.pass), "_blank");
       },
     },
   ];
@@ -1128,10 +1160,13 @@ export async function viewerRoute(params, gen, path) {
   frame.id = "hub-frame";
   frame.dataset.id = id;
   frame.dataset.kind = current.kind;
+  // Read back by every later rebuild of this frame's address: a theme switch
+  // and the raw-view toggle both start from it.
+  if (viewer.pass) frame.dataset.pass = viewer.pass;
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("title", current.title);
   frame.setAttribute("data-theme", opened);
-  frame.src = frameSrc(id, viewer.version, opened);
+  frame.src = frameSrc(id, viewer.version, opened, viewer.pass);
   docCol.appendChild(frame);
 
   content.appendChild(docCol);

@@ -98,8 +98,17 @@ plain share link pinned to the active version and `DELETE` revokes it, both
 admin-gated; `GET /api/v1/artifacts/:id/share` reports the current link. The
 link is served unauthenticated at `/s/:token`, with `/s/:token/frame` for the
 sandboxed content and `/s/:token/og.svg` for its preview card; a revoked or
-unknown token is `404`. Agents have no MCP tool to create or revoke a link, so
-their artifact workflow is publish, version and protect, and the human shares.
+unknown token is `404`. While a link is live, `/artifacts/:id` and
+`/artifacts/:id/frame` are `404` for every caller without a viewer pass, and
+`404` again once the link is revoked. The pass comes from
+`GET /api/v1/artifacts/:id/viewer-pass`, admin-gated: it is a keyed digest of the
+admin token, the artifact id and a sixty-second window, recomputed on every
+request rather than stored, so it expires by itself and reads one artifact's
+public page and nothing else. The PWA embeds that page in a frame, and a frame
+navigation carries no bearer token, so the app mints the pass and carries it in
+the frame address; that is the whole reason the pass exists. Agents have no MCP
+tool to create or revoke a link, so their artifact workflow is publish, version
+and protect, and the human shares.
 
 The two probes differ on purpose. `GET /healthz` is liveness: the process is
 up. `GET /readyz` is readiness, and it answers `200` only when the store is

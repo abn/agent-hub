@@ -101,6 +101,8 @@ specified;
 content, including `comments_count` and `comments_open`, and for a public
 markdown artifact includes a `rendered` HTML field;
 `GET /api/v1/artifacts/:id/versions` returns the history;
+`GET /api/v1/artifacts/:id/viewer-pass` returns the short-lived pass the PWA
+embeds a shared artifact's page with (see Sharing);
 `GET /api/v1/artifacts/:id/raw` returns the stored bytes as text, or a JSON
 envelope with base64 ciphertext for a protected artifact. Deletion is
 `DELETE /api/v1/artifacts/:id`. Every page carries link-preview tags with a
@@ -152,14 +154,30 @@ For a plain artifact, sharing issues a unique, unguessable capability token. The
 resulting link (`/s/{token}`) serves the specific pinned version that was active
 when the share link was created. Once a plain artifact has been shared, the
 unauthenticated `/artifacts/{id}` route returns 404, so access is governed by the
-token alone; that holds after a revoke too, and a fresh share rotates the token.
-Before the first share the sheet offers **Make link** and says that sharing
-creates one link to this version. With a link it shows the link, a copy control,
-the version it opens, and a confirmed **Revoke link** action. Revoking deactivates
-that URL immediately: requests for a revoked token return 404 indistinguishable
-from an unknown token, preventing existence oracles. Creating a fresh share link
-for the artifact rotates the token, invalidating any previous link, and returns
-the sheet to the Make link state.
+token alone; a fresh share rotates the token. Revoking the link restores the
+public page: the link is withdrawn, not the artifact, so the owner's own
+address answers again and the revoked token stays dead. Before the first share
+the sheet offers **Make link** and says that sharing creates one link to this
+version. With a link it shows the link, a copy control, the version it opens,
+and a confirmed **Revoke link** action. Revoking deactivates that URL
+immediately: requests for a revoked token return 404 indistinguishable from an
+unknown token, preventing existence oracles. Creating a fresh share link for the
+artifact rotates the token, invalidating any previous link, and returns the sheet
+to the Make link state.
+
+The owner reads a shared artifact in the app like any other, because the
+app asks the hub for a **viewer pass** before the frame names the page
+(`GET /api/v1/artifacts/:id/viewer-pass`, admin-gated) and carries it in the
+frame address. A pass is a keyed digest of the admin token, the artifact id and
+a sixty-second window: it cannot be computed without the admin token, it reads
+that one artifact's page and body and no other, and the hub recomputes it on
+every request instead of storing it, so it expires on its own and leaves nothing
+to keep. It exists because an iframe navigation carries no bearer token, which
+is the credential the app reads everything else with. It grants nothing a
+share recipient does not already have, and it is not the share token: the link
+still serves its pinned version, and an unauthenticated `/artifacts/{id}` for a
+shared artifact stays concealed while the link is live. The preview card takes
+no pass, because a card names its artifact to anyone who asks for one.
 
 For a protected artifact, the ciphertext is already protected by the client's
 encryption key, which never reaches the hub. The share sheet provides a copy
