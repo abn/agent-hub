@@ -1484,12 +1484,16 @@ pub async fn get_share_for_artifact(
     }
 }
 
-/// Whether an artifact has ever had a share record.
-pub async fn has_share_record(db: &Database, artifact_id: &str) -> Result<bool> {
+/// Whether an artifact has a share link that is live right now.
+///
+/// A revoked row is history, not access: counting it kept the public page
+/// concealed after the link behind it was withdrawn, so the operator's own
+/// address for a revoked artifact stayed 404 forever.
+pub async fn has_active_share(db: &Database, artifact_id: &str) -> Result<bool> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT 1 FROM artifact_shares WHERE artifact_id = ?1",
+            "SELECT 1 FROM artifact_shares WHERE artifact_id = ?1 AND revoked_at IS NULL",
             vec![Value::Text(artifact_id.to_string())],
         )
         .await
