@@ -7,9 +7,11 @@
   "scripts": {
     "units": "vitest run",
     "styles": "vitest run .agents/js-tests/styles.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "css-tree": "3.2.1",
     "jsdom": "28.1.0",
     "typescript": "5.9.3",

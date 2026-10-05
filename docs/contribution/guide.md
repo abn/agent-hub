@@ -52,7 +52,11 @@ shims. It is idempotent, so re-run it whenever hooks or tooling change.
   registers plus the states a route alone does not show (a dialog, the
   comments drawer, a toast, the public artifact page and its password gate),
   and measures the contrast axe leaves undecided.
-- `make web/smoke`: drives the PWA in a browser against a seeded hub
+- `make web/e2e`: the browser behaviour checks, on Playwright Test. Two
+  projects, one per width (1440x900 and 390x844), each against its own seeded
+  hub. It holds the list filter, the single-key verbs, the search key and the
+  filter chips. Needs Node and a browser; without either the target says so and
+  passes, and `HUB_REQUIRE_BROWSER=1` turns that skip into a failure.
 - `make check`: the full gate: hooks, linter, formatting, and tests
 
 ## The client toolchain
@@ -67,13 +71,36 @@ in `package.json` as devDependencies with the lockfile committed and
 | Pure client logic | Vitest | `make web/units` |
 | Stylesheet rules and tokens | `css-tree` AST walk under Vitest | `make web/styles` |
 | Client types | `tsc --noEmit` over `checkJs` | `make web/types` |
-| Browser behaviour and layout | Playwright Test | not wired yet |
+| Browser behaviour and layout | Playwright Test | `make web/e2e` |
 | Accessibility | `@axe-core/playwright` | not wired yet |
 
 The unit tests import the modules from `web/` directly, so a test and the page
 cannot drift apart, and jsdom supplies the document and the media query the
 modules read at import time. A rename no longer fails a test, and a branch that
 is dropped does.
+
+The browser checks live in `e2e/` and run on Playwright Test. Three things are
+worth knowing before writing one:
+
+- **Wait on a condition, not on a number of milliseconds.** `expect(locator)
+  .toBeVisible()` and `.toHaveText()` retry until the page says so, so a slow
+  paint is waited out and a missing one fails with a message. A fixed
+  `wait_for_timeout` is the thing this phase removed; do not add one back.
+- **Find what a reader reaches by role or label,** the way
+  `getByRole("searchbox", { name: "Filter inbox" })` does, and fall back to a
+  class only where the markup has no accessible name to ask for (a row's
+  position in a group). A locator that names a class is a screen rule, not a
+  behavioural gate.
+- **A hub per project, seeded by the Python harness.** `e2e/hub.mjs` starts one
+  throwaway hub per project through `e2e/hub-bridge.py`, which reuses
+  `hub_harness.seed()`, and writes a descriptor the tests read. So the fixture
+  strings a check names are the harness's constants, and a project's tests do not
+  move another project's data. `workers: 1` keeps a project's own tests in order,
+  which matters because the hub draws Home's unread dots from what is still above
+  the reader's cursor.
+
+The specs are `.spec.mjs`, so `npx playwright test` finds them, and the
+throwaway data directory and the failure artefacts land under `target/tmp`.
 
 The stylesheet gate reads the same way: it parses `web/*.css` with `css-tree`
 and asserts parsed declarations, so a check names the property and the value it

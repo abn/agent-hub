@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/a11y web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -131,12 +131,19 @@ web/focus: build ## Run the focus ring and control spacing checks
 web/invariants: build ## Run the behavioral invariant checks
 	$(call browser_check,web/invariants,.agents/scripts/invariants.py)
 
-# What a filter leaves on screen and what the single-key verbs reach: the rows
-# a query keeps under the groups that hold them, a and r on a row whose verbs sit
-# beside it, where / lands, and what a filter chip's number counts. Behavioural
-# too, and on the same grounds.
-web/interaction: build ## Run the list filter and single-key verb checks
-	$(call browser_check,web/interaction,.agents/scripts/interaction.py)
+# The browser behaviour slice, on the standard runner: what a filter leaves on
+# screen and what the single-key verbs reach. The rows a query keeps under the
+# groups that hold them, a and r on a row whose verbs sit beside it, where / lands
+# and what a filter chip's number counts. It seeds a throwaway hub per viewport
+# project through the Python harness and asserts rendered values with web-first
+# assertions, so no check waits on a fixed number of milliseconds. It skips
+# rather than fails when there is no Node or no browser, on the same terms as the
+# other browser gates.
+web/e2e: build node_tree ## Run the browser behaviour checks
+	@command -v node >/dev/null || { printf 'web/e2e: node is not installed, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) exit 1;; esac; exit 0; }
+	@node -e "import('@playwright/test').then(async ({chromium}) => { const b = await chromium.launch(); await b.close(); })" >/dev/null 2>&1 \
+	  || { printf 'web/e2e: no browser is available for playwright, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) printf 'web/e2e: HUB_REQUIRE_BROWSER is set, so a skip is a failure\n'; exit 1;; esac; exit 0; }
+	npx playwright test
 
 # A reverse proxy that mounts the hub on a path strips the prefix before
 # forwarding, so the hub never sees it; only the client-side references have
@@ -154,7 +161,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/a11y web/focus web/interaction web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/a11y web/e2e web/focus web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first
