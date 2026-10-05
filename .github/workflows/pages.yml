@@ -1,0 +1,63 @@
+# Render the docs bundle and publish it to GitHub Pages.
+#
+# The action runs the published okf-wiki image, which bakes a pinned mermaid
+# bundle, so the diagrams in the bundle render with no network. Pages must be
+# set to build from a workflow once (Settings, Pages, Source: GitHub Actions),
+# or the deploy step fails with a 404.
+name: Publish wiki
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time, and never cancel one in flight: a cancelled
+# deploy can leave the site mid-swap.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate the bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The repository's own validator, the same one `make docs/check` runs: the
+      # OKF v0.2 rules plus the bundle's privacy, ticket-prefix, scratch-path and
+      # link rules, so a page that should not be public stops the deploy.
+      - name: Validate OKF v0.2
+        run: ./.agents/scripts/check-okf.py
+
+  publish:
+    name: Render and deploy
+    needs: validate
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.deploy-url }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The wiki has no tagged release, so the action is pinned to a commit on
+      # main rather than a moving tag. Bump it deliberately.
+      - id: deploy
+        uses: abn/okf-wiki/action@052f3d746f1fc96aa218a460fe41572f136a2140 # main
+        with:
+          content: docs
+          deploy: true
+          brand: agent-hub
+          brand-sub: docs
+          title: Agent Hub Docs
+          # Section order; any directory not listed is appended alphabetically.
+          sections: "design:Design,architecture:Architecture,usage:Usage,contribution:Contribution,adr:Decisions"
+          nav-links: "GitHub=https://github.com/${{ github.repository }}"

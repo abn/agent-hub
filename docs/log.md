@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The wiki publishes to GitHub Pages
+
+* **Add**: `.github/workflows/pages.yml` renders the bundle with the okf-wiki
+  action and deploys it to Pages, after the repository's own validator. The
+  action runs the published image, so the mermaid diagrams render with no
+  network. Pages must be set to build from a workflow once.
+
 ### The wiki gains diagrams
 
 * **Add**: mermaid diagrams where a picture carries more than the prose: the
