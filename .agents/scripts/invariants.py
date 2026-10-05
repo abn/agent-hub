@@ -2626,8 +2626,10 @@ def check_inbox_card_gutter(page, watch: Watch, port: int, project: str) -> None
               return {
                 bodyPadLeft: getComputedStyle(body).paddingLeft,
                 cardLeft: card ? Math.round(card.getBoundingClientRect().left * 100) / 100 : null,
-                probes: ['.inbox-back', '#inbox-detail-title', '.inbox-detail-meta',
-                          '.inbox-detail-snooze-wrap'].map(probe),
+                // The snooze control is a padded button, so its label is inset
+                // from the gutter by its own padding while its box is the
+                // card's; the three text probes are what hold the gutter.
+                probes: ['.inbox-back', '#inbox-detail-title', '.inbox-detail-meta'].map(probe),
               };
             }"""
         )
