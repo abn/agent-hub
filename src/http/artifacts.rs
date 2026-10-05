@@ -557,9 +557,11 @@ pub async fn viewer_pass(
     // A protected artifact's page is never concealed: the password is the gate.
     // So is a plain one nobody has shared. Either way there is nothing to pass,
     // and no reason to put a credential in a frame address.
-    if artifact.protected || !artifact_store::has_active_share(&state.db, &artifact_id).await.map_err(
-        |err| Problem::from_error(&err),
-    )? {
+    if artifact.protected
+        || !artifact_store::has_active_share(&state.db, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+    {
         return Ok(Json(ViewerPassResponse {
             pass: String::new(),
         }));

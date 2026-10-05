@@ -86,7 +86,10 @@ impl StdioClient {
         // that does not exist, so no user file is read at all.
         all.push((
             "HUB_CONFIG",
-            data_dir.join("client-config").to_string_lossy().into_owned(),
+            data_dir
+                .join("client-config")
+                .to_string_lossy()
+                .into_owned(),
         ));
         all.extend(env.iter().map(|(key, value)| (*key, value.to_string())));
         Self::spawn(&["mcp"], &all)

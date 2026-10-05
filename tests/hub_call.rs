@@ -1031,10 +1031,7 @@ mod broken_teardown {
     /// ends, which is all the one call it serves needs.
     pub fn listen() -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free port");
-        let port = listener
-            .local_addr()
-            .expect("local addr")
-            .port();
+        let port = listener.local_addr().expect("local addr").port();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else {
