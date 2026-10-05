@@ -137,12 +137,18 @@ web/invariants: build ## Run the behavioral invariant checks
 # and what a filter chip's number counts. It seeds a throwaway hub per viewport
 # project through the Python harness and asserts rendered values with web-first
 # assertions, so no check waits on a fixed number of milliseconds. It skips
-# rather than fails when there is no Node or no browser, on the same terms as the
-# other browser gates.
+# rather than fails when there is no Node, no browser or no hub to run against, on
+# the same terms as the other browser gates: a skip is green unless
+# HUB_REQUIRE_BROWSER says otherwise.
 web/e2e: build node_tree ## Run the browser behaviour checks
 	@command -v node >/dev/null || { printf 'web/e2e: node is not installed, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) exit 1;; esac; exit 0; }
 	@node -e "import('@playwright/test').then(async ({chromium}) => { const b = await chromium.launch(); await b.close(); })" >/dev/null 2>&1 \
 	  || { printf 'web/e2e: no browser is available for playwright, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) printf 'web/e2e: HUB_REQUIRE_BROWSER is set, so a skip is a failure\n'; exit 1;; esac; exit 0; }
+	@if [ ! -f "$${HUB_BIN:-target/debug/agent-hub}" ]; then \
+	  printf 'web/e2e: the hub binary is not built, skipped\n'; \
+	  case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) printf 'web/e2e: HUB_REQUIRE_BROWSER is set, so a skip is a failure\n'; exit 1;; esac; \
+	  echo 'web/e2e: skipped'; exit 0; \
+	fi; \
 	npx playwright test
 
 # A reverse proxy that mounts the hub on a path strips the prefix before

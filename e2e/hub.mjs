@@ -13,7 +13,7 @@
 // strings are the harness's constants and not literals repeated in the specs.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, watch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,18 +36,35 @@ const descriptorFor = (project) => path.join(SCRATCH, `${project}.json`);
 // standard library.
 const python = process.env.PYTHON || "python3";
 
+// The descriptor is waited for as an event rather than polled for on a timer:
+// the bridge writes it when the seed is done, so there is nothing to guess at.
 async function waitForDescriptor(child, descriptor, said) {
-  const deadline = Date.now() + READY_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(descriptor)) return JSON.parse(readFileSync(descriptor, "utf8"));
-    if (child.exitCode !== null) {
+  if (existsSync(descriptor)) return JSON.parse(readFileSync(descriptor, "utf8"));
+  const named = path.basename(descriptor);
+  return new Promise((resolve, reject) => {
+    let watcher = null;
+    let ceiling = null;
+    const stop = () => {
+      watcher?.close();
+      clearTimeout(ceiling);
+    };
+    watcher = watch(path.dirname(descriptor), (_event, name) => {
+      if (name !== named && name !== null) return;
+      if (!existsSync(descriptor)) return;
+      stop();
+      resolve(JSON.parse(readFileSync(descriptor, "utf8")));
+    });
+    child.once("exit", () => {
+      stop();
       // The harness reports a missing binary by exiting green, so a run that
       // cannot start says the harness's own reason rather than a timeout.
-      throw new Error(`the hub bridge exited before describing a hub\n${said()}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`the hub bridge described nothing within ${READY_MS / 1000}s\n${said()}`);
+      reject(new Error(`the hub bridge exited before describing a hub\n${said()}`));
+    });
+    ceiling = setTimeout(() => {
+      stop();
+      reject(new Error(`the hub bridge described nothing within ${READY_MS / 1000}s\n${said()}`));
+    }, READY_MS);
+  });
 }
 
 export async function startHubs(projects) {

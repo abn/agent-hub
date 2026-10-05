@@ -115,13 +115,14 @@ const owes = (term, before) => {
   };
 };
 
-// Typing a query leaves the rows it matched on screen under the groups that hold
-// them, and leaves nothing standing that holds nothing.
-async function filterKeepsItsRows(page, { name, terms, miss, where }) {
+// Typing a query stands or hides a group by whether it still heads a row the
+// query kept, names that in one count line, and puts every heading back when the
+// query is cleared. What it does with a row of its own is held separately, in
+// the check that says why.
+async function filterHoldsItsGroups(page, { name, terms, miss, where }) {
   const field = page.getByRole("searchbox", { name });
   await expect(field).toBeVisible();
   const before = await readIndex(page);
-  const rows = page.locator(`${BODY} .row`);
   const groups = page.locator(BODY).locator(HEADINGS);
   const labels = page.locator(`${BODY} .inbox-label`);
   const count = page.locator(`${BODY} .shell-count`);
@@ -131,18 +132,10 @@ async function filterKeepsItsRows(page, { name, terms, miss, where }) {
     expect(want.matching.length, `${where}: nothing on the list matches ${term}`).toBeGreaterThan(0);
     await field.fill(term);
     // The count line is the only statement of what the query did, and the same
-    // pass that writes it hides the rows, so waiting on it is waiting on the
-    // filter having run.
+    // pass that writes it stands or hides the groups, so waiting on it is
+    // waiting on the filter having run.
     await expect(count).toBeVisible();
     await expect(count).toHaveText(`${want.matching.length} of ${before.rows.length} match "${term}"`);
-    await expect(rows).toHaveCount(before.rows.length);
-    for (const [at, row] of before.rows.entries()) {
-      // A row under a folded disclosure was not the reader's to begin with, so
-      // only the rows that were on screen are asked about.
-      if (!row.visible) continue;
-      if (want.matching.includes(row.text)) await expect(rows.nth(at)).toBeVisible();
-      else await expect(rows.nth(at)).toBeHidden();
-    }
     for (const [at, group] of before.groups.entries()) {
       if (!group.visible) continue;
       if (want.holding[group.key]) await expect(groups.nth(at)).toBeVisible();
@@ -154,21 +147,49 @@ async function filterKeepsItsRows(page, { name, terms, miss, where }) {
       if (holds) await expect(labels.nth(at)).toBeVisible();
       else await expect(labels.nth(at)).toBeHidden();
     }
+    // The count line gives way to the headings again when the query is cleared.
     await field.fill("");
     await expect(count).toBeHidden();
-    await expect(page.locator(`${BODY} .row[hidden]`)).toHaveCount(0);
+    for (const [at, group] of before.groups.entries()) {
+      if (group.visible) await expect(groups.nth(at)).toBeVisible();
+    }
   }
 
-  // A query nothing matches leaves no row showing and no group standing over an
-  // empty list.
+  // A query nothing matches leaves no group standing over an empty list.
   await field.fill(miss);
   await expect(count).toHaveText(`0 of ${before.rows.length} match "${miss}"`);
-  await expect(page.locator(`${BODY} .row:visible`)).toHaveCount(0);
   for (const [at, group] of before.groups.entries()) {
     if (group.visible) await expect(groups.nth(at)).toBeHidden();
   }
+}
+
+// A query leaves the reader with the rows it matched and nothing else: the rows
+// it did not match are gone from the screen, and a query that matched nothing
+// leaves an empty list rather than one row of a day with no heading over it.
+async function queryTakesTheRest(page, { name, term }) {
+  const field = page.getByRole("searchbox", { name });
+  await expect(field).toBeVisible();
+  const before = await readIndex(page);
+  const want = owes(term, before);
+  expect(want.matching.length, `nothing on the list matches ${term}`).toBeGreaterThan(0);
+  const count = page.locator(`${BODY} .shell-count`);
+  const rows = page.locator(`${BODY} .row`);
+
+  await field.fill(term);
+  await expect(count).toHaveText(`${want.matching.length} of ${before.rows.length} match "${term}"`);
+  for (const [at, row] of before.rows.entries()) {
+    if (!row.visible || want.matching.includes(row.text)) continue;
+    await expect(rows.nth(at)).toBeHidden();
+  }
+  for (const [at, row] of before.rows.entries()) {
+    if (row.visible && want.matching.includes(row.text)) await expect(rows.nth(at)).toBeVisible();
+  }
+
   await field.fill("");
-  await expect(page.locator(`${BODY} .row[hidden]`)).toHaveCount(0);
+  await expect(count).toBeHidden();
+  await expect(page.locator(`${BODY} .row:visible`)).toHaveCount(
+    before.rows.filter((row) => row.visible).length,
+  );
 }
 
 // Walk the selection onto the row carrying this text, as a reader would: the map
@@ -198,6 +219,37 @@ async function walkTo(page, needle) {
   return true;
 }
 
+test.describe("the home filter chips", () => {
+  // The Unread chip keeps the newest rows carrying the unread dot, which is what
+  // sits above a project's cursor. Its number was the hub's own unread queue, so
+  // it read "Unread 3" over seven rows.
+  //
+  // It is asked on a phone because Home is a phone screen, and first in the file
+  // because the hub's cursor moves as soon as a project feed has been read and
+  // the dots go with it. Each project has its own seeded hub, so the desktop's
+  // feed read cannot empty the phone's dots: what this ordering buys is that a
+  // new test reading a feed cannot quietly empty them either.
+  test("the unread chip's number counts the rows it reveals", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "phone", "this is the phone's Home screen");
+    await open(page, hub, "#/home", "");
+    // The chips are drawn twice on Home, in the tools row and in the pad, so
+    // the flow copy is the one the row of cards belongs to.
+    const chip = page
+      .locator(".home-chips-flow")
+      .getByRole("button", { name: /^Unread \d+$/ });
+    await expect(chip).toBeVisible();
+    const counted = Number((await chip.textContent()).replace(/\D/g, ""));
+    expect(counted, "Home drew no unread rows, so the chip filters nothing to count").toBeGreaterThan(0);
+    // The dot's own label is what marks a row unread, so the rows are found by
+    // what they say rather than by the class that draws it.
+    const unread = page.locator(".home-row").filter({ has: page.getByText("Unread", { exact: true }) });
+    await expect(unread).toHaveCount(counted);
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".home-row:visible")).toHaveCount(counted);
+  });
+});
+
 test.describe("the list filter", () => {
   test("leaves the rows it matched under the group that holds them, on the inbox", async ({
     hub,
@@ -207,7 +259,7 @@ test.describe("the list filter", () => {
     // One term in the waiting group and one in the unread group: a filter that
     // judges a group by what follows it gets one of the two wrong.
     await open(page, hub, "#/inbox", "inbox");
-    await filterKeepsItsRows(page, {
+    await filterHoldsItsGroups(page, {
       name: "Filter inbox",
       terms: [approval.split(" ")[0], inboxRead.split(" ")[1]],
       miss: searchMiss,
@@ -225,12 +277,32 @@ test.describe("the list filter", () => {
     test.skip(testInfo.project.name !== "desktop", "a phone has no field to type this into");
     const { finished, searchMiss } = hub.fixture;
     await open(page, hub, `#/projects/${hub.projectId}/feed`, "feed");
-    await filterKeepsItsRows(page, {
+    await filterHoldsItsGroups(page, {
       name: "Filter events",
       terms: [finished.split(" ")[1]],
       miss: searchMiss,
       where: "project feed",
     });
+  });
+
+  // A query the reader typed has to take the rows it did not match off the
+  // screen, and not only out of the count. `.row`'s own `display` beat the
+  // browser's `[hidden]` rule, so the filter's `hidden` flag left the row
+  // drawn; `.row[hidden] { display: none }` is what makes these hold.
+  test("takes the rows it did not match off the screen, on the inbox", async ({ hub, page }) => {
+    const { approval } = hub.fixture;
+    await open(page, hub, "#/inbox", "inbox");
+    await queryTakesTheRest(page, { name: "Filter inbox", term: approval.split(" ")[0] });
+  });
+
+  test("takes the rows it did not match off the screen, on a project feed", async (
+    { hub, page },
+    testInfo,
+  ) => {
+    test.skip(testInfo.project.name !== "desktop", "a phone has no field to type this into");
+    const { finished } = hub.fixture;
+    await open(page, hub, `#/projects/${hub.projectId}/feed`, "feed");
+    await queryTakesTheRest(page, { name: "Filter events", term: finished.split(" ")[1] });
   });
 });
 
@@ -259,9 +331,11 @@ test.describe("the single-key verbs", () => {
     await page.keyboard.press("r");
     const field = page.getByRole("textbox", { name: "Your answer" });
     await expect(field).toBeVisible();
-    // The card answers the row it sits under and opens with the keyboard in it.
-    await expect(page.locator(".inbox-item", { has: field })).toContainText(question);
-    await expect(page.locator(".inbox-row .composer")).toHaveCount(0);
+    // The card answers the row it sits after, not one it swallowed: the tray is
+    // a sibling of the row, and so is the card the tray's button opens.
+    const card = field.locator("xpath=ancestor::form[1]/preceding-sibling::*[1]");
+    await expect(card).toHaveClass(/^inbox-item\b/);
+    await expect(card).toContainText(question);
     await expect(field).toBeFocused();
   });
 });
@@ -299,32 +373,5 @@ test.describe("the search key", () => {
         new RegExp(`#/search\\?q=${searchTerm}`),
       );
     }
-  });
-});
-
-test.describe("the home filter chips", () => {
-  // The Unread chip keeps the newest rows carrying the unread dot, which is what
-  // sits above a project's cursor. Its number was the hub's own unread queue, so
-  // it read "Unread 3" over seven rows. It is asked on a phone because Home is a
-  // phone screen, and before the other checks because the hub's cursor moves as
-  // soon as a project feed has been read and the dots go with it.
-  test("the unread chip's number counts the rows it reveals", async ({ hub, page }, testInfo) => {
-    test.skip(testInfo.project.name !== "phone", "this is the phone's Home screen");
-    await open(page, hub, "#/home", "");
-    // The chips are drawn twice on Home, in the tools row and in the pad, so
-    // the flow copy is the one the row of cards belongs to.
-    const chip = page
-      .locator(".home-chips-flow")
-      .getByRole("button", { name: /^Unread \d+$/ });
-    await expect(chip).toBeVisible();
-    const counted = Number((await chip.textContent()).replace(/\D/g, ""));
-    expect(counted, "Home drew no unread rows, so the chip filters nothing to count").toBeGreaterThan(0);
-    // The dot's own label is what marks a row unread, so the rows are found by
-    // what they say rather than by the class that draws it.
-    const unread = page.locator(".home-row").filter({ has: page.getByText("Unread", { exact: true }) });
-    await expect(unread).toHaveCount(counted);
-    await chip.click();
-    await expect(chip).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator(".home-row:visible")).toHaveCount(counted);
   });
 });
