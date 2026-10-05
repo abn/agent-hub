@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The project artifact stage's More button opens its menu
+
+* **Fix**: the More control in a project's own Artifacts segment drew a
+  three-dot glyph and answered nothing. It opens the stage's overflow menu now,
+  carrying Start a thread, Comments, Copy raw, Copy path, Copy link, and Open in
+  browser, each doing what the stage can honour. Share is left out because the
+  stage keeps no share sheet of its own. The menu hangs from its trigger in the
+  stage header, the same pattern the project header uses.
+
 ### The captures repaint across every screen
 
 * **Update**: the seeded capture set is re-run in full and committed, so the

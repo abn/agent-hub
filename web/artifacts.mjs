@@ -80,22 +80,36 @@ export async function artifactStage(id, projectId) {
   const comments = openCommentsCount
     ? `<span class="hub-glyph-count mono" aria-hidden="true">${openCommentsCount}</span>`
     : "";
+  const stagePath = `${project} / artifacts / ${slug}`;
+  // The More control carries the same actions the standalone viewer offers,
+  // narrowed to what a stage can honour: it keeps no share sheet of its own, so
+  // Share is left out rather than drawn dead. The wrapper is the project
+  // header's own overflow pattern, so the menu hangs from its trigger in the
+  // head and cannot open over another pane.
   const actions = `
     <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-pressed="true" aria-label="${
       openCommentsCount ? `Comments, ${openCommentsCount}` : "Start a thread"
     }">${glyphSvg("comments", { size: 18 })}${comments}</button>
-    <button type="button" class="hub-btn-glyph" aria-label="More">${glyphSvg("overflow", { size: 18 })}</button>`;
+    <span class="proj-overflow-wrap">
+      <button type="button" class="hub-btn-glyph" data-action="stage-more" aria-label="More" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 18 })}</button>
+      <div class="proj-overflow-menu" role="menu" hidden>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-start-thread">Start a thread</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-comments">Comments</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}">Copy raw</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-path" data-path="${esc(stagePath)}">Copy path</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-copy-link">Copy link</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-open-in-browser">Open in browser</button>
+      </div>
+    </span>`;
 
   const copyGlyph = glyphSvg("copy", { size: 14 });
   const rawGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-4 5 4 5"></path><path d="M15 7l4 5-4 5"></path></svg>`;
 
   const controls = `
-    <span class="shell-meta mono" title="${esc(`${project} / artifacts / ${slug}`)}">${esc(
-      `${project} / artifacts / ${slug}`,
-    )}</span>
+    <span class="shell-meta mono" title="${esc(stagePath)}">${esc(stagePath)}</span>
     <div class="grow"></div>
     <button type="button" class="hub-btn-glyph" data-action="copy-path" data-path="${esc(
-      `${project} / artifacts / ${slug}`,
+      stagePath,
     )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
     <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${newest}">v${newest} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}</button>
     <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}" aria-label="Copy raw">${rawGlyph}</button>`;
@@ -200,6 +214,74 @@ export function wireArtifactStage(root, id, info) {
       }
     });
   }
+  // The stage's More menu, hung from its own trigger in the header. Start a
+  // thread and Comments open the surface this stage reads: the aside on a fine
+  // pointer, the sheet on a coarse one. The stage has no composer of its own on
+  // a fine pointer, so both offer the surface there. Copy raw and Copy path are
+  // wired by the loops above, because the menu carries the same data-actions.
+  const stageMore = root.querySelector('[data-action="stage-more"]');
+  const stageMenu = stageMore?.closest(".proj-overflow-wrap")?.querySelector(".proj-overflow-menu");
+  if (stageMore && stageMenu) {
+    const closeMenu = () => {
+      stageMenu.hidden = true;
+      stageMore.setAttribute("aria-expanded", "false");
+    };
+    const openStageComments = () => {
+      if (coarse) {
+        openCommentsDrawer();
+        return;
+      }
+      const aside = root.querySelector(".shell-aside");
+      const commentsBtn = root.querySelector('[data-action="comments-toggle"]');
+      if (aside && aside.hidden) {
+        if (commentsBtn) toggleAside(commentsBtn);
+        else toggleAside(stageMore);
+      }
+      renderDesktopCards();
+    };
+    const runs = {
+      "stage-start-thread": openStageComments,
+      "stage-comments": openStageComments,
+      "stage-copy-link": async () => {
+        try {
+          await navigator.clipboard.writeText(location.href);
+        } catch {}
+        toast("Link copied");
+      },
+      "stage-open-in-browser": () => {
+        const frame = root.querySelector("#hub-frame");
+        if (frame) window.open(frame.src, "_blank");
+      },
+    };
+    stageMore.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = stageMenu.hidden;
+      stageMenu.hidden = !open;
+      stageMore.setAttribute("aria-expanded", String(open));
+      if (open) stageMenu.querySelector("button")?.focus();
+    });
+    for (const item of stageMenu.querySelectorAll("button")) {
+      item.addEventListener("click", () => {
+        closeMenu();
+        const run = runs[item.dataset.action];
+        if (run) run();
+      });
+    }
+    // The project header's outside-click handler hides this menu with every
+    // other, but it clears aria-expanded on `.proj-overflow-btn` alone, and this
+    // trigger is a glyph button. Its state is cleared here.
+    const wrap = stageMore.closest(".proj-overflow-wrap");
+    document.addEventListener("click", (e) => {
+      if (wrap && wrap.isConnected && !wrap.contains(e.target)) closeMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || stageMenu.hidden || !stageMore.isConnected) return;
+      e.stopPropagation();
+      closeMenu();
+      stageMore.focus();
+    });
+  }
+
   // The version control opens the same sheet the standalone viewer mounts. The
   // stage used to render a version button nothing answered, so the control read
   // as a dropdown and did nothing.
