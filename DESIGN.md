@@ -144,7 +144,8 @@ the round-11 row form and keeps its 40px control row; its THIS HUB group ends
 with Version, a value row that promises nothing. Storage adds a fourth bar
 segment and one helper line, and a zero cell reads a dash. Agents and tokens is a
 list-and-item screen, an index beside a stage, like the inbox. The rail's sync
-line is hidden when healthy.
+line is hidden when healthy. The artifact viewer's chrome band is a 52px header
+like every other pane's, and every control in it is 36px.
 
 ### The frame does not move, on a desktop
 
@@ -166,7 +167,17 @@ line is hidden when healthy.
 - One gutter per pane: 16px on mobile and in the stage, 12px in the index,
   14px in the aside. Headings, body and section headers share it.
 - Prose is left-aligned in the stage and capped at 640. Panes may change
-  width; the reader's place in the prose may not.
+  width; the reader's place in the prose may not. A pane that stages prose
+  carries its own gutter in its own padding, because the stage body carries
+  none: the inbox card and the feed stage both hold 16px themselves.
+- A summary is a subject or a message, and the two are drawn differently. It is
+  a **subject** when it is one line of at most 100 characters: a question's
+  "Ship the release?", a session's name. It is a **message** when it is longer
+  or holds a newline, which is what a `finished` event's report is. A subject is
+  the item title and nothing else. A message titles the item with its leading
+  sentence and reads the rest as body prose beneath, at 15px and normal weight.
+  The split loses no characters: the subject and the message together hold the
+  whole summary. A heading never carries a whole message.
 - A list's glyph column is a fixed box, 20px in the index and 28px on the
   mobile feed, so every title starts at the same x with or without a glyph.
 
@@ -357,8 +368,9 @@ document was published.
 A screen that fails one of these is not done. The first four are the design's
 named checks from the current handoff.
 
-1. **Chrome alignment.** Feed, artifacts, sessions and inbox photographed at
-   1440: every horizontal rule in the chrome lands on the same y.
+1. **Chrome alignment.** Feed, artifacts, sessions, inbox and the artifact
+   viewer photographed at 1440: every horizontal rule in the chrome lands on the
+   same y, and every pane's header band is 52px.
 2. **Nothing jumps.** Opening or closing the aside does not move the article's
    left edge or its first line.
 3. **One left edge.** Every title in a list shares it, with or without a glyph,

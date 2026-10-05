@@ -131,6 +131,51 @@ export function feedDestination(event) {
   return "";
 }
 
+// One rule for what an event's summary is, wherever it is read. A summary
+// that is a single line of at most this many characters is a subject: it is
+// what the item is called, and it renders as the item title with no body.
+// Anything longer, or carrying a newline, is a message rather than a subject,
+// and painting it as a heading is what turned a finished event's report into a
+// wall of 600-weight text.
+export const SUBJECT_MAX = 100;
+
+// A summary, split into the subject a heading can carry and the message that
+// belongs under it. The two are disjoint and together hold every character of
+// the summary, so a long one loses nothing when it stops being a heading. The
+// subject is marked with an ellipsis wherever it was cut rather than ended, so
+// the reader can tell a shortened subject from a whole one.
+export function subjectAndMessage(summary) {
+  const text = String(summary == null ? "" : summary).trim();
+  if (!text) return { subject: "", message: "" };
+  if (text.length <= SUBJECT_MAX && !text.includes("\n")) return { subject: text, message: "" };
+
+  // A summary written as more than one line already says which line is the
+  // subject: the first one. The rest is its message, keeping its line breaks.
+  if (text.includes("\n")) {
+    const split = text.indexOf("\n");
+    return { subject: clampSubject(text.slice(0, split).trim()), message: text.slice(split + 1).trim() };
+  }
+
+  // One line, too long to be a subject. Its leading sentence is, where a
+  // sentence ends inside the budget. Where none does, the subject is the
+  // opening words clamped at the budget, and the message picks up at that same
+  // point so no word is dropped or read twice.
+  const stop = text.slice(0, SUBJECT_MAX).search(/[.!?](?=\s|$)/);
+  if (stop !== -1) {
+    return { subject: `${text.slice(0, stop + 1).trim()}…`, message: text.slice(stop + 1).trim() };
+  }
+  const space = text.lastIndexOf(" ", SUBJECT_MAX);
+  const cut = space > 0 ? space : SUBJECT_MAX;
+  return { subject: `${text.slice(0, cut).trimEnd()}…`, message: text.slice(cut).trim() };
+}
+
+// A subject cut to the budget, on a word boundary where there is one.
+function clampSubject(text) {
+  if (text.length <= SUBJECT_MAX) return text;
+  const space = text.lastIndexOf(" ", SUBJECT_MAX);
+  return `${text.slice(0, space > 0 ? space : SUBJECT_MAX).trimEnd()}…`;
+}
+
 export function formatEventSummary(event) {
   const summary = event.summary || "";
   if (event.kind === "signal") {
@@ -473,7 +518,10 @@ export function eventStage(event, projectId) {
   }
   const open = isOpen(event);
   const word = KIND_WORD[event.kind] || event.kind;
-  const title = formatEventSummary(event);
+  // A finished event's summary is a report, not a subject, so the stage titles
+  // it with its leading sentence and reads the rest as prose. A question's
+  // short subject keeps the title it always had.
+  const { subject, message } = subjectAndMessage(formatEventSummary(event));
   const body = typeof event.payload?.body === "string" ? event.payload.body.trim() : "";
   const dest = feedDestination(event);
   const sessionId = event.kind === "session" ? event.payload?.session_id : null;
@@ -493,8 +541,9 @@ export function eventStage(event, projectId) {
         <span class="pill" data-kind="${esc(event.kind)}">${esc(word)}</span>
         ${open ? `<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>` : ""}
       </div>
-      <h2 class="feed-stage-title">${esc(title)}</h2>
+      <h2 class="feed-stage-title">${esc(subject)}</h2>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
+      ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
       ${body ? `<p class="feed-stage-body">${esc(body)}</p>` : ""}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}

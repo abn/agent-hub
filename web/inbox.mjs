@@ -8,6 +8,7 @@ import { esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
+import { subjectAndMessage } from "./feed.mjs";
 import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
 import { fullStamp, relative } from "./time.mjs";
@@ -321,6 +322,10 @@ function detail(item, state) {
   const note = isResolved ? noteOf(item) : "";
   const enrol = enrolOf(item);
   const isEnrol = enrol !== null;
+  // One rule with the feed's stage: a summary that reads as a subject titles
+  // the card, and a summary that is a whole message titles it with its leading
+  // sentence and reads the rest as prose under it.
+  const { subject, message } = subjectAndMessage(item.summary);
   let answers = "";
   if (waits(item) && item.kind === "approval") {
     answers = `<div class="inbox-answers">
@@ -339,7 +344,8 @@ function detail(item, state) {
       ${outcome ? `<span class="pill pill-outcome">${esc(outcome)}</span>` : ""}
       <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
     </div>
-    <h2 class="item-title" id="inbox-detail-title">${esc(item.summary)}</h2>
+    <h2 class="item-title" id="inbox-detail-title">${esc(subject)}</h2>
+    ${message ? `<p class="inbox-detail-message">${esc(message)}</p>` : ""}
     ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}</div>` : ""}
     ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}
     ${note ? `<div class="inbox-detail-resolved-note"><strong>${outcome === "Approved" || outcome === "Declined" ? "Decision note" : "Answer"}:</strong> ${esc(note)}</div>` : ""}

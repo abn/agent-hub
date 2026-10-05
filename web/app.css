@@ -942,7 +942,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
    it and answers to the 44px control floor. */
 .hub-viewer { gap: var(--s-2); }
 .hub-back {
-  flex: none; width: 44px; height: 44px; border: 0; background: transparent;
+  flex: none; width: 36px; height: 36px; border: 0; background: transparent;
   color: var(--ink); border-radius: var(--r-1);
   display: inline-flex; align-items: center; justify-content: center;
 }
@@ -2463,8 +2463,18 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .swipe-tray-actions button.action { background: var(--action); color: var(--ink-inverse); }
 .inbox-item + .composer, .inbox-rows > .composer { margin: 0; padding: var(--s-2) var(--s-4) var(--s-3); border-bottom: 1px solid var(--line); }
 
-/* The medium card: one item at full size. */
-.inbox-detail { display: flex; flex-direction: column; gap: var(--s-3); }
+/* The medium card: one item at full size. The stage body carries no padding,
+   so the card holds the pane's own 16px gutter itself. Without it the card's
+   back link, title, meta and snooze sat at the pane's x 0 while the breadcrumb
+   and header title above them sat on the 16px. */
+.inbox-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-4) var(--s-6);
+  box-sizing: border-box;
+}
+/* The feed stage holds its gutter the same way, inside the same 640 box. */
 .inbox-back { display: inline-flex; align-items: center; align-self: flex-start; min-height: 44px; font-size: var(--t-13); font-weight: 500; text-decoration: none; }
 .inbox-close-label { display: none; }
 @media (min-width: 1100px) {
@@ -2480,6 +2490,10 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   .inbox-detail-meta { flex-basis: 100%; margin-left: 0; }
 }
 .inbox-detail-body { margin: 0; font-size: var(--t-15); line-height: 1.45; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The message of a summary too long to be a subject. Body prose, not a second
+   heading: a finished event's report reads at body weight beside its subject,
+   the way the feed stage reads the same words. */
+.inbox-detail-message { margin: 0; font-size: var(--t-15); font-weight: 400; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
 .inbox-detail .item-title { overflow-wrap: anywhere; }
 .inbox-answers { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .inbox-answers button { min-height: 44px; }
@@ -3820,12 +3834,15 @@ a.session-back {
   position: relative;
 }
 
+/* The viewer is a pane like any other, so its chrome band is the 52px header
+   the frame reserves everywhere else and the document below it starts on the
+   same y as the document on the Artifacts list. */
 .hub-viewer-bar {
   display: flex;
   align-items: center;
-  height: 44px;
-  min-height: 44px;
-  max-height: 44px;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   padding: 0 4px;
@@ -3833,14 +3850,16 @@ a.session-back {
   z-index: 35;
 }
 
+/* One control height across the band: the back and the three glyphs are all
+   36px, so a row of glyph buttons does not mix two heights. */
 .hub-back {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  width: 44px;
-  height: 44px;
+  min-width: 36px;
+  min-height: 36px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: none;
   background: transparent;
@@ -3905,7 +3924,12 @@ a.session-back {
   outline-offset: 2px;
 }
 
+/* The band's controls are 36px, so a coarse pointer gets the 44px floor from
+   the same expansion the glyph buttons already carry, rather than from a
+   second height in the row. */
 @media (pointer: coarse) {
+  .hub-back { position: relative; }
+  .hub-back::after,
   .hub-btn-glyph::after {
     content: "";
     position: absolute;
@@ -4237,10 +4261,27 @@ a.session-back {
   text-align: right;
 }
 
+/* Two grounds under 4.5:1 at 12px, each fixed in the theme that failed and
+   neither in the theme that already passed.
+
+   Dark: the selected row stands on --accent-bg, where --ink-3 reads 4.00:1.
+   Its actor line and size step to --ink-2 for 5.84:1. An unselected row sits
+   on the sheet's own --surface and --ink-3 already reads 4.77:1 there.
+
+   Light: the footer sits on --surface-2, where --ink-3 reads 4.47:1, 0.03
+   under the floor. --ink-2 is 5.90:1 there.
+
+   --ink-2 on --accent-bg in light is 5.97:1, so the light theme is left as it
+   was and only dark takes the row rule. */
+[data-theme="dark"] .hub-version-row.current .hub-version-secondary,
+[data-theme="dark"] .hub-version-row.current .hub-version-size {
+  color: var(--ink-2);
+}
+
 .hub-version-sheet-footer {
   padding: var(--s-3) var(--s-4);
   font-size: var(--t-12);
-  color: var(--ink-3);
+  color: var(--ink-2);
   line-height: 1.4;
   border-top: 1px solid var(--line);
   background: var(--surface-2);
@@ -4785,18 +4826,30 @@ a.session-back {
   margin-right: auto;
 }
 
+/* A thread starts here, so this is a control that opens something and not a
+   copy glyph on a row: 36px, the same box as the glyph buttons in the band
+   above, with the coarse-pointer expansion for the tap floor. */
 .hub-comments-head-add {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  position: relative;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
   padding: 0;
   background: none;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
   color: var(--ink);
   cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .hub-comments-head-add::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
 }
 
 .hub-comments-head-add:hover {
@@ -7158,6 +7211,9 @@ dialog.dialog-project-delete {
 .feed-stage { padding: 20px 16px 40px; }
 .feed-stage-pills { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .feed-stage-title { margin: 0 0 6px; font-size: var(--t-22); font-weight: 600; line-height: 1.25; }
+/* The message of a summary too long to be a subject, read at the same body
+   weight as the event's own body rather than as a second heading. */
+.feed-stage-message { margin: 14px 0 0; font-size: var(--t-15); font-weight: 400; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
 .feed-stage-body { margin: 14px 0 0; font-size: var(--t-15); line-height: 1.55; color: var(--ink-2); }
 .feed-stage-actions { margin-top: 16px; display: flex; gap: 8px; }
 
