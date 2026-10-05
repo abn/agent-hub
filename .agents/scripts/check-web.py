@@ -158,6 +158,13 @@ TEXT_PAIRS = [
 # A disabled control is exempt from the text contrast rule, but its label still
 # has to say what the control would do, so it is held to the non-text floor.
 DISABLED_PAIRS = [("--ink-3", "--surface-2")]
+
+# The artifact version sheet's selected row stands on --accent-bg, so the text
+# on it is read on a ground the table above does not name. --ink-3 there reads
+# 4.00:1 in dark, under the floor, which is why the stylesheet draws that row's
+# actor line and size in --ink-2 and scopes the step to dark: --ink-2 is 5.84:1
+# there and light's --ink-3 is already 4.53:1.
+TINTED_ROW_PAIRS = [("--ink-2", "--accent-bg")]
 # The rule that draws every text field, and the surfaces a field sits on. A
 # bare field has no label inside it, so its border is the only thing that says
 # a control is there: WCAG 1.4.11 asks 3:1 of it. The token is read out of the
@@ -275,6 +282,8 @@ def check_design_contract(errors: list[str], tokens_css: str, app_css: str) -> N
             ratio_check(errors, theme, resolved, foreground, background, 4.5)
         for foreground, background in DISABLED_PAIRS:
             ratio_check(errors, theme, resolved, foreground, background, 3.0)
+        for foreground, background in TINTED_ROW_PAIRS:
+            ratio_check(errors, theme, resolved, foreground, background, 4.5)
         for surface in FIELD_SURFACES if field_border else ():
             ratio_check(errors, theme, resolved, field_border, surface, 3.0)
         for kind in KINDS:

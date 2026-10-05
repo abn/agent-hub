@@ -2440,6 +2440,344 @@ ROUND14_ROUTES = (
 )
 
 
+# A summary over this length, or one holding a newline, is a message and not a
+# subject: the item titles it with its leading sentence and reads the rest as
+# body prose. The value is a whole sentence so the split falls where one does.
+LONG_SUMMARY = (
+    "The nightly run is green. 42 checks passed, the loader rewrite is behind the flag, "
+    "and the artifact viewer now reserves its 52px chrome like every other pane."
+)
+
+
+def long_summary_event(port: int, project: str, summary: str) -> str:
+    """One finished event with a message-length summary, and its id."""
+    session = harness.feed_days_session(port)
+    harness.mcp_call(
+        port,
+        session,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "signal_append",
+                "arguments": {"project_id": project, "kind": "finished", "summary": summary},
+            },
+        },
+    )
+    feed = json.loads(harness.request(port, "GET", f"/api/v1/projects/{quote(project)}/feed?limit=8"))
+    return next((event["id"] for event in feed["events"] if event["summary"] == summary), "")
+
+
+# The heading, the message under it, and how many lines each occupies. A heading
+# that paints a whole message shows its line count and a huge character count;
+# a message paragraph shows 15px at weight 400 and the body of the text.
+READ_SUMMARY_SURFACE = r"""
+() => {
+  const read = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el || !el.getClientRects().length) return { sel, missing: true };
+    const cs = getComputedStyle(el);
+    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+    return {
+      sel,
+      tag: el.tagName.toLowerCase(),
+      size: cs.fontSize,
+      weight: cs.fontWeight,
+      lines: Math.round(el.getBoundingClientRect().height / lineHeight),
+      chars: el.textContent.trim().length,
+      heading: el.tagName.toLowerCase().startsWith('h'),
+    };
+  };
+  return [
+    read('#inbox-detail-title'), read('.inbox-detail-message'),
+    read('.feed-stage-title'), read('.feed-stage-message'),
+  ];
+}
+"""
+
+
+def check_summary_subject_and_message(page, watch: Watch, port: int, project: str) -> None:
+    """A long summary is body prose, not one long heading. Both stages.
+
+    A `finished` event's summary is a whole report, and painting it as the item
+    title made the inbox card and the feed stage read as a wall of 600-weight
+    heading text. The rule is one line of at most 100 characters is a subject;
+    anything longer is a message, titled by its leading sentence and read under
+    that as body prose. A short subject keeps today's title treatment.
+    """
+    watch.enter("summary: a long one is body prose in the inbox detail and the feed stage")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    event_id = long_summary_event(port, project, LONG_SUMMARY)
+    if not event_id:
+        watch.fail("the long-summary event never reached the feed")
+        return
+
+    for route, title_sel, message_sel, label in (
+        (f"#/inbox?open={quote(event_id)}", "#inbox-detail-title", ".inbox-detail-message", "inbox detail"),
+        (
+            f"#/projects/{quote(project)}/feed?event={quote(event_id)}",
+            ".feed-stage-title",
+            ".feed-stage-message",
+            "feed stage",
+        ),
+    ):
+        goto(page, route, None)
+        if not settle(page, f"!!document.querySelector({json.dumps(title_sel)})"):
+            watch.fail(f"{label}: the event did not open")
+            continue
+        rows = {row["sel"]: row for row in page.evaluate(READ_SUMMARY_SURFACE)}
+        title, message = rows.get(title_sel, {}), rows.get(message_sel, {})
+        if title.get("missing"):
+            watch.fail(f"{label}: no heading carries the event")
+            continue
+        if not title.get("heading"):
+            watch.fail(f"{label}: the accessible title points at a {title.get('tag')}, not a heading")
+        # The whole message in the heading is the defect: a message of this size
+        # cannot be a subject at any width.
+        if title["chars"] >= len(LONG_SUMMARY):
+            watch.fail(
+                f"{label}: the heading carries the whole {title['chars']}-character summary "
+                f"at {title['size']}/{title['weight']}"
+            )
+        if message.get("missing"):
+            watch.fail(
+                f"{label}: a {len(LONG_SUMMARY)}-character summary has no message paragraph, "
+                f"so all of it is painted as a heading at {title['size']}/{title['weight']}"
+            )
+            continue
+        if message["size"] != "15px" or message["weight"] not in ("400", "normal"):
+            watch.fail(
+                f"{label}: the message is {message['size']}/{message['weight']}, not body prose at 15px normal"
+            )
+        if message["chars"] < len(LONG_SUMMARY) // 2:
+            watch.fail(f"{label}: the message keeps only {message['chars']} of the summary's characters")
+        # The split must lose nothing: subject and message together hold the text.
+        held = title["chars"] + message["chars"]
+        if held < len(LONG_SUMMARY):
+            watch.fail(f"{label}: the split drops {len(LONG_SUMMARY) - held} characters of the summary")
+
+    watch.enter("summary: a short subject keeps the item title and gets no message")
+    feed = json.loads(harness.request(port, "GET", f"/api/v1/projects/{quote(project)}/feed?limit=20"))
+    short_id = next((e["id"] for e in feed["events"] if e["summary"] == harness.QUESTION_SUBJECT), "")
+    if not short_id:
+        watch.fail("the seeded question subject never reached the feed")
+    else:
+        for route, title_sel, message_sel, label in (
+            (f"#/inbox?open={quote(short_id)}", "#inbox-detail-title", ".inbox-detail-message", "inbox detail"),
+            (
+                f"#/projects/{quote(project)}/feed?event={quote(short_id)}",
+                ".feed-stage-title",
+                ".feed-stage-message",
+                "feed stage",
+            ),
+        ):
+            goto(page, route, None)
+            if not settle(page, f"!!document.querySelector({json.dumps(title_sel)})"):
+                watch.fail(f"{label}: the short subject did not open")
+                continue
+            rows = {row["sel"]: row for row in page.evaluate(READ_SUMMARY_SURFACE)}
+            title, message = rows.get(title_sel, {}), rows.get(message_sel, {})
+            if harness.QUESTION_SUBJECT not in page.inner_text(title_sel):
+                watch.fail(f"{label}: a short subject is no longer the item title")
+            if title.get("size") not in ("17px", "22px") or title.get("weight") not in ("600", "bold"):
+                watch.fail(f"{label}: a short subject lost its item-title treatment ({title})")
+            if not message.get("missing"):
+                watch.fail(f"{label}: a short subject was split into a message paragraph")
+
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+def check_inbox_card_gutter(page, watch: Watch, port: int, project: str) -> None:
+    """The open inbox card's content sits on the pane's 16px gutter.
+
+    The stage body carries no padding, so a card that holds no gutter of its own
+    paints its back link, title, meta and snooze at the pane's x 0, while the
+    breadcrumb and the header title above them sit at 16. On a 390 phone the
+    card's own left edge is the screen's left edge.
+    """
+    watch.enter("inbox: the open card's content sits on the 16px gutter at 390")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+    question = one_off_question(port, project, "gutter check question")
+    if not question:
+        watch.fail("the gutter probe question never reached the inbox")
+        return
+    try:
+        goto(page, f"#/inbox?open={quote(question)}", "Inbox")
+        if not settle(page, "!!document.querySelector('.inbox-detail #inbox-detail-title')"):
+            watch.fail("the gutter probe card did not open")
+            return
+        geom = page.evaluate(
+            """() => {
+              const textX = (el) => { const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                const tn = w.nextNode();
+                if (tn) { const range = document.createRange(); range.selectNodeContents(tn);
+                  const r = range.getBoundingClientRect(); if (r.width > 0) return r.left; }
+                return el.getBoundingClientRect().left; };
+              const probe = (sel) => { const el = document.querySelector(sel);
+                if (!el || !el.getClientRects().length) return { sel, missing: true };
+                return { sel, x: Math.round(textX(el) * 100) / 100 }; };
+              const card = document.querySelector('.inbox-detail');
+              const body = document.querySelector('main .shell-body');
+              return {
+                bodyPadLeft: getComputedStyle(body).paddingLeft,
+                cardLeft: card ? Math.round(card.getBoundingClientRect().left * 100) / 100 : null,
+                probes: ['.inbox-back', '#inbox-detail-title', '.inbox-detail-meta',
+                          '.inbox-detail-snooze-wrap'].map(probe),
+              };
+            }"""
+        )
+        for probe in geom["probes"]:
+            if probe.get("missing"):
+                watch.fail(f"inbox card: {probe['sel']} is not on screen")
+            elif probe["x"] != 16:
+                watch.fail(f"inbox card: {probe['sel']} sits at x {probe['x']}, not the 16px gutter")
+    finally:
+        try:
+            harness.request(port, "POST", f"/api/v1/questions/{question}/answer", {"body": "answered by the check"})
+        except Exception:
+            pass
+        goto(page, "#/inbox", "Inbox")
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+# Contrast against the ground a node is actually painted on, composited through
+# any translucent ancestor, so a tinted row is read against its own tint rather
+# than against the sheet behind it.
+PAINTED_CONTRAST = r"""
+(selector) => {
+  const ch = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  const lum = (c) => 0.2126 * ch(c[0]) + 0.7152 * ch(c[1]) + 0.0722 * ch(c[2]);
+  const parse = (value) => { const m = String(value).match(/rgba?\(([^)]+)\)/);
+    if (!m) return null; const p = m[1].split(',').map((v) => parseFloat(v));
+    return [p[0], p[1], p[2], p[3] === undefined ? 1 : p[3]]; };
+  const over = (fg, bg) => fg.slice(0, 3).map((c, i) => c * fg[3] + bg[i] * (1 - fg[3]));
+  const el = document.querySelector(selector);
+  if (!el || !el.getClientRects().length) return { selector, missing: true };
+  // The first opaque ground at or above the node, with every translucent layer
+  // between composited over it.
+  let ground = null, node = el;
+  while (node && node !== document.documentElement) {
+    const c = parse(getComputedStyle(node).backgroundColor);
+    if (c && c[3] > 0) {
+      if (ground === null) ground = c.slice(0, 3);
+      else if (c[3] < 1) ground = over(c, ground);
+      if (c[3] === 1) break;
+    }
+    node = node.parentElement;
+  }
+  if (ground === null) ground = [255, 255, 255];
+  const fg = over(parse(getComputedStyle(el).color), ground);
+  const hi = Math.max(lum(fg), lum(ground)), lo = Math.min(lum(fg), lum(ground));
+  const round2 = (n) => Math.round(n * 100) / 100;
+  return { selector, color: getComputedStyle(el).color, size: getComputedStyle(el).fontSize,
+           bg: `rgb(${ground.map(round2).join(', ')})`, ratio: round2((hi + 0.05) / (lo + 0.05)) };
+}
+"""
+
+
+def check_version_sheet_contrast(page, watch: Watch, artifact_id: str) -> None:
+    """The version sheet's 12px text clears 4.5:1 in both themes.
+
+    Measured against the painted ground, so the selected row is read against
+    its own --accent-bg and the footer against its --surface-2. Two grounds
+    failed and only the theme each failed in changed: dark's selected row, and
+    light's footer.
+    """
+    watch.enter("version sheet: 12px text clears 4.5:1 against its painted ground, both themes")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, f"#/artifacts/{quote(artifact_id)}?project={quote(harness.PROJECT_ID)}", None)
+    if not settle(page, "!!document.querySelector('[data-action=\"version-toggle\"]')"):
+        watch.fail("the artifact viewer did not open, so the version sheet could not be measured")
+    else:
+        page.click('[data-action="version-toggle"]')
+        if not settle(page, "!!document.querySelector('.hub-version-row.current')"):
+            watch.fail("the version sheet did not open")
+        else:
+            for name in ("dark", "light"):
+                page.evaluate(f"document.documentElement.setAttribute('data-theme', {name!r})")
+                page.wait_for_timeout(200)
+                for selector in (
+                    ".hub-version-row.current .hub-version-secondary",
+                    ".hub-version-row.current .hub-version-size",
+                    ".hub-version-sheet-footer",
+                ):
+                    got = page.evaluate(PAINTED_CONTRAST, selector)
+                    if got.get("missing"):
+                        watch.fail(f"version sheet {name}: {selector} is not on screen")
+                        continue
+                    if got["ratio"] < 4.5:
+                        watch.fail(
+                            f"version sheet {name}: {selector} is {got['ratio']}:1 at {got['size']} "
+                            f"({got['color']} on {got['bg']}), under 4.5:1"
+                        )
+            page.evaluate("() => { const b = document.querySelector('#hub-version-backdrop'); if (b) b.click(); }")
+            page.wait_for_timeout(200)
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
+# The viewer's chrome band is a pane header like any other: 52px, with one
+# control height across it. The comments aside's thread control is not a copy
+# glyph, so it is not the copy control's 28px.
+VIEWER_CHROME = r"""
+() => {
+  const bar = document.querySelector('.hub-viewer-bar');
+  if (!bar || !bar.getClientRects().length) return { missing: true };
+  const heights = [...bar.querySelectorAll('button, a')]
+    .filter((el) => el.getClientRects().length)
+    .map((el) => ({ cls: el.className.split(' ')[0], h: Math.round(el.getBoundingClientRect().height) }));
+  const add = document.querySelector('.hub-comments-head-add');
+  return {
+    band: Math.round(bar.getBoundingClientRect().height),
+    heights,
+    thread: add && add.getClientRects().length
+      ? { w: Math.round(add.getBoundingClientRect().width),
+          h: Math.round(add.getBoundingClientRect().height) }
+      : null,
+  };
+}
+"""
+
+
+def check_viewer_chrome_band(page, watch: Watch, artifact_id: str) -> None:
+    """The viewer's band is a 52px header and its controls agree on one height."""
+    watch.enter("artifact viewer: the chrome band is a 52px header with one control height")
+    previous = page.viewport_size
+    page.set_viewport_size({"width": 1440, "height": 900})
+    goto(page, f"#/artifacts/{quote(artifact_id)}?project={quote(harness.PROJECT_ID)}", None)
+    if not settle(page, "!!document.querySelector('.hub-viewer-bar')"):
+        watch.fail("the artifact viewer did not open, so its chrome band could not be measured")
+        if previous:
+            page.set_viewport_size(previous)
+        return
+    got = page.evaluate(VIEWER_CHROME)
+    if got.get("missing"):
+        watch.fail("the viewer's chrome band is not on screen")
+    else:
+        if got["band"] != 52:
+            watch.fail(f"the viewer's chrome band is {got['band']}px, not the 52px header")
+        mixed = sorted({h["h"] for h in got["heights"]})
+        if len(mixed) > 1:
+            watch.fail(f"the viewer's band mixes control heights: {got['heights']}")
+        thread = got.get("thread")
+        if thread is None:
+            watch.fail("the comments aside has no thread control on screen")
+        elif thread["w"] != thread["h"] or thread["w"] != 36:
+            watch.fail(f"the comments aside's thread control is {thread['w']}x{thread['h']}, not 36x36")
+    if previous:
+        page.set_viewport_size(previous)
+    watch.drain_rejections()
+
+
 def check_round14(page, watch: Watch, port: int, project: str, artifact_id: str, protected_id: str) -> None:
     """CHECK 14.A-D: the access copy, the type floor, the share sheet and the token states."""
     agent = "round14-probe"
@@ -2982,6 +3320,13 @@ def run() -> int:
                 run_step(watch, check_artifact_row_thread_count, page, watch, port, project, artifact_id)
                 run_step(watch, check_inbox_and_search_phone, page, watch, port, project)
                 run_step(watch, capture_b7_screenshots, page, watch, port, project, session_id, artifact_id)
+                # 8a. A long summary is body prose, the inbox card holds the
+                # gutter, the version sheet clears contrast in both themes, and
+                # the viewer's band is a 52px header.
+                run_step(watch, check_summary_subject_and_message, page, watch, port, project)
+                run_step(watch, check_inbox_card_gutter, page, watch, port, project)
+                run_step(watch, check_version_sheet_contrast, page, watch, artifact_id)
+                run_step(watch, check_viewer_chrome_band, page, watch, artifact_id)
 
                 # 9. Projects register and Connect
                 run_step(watch, check_projects_register_segmented_and_rows, page, watch, port)
