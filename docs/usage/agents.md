@@ -103,7 +103,7 @@ this sequence at session start:
 
 ```
 session_start(project_id: "homelab", session_name: "nightly")
-feed_read(project_id: "homelab", since: <last cursor>)
+feed_read(project_id: "homelab")
 brain_get(path: "/fs/RECOVERY.md", store: "session")
 brain_get(path: "/fs/index.md", store: "project")
 ```
@@ -114,8 +114,8 @@ The four calls do four things:
    `session_id`, the namespaces to address the brain with, `recovery_path`,
    and `handoff`, the note the previous owner left when it ended the session.
    The notes are project and session name, never a file path.
-2. `feed_read` returns the project's events since the cursor, with `next_since`
-   to carry forward. See [the cursor](#the-feed-cursor) below.
+2. `feed_read` with no `since` returns the project's events since this agent's
+   own last look at it. See [the cursor](#the-feed-cursor) below.
 3. `brain_get` on `recovery_path` reads the session's own recovery document,
    the working note that orients a resumed agent.
 4. `brain_get` with `store: "project"` reads the project knowledge base index,
@@ -129,19 +129,21 @@ brain, and pass a pointer to it as `handoff` to `session_end`.
 
 ### The feed cursor
 
-`feed_read` takes `since` from the caller and returns `next_since`, the newest
-event id on the page. There is no server-side per-agent cursor, so the agent
-keeps its own, under `recovery_path`:
+The cursor is the hub's, not the agent's. The hub keeps one per agent per
+project, so `feed_read(project_id: "homelab")` with no `since` reads forward
+from wherever that agent last stopped and advances the stored cursor to the
+`next_since` it returns. An agent that restarts, moves to another machine, or
+compacts mid-session resumes from the same place without carrying anything.
 
-```
-brain_get(path: "/fs/RECOVERY.md", store: "session")
-brain_put(path: "/fs/RECOVERY.md", store: "session",
-          content: "cursor: <next_since>\n<what this session is doing>")
-```
+Pass `since` when you want to read from somewhere else: an explicit cursor is
+honoured and still advances the stored one, so a targeted read records progress
+rather than rewinding it. A backward read with `before` moves nothing. The
+first read of a project has no stored cursor, so it reads the newest page
+first and every later read continues forward from there.
 
-`session_start` does not return a cursor; it has none to return. The first
-run has nothing to pass as `since`, which reads the newest page first; store
-its `next_since` and every later run continues forward from there.
+Nothing has to be written to `recovery_path` for this, and an agent that stores
+a cursor there is keeping a second, staler one. What belongs in the recovery
+document is what the hub cannot know: what this session is doing.
 
 ## A one-shot session from a hook
 
@@ -158,7 +160,7 @@ agent-hub call brain_get \
   '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
 
 agent-hub call brain_put \
-  '{"path":"/fs/RECOVERY.md","store":"session","content":"cursor: 42\nwhat this session is doing","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
+  '{"path":"/fs/RECOVERY.md","store":"session","content":"what this session is doing","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
 ```
 
 The `session` is what makes this work without a held connection: `brain_get`

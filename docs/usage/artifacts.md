@@ -165,6 +165,13 @@ unknown token, preventing existence oracles. Creating a fresh share link for the
 artifact rotates the token, invalidating any previous link, and returns the sheet
 to the Make link state.
 
+The `url` the share endpoints return is absolute once `HUB_PUBLIC_URL` is set,
+because an agent sharing outward has no document to resolve a relative link
+against and would have to join a base URL it cannot know. Without a declared
+public address it stays relative (`s/{token}`): behind a path-stripping proxy
+the address off the request is the upstream's, with no prefix, and the relative
+link resolves against the page it is on, which gets the prefix right.
+
 The owner reads a shared artifact in the app like any other, because the
 app asks the hub for a **viewer pass** before the frame names the page
 (`GET /api/v1/artifacts/:id/viewer-pass`, admin-gated) and carries it in the

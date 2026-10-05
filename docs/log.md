@@ -6,6 +6,33 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The agent surface answers with what the hub knows
+
+* **Fix**: a share link is absolute once `HUB_PUBLIC_URL` is set, so an agent
+  sharing outward hands on a link it does not have to build. Without a declared
+  public address it stays relative: an address read off the request is the
+  upstream's behind a path-stripping proxy and carries no prefix. The `url` the
+  create and read routes return follows one rule, so one link is one answer.
+  [Artifacts](usage/artifacts.md) says which is which.
+* **Add**: `/api/v1/projects` marks a personal space with `is_personal`, on the
+  listing and the single-project read alike. An agent's listing holds every
+  other agent's personal space, because a token reads every ordinary project,
+  and a client had to infer which rows those were from the `space-` id prefix.
+  They stay listed: they are readable, and the hub marks them rather than hiding
+  them. [Agent surface](architecture/agent-surface.md) states the field.
+* **Fix**: a path sent to the project store that names no namespace is refused
+  naming `/fs/`, the one namespace that store has. It used to answer with the
+  brain's own refusal, which offered `/kv/` and `/fs/`, and the knowledge base
+  has no `/kv/` for a caller to be redirected to. The session store keeps
+  naming both, because it has both.
+* **Fix**: [Using the hub as a brain](usage/agents.md) claimed there was no
+  server-side per-agent feed cursor and that the agent kept its own under
+  `recovery_path`. The hub keeps one per agent per project: a `feed_read` with no
+  `since` resumes from it and advances it. The session-start sequence drops its
+  `since` argument, the recovery document is left to hold what the hub cannot
+  know, and [the agent surface](architecture/agent-surface.md) says the same in
+  its bootstrap convention.
+
 ### ADR 0023: prove the interface with standard tools
 
 * **Add**: [ADR 0023](adr/0023-prove-the-interface-with-standard-tools.md)

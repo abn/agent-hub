@@ -135,6 +135,14 @@ write that lands in the wrong store is silent either way, and defaults to
 `"session"` on the reads, where a wrong guess is a `not_found` the caller
 recovers from.
 
+The project listing a client reads over `GET /api/v1/projects` carries every
+project the caller can see, which includes every other agent's personal space:
+one operator, and a token reads every ordinary project. Each row carries
+`is_personal`, true for a personal space and false for an ordinary project, so
+a client labels or filters one without inferring it from the `space-` id prefix.
+They stay visible because they are readable, and the hub marks them rather than
+hiding them.
+
 `brain_get` and `brain_list` take an optional `session` naming another session
 to read, either `{session_id}` or `{agent, name}` with a `project_id` that
 defaults to the active session's project; omitted, it is the active session.
@@ -169,8 +177,9 @@ a row another project holds, so no field reaches past what the caller can see.
 The served skill document, `GET /SKILL.md`, names the fields.
 
 Paths are namespaced: `/fs/` for the filesystem and `/kv/` for key-value
-entries. A knowledge base holds pages only, so a `/kv/` path there is an
-`invalid_argument`. No tool exposes a raw file handle or the server path of a
+entries. A knowledge base holds pages only, so a path there must start with
+`/fs/`; anything else is an `invalid_argument` naming `/fs/` as the namespace
+the store has, since the knowledge base has no `/kv/` to be redirected to. No tool exposes a raw file handle or the server path of a
 file: `session_start` returns the session id, its owner and status, the two
 namespaces to address the brain with, the conventional recovery path, and the
 handoff note the previous owner left. One value is
@@ -274,10 +283,12 @@ not per-harness scaffolding: wiring a harness to call these at session start,
 and migrating an existing notes file into a brain, are the operator's steps and
 are described in [using the hub as a brain](../usage/agents.md).
 
-The feed cursor an agent reads forward from is the `next_since` of its last
-`feed_read`, kept in the session's own recovery document. `session_start`
-returns no cursor because it has no server-side per-agent cursor to return; the
-agent stores the one it last used under `recovery_path`.
+The feed cursor an agent reads forward from is the hub's, kept per agent and
+project: a `feed_read` with no `since` polls from the stored cursor and
+advances it, so a restarted agent resumes where it stopped with nothing of its
+own to carry. `session_start` returns no cursor because it has none of its own
+to return, and the recovery document holds what the hub cannot know, which is
+what the session is doing rather than where it got to.
 
 ## See also
 
