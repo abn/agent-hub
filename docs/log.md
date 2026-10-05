@@ -4,6 +4,28 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-05
+
+### ADR 0023: prove the interface with standard tools
+
+* **Add**: [ADR 0023](adr/0023-prove-the-interface-with-standard-tools.md)
+  records the decision to prove the interface with standard dev-only tools
+  rather than scripts that pattern-match source text: Playwright Test with role
+  locators and auto-waiting, `toHaveScreenshot` for visuals,
+  `@axe-core/playwright` for accessibility, Vitest for client logic, Stylelint
+  and `css-tree` for the stylesheet, TypeScript and `tsc --noEmit` for types,
+  and cargo-mutants and Stryker for mutation. `AGENTS.md` gains the "Tests
+  assert behaviour, not source text" rule. The migration is phased and each
+  phase deletes what it replaces.
+
+### The captures repaint for the focus, chips and inbox fixes
+
+* **Update**: the seeded captures are refreshed after the v1 fixes: the Connect
+  focus-ring and spacing work, the status pill on one line, the search scope
+  chips, the storage summary on the canvas, the storage and settings rhythm, the
+  wiki row overflow and search-index gutter, the inbox gutter, and the
+  long-summary subject and message. Both widths, both themes.
+
 ## 2026-10-04
 
 ### The v1 fixes repaint the captures
