@@ -91,4 +91,22 @@ test.describe("the project artifact stage's actions", () => {
     await menu.getByRole("menuitem", { name: "Copy path" }).click();
     await expect(page.getByText("Path copied")).toBeVisible();
   });
+
+  test("commenting on selected text opens the composer", async ({ hub, page }, testInfo) => {
+    // A desktop stage draws the selection callout in the frame. The callout
+    // posted a message the shell could not answer on a fine pointer, because the
+    // comments drawer the composer renders into was not mounted there, so
+    // commenting on selected text did nothing.
+    test.skip(testInfo.project.name !== "desktop", "the callout is a fine-pointer surface");
+    await open(page, hub, `#/projects/${hub.projectId}/artifacts`, "artifacts");
+    const document = page.frameLocator("#hub-frame").frameLocator("#hub-frame");
+    await document.locator("body").first().waitFor();
+    await document.locator("body").first().selectText();
+    const callout = document.getByRole("button", { name: "Comment on selection" });
+    await expect(callout).toBeVisible();
+    await callout.click();
+    const sheet = page.locator(".comments-drawer.hub-comment-sheet:not([hidden])");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".hub-sheet-title")).toHaveText("New Comment");
+  });
 });

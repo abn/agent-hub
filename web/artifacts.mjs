@@ -168,6 +168,14 @@ export function wireArtifactStage(root, id, info) {
   }
   if (info) startComments(id, info.version, info.protected);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
+  // The drawer is mounted at every width. On a fine pointer the aside is the
+  // reading surface, but a text selection and Start a thread open the compose
+  // sheet, and openCompose renders into this drawer. Without it the selection
+  // callout posted a message nothing answered, so commenting on selected text
+  // did nothing on a desktop.
+  const { toggle, badge } = commentsToggle();
+  const { backdrop, drawer } = commentsPanel({ toggle, badge });
+  document.body.append(backdrop, drawer);
   if (!coarse) {
     // The aside is part of the layout on a fine pointer: the threads read
     // beside the document, and the control toggles it.
@@ -185,12 +193,6 @@ export function wireArtifactStage(root, id, info) {
       });
     }
   } else {
-    // One surface on a coarse pointer: the sheet. `commentsPanel` returns the
-    // backdrop and the drawer, so both are mounted; appending the returned
-    // object itself is not a Node and throws.
-    const { toggle, badge } = commentsToggle();
-    const { backdrop, drawer } = commentsPanel({ toggle, badge });
-    document.body.append(backdrop, drawer);
     for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
       btn.addEventListener("click", () => openCommentsDrawer());
     }
