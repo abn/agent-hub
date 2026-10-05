@@ -13,7 +13,7 @@
 // strings are the harness's constants and not literals repeated in the specs.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, watch } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, watch } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,8 +67,38 @@ async function waitForDescriptor(child, descriptor, said) {
   });
 }
 
+// A hub is reaped when its bridge exits, but a bridge killed with SIGKILL (an
+// aborted run) orphans its hub, which holds a port and memory and poisons the
+// next run. Every test hub and its bridge carry HUB_CHECK_HUB, so the sweep
+// kills only a test process, never a real hub. It runs once, before any hub of
+// this run starts, so the only marked process it can reach is an orphan.
+function sweepStaleHubs() {
+  let pids;
+  try {
+    pids = readdirSync("/proc");
+  } catch {
+    return; // Not Linux; there is no /proc to sweep.
+  }
+  for (const entry of pids) {
+    if (!/^\d+$/.test(entry)) continue;
+    let env;
+    try {
+      env = readFileSync(`/proc/${entry}/environ`);
+    } catch {
+      continue; // Another user's process, or gone.
+    }
+    if (!env.includes("HUB_CHECK_HUB=1")) continue;
+    try {
+      process.kill(Number(entry), "SIGKILL");
+    } catch {
+      // Gone between the read and the kill.
+    }
+  }
+}
+
 export async function startHubs(projects) {
   mkdirSync(SCRATCH, { recursive: true });
+  sweepStaleHubs();
   const bridges = [];
   for (const project of projects) {
     const descriptor = descriptorFor(project);
@@ -76,6 +106,7 @@ export async function startHubs(projects) {
     const child = spawn(python, [BRIDGE, descriptor], {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, HUB_CHECK_HUB: "1" },
     });
     let said = "";
     child.stdout.on("data", (chunk) => {
