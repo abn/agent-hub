@@ -271,6 +271,47 @@ async fn another_agents_session_refuses_a_named_write() {
     assert_eq!(wrote["ok"], true, "its own session writes: {wrote}");
 }
 
+/// A session that has ended is written through neither address.
+///
+/// Naming a session is the second way in, so the ended-session rule cannot hold
+/// on the active path alone: an owner naming its own ended session is refused
+/// the same way a connection still holding the lease is.
+#[tokio::test]
+async fn an_ended_session_refuses_a_named_write() {
+    let fleet = TestFleet::new("named-write-ended", &["agent-one"]).await;
+
+    let started = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "worker"}),
+    );
+    let session_id = started["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let (status, body) = admin(
+        fleet.port,
+        "POST",
+        &format!("/api/v1/sessions/{session_id}/end"),
+        Some(r#"{"handoff":"work done"}"#),
+    );
+    assert_eq!(status, 200, "end session via REST: {body}");
+
+    for arguments in [
+        json!({"store": "session", "path": "/kv/note", "content": "late write",
+               "session": {"session_id": session_id}}),
+        json!({"store": "session", "path": "/kv/note", "content": "late write",
+               "session": {"agent": "agent-one", "name": "worker", "project_id": PROJECT}}),
+    ] {
+        let (code, msg) = fleet.agent(0).refusal("brain_put", arguments);
+        assert_eq!(
+            code, "conflict",
+            "a named write on an ended session must fail with conflict, got code={code} msg={msg}"
+        );
+        assert!(msg.contains("ended"), "the refusal says why: {msg}");
+    }
+}
+
 #[tokio::test]
 async fn reassigned_session_clears_stale_lineage_in_session_in() {
     let fleet = TestFleet::new("stale-lineage", &["agent-one", "agent-two"]).await;
