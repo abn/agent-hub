@@ -368,7 +368,9 @@ def free_port() -> int:
 
 
 def wait_for_hub(name: str, port: int) -> None:
-    deadline = time.time() + 20
+    # Generous, because a loaded host opens the engine and migrates slowly, and
+    # a browser gate that flakes under load is worse than one that waits.
+    deadline = time.time() + 40
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/readyz", timeout=1):
@@ -845,7 +847,14 @@ def running_hub(name: str, override: str | None = None, cwd: str | None = None):
         yield port, seed(port)
     finally:
         hub.terminate()
-        hub.wait(timeout=10)
+        # Above the hub's ten-second drain, so a clean stop is not reported as a
+        # timeout. A teardown that raised here used to replace the real error
+        # with its own.
+        try:
+            hub.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            hub.kill()
+            hub.wait(timeout=5)
         # The default throwaway directory is ours to remove; an overriding one
         # belongs to the caller, which cleans it up in its own way.
         if override is None:
