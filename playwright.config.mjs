@@ -49,12 +49,27 @@ export default defineConfig({
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name,
       use: { viewport },
-      testIgnore: /a11y\.spec\.mjs/,
+      testIgnore: /(a11y|focus-rings)\.spec\.mjs/,
     })),
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name: `a11y-${name}`,
       use: { viewport },
       testMatch: /a11y\.spec\.mjs/,
     })),
+    {
+      name: "focus-desktop",
+      use: { viewport: { width: 1100, height: 800 } },
+      testMatch: /focus-rings\.spec\.mjs/,
+    },
+    {
+      name: "focus-phone",
+      use: { viewport: { width: 390, height: 844 } },
+      testMatch: /focus-rings\.spec\.mjs/,
+    },
+    {
+      name: "focus-touch",
+      use: { viewport: { width: 390, height: 844 }, hasTouch: true },
+      testMatch: /focus-rings\.spec\.mjs/,
+    },
   ],
 });

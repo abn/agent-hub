@@ -16,6 +16,10 @@ software release notes and the repository changelog.
 * **Change**: the accessibility audit is `e2e/a11y.spec.mjs`, on
   `@axe-core/playwright` under Playwright Test, replacing `a11y.py`. The
   [contributor guide](contribution/guide.md) records the tooling.
+* **Change**: the focus-ring and Connect-spacing check is
+  `e2e/focus-rings.spec.mjs`, on Playwright Test, replacing `focus-rings.py`. It
+  runs in its own projects for the three widths it needs, one a coarse pointer,
+  against their own seeded hubs.
 
 ### The wiki publishes to GitHub Pages
 

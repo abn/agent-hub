@@ -54,6 +54,7 @@ def main(argv: list[str]) -> int:
                     # The plain artifact the viewer checks open at its own
                     # address, read from the harness rather than guessed at.
                     "artifactId": seeded.get("artifact_id", ""),
+                    "questionId": seeded.get("question_id", ""),
                     # The fixture the checks name. It is the harness's, read
                     # from here rather than repeated as literals in the tests.
                     "fixture": {
