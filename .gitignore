@@ -2,11 +2,25 @@
 # Never committed.
 /.agents/brain/
 
-# Local assistant state, plus the tool shims .agents/bootstrap.sh generates
+# Local assistant state and tool shims. The one contract is AGENTS.md; every
+# shim points at it, and .agents/bootstrap.sh writes them. Never committed.
 /.claude/
+/.gemini/
+/.antigravity/
+/.cursor/
 /.opencode/
+/.pi/
+/.codex/
+/.windsurf/
+/.continue/
+/.aider*
 /CLAUDE.md
 /GEMINI.md
+/ANTIGRAVITY.md
+/CURSOR.md
+/PI.md
+/.cursorrules
+/.windsurfrules
 
 # Worktrees
 /.worktrees/

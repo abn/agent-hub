@@ -10,7 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 chmod +x .agents/bootstrap.sh .agents/scripts/*.py
 
 # Assistant shims point at the one committed contract. Listed in .gitignore.
-for shim in CLAUDE.md GEMINI.md; do
+for shim in CLAUDE.md GEMINI.md ANTIGRAVITY.md CURSOR.md PI.md .cursorrules; do
   printf 'Read AGENTS.md and follow it.\n' > "$shim"
 done
 
