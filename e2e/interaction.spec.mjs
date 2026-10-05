@@ -15,11 +15,9 @@
 // typing into the inbox filter emptied the list while the count line above it
 // still said what had matched.
 
-import { expect, test as base } from "@playwright/test";
-import { readHub } from "./hub.mjs";
+import { expect } from "@playwright/test";
+import { BODY, open, test } from "./app.mjs";
 
-// The list the filter judges: the index pane's body, and the field above it.
-const BODY = ".shell-index .shell-body";
 // The group headings a filter judges, which is the filter's own list rather than
 // a second one here, so a screen that draws another shape is walked by both.
 const HEADINGS = ".day, .hub-group-header, .inbox-group";
@@ -27,48 +25,6 @@ const HEADINGS = ".day, .hub-group-header, .inbox-group";
 const KEY_ROWS = ".inbox-row:not(details:not([open]) .inbox-row)";
 // The field Search opens on, named by its own label.
 const SEARCH_FIELD = "Search the feed, artifacts and session brains";
-
-const test = base.extend({
-  // What this check runs against: its own project's seeded hub, and the token
-  // the app reads before it paints. The token is written before any script on
-  // the page runs, which is the only moment it can be for a page that paints
-  // straight away.
-  hub: async ({ page }, use, testInfo) => {
-    const hub = readHub(testInfo.project.name);
-    await page.addInitScript((token) => window.localStorage.setItem("hub.token", token), hub.token);
-    await use(hub);
-  },
-  // What the browser reported while the check ran, asserted when it ends, for
-  // every check rather than for the ones that ask for it. A rendered document
-  // is opaque-origin on purpose, so a frame of one that reads local storage
-  // throws in the frame and not in the app. That is the design's own rule for
-  // the viewer rather than what these checks are about, so it is the one error
-  // left unreported.
-  errors: [
-    async ({ page }, use) => {
-      const errors = [];
-      page.on("pageerror", (error) => {
-        const said = String(error);
-        if (!said.includes("sandboxed")) errors.push(said);
-      });
-      await use(errors);
-      expect(errors, "the browser reported uncaught errors").toEqual([]);
-    },
-    { auto: true },
-  ],
-});
-
-// A screen names its own section in `data-segment`, which is the screen's
-// identity rather than whatever it happened to open: a project screen's `h1` is
-// the selected event or artifact, not the screen's name. So the wait is on the
-// shell, and it is an assertion that waits for the paint.
-async function open(page, hub, route, segment) {
-  await page.goto(`${hub.baseUrl}/${route}`);
-  const painted = segment
-    ? page.locator(`.shell[data-segment="${segment}"] ${BODY}`)
-    : page.locator(".shell-no-index .home-pad");
-  await expect(painted).toBeVisible();
-}
 
 // What the index holds, asked of the rendered page: every row and whether the
 // reader can see it, every group heading with the rows it heads, and every

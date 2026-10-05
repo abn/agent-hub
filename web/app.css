@@ -1104,6 +1104,7 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line);
 }
 .comments-drawer-head h2 { margin: 0; font-size: var(--t-17); flex: 1; }
+.comments-drawer-head[hidden] { display: none; }
 .comments-list {
   flex: 1; overflow-y: auto;
   display: flex; flex-direction: column; gap: var(--s-3);

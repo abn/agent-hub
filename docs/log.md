@@ -6,6 +6,19 @@ software release notes and the repository changelog.
 
 ## 2026-10-05
 
+### The viewer's menu hangs from its trigger and the sheet shows one head
+
+* **Fix**: the artifact viewer's overflow menu was anchored to the viewer's own
+  positioned box, which spans the index, the stage and the comments column, so
+  it painted over the comments column instead of under its button. It is drawn
+  in the control band now and hangs from the trigger.
+  [Human surface](architecture/human-surface.md) describes that band and the
+  menu it carries.
+* **Fix**: the comment sheet stacked the drawer's own "Comments" head above the
+  compose head, drawing two titles and two close buttons in one sheet. One
+  surface shows one head, so the drawer's head belongs to the list alone.
+  [Human surface](architecture/human-surface.md) describes the sheet.
+
 ### The agent surface answers with what the hub knows
 
 * **Fix**: a share link is absolute once `HUB_PUBLIC_URL` is set, so an agent

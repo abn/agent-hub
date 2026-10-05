@@ -51,6 +51,9 @@ def main(argv: list[str]) -> int:
                     "baseUrl": f"http://127.0.0.1:{port}",
                     "token": harness.ADMIN_TOKEN,
                     "projectId": seeded["project_id"],
+                    # The plain artifact the viewer checks open at its own
+                    # address, read from the harness rather than guessed at.
+                    "artifactId": seeded.get("artifact_id", ""),
                     # The fixture the checks name. It is the harness's, read
                     # from here rather than repeated as literals in the tests.
                     "fixture": {

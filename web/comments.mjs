@@ -396,6 +396,12 @@ function renderListView() {
   els.drawer.className = "comments-drawer hub-drawer-list";
   els.list.innerHTML = "";
 
+  // The drawer's own head names the list it holds. The two sheet views build a
+  // head of their own, so this one is hidden while they are mounted rather than
+  // stacked above them, which put two titles and two close buttons in one
+  // sheet.
+  if (els.head) els.head.hidden = false;
+
   const heading = els.drawer.querySelector(".comments-drawer-head h2");
   if (heading) heading.textContent = "Comments";
 
@@ -533,6 +539,8 @@ function renderPhoneSheet() {
 
   els.drawer.className = "comments-drawer hub-comment-sheet";
   els.list.innerHTML = "";
+
+  if (els.head) els.head.hidden = true;
 
   // Grab handle
   const handle = document.createElement("div");
@@ -700,6 +708,8 @@ function renderComposeSheet() {
 
   els.drawer.className = "comments-drawer hub-comment-sheet";
   els.list.innerHTML = "";
+
+  if (els.head) els.head.hidden = true;
 
   const handle = document.createElement("div");
   handle.className = "hub-sheet-handle";
@@ -1149,7 +1159,7 @@ export function commentsPanel({ toggle, badge }) {
   });
 
   commentsState.elements = {
-    backdrop, drawer, toggle, badge, close, list, error, compose: made.box, composeForm: form,
+    backdrop, drawer, head, toggle, badge, close, list, error, compose: made.box, composeForm: form,
   };
   loadComments();
   return { backdrop, drawer };

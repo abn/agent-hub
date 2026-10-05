@@ -1013,6 +1013,7 @@ export async function viewerRoute(params, gen, path) {
 
   const overflowMenu = document.createElement("div");
   overflowMenu.className = "hub-overflow-menu";
+  overflowMenu.setAttribute("role", "menu");
   overflowMenu.hidden = true;
 
   let openShareSheet = () => {};
@@ -1063,6 +1064,7 @@ export async function viewerRoute(params, gen, path) {
   for (const item of menuItems) {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.setAttribute("role", "menuitem");
     btn.dataset.action = item.action;
     btn.textContent = item.text;
     btn.addEventListener("click", (e) => {
@@ -1095,7 +1097,11 @@ export async function viewerRoute(params, gen, path) {
     }
   });
 
-  bar.append(back, pathEl, threadBtn, copyRawBtn, moreBtn);
+  // The menu is a child of the band rather than of the viewer: the viewer is a
+  // positioned box spanning the index, the stage and the comments column, so a
+  // menu anchored to it opened over the comments column instead of under its
+  // own button. Inside the band it hangs from the trigger.
+  bar.append(back, pathEl, threadBtn, copyRawBtn, moreBtn, overflowMenu);
 
   // Document meta line with version toggle (Screen 01):
   const metaWrap = document.createElement("div");
@@ -1170,7 +1176,7 @@ export async function viewerRoute(params, gen, path) {
   docCol.appendChild(frame);
 
   content.appendChild(docCol);
-  stageCol.append(bar, overflowMenu, metaWrap, content);
+  stageCol.append(bar, metaWrap, content);
 
   // Right Comments Column (Aside): 320px
   const commentsCol = document.createElement("aside");
