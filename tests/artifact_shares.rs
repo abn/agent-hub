@@ -81,9 +81,9 @@ async fn create_share_link_and_fetch_via_public_token_route() {
     let token = share_info["token"].as_str().expect("share token string");
     assert!(!token.is_empty());
     assert_eq!(share_info["version"], 1);
-    // The link is relative on purpose: the browser resolves it against the page
-    // it is on, so a hub behind a path prefix gets the prefix right. An origin
-    // here would drop it (H8).
+    // Relative with no declared public address: the browser resolves it against
+    // the page it is on, so a hub behind a path prefix gets the prefix right. An
+    // origin read off the request would drop it (H8).
     let returned = share_info["url"].as_str().expect("share url string");
     assert_eq!(returned, format!("s/{token}"));
     assert!(
@@ -116,6 +116,74 @@ async fn create_share_link_and_fetch_via_public_token_route() {
         res.headers().get(header::CONTENT_TYPE).unwrap(),
         "image/svg+xml"
     );
+}
+
+/// With `HUB_PUBLIC_URL` set, both share routes hand back a link an agent can
+/// pass on as it stands: it has no document to resolve a relative link against,
+/// and the declared address is validated to carry no path, so the join is
+/// exact. The token is unchanged, and the absolute link serves the same page.
+#[tokio::test]
+async fn a_declared_public_url_makes_the_share_link_absolute() {
+    let state = common::state::open_with("artifact-shares-public", |config| {
+        config.public_url = Some("https://hub.example".to_string());
+    })
+    .await;
+    let _ = projects::create(&state.db, "proj", "Default Project").await;
+    let id = publish_artifact(&state, "Specification", "# Version 1 Content", false).await;
+    let app = router(state.clone());
+
+    let created = json_body(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/artifacts/{id}/share"))
+                    .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    let token = created["token"].as_str().expect("share token").to_string();
+    assert_eq!(
+        created["url"].as_str().expect("share url"),
+        format!("https://hub.example/s/{token}"),
+        "create names the declared public address"
+    );
+
+    // The read route applies the same rule, so one link is one answer whichever
+    // route reported it.
+    let fetched = json_body(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/artifacts/{id}/share"))
+                    .header(header::AUTHORIZATION, format!("Bearer {ADMIN_TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        fetched["url"].as_str().expect("share url"),
+        format!("https://hub.example/s/{token}"),
+        "the read names the declared public address too"
+    );
+
+    // The absolute link is still the same page: the path half is served
+    // unauthenticated exactly as the relative one was.
+    let req = Request::builder()
+        .uri(format!("/s/{token}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(text_body(res).await.contains("Specification"));
 }
 
 #[tokio::test]

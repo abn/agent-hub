@@ -781,10 +781,7 @@ pub async fn share_create(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    // Relative on purpose: the link is resolved by the browser against the
-    // page it is on, so a hub mounted behind a path-stripping proxy gets the
-    // prefix right. `request_origin` knows only scheme and authority. H8.
-    let url = format!("s/{}", share.token);
+    let url = share_url(&state, &share.token);
 
     Ok(Json(ShareResponse {
         token: share.token,
@@ -792,6 +789,25 @@ pub async fn share_create(
         version: share.version,
         created_at: share.created_at,
     }))
+}
+
+/// The link to hand a recipient.
+///
+/// Absolute once the operator has declared the hub's public address, because
+/// an agent sharing outward has no document to resolve a relative link against
+/// and would otherwise join a base URL it has no way to know. `HUB_PUBLIC_URL`
+/// is that address, validated to be an origin with no path, so the join is
+/// exact.
+///
+/// Relative otherwise. A base read off the request is not a public base: behind
+/// a path-stripping proxy it is the upstream's authority and carries no prefix,
+/// so an origin-root URL would point at the wrong hub. The relative link is
+/// resolved against the document it is on, which gets the prefix right. H8.
+fn share_url(state: &AppState, token: &str) -> String {
+    match &state.config.public_url {
+        Some(origin) => format!("{origin}/s/{token}"),
+        None => format!("s/{token}"),
+    }
 }
 
 /// `DELETE /api/v1/artifacts/{id}/share`
@@ -833,9 +849,9 @@ pub async fn share_get(
 
     match share {
         Some(s) if s.revoked_at.is_none() => {
-            // Relative, like the create route: the browser resolves it against
-            // the document, so the path prefix survives.
-            let url = format!("s/{}", s.token);
+            // The same rule as the create route, so one link is one answer
+            // whichever route reported it.
+            let url = share_url(&state, &s.token);
             Ok(Json(ShareResponse {
                 token: s.token,
                 url,

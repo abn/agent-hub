@@ -15,6 +15,11 @@ pub struct Project {
     pub id: String,
     pub display_name: String,
     pub owner_agent: Option<String>,
+    /// Whether this is an agent's personal space rather than an ordinary
+    /// project. An agent sees every other agent's space in its listing, so it
+    /// needs to tell them apart to label or filter them, and `owner_agent`
+    /// alone would have it infer that from the id prefix.
+    pub is_personal: bool,
     pub created_at: String,
     /// Feed events newer than the human's last-seen cursor on this project.
     pub unseen_events: i64,
@@ -172,6 +177,7 @@ pub async fn create_with_confidential(
         id: id.to_string(),
         display_name: display_name.to_string(),
         owner_agent: None,
+        is_personal: false,
         created_at,
         unseen_events: 0,
         agents_active: 0,
@@ -681,6 +687,9 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
     Ok(Project {
         id: text(0)?,
         display_name: text(1)?,
+        // The one thing that makes a project an agent's personal space is that
+        // an agent owns it, so the marker is read rather than kept beside it.
+        is_personal: owner_agent.is_some(),
         owner_agent,
         created_at: text(3)?,
         // Both filled by the caller, which counts every project it returns in

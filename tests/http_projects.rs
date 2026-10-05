@@ -323,6 +323,70 @@ async fn an_agents_personal_space_is_settable_though_it_cannot_be_deleted() {
     );
 }
 
+/// An agent's listing holds every other agent's personal space, and the payload
+/// says which rows those are. A client labels or filters on the field rather
+/// than inferring it from the `space-` id prefix, and the spaces stay in the
+/// listing because they are readable.
+#[tokio::test]
+async fn the_listing_marks_a_personal_space_and_not_an_ordinary_project() {
+    let state = state().await;
+    projects::create(&state.db, "homelab", "Homelab")
+        .await
+        .expect("create project");
+    let other = agent_hub::store::identity::create_agent(&state.db, "other", "Other")
+        .await
+        .expect("create agent");
+    let space = other.personal_project_id;
+    assert!(
+        space.starts_with("space-"),
+        "a personal space is the row the marker is about, got {space}"
+    );
+
+    let personal = listed(&state, &space).await;
+    assert_eq!(
+        personal["is_personal"], true,
+        "a personal space is marked as one: {personal}"
+    );
+    assert_eq!(
+        personal["owner_agent"], "other",
+        "the space still names the agent that owns it"
+    );
+
+    let ordinary = listed(&state, "homelab").await;
+    assert_eq!(
+        ordinary["is_personal"], false,
+        "an ordinary project is not: {ordinary}"
+    );
+    assert!(
+        ordinary["owner_agent"].is_null(),
+        "and it is owned by no agent: {ordinary}"
+    );
+
+    // Both stay in the listing: the spaces are readable, so the hub marks them
+    // rather than hiding them.
+    let body = json_body(call(&state, "GET", "/api/v1/projects", None).await).await;
+    let ids: Vec<&str> = body["projects"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .filter_map(|project| project["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&space.as_str()),
+        "another agent's space is still listed: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"homelab"),
+        "and the project beside it: {ids:?}"
+    );
+
+    // The single-project read carries the same marker, or a client that opened
+    // one row would have to go back to the listing to learn what it is.
+    let single =
+        json_body(call(&state, "GET", &format!("/api/v1/projects/{space}"), None).await).await;
+    assert_eq!(single["is_personal"], true, "the read agrees: {single}");
+}
+
 #[tokio::test]
 async fn patching_an_unknown_project_is_not_found_and_needs_a_token() {
     let state = state().await;
