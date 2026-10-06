@@ -259,6 +259,16 @@ async fn backup_inner(
         verify_blobs(out_dir, &hub_dest).await?;
     }
 
+    // The embedded tailnet keeps its device identity under `tailnet/`, opaque
+    // bytes like a blob. It is copied only when present: a hub without the
+    // endpoint has no such directory, and a backup must not invent one.
+    for source in walk_files(&data_dir.join("tailnet"))? {
+        let rel = relative(data_dir, &source)?;
+        let dest = out_dir.join(&rel);
+        copy_file(&source, &dest)?;
+        entries.push(entry_for(&dest, &rel)?);
+    }
+
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     let bytes = entries.iter().map(|entry| entry.size).sum();
     let manifest = Manifest {

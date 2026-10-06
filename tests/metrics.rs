@@ -117,9 +117,30 @@ fn the_counters_render_all_three_families() {
         "{text}"
     );
     assert!(
+        text.contains("# TYPE agenthub_request_errors_total counter"),
+        "{text}"
+    );
+    assert!(
         text.contains("# TYPE agenthub_tool_calls_total counter"),
         "{text}"
     );
+    // Every fixed error code has a series, so a scraper sees the shape.
+    for code in [
+        "invalid_argument",
+        "unauthenticated",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "payload_too_large",
+        "rate_limited",
+        "unavailable",
+        "internal",
+    ] {
+        assert!(
+            text.contains(&format!("agenthub_request_errors_total{{code=\"{code}\"}}")),
+            "code {code} is rendered: {text}"
+        );
+    }
     // Every fixed event kind has a series, so a scraper sees the shape.
     for kind in [
         "signal", "finished", "question", "answer", "approval", "artifact", "session", "system",
@@ -129,6 +150,63 @@ fn the_counters_render_all_three_families() {
             "kind {kind} is rendered: {text}"
         );
     }
+}
+
+#[test]
+fn a_refused_request_moves_the_error_code_counter() {
+    let (_dir, _hub, port) = serve("metrics-errors");
+
+    let before = counter(series(
+        &scrape(port),
+        "agenthub_request_errors_total{code=\"not_found\"}",
+    ));
+
+    // The router's fallback answers a problem with the not_found code, which is
+    // the one place every REST failure is built.
+    let missing = rest(port, "GET", "/no/such/route", Some(ADMIN_TOKEN), None);
+    assert_eq!(missing.status, 404, "{}", missing.raw);
+
+    let after = counter(series(
+        &scrape(port),
+        "agenthub_request_errors_total{code=\"not_found\"}",
+    ));
+    assert!(
+        after > before,
+        "the 404 moved the not_found counter: {before} -> {after}"
+    );
+}
+
+#[test]
+fn the_scrape_reports_the_disk_and_store_gauges() {
+    let (_dir, _hub, port) = serve("metrics-gauges");
+
+    let text = scrape(port);
+    for family in [
+        "# TYPE agenthub_data_free_bytes gauge",
+        "# TYPE agenthub_store_bytes gauge",
+        "# TYPE agenthub_store_wal_bytes gauge",
+    ] {
+        assert!(text.contains(family), "{text}");
+    }
+    // The data volume is measurable in the test environment, and the store file
+    // exists, so both carry a real number rather than NaN.
+    let free = series(&text, "agenthub_data_free_bytes ");
+    assert!(
+        free.rsplit(' ')
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some(),
+        "free bytes is a number: {free}"
+    );
+    let store = series(&text, "agenthub_store_bytes ");
+    assert!(
+        store
+            .rsplit(' ')
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|bytes| bytes > 0),
+        "the store file has a size: {store}"
+    );
 }
 
 #[test]

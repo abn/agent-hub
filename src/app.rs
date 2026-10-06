@@ -729,7 +729,11 @@ pub async fn run(config: Config) -> Result<()> {
 }
 
 /// How long a stopping hub waits for in-flight requests to finish.
-const SHUTDOWN_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+///
+/// The container's `stop_grace_period` must be longer than this, or the runtime
+/// SIGKILLs the hub mid-drain; see `deploy/compose.yaml` and the test that
+/// cross-checks the two.
+pub const SHUTDOWN_DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Count one answered request by method and status class.
 ///

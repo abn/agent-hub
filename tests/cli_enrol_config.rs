@@ -286,3 +286,49 @@ fn a_second_agent_enrols_through_a_config_file_of_its_own() {
         "the first agent's config is left as it was: {untouched}"
     );
 }
+
+/// An enrol refusal that is not a bad token exits 1, not 77.
+///
+/// 77 means "the token was refused", and a hook branches on it to re-enrol or
+/// ask the human. A hub with enrolment closed refuses the request, not the
+/// token (which the caller does not have yet), so it must not send a hook down
+/// that path.
+#[test]
+fn enrolment_closed_is_an_ordinary_failure_not_a_refused_token() {
+    let data = common::temp::TempDir::new("enrol-off-data");
+    let home = common::temp::TempDir::new("enrol-off-home");
+    let hub = common::process::HubProcess::start(
+        data.path(),
+        common::hub::ADMIN_TOKEN,
+        common::process::ANY_PORT,
+        &[("HUB_ENROL", "off")],
+    )
+    .expect("start the hub with enrolment closed");
+
+    let output = clean_client(home.path())
+        .args([
+            "enrol",
+            "--url",
+            &format!("http://127.0.0.1:{}", hub.port()),
+            "--id",
+            "closed-agent",
+            "--name",
+            "ClosedAgent",
+            "--why",
+            "enrolment is closed",
+        ])
+        .output()
+        .expect("run agent-hub enrol");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a closed enrolment is an ordinary failure: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("enrolment is disabled"),
+        "the refusal names why: {stderr}"
+    );
+}

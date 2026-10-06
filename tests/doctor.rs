@@ -242,6 +242,69 @@ fn doctor_refuses_while_a_hub_holds_the_store() {
 }
 
 #[test]
+fn doctor_reports_a_store_older_than_the_binary_without_erroring() {
+    let dir = TempDir::new("doctor-old-store");
+    let data = dir.path();
+    std::fs::create_dir_all(data).expect("create the data directory");
+    block_on(async {
+        let db = agent_hub::store::open_engine(&data.join("hub.db"))
+            .await
+            .expect("open hub store");
+        agent_hub::store::migrate(&db).await.expect("migrate");
+        agent_hub::store::projects::create(&db, "homelab", "Homelab")
+            .await
+            .expect("create project");
+        let conn = db.connect().expect("connect");
+        // Reproduce a store written before the id_high_water and
+        // artifact_versions migrations: the tables do not exist and the
+        // recorded version predates them. This is a real supported state that
+        // `serve` migrates on next start.
+        conn.execute("DROP TABLE id_high_water", ())
+            .await
+            .expect("drop id_high_water");
+        conn.execute("DROP TABLE artifact_versions", ())
+            .await
+            .expect("drop artifact_versions");
+        conn.execute("DELETE FROM schema_version WHERE version > 2", ())
+            .await
+            .expect("trim the version to an older schema");
+    });
+
+    let report = block_on(agent_hub::ops::doctor(data)).expect("doctor runs on an older store");
+
+    assert_eq!(report.schema_version, 2, "the store reports its own schema");
+    assert!(
+        report.id_high_water.is_none(),
+        "a missing mark reads as absent, not as an error"
+    );
+    assert!(
+        report.is_ok(),
+        "an older store is healthy for this binary: {:?}",
+        report.problems
+    );
+
+    // The CLI reports the same, rather than the parse error it used to raise.
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .args(["doctor", "--data-dir"])
+        .arg(data)
+        .env("RUST_LOG", "error")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run the binary");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("schema: 2 (binary supports up to"),
+        "the CLI reports the store's own schema: {stdout}"
+    );
+    assert!(
+        stdout.contains("id high-water mark: none"),
+        "the missing mark reads as none: {stdout}"
+    );
+    assert!(stdout.contains("no problems"), "{stdout}");
+}
+
+#[test]
 fn doctor_cli_prints_the_report_and_exits_zero() {
     let data = TempDir::new("doctor-cli");
     seed_store(data.path());

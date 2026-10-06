@@ -160,6 +160,49 @@ fn a_key_without_the_feature_is_refused() {
     });
 }
 
+/// A pure configuration error must not have a side effect: on a featureless
+/// build, `HUB_TAILNET` is refused before the store is created or migrated, so
+/// a typo or a wrong binary leaves no data directory and no pre-migration
+/// backup behind.
+#[cfg(not(feature = "tailnet"))]
+#[test]
+fn a_key_on_a_featureless_build_fails_before_the_store_is_touched() {
+    let dir = common::temp::TempDir::new("tailnet-early-refusal");
+    let data = dir.join("data");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("create an empty home");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .arg("serve")
+        .env("RUST_LOG", "error")
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", dir.join("absent-system.toml"))
+        .env("HUB_DATA_DIR", &data)
+        .env("HUB_BIND", "127.0.0.1:0")
+        .env("HUB_TAILNET", "tskey-auth-example")
+        .env_remove("HUB_ADMIN_TOKEN")
+        .env_remove("HUB_CONFIG")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run agent-hub serve");
+
+    assert_ne!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("built without the tailnet feature"),
+        "the refusal names the feature: {stderr}"
+    );
+    assert!(
+        !data.join("hub.db").exists(),
+        "the store was not created before the refusal"
+    );
+    assert!(
+        !data.join("backups").exists(),
+        "no pre-migration backup was left behind"
+    );
+}
+
 #[cfg(feature = "tailnet")]
 #[tokio::test]
 async fn a_tailnet_without_a_key_is_refused() {
