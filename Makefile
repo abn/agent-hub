@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e web/invariants net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -117,21 +117,14 @@ web/styles: node_tree ## Run the stylesheet gate over the parsed CSS
 web/types: node_tree ## Type-check the client sources
 	npx tsc --noEmit
 
-# The behavioural invariants: race conditions, request counts, crypto gates,
-# text escaping and single-decision guarantees. Nothing here depends on
-# screen layout or geometry.
-web/invariants: build ## Run the behavioral invariant checks
-	$(call browser_check,web/invariants,.agents/scripts/invariants.py)
-
-# The browser behaviour slice, on the standard runner: what a filter leaves on
-# screen and what the single-key verbs reach. The rows a query keeps under the
-# groups that hold them, a and r on a row whose verbs sit beside it, where / lands
-# and what a filter chip's number counts. It seeds a throwaway hub per viewport
-# project through the Python harness and asserts rendered values with web-first
-# assertions, so no check waits on a fixed number of milliseconds. It skips
-# rather than fails when there is no Node, no browser or no hub to run against, on
-# the same terms as the other browser gates: a skip is green unless
-# HUB_REQUIRE_BROWSER says otherwise.
+# The browser checks, on the standard runner: what a filter leaves on screen,
+# what the single-key verbs reach, and the behavioural invariants (race
+# conditions, request counts, crypto gates, text escaping and single-decision
+# guarantees). It seeds a throwaway hub per project through the Python harness
+# and asserts rendered values with web-first assertions, so no check waits on a
+# fixed number of milliseconds. It skips rather than fails when there is no
+# Node, no browser or no hub to run against, on the same terms as the other
+# browser gates: a skip is green unless HUB_REQUIRE_BROWSER says otherwise.
 web/e2e: build node_tree ## Run the browser behaviour checks
 	@command -v node >/dev/null || { printf 'web/e2e: node is not installed, skipped\n'; case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) exit 1;; esac; exit 0; }
 	@node -e "import('@playwright/test').then(async ({chromium}) => { const b = await chromium.launch(); await b.close(); })" >/dev/null 2>&1 \
@@ -152,7 +145,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/e2e web/invariants net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/e2e net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first

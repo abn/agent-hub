@@ -6,6 +6,18 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The behavioural invariants move to Playwright Test
+
+* **Change**: `.agents/scripts/invariants.py` is replaced by
+  `e2e/invariants-01-shell.spec.mjs`, `e2e/invariants-02-decisions.spec.mjs`,
+  `e2e/invariants-03-screens.spec.mjs` and `e2e/invariants-04-project.spec.mjs`,
+  on Playwright Test, under the `invariants` project and its own seeded hub.
+  The script and the `web/invariants` make target are gone, and `web/e2e` runs
+  the whole browser suite. The checks assert rendered values and behaviours
+  with web-first assertions rather than driving Playwright by hand with fixed
+  waits. The router exposes its registered screen list to the render-guard
+  check, which is the same shape as the sync counter the shell already exposes.
+
 ### The PWA static checks move onto standard tools
 
 * **Change**: the PWA's static checks are Vitest specs rather than
