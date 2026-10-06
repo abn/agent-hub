@@ -18,6 +18,10 @@ software release notes and the repository changelog.
   trailer, the two tools, and the delivery-once rule.
 * **Change**: the `agent-hub` skill gains `references/notifications.md` and
   `references/subscriptions.md`.
+* **Update**: [Using the hub as a brain](usage/agents.md) tells an agent to read
+  the trailer and to subscribe instead of polling, and
+  [Data model](architecture/data-model.md) lists the per-agent feed cursor and
+  the two notification tables.
 * **Decision**: [ADR 0024](adr/0024-notifications-on-the-tool-result.md)
   records that notification lives in the hub rather than in each harness.
 

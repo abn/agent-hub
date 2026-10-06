@@ -41,6 +41,9 @@ inbox, which is global.
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
 | `project_feed_cursors` | One row per project: the newest feed event the human has seen there, and when it was recorded. There is one human operator, so the project is the key. |
+| `agent_feed_cursors` | One row per agent and project: the newest feed event that agent has read there, so `feed_read` with no `since` resumes where the agent stopped without the agent carrying a cursor. |
+| `agent_notify_cursors` | One row per agent: the newest resolved item delivered in the notification trailer on a tool result, so each item is delivered once. |
+| `notify_subscriptions` | One row per standing subscription: the agent, the event kinds it asked for, an optional project scope, and the newest event it has been told about. The cursor starts at the newest matching event, so nothing before the subscription is replayed. |
 | `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
 | `agents` | Agent identity, display name, and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |

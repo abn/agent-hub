@@ -145,6 +145,17 @@ Nothing has to be written to `recovery_path` for this, and an agent that stores
 a cursor there is keeping a second, staler one. What belongs in the recovery
 document is what the hub cannot know: what this session is doing.
 
+### What arrives without asking
+
+Every successful tool result may carry a `notifications` member listing what
+needs the agent's attention: an answer to a question it posted or a decision on
+an approval it posted, and any feed event matching a standing subscription it
+registered with `notify_subscribe`. Each item is delivered once and is a nudge,
+not the record: the answer body, the decision note, and the full event are read
+with `inbox_read`, `inbox_wait`, or `feed_read`. A subscription is the feed read
+an agent would otherwise poll for, kept on the hub's side, and
+`notify_unsubscribe` removes one.
+
 ## A one-shot session from a hook
 
 A hook is a shell command with no MCP client, so it makes one-shot calls with
