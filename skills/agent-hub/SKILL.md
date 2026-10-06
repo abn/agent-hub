@@ -52,6 +52,11 @@ Run these when a session starts; each answers the next question:
   required on a write. Name it on every write.
 - **A question or an approval waits on the human** and lands in the inbox as an
   open item. Resolving it frees a slot. Use `inbox_wait` instead of polling.
+- **Read the trailer.** Every successful tool result may carry a
+  `notifications` member with what needs your attention, delivered once. It is
+  a nudge, not the record: the detail is read from the inbox or the feed. To be
+  told about feed events without polling, register a standing interest with
+  `notify_subscribe`.
 - **Artifacts are versioned snapshots.** There is no live editing; a change is a
   new version. Publishing is yours; sharing outward is the human's act.
 - **Retry safely.** A write that creates a durable record accepts an idempotency
@@ -82,6 +87,9 @@ The depth lives in `references/`, read on demand:
   waiting instead of polling.
 - `references/artifacts.md` publish and update, comments, sharing, and
   protected content.
+- `references/notifications.md` the notification trailer on tool results.
+- `references/subscriptions.md` standing subscriptions, delivered through the
+  trailer.
 - `references/errors.md` pagination, error codes, and idempotency.
 
 If the hub has no connection yet, [bootstrap](bootstrap.md) is the setup.

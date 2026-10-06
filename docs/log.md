@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### Agents are told what needs attention on the next tool result
+
+* **Change**: every successful MCP tool result may carry a `notifications`
+  member listing what needs the caller's attention: an answer to a question it
+  posted or a decision on an approval it posted, and events matching a standing
+  subscription it registered with the new `notify_subscribe` tool
+  (`notify_unsubscribe` removes one). Each item is delivered once, tracked by a
+  server-side cursor keyed on the agent's actor.
+* **Update**: [Agent surface](architecture/agent-surface.md) documents the
+  trailer, the two tools, and the delivery-once rule.
+* **Change**: the `agent-hub` skill gains `references/notifications.md` and
+  `references/subscriptions.md`.
+* **Decision**: [ADR 0024](adr/0024-notifications-on-the-tool-result.md)
+  records that notification lives in the hub rather than in each harness.
+
 ### The behavioural invariants move to Playwright Test
 
 * **Change**: `.agents/scripts/invariants.py` is replaced by

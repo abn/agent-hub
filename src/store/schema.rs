@@ -94,6 +94,14 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 20,
         ddl: V20,
     },
+    Migration {
+        version: 21,
+        ddl: V21,
+    },
+    Migration {
+        version: 22,
+        ddl: V22,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -549,4 +557,48 @@ CREATE TABLE IF NOT EXISTS agent_feed_cursors(
   updated_at TEXT NOT NULL,
   PRIMARY KEY(project_id, agent)
 );
+"#;
+
+/// Version 21: one attention cursor per agent for the notification trailer.
+///
+/// Every successful tool result carries what needs the caller's attention, and
+/// each item is delivered once. The cursor is keyed by the resolved
+/// `principal.actor`, the same stable label `events.actor` and
+/// `agent_feed_cursors.agent` use, never the token. An empty read leaves the
+/// cursor alone; a read that delivers advances it to the newest id shown.
+const V21: &str = r#"
+CREATE TABLE IF NOT EXISTS agent_notify_cursors(
+  agent TEXT PRIMARY KEY,
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+"#;
+
+/// Version 22: standing notification subscriptions.
+///
+/// An agent that wants to be told registers the event kinds it cares about,
+/// optionally scoped to one project, and the hub drains what matched into the
+/// next tool result the caller makes. `kinds` is the registered set as a
+/// comma-separated list, and `last_seen_event_id` is where the drain stopped:
+/// an exclusive event id, seeded at the newest matching event on the day of the
+/// subscription, so a subscription reports from the moment it was made.
+///
+/// The key is the resolved `principal.actor`, the same stable label
+/// `agent_feed_cursors` and `events.actor` carry, never the token: an agent's
+/// identity is its actor, and a token is a credential that can be rotated
+/// without moving the read position. A null `project_id` is every project the
+/// caller may read, so it references no row; a scoped one references `projects`
+/// to document the relation, and foreign keys are not enforced in this schema,
+/// so the project delete sweeps the rows rather than the engine. The index
+/// serves the one read, a caller's own rows.
+const V22: &str = r#"
+CREATE TABLE IF NOT EXISTS notify_subscriptions(
+  id TEXT PRIMARY KEY,
+  agent TEXT NOT NULL,
+  project_id TEXT,
+  kinds TEXT NOT NULL,
+  last_seen_event_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notify_subscriptions_agent ON notify_subscriptions(agent);
 "#;

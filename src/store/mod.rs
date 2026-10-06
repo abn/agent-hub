@@ -12,6 +12,7 @@ pub mod home;
 pub mod idempotency;
 pub mod identity;
 pub mod inbox;
+pub mod notifications;
 pub mod page_comments;
 pub mod projects;
 pub mod prune;
@@ -20,6 +21,7 @@ pub mod schema;
 pub mod search;
 pub mod sessions;
 pub mod storage;
+pub mod subscriptions;
 
 /// How long a connection waits for a competing writer to release the lock.
 ///

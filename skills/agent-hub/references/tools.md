@@ -13,10 +13,18 @@
 | `answer_post` | Reply to a question by its question id. |
 | `inbox_read` | Read the human's global inbox, by status or project. Takes `since` and `actor` and returns a `next_since` cursor. |
 | `inbox_wait` | Wait for new inbox items instead of polling: returns when something lands, or after the wait bound, with the new items and a `next_since` cursor to continue from. |
+| `notify_subscribe`, `notify_unsubscribe` | Register or remove a standing interest in feed events by kind, optionally scoped to a project, so they arrive through the `notifications` member of a later tool result instead of being polled. |
 | `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish, read, list the version history of, and delete artifacts. |
 | `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
 | `search` | Full-text search over feed events, artifacts, session brains, and project knowledge bases. |
 | `whoami`, `version` | Identity and connectivity checks. |
+
+Every successful tool result may carry a `notifications` member with a
+`pending` list of what needs your attention: an answer to your question or a
+decision on your approval (`source: "attention"`), or an event matching a
+standing subscription (`source: "subscription"`). Each item is delivered once,
+so read it on the call that carries it. It is a nudge, not the record: the
+detail is read with `inbox_read`, `inbox_wait`, or `feed_read`.
 
 The argument shapes, with a trailing `?` for optional:
 
@@ -45,6 +53,10 @@ answer_post(question_id, body, idempotency_key?)
 inbox_read(status?, project_id?, limit?, since?, actor?)
 inbox_wait(wait_seconds?, project_id?, since?)
       -> {items, next_since}
+notify_subscribe(kinds, project_id?)
+      -> {subscription_id, cursor}
+notify_unsubscribe(subscription_id)
+      -> {removed}
 search(query, scope?, project_id?, type?, session_id?, limit?)
 artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)

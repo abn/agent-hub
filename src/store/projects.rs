@@ -553,6 +553,7 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
     .map_err(engine)?;
     crate::store::events::forget_cursor_in_tx(&tx, id).await?;
     crate::store::events::forget_agent_cursors_in_tx(&tx, id).await?;
+    crate::store::subscriptions::forget_project_in_tx(&tx, id).await?;
     tx.execute(
         "DELETE FROM projects WHERE id = ?1",
         vec![Value::Text(id.to_string())],

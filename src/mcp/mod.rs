@@ -14,8 +14,8 @@ use axum::response::{IntoResponse, Response};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, CustomRequest, CustomResult,
-    ErrorCode as McpErrorCode, ErrorData, ExtensionCapabilities, ListResourcesResult,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, CustomRequest,
+    CustomResult, ErrorCode as McpErrorCode, ErrorData, ExtensionCapabilities, ListResourcesResult,
     PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
     Resource, ResourceContents, ServerCapabilities, ServerConfig,
 };
@@ -32,12 +32,15 @@ use crate::error::{Error, ErrorCode};
 use crate::principal::Principal;
 
 mod artifacts;
+mod attention;
 mod brain;
 mod comments;
 mod feed;
 mod identity;
 mod inbox;
+mod notifications;
 mod search;
+mod subscriptions;
 
 /// The lease recording an active session on a client connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,7 +74,8 @@ impl HubServer {
                 + Self::artifacts_router()
                 + Self::comments_router()
                 + Self::search_router()
-                + Self::identity_router(),
+                + Self::identity_router()
+                + Self::subscriptions_router(),
             state,
             active: Arc::new(AsyncMutex::new(None)),
         }
@@ -175,8 +179,16 @@ const SKILL_FILES: &[SkillFile] = &[
         body: include_str!("../../skills/agent-hub/references/knowledge-base.md"),
     },
     SkillFile {
+        rel: "references/notifications.md",
+        body: include_str!("../../skills/agent-hub/references/notifications.md"),
+    },
+    SkillFile {
         rel: "references/sessions.md",
         body: include_str!("../../skills/agent-hub/references/sessions.md"),
+    },
+    SkillFile {
+        rel: "references/subscriptions.md",
+        body: include_str!("../../skills/agent-hub/references/subscriptions.md"),
     },
     SkillFile {
         rel: "references/tools.md",
@@ -346,8 +358,10 @@ impl ServerHandler for HubServer {
             return Ok(CallToolResult::structured_error(error_object(&error)).into());
         }
         crate::metrics::record_tool(name.as_ref());
+        let principal = self.principal(&context);
         let tcc = ToolCallContext::new(self, request, context);
-        self.tool_router.call(tcc).await
+        let response = self.tool_router.call(tcc).await?;
+        Ok(merge_trailer(&self.state, &principal, response).await)
     }
 
     /// Advertise the resource surface alongside the tools.
@@ -445,6 +459,39 @@ impl ServerHandler for HubServer {
             )),
         }
     }
+}
+
+/// Carry the notification trailer on one successful tool result.
+///
+/// Only a complete, non-error result with a JSON object body is decorated: the
+/// trailer merges under a `notifications` key and the text view is rebuilt
+/// from the merged object, so both views stay identical. Anything else passes
+/// through untouched, and the trailer never fails the call it rides on.
+async fn merge_trailer(
+    state: &AppState,
+    principal: &Principal,
+    response: CallToolResponse,
+) -> CallToolResponse {
+    let CallToolResponse::Complete(mut result) = response else {
+        return response;
+    };
+    if result.is_error == Some(true) {
+        return CallToolResponse::Complete(result);
+    }
+    let Some(body) = result
+        .structured_content
+        .as_mut()
+        .and_then(|value| value.as_object_mut())
+    else {
+        return CallToolResponse::Complete(result);
+    };
+    let Some(trailer) = notifications::trailer(state, principal).await else {
+        return CallToolResponse::Complete(result);
+    };
+    body.insert("notifications".to_string(), trailer);
+    let merged = serde_json::Value::Object(body.clone());
+    result.content = vec![ContentBlock::text(merged.to_string())];
+    CallToolResponse::Complete(result)
 }
 
 /// Translate a hub error into an MCP tool error carrying the hub code.

@@ -34,3 +34,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   a fetch cap
 * [0023](0023-prove-the-interface-with-standard-tools.md) - Prove the interface
   with standard tools
+* [0024](0024-notifications-on-the-tool-result.md) - Deliver notifications on
+  the tool result, not by polling

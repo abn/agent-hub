@@ -100,6 +100,8 @@ handing it the document.
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
 | `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
+| `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, so they are delivered through the notification trailer instead of polled. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
+| `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact. |
 | `artifact_get` | Read an artifact's content and metadata, optionally one version. Includes total and open thread counts across all versions. |
@@ -118,6 +120,29 @@ handing it the document.
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
 | `whoami` | Report the calling identity, its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
+
+## Notifications on tool results
+
+There is no push channel and no per-harness timer. Every successful tool
+result may carry a top-level `notifications` member, present only when there
+is something to report, whose `pending` list holds the items that need the
+caller's attention. Each item is `{source, kind, id, project_id, title, at}`:
+`source` is `attention` for an answer to a question the caller posted or a
+decision on an approval it posted, or `subscription` for a standing
+subscription it registered. The item is a nudge, not the record: the detail
+stays in the inbox and the feed, read by `inbox_read`, `inbox_wait`, or
+`feed_read`.
+
+Each item is delivered once. Two server-side cursors, keyed on the resolved
+actor and never the token, record what has been shown: one for the caller's own
+attention queue, and one per subscription. A delivered read advances its
+cursor, so the next call carries only what is new; an empty read moves nothing.
+An error result carries no `notifications` member, and neither does a result
+when there is nothing to report. `notify_subscribe` seeds its cursor at the
+newest matching event, so a subscription reports from the moment it was made
+rather than replaying history, and an unscoped drain keeps to the projects the
+caller may read at drain time: an event in a project it may not read is left
+above the cursor rather than consumed, so it arrives if a grant is later given.
 
 A publish carries a description and a version label. It
 also records the publishing agent identity as `actor`, resolved directly from
