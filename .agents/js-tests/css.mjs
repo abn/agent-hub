@@ -219,6 +219,60 @@ export function colourOf(value) {
   return null;
 }
 
+/**
+ * The six-digit RGB of a hex colour, or null when the value is not one. Only a
+ * full `#RRGGBB` is read: a shorthand or an alpha form has no contrast this
+ * walk can compute, and the caller refuses it rather than guessing.
+ */
+export function hexRgb(value) {
+  const match = /^#([0-9a-fA-F]{6})$/.exec(value.trim());
+  if (!match) return null;
+  return [0, 2, 4].map((at) => Number.parseInt(match[1].slice(at, at + 2), 16));
+}
+
+/**
+ * The WCAG contrast ratio between two RGB colours. Relative luminance is the
+ * WCAG formula: linearise each channel, then weight it for the eye. It is
+ * worked out here rather than eyeballed, so a palette change is measured
+ * against the floor instead of reviewed by feel.
+ */
+export function contrastRatio(a, b) {
+  const luminance = ([r, g, b]) => {
+    const [red, green, blue] = [r, g, b].map((channel) => {
+      const value = channel / 255;
+      return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const high = Math.max(luminance(a), luminance(b));
+  const low = Math.min(luminance(a), luminance(b));
+  return (high + 0.05) / (low + 0.05);
+}
+
+/**
+ * The light and dark token blocks of `name`, as raw name to value maps. A theme
+ * inherits every token it does not restate, so a caller that reads a pair
+ * merges the light block under the dark one rather than reading the block
+ * alone.
+ */
+export function tokenBlocks(name) {
+  const light = new Map();
+  const dark = new Map();
+  for (const rule of rules(name)) {
+    const target =
+      rule.selectors.includes(":root") || rule.selectors.includes('[data-theme="light"]')
+        ? light
+        : rule.selectors.includes('[data-theme="dark"]')
+          ? dark
+          : null;
+    if (!target) continue;
+    for (const decl of rule.declarations) {
+      if (decl.property.startsWith("--")) target.set(decl.property, decl.value);
+    }
+  }
+  return { light, dark };
+}
+
 /** The properties that can carry a colour, and so are held to the tokens. */
 export const COLOUR_PROPERTIES = new Set([
   "color",

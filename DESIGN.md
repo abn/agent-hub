@@ -403,9 +403,9 @@ named checks from the current handoff.
 12. **Alert hierarchy.** L0 quiet, L1 unread, L2 waiting. No red, no animation,
     no modal for an alert.
 
-`make web/check` and the browser gates enforce what they can; a UI change is
-not done until someone has looked at it at both widths and said either that it
-matches the design or exactly where it deviates and why.
+`make web/styles`, `make web/units` and the browser gates enforce what they can;
+a UI change is not done until someone has looked at it at both widths and said
+either that it matches the design or exactly where it deviates and why.
 
 ## Where the design source lives
 

@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/units web/styles web/types web/e2e web/invariants net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e web/invariants net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -59,9 +59,6 @@ docs/check: ## Validate the docs bundle against OKF v0.2
 	@command -v okf >/dev/null || { printf 'docs/check: okf is not installed. Install it with:\n  GOBIN="$$HOME/.local/bin" GOTOOLCHAIN=auto go install github.com/okfcli/okf/cmd/okf@latest\n' >&2; exit 1; }
 	okf validate docs
 
-web/check: ## Static checks for the PWA assets
-	./.agents/scripts/check-web.py
-
 # The artifact encryption round-trip. The module is reachable only through the
 # PWA, but a regression in it would break every protected artifact, so the gate
 # runs it when a Node runtime is present and says so when it is not.
@@ -96,11 +93,13 @@ node_tree:
 	@npm ci --no-audit --no-fund
 
 # The pure client functions, held directly rather than through a rendered page
-# the tests then read geometry out of. A rename no longer fails one of these,
-# and a branch that is dropped fails one of them. The frontmatter module's
-# corpus, property and differential tests live here too; the differential layer
-# compares against the Rust reference through cargo and skips when it is absent.
-web/units: node_tree ## Run the client unit tests
+# the tests then read geometry out of, plus the PWA's static checks: the
+# stylesheet's design contract and the build and asset checks, read from the
+# files as parsed or structural properties. The frontmatter module's corpus,
+# property and differential tests live here too; the differential layer compares
+# against the Rust reference through cargo and skips when it is absent. A rename
+# no longer fails one of these, and a branch that is dropped fails one of them.
+web/units: node_tree ## Run the client unit tests and the PWA static checks
 	npx vitest run
 
 # The stylesheet's design contract, held against a `css-tree` parse rather than
@@ -153,7 +152,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/units web/styles web/e2e web/invariants net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/e2e web/invariants net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first

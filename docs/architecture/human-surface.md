@@ -377,16 +377,17 @@ over the screen that replaced it.
 
 External runtime scripts live in `web/vendor/` and are tracked in
 `web/vendor/MANIFEST.json`. The manifest records each vendored file's name,
-version, upstream URL, license, and SHA-256 digest. Static checks
-(`make web/check`) verify that every file in `web/vendor/` matches its manifest
-entry, that hashes match, and that no untracked files exist.
+version, upstream URL, license, and SHA-256 digest. The static checks
+(`make web/units`, `.agents/js-tests/web-assets.test.mjs`) verify that every
+file in `web/vendor/` matches its manifest entry, that hashes match, and that
+no untracked files exist.
 
 To update or add a vendored script:
 1. Place the script in `web/vendor/`.
 2. Update `web/vendor/MANIFEST.json` with the filename, upstream URL, license,
    and banner-derived version (or state that the banner lacks a version).
 3. Compute and record the SHA-256 hash in `MANIFEST.json`.
-4. Run `make web/check` to verify the manifest against disk.
+4. Run `make web/units` to verify the manifest against disk.
 
 Two optional browser gates cover the surface: an accessibility audit over the
 rendered screens in both themes, and a smoke pass that visits every route

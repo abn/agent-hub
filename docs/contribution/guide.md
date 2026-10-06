@@ -30,17 +30,15 @@ change.
 - `make fmt`: applies formatting fixes
 - `make fmt/check`: fails if formatting differs
 - `make docs/check`: validates the docs bundle against OKF v0.2
-- `make web/check`: static checks over the PWA assets. The script syntax pass
-  needs Node; without it the pass is skipped and says so, and
-  `HUB_REQUIRE_BROWSER=1` turns that skip into a failure.
 - `make web/units`: unit tests over the pure client functions, imported from
-  `web/` where they live. Node only, no browser.
+  `web/` where they live, and the PWA's static checks: the stylesheet's design
+  contract and the build and asset checks. Node only, no browser.
 - `make web/styles`: the stylesheet's design contract, held against a `css-tree`
   parse of `web/*.css` rather than against the source text. It reads the
-  token-only colour rule, the 12px type floor, the 44px target, the transition
-  bound, reduced motion, token resolution and the focus ring as parsed
-  declarations, so a renamed selector passes and a changed value fails. Node
-  only, no browser.
+  token-only colour rule, the token contrast pairs, the one palette, the 12px
+  type floor, the 44px target, the transition bound, reduced motion, token
+  resolution and the focus ring as parsed declarations, so a renamed selector
+  passes and a changed value fails. Node only, no browser.
 - `make web/types`: type-checks the client sources with `tsc --noEmit` over
   `checkJs`. It is not in `make check` yet: it lists the errors the JSDoc phase
   has to clear, and a target that cannot pass is not a gate. As of 2026-10-05
@@ -69,6 +67,7 @@ in `package.json` as devDependencies with the lockfile committed and
 | Concern | Tool | Where |
 |---|---|---|
 | Pure client logic | Vitest | `make web/units` |
+| PWA build and assets | Vitest reading the files | `make web/units` |
 | Stylesheet rules and tokens | `css-tree` AST walk under Vitest | `make web/styles` |
 | Client types | `tsc --noEmit` over `checkJs` | `make web/types` |
 | Browser behaviour and layout | Playwright Test | `make web/e2e` |
@@ -117,9 +116,16 @@ before writing one:
   condition that earns the waiver rather than trusting the name, so the waiver
   cannot outlive the thing that justified it.
 
-`check-web.py` still holds a regex version of the type floor, the tap target
-and the token gate. The two now overlap; the regex versions are the next
-phase's deletion, and a new gate should not be added in both places.
+The build and asset checks read the same way:
+`.agents/js-tests/web-assets.test.mjs` holds every required asset, the licence
+markers, the external-origin and emoji ban, the shell's accessibility basics,
+the service-worker registration and its server-stamped placeholders, the parse
+of every first-party script, the served asset table, the glyph set and the
+vendor manifest. Each reads the files and asserts a parsed or structural
+property. The old `check-web.py` and its
+`make web/check` target are gone: the regex versions of the type floor, the tap
+target and the token gate are deleted rather than left beside their
+replacements, so a new gate has one place to live.
 
 ## The workflow
 

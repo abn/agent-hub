@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The PWA static checks move onto standard tools
+
+* **Change**: the PWA's static checks are Vitest specs rather than
+  `.agents/scripts/check-web.py`. The stylesheet and design-token rules (token
+  presence, contrast, the one palette, the 12px type floor) live in
+  `.agents/js-tests/styles.test.mjs` over the `css-tree` parse; the build and
+  asset rules (the served asset table, the vendor manifest, the glyph set, the
+  native-modal ban, the first-party script parse, the shell basics) live in
+  `.agents/js-tests/web-assets.test.mjs`. The `make web/check` target is gone
+  and `make web/units` runs both.
+  [ADR 0023](adr/0023-prove-the-interface-with-standard-tools.md) records the
+  decision, and the [contributor guide](contribution/guide.md) the tooling.
+* **Update**: [Human surface](architecture/human-surface.md) names
+  `make web/units` for the vendor manifest check.
+
 ### The scripts fold into skills, and the accessibility audit moves to Playwright
 
 * **Change**: `.agents/scripts/` is being reduced to the checks that still have
