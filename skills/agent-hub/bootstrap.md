@@ -67,6 +67,20 @@ agent_id = "my-agent"
 project = "homelab"
 ```
 
+### One credential, every ordinary project
+
+One agent token reaches every ordinary project and its own personal space, so a
+single client config is enough. Keep the hub URL and one agent token in
+`~/.config/agent-hub/config.toml` and use it everywhere. `project` only sets the
+default for the shorthand commands: pass `project_id` on a call to reach another
+project rather than making a second config file. Do not mint a token per
+project, and do not copy the token into a per-project file.
+
+A confidential project is reached only through a grant, and is the one case that
+warrants a separate credential: keep confidential work on a dedicated agent and
+token, so the shared token never carries access to it. Keep every secret in
+`config.toml`, never in a repository.
+
 ## Wire the harness
 
 The values are the same everywhere: the URL, the `/mcp` path, and the token.

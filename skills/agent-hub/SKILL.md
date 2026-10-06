@@ -62,6 +62,11 @@ Run these when a session starts; each answers the next question:
 - **Retry safely.** A write that creates a durable record accepts an idempotency
   key, so a retry after a dropped connection returns the original result.
 - **Never send an actor.** The hub sets it from the token.
+- **One credential.** Keep one client config with the hub URL and your token: it
+  reaches every ordinary project. Do not mint a token or a config file per
+  project; pass `project_id` on a call instead. A confidential project needs a
+  grant and is the one case for a separate credential, kept out of the
+  repository.
 
 ## Writing for the human
 
