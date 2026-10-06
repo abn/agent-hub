@@ -14,6 +14,14 @@ export function setScreens(table) {
   screens = table;
 }
 
+// The behavioural harness reads the router's own table to prove every screen is
+// covered by the render guard. It is the registered list rather than a second
+// one in the test, so a screen added to the table fails until it is held. This
+// is the same shape as the sync counter the shell exposes for its own check.
+if (typeof window !== "undefined") {
+  window.__router = { screens: () => Object.keys(screens) };
+}
+
 // The chip a render should return focus to, set when a filter is toggled.
 let pendingFocus = null;
 

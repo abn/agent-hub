@@ -14,6 +14,7 @@ Usage: hub-bridge.py DESCRIPTOR
 from __future__ import annotations
 
 import json
+import os
 import signal
 import sys
 import time
@@ -45,7 +46,10 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGINT, leave)
     with harness.running_hub(NAME) as (port, seeded):
         descriptor.parent.mkdir(parents=True, exist_ok=True)
-        descriptor.write_text(
+        # Written to a sibling and renamed into place, so the runner's watcher
+        # only ever sees the finished document rather than a half-written one.
+        staged = descriptor.with_name(descriptor.name + ".tmp")
+        staged.write_text(
             json.dumps(
                 {
                     "baseUrl": f"http://127.0.0.1:{port}",
@@ -55,20 +59,38 @@ def main(argv: list[str]) -> int:
                     # address, read from the harness rather than guessed at.
                     "artifactId": seeded.get("artifact_id", ""),
                     "questionId": seeded.get("question_id", ""),
+                    # The seeded session and protected artifact, so the
+                    # invariant checks that read a brain or drive the password
+                    # gate address the harness's own fixture.
+                    "sessionId": seeded.get("session_id", ""),
+                    "protectedId": seeded.get("protected_id", ""),
                     # The fixture the checks name. It is the harness's, read
                     # from here rather than repeated as literals in the tests.
                     "fixture": {
                         "approval": harness.APPROVAL_SUMMARY,
+                        "secondApproval": harness.SECOND_APPROVAL_SUMMARY,
                         "question": harness.QUESTION_SUBJECT,
                         "inboxRead": harness.INBOX_READ_SUMMARY,
                         "finished": harness.FINISHED_SUMMARY,
+                        "markup": harness.MARKUP_SUMMARY,
+                        "sessionName": harness.SESSION_NAME,
+                        "brainValue": harness.BRAIN_VALUE,
+                        "brainFsPath": harness.BRAIN_FS_PATH,
+                        "brainFsTop": harness.BRAIN_FS_TOP,
+                        "brainFolder": harness.BRAIN_FOLDER,
                         "searchTerm": harness.SEARCH_TERM,
                         "searchMiss": harness.SEARCH_MISS_TERM,
+                        "searchMarkup": harness.SEARCH_MARKUP_TERM,
+                        "searchHostile": harness.SEARCH_HOSTILE_QUERIES,
+                        "protectedPassword": harness.PROTECTED_PASSWORD,
+                        "protectedBody": harness.PROTECTED_BODY_MARK,
+                        "protectedHostile": harness.PROTECTED_HOSTILE_MARK,
                     },
                 }
             ),
             encoding="utf-8",
         )
+        os.replace(staged, descriptor)
         print(f"{NAME}: {descriptor} describes the seeded hub on port {port}", flush=True)
         while True:
             time.sleep(0.2)

@@ -49,8 +49,17 @@ export default defineConfig({
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name,
       use: { viewport },
-      testIgnore: /(a11y|focus-rings|prefix)\.spec\.mjs/,
+      testIgnore: /(a11y|focus-rings|prefix|invariants).*\.spec\.mjs/,
     })),
+    // The behavioural invariants are their own project so their run does not
+    // move the behaviour checks' state. They are one phone-width run with the
+    // desktop screens driven by the checks that measure them, which is the
+    // shape the old script ran in, and their own seeded hub.
+    {
+      name: "invariants",
+      use: { viewport: { width: 390, height: 844 } },
+      testMatch: /invariants.*\.spec\.mjs/,
+    },
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name: `a11y-${name}`,
       use: { viewport },
