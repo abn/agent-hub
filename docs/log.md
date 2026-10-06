@@ -21,6 +21,16 @@ software release notes and the repository changelog.
   runs in its own projects for the three widths it needs, one a coarse pointer,
   against their own seeded hubs.
 
+### The frontmatter runner moves to Vitest
+
+* **Change**: `.agents/scripts/test-frontmatter.mjs` becomes
+  `.agents/js-tests/frontmatter.test.mjs`, on Vitest, and `make web/frontmatter`
+  is removed. The three layers are kept: the fixture corpus compared byte for
+  byte, the properties over generated input, and the differential layer that
+  answers generated cases with the Rust reference through cargo. The
+  differential skips rather than fails without a toolchain, and runs in
+  `make check`, where cargo is present.
+
 ### The wiki publishes to GitHub Pages
 
 * **Add**: `.github/workflows/pages.yml` renders the bundle with the okf-wiki

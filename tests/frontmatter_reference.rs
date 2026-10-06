@@ -1,11 +1,11 @@
 //! The Rust patcher as a reference a second implementation is compared with.
 //!
-//! The fixture corpus cannot hold every input, so the browser module's runner
-//! (`.agents/scripts/test-frontmatter.mjs --differential`) generates cases,
-//! has this test answer them, and requires its own answers to be the same
-//! bytes or the same refusal. The test is ignored in a normal run: it reads
-//! the file named by `FRONTMATTER_CASES`, one JSON case per line, and writes
-//! one JSON answer per line to the file named by `FRONTMATTER_ANSWERS`.
+//! The fixture corpus cannot hold every input, so the browser module's Vitest
+//! suite (`.agents/js-tests/frontmatter.test.mjs`) generates cases, has this
+//! test answer them, and requires its own answers to be the same bytes or the
+//! same refusal. The test is ignored in a normal run: it reads the file named
+//! by `FRONTMATTER_CASES`, one JSON case per line, and writes one JSON answer
+//! per line to the file named by `FRONTMATTER_ANSWERS`.
 //!
 //! A case is `{"text": ..., "op": ...}` where `op` has the shape of a corpus
 //! patch file, or is `{"operation": "read"}`. An answer is `{"ok": <page>}`,
@@ -115,7 +115,7 @@ fn answer(line: &str) -> Value {
 }
 
 #[test]
-#[ignore = "driven by .agents/scripts/test-frontmatter.mjs --differential"]
+#[ignore = "driven by .agents/js-tests/frontmatter.test.mjs"]
 fn answer_the_cases_in_a_file() {
     let cases = env::var("FRONTMATTER_CASES").expect("FRONTMATTER_CASES names the case file");
     let answers =

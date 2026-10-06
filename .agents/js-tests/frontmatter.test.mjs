@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Tests for web/frontmatter.mjs, the browser's frontmatter reader and patcher.
 //
 // Three layers, all seeded and none with a dependency:
@@ -13,105 +12,80 @@
 //    what was set, nothing but a typed refusal is ever thrown, and the work
 //    is linear. The generator is the xorshift tests/frontmatter_properties.rs
 //    uses, so a seed names the same page on both sides.
-// 3. With --differential, generated (page, operation) pairs are answered by
-//    the Rust reference (tests/frontmatter_reference.rs, run through cargo)
-//    and by the module, and the answers must be the same bytes or the same
-//    refusal code.
+// 3. The differential layer answers generated (page, operation) pairs with the
+//    Rust reference (tests/frontmatter_reference.rs, run through cargo) and
+//    with the module, and the answers must be the same bytes or the same
+//    refusal code. It skips rather than fails when cargo is absent, and runs
+//    in `make check`, where cargo is present.
 //
-// Usage: node .agents/scripts/test-frontmatter.mjs [--differential]
-//          [--cases N] [--seed N] [--only corpus|properties|differential]
-//          [--module path/to/frontmatter.mjs]
+// Ported from .agents/scripts/test-frontmatter.mjs onto Vitest, the standard
+// tool for pure client logic (ADR 0023).
 
+import { describe, expect, it, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+import { CODES, FrontmatterError, patch, promote, read, review } from "../../web/frontmatter.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, "../..");
 const FIXTURES = path.join(ROOT, "tests/fixtures/frontmatter");
 // The minimum tests/frontmatter_corpus.rs holds the corpus to.
 const MIN_CASES = 60;
 const BUDGET_MS = 10_000;
 
-function parseArgs(argv) {
-  const args = {
-    module: path.join(ROOT, "web/frontmatter.mjs"),
-    differential: false,
-    cases: 6000,
-    seed: 1,
-    only: null,
-  };
-  for (let i = 0; i < argv.length; i += 1) {
-    const flag = argv[i];
-    if (flag === "--differential") args.differential = true;
-    else if (flag === "--module") args.module = path.resolve(argv[(i += 1)]);
-    else if (flag === "--cases") args.cases = Number(argv[(i += 1)]);
-    else if (flag === "--seed") args.seed = Number(argv[(i += 1)]);
-    else if (flag === "--only") args.only = argv[(i += 1)];
-    else throw new Error(`unknown argument ${flag}`);
-  }
-  if (!Number.isSafeInteger(args.cases) || args.cases < 1) throw new Error("--cases");
-  if (!Number.isSafeInteger(args.seed) || args.seed < 0) throw new Error("--seed");
-  if (args.only !== null && !["corpus", "properties", "differential"].includes(args.only)) {
-    throw new Error("--only takes corpus, properties or differential");
-  }
-  if (args.only === "differential") args.differential = true;
-  return args;
-}
+// The differential layer's volume, kept from the runner it replaces: the
+// generator must reach every refusal code and accept a tenth of the cases.
+const DIFFERENTIAL_CASES = 6000;
+const DIFFERENTIAL_SEED = 1;
 
-const args = parseArgs(process.argv.slice(2));
-const fm = await import(pathToFileURL(args.module).href);
-const { FrontmatterError, CODES } = fm;
+// The pure functions do no I/O, so a heavy property or the reference run is
+// bounded by the work itself rather than by Vitest's five-second default.
+const SLOW_MS = 120_000;
+const CARGO_MS = 600_000;
+
+const hasCargo = (() => {
+  const probe = spawnSync("cargo", ["--version"], { encoding: "utf8" });
+  return !probe.error && probe.status === 0;
+})();
 
 // ---------------------------------------------------------------------------
-// A small harness: every check runs, every failure is listed.
-
-const results = [];
-
-function check(name, body) {
-  const started = Date.now();
-  try {
-    const note = body();
-    results.push({ name, ok: true });
-    console.log(`ok    ${name}${note ? ` (${note})` : ""} ${Date.now() - started} ms`);
-  } catch (err) {
-    results.push({ name, ok: false });
-    console.log(`FAIL  ${name}\n      ${String(err && err.message ? err.message : err)}`);
-  }
-}
-
-function fail(message) {
-  throw new Error(message);
-}
+// A small harness for the refusal contract. Anything thrown that is not a
+// typed refusal with a known code is a failure of the module, so `outcome`
+// narrows a call to `{ ok }` or `{ error }` and leaves every other throw to
+// fail the test.
 
 function show(value) {
+  // JSON.stringify returns undefined for a value it cannot serialize, such as
+  // the `undefined` change list the shape check is handed, so fall back to the
+  // value's own string form rather than reading `.length` off undefined.
   const text = JSON.stringify(value);
+  if (text === undefined) return String(value);
   return text.length > 400 ? `${text.slice(0, 400)}...` : text;
 }
 
-function assertEqual(got, want, context) {
-  if (got !== want) fail(`${context}\n         got: ${show(got)}\n      wanted: ${show(want)}`);
-}
-
-// Run an operation to `{ ok }` or `{ error }`. Anything thrown that is not a
-// typed refusal with a known code is a failure of the module.
 function outcome(work, context) {
+  let out;
   try {
-    const out = work();
-    if (typeof out !== "string") fail(`${context}: returned ${typeof out}, not a string`);
-    return { ok: out };
+    out = work();
   } catch (err) {
     if (err instanceof FrontmatterError && CODES.includes(err.code)) {
       return { error: err.code };
     }
-    fail(`${context}: threw ${err && err.stack ? err.stack : err}`);
+    throw new Error(`${context}: threw ${err && err.stack ? err.stack : err}`);
   }
+  if (typeof out !== "string") {
+    throw new Error(`${context}: returned ${typeof out}, not a string`);
+  }
+  return { ok: out };
 }
 
 function refusal(work, code, context) {
   const got = outcome(work, context);
-  if (got.error !== code) fail(`${context}: wanted refusal ${code}, got ${show(got)}`);
+  expect(got.error, `${context}: wanted refusal ${code}, got ${show(got)}`).toBe(code);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,87 +115,80 @@ function decode(bytes, context) {
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    fail(`${context}: not UTF-8`);
+    throw new Error(`${context}: not UTF-8`);
   }
 }
 
 function onlyFields(object, allowed, context) {
   if (typeof object !== "object" || object === null || Array.isArray(object)) {
-    fail(`${context}: not an object`);
+    throw new Error(`${context}: not an object`);
   }
   for (const field of Object.keys(object)) {
-    if (!allowed.includes(field)) fail(`${context}: unknown field ${field}`);
+    if (!allowed.includes(field)) throw new Error(`${context}: unknown field ${field}`);
   }
 }
 
 function runOperation(text, op, context) {
   onlyFields(op, Object.keys(OPERATION_FIELDS).flatMap((k) => OPERATION_FIELDS[k]), context);
   const allowed = OPERATION_FIELDS[op.operation];
-  if (allowed === undefined) fail(`${context}: unknown operation ${show(op.operation)}`);
+  if (allowed === undefined) throw new Error(`${context}: unknown operation ${show(op.operation)}`);
   onlyFields(op, allowed, context);
-  if (op.operation === "patch") return fm.patch(text, op.changes);
-  if (op.operation === "review") return fm.review(text, op.actor, op.time);
-  return fm.promote(text, op);
+  if (op.operation === "patch") return patch(text, op.changes);
+  if (op.operation === "review") return review(text, op.actor, op.time);
+  return promote(text, op);
 }
 
 function loadManifest() {
   const manifest = JSON.parse(decode(readFixture("manifest.json"), "manifest.json"));
   onlyFields(manifest, ["version", "cases"], "manifest.json");
-  if (manifest.version !== 2) fail(`unknown manifest version ${manifest.version}`);
-  if (!Array.isArray(manifest.cases)) fail("manifest.json: cases is not a list");
+  if (manifest.version !== 2) throw new Error(`unknown manifest version ${manifest.version}`);
+  if (!Array.isArray(manifest.cases)) throw new Error("manifest.json: cases is not a list");
   return manifest;
 }
 
-function corpusChecks() {
-  const manifest = loadManifest();
+const manifest = loadManifest();
 
-  check("corpus: every case matches byte for byte", () => {
-    if (manifest.cases.length < MIN_CASES) {
-      fail(`the corpus shrank to ${manifest.cases.length} cases`);
-    }
-    const failures = [];
-    for (const meta of manifest.cases) {
-      try {
-        onlyFields(meta, ["id", "description", "input", "patch", "expected", "error"], "case");
-        for (const field of ["id", "description", "input", "patch"]) {
-          if (typeof meta[field] !== "string" || meta[field] === "") {
-            fail(`${meta.id}: no ${field}`);
-          }
-        }
-        if ((meta.expected === undefined) === (meta.error === undefined)) {
-          fail(`${meta.id}: exactly one of expected and error is required`);
-        }
-        const text = decode(readFixture(meta.input), meta.input);
-        const op = JSON.parse(decode(readFixture(meta.patch), meta.patch));
-        const got = outcome(() => runOperation(text, op, meta.id), meta.id);
-        if (meta.error !== undefined) {
-          if (got.error !== meta.error) {
-            fail(`${meta.id}: wanted refusal ${meta.error}, got ${show(got)}`);
-          }
-        } else {
-          if (got.ok === undefined) fail(`${meta.id}: refused with ${got.error}`);
-          const want = readFixture(meta.expected);
-          if (!Buffer.from(got.ok, "utf8").equals(want)) {
-            fail(
-              `${meta.id} (${meta.description})\n         got: ${show(got.ok)}\n      wanted: ${show(want.toString("utf8"))}`,
-            );
-          }
-        }
-      } catch (err) {
-        failures.push(err.message);
-      }
-    }
-    if (failures.length > 0) {
-      fail(`${failures.length} of ${manifest.cases.length} cases failed:\n      ${failures.join("\n      ")}`);
-    }
-    return `${manifest.cases.length} cases`;
+describe("the fixture corpus", () => {
+  it("holds at least the minimum number of cases", () => {
+    expect(
+      manifest.cases.length,
+      `the corpus shrank to ${manifest.cases.length} cases`,
+    ).toBeGreaterThanOrEqual(MIN_CASES);
   });
 
-  check("corpus: every fixture file belongs to a case", () => {
+  it.each(manifest.cases)("$id matches byte for byte", (meta) => {
+    onlyFields(meta, ["id", "description", "input", "patch", "expected", "error"], "case");
+    for (const field of ["id", "description", "input", "patch"]) {
+      expect(typeof meta[field], `${meta.id}: no ${field}`).toBe("string");
+      expect(meta[field], `${meta.id}: no ${field}`).not.toBe("");
+    }
+    expect(
+      (meta.expected === undefined) === (meta.error === undefined),
+      `${meta.id}: exactly one of expected and error is required`,
+    ).toBe(false);
+
+    const text = decode(readFixture(meta.input), meta.input);
+    const op = JSON.parse(decode(readFixture(meta.patch), meta.patch));
+    const got = outcome(() => runOperation(text, op, meta.id), meta.id);
+    if (meta.error !== undefined) {
+      expect(got.error, `${meta.id}: wanted refusal ${meta.error}, got ${show(got)}`).toBe(
+        meta.error,
+      );
+    } else {
+      expect(got.ok, `${meta.id}: refused with ${got.error}`).toBeDefined();
+      const want = readFixture(meta.expected);
+      expect(
+        Buffer.from(got.ok, "utf8").equals(want),
+        `${meta.id} (${meta.description})\n         got: ${show(got.ok)}\n      wanted: ${show(want.toString("utf8"))}`,
+      ).toBe(true);
+    }
+  });
+
+  it("references exactly the fixture files on disk, once each", () => {
     const referenced = new Set(["manifest.json", "README.md"]);
     const ids = new Set();
     for (const meta of manifest.cases) {
-      if (ids.has(meta.id)) fail(`duplicate case id ${meta.id}`);
+      expect(ids.has(meta.id), `duplicate case id ${meta.id}`).toBe(false);
       ids.add(meta.id);
       for (const name of [meta.input, meta.patch, meta.expected]) {
         if (name !== undefined) referenced.add(name);
@@ -230,16 +197,13 @@ function corpusChecks() {
     const onDisk = new Set(fs.readdirSync(FIXTURES));
     const stray = [...onDisk].filter((name) => !referenced.has(name));
     const missing = [...referenced].filter((name) => !onDisk.has(name));
-    if (stray.length > 0 || missing.length > 0) {
-      fail(`fixture files and manifest disagree: stray ${show(stray)}, missing ${show(missing)}`);
-    }
-    return `${onDisk.size} files`;
+    expect({ stray, missing }).toStrictEqual({ stray: [], missing: [] });
   });
 
-  check("corpus: every refusal code and operation is covered", () => {
+  it("covers every refusal code and every operation", () => {
     const refused = new Set(manifest.cases.map((meta) => meta.error));
     for (const code of CODES) {
-      if (!refused.has(code)) fail(`no case refuses with ${code}`);
+      expect(refused.has(code), `no case refuses with ${code}`).toBe(true);
     }
     const operations = new Set(
       manifest.cases.map(
@@ -247,12 +211,10 @@ function corpusChecks() {
       ),
     );
     for (const operation of Object.keys(OPERATION_FIELDS)) {
-      if (!operations.has(operation)) fail(`no case runs ${operation}`);
+      expect(operations.has(operation), `no case runs ${operation}`).toBe(true);
     }
   });
-
-  return manifest;
-}
+});
 
 // ---------------------------------------------------------------------------
 // The generator shared with tests/frontmatter_properties.rs
@@ -374,27 +336,25 @@ function promoteParams(title, tags) {
   };
 }
 
-function propertyChecks(manifest) {
-  check("property: the empty patch is the identity on every corpus input", () => {
+describe("the properties", () => {
+  it("keeps the empty patch as the identity on every corpus input", () => {
     for (const meta of manifest.cases) {
       const text = decode(readFixture(meta.input), meta.input);
-      assertEqual(fm.patch(text, []), text, meta.id);
+      expect(patch(text, []), meta.id).toBe(text);
     }
-    return `${manifest.cases.length} inputs`;
   });
 
-  check("property: the empty patch is the identity on arbitrary input", () => {
+  it("keeps the empty patch as the identity on arbitrary input", () => {
     for (let seed = 0; seed < 3000; seed += 1) {
       const rng = new Rng(seed);
       const text = noise(rng, ALPHABET, 40);
-      assertEqual(fm.patch(text, []), text, `seed ${seed}`);
+      expect(patch(text, []), `seed ${seed}`).toBe(text);
       const units = codeUnits(rng, 40);
-      assertEqual(fm.patch(units, []), units, `seed ${seed}, code units`);
+      expect(patch(units, []), `seed ${seed}, code units`).toBe(units);
     }
-    return "3000 seeds, twice";
   });
 
-  check("property: nothing but a refusal is thrown, and output never reads worse", () => {
+  it("throws nothing but a refusal, and never makes an accepted page unreadable", () => {
     let accepted = 0;
     for (let seed = 0; seed < 6000; seed += 1) {
       const rng = new Rng(seed);
@@ -406,30 +366,28 @@ function propertyChecks(manifest) {
       const tags = [value, noise(rng, ALPHABET, 3)];
       const context = `seed ${seed}: ${show(text)}`;
 
-      outcome(() => JSON.stringify(fm.read(text)), context);
+      outcome(() => JSON.stringify(read(text)), context);
       const outputs = [
-        outcome(
-          () => fm.patch(text, [["key", value], ["verified", null], ["tags", tags]]),
-          context,
-        ),
-        outcome(() => fm.review(text, value, AT), context),
-        outcome(() => fm.promote(text, promoteParams(value, tags)), context),
+        outcome(() => patch(text, [["key", value], ["verified", null], ["tags", tags]]), context),
+        outcome(() => review(text, value, AT), context),
+        outcome(() => promote(text, promoteParams(value, tags)), context),
       ];
       // Whatever was accepted must still lay out.
       for (const output of outputs) {
         if (output.ok === undefined) continue;
         accepted += 1;
-        const again = outcome(() => JSON.stringify(fm.read(output.ok)), context);
+        const again = outcome(() => JSON.stringify(read(output.ok)), context);
         if (again.error !== undefined) {
-          fail(`${context} became unreadable (${again.error}): ${show(output.ok)}`);
+          throw new Error(`${context} became unreadable (${again.error}): ${show(output.ok)}`);
         }
       }
     }
-    if (accepted < 1000) fail(`only ${accepted} operations were accepted: the generator rotted`);
-    return `6000 seeds, ${accepted} accepted`;
+    expect(accepted, "only some operations were accepted: the generator rotted").toBeGreaterThanOrEqual(
+      1000,
+    );
   });
 
-  check("property: arbitrary code units never throw and never reach the page", () => {
+  it("never throws on arbitrary code units and never writes them to the page", () => {
     for (let seed = 0; seed < 3000; seed += 1) {
       const rng = new Rng(seed);
       let text = rng.below(2) === 0 ? "---\n" : "";
@@ -438,22 +396,22 @@ function propertyChecks(manifest) {
       const value = codeUnits(rng, 5);
       const context = `seed ${seed}: ${show(text)} with ${show(value)}`;
 
-      outcome(() => JSON.stringify(fm.read(text)), context);
-      const patched = outcome(() => fm.patch(text, [["key", value], ["tags", [value]]]), context);
-      const reviewed = outcome(() => fm.review(text, value, AT), context);
-      const promoted = outcome(() => fm.promote(text, promoteParams(value, [value])), context);
+      outcome(() => JSON.stringify(read(text)), context);
+      const patched = outcome(() => patch(text, [["key", value], ["tags", [value]]]), context);
+      const reviewed = outcome(() => review(text, value, AT), context);
+      const promoted = outcome(() => promote(text, promoteParams(value, [value])), context);
       if (hasLoneSurrogate(value)) {
         for (const got of [patched, reviewed, promoted]) {
-          if (got.error !== "invalid_value") {
-            fail(`${context}: a lone surrogate was not refused: ${show(got)}`);
-          }
+          expect(
+            got.error,
+            `${context}: a lone surrogate was not refused: ${show(got)}`,
+          ).toBe("invalid_value");
         }
       }
     }
-    return "3000 seeds";
   });
 
-  check("property: patching one key leaves every other byte alone", () => {
+  it("changes only the named key's line when patching one key", () => {
     for (let seed = 0; seed < 4000; seed += 1) {
       const rng = new Rng(seed);
       const { segments, nl } = generatedPage(rng);
@@ -465,24 +423,23 @@ function propertyChecks(manifest) {
       const after = join(segments.slice(target + 1));
 
       const value = noise(rng, ALPHABET, 5);
-      const replaced = fm.patch(page, [[key, value]]);
+      const replaced = patch(page, [[key, value]]);
       if (
         !replaced.startsWith(before) ||
         !replaced.endsWith(after) ||
         replaced.length < before.length + after.length
       ) {
-        fail(`seed ${seed}: bytes outside ${key} changed: ${show(replaced)}`);
+        throw new Error(`seed ${seed}: bytes outside ${key} changed: ${show(replaced)}`);
       }
       const middle = replaced.slice(before.length, replaced.length - after.length);
       if (!middle.startsWith(`${key}: `) || !middle.endsWith(nl) || count(middle, "\n") !== 1) {
-        fail(`seed ${seed}: the value left its line: ${show(middle)}`);
+        throw new Error(`seed ${seed}: the value left its line: ${show(middle)}`);
       }
-      assertEqual(fm.patch(page, [[key, null]]), before + after, `seed ${seed}: delete`);
+      expect(patch(page, [[key, null]]), `seed ${seed}: delete`).toBe(before + after);
     }
-    return "4000 seeds";
   });
 
-  check("property: review leaves every byte outside verified alone", () => {
+  it("leaves every byte outside verified alone when reviewing", () => {
     for (let seed = 0; seed < 2000; seed += 1) {
       const rng = new Rng(seed);
       const { segments, nl } = generatedPage(rng);
@@ -490,20 +447,18 @@ function propertyChecks(manifest) {
       const last = segments[segments.length - 1].bytes;
       const head = join(segments.slice(0, -1));
       const added = `verified:${nl}  - by: human${nl}    at: ${AT}${nl}`;
-      const reviewed = fm.review(page, "human", AT);
-      assertEqual(reviewed, head + added + last, `seed ${seed}`);
+      const reviewed = review(page, "human", AT);
+      expect(reviewed, `seed ${seed}`).toBe(head + added + last);
       // A second review appends under the first and touches nothing else.
       const second = `  - by: human${nl}    at: 2026-09-20T08:00:00Z${nl}`;
-      assertEqual(
-        fm.review(reviewed, "human", "2026-09-20T08:00:00Z"),
-        head + added + second + last,
+      expect(
+        review(reviewed, "human", "2026-09-20T08:00:00Z"),
         `seed ${seed}: second review`,
-      );
+      ).toBe(head + added + second + last);
     }
-    return "2000 seeds";
   });
 
-  check("property: patch then read returns what was set", () => {
+  it("reads back what patch set", () => {
     for (let seed = 0; seed < 4000; seed += 1) {
       const rng = new Rng(seed);
       const title = noise(rng, ALPHABET, 6);
@@ -523,19 +478,18 @@ function propertyChecks(manifest) {
         "---\ntitle: old\ntags:\n  - x\n\n  - y\n---\n",
         "---\r\ncustom: |\r\n  a\r\n\r\n  b\r\n---\r\n",
       ]);
-      const out = fm.patch(page, changes);
-      const got = fm.read(out);
+      const out = patch(page, changes);
+      const got = read(out);
       const context = `seed ${seed}: ${show(out)}`;
-      assertEqual(got.title, title, context);
-      if (!isDeepStrictEqual(got.custom, [["custom", custom]])) fail(`${context}: custom`);
-      if (!isDeepStrictEqual(got.tags, tags)) fail(`${context}: tags`);
-      if (!isDeepStrictEqual(got.verified, [{ by, at: AT }])) fail(`${context}: verified`);
-      if (page !== "" && !page.startsWith("---")) assertEqual(got.body, `\n${page}`, context);
+      expect(got.title, context).toBe(title);
+      expect(got.custom, `${context}: custom`).toStrictEqual([["custom", custom]]);
+      expect(got.tags, `${context}: tags`).toStrictEqual(tags);
+      expect(got.verified, `${context}: verified`).toStrictEqual([{ by, at: AT }]);
+      if (page !== "" && !page.startsWith("---")) expect(got.body, context).toBe(`\n${page}`);
     }
-    return "4000 seeds";
   });
 
-  check("property: a five megabyte page is handled in linear time", () => {
+  it("handles a five megabyte page in linear time", () => {
     let page = "---\ntitle: old\ndescription: |\n";
     const scalar = "  a line of a very long literal scalar\n\n";
     page += scalar.repeat(Math.ceil((2_500_000 - page.length) / scalar.length));
@@ -543,33 +497,30 @@ function propertyChecks(manifest) {
     const body = "A body line with --- and key: value text.\n";
     page += body.repeat(Math.ceil((5_000_000 - page.length) / body.length));
 
-    const timings = [];
     const timed = (name, work) => {
       const started = Date.now();
       const out = work();
       const elapsed = Date.now() - started;
-      if (elapsed > BUDGET_MS) fail(`${name} took ${elapsed} ms`);
-      timings.push(`${name} ${elapsed} ms`);
+      expect(elapsed, `${name} took ${elapsed} ms`).toBeLessThanOrEqual(BUDGET_MS);
       return out;
     };
     const out = timed("patch", () =>
-      fm.patch(page, [["description", "short"], ["status", "stable"]]),
+      patch(page, [["description", "short"], ["status", "stable"]]),
     );
     // The blank line that ends the scalar is followed by no indented line,
     // so it is not part of the value and stays.
     const head = "---\ntitle: old\ndescription: short\n\nstatus: stable\n---\n";
-    assertEqual(out.slice(0, head.length), head, "the head of the patched page");
-    timed("review", () => fm.review(page, "human", AT));
-    const got = timed("read", () => fm.read(page));
-    assertEqual(got.status, "draft", "read");
+    expect(out.slice(0, head.length), "the head of the patched page").toBe(head);
+    timed("review", () => review(page, "human", AT));
+    const got = timed("read", () => read(page));
+    expect(got.status, "read").toBe("draft");
 
     const line = `---\nlong: ${"x: y #".repeat(800_000)}\n---\n`;
-    const patched = timed("one long line", () => fm.patch(line, [["long", "short"], ["k", line]]));
-    assertEqual(fm.read(patched).custom[1][1], line, "a page as a value reads back");
-    return timings.join(", ");
-  });
+    const patched = timed("one long line", () => patch(line, [["long", "short"], ["k", line]]));
+    expect(read(patched).custom[1][1], "a page as a value reads back").toBe(line);
+  }, SLOW_MS);
 
-  check("property: a hundred thousand keys are patched in linear time", () => {
+  it("patches a hundred thousand keys in linear time", () => {
     const lines = ["---\n"];
     for (let n = 0; n < 100_000; n += 1) lines.push(`key${n}: value ${n}\n`);
     lines.push("---\nBody\n");
@@ -580,17 +531,18 @@ function propertyChecks(manifest) {
     for (let n = 1; n < 100_000; n += 7) if (n % 5 !== 0) changes.push([`key${n}`, null]);
     for (let n = 0; n < 20_000; n += 1) changes.push([`added${n}`, n]);
     const started = Date.now();
-    const out = fm.patch(page, changes);
+    const out = patch(page, changes);
     const elapsed = Date.now() - started;
-    if (elapsed > BUDGET_MS) fail(`took ${elapsed} ms`);
-    if (!out.includes("\nkey99995: patched\n")) fail("key99995 was not patched");
-    if (out.includes("\nkey8:")) fail("key8 was not deleted");
-    if (!out.endsWith("added19999: 19999\n---\nBody\n")) fail("the added keys are not last");
-    assertEqual(fm.read(out).fields.length, 100_000 - 11_429 + 20_000, "keys read back");
-    return `${elapsed} ms`;
-  });
+    expect(elapsed, `took ${elapsed} ms`).toBeLessThanOrEqual(BUDGET_MS);
+    expect(out, "key99995 was not patched").toContain("\nkey99995: patched\n");
+    expect(out, "key8 was not deleted").not.toContain("\nkey8:");
+    expect(out.endsWith("added19999: 19999\n---\nBody\n"), "the added keys are not last").toBe(
+      true,
+    );
+    expect(read(out).fields.length, "keys read back").toBe(100_000 - 11_429 + 20_000);
+  }, SLOW_MS);
 
-  check("hostile values stay inside their line and read back", () => {
+  it("keeps a hostile value inside its line and reads it back", () => {
     const values = [
       "</script><script>alert(1)</script>",
       "---",
@@ -607,155 +559,149 @@ function propertyChecks(manifest) {
     ];
     for (const value of values) {
       for (const page of ["", "# Body\n", "---\ncustom: old\n---\nBody\n"]) {
-        const out = fm.patch(page, [["custom", value], ["tags", [value]]]);
-        const got = fm.read(out);
+        const out = patch(page, [["custom", value], ["tags", [value]]]);
+        const got = read(out);
         const context = show(value.slice(0, 60));
-        if (!isDeepStrictEqual(got.custom, [["custom", value]])) fail(`${context}: custom`);
-        if (!isDeepStrictEqual(got.tags, [value])) fail(`${context}: tags`);
+        expect(got.custom, `${context}: custom`).toStrictEqual([["custom", value]]);
+        expect(got.tags, `${context}: tags`).toStrictEqual([value]);
         // A replaced key, a new key, and for a new block its two delimiters
         // and the empty line before a body: never a line more.
         const added = page.startsWith("---") ? 1 : page === "" ? 4 : 5;
-        assertEqual(count(out, "\n"), count(page, "\n") + added, context);
+        expect(count(out, "\n"), context).toBe(count(page, "\n") + added);
       }
     }
-    return `${values.length} values`;
   });
 
-  check("astral characters and lone surrogates", () => {
+  it("reads astral characters and refuses lone surrogates in a value", () => {
     const clef = cp(0x1d11e);
     const lone = String.fromCharCode(0xd834);
     const low = String.fromCharCode(0xdd1e);
 
-    const out = fm.patch("---\n---\n", [["title", clef]]);
+    const out = patch("---\n---\n", [["title", clef]]);
     const want = Buffer.concat([
       Buffer.from("---\ntitle: "),
       Buffer.from([0xf0, 0x9d, 0x84, 0x9e]),
       Buffer.from("\n---\n"),
     ]);
-    if (!Buffer.from(out, "utf8").equals(want)) fail(`an astral value: ${show(out)}`);
-    assertEqual(fm.read(out).title, clef, "an astral value reads back");
+    expect(Buffer.from(out, "utf8").equals(want), `an astral value: ${show(out)}`).toBe(true);
+    expect(read(out).title, "an astral value reads back").toBe(clef);
 
     // In the page a lone surrogate is data: left where it is, never thrown on.
     const page = `---\nnote: ${lone}\ntitle: old${low}\n---\nBody ${low}${lone}\n`;
-    assertEqual(
-      fm.patch(page, [["title", "new"]]),
-      `---\nnote: ${lone}\ntitle: new\n---\nBody ${low}${lone}\n`,
+    expect(
+      patch(page, [["title", "new"]]),
       "a lone surrogate in the page",
-    );
-    assertEqual(fm.read(page).custom[0][1], lone, "a lone surrogate is read as it is");
-    assertEqual(fm.patch(lone, []), lone, "identity");
-    assertEqual(fm.patch(lone, [["a", "b"]]), `---\na: b\n---\n\n${lone}`, "no block");
+    ).toBe(`---\nnote: ${lone}\ntitle: new\n---\nBody ${low}${lone}\n`);
+    expect(read(page).custom[0][1], "a lone surrogate is read as it is").toBe(lone);
+    expect(patch(lone, []), "identity").toBe(lone);
+    expect(patch(lone, [["a", "b"]]), "no block").toBe(`---\na: b\n---\n\n${lone}`);
 
     // In a value it cannot be sent to the server, so it is refused.
     for (const bad of [lone, low, `${low}${lone}`, `a${lone}b`]) {
-      refusal(() => fm.patch(page, [["title", bad]]), "invalid_value", "string");
-      refusal(() => fm.patch(page, [["tags", [bad]]]), "invalid_value", "list");
-      refusal(() => fm.patch(page, [["v", [{ by: bad }]]]), "invalid_value", "record");
-      refusal(() => fm.patch(page, [["v", [{ [bad]: "x" }]]]), "invalid_value", "field");
-      refusal(() => fm.patch(page, [[bad, "x"]]), "invalid_key", "key");
-      refusal(() => fm.review(page, bad, AT), "invalid_value", "review");
-      refusal(() => fm.promote(page, promoteParams(bad, [])), "invalid_value", "promote");
+      refusal(() => patch(page, [["title", bad]]), "invalid_value", "string");
+      refusal(() => patch(page, [["tags", [bad]]]), "invalid_value", "list");
+      refusal(() => patch(page, [["v", [{ by: bad }]]]), "invalid_value", "record");
+      refusal(() => patch(page, [["v", [{ [bad]: "x" }]]]), "invalid_value", "field");
+      refusal(() => patch(page, [[bad, "x"]]), "invalid_key", "key");
+      refusal(() => review(page, bad, AT), "invalid_value", "review");
+      refusal(() => promote(page, promoteParams(bad, [])), "invalid_value", "promote");
     }
 
     // Escapes: an astral one is read, a surrogate one is not a character.
     const escaped = '---\na: "\\U0001D11E"\nb: "\\uD834"\nc: "\\UFFFFFFFF"\nd: "\\' + clef + '"\n---\n';
-    assertEqual(
-      show(fm.read(escaped).custom),
-      show([["a", clef], ["b", '"\\uD834"'], ["c", '"\\UFFFFFFFF"'], ["d", clef]]),
+    expect(
+      show(read(escaped).custom),
       "escapes",
-    );
+    ).toBe(show([["a", clef], ["b", '"\\uD834"'], ["c", '"\\UFFFFFFFF"'], ["d", clef]]));
   });
 
-  check("the change list: shapes, order of checks, numbers", () => {
+  it("holds the change list's shapes, order of checks and numbers", () => {
     const page = "---\ntype: concept\n---\n";
     const bom = `${cp(0xfeff)}${page}`;
     for (const changes of [null, undefined, {}, "x", [["a"]], [["a", "b", "c"]], [[1, "x"]], ["ab"]]) {
-      try {
-        fm.patch(page, changes);
-      } catch (err) {
-        if (err instanceof TypeError) continue;
-      }
-      fail(`${show(changes)} is not a change list and was not a TypeError`);
+      expect(
+        () => patch(page, changes),
+        `${show(changes)} is not a change list and was not a TypeError`,
+      ).toThrow(TypeError);
     }
     for (const text of [null, undefined, 1, {}, []]) {
-      for (const work of [() => fm.read(text), () => fm.patch(text, []), () => fm.review(text, "a", AT)]) {
-        try {
-          work();
-        } catch (err) {
-          if (err instanceof TypeError) continue;
-        }
-        fail(`${show(text)} is not a page and was not a TypeError`);
+      for (const work of [() => read(text), () => patch(text, []), () => review(text, "a", AT)]) {
+        expect(work, `${show(text)} is not a page and was not a TypeError`).toThrow(TypeError);
       }
     }
 
     // `undefined` is never a deletion: JSON would turn it into one.
-    refusal(() => fm.patch(page, [["type", undefined]]), "invalid_value", "undefined");
+    refusal(() => patch(page, [["type", undefined]]), "invalid_value", "undefined");
     for (const value of [1.5, NaN, Infinity, 2 ** 53, -(2 ** 53), 1e21, 2 ** 63, 10n, () => 1, Symbol("s")]) {
-      refusal(() => fm.patch(page, [["k", value]]), "invalid_value", String(value));
+      refusal(() => patch(page, [["k", value]]), "invalid_value", String(value));
     }
     for (const value of [{ a: "b" }, ["a", 1], [["a"]], [null], ["a", { b: "c" }], [{}], [{ a: null }], [{ a: [] }], [{ a: {} }], [{ 1: "a" }], [{ "bad field": "a" }], [true], new Date(0), new Map()]) {
-      refusal(() => fm.patch(page, [["k", value]]), "invalid_value", show(value));
+      refusal(() => patch(page, [["k", value]]), "invalid_value", show(value));
     }
 
-    assertEqual(fm.patch(page, [["k", -0]]), "---\ntype: concept\nk: 0\n---\n", "-0 is 0");
-    assertEqual(
-      fm.patch(page, [["a", Number.MAX_SAFE_INTEGER], ["b", -Number.MAX_SAFE_INTEGER], ["c", 1e15]]),
-      "---\ntype: concept\na: 9007199254740991\nb: -9007199254740991\nc: 1000000000000000\n---\n",
+    expect(patch(page, [["k", -0]]), "-0 is 0").toBe("---\ntype: concept\nk: 0\n---\n");
+    expect(
+      patch(page, [["a", Number.MAX_SAFE_INTEGER], ["b", -Number.MAX_SAFE_INTEGER], ["c", 1e15]]),
       "integers print as digits",
-    );
-    assertEqual(fm.patch(page, [["k", []]]), "---\ntype: concept\nk: []\n---\n", "empty list");
+    ).toBe("---\ntype: concept\na: 9007199254740991\nb: -9007199254740991\nc: 1000000000000000\n---\n");
+    expect(patch(page, [["k", []]]), "empty list").toBe("---\ntype: concept\nk: []\n---\n");
 
     // Shapes first, then each change in order, then the page.
-    refusal(() => fm.patch(bom, [["bad key", "x"], ["k", 1.5]]), "invalid_value", "shape first");
-    refusal(() => fm.patch(bom, [["bad key", "x"], ["k", 2 ** 53]]), "invalid_key", "key, then range");
-    refusal(() => fm.patch(bom, [["k", 2 ** 53], ["bad key", "x"]]), "invalid_value", "in order");
-    refusal(() => fm.patch(bom, [["k", "x"], ["k", 2 ** 53]]), "duplicate_change", "duplicate first");
-    refusal(() => fm.patch(bom, [["bad key", "x"], ["k", [{ 1: "a" }]]]), "invalid_key", "fields later");
-    refusal(() => fm.patch(bom, [["k", "x"]]), "byte_order_mark", "then the page");
-    assertEqual(fm.patch(bom, []), bom, "an empty patch is never refused");
+    refusal(() => patch(bom, [["bad key", "x"], ["k", 1.5]]), "invalid_value", "shape first");
+    refusal(() => patch(bom, [["bad key", "x"], ["k", 2 ** 53]]), "invalid_key", "key, then range");
+    refusal(() => patch(bom, [["k", 2 ** 53], ["bad key", "x"]]), "invalid_value", "in order");
+    refusal(() => patch(bom, [["k", "x"], ["k", 2 ** 53]]), "duplicate_change", "duplicate first");
+    refusal(() => patch(bom, [["bad key", "x"], ["k", [{ 1: "a" }]]]), "invalid_key", "fields later");
+    refusal(() => patch(bom, [["k", "x"]]), "byte_order_mark", "then the page");
+    expect(patch(bom, []), "an empty patch is never refused").toBe(bom);
 
     // Keys that are also Object.prototype members are ordinary keys.
     const proto = JSON.parse('[["__proto__", "a"], ["constructor", [{"__proto__": "b", "toString": "c"}]]]');
-    assertEqual(
-      fm.patch("---\nconstructor: x\n__proto__: y\n---\n", proto),
-      "---\nconstructor:\n  - __proto__: b\n    toString: c\n__proto__: a\n---\n",
+    expect(
+      patch("---\nconstructor: x\n__proto__: y\n---\n", proto),
       "prototype member names",
-    );
-    const got = fm.read("---\n__proto__: y\nconstructor: x\nhasOwnProperty: z\n---\n");
-    assertEqual(show(got.custom), show([["__proto__", "y"], ["constructor", "x"], ["hasOwnProperty", "z"]]), "read");
+    ).toBe("---\nconstructor:\n  - __proto__: b\n    toString: c\n__proto__: a\n---\n");
+    const got = read("---\n__proto__: y\nconstructor: x\nhasOwnProperty: z\n---\n");
+    expect(
+      show(got.custom),
+      "read",
+    ).toBe(show([["__proto__", "y"], ["constructor", "x"], ["hasOwnProperty", "z"]]));
   });
 
-  check("read: fields, body and raw", () => {
-    const none = fm.read("# Title\n");
-    assertEqual(none.raw, null, "no block: raw");
-    assertEqual(none.body, "# Title\n", "no block: body");
-    assertEqual(none.fields.length, 0, "no block: fields");
+  it("reads fields, body and raw", () => {
+    const none = read("# Title\n");
+    expect(none.raw, "no block: raw").toBe(null);
+    expect(none.body, "no block: body").toBe("# Title\n");
+    expect(none.fields.length, "no block: fields").toBe(0);
 
     const page =
       "---\r\ntype: concept\r\n# note\r\nzeta: [a, b] # why\r\ntags: [\"x, y\", 'it''s', z]\r\n" +
       "verified:\r\n  - by: human\r\n    at: 2026-01-01T00:00:00Z\r\n  - by: only\r\n" +
       "sources:\r\n- title: \"A: b\" # c\r\n  resource: r\r\nstale_after: 2027-01-01\r\n" +
       "description: >-\r\n  folded\r\n\r\n  text\r\ntitle: one\r\ntitle: two\r\n---\r\nBody\r\n---\r\n";
-    const got = fm.read(page);
-    assertEqual(got.body, "Body\r\n---\r\n", "body");
-    assertEqual(got.raw, page.slice(5, page.indexOf("---\r\nBody")), "raw");
-    assertEqual(got.type, "concept", "type");
-    assertEqual(got.title, "two", "the last of a repeated key wins");
-    assertEqual(got.description, "folded text", "description");
-    assertEqual(got.stale_after, "2027-01-01", "stale_after");
-    assertEqual(show(got.tags), show(["x, y", "it's", "z"]), "tags");
-    assertEqual(show(got.verified), show([{ by: "human", at: "2026-01-01T00:00:00Z" }]), "verified");
-    assertEqual(show(got.sources), show([{ title: "A: b", resource: "r" }]), "sources");
-    assertEqual(show(got.custom), show([["zeta", "[a, b] # why"]]), "custom");
-    assertEqual(
+    const got = read(page);
+    expect(got.body, "body").toBe("Body\r\n---\r\n");
+    expect(got.raw, "raw").toBe(page.slice(5, page.indexOf("---\r\nBody")));
+    expect(got.type, "type").toBe("concept");
+    expect(got.title, "the last of a repeated key wins").toBe("two");
+    expect(got.description, "description").toBe("folded text");
+    expect(got.stale_after, "stale_after").toBe("2027-01-01");
+    expect(show(got.tags), "tags").toBe(show(["x, y", "it's", "z"]));
+    expect(show(got.verified), "verified").toBe(show([{ by: "human", at: "2026-01-01T00:00:00Z" }]));
+    expect(show(got.sources), "sources").toBe(show([{ title: "A: b", resource: "r" }]));
+    expect(show(got.custom), "custom").toBe(show([["zeta", "[a, b] # why"]]));
+    expect(
       show(got.fields.map((field) => field.key)),
-      show(["type", "zeta", "tags", "verified", "sources", "stale_after", "description", "title", "title"]),
       "fields keep block order",
+    ).toBe(
+      show(["type", "zeta", "tags", "verified", "sources", "stale_after", "description", "title", "title"]),
     );
-    assertEqual(got.fields.map((field) => field.text).join(""), got.raw.replace("# note\r\n", ""), "field text");
-    refusal(() => fm.read("---\ntype: x\n"), "unclosed", "read refuses what the layout refuses");
+    expect(got.fields.map((field) => field.text).join(""), "field text").toBe(
+      got.raw.replace("# note\r\n", ""),
+    );
+    refusal(() => read("---\ntype: x\n"), "unclosed", "read refuses what the layout refuses");
   });
-}
+});
 
 // ---------------------------------------------------------------------------
 // Differential testing against the Rust reference
@@ -975,7 +921,7 @@ function answer(line) {
   const { text, op } = JSON.parse(line);
   if (op.operation === "read") {
     try {
-      const got = fm.read(text);
+      const got = read(text);
       if (got.raw === null) return { read: null };
       const { raw, type, title, description, status, tags, stale_after, okf_version, verified, sources, custom } = got;
       return { read: { type, title, description, status, tags, stale_after, okf_version, verified, sources, custom, raw } };
@@ -1043,96 +989,83 @@ function runReference(lines) {
         maxBuffer: 64 * 1024 * 1024,
       },
     );
-    if (run.error) fail(`cargo did not run: ${run.error.message}`);
-    if (run.status !== 0) fail(`the reference failed:\n${run.stdout}\n${run.stderr}`);
+    if (run.error) throw new Error(`cargo did not run: ${run.error.message}`);
+    if (run.status !== 0) throw new Error(`the reference failed:\n${run.stdout}\n${run.stderr}`);
     const out = fs.readFileSync(answers, "utf8").split("\n");
-    if (out.pop() !== "") fail("the reference's answers do not end in a newline");
-    if (out.length !== lines.length) fail(`${lines.length} cases, ${out.length} answers`);
+    if (out.pop() !== "") throw new Error("the reference's answers do not end in a newline");
+    if (out.length !== lines.length) throw new Error(`${lines.length} cases, ${out.length} answers`);
     return out.map((line) => JSON.parse(line));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-function differentialChecks(manifest) {
+function differentialInputs() {
   const corpusInputs = manifest.cases
     .map((meta) => decode(readFixture(meta.input), meta.input))
     .filter((text) => text !== "");
 
   const lines = [];
-  for (let i = 0; i < args.cases; i += 1) {
-    const rng = new Rng(args.seed + i);
+  for (let i = 0; i < DIFFERENTIAL_CASES; i += 1) {
+    const rng = new Rng(DIFFERENTIAL_SEED + i);
     const text = pageText(rng, corpusInputs);
     lines.push(`{"text":${JSON.stringify(text)},"op":${operationJson(rng, i)}}`);
   }
-  const pinnedLines = PINNED.map((pin) => `{"text":"","op":${pin.op}}`);
+  return { lines, pinnedLines: PINNED.map((pin) => `{"text":"","op":${pin.op}}`) };
+}
 
+describe.skipIf(!hasCargo)("the differential against the Rust reference", () => {
+  const { lines, pinnedLines } = differentialInputs();
   let answers = null;
-  check("differential: the reference answers", () => {
-    answers = runReference([...lines, ...pinnedLines]);
-    return `${answers.length} cases`;
-  });
-  if (answers === null) return;
 
-  check("differential: same bytes or same refusal", () => {
+  beforeAll(() => {
+    answers = runReference([...lines, ...pinnedLines]);
+  }, CARGO_MS);
+
+  it("answers every generated case", () => {
+    expect(answers.length).toBe(lines.length + pinnedLines.length);
+  });
+
+  it("agrees with the reference on every generated case", () => {
     const tally = new Map();
     const divergences = [];
     lines.forEach((line, i) => {
       const rust = answers[i];
       if (rust.load_error !== undefined) {
-        divergences.push(`seed ${args.seed + i}: the reference could not load ${line}: ${rust.load_error}`);
+        divergences.push(`seed ${DIFFERENTIAL_SEED + i}: the reference could not load ${line}: ${rust.load_error}`);
         return;
       }
       const js = answer(line);
       const label = js.error ?? (js.ok !== undefined ? "ok" : "read");
       tally.set(label, (tally.get(label) ?? 0) + 1);
       if (!same(js, rust)) {
-        divergences.push(`seed ${args.seed + i}: ${line}\n          module: ${show(js)}\n       reference: ${show(rust)}`);
+        divergences.push(`seed ${DIFFERENTIAL_SEED + i}: ${line}\n          module: ${show(js)}\n       reference: ${show(rust)}`);
       }
     });
     const counts = [...tally.entries()].sort().map(([label, n]) => `${label} ${n}`).join(", ");
-    if (divergences.length > 0) {
-      fail(`${divergences.length} divergences (${counts}):\n      ${divergences.slice(0, 20).join("\n      ")}`);
-    }
+    expect(
+      divergences,
+      `${divergences.length} divergences (${counts}):\n      ${divergences.slice(0, 20).join("\n      ")}`,
+    ).toEqual([]);
     // A generator that stops reaching a refusal, or reaches nothing else,
     // has rotted.
-    if (args.cases >= 6000) {
+    if (DIFFERENTIAL_CASES >= 6000) {
       for (const code of CODES) {
-        if (!tally.has(code)) fail(`no generated case was refused with ${code} (${counts})`);
+        expect(tally.has(code), `no generated case was refused with ${code} (${counts})`).toBe(true);
       }
-      if ((tally.get("ok") ?? 0) < args.cases / 10) fail(`too few accepted cases (${counts})`);
+      expect(tally.get("ok") ?? 0, `too few accepted cases (${counts})`).toBeGreaterThanOrEqual(
+        DIFFERENTIAL_CASES / 10,
+      );
     }
-    return `seeds ${args.seed} to ${args.seed + args.cases - 1}: ${counts}`;
   });
 
-  check("differential: the known differences are exactly the pinned ones", () => {
+  it("keeps the known differences exactly pinned", () => {
     PINNED.forEach((pin, i) => {
       const rust = answers[lines.length + i];
       const js = answer(pinnedLines[i]);
       const rustWant = pin.rust === "load_error" ? rust.load_error !== undefined : isDeepStrictEqual(rust, pin.rust);
-      if (!rustWant) fail(`${pin.op}: the reference now answers ${show(rust)} (${pin.why})`);
-      if (!isDeepStrictEqual(js, pin.js)) fail(`${pin.op}: the module now answers ${show(js)} (${pin.why})`);
+      expect(rustWant, `${pin.op}: the reference now answers ${show(rust)} (${pin.why})`).toBe(true);
+      expect(js, `${pin.op}: the module now answers ${show(js)} (${pin.why})`).toStrictEqual(pin.js);
     });
-    return `${PINNED.length} pinned`;
   });
-}
-
-// ---------------------------------------------------------------------------
-
-const wants = (layer) => args.only === null || args.only === layer;
-
-let manifest = null;
-if (wants("corpus")) {
-  manifest = corpusChecks();
-} else {
-  manifest = loadManifest();
-}
-if (wants("properties")) propertyChecks(manifest);
-if (args.differential && wants("differential")) differentialChecks(manifest);
-
-const failed = results.filter((result) => !result.ok);
-console.log(
-  `test-frontmatter: ${results.length} checks, ${failed.length} failed` +
-    (args.differential ? "" : " (differential not run: pass --differential, needs cargo)"),
-);
-process.exit(failed.length === 0 && results.length > 0 ? 0 : 1);
+});
