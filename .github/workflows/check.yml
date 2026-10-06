@@ -2,69 +2,75 @@ name: check
 
 "on":
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  gate:
-    name: Gate
+  lint:
+    name: Lint and docs
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
         with:
           toolchain: 1.97.1
-          components: clippy, rustfmt
-
-      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
-        with:
-          node-version: 22
-          cache: npm
-
+          components: rustfmt
+          build-warnings: ""
       - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
         with:
           python-version: "3.12"
-
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27"
-
-      # `make gate` runs the hooks (pre-commit) and `okf validate`.
-      - name: Install the gate's tools
+      # `make lint` runs the hooks, which include `okf validate`.
+      - name: Install okf and pre-commit
         run: |
           GOBIN="$RUNNER_TEMP/bin" GOTOOLCHAIN=auto \
             go install github.com/okfcli/okf/cmd/okf@latest
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip pre-commit==4.6.2
+      - run: make lint lint/engine fmt/check
 
-      - uses: actions/cache@0c907a75c2c80ebcb7f088228285e798b750cf8f # v4.2.1
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Run the gate
-        run: make gate
-
-  container:
-    name: Container
+  web:
+    name: Web
     runs-on: ubuntu-24.04
-    env:
-      HUB_ADMIN_TOKEN: placeholder-for-config-rendering
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: 22
+          cache: npm
+      - run: make web/crypto web/units web/styles
 
-      - name: Validate the compose file
-        run: make container/config
+  checks:
+    name: Rust checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.97.1
+          components: clippy
+          build-warnings: ""
+      - run: make clippy net/check serve/check
 
-      - name: Build the image
-        run: podman build -f Containerfile -t ghcr.io/abn/agent-hub:ci .
+  test:
+    name: Test ${{ matrix.shard }}/2
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.97.1
+          build-warnings: ""
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
+        with:
+          tool: nextest
+      - run: make test/shard N=${{ matrix.shard }} M=2

@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate e2e check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate gate/quick e2e e2e/shard check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -23,14 +23,25 @@ setup: ## Install git hooks, write local shims, create the scratch area
 build: ## Build the binary (debug)
 	cargo build
 
-test: ## Run the test suite
-	cargo test
+test: ## Run the test suite (cargo-nextest when installed)
+	@if cargo nextest --version >/dev/null 2>&1; then \
+	  cargo nextest run; \
+	else \
+	  printf 'test: cargo-nextest is not installed, using cargo test (install: cargo install cargo-nextest --locked)\n'; \
+	  cargo test; \
+	fi
+
+test/shard: ## Run one slice of the suite (CI): make test/shard N=1 M=3
+	cargo nextest run --partition count:$(N)/$(M)
 
 clippy: ## Run the Rust linter, warnings are errors
 	cargo clippy --all-targets --all-features -- -D warnings
 
 lint: hooks/require ## Run every declarative hook against all files
 	pre-commit run --all-files
+
+lint/staged: hooks/require ## Run the hooks on the staged files only (inner loop)
+	pre-commit run
 
 # The one-engine invariant, enforced by tooling rather than review. Every
 # `turso*` crate in the tree must resolve to the same version.
@@ -128,7 +139,10 @@ serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
 gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles net/check serve/check test ## Everything the gate runs but the browser checks
+gate/quick: fmt/check lint/engine clippy web/units ## Fast inner loop: format, lint and client units
 e2e: web/e2e ## The browser behaviour checks
+e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2
+	npx playwright test --shard=$(SHARD)
 check: gate e2e ## Full quality gate
 	@printf 'check: ok\n'
 
