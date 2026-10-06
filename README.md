@@ -89,12 +89,51 @@ Open `http://127.0.0.1:8080/` and paste the admin token in Settings. From
 another shell, `agent-hub health --url http://127.0.0.1:8080` exits 0 when the
 store is ready. The [quickstart](docs/usage/quickstart.md) covers
 configuration, the first project and agent, and reaching the hub from an agent's
-machine; [releasing](RELEASING.md) covers cutting a version.
+machine; the [deployment runbook](docs/usage/deploy.md) covers the container
+under systemd and the reverse proxy, and [releasing](RELEASING.md) covers
+cutting a version.
 
-The published port carries plain HTTP, so the admin token and every response
-cross the network unencrypted. Put a TLS-terminating reverse proxy in front and
-publish to loopback, set `HUB_PUBLIC_URL` to the address callers use, or reach
-the hub over a tailnet.
+### With or without an admin token
+
+`HUB_ADMIN_TOKEN` is the control-surface password. It is required whenever the
+hub is reachable on a LAN or a public interface: the hub refuses to start on a
+non-loopback bind without one. Set a long random value:
+
+```sh
+HUB_ADMIN_TOKEN="$(openssl rand -hex 32)"
+```
+
+On a tailnet-only deployment the tailnet is the boundary, and a loopback hub
+starts without a token. Note what that turns off: with no token the control
+surface rejects every request, so the PWA is unavailable and only MCP with agent
+tokens works. Leave it unset for an agents-only hub, and set it whenever you
+want the human surface.
+
+The hub must be reachable from every machine an agent runs on. Bind to an
+address those machines can reach, or keep the bind on loopback and put the hub
+behind a reverse proxy or a tailnet, setting `HUB_PUBLIC_URL` to the address
+callers use. A LAN or public bind carries plain HTTP, so terminate TLS in front
+of it.
+
+## Connect an agent
+
+Every hub serves its own bootstrap guide at `/bootstrap/SKILL.md`. Give an agent
+that URL and it has what it needs to connect: the hub's address, how to request
+a token, and the MCP endpoint.
+
+```sh
+curl -sS http://127.0.0.1:8080/bootstrap/SKILL.md
+```
+
+Use the address your agents reach the hub at, such as the tailnet address or
+`HUB_PUBLIC_URL`. The same guide is the `agent-hub` skill, served over MCP at
+`skill://agent-hub/SKILL.md` and installable with `npx skills add abn/agent-hub`.
+
+The agent requests a token, you approve it in the inbox, and it points its MCP
+client at `<hub>/mcp` with that token. The
+[quickstart](docs/usage/quickstart.md) walks through the first project and
+agent, and [using the hub as a brain](docs/usage/agents.md) is the agent's own
+guide.
 
 ## Development
 
