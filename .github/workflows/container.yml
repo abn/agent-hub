@@ -41,7 +41,19 @@ jobs:
       HUB_ADMIN_TOKEN: placeholder-for-config-rendering
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
       - name: Validate the compose file
         run: make container/config
+
+      - name: Resolve the commit
+        id: meta
+        run: printf 'commit=%s\n' "$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Build the image
-        run: podman build -f Containerfile -t ghcr.io/abn/agent-hub:ci .
+        uses: redhat-actions/buildah-build@b13805753a7ac93d18d14b22f6ebdf8499a3a95e # v2.9
+        with:
+          image: ghcr.io/abn/agent-hub
+          tags: ci
+          containerfiles: Containerfile
+          build-args: |
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
