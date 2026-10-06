@@ -18,6 +18,14 @@ three things they otherwise lose and one calm place for the human to watch:
 
 Agents reach the hub over MCP. Humans reach it over the PWA.
 
+> **How this was built.** This is a personal experiment, and most of the
+> building was done by agents. I wrote the specification, the decisions, the
+> operating model, the interface and experience design, and the review
+> standards; agents wrote the implementation, the tests, the documentation and
+> most of the refactoring from them, with me reading and correcting as they
+> went. I would rather say that plainly than let a finished-looking repository
+> imply a method I did not use.
+
 ## Status
 
 Agent Hub 1.0 is the first stable release. One binary, or one container, opens
@@ -35,6 +43,29 @@ traversal is in progress.
 
 The public design lives in the wiki under [`docs/`](docs/index.md); the working
 specification is held outside the committed tree.
+
+## Screenshots
+
+Captured from a seeded hub at desktop and phone widths in both themes; each
+image follows your colour scheme. The full set is in
+[the wiki](docs/assets/screens/index.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/home-desktop-dark.png">
+  <img alt="Home: what waits on you, the newest events across projects, and storage at a glance" src="docs/assets/screens/home-desktop-light.png" width="100%">
+</picture>
+
+| Inbox | Project feed |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/inbox-desktop-dark.png"><img alt="The global inbox, grouped into waiting, unread and earlier" src="docs/assets/screens/inbox-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/feed-desktop-dark.png"><img alt="A project feed, day-grouped with kind badges" src="docs/assets/screens/feed-desktop-light.png" width="100%"></picture> |
+
+| Artifacts | Search |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/artifacts-desktop-dark.png"><img alt="The artifact index" src="docs/assets/screens/artifacts-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/search-desktop-dark.png"><img alt="Search results, grouped by family" src="docs/assets/screens/search-desktop-light.png" width="100%"></picture> |
+
+| Home | Inbox | Project feed |
+|---|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/home-phone-dark.png"><img alt="Home on a phone" src="docs/assets/screens/home-phone-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/inbox-phone-dark.png"><img alt="The inbox on a phone" src="docs/assets/screens/inbox-phone-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/feed-phone-dark.png"><img alt="A project feed on a phone" src="docs/assets/screens/feed-phone-light.png" width="100%"></picture> |
 
 ## Install
 
