@@ -109,4 +109,26 @@ test.describe("the project artifact stage's actions", () => {
     await expect(sheet).toBeVisible();
     await expect(sheet.locator(".hub-sheet-title")).toHaveText("New Comment");
   });
+
+  test("a comment posted from the stage saves without an artifact param", async ({
+    hub,
+    page,
+  }, testInfo) => {
+    // The stage shows the first artifact when the URL names none, but the comment
+    // state was seeded from the URL param, which is empty there, so the post went
+    // to /api/v1/artifacts//comments and the hub answered "artifact not found".
+    test.skip(testInfo.project.name !== "desktop", "the callout is a fine-pointer surface");
+    await open(page, hub, `#/projects/${hub.projectId}/artifacts`, "artifacts");
+    const document = page.frameLocator("#hub-frame").frameLocator("#hub-frame");
+    await document.locator("body").first().waitFor();
+    await document.locator("body").first().selectText();
+    await document.getByRole("button", { name: "Comment on selection" }).click();
+    const sheet = page.locator(".comments-drawer.hub-comment-sheet:not([hidden])");
+    await expect(sheet).toBeVisible();
+    await sheet.locator("textarea").first().fill("a stage comment");
+    await sheet.locator(".hub-composer-send").first().click();
+    // The sheet closes on success, and the comment lands on the artifact.
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator(".hub-comment-card").filter({ hasText: "a stage comment" })).toBeVisible();
+  });
 });

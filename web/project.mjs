@@ -520,6 +520,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
     }),
     info,
     selected,
+    chosen,
   };
 }
 
@@ -703,7 +704,7 @@ export async function projectScreen(params, gen, path) {
     const built = await artifactsShell(id, segment, stats, params, mobileBar, project);
     shell = built.html;
     artifactInfo = built.info;
-    artifactId = built.selected;
+    artifactId = built.chosen || built.selected;
   } else if (segment === "sessions") {
     const built = await sessionsShell(id, segment, stats, params, mobileBar, gen, project);
     shell = built.html;
