@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/e2e web/invariants web/prefix-smoke net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/types web/e2e web/invariants net/check serve/check check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -149,13 +149,6 @@ web/e2e: build node_tree ## Run the browser behaviour checks
 	fi; \
 	npx playwright test
 
-# A reverse proxy that mounts the hub on a path strips the prefix before
-# forwarding, so the hub never sees it; only the client-side references have
-# to survive that. This drives a real browser through a small prefix-
-# stripping proxy in front of a second hub instance to hold it.
-web/prefix-smoke: build ## Run the smoke pass behind a path-stripping proxy
-	$(call browser_check,web/prefix-smoke,.agents/scripts/prefix-smoke.py)
-
 net/check: ## Compile and test the optional embedded tailnet build
 	cargo check --features tailnet
 	cargo test --features tailnet --test tailnet_config
@@ -165,7 +158,7 @@ net/check: ## Compile and test the optional embedded tailnet build
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/e2e web/invariants web/prefix-smoke net/check serve/check test ## Full quality gate
+check: lint lint/engine clippy fmt/check docs/check web/check web/crypto web/frontmatter web/units web/styles web/e2e web/invariants net/check serve/check test ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first
