@@ -130,13 +130,14 @@ value is what the artifact frame policy names, what a shared artifact link
 carries in its preview tags, and what `GET /bootstrap/SKILL.md` hands a bootstrapping
 agent.
 
-The embedded tailnet endpoint is experimental and needs a binary built with
-the `tailnet` feature (`cargo build --features tailnet`). Setting `HUB_TAILNET`
-is the acknowledgement that it uses early-days software; the hub records that
-on startup, so no extra variable is needed. It is addressed by tailnet IP and
-carries plain HTTP inside the tunnel, so it needs `HUB_ADMIN_TOKEN` as well.
-Leave `HUB_TAILNET` unset for the default deployment: the plain container
-behind a reverse proxy.
+The embedded tailnet endpoint is experimental and is compiled into the default
+build. Setting `HUB_TAILNET` is the acknowledgement that it uses early-days
+software; the hub records that on startup, so no extra variable is needed. It
+is addressed by tailnet IP and carries plain HTTP inside the tunnel, so it
+needs `HUB_ADMIN_TOKEN` as well. The container image builds with
+`--no-default-features`, so it does not carry the embedded endpoint. Leave
+`HUB_TAILNET` unset for the default deployment: the plain container behind a
+reverse proxy.
 
 ## Run the binary
 

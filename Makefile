@@ -136,9 +136,9 @@ web/e2e: build node_tree ## Run the browser behaviour checks
 	fi; \
 	npx playwright test
 
-net/check: ## Compile and test the optional embedded tailnet build
-	cargo check --features tailnet
-	cargo test --features tailnet --test tailnet_config
+net/check: ## Test the tailnet configuration path in a build without the feature
+	cargo test --no-default-features --test ops_lifecycle a_tailnet_key
+	cargo test --no-default-features --test tailnet_config
 
 # The container image serves only and is built without the client. Nothing else
 # compiles that configuration, so without this its cfg arms rot unseen.

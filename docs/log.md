@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-10-06
 
+### The embedded tailnet ships in the default build
+
+* **Change**: the `tailnet` feature joins the default feature set, so the
+  embedded tailnet endpoint is compiled into every default build. It stays
+  opt-in at runtime: `HUB_TAILNET` is still what joins the tailnet, and the
+  container image, built with `--no-default-features`, does not carry it.
+* **Update**: [Quickstart](usage/quickstart.md) says the endpoint is compiled in
+  by default rather than needing `cargo build --features tailnet`.
+
 ### Agents are told what needs attention on the next tool result
 
 * **Change**: every successful MCP tool result may carry a `notifications`

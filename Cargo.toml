@@ -25,10 +25,10 @@ ulid = "3"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 rand = "0.9"
 sha2 = "0.10"
-# The embedded tailnet endpoint is optional and off by default, so the standard
-# binary and the one-engine gate are untouched. It is experimental: the library
-# has no tailnet name resolution or certificate issuance and its NAT traversal
-# is in progress.
+# The embedded tailnet endpoint is compiled in by default and stays opt-in at
+# runtime: setting HUB_TAILNET is what joins the tailnet. It is experimental:
+# the library has no tailnet name resolution or certificate issuance and its
+# NAT traversal is in progress.
 tailscale = { version = "0.5", features = ["axum"], optional = true }
 # Already in the build as a transitive dependency; taken directly, at the
 # version the lock file already pins, for the volume and host name the storage
@@ -37,7 +37,7 @@ rustix = { version = "1.1.4", features = ["fs", "system"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"], optional = true }
 
 [features]
-default = ["client"]
+default = ["client", "tailnet"]
 # The client side: the stdio proxy and the one-shot calls. Default on, so a
 # published binary proxies out of the box; the container, which only serves,
 # builds without it. rmcp's reqwest transport is taken whole rather than

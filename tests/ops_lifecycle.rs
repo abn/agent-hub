@@ -208,15 +208,16 @@ fn the_mcp_gate_refuses_a_missing_token_with_401() {
     drop(hub);
 }
 
+#[cfg(not(feature = "tailnet"))]
 #[test]
 fn a_tailnet_key_on_a_build_without_the_feature_does_not_touch_the_store() {
     let root = TempDir::new("ops-tailnet-no-feature");
     let data = root.join("data");
 
-    // No build in the default test set carries the tailnet feature, so the key
-    // is a configuration error. It must be caught before the store opens, so
-    // the data directory is not created or migrated and no pre-migration backup
-    // is left behind.
+    // This runs in the no-feature build, which is the container image's, so the
+    // key is a configuration error. It must be caught before the store opens,
+    // so the data directory is not created or migrated and no pre-migration
+    // backup is left behind.
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-hub"))
         .arg("serve")
         .env("RUST_LOG", "error")
