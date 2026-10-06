@@ -32,11 +32,22 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # The repository's own validator, the same one `make docs/check` runs: the
-      # OKF v0.2 rules plus the bundle's privacy, ticket-prefix, scratch-path and
-      # link rules, so a page that should not be public stops the deploy.
+      # The docs gate is `okf validate`, the standard validator `make docs/check`
+      # runs, so CI installs it. GOTOOLCHAIN=auto so the install works even when
+      # the pinned Go is older than okf requires.
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27"
+
+      - name: Install the OKF validator
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" GOTOOLCHAIN=auto \
+            go install github.com/okfcli/okf/cmd/okf@latest
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       - name: Validate OKF v0.2
-        run: ./.agents/scripts/check-okf.py
+        run: make docs/check
 
   publish:
     name: Render and deploy
