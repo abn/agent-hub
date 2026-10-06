@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { SUBJECT_MAX, formatEventSummary, subjectAndMessage } from "../../web/feed.mjs";
 import { displayTitle, terms } from "../../web/search.mjs";
+import { anchorQuote } from "../../web/comments.mjs";
 
 // The report a finished event carries, the one the browser invariant seeded to
 // hold the subject and message split. Both stages read it: the inbox detail
@@ -195,5 +196,27 @@ describe("terms", () => {
     expect(terms("WAL engine?")).toEqual(["wal", "engine"]);
     expect(terms("  ")).toEqual([]);
     expect(terms(null)).toEqual([]);
+  });
+});
+
+describe("anchorQuote", () => {
+  // The hub caps a text anchor at 2048 bytes, so a long selection must be cut
+  // client-side rather than refused.
+  const bytes = (text) => new TextEncoder().encode(text).length;
+
+  it("keeps a short quote as written", () => {
+    expect(anchorQuote("Build")).toBe("Build");
+  });
+
+  it("cuts a long quote below the hub's byte budget", () => {
+    const capped = anchorQuote("x".repeat(5000));
+    expect(capped.length).toBeGreaterThan(0);
+    expect(bytes(capped)).toBeLessThanOrEqual(1500);
+  });
+
+  it("cuts multibyte text by bytes, not characters", () => {
+    const capped = anchorQuote("é".repeat(2000));
+    expect(bytes(capped)).toBeLessThanOrEqual(1500);
+    expect(capped.length).toBeLessThan(2000);
   });
 });

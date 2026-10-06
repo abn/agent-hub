@@ -174,11 +174,25 @@ export async function loadComments() {
   }
 }
 
+// The hub caps a text anchor at 2000 characters and 2048 bytes, and a reader can
+// select far more than that. Anchor the first slice, capped by bytes, rather
+// than refusing the comment: the quote is a pointer into the document, not the
+// whole passage, and the frame matches the prefix.
+export function anchorQuote(text) {
+  const encoder = new TextEncoder();
+  let out = "";
+  for (const ch of text) {
+    if (encoder.encode(out + ch).length > 1500) break;
+    out += ch;
+  }
+  return out;
+}
+
 export async function postComment(body, quote) {
   const id = commentsState.artifactId;
   const payload = { body };
   if (quote && !commentsState.isProtected) {
-    payload.anchor = { mode: "text", quote };
+    payload.anchor = { mode: "text", quote: anchorQuote(quote) };
     payload.anchor_version = commentsState.shownVersion;
   }
   const created = await api(commentsBase(id), {
