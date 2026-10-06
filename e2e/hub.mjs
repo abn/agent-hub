@@ -27,7 +27,7 @@ const SCRATCH = path.join(ROOT, "target", "tmp", "e2e");
 // harness starts the binary, waits for it to answer, and then makes about forty
 // MCP calls, so this is a ceiling rather than a wait: the descriptor appears the
 // moment the seed is done.
-const READY_MS = 60_000;
+const READY_MS = 180_000;
 
 const descriptorFor = (project) => path.join(SCRATCH, `${project}.json`);
 
@@ -69,9 +69,14 @@ async function waitForDescriptor(child, descriptor, said) {
 
 // A hub is reaped when its bridge exits, but a bridge killed with SIGKILL (an
 // aborted run) orphans its hub, which holds a port and memory and poisons the
-// next run. Every test hub and its bridge carry HUB_CHECK_HUB, so the sweep
-// kills only a test process, never a real hub. It runs once, before any hub of
+// next run. Every test hub and its bridge carry HUB_CHECK_HUB set to this run's
+// own scratch directory, so the sweep kills only an orphan of this checkout,
+// never a real hub and never a concurrent run in another worktree. The value is
+// the scratch path rather than a bare flag because two runs on one host would
+// otherwise reap each other's hubs mid-flight. It runs once, before any hub of
 // this run starts, so the only marked process it can reach is an orphan.
+const MARKER = `HUB_CHECK_HUB=${SCRATCH}`;
+
 function sweepStaleHubs() {
   let pids;
   try {
@@ -87,7 +92,7 @@ function sweepStaleHubs() {
     } catch {
       continue; // Another user's process, or gone.
     }
-    if (!env.includes("HUB_CHECK_HUB=1")) continue;
+    if (!env.includes(MARKER)) continue;
     try {
       process.kill(Number(entry), "SIGKILL");
     } catch {
@@ -106,7 +111,7 @@ export async function startHubs(projects) {
     const child = spawn(python, [BRIDGE, descriptor], {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, HUB_CHECK_HUB: "1" },
+      env: { ...process.env, HUB_CHECK_HUB: SCRATCH },
     });
     let said = "";
     child.stdout.on("data", (chunk) => {

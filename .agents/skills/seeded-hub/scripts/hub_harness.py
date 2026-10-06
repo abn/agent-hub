@@ -369,8 +369,10 @@ def free_port() -> int:
 
 def wait_for_hub(name: str, port: int) -> None:
     # Generous, because a loaded host opens the engine and migrates slowly, and
-    # a browser gate that flakes under load is worse than one that waits.
-    deadline = time.time() + 40
+    # a browser gate that flakes under load is worse than one that waits. A
+    # shared build host can carry several gates at once, so the ceiling is a
+    # wide one: it is still a ceiling, not a sleep.
+    deadline = time.time() + 120
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/readyz", timeout=1):
@@ -392,7 +394,9 @@ def request(port: int, method: str, path: str, body: dict | None = None) -> byte
             "Accept": "application/json, text/event-stream",
         },
     )
-    with urllib.request.urlopen(req, timeout=5) as response:
+    # A loaded host answers a seed call slowly; the call is still bounded, so a
+    # hub that is really down fails rather than hangs.
+    with urllib.request.urlopen(req, timeout=30) as response:
         return response.read()
 
 
@@ -410,7 +414,7 @@ def mcp_call(port: int, session: list[str], payload: dict) -> dict:
         method="POST",
         headers=headers,
     )
-    with urllib.request.urlopen(req, timeout=5) as response:
+    with urllib.request.urlopen(req, timeout=30) as response:
         assigned = response.headers.get("mcp-session-id")
         if assigned and not session:
             session.append(assigned)
