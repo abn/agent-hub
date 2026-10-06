@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test clippy lint lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate e2e check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -66,24 +66,6 @@ web/crypto: ## Run the artifact encryption round-trip self-test
 	@command -v node >/dev/null || { printf 'web/crypto: node is not installed, skipped\n'; exit 0; }
 	node --input-type=module -e "import { selfTest } from './web/crypto.mjs'; await selfTest();"
 
-# The browser checks run under the first interpreter that can import
-# playwright: the default python3, or the one the playwright launcher itself
-# runs under. Absent both, the target says so and passes, so a machine with
-# only the static checks is not blocked.
-define browser_check
-	@found=""; \
-	for python in python3 "$$(head -1 "$$(command -v playwright 2>/dev/null)" 2>/dev/null | sed -e 's|^#!||' -e 's| .*$$||')"; do \
-	  [ -n "$$python" ] || continue; \
-	  if "$$python" -c 'import playwright' >/dev/null 2>&1; then found="$$python"; break; fi; \
-	done; \
-	if [ -z "$$found" ]; then \
-	  printf '$(1): playwright is not installed, skipped\n'; \
-	  case "$$HUB_REQUIRE_BROWSER" in 1|true|yes|TRUE|True|YES) printf '$(1): HUB_REQUIRE_BROWSER is set, so a skip is a failure\n'; exit 1;; esac; \
-	  exit 0; \
-	fi; \
-	"$$found" $(2)
-endef
-
 # The Node toolchain. The PWA is served as vanilla ES modules with no bundler,
 # so the tree holds development tools only and the shipped binary and image
 # never read it. The lockfile is committed and the tree is not, and the install
@@ -145,7 +127,9 @@ net/check: ## Test the tailnet configuration path in a build without the feature
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-check: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/e2e net/check serve/check test ## Full quality gate
+gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles net/check serve/check test ## Everything the gate runs but the browser checks
+e2e: web/e2e ## The browser behaviour checks
+check: gate e2e ## Full quality gate
 	@printf 'check: ok\n'
 
 # `web/types` is listed here rather than in `check` because it is red: the first

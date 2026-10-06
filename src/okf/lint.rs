@@ -1,6 +1,6 @@
 //! Advisory lint rules and backlink graph construction for OKF knowledge bases.
 //!
-//! Codes mirror `.agents/scripts/check-okf.py`:
+//! Codes for the hub's advisory lint over an OKF knowledge base:
 //! - `missing_frontmatter`
 //! - `missing_type`
 //! - `unparsed_frontmatter`

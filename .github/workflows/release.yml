@@ -1,10 +1,7 @@
 name: release
 
-# release-please owns the version, CHANGELOG.md, the tag and the GitHub release.
-# When it cuts one, this same run builds and pushes the image with buildah and
-# podman, then verifies it. The image is built here rather than on the tag,
-# because a tag created with the default GITHUB_TOKEN does not trigger another
-# workflow.
+# A tag created with the default GITHUB_TOKEN does not trigger another workflow,
+# so the image is built and pushed in this same run.
 "on":
   push:
     branches: [main]
@@ -15,8 +12,6 @@ permissions:
   issues: write
   pull-requests: write
 
-# Serialize releases per branch instead of cancelling: a release PR update and
-# a tag have to finish rather than race each other.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -30,7 +25,6 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      # The config and manifest files are read from the checkout.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - id: release
@@ -50,8 +44,6 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      # The Version row shows a short commit, so the build is given the short
-      # form of the tagged commit rather than the full sha.
       - name: Resolve the version and commit
         id: meta
         env:
@@ -68,9 +60,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The local build tags and the pushed tags must align, so push-to-registry
-      # reuses the tags buildah-build reports rather than recomputing them. The
-      # image name is the repository path, ghcr.io/<repo> after the push.
       - name: Build the image
         id: build
         uses: redhat-actions/buildah-build@b13805753a7ac93d18d14b22f6ebdf8499a3a95e # v2.9
@@ -78,8 +67,6 @@ jobs:
           image: ${{ github.repository }}
           tags: ${{ steps.meta.outputs.version }} latest
           containerfiles: Containerfile
-          # The image context has no .git, so the build script is told which
-          # commit it is building.
           build-args: |
             GIT_COMMIT=${{ steps.meta.outputs.commit }}
 
