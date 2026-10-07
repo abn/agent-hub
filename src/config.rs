@@ -32,6 +32,7 @@ pub const HUB_KEYS: &[&str] = &[
     "notify_url",
     "notify_token",
     "notify_interval_secs",
+    "backup_dir",
 ];
 
 /// The settings that name the hub a client reaches.
@@ -180,6 +181,9 @@ pub struct Config {
     pub trusted_proxies: Vec<std::net::IpAddr>,
     /// Where the contentless "something is waiting" nudge goes. None is off.
     pub notify: Option<crate::notify::NotifyTarget>,
+    /// Where the serving hub writes an online backup, one new directory per
+    /// backup. Unset turns online backup off.
+    pub backup_dir: Option<PathBuf>,
 }
 
 const ACTIVE_WINDOW_SECS: u64 = 900;
@@ -220,6 +224,25 @@ impl Config {
     /// layered config files and `HUB_DATA_DIR` for `data_dir` only.
     pub fn data_dir_from_env() -> Result<PathBuf> {
         Self::resolve_data_dir(&|key| std::env::var(key).ok())
+    }
+
+    /// Read only the admin token, as the hub itself resolves it.
+    ///
+    /// `agent-hub backup --url` acts as the admin against a running hub, so it
+    /// takes the token the hub serves with, from `HUB_ADMIN_TOKEN` or the
+    /// layered config files, without the serve-time checks.
+    pub fn admin_token_from_env() -> Result<Option<String>> {
+        Self::resolve_admin_token(&|key| std::env::var(key).ok())
+    }
+
+    /// Resolve the admin token from an environment lookup and layered config
+    /// files.
+    pub fn resolve_admin_token(env: &dyn Fn(&str) -> Option<String>) -> Result<Option<String>> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+        Ok(Setting::resolved(env, "hub", "admin_token", &files, None)
+            .value
+            .filter(|token| !token.is_empty()))
     }
 
     /// Resolve `data_dir` from an environment lookup and layered config files.
@@ -315,6 +338,12 @@ impl Config {
                 .value
                 .as_deref(),
         )?;
+        let backup_dir = Self::parse_backup_dir(
+            Setting::resolved(env, "hub", "backup_dir", &files, None)
+                .value
+                .as_deref(),
+            &data_dir,
+        )?;
 
         let notify = crate::notify::NotifyTarget::parse(
             Setting::resolved(env, "hub", "notify_url", &files, None)
@@ -342,7 +371,31 @@ impl Config {
             enrol_pending_ttl,
             trusted_proxies,
             notify,
+            backup_dir,
         })
+    }
+
+    /// Read the online backup directory, refusing one inside the data
+    /// directory.
+    ///
+    /// A backup written into the tree it copies would be walked as content by
+    /// the next backup and pruned or restored along with the store it is meant
+    /// to outlive, so the two must be apart. This is the lexical check, which
+    /// catches a typo at startup; the hub compares the resolved paths again
+    /// before each backup, which catches a symlink.
+    pub fn parse_backup_dir(value: Option<&str>, data_dir: &Path) -> Result<Option<PathBuf>> {
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        let dir = PathBuf::from(value);
+        if backup_dir_inside(&dir, data_dir) {
+            return Err(Error::Config(format!(
+                "HUB_BACKUP_DIR {} must be outside the data directory {}",
+                dir.display(),
+                data_dir.display()
+            )));
+        }
+        Ok(Some(dir))
     }
 
     /// Read the window an agent stays counted as active for.
@@ -721,6 +774,27 @@ fn extract_value(
     }
 }
 
+/// Whether `dir` is the data directory or under it, comparing the paths as
+/// written, made absolute against the current directory with `.` and `..`
+/// folded. Symlinks are not followed here.
+pub fn backup_dir_inside(dir: &Path, data_dir: &Path) -> bool {
+    let normal = |path: &Path| -> PathBuf {
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let mut folded = PathBuf::new();
+        for component in absolute.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    folded.pop();
+                }
+                other => folded.push(other),
+            }
+        }
+        folded
+    };
+    normal(dir).starts_with(normal(data_dir))
+}
+
 /// Where a setting resolved from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingSource {
@@ -1072,6 +1146,7 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             Some("60"),
             false,
         ),
+        ("hub", "backup_dir", "HUB_BACKUP_DIR", None, false),
         ("client", "url", "HUB_URL", None, false),
         ("client", "token", "HUB_TOKEN", None, true),
         ("client", "agent_id", "HUB_AGENT_ID", None, false),

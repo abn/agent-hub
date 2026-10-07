@@ -76,8 +76,10 @@ every change it makes.
 
 The binary is the unit of deployment, whether run directly on a node or in a
 scratch or distroless container as a non-root user with a read-only root
-filesystem. Persistence is a single mounted data volume; backups are node or
-NAS snapshots.
+filesystem. Persistence is a single mounted data volume. Backups are taken
+offline by `agent-hub backup`, online by the serving hub itself into a
+configured directory outside the data volume, or as node or NAS snapshots (see
+[Operations](../usage/operations.md#back-up)).
 
 The default path is the plain container behind a reverse proxy, which owns
 TLS. An optional build embeds a tailnet endpoint through `tailscale-rs`, behind

@@ -29,7 +29,7 @@ const COMMANDS: [(&str, &str); 14] = [
     ("project", "agent-hub project create"),
     ("config", "agent-hub config"),
     ("enrol", "agent-hub enrol"),
-    ("backup", "agent-hub backup"),
+    ("backup", "agent-hub backup --url URL"),
     ("restore", "agent-hub restore"),
     ("check", "agent-hub check"),
     ("doctor", "agent-hub doctor"),
@@ -138,4 +138,30 @@ fn a_typo_is_still_a_typo_with_a_help_flag_on_it() {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unknown subcommand 'kn'"), "{stderr}");
+}
+
+#[test]
+fn backup_usage_names_the_offline_and_the_online_form() {
+    let dir = TempDir::new("help-backup");
+    let home = dir.join("home");
+    std::fs::create_dir_all(&home).expect("the home");
+
+    let output = clean_client(&home, &dir.join("data"))
+        .args(["--help"])
+        .output()
+        .expect("run agent-hub --help");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("agent-hub backup --out DIR"), "{stdout}");
+    assert!(stdout.contains("agent-hub backup --url URL"), "{stdout}");
+
+    // A help flag beside --url is still a question, answered without reaching
+    // the address it names.
+    let output = clean_client(&home, &dir.join("data"))
+        .args(["backup", "--url", "http://127.0.0.1:9", "--help"])
+        .output()
+        .expect("run agent-hub backup --url ... --help");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("agent-hub backup --out DIR"), "{stdout}");
+    assert!(stdout.contains("HUB_BACKUP_DIR"), "{stdout}");
 }

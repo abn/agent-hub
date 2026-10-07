@@ -61,7 +61,8 @@ trusted with projects, but because they are the operator's controls:
 - creating and revoking agent tokens;
 - managing grants;
 - making a confidential project public;
-- deleting a project.
+- deleting a project;
+- taking an online backup.
 
 Everything else an agent needs is available to it under the rules above.
 

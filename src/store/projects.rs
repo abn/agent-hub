@@ -405,6 +405,16 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     }
 }
 
+/// The name a project delete moves a project's directories aside under, ahead
+/// of `<project>-<generation>`.
+const QUARANTINE_PREFIX: &str = ".deleted-";
+
+/// Whether a directory under `sessions/`, `kb/` or `artifacts/` is a delete's
+/// quarantine rather than a project. Startup recovery removes them.
+pub(crate) fn is_quarantine(name: &str) -> bool {
+    name.starts_with(QUARANTINE_PREFIX)
+}
+
 /// Delete a project and every row and file scoped to it.
 ///
 /// Refuses an agent's personal space: that project belongs to the agent and is
@@ -460,12 +470,16 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
 }
 
 pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
+    // The project's files are moved aside before its rows go, so a backup
+    // snapshot taken in between would name files that are no longer there.
+    // Held to the end, across the moves, the commit and the removals.
+    let _removing = super::hold_removals().await;
     let session_ids = session_ids(db, id).await?;
 
     let del_id = crate::store::next_id();
     let q_art = data_dir
         .join("artifacts")
-        .join(format!(".deleted-{id}-{del_id}"));
+        .join(format!("{QUARANTINE_PREFIX}{id}-{del_id}"));
     let art_dir = data_dir.join("artifacts").join(id);
     if art_dir.exists() {
         let _ = std::fs::rename(&art_dir, &q_art);
@@ -473,13 +487,14 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
 
     let q_sess = data_dir
         .join("sessions")
-        .join(format!(".deleted-{id}-{del_id}"));
+        .join(format!("{QUARANTINE_PREFIX}{id}-{del_id}"));
     let sess_dir = data_dir.join("sessions").join(id);
     if sess_dir.exists() {
         let _ = std::fs::rename(&sess_dir, &q_sess);
     }
 
-    let q_kb = crate::brain::knowledge_dir(data_dir).join(format!(".deleted-{id}-{del_id}"));
+    let q_kb =
+        crate::brain::knowledge_dir(data_dir).join(format!("{QUARANTINE_PREFIX}{id}-{del_id}"));
     let kb_dir = crate::brain::knowledge_dir(data_dir).join(id);
     if kb_dir.exists() {
         let _ = std::fs::rename(&kb_dir, &q_kb);
@@ -635,7 +650,7 @@ fn clean_deleted_dirs(parent: &Path) -> Result<()> {
     if let Ok(entries) = std::fs::read_dir(parent) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str()
-                && name.starts_with(".deleted-")
+                && is_quarantine(name)
             {
                 let _ = std::fs::remove_dir_all(entry.path());
             }

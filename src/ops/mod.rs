@@ -1,10 +1,11 @@
-//! Offline data-lifecycle commands: backup, restore, check, and doctor.
+//! Data-lifecycle commands: backup, restore, check, and doctor.
 //!
 //! These commands run against the store on disk while no hub serves it. A
 //! running hub holds the engine's exclusive file lock, so every command here
 //! opens the store the same way the hub does and refuses with one clear message
-//! when the lock is held; the online alternative is a filesystem snapshot of a
-//! stopped or quiesced volume.
+//! when the lock is held. The one exception is backup, which the serving hub
+//! can also take itself, through its own handles, into the same layout; the
+//! other online alternative is a filesystem snapshot of the volume.
 //!
 //! The set a backup holds is the whole store: `hub.db`, every session brain
 //! and project knowledge file under `sessions/` and `kb/`, every artifact blob
@@ -22,7 +23,7 @@ pub mod restore;
 
 use std::path::{Path, PathBuf};
 
-pub use backup::{BackupReport, backup};
+pub use backup::{BackupReport, Serving, backup, backup_serving, online_target};
 pub use check::{CheckReport, check};
 pub use doctor::{DoctorReport, doctor};
 pub use manifest::{Entry, Manifest};

@@ -565,6 +565,21 @@ impl Brain {
             .map_err(engine_error)
     }
 
+    /// Run `work` on a connection to this file while holding its write lock.
+    ///
+    /// An online backup copies the file through this, so no write to it
+    /// interleaves with the copy. A file a prune removed after the open is
+    /// refused, as a write would be.
+    pub async fn with_locked_connection<T>(
+        &self,
+        work: impl AsyncFnOnce(&turso::Connection) -> Result<T>,
+    ) -> Result<T> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        work(&conn).await
+    }
+
     /// Fold the write-ahead log into the database file and truncate it, so the
     /// file's size reflects the data it holds rather than pages still in the
     /// log. Run when a session ends, so a finished brain is one consolidated

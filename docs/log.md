@@ -6,6 +6,33 @@ software release notes and the repository changelog.
 
 ## 2026-10-07
 
+### The serving hub takes an online backup
+
+* **Change**: a running hub can back itself up. `POST /api/v1/backups`, admin
+  only, writes the offline backup's layout and `manifest.json` into a new
+  directory named for the UTC time under `backup_dir` (`HUB_BACKUP_DIR`), so
+  `check` and `restore` read it unchanged. Online backup is off while
+  `backup_dir` is unset; one inside the data directory is refused at startup and
+  again, symlinks resolved, before each backup. One backup runs at a time.
+* **Change**: `agent-hub backup --url URL` asks a running hub for the backup as
+  the admin (`HUB_ADMIN_TOKEN`) and prints where it landed. The offline backup's
+  refusal while a hub holds the store now names `--url` beside stopping the hub
+  and snapshotting the volume.
+* **Change**: deleting or overwriting files (artifact and project deletes, a
+  prune's commit, a live artifact write and the update that seals it) waits
+  while an online backup runs, so the store snapshot never names a blob the
+  backup lacks and every copied blob holds the bytes its row describes. The
+  blob copy runs off the request workers, so the hub keeps serving.
+* **Change**: both backups leave out a project's files that a delete moved
+  aside and could not remove, which the next start removes anyway.
+* **Update**: [Operations](usage/operations.md) describes the online backup, what
+  it guarantees across files, a cron and a systemd timer example, and that old
+  backups are the operator's to prune; the [quickstart](usage/quickstart.md)
+  lists `backup_dir`; the [operating model](architecture/model.md), the [human
+  surface](architecture/human-surface.md) and
+  [components](architecture/components.md) name the route and the admin
+  boundary it sits behind.
+
 ### A question or an approval can carry a deadline
 
 * **Change**: `question_post`, and `signal_append` with kind `approval`, take an

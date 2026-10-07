@@ -313,6 +313,7 @@ mod tests {
             enrol_pending_ttl: std::time::Duration::from_secs(24 * 60 * 60),
             trusted_proxies: Vec::new(),
             notify: None,
+            backup_dir: None,
         })
         .await
         .expect("open state")

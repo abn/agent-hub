@@ -15,6 +15,7 @@ usage:
   agent-hub config [flags]       inspect and validate configuration
   agent-hub enrol [why]          request enrolment and wait for operator approval
   agent-hub backup --out DIR     back up the store while no hub serves it
+  agent-hub backup --url URL     ask a running hub to back itself up
   agent-hub restore --from DIR   restore the store from a backup
   agent-hub check                check store integrity, and any manifest present
   agent-hub doctor [--data-dir DIR] report the store's health and identity
@@ -79,12 +80,21 @@ usage:
 const BACKUP_USAGE: &str = "\
 usage:
   agent-hub backup --out DIR [--data-dir DIR]
+  agent-hub backup --url URL
 
 Copy the store offline: the hub database, every session brain and project
 knowledge file through the engine, every artifact blob verbatim, and the
 embedded tailnet's key state, with a manifest.json of each file's size and
-sha256. A running hub holds the engine lock, so stop it first, or snapshot the
-volume.
+sha256. A running hub holds the engine lock, so the offline copy refuses while
+one serves the store.
+
+With --url, the hub at URL takes the same backup itself while it serves, into a
+new timestamped directory under its backup_dir setting (HUB_BACKUP_DIR), and
+this prints where it landed. The request is the admin's: the token is
+HUB_ADMIN_TOKEN, or admin_token under [hub] in config.toml, and HUB_TIMEOUT
+bounds the wait. The hub chooses the directory, so --url takes no --out. The
+exit code says what happened: 0 success, 1 the hub refused, 2 usage, 69 the hub
+is unreachable, 77 the token was refused, 78 no admin token is set.
 ";
 
 const RESTORE_USAGE: &str = "\
@@ -371,8 +381,11 @@ fn ops_data_dir(explicit: Option<String>) -> std::result::Result<PathBuf, String
     }
 }
 
-/// Copy the whole store into a fresh output directory.
+/// Copy the whole store into a fresh output directory, or ask a running hub to.
 fn backup_cmd(args: &[String]) -> ExitCode {
+    if args.iter().any(|argument| argument == "--url") {
+        return online_backup_cmd(args);
+    }
     let options = match OpsOptions::parse(args, BACKUP_USAGE) {
         Ok(options) => options,
         Err(message) => {
@@ -422,6 +435,81 @@ fn backup_cmd(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Ask the hub named by `--url` to take a backup of its own store.
+#[cfg(feature = "client")]
+fn online_backup_cmd(args: &[String]) -> ExitCode {
+    use agent_hub::client::Failure;
+
+    let mut url = None;
+    let mut rest = args.iter();
+    while let Some(argument) = rest.next() {
+        match argument.as_str() {
+            "--url" => match rest.next() {
+                Some(value) => url = Some(value.clone()),
+                None => {
+                    return fail(&Failure::Usage(format!(
+                        "backup: --url needs a value\n{BACKUP_USAGE}"
+                    )));
+                }
+            },
+            flag @ ("--out" | "--data-dir") => {
+                return fail(&Failure::Usage(format!(
+                    "backup: --url asks the hub, which chooses where the backup goes, so it \
+                     takes no {flag}\n{BACKUP_USAGE}"
+                )));
+            }
+            other => {
+                return fail(&Failure::Usage(format!(
+                    "backup: unknown option '{other}'\n{BACKUP_USAGE}"
+                )));
+            }
+        }
+    }
+    let Some(url) = url else {
+        return fail(&Failure::Usage(format!(
+            "backup: --url needs a value\n{BACKUP_USAGE}"
+        )));
+    };
+    let admin_token = match Config::admin_token_from_env() {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            return fail(&Failure::Config(
+                "backup --url acts as the admin; set HUB_ADMIN_TOKEN, or admin_token under [hub]"
+                    .to_string(),
+            ));
+        }
+        Err(err) => return fail(&Failure::Config(err.to_string())),
+    };
+    let (client, runtime) = match client_runtime() {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    match runtime.block_on(agent_hub::client::backup::request(
+        &client,
+        &url,
+        &admin_token,
+    )) {
+        Ok(taken) => {
+            let manifest = &taken["manifest"];
+            println!(
+                "backed up {} files, {} bytes, at schema v{} to {} in {} ms",
+                manifest["files"],
+                manifest["bytes"],
+                manifest["schema_version"],
+                taken["path"].as_str().unwrap_or_default(),
+                taken["duration_ms"]
+            );
+            ExitCode::SUCCESS
+        }
+        Err(failure) => fail(&failure),
+    }
+}
+
+#[cfg(not(feature = "client"))]
+fn online_backup_cmd(_args: &[String]) -> ExitCode {
+    without_client()
 }
 
 /// Verify a backup and replace the data directory with it.

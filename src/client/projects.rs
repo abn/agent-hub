@@ -73,7 +73,7 @@ pub async fn delete(config: &ClientConfig, id: &str) -> Result<(), Failure> {
 ///
 /// The timeout comes from the client settings, so `HUB_TIMEOUT` means here what
 /// it means to a tool call.
-async fn call(
+pub(super) async fn call(
     config: &ClientConfig,
     endpoint: &str,
     build: impl FnOnce(&str, &reqwest::Client) -> reqwest::RequestBuilder,
@@ -145,7 +145,7 @@ fn hub_url(config: &ClientConfig) -> Result<String, Failure> {
 }
 
 /// The JSON a successful answer carried.
-fn json_body(text: &str) -> Result<Value, Failure> {
+pub(super) fn json_body(text: &str) -> Result<Value, Failure> {
     serde_json::from_str(text)
         .map_err(|err| Failure::Failed(format!("the hub's answer is not JSON: {err}")))
 }

@@ -52,6 +52,8 @@ pub struct AppState {
     /// The readiness probe compares against this so a removed or replaced path
     /// is unavailable even while the open file descriptor still answers.
     pub store_identity: StoreIdentity,
+    /// Held by the one online backup that may run at a time.
+    pub backup_running: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// A freshness tick for the human stream.
@@ -169,7 +171,10 @@ async fn backup_before_migration(db: &turso::Database, data_dir: &Path, from: i6
     let backups = data_dir.join("backups");
     config::private_dir(&backups)?;
 
-    let target = backups.join(format!("pre-migration-v{from}-{}.db", backup_stamp()));
+    let target = backups.join(format!(
+        "pre-migration-v{from}-{}.db",
+        store::filename_stamp()
+    ));
     // The destination is a string literal to the engine, so a quote in the
     // path is doubled rather than ending it.
     let target_sql = target.to_string_lossy().replace('\'', "''");
@@ -187,21 +192,6 @@ async fn backup_before_migration(db: &turso::Database, data_dir: &Path, from: i6
 
     prune_backups(&backups, 3);
     Ok(())
-}
-
-/// A filename-safe UTC stamp for a backup, distinct within a process.
-fn backup_stamp() -> String {
-    let now = time::OffsetDateTime::now_utc();
-    format!(
-        "{:04}{:02}{:02}T{:02}{:02}{:02}.{:03}Z",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute(),
-        now.second(),
-        now.millisecond(),
-    )
 }
 
 /// Remove every pre-migration backup beyond the newest `keep`.
@@ -447,6 +437,7 @@ impl AppState {
             enrol_shares: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             integrity_sample,
             store_identity,
+            backup_running: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 

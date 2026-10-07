@@ -126,6 +126,7 @@ search paths, and validation status.
 | `notify_url` | `HUB_NOTIFY_URL` | unset | An http or https URL the hub POSTs a fixed, contentless sentence to when something starts waiting on the human; unset sends nothing. It may not carry credentials, and only its origin is printed |
 | `notify_token` | `HUB_NOTIFY_TOKEN` | unset | Sent to the notify target as `Authorization: Bearer`; masked wherever the configuration is printed |
 | `notify_interval_secs` | `HUB_NOTIFY_INTERVAL_SECS` | `60` | Least time between two notify sends; items inside it become one trailing send; 1 to 86400 seconds |
+| `backup_dir` | `HUB_BACKUP_DIR` | unset | Existing directory, outside the data directory, where the serving hub writes an online backup; unset turns online backup off (see [Operations](operations.md#back-up)) |
 
 Without `HUB_PUBLIC_URL` the hub reads its own address off each request: the
 forwarded scheme and host, then the request host, then the bind. Set it when a

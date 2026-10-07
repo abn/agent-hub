@@ -528,6 +528,11 @@ pub async fn update_for_principal_capped(
     let updated_at = crate::store::now_rfc3339();
     let mut promoted = None;
 
+    // Sealing a live version, or reusing an abandoned one's number, promotes
+    // over a blob the store already names. Held to the commit, so an online
+    // backup never pairs the old row with the new bytes.
+    let _writing = super::hold_removals().await;
+
     let write = async {
         let tx = conn
             .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
@@ -849,6 +854,11 @@ pub async fn draft_for_principal_capped(
     let updated_at = crate::store::now_rfc3339();
     let mut promoted = None;
 
+    // A live write after the first promotes over the blob the store names for
+    // this version. Held to the commit, so an online backup never pairs the
+    // old row's envelope and size with the new bytes.
+    let _writing = super::hold_removals().await;
+
     let write = async {
         let tx = conn
             .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
@@ -1136,10 +1146,14 @@ pub async fn delete(
     .await?;
     tx.commit().await.map_err(engine)?;
 
+    // The rows are gone, but a backup's store snapshot taken before the commit
+    // still names these blobs, so the removal waits for that backup's copy.
+    let removing = super::hold_removals().await;
     let tree = format!("artifacts/{}/{}", existing.project_id, artifact_id);
     if let Err(err) = blob::remove_tree(data_dir, &tree) {
         tracing::warn!(artifact = artifact_id, error = %err, "artifact tree removal failed");
     }
+    drop(removing);
     Ok(existing)
 }
 

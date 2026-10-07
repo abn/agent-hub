@@ -42,6 +42,37 @@ pub(crate) fn connect(db: &turso::Database) -> Result<turso::Connection> {
     Ok(conn)
 }
 
+/// The gate between removing store files and an online backup.
+///
+/// An online backup snapshots `hub.db` first and copies the brain, knowledge
+/// and blob files after it, so a file the snapshot names must not be moved,
+/// removed or overwritten until the copy is done. Every operation that does so
+/// to a file the committed store may still name holds this shared, from its
+/// first change to its commit or last removal: an artifact delete's blob
+/// removal, a live artifact write and an update that promotes over a version's
+/// blob, a project delete, and a prune's commit. The backup holds it
+/// exclusively for its whole run. One gate for the process, because one
+/// process serves one data directory.
+fn removal_gate() -> &'static tokio::sync::RwLock<()> {
+    static GATE: std::sync::OnceLock<tokio::sync::RwLock<()>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| tokio::sync::RwLock::new(()))
+}
+
+/// Hold off an online backup while store files are moved, removed or
+/// overwritten.
+///
+/// Never taken while already held: the gate is fair, so a second shared hold
+/// queued behind a waiting backup would wait on itself.
+pub(crate) async fn hold_removals() -> tokio::sync::RwLockReadGuard<'static, ()> {
+    removal_gate().read().await
+}
+
+/// Stop every store file removal until the guard is dropped, once those in
+/// flight have finished.
+pub(crate) async fn freeze_removals() -> tokio::sync::RwLockWriteGuard<'static, ()> {
+    removal_gate().write().await
+}
+
 /// Open the engine with the full-text index method enabled.
 ///
 /// The index method is behind an experimental flag, so the engine is built
@@ -202,6 +233,22 @@ pub(crate) fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
+}
+
+/// A filename-safe UTC stamp to the millisecond, for a backup's name, which
+/// sorts by age.
+pub(crate) fn filename_stamp() -> String {
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}{:02}{:02}T{:02}{:02}{:02}.{:03}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond(),
+    )
 }
 
 /// The millisecond of the newest id minted in this process, or read from the
