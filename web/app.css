@@ -4145,6 +4145,11 @@ a.session-back {
   min-height: 200px;
 }
 
+/* The comment bar is a bar: it holds the bottom of the reader's viewport
+   rather than the end of the document, so it stays put as the document scrolls
+   under it. At 1100px and above the stage's own content is the scrollport; below
+   that the page is. On a phone the fixed tab bar sits under the bar, so the bar
+   keeps its own height clear of the tab bar. */
 .hub-comments-strip {
   display: flex;
   align-items: center;
@@ -4160,6 +4165,15 @@ a.session-back {
   cursor: pointer;
   text-align: left;
   margin-top: var(--s-4);
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+}
+
+@media (max-width: 719px) {
+  .hub-comments-strip {
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 .hub-comments-strip:hover {
@@ -4771,12 +4785,14 @@ a.session-back {
     flex-direction: column;
     min-width: 0;
     flex: 1 1 640px;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
   .hub-viewer.panes .hub-viewer-content {
     justify-content: center;
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .hub-viewer-doc {

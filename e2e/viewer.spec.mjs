@@ -15,12 +15,37 @@
 
 import { expect } from "@playwright/test";
 import { open, test } from "./app.mjs";
+import { api, newSession, structured, toolCall } from "./invariants.mjs";
 
 // One artifact read at its own address, the one a feed link and a share link
 // both reach, rather than the project stage.
 async function openArtifact(page, hub) {
   await page.goto(`${hub.baseUrl}/#/artifacts/${hub.artifactId}?project=${hub.projectId}`);
   await expect(page.locator("#hub-frame")).toBeVisible();
+}
+
+// A document long enough to scroll, with one open thread, so the viewer paints
+// its comments bar. Published through the agent surface an agent would use,
+// because no seeded artifact is both long and commented. It is left on the
+// project's hub, and viewer.spec is the last spec to run against that hub.
+async function longCommentedArtifact(hub) {
+  const session = await newSession(hub);
+  const content = Array.from(
+    { length: 40 },
+    (_, i) => `## Section ${i}\n\nA paragraph long enough that the document runs well past one viewport.`,
+  ).join("\n\n");
+  const published = await toolCall(hub, session, "artifact_publish", {
+    project_id: hub.projectId,
+    title: "Scroll check",
+    kind: "markdown",
+    content,
+  });
+  const id = structured(published).artifact_id;
+  await api(hub, "POST", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`, {
+    body: "A note on the design.",
+    anchor_version: 1,
+  });
+  return id;
 }
 
 test.describe("the artifact viewer's actions", () => {
@@ -190,5 +215,89 @@ test.describe("the project artifact stage's actions", () => {
     // The sheet closes on success, and the comment lands on the artifact.
     await expect(sheet).toHaveCount(0);
     await expect(page.locator(".hub-comment-card").filter({ hasText: "a stage comment" })).toBeVisible();
+  });
+});
+
+test.describe("the artifact viewer's comments bar", () => {
+  // The bar is chrome, not the document's last paragraph: it holds the bottom
+  // of the reader's viewport while the document scrolls under it. Built at the
+  // end of the document instead, it floated mid-page and then left the viewport,
+  // which is what the wheel is here to catch. The gap is read as geometry in the
+  // reader's own viewport, so the fixed tab bar a phone carries is already
+  // accounted for and the same expectation holds at both widths.
+  test("the comments bar holds the bottom of the viewport while the document scrolls", async ({
+    hub,
+    page,
+  }) => {
+    const id = await longCommentedArtifact(hub);
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    await expect(page.locator("#hub-frame")).toBeVisible();
+    const bar = page.locator(".hub-comments-strip");
+    await expect(bar).toBeVisible();
+
+    // The frame reports its own height, so the document is short until that
+    // message lands. Wait for it, or the bar is measured against a page with
+    // nothing to scroll.
+    await page.waitForFunction(() => {
+      const content = document.querySelector(".hub-viewer-content");
+      const stage = document.querySelector(".hub-viewer-stage");
+      const tall = Math.max(
+        document.documentElement.scrollHeight,
+        content ? content.scrollHeight : 0,
+        stage ? stage.scrollHeight : 0,
+      );
+      return tall > window.innerHeight * 2;
+    });
+
+    const gap = () =>
+      page.evaluate(() => {
+        const strip = document.querySelector(".hub-comments-strip");
+        return Math.round(window.innerHeight - strip.getBoundingClientRect().bottom);
+      });
+    // How far the document has scrolled, whichever box is its scrollport: the
+    // stage's content on a desktop, the page on a phone.
+    const scrollPos = () =>
+      page.evaluate(() => {
+        const content = document.querySelector(".hub-viewer-content");
+        const stage = document.querySelector(".hub-viewer-stage");
+        return Math.max(window.scrollY, content.scrollTop, stage.scrollTop);
+      });
+    // Zero is flush with the viewport bottom. The ceiling is the phone's 60px
+    // tab bar plus the trailing padding the bar settles over at the very end of
+    // a page-scrolled document (measured 124 on a phone, 0 on a desktop); it
+    // should tighten when that end settle is removed.
+    const ceiling = 140;
+    const held = async (where) => {
+      const distance = await gap();
+      expect(distance, `${where}: the bar is under the viewport bottom`).toBeGreaterThanOrEqual(0);
+      expect(distance, `${where}: the bar is above the viewport bottom`).toBeLessThanOrEqual(ceiling);
+    };
+
+    await held("at rest");
+
+    await page.locator(".hub-viewer-content").hover();
+    const start = await scrollPos();
+    await page.mouse.wheel(0, 1200);
+    await page.waitForFunction((from) => {
+      const content = document.querySelector(".hub-viewer-content");
+      const stage = document.querySelector(".hub-viewer-stage");
+      return Math.max(window.scrollY, content.scrollTop, stage.scrollTop) > from;
+    }, start);
+    await held("mid-document");
+
+    // And at the end, where a bar built into the document would have settled.
+    await page.mouse.wheel(0, 100000);
+    await page.waitForFunction(() => {
+      const content = document.querySelector(".hub-viewer-content");
+      const stage = document.querySelector(".hub-viewer-stage");
+      const end = Math.max(
+        document.documentElement.scrollHeight - window.innerHeight,
+        content.scrollHeight - content.clientHeight,
+        stage.scrollHeight - stage.clientHeight,
+      );
+      const pos = Math.max(window.scrollY, content.scrollTop, stage.scrollTop);
+      return pos >= end - 2;
+    });
+    await held("at the end");
   });
 });

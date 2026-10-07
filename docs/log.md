@@ -28,6 +28,15 @@ software release notes and the repository changelog.
   live version is a pointer on the artifact and not a draft, and why the public
   URL holds still while one is live.
 
+### The artifact viewer's comments bar holds the bottom of the viewport
+
+* **Fix**: the viewer's comments bar was built at the end of the document, so it
+  floated mid-page while the document scrolled and left the viewport with the
+  last paragraph. It holds the bottom of the reader's viewport now, above the
+  phone's fixed tab bar, and the document scrolls under it. A regression check
+  reads the bar's own geometry at rest, mid-scroll and at the end of the
+  document, so a bar that scrolls away fails the run.
+
 ## 2026-10-06
 
 ### The embedded tailnet ships in the default build
