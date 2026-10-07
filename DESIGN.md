@@ -321,7 +321,9 @@ Agents and access, Connect, and the knowledge base.
   about.
 - **Artifact viewer.** The stage renders the document. The aside holds anchored
   comments on a fine pointer; on a coarse pointer the same thread is one bottom
-  sheet. Never both.
+  sheet. Never both. While open threads exist, a comments bar rides the bottom
+  of the reader's viewport, above the phone's fixed tab bar, and the document
+  scrolls under it.
 - **Session detail.** The brain tree in the stage. A `kv` key is read in the
   aside, named in mono with the copy glyph. On a coarse pointer the aside is not
   drawn, so the same value opens as one bottom sheet, opened by the tree leaf
