@@ -355,7 +355,10 @@ it opens a menu of the hub's agents, and choosing one opens a confirmation
 dialog naming that agent before the move is made. Agents pick work up themselves and ask nobody. Project deletion is a destructive action on the project's own settings screen and from the project header overflow menu, behind a typed confirmation dialog and count manifest; an agent's personal space cannot be deleted. Inbox notifications are configured from Settings under Alerts, request permission only on explicit enable action, and carry only waiting-on-you items; without permission or support they degrade silently. True background push is deferred, by
 [decision](../adr/0016-push-notifications-deferred.md); an open app reads the
 freshness stream and refreshes its waiting badge on a tick, with a slow poll
-as the fallback.
+as the fallback. With the app fully closed nothing is raised, unless the
+operator has configured a notify target of their own: then the hub POSTs one
+fixed sentence to it when something starts waiting, naming no project, agent,
+title or count ([decision](../adr/0026-contentless-notify-target.md)).
 
 The app ships as ES modules with no bundler and no build step. `app.js` is
 the entry: it names the screens the router can paint and routes the delegated

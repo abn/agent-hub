@@ -145,7 +145,7 @@ pub async fn enrol(
     .await
     .map_err(|err| Problem::from_error(&err))?;
 
-    state.notify();
+    state.notify_waiting();
 
     Ok((
         StatusCode::ACCEPTED,

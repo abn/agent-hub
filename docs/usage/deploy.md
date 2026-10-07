@@ -40,6 +40,18 @@ Set `HUB_PUBLIC_URL` whenever the hub sits behind a reverse proxy that rewrites
 the host: the served bootstrap, the artifact frame policy and the share links
 all name that address. Generate the token with `openssl rand -hex 32`.
 
+To be nudged when something waits while the app is closed, add a notify target
+you run, such as a self-hosted ntfy topic on the LAN:
+
+```
+HUB_NOTIFY_URL=https://ntfy.lan/agent-hub
+HUB_NOTIFY_TOKEN=<an ntfy access token>
+```
+
+The hub POSTs one fixed sentence there and nothing about the item itself.
+[Operations](operations.md#notify-a-closed-app) covers the coalescing and the
+failure behaviour.
+
 ## Compose
 
 The repository ships `deploy/compose.yaml`. It builds the Containerfile, mounts

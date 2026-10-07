@@ -41,6 +41,9 @@ pub struct AppState {
     /// its revision. The stream carries no content either way, only the nudge
     /// to refetch.
     pub ticker: tokio::sync::broadcast::Sender<Tick>,
+    /// The contentless nudge to the operator's notify target, off unless one
+    /// is configured.
+    pub notifier: crate::notify::Notifier,
     /// Share flag recorded during enrolment approvals.
     pub enrol_shares: Arc<std::sync::Mutex<std::collections::HashMap<String, bool>>>,
     /// How often the background store integrity sample runs. Zero disables it.
@@ -407,6 +410,13 @@ impl AppState {
         let host = store::storage::host_name(config.node_name.as_deref());
         let integrity_sample = Config::integrity_sample_from_env()?;
         let (ticker, _) = tokio::sync::broadcast::channel(16);
+        let notifier = match &config.notify {
+            Some(target) => {
+                tracing::info!(target = %target.redacted(), interval_secs = target.interval.as_secs(), "notify target configured");
+                crate::notify::Notifier::start(target.clone())
+            }
+            None => crate::notify::Notifier::off(),
+        };
         Ok(Self {
             config: Arc::new(config),
             data_dir,
@@ -420,6 +430,7 @@ impl AppState {
             generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             host,
             ticker,
+            notifier,
             enrol_shares: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             integrity_sample,
             store_identity,
@@ -452,6 +463,14 @@ impl AppState {
         self.generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _ = self.ticker.send(Tick::default());
+    }
+
+    /// Nudge stream subscribers after a write that left something waiting on
+    /// the human: a question, an approval, or an enrolment request. The
+    /// operator's notify target, when one is configured, is told too.
+    pub fn notify_waiting(&self) {
+        self.notify();
+        self.notifier.waiting();
     }
 
     /// Nudge subscribers that one artifact's live version moved.

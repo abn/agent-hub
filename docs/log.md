@@ -6,6 +6,27 @@ software release notes and the repository changelog.
 
 ## 2026-10-07
 
+### A closed app can be nudged through a target the operator runs
+
+* **Change**: with `notify_url` (`HUB_NOTIFY_URL`) set, the hub POSTs a fixed
+  plain-text sentence to that URL when a question, an approval or an enrolment
+  request starts waiting on the human. The body names no project, agent, title,
+  id or count. `notify_token` is sent as `Authorization: Bearer`, and sends are
+  coalesced to one per `notify_interval_secs` (default 60) with a trailing send
+  for anything that arrived in the quiet period. Delivery runs in the
+  background and never fails the write. Unset, nothing is sent.
+* **Change**: `/metrics` carries `agenthub_notify_sends_total` by result, and
+  `agent-hub config` lists the three settings with the token masked and the URL
+  shown by its origin.
+* **Update**: [Operations](usage/operations.md) gains a section with a
+  self-hosted ntfy example, [Deploy](usage/deploy.md) shows the two variables,
+  the [quickstart](usage/quickstart.md) settings table lists the keys, and the
+  [quickstart](usage/quickstart.md), [human surface](architecture/human-surface.md)
+  and README say that a closed app still raises nothing unless a target is set.
+* **Decision**: [ADR 0026](adr/0026-contentless-notify-target.md) refines ADR
+  0016: an operator-chosen target and a contentless body are added, and Web
+  Push stays deferred.
+
 ### A question can suggest answers the human picks with one tap
 
 * **Change**: `question_post` takes an optional `options`, 2 to 6 suggested

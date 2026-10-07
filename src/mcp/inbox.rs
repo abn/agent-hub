@@ -44,7 +44,7 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
         let session_id = self.session_in(&principal, &params.project_id).await;
-        let event_id = questions::post(
+        let posted = questions::post_outcome(
             &self.state.db,
             &self.state.config.inbox_caps,
             self.state.config.events_per_project.per_project,
@@ -62,7 +62,14 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
-        self.state.notify();
+        // A replay posted nothing new, and the question it returns may have
+        // been answered since, so only a new question nudges the target.
+        if posted.replayed {
+            self.state.notify();
+        } else {
+            self.state.notify_waiting();
+        }
+        let event_id = posted.id;
         // The question roots its own thread and is its own event, so the
         // question id, the event id, and the thread id are the same value.
         let thread_id = event_id.clone();

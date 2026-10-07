@@ -29,6 +29,9 @@ pub const HUB_KEYS: &[&str] = &[
     "tailnet",
     "tailnet_port",
     "tailnet_control_url",
+    "notify_url",
+    "notify_token",
+    "notify_interval_secs",
 ];
 
 /// The settings that name the hub a client reaches.
@@ -175,6 +178,8 @@ pub struct Config {
     /// operator's own machine most often. Empty trusts none, and the socket
     /// peer is the identity.
     pub trusted_proxies: Vec<std::net::IpAddr>,
+    /// Where the contentless "something is waiting" nudge goes. None is off.
+    pub notify: Option<crate::notify::NotifyTarget>,
 }
 
 const ACTIVE_WINDOW_SECS: u64 = 900;
@@ -311,6 +316,18 @@ impl Config {
                 .as_deref(),
         )?;
 
+        let notify = crate::notify::NotifyTarget::parse(
+            Setting::resolved(env, "hub", "notify_url", &files, None)
+                .value
+                .as_deref(),
+            Setting::resolved(env, "hub", "notify_token", &files, None)
+                .value
+                .as_deref(),
+            Setting::resolved(env, "hub", "notify_interval_secs", &files, Some("60"))
+                .value
+                .as_deref(),
+        )?;
+
         Ok(Self {
             data_dir,
             bind,
@@ -324,6 +341,7 @@ impl Config {
             enrol_pending_max,
             enrol_pending_ttl,
             trusted_proxies,
+            notify,
         })
     }
 
@@ -639,8 +657,9 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let has_token =
-            parsed.client.contains_key("token") || parsed.hub.contains_key("admin_token");
+        let has_token = parsed.client.contains_key("token")
+            || parsed.hub.contains_key("admin_token")
+            || parsed.hub.contains_key("notify_token");
         if let Ok(metadata) = std::fs::metadata(path)
             && let Some(warning) =
                 config_permissions_warning(path, metadata.permissions().mode(), has_token)
@@ -676,7 +695,8 @@ fn extract_value(
             | "enrol_pending_max"
             | "enrol_pending_ttl_secs"
             | "integrity_sample_secs"
-            | "tailnet_port",
+            | "tailnet_port"
+            | "notify_interval_secs",
         ) => match value {
             toml::Value::Integer(i) => Ok(Some(i.to_string())),
             _ => Err(Error::Config(format!(
@@ -861,6 +881,7 @@ fn migrate_legacy_config(old_path: &Path, new_path: &Path) -> Result<()> {
                     | "enrol_pending_ttl_secs"
                     | "integrity_sample_secs"
                     | "tailnet_port"
+                    | "notify_interval_secs"
             ) && let Ok(num) = v.parse::<i64>()
             {
                 toml_out.push_str(&format!("{k} = {num}\n"));
@@ -1042,6 +1063,15 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             None,
             false,
         ),
+        ("hub", "notify_url", "HUB_NOTIFY_URL", None, false),
+        ("hub", "notify_token", "HUB_NOTIFY_TOKEN", None, true),
+        (
+            "hub",
+            "notify_interval_secs",
+            "HUB_NOTIFY_INTERVAL_SECS",
+            Some("60"),
+            false,
+        ),
         ("client", "url", "HUB_URL", None, false),
         ("client", "token", "HUB_TOKEN", None, true),
         ("client", "agent_id", "HUB_AGENT_ID", None, false),
@@ -1055,6 +1085,8 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
         let value_display = match setting.value {
             None => "(unset)".to_string(),
             Some(val) if is_secret => mask_token(&val),
+            // A topic path or a query can be a credential on some targets.
+            Some(val) if key == "notify_url" => crate::notify::redact_url_str(&val),
             Some(val) => val,
         };
         let source_display = format_source(&setting.source, home.as_deref());

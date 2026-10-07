@@ -87,6 +87,8 @@ pub struct Metrics {
     integrity_ok: AtomicI64,
     /// Integrity samples that failed, by timeout or error or a reported issue.
     integrity_failures: AtomicU64,
+    /// Notify sends to the operator's target: slot 0 delivered, slot 1 failed.
+    notify: [AtomicU64; 2],
 }
 
 impl Metrics {
@@ -99,6 +101,7 @@ impl Metrics {
             tools: Mutex::new(HashMap::new()),
             integrity_ok: AtomicI64::new(-1),
             integrity_failures: AtomicU64::new(0),
+            notify: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
 
@@ -148,6 +151,11 @@ impl Metrics {
         }
     }
 
+    /// Count one send to the operator's notify target.
+    pub fn record_notify(&self, delivered: bool) {
+        self.notify[usize::from(!delivered)].fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Render every counter as Prometheus text, family by family.
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -195,6 +203,17 @@ impl Metrics {
             out.push_str(&format!(
                 "agenthub_tool_calls_total{{tool=\"{}\"}} {value}\n",
                 escape_label(name)
+            ));
+        }
+
+        out.push_str(
+            "# HELP agenthub_notify_sends_total Sends to the operator's notify target, by result.\n",
+        );
+        out.push_str("# TYPE agenthub_notify_sends_total counter\n");
+        for (index, result) in ["delivered", "failed"].iter().enumerate() {
+            out.push_str(&format!(
+                "agenthub_notify_sends_total{{result=\"{result}\"}} {}\n",
+                self.notify[index].load(Ordering::Relaxed)
             ));
         }
 
@@ -260,6 +279,11 @@ pub fn record_tool(tool: &str) {
 /// Record one completed background integrity sample in the global registry.
 pub fn record_integrity(ok: bool) {
     global().record_integrity(ok);
+}
+
+/// Count one notify send in the global registry.
+pub fn record_notify(delivered: bool) {
+    global().record_notify(delivered);
 }
 
 /// Render the global registry as Prometheus text.
@@ -404,6 +428,23 @@ mod tests {
     #[test]
     fn a_label_value_is_escaped() {
         assert_eq!(escape_label("a\"b\\c"), "a\\\"b\\\\c");
+    }
+
+    #[test]
+    fn notify_sends_are_counted_by_result() {
+        let metrics = Metrics::new();
+        metrics.record_notify(true);
+        metrics.record_notify(false);
+        metrics.record_notify(false);
+        let text = metrics.render();
+        assert!(
+            text.contains("agenthub_notify_sends_total{result=\"delivered\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("agenthub_notify_sends_total{result=\"failed\"} 2"),
+            "{text}"
+        );
     }
 
     #[test]
