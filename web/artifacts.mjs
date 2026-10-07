@@ -17,6 +17,7 @@ import {
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
+import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
 import { toggleAside } from "./shell-layout.mjs";
@@ -38,6 +39,118 @@ function formatBytes(bytes) {
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+// The live band: whether a version is being written, who is writing it, and
+// whether the reader is following. It rides above the document in the stage.
+// A sealed artifact hides it, so it costs nothing while nothing is live.
+function liveBandElement() {
+  const band = document.createElement("div");
+  band.className = "hub-live-band";
+  band.hidden = true;
+  band.setAttribute("role", "status");
+  band.innerHTML =
+    `<span class="hub-live-dot" aria-hidden="true"></span>` +
+    `<span class="hub-live-label mono"></span>` +
+    `<button type="button" class="hub-live-follow" data-action="live-follow" aria-pressed="true" hidden>Following</button>`;
+  return band;
+}
+
+// Watch one artifact. The band appears while a version is live or idle; the
+// document keeps up while the reader is following, and a reader who has
+// scrolled away can pause so the page stops moving under them.
+function wireLiveBand(id, kind, protectedArtifact, frame, band) {
+  let following = true;
+  let pending = 0;
+  let version = null;
+
+  const redraw = () => {
+    const state = band.dataset.state || "sealed";
+    band.hidden = state === "sealed";
+    band.dataset.following = following ? "yes" : "no";
+    const agent = band.dataset.agent || "";
+    const who = agent ? ` · ${agent}` : "";
+    const extra = pending ? ` · ${pending} update${pending === 1 ? "" : "s"}` : "";
+    band.querySelector(".hub-live-label").textContent = `${state}${who}${extra}`;
+    const follow = band.querySelector(".hub-live-follow");
+    follow.hidden = band.hidden;
+    follow.textContent = following ? "Following" : "Paused";
+    follow.setAttribute("aria-pressed", String(following));
+  };
+
+  const refresh = async () => {
+    try {
+      const state = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/live`);
+      band.dataset.state = state.state;
+      band.dataset.agent = state.actor || "";
+      version = state.version || null;
+      liveVersion = state.version || null;
+      // A version sheet the stage mounted before this read answered already
+      // labelled the row; relabel it now that the answer is known.
+      if (liveVersion) {
+        const row = document.querySelector(`.hub-version-row[data-version="${liveVersion}"]`);
+        const primary = row && row.querySelector(".hub-version-primary");
+        if (primary) primary.textContent = "Being written";
+      }
+    } catch {
+      // A refusal leaves the band as it was: a live read is a nicety, not the
+      // document, so losing it costs nothing the reader has to be told about.
+    }
+  };
+
+  const apply = async (at) => {
+    if (protectedArtifact || !at || !frame || !frame.contentWindow) return;
+    const payload = { type: "hub:set-live", kind, version: at };
+    if (kind === "markdown") {
+      try {
+        payload.content = await fetchRawText(id, at);
+      } catch {
+        return;
+      }
+    }
+    frame.contentWindow.postMessage(payload, "*");
+  };
+
+  band.querySelector(".hub-live-follow").addEventListener("click", async () => {
+    following = !following;
+    if (following) {
+      pending = 0;
+      await apply(version);
+    }
+    redraw();
+  });
+
+  const off = onArtifactLive(async (event) => {
+    // A band whose artifact the reader has navigated away from stops
+    // listening on the next event of any kind, not only its own.
+    if (!band.isConnected) {
+      off();
+      return;
+    }
+    if (!event || event.artifact_id !== id) return;
+    const was = band.dataset.state;
+    await refresh();
+    // The event names the version that moved, so a seal (which clears the
+    // pointer) still renders the settled bytes.
+    const at = event.version || version;
+    if (following) {
+      pending = 0;
+      await apply(at);
+    } else {
+      pending += 1;
+    }
+    // Sealing is the end of the live session. Rebuild the screen once so the
+    // meta line, the picker and the band all settle on the sealed version
+    // rather than on the numbers read when the page opened.
+    if (was && was !== "sealed" && band.dataset.state === "sealed") {
+      render();
+      return;
+    }
+    redraw();
+  });
+  band._unwatch = off;
+
+  refresh().then(redraw);
 }
 
 export async function artifactsScreen(selected, gen) {
@@ -148,6 +261,7 @@ export async function artifactStage(id, projectId) {
     commentsCount,
     version: newest,
     versions,
+    kind: current.kind,
     protected: Boolean(current.protected),
   };
 }
@@ -165,6 +279,12 @@ export function wireArtifactStage(root, id, info) {
       frame.style.height = `${Math.max(Math.round(h), 200)}px`;
     };
     window.addEventListener("message", onHeight);
+    const doc = root.querySelector(".hub-viewer-doc");
+    if (doc && info) {
+      const band = liveBandElement();
+      doc.prepend(band);
+      wireLiveBand(id, info.kind, info.protected, frame, band);
+    }
   }
   if (info) startComments(id, info.version, info.protected);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
@@ -421,6 +541,10 @@ export function viewerBack() {
 
 const viewer = { id: null, version: null, kind: null, raw: false, project: null, pass: "" };
 
+// The version an agent is holding live, when the band has read one. The version
+// sheet labels that row so a reader knows the text is still moving.
+let liveVersion = null;
+
 // The framed page cannot remember a theme (a sandboxed frame has no store),
 // so the viewer names the one it wants in the address. Relative to this
 // document (the app shell), not the origin root, so it still lands on the
@@ -632,8 +756,9 @@ function buildVersionSheet(id, versions, shown, projectId) {
 
     const age = v.created_at ? relative(Date.parse(v.created_at)) : "";
     const actor = v.actor || "agent";
-    const primaryText = isCurrent ? "Current" : actor;
-    const secondaryText = isCurrent ? `${actor} · ${age}` : age;
+    const isLive = v.version === liveVersion;
+    const primaryText = isLive ? "Being written" : isCurrent ? "Current" : actor;
+    const secondaryText = isCurrent || isLive ? `${actor} · ${age}` : age;
 
     row.innerHTML = `
       <span class="hub-version-num mono">v${v.version}</span>
@@ -1258,6 +1383,10 @@ export async function viewerRoute(params, gen, path) {
   frame.setAttribute("data-theme", opened);
   frame.src = frameSrc(id, viewer.version, opened, viewer.pass);
   docCol.appendChild(frame);
+
+  const band = liveBandElement();
+  docCol.prepend(band);
+  wireLiveBand(id, viewer.kind, Boolean(current.protected), frame, band);
 
   content.appendChild(docCol);
   stageCol.append(bar, metaWrap, content);

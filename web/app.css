@@ -8133,3 +8133,47 @@ dialog.dialog-project-delete {
     }
   }
 }
+
+/* component: artifact live band */
+.hub-live-band {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 16px;
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-12);
+}
+.hub-live-band[hidden] { display: none; }
+.hub-live-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--ink-3);
+}
+.hub-live-band[data-state="live"] .hub-live-dot { background: var(--accent); }
+.hub-live-band[data-state="idle"] .hub-live-dot { background: var(--action); }
+.hub-live-label { color: var(--ink-2); }
+.hub-live-follow {
+  position: relative;
+  margin-left: auto;
+  min-height: 24px;
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--t-12);
+}
+/* The drawn control is small, so under a coarse pointer the hit area grows to
+   the 44px target the way a chip's does. */
+@media (pointer: coarse) {
+  .hub-live-follow::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -8px;
+    right: -8px;
+    transform: translateY(-50%);
+    height: 44px;
+  }
+}
