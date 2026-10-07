@@ -38,3 +38,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   the tool result, not by polling
 * [0025](0025-live-artifact-versions.md) - A live artifact version is a pointer,
   not a draft
+* [0026](0026-contentless-notify-target.md) - A contentless nudge to an
+  operator-configured target (refines 0016)
