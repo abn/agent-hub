@@ -48,7 +48,7 @@ brain_promote(from_path, to_path, project_id?, type?, title?, description?, tags
 session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?)
-question_post(project_id, subject, body?, context?, idempotency_key?)
+question_post(project_id, subject, body?, context?, options?, idempotency_key?)
 answer_post(question_id, body, idempotency_key?)
 inbox_read(status?, project_id?, limit?, since?, actor?)
 inbox_wait(wait_seconds?, project_id?, since?)

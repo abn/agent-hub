@@ -96,7 +96,7 @@ handing it the document.
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from the caller's own durable server-side cursor for the project and advances that cursor to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
-| `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. |
+| `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
 | `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
@@ -171,6 +171,18 @@ both defaulting to 0 when there are none.
 same value: a question roots its own thread and is its own event. `answer_post`
 takes that value as `question_id`. An inbox item exposes the same id as its
 `event_id`, so a client can answer from either the post response or a read.
+
+`question_post` takes an optional `options`: 2 to 6 suggested answers, each
+one line of at most 80 characters once trimmed, none blank and no two the
+same. A list outside those bounds is refused whole with `invalid_argument` and
+posts nothing; the hub never drops or cuts an option. The options are stored
+trimmed in the question's payload as `payload.options`, so `inbox_read`,
+`inbox_wait`, `feed_read` and the inbox routes return them wherever the
+question is read. A picked option arrives as an ordinary answer whose `body`
+is the option's text, exactly as offered, and the human may write their own
+reply instead, so an agent reads `answer.body` as it always has and compares it
+with its options when it wants to branch. The answer records no separate
+marker for a pick.
 
 The brain tools reach two stores through one `store` argument. `"session"` is
 a session's own brain, the working state that is pruned with the session.

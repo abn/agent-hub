@@ -356,3 +356,131 @@ fn an_agent_reads_the_outcome_of_its_approval_and_the_note_left_with_it() {
     assert_eq!(answer["payload"]["decision"], "declined");
     assert_eq!(answer["payload"]["note"], "wait for the backup");
 }
+
+#[test]
+fn question_options_round_trip_into_inbox_read_and_the_feed() {
+    let data_dir = TempDir::new("options");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = spawn(data_dir.path(), &[]);
+    server.initialize();
+
+    let asked = server.call_tool(
+        "question_post",
+        json!({
+            "project_id": "proj",
+            "subject": "Keep the old export format?",
+            "options": ["  Keep it ", "Drop it", "Ask me next week"],
+        }),
+    );
+    let question_id = structured(&asked)["question_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a question with options is admitted: {asked}"))
+        .to_string();
+
+    let action = server.call_tool("inbox_read", json!({"status": "action"}));
+    let item = item_with_id(items(&action), &question_id);
+    assert_eq!(
+        item["payload"]["options"],
+        json!(["Keep it", "Drop it", "Ask me next week"]),
+        "the options are stored trimmed and in the order given"
+    );
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let event = structured(&feed)["events"]
+        .as_array()
+        .expect("feed_read returns events")
+        .iter()
+        .find(|event| event["id"] == question_id.as_str())
+        .unwrap_or_else(|| panic!("the feed carries the question: {feed}"))
+        .clone();
+    assert_eq!(
+        event["payload"]["options"], item["payload"]["options"],
+        "the feed event carries the same options"
+    );
+
+    // A pick is an ordinary answer whose body is the option's text.
+    let answered = server.call_tool(
+        "answer_post",
+        json!({"question_id": question_id, "body": "Drop it"}),
+    );
+    structured(&answered)["event_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("answer_post accepts an option's text: {answered}"));
+    let resolved = server.call_tool("inbox_read", json!({"status": "resolved"}));
+    let item = item_with_id(items(&resolved), &question_id);
+    assert_eq!(item["answer"]["body"], "Drop it");
+    assert_eq!(
+        item["payload"]["options"],
+        json!(["Keep it", "Drop it", "Ask me next week"]),
+        "a resolved question still says what it offered"
+    );
+
+    let plain = server.call_tool(
+        "question_post",
+        json!({"project_id": "proj", "subject": "Anything else?", "body": "Say so."}),
+    );
+    let plain_id = structured(&plain)["question_id"]
+        .as_str()
+        .expect("a question without options is admitted")
+        .to_string();
+    let action = server.call_tool("inbox_read", json!({"status": "action"}));
+    let item = item_with_id(items(&action), &plain_id);
+    assert_eq!(
+        item["payload"],
+        json!({"body": "Say so."}),
+        "a question without options carries the payload it always did"
+    );
+}
+
+#[test]
+fn malformed_question_options_are_refused_and_post_nothing() {
+    let data_dir = TempDir::new("options-refused");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = spawn(data_dir.path(), &[]);
+    server.initialize();
+
+    let long = "x".repeat(81);
+    let refused: [(Value, &str); 9] = [
+        (json!([]), "an empty list"),
+        (json!(["Yes"]), "a single option"),
+        (json!(["a", "b", "c", "d", "e", "f", "g"]), "seven options"),
+        (json!(["Yes", "   "]), "a blank option"),
+        (json!(["Yes", " Yes"]), "a repeated option"),
+        (json!(["Yes", long]), "an option over 80 characters"),
+        (json!(["Yes", "No\nreally"]), "an option over two lines"),
+        (
+            json!(["Yes", "No\u{2028}really"]),
+            "an option split by a line separator",
+        ),
+        (
+            json!(["Yes", "No\u{2029}really"]),
+            "an option split by a paragraph separator",
+        ),
+    ];
+    for (options, what) in refused {
+        let response = server.call_tool(
+            "question_post",
+            json!({"project_id": "proj", "subject": "Ship?", "options": options}),
+        );
+        assert_eq!(
+            error_code(&response),
+            "invalid_argument",
+            "{what} is refused: {response}"
+        );
+    }
+    let action = server.call_tool("inbox_read", json!({"status": "action"}));
+    assert_eq!(items(&action).len(), 0, "a refused list posts no question");
+
+    let widest = "y".repeat(80);
+    let admitted = server.call_tool(
+        "question_post",
+        json!({
+            "project_id": "proj",
+            "subject": "Ship?",
+            "options": ["a", "b", "c", "d", "e", widest],
+        }),
+    );
+    structured(&admitted)["question_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("six options of up to 80 characters are admitted: {admitted}"));
+}

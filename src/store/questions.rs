@@ -20,6 +20,9 @@ pub struct NewQuestion<'a> {
     pub body: Option<&'a str>,
     /// Optional context for the reader.
     pub context: Option<&'a str>,
+    /// Optional suggested answers the human can pick with one tap. Checked by
+    /// [`crate::limits::check_question_options`] and stored trimmed.
+    pub options: Option<&'a [String]>,
     /// Optional idempotency key.
     pub idempotency_key: Option<&'a str>,
     /// The session the asker had open, when it had one.
@@ -43,9 +46,15 @@ pub async fn post(
         subject,
         body,
         context,
+        options,
         idempotency_key,
         session_id,
     } = question;
+
+    // Before anything is written, so a refused list posts nothing.
+    let options = options
+        .map(crate::limits::check_question_options)
+        .transpose()?;
 
     let mut payload = serde_json::Map::new();
     if let Some(body) = body {
@@ -59,6 +68,9 @@ pub async fn post(
             "context".to_string(),
             serde_json::Value::String(context.to_string()),
         );
+    }
+    if let Some(options) = options {
+        payload.insert("options".to_string(), serde_json::json!(options));
     }
     let id = events::append_action(
         db,

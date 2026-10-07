@@ -6,7 +6,7 @@
 // The password the gate opens with and the plaintext marker it must show are
 // the harness's fixture, read from the descriptor rather than repeated here.
 
-import { api, expect, gateOf, goto, oneOffEvent, settle, test } from "./invariants.mjs";
+import { api, expect, gateOf, goto, oneOffEvent, oneOffQuestion, settle, test } from "./invariants.mjs";
 
 const storedPassword = (page, project) =>
   page.evaluate((value) => {
@@ -213,6 +213,88 @@ test.describe("one decision", () => {
     );
     expect(said, "an approval that went through was reported as a failure").not.toContain("Nothing changed");
     expect(said, "an approval that went through was reported as already done").not.toContain("already");
+  });
+
+  // A question that suggests answers offers each as a control on its card,
+  // beside the composer, and the keyboard reaches them.
+  test("a seeded question offers its quick answers on the card", async ({ hub, page }) => {
+    await goto(page, `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "Inbox");
+    const group = page.getByRole("group", { name: "Quick answers" });
+    await expect(group).toBeVisible();
+    for (const option of hub.fixture.questionOptions) {
+      const pick = group.getByRole("button", { name: option, exact: true });
+      await expect(pick).toBeVisible();
+      const box = await pick.boundingBox();
+      expect(box.height, `the ${option} answer is under the 44px target`).toBeGreaterThanOrEqual(44);
+    }
+    await expect(page.getByRole("textbox", { name: "Your answer" }), "quick answers took the composer's place").toBeVisible();
+    const first = group.getByRole("button", { name: hub.fixture.questionOptions[0], exact: true });
+    await first.focus();
+    await expect(first).toBeFocused();
+  });
+
+  // A quick answer is an answer: one press sends the option's text once, a
+  // second press while it is on its way sends nothing, and the question is
+  // answered with exactly those words.
+  test("a quick answer answers the question once", async ({ hub, page }) => {
+    const options = ["Keep it", "Drop it"];
+    const id = await oneOffQuestion(hub, hub.projectId, "quick answer check", { options });
+    expect(id, "the quick answer question never reached the inbox").toBeTruthy();
+    let sent = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().endsWith(`/api/v1/questions/${id}/answer`)) sent += 1;
+    });
+    let release;
+    const gate = new Promise((open) => {
+      release = open;
+    });
+    const answerRoute = new RegExp(`/api/v1/questions/${id}/answer`);
+    await page.route(answerRoute, async (route) => {
+      if (route.request().method() === "POST") await gate;
+      await route.continue().catch(() => {});
+    });
+    try {
+      await goto(page, `#/inbox?open=${encodeURIComponent(id)}`, "Inbox");
+      const group = page.getByRole("group", { name: "Quick answers" });
+      const drop = group.getByRole("button", { name: "Drop it", exact: true });
+      await drop.click();
+      // Held at the network: both options are pressed again while it waits.
+      await expect(drop).toBeDisabled();
+      await drop.dispatchEvent("click");
+      await group.getByRole("button", { name: "Keep it", exact: true }).dispatchEvent("click");
+      release();
+      await expect(page.locator(`main .inbox-detail`)).toHaveCount(0, { timeout: 8000 });
+    } finally {
+      release();
+      await page.unroute(answerRoute).catch(() => {});
+    }
+    expect(sent, "two presses sent more than one answer").toBe(1);
+    const resolved = (await api(hub, "GET", "/api/v1/inbox?status=resolved&limit=500")).json();
+    const item = resolved.items.find((entry) => entry.event_id === id);
+    expect(item && item.answer && item.answer.body, "the answer is not the option's text").toBe("Drop it");
+    const said = await page.evaluate(() =>
+      [...document.querySelectorAll(".toast-text")].map((node) => node.textContent).join(" | "),
+    );
+    expect(said).toContain("Answer sent");
+  });
+
+  // A question answered elsewhere while its card is open refuses the pick in
+  // the composer, as it refuses a typed reply, and nothing is sent twice.
+  test("a quick answer on a question already answered says nothing was sent", async ({ hub, page, watch }) => {
+    const id = await oneOffQuestion(hub, hub.projectId, "late quick answer check", { options: ["Yes", "No"] });
+    expect(id, "the late quick answer question never reached the inbox").toBeTruthy();
+    // The refusal is what this check drives, so the hub's 409 is not a defect.
+    watch.ignore(`/api/v1/questions/${id}/answer`);
+    await goto(page, `#/inbox?open=${encodeURIComponent(id)}`, "Inbox");
+    const yes = page.getByRole("group", { name: "Quick answers" }).getByRole("button", { name: "Yes", exact: true });
+    await expect(yes).toBeVisible();
+    await api(hub, "POST", `/api/v1/questions/${id}/answer`, { body: "No" });
+    await yes.click();
+    await expect(page.locator(".inbox-detail .composer-error")).toContainText("Nothing was sent");
+    await expect(yes).toBeEnabled();
+    const resolved = (await api(hub, "GET", "/api/v1/inbox?status=resolved&limit=500")).json();
+    const item = resolved.items.find((entry) => entry.event_id === id);
+    expect(item.answer.body, "the late pick replaced the first answer").toBe("No");
   });
 
   // A toast does not take the keyboard off a reader who is mid-sentence. Undo

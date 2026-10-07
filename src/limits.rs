@@ -62,6 +62,20 @@ pub const HANDOFF_CHARS_MAX: usize = 4096;
 /// reply the agent can thread.
 pub const DECISION_NOTE_CHARS_MAX: usize = 2000;
 
+/// Fewest and most suggested answers a question may offer.
+///
+/// One suggestion is not a choice, and past a handful the human is reading a
+/// form rather than tapping an answer; a longer menu belongs in the body.
+pub const QUESTION_OPTIONS_MIN: usize = 2;
+/// Most suggested answers a question may offer.
+pub const QUESTION_OPTIONS_MAX: usize = 6;
+
+/// Maximum characters of one suggested answer.
+///
+/// An option is a button label the human taps on a phone, so it is a phrase,
+/// not a paragraph.
+pub const QUESTION_OPTION_CHARS_MAX: usize = 80;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
@@ -291,6 +305,51 @@ pub fn check_decision_note(note: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// The suggested answers of a question, trimmed, or the reason they are
+/// refused.
+///
+/// Between [`QUESTION_OPTIONS_MIN`] and [`QUESTION_OPTIONS_MAX`] entries, each
+/// one line of at most [`QUESTION_OPTION_CHARS_MAX`] characters once trimmed,
+/// none blank and no two the same. Nothing is dropped or cut: a list the hub
+/// would have to edit is refused whole, so the human is never offered an
+/// answer the agent did not write.
+pub fn check_question_options(options: &[String]) -> Result<Vec<String>> {
+    if options.len() < QUESTION_OPTIONS_MIN || options.len() > QUESTION_OPTIONS_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "options must hold {QUESTION_OPTIONS_MIN} to {QUESTION_OPTIONS_MAX} entries, got {}",
+            options.len()
+        )));
+    }
+    let mut trimmed: Vec<String> = Vec::with_capacity(options.len());
+    for (index, option) in options.iter().enumerate() {
+        let option = option.trim();
+        if option.is_empty() {
+            return Err(Error::InvalidArgument(format!("options[{index}] is blank")));
+        }
+        if option
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+        {
+            return Err(Error::InvalidArgument(format!(
+                "options[{index}] must be one line of text"
+            )));
+        }
+        let chars = option.chars().count();
+        if chars > QUESTION_OPTION_CHARS_MAX {
+            return Err(Error::InvalidArgument(format!(
+                "options[{index}] is {chars} characters; the limit is {QUESTION_OPTION_CHARS_MAX}"
+            )));
+        }
+        if trimmed.iter().any(|seen| seen == option) {
+            return Err(Error::InvalidArgument(format!(
+                "options[{index}] repeats \"{option}\""
+            )));
+        }
+        trimmed.push(option.to_string());
+    }
+    Ok(trimmed)
 }
 
 /// Reject an artifact blob over the cap.

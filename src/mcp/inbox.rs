@@ -25,7 +25,10 @@ use super::{HubServer, to_error_data};
 
 #[tool_router(router = inbox_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Post a question to the human and open its thread.")]
+    #[tool(description = "Post a question to the human and open its thread. \
+                       Optional `options` offer 2 to 6 suggested answers the \
+                       human can pick with one tap; the answer's body is then \
+                       the picked option's text, or the human's own words.")]
     async fn question_post(
         &self,
         context: RequestContext<RoleServer>,
@@ -51,6 +54,7 @@ impl HubServer {
                 subject: &params.subject,
                 body: params.body.as_deref(),
                 context: params.context.as_deref(),
+                options: params.options.as_deref(),
                 idempotency_key: params.idempotency_key.as_deref(),
                 session_id: session_id.as_deref(),
             },
@@ -265,6 +269,12 @@ struct QuestionPostParams {
     body: Option<String>,
     #[serde(default)]
     context: Option<String>,
+    /// Suggested answers the human can pick with one tap: 2 to 6 entries, each
+    /// one line of at most 80 characters, none blank and no two the same. A
+    /// pick arrives as an ordinary answer whose body is the option's text, and
+    /// the human can still write their own reply instead.
+    #[serde(default)]
+    options: Option<Vec<String>>,
     /// Scoped per project and per operation: a retry with the same value
     /// returns the first question instead of posting a duplicate.
     #[serde(default)]

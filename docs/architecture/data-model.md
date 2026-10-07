@@ -57,6 +57,8 @@ payload, so structured detail rides along without a second schema. The event
 kind is a closed set of the six design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`) plus `system`;
 sub-actions such as an artifact publish or update ride in the payload.
+A question's payload carries its optional `body`, `context` and suggested
+answer `options`, so a question needs no table of its own.
 
 An event also names the session it was written during, indexed, so a session
 detail screen counts what the session produced without reading a payload. The

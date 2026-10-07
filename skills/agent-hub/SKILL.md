@@ -77,7 +77,8 @@ summary is often the only line they see.
 
 - Put the ask or the fact first. No preamble, no restating the request.
 - The summary must stand alone. Detail goes in `body`.
-- A question's subject ends in a question mark; the choice goes in the body.
+- A question's subject ends in a question mark; the choice goes in the body,
+  and a short set of likely answers goes in `options` for one-tap replies.
 - An approval's summary says what happens if approved.
 - Plain words, one idea per sentence, no filler, no emoji and no em-dashes.
 

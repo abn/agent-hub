@@ -86,13 +86,38 @@ export const glyph = (kind) =>
 
 export const when = (ts) => timeHTML(ts);
 
+// The answers a question's asker suggested, as the hub stored them. Anything
+// that is not a list of strings offers nothing, so a reader is never shown a
+// control that sends a value the agent did not write.
+export function questionOptions(payload) {
+  const options = payload && payload.options;
+  if (!Array.isArray(options)) return [];
+  return options.filter((option) => typeof option === "string" && option.trim() !== "");
+}
+
+// The options carried on a Reply control, for the composer it opens. The
+// attribute is absent when there is nothing to offer.
+export const optionsAttr = (payload) => {
+  const options = questionOptions(payload);
+  return options.length ? ` data-options="${esc(JSON.stringify(options))}"` : "";
+};
+
+export function optionsFrom(attr) {
+  if (!attr) return [];
+  try {
+    return questionOptions({ options: JSON.parse(attr) });
+  } catch {
+    return [];
+  }
+}
+
 // The action a caller can take on an event. A question is answered; an
 // approval is a decision. Both are the human's to act on, so the row carries
 // the verb rather than only a label.
 export function actionFor(event) {
   const id = esc(event.event_id || event.id);
   if (event.kind === "question") {
-    return `<button type="button" class="action" data-action="answer" data-id="${id}">Reply</button>`;
+    return `<button type="button" class="action" data-action="answer" data-id="${id}"${optionsAttr(event.payload)}>Reply</button>`;
   }
   if (event.kind === "approval") {
     return `<button type="button" class="action" data-action="approve" data-id="${id}" data-summary="${esc(event.summary)}">Approve</button>`;

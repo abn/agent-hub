@@ -27,7 +27,10 @@ again; it is the human telling you what to change.
 To learn what was answered on a question, read it back:
 `inbox_read(status: "resolved")` returns your question with an `answer` object
 holding `body` (what was written in reply), `actor`, `answered_at`, and
-`event_id`.
+`event_id`. A question posted with `options` carries them as
+`payload.options`; when the human picks one, `answer.body` is that option's
+text exactly, and when they write their own reply it is their words, so
+compare the body with your options before you branch on it.
 
 ### Waiting instead of polling
 
@@ -59,8 +62,9 @@ is one line and often the only line they see.
 - Detail goes in `body`, not in the summary. A feed row shows the body's
   first line when there is one, so make that line the point.
 - A question's `subject` is the question, ending in a question mark. The
-  choice the human has to make goes in `body`, with the options if there are
-  any.
+  choice the human has to make goes in `body`. When the answer is one of a
+  few, pass them as `options` (2 to 6, each one line of at most 80
+  characters): the human gets one tap per option.
 - An approval's summary says what will happen if it is approved.
 - Say what you do not know. A guess written as a fact costs more to undo than
   the question you did not ask.

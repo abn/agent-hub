@@ -57,6 +57,8 @@ APPROVAL_SUMMARY = "Deploy the release to production"
 # by button each have one of their own to decide.
 SECOND_APPROVAL_SUMMARY = "Rotate the signing key on the build host"
 QUESTION_SUBJECT = "Ship the release?"
+# The answers the open question suggests, so its card offers quick answers.
+QUESTION_OPTIONS = ["Ship it", "Hold until Monday"]
 # A second question, seeded already answered, so the feed carries an answer
 # beside the other kinds. The open question above is left for the checks that
 # act on one.
@@ -614,7 +616,11 @@ def seed(port: int) -> dict[str, str]:
         ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
         ("approval-two", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": SECOND_APPROVAL_SUMMARY}),
-        ("question", "question_post", {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT}),
+        (
+            "question",
+            "question_post",
+            {"project_id": PROJECT_ID, "subject": QUESTION_SUBJECT, "options": QUESTION_OPTIONS},
+        ),
         # Published before the plain one so the gallery, newest first, still
         # opens the plain artifact for the checks that click the first card.
         (

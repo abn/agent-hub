@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { SUBJECT_MAX, formatEventSummary, subjectAndMessage } from "../../web/feed.mjs";
 import { displayTitle, terms } from "../../web/search.mjs";
 import { anchorQuote } from "../../web/comments.mjs";
+import { optionsAttr, optionsFrom, questionOptions } from "../../web/dom.mjs";
+import { composer } from "../../web/composer.mjs";
 
 // The report a finished event carries, the one the browser invariant seeded to
 // hold the subject and message split. Both stages read it: the inbox detail
@@ -218,5 +220,76 @@ describe("anchorQuote", () => {
     const capped = anchorQuote("é".repeat(2000));
     expect(bytes(capped)).toBeLessThanOrEqual(1500);
     expect(capped.length).toBeLessThan(2000);
+  });
+});
+
+describe("questionOptions", () => {
+  it("reads the options a question carries, in order", () => {
+    expect(questionOptions({ options: ["Keep it", "Drop it"] })).toEqual(["Keep it", "Drop it"]);
+  });
+
+  it("offers nothing for a question without options or with a malformed list", () => {
+    expect(questionOptions(null)).toEqual([]);
+    expect(questionOptions({ body: "plain" })).toEqual([]);
+    expect(questionOptions({ options: "Yes" })).toEqual([]);
+    expect(questionOptions({ options: [1, null, "  ", "Yes"] })).toEqual(["Yes"]);
+  });
+
+  it("carries the options through a Reply control's attribute and back", () => {
+    const options = ['Say "yes"', "<b>no</b>"];
+    const holder = document.createElement("div");
+    holder.innerHTML = `<button${optionsAttr({ options })}>Reply</button>`;
+    expect(optionsFrom(holder.querySelector("button").dataset.options)).toEqual(options);
+    expect(optionsAttr({})).toBe("");
+    expect(optionsFrom("not json")).toEqual([]);
+  });
+});
+
+describe("composer quick answers", () => {
+  const picks = (element) => [...element.querySelectorAll(".composer-options button")];
+
+  it("draws no quick answers when none are offered", () => {
+    const { element } = composer({ label: "Your answer", send: async () => {} });
+    expect(element.querySelector(".composer-options")).toBeNull();
+  });
+
+  it("sends a picked option's text once, however often it is pressed", async () => {
+    const sent = [];
+    let finish;
+    const { element } = composer({
+      label: "Your answer",
+      options: ["Keep it", "Drop it"],
+      send: (body) => {
+        sent.push(body);
+        return new Promise((resolve) => (finish = resolve));
+      },
+    });
+    const [keep, drop] = picks(element);
+    expect(element.querySelector('[role="group"]').getAttribute("aria-label")).toBe("Quick answers");
+    drop.click();
+    drop.click();
+    keep.click();
+    element.querySelector(".composer-field").value = "typed instead";
+    element.dispatchEvent(new Event("submit", { cancelable: true }));
+    expect(sent).toEqual(["Drop it"]);
+    expect(picks(element).every((pick) => pick.disabled)).toBe(true);
+    finish();
+  });
+
+  it("says why a refused pick sent nothing and offers the options again", async () => {
+    const { element } = composer({
+      label: "Your answer",
+      options: ["Keep it", "Drop it"],
+      send: async () => {
+        throw new Error("question was already answered");
+      },
+    });
+    const [keep] = picks(element);
+    keep.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const error = element.querySelector(".composer-error");
+    expect(error.hidden).toBe(false);
+    expect(error.textContent).toBe("Nothing was sent: question was already answered");
+    expect(picks(element).some((pick) => pick.disabled)).toBe(false);
   });
 });

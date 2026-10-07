@@ -6,6 +6,26 @@ software release notes and the repository changelog.
 
 ## 2026-10-07
 
+### A question can suggest answers the human picks with one tap
+
+* **Change**: `question_post` takes an optional `options`, 2 to 6 suggested
+  answers of at most 80 characters each, trimmed, one line, none blank and no
+  two the same. A list outside those bounds is refused whole with
+  `invalid_argument`. The options ride in the question's payload, so every read
+  of the question returns them as `payload.options`. A pick is an ordinary
+  answer whose body is the option's text.
+* **Change**: the inbox shows a question's options as quick answers above its
+  composer, on the open card and under a row's Reply. One press answers, with
+  no confirmation, and the free-text composer stays.
+* **Update**: [Agent surface](architecture/agent-surface.md) describes
+  `options` and how a pick reads back; [Human
+  surface](architecture/human-surface.md) replaces "not yet shipped" for quick
+  answers with the behaviour; [Data model](architecture/data-model.md) names
+  the question payload's fields. The `agent-hub` skill tells an agent when to
+  pass `options` and to compare the answer body with them.
+* **Update**: the open inbox item screenshots (`inbox-item`, both widths and
+  themes) are recaptured, since the seeded open question now suggests answers.
+
 ### An artifact version can be held live while an agent writes it
 
 * **Change**: a version can be held live while an agent writes it. The MCP tool

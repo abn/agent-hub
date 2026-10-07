@@ -26,6 +26,7 @@ fn question(subject: &str) -> NewQuestion<'_> {
         subject,
         body: None,
         context: None,
+        options: None,
         idempotency_key: None,
         session_id: None,
     }
@@ -38,6 +39,7 @@ fn question_by<'a>(actor: &'a str, subject: &'a str) -> NewQuestion<'a> {
         subject,
         body: None,
         context: None,
+        options: None,
         idempotency_key: None,
         session_id: None,
     }

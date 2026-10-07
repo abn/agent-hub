@@ -244,10 +244,11 @@ export async function oneOffEvent(hub, project, kind, summary) {
   return (feed.events.find((event) => event.summary === summary) || {}).id || "";
 }
 
-// One open question, and its inbox event id.
-export async function oneOffQuestion(hub, project, subject) {
+// One open question, and its inbox event id. `fields` carries what else the
+// question is posted with, such as its suggested answers.
+export async function oneOffQuestion(hub, project, subject, fields = {}) {
   const session = await newSession(hub);
-  await toolCall(hub, session, "question_post", { project_id: project, subject });
+  await toolCall(hub, session, "question_post", { ...fields, project_id: project, subject });
   for (const status of ["action", "waiting"]) {
     const held = (await api(hub, "GET", `/api/v1/inbox?status=${status}&limit=500`)).json();
     const item = held.items.find((entry) => entry.summary === subject);
