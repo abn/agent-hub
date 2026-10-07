@@ -45,11 +45,31 @@ function showWaitingNotification(count) {
     .catch(() => {});
 }
 
-// Read the server's freshness stream. It carries no event data; each tick just
-// refetches the badge. A dropped stream reconnects, and the slow poll covers
-// any gap. The loop also waits for a token, so entering one in Settings starts
-// the stream without a reload.
+// Read the server's freshness stream. A plain tick refetches the badge; an
+// event naming one artifact's live version is handed to whoever is watching
+// that artifact, so a live preview refetches without a poll. A dropped stream
+// reconnects, and the slow poll covers any gap. The loop also waits for a
+// token, so entering one in Settings starts the stream without a reload.
 let streamRunning = false;
+
+// Watchers of a live artifact, by artifact id. An entry is added when a viewer
+// opens and removed when it closes.
+const liveWatchers = new Set();
+
+/** Subscribe to live writes. Returns an unsubscribe function. */
+export function onArtifactLive(watcher) {
+  liveWatchers.add(watcher);
+  return () => liveWatchers.delete(watcher);
+}
+
+function dispatchLive(payload) {
+  for (const watcher of liveWatchers) {
+    try {
+      watcher(payload);
+    } catch {}
+  }
+}
+
 export async function startStream() {
   if (streamRunning) return;
   if (!prefs.token) {
@@ -74,9 +94,22 @@ export async function startStream() {
       buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split("\n\n");
       buffer = frames.pop();
-      if (frames.some((frame) => frame.includes("event: tick"))) refreshBadge();
+      for (const frame of frames) handleFrame(frame);
     }
   } catch {}
   streamRunning = false;
   setTimeout(startStream, 15000);
+}
+
+/** One SSE frame: a live write goes to its watchers, anything else is a tick. */
+function handleFrame(frame) {
+  if (frame.includes("event: artifact-live")) {
+    const line = frame.split("\n").find((entry) => entry.startsWith("data:"));
+    if (!line) return;
+    try {
+      dispatchLive(JSON.parse(line.slice(5).trim()));
+    } catch {}
+    return;
+  }
+  if (frame.includes("event: tick")) refreshBadge();
 }

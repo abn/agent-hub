@@ -280,6 +280,24 @@ function renderForTheme(state, theme) {
   }
 }
 
+// A live write pushed by the app: re-render the document from the bytes it just
+// read. Markdown renders here from the source; HTML re-reads the frame route at
+// the live version, which is the same address with that version named, so the
+// authored page's own scripts run the way they do on a first load.
+function applyLive(state, data) {
+  const { frame, meta } = state;
+  if (!frame || !meta) return;
+  if (meta.kind === "markdown" && typeof data.content === "string") {
+    showMarkdown(frame, meta, data.content, state.theme);
+    reveal(frame);
+    return;
+  }
+  if (meta.kind === "html") {
+    const target = frameUrl({ ...meta, version: data.version }, state.theme);
+    frame.src = `${target}&_=${encodeURIComponent(String(data.version))}`;
+  }
+}
+
 // A locked artifact has nothing to put in the frame, and the frame is 60vh
 // tall, so leaving it in flow gave the gate a screenful of empty space below
 // it. On a phone that made the short gate scroll, and scrolling slid the
@@ -420,6 +438,18 @@ function init() {
   // the frame element's own messages are honored, and the height is
   // clamped to a sane band.
   window.addEventListener("message", (event) => {
+    // A live write aimed at this page, from the app embedding it. It is
+    // handled here rather than forwarded: the frame loader has no way to
+    // rebuild the document, and this page is the one that renders it.
+    if (
+      event.source === window.parent &&
+      event.data &&
+      typeof event.data === "object" &&
+      event.data.type === "hub:set-live"
+    ) {
+      applyLive(state, event.data);
+      return;
+    }
     if (event.data && typeof event.data === "object" && event.data.type && event.data.type.startsWith("hub:")) {
       if (event.source === state.frame?.contentWindow) {
         if (window.parent && window.parent !== window) {
