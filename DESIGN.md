@@ -271,8 +271,9 @@ structure, not to line length.
   While filtering, the group headers give way to one mono count line.
 - **Composer.** A rounded container, growing to a 120px maximum height, a 1px
   strong border, a placeholder naming the version it attaches to. The send
-  control is a 30px circle inside the field, 36px on a coarse pointer, inset
-  5px from the right and bottom. Enter posts, Shift+Enter breaks the line.
+  control is a 30px circle inside the field, 36px on a coarse pointer, centred
+  vertically and inset 8px from the right. Enter posts, Shift+Enter breaks the
+  line.
 - **Copy control.** A control whose whole job is to put a string on the
   clipboard is a 28px icon button, 36px on a coarse pointer, sitting on the row
   that owns the string. Never a text button, never floating over content.

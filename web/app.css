@@ -5270,18 +5270,17 @@ a.session-back {
   border-radius: var(--r-2);
   background: var(--bg);
   padding: 4px;
-  /* The send control is a 44px touch target and it lives inside this box, so
-     the box cannot be shorter than the target plus its inset. */
-  min-height: 52px;
   box-sizing: border-box;
 }
 
 .hub-composer-field textarea {
   flex: 1;
+  /* The field's resting height is this floor plus the field's own inset, and it
+     has to clear the coarse send control's 44px hit area. */
   min-height: 42px;
   max-height: 132px;
-  /* Room for the send control, which overlaps this box. */
-  padding: 10px 52px 10px 10px;
+  /* Room for the send control, which is inset into the right of this box. */
+  padding: 10px 48px 10px 10px;
   border: 0;
   background: none;
   color: var(--ink);
@@ -5324,13 +5323,25 @@ a.session-back {
   white-space: nowrap;
 }
 
+/* The send control is the design's 30px circle inside the field, 36px under a
+   coarse pointer, centred vertically and inset 8px from the right. The global
+   button floor is 44px, so the drawn circle overrides it and the area that
+   answers to a tap grows back to 44 under a coarse pointer, the two-step any
+   control drawn under the floor uses to reach it. */
 .hub-composer-send,
 .hub-sheet-send {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 44px;
-  height: 44px;
+  right: 8px;
+  /* Top and bottom pinned with auto margins centres the circle in the field
+     however tall the field has grown, without a transform the active state
+     would clobber. */
+  top: 0;
+  bottom: 0;
+  margin-block: auto;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
   display: grid;
   place-items: center;
   border: none;
@@ -5339,6 +5350,21 @@ a.session-back {
   color: var(--ink-inverse);
   cursor: pointer;
   flex: none;
+}
+
+@media (pointer: coarse) {
+  .hub-composer-send,
+  .hub-sheet-send {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+  .hub-composer-send::after,
+  .hub-sheet-send::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
 }
 
 .hub-composer-send:disabled,

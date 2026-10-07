@@ -54,6 +54,66 @@ test.describe("the artifact viewer's actions", () => {
     await expect(page.getByRole("heading", { name: "Comments" })).toBeHidden();
     await expect(sheet.getByRole("button", { name: /^Close/ })).toHaveCount(1);
   });
+
+  test("the send control is the design's circle inside the field", async ({ hub, page }) => {
+    // DESIGN.md: "The send control is a 30px circle inside the field ...
+    // centred vertically and inset 8px from the right." The global button floor
+    // is 44px and a control that inherits it fills the field, which is what
+    // this holds.
+    await openArtifact(page, hub);
+    await page.getByRole("button", { name: "Start a thread" }).click();
+    const sheet = page.getByRole("dialog");
+    await expect(sheet).toBeVisible();
+    const send = sheet.getByRole("button", { name: "Post" });
+    const field = sheet.locator(".hub-composer-field").first();
+    const sendBox = await send.boundingBox();
+    const fieldBox = await field.boundingBox();
+    expect(
+      Math.abs(sendBox.width - sendBox.height),
+      "the send control is not a circle",
+    ).toBeLessThanOrEqual(1);
+    expect(sendBox.width, "the send control is not the design's 30px circle").toBeCloseTo(30, 0);
+    // The control is offset from the field's padding box, so its distance from
+    // the drawn edge is the inset plus whatever border the field carries.
+    const border = await field.evaluate((el) =>
+      parseFloat(getComputedStyle(el).borderRightWidth),
+    );
+    expect(
+      fieldBox.x + fieldBox.width - (sendBox.x + sendBox.width),
+      "the send control is not inset from the field's right edge",
+    ).toBeCloseTo(8 + border, 0);
+    const above = sendBox.y - fieldBox.y;
+    const below = fieldBox.y + fieldBox.height - (sendBox.y + sendBox.height);
+    expect(
+      Math.abs(above - below),
+      "the send control is not centred vertically in the field",
+    ).toBeLessThanOrEqual(1);
+  });
+
+  test.describe("under a coarse pointer", () => {
+    test.use({ hasTouch: true });
+
+    test("the send control is the 36px circle with a 44px hit area", async ({ hub, page }) => {
+      // The drawn circle stays at the design's 36px and the area that answers to
+      // a tap grows to the 44px floor with a pseudo element. A point outside the
+      // drawn circle has to still resolve to the control.
+      await openArtifact(page, hub);
+      await page.getByRole("button", { name: "Start a thread" }).click();
+      const sheet = page.getByRole("dialog");
+      await expect(sheet).toBeVisible();
+      const send = sheet.getByRole("button", { name: "Post" });
+      const box = await send.boundingBox();
+      expect(box.width, "the drawn circle is not the coarse pointer's 36px").toBeCloseTo(36, 0);
+      const hit = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.className ?? "",
+        { x: box.x + box.width / 2, y: box.y - 3 },
+      );
+      expect(
+        hit,
+        "the hit area does not reach past the drawn circle to the 44px floor",
+      ).toContain("hub-composer-send");
+    });
+  });
 });
 
 test.describe("the project artifact stage's actions", () => {
