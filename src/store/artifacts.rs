@@ -47,6 +47,16 @@ pub struct Artifact {
     pub updated_at: String,
     #[serde(skip)]
     pub path: String,
+    /// The version an agent is writing live, or None when nothing is.
+    ///
+    /// `version` stays the last sealed version for the whole session, so a
+    /// reader of the plain artifact sees sealed content even mid-edit.
+    pub live_version: Option<i64>,
+    /// Writes to the live version so far. Zero when nothing is live.
+    pub live_rev: i64,
+    /// The session holding the live version, which is how the surface names
+    /// the agent doing the writing.
+    pub live_session: Option<String>,
     pub comments_count: i64,
     pub comments_open: i64,
 }
@@ -276,6 +286,9 @@ pub async fn publish_for_principal_capped(
             created_at: created_at.clone(),
             updated_at: created_at.clone(),
             path: rel.clone(),
+            live_version: None,
+            live_rev: 0,
+            live_session: None,
             comments_count: 0,
             comments_open: 0,
         };
@@ -565,7 +578,25 @@ pub async fn update_for_principal_capped(
             )));
         }
 
-        let version = existing.version + 1;
+        // A live version is sealed in place: the update keeps the number the
+        // human has been reading, overwrites its blob and its row, and clears
+        // the pointer. Any other update mints the next number and clears a
+        // pointer that should not be set.
+        let sealing = existing.live_version.filter(|live| *live > existing.version);
+        // Sealing another session's live version would silently discard its
+        // work, so it is refused the same way a draft is, unless forced. Two
+        // unknown holders are not a conflict: only two differing, named
+        // sessions are.
+        if sealing.is_some()
+            && !opts.force
+            && let (Some(held), Some(mine)) = (existing.live_session.as_deref(), opts.session_id)
+            && held != mine
+        {
+            return Err(Error::Conflict(format!(
+                "artifact {artifact_id} is being written live by session {held}",
+            )));
+        }
+        let version = sealing.unwrap_or(existing.version + 1);
         let rel = blob::promote(
             data_dir,
             &pending,
@@ -585,7 +616,7 @@ pub async fn update_for_principal_capped(
         };
 
         tx.execute(
-            "UPDATE artifacts SET current_ver = ?1, label = ?2, envelope = ?3, path = ?4, size_bytes = ?5, updated_at = ?6 WHERE id = ?7",
+            "UPDATE artifacts SET current_ver = ?1, label = ?2, envelope = ?3, path = ?4, size_bytes = ?5, updated_at = ?6, live_version = NULL, live_rev = 0, live_session = NULL WHERE id = ?7",
             vec![
                 Value::Integer(version),
                 optional_text(label.as_deref()),
@@ -598,21 +629,57 @@ pub async fn update_for_principal_capped(
         )
         .await
         .map_err(engine)?;
-        insert_version(
-            &tx,
-            artifact_id,
-            version,
-            &existing.title,
-            &existing.description,
-            &existing.kind,
-            label.as_deref(),
-            protected,
-            envelope_json.as_deref(),
-            content.len() as i64,
-            &rel,
-            &updated_at,
-        )
-        .await?;
+        if sealing.is_some() {
+            update_version(
+                &tx,
+                artifact_id,
+                version,
+                &existing.title,
+                &existing.description,
+                &existing.kind,
+                label.as_deref(),
+                protected,
+                envelope_json.as_deref(),
+                content.len() as i64,
+                &rel,
+                &updated_at,
+            )
+            .await?;
+        } else if version_row_exists(&tx, artifact_id, version).await? {
+            // An abandoned live version can occupy the next number: a session
+            // that went quiet had its pointer cleared while its row stayed.
+            update_version(
+                &tx,
+                artifact_id,
+                version,
+                &existing.title,
+                &existing.description,
+                &existing.kind,
+                label.as_deref(),
+                protected,
+                envelope_json.as_deref(),
+                content.len() as i64,
+                &rel,
+                &updated_at,
+            )
+            .await?;
+        } else {
+            insert_version(
+                &tx,
+                artifact_id,
+                version,
+                &existing.title,
+                &existing.description,
+                &existing.kind,
+                label.as_deref(),
+                protected,
+                envelope_json.as_deref(),
+                content.len() as i64,
+                &rel,
+                &updated_at,
+            )
+            .await?;
+        }
         index_doc(
             &tx,
             SearchDoc {
@@ -675,6 +742,9 @@ pub async fn update_for_principal_capped(
             created_at: existing.created_at,
             updated_at,
             path: rel,
+            live_version: None,
+            live_rev: 0,
+            live_session: None,
             comments_count: existing.comments_count,
             comments_open: existing.comments_open,
         }))
@@ -703,6 +773,287 @@ pub async fn update_for_principal_capped(
             Err(err)
         }
     }
+}
+
+/// Write the version an artifact holds live, under no principal and the default
+/// ceiling. The convenience form the tests and in-process callers use.
+#[allow(clippy::too_many_arguments)]
+pub async fn draft(
+    db: &Database,
+    data_dir: &Path,
+    actor: &str,
+    artifact_id: &str,
+    content: &[u8],
+    envelope: EnvelopeUpdate,
+    opts: LiveOptions<'_>,
+) -> Result<Artifact> {
+    draft_for_principal_capped(
+        db,
+        data_dir,
+        None,
+        0,
+        actor,
+        artifact_id,
+        content,
+        envelope,
+        opts,
+    )
+    .await
+}
+
+/// Options for writing a live version.
+#[derive(Debug, Clone, Default)]
+pub struct LiveOptions<'a> {
+    /// Take the live pointer from another session instead of conflicting.
+    pub force: bool,
+    /// The session performing the write, which becomes the pointer's holder.
+    pub session_id: Option<&'a str>,
+}
+
+/// Write the version an artifact holds live, forking one when none is held.
+///
+/// The first write mints `current_ver + 1`, records it as the live version and
+/// appends one feed event. Later writes overwrite that same version's blob in
+/// place and bump `live_rev`, so a live session adds one version rather than
+/// one per write. `current_ver` never moves here: sealing is the same call an
+/// agent already makes to publish, and it is what turns the live version into
+/// an ordinary immutable one.
+#[allow(clippy::too_many_arguments)]
+pub async fn draft_for_principal_capped(
+    db: &Database,
+    data_dir: &Path,
+    principal: Option<&crate::principal::Principal>,
+    ceiling: i64,
+    actor: &str,
+    artifact_id: &str,
+    content: &[u8],
+    envelope: EnvelopeUpdate,
+    opts: LiveOptions<'_>,
+) -> Result<Artifact> {
+    limits::check_artifact(content.len())?;
+
+    let mut conn = super::connect(db)?;
+    // Only the project and the kind are needed to name the pending file; every
+    // decision below is made on the row the transaction reads.
+    let current = row_on(&conn, artifact_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+
+    let pending = blob::write_pending(
+        data_dir,
+        &current.project_id,
+        artifact_id,
+        &current.kind,
+        content,
+    )?;
+    let updated_at = crate::store::now_rfc3339();
+    let mut promoted = None;
+
+    let write = async {
+        let tx = conn
+            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+            .await
+            .map_err(engine)?;
+
+        let mut p_rows = tx
+            .query(
+                "SELECT status FROM projects WHERE id = ?1",
+                vec![Value::Text(current.project_id.clone())],
+            )
+            .await
+            .map_err(engine)?;
+        let p_row = p_rows.next().await.map_err(engine)?.ok_or_else(|| {
+            Error::NotFound(format!("project {} not found", current.project_id))
+        })?;
+        let status: String = match p_row.get_value(0).map_err(engine)? {
+            Value::Text(s) => s,
+            _ => "active".to_string(),
+        };
+        if status != "active" {
+            return Err(Error::NotFound(format!("project {} not found", current.project_id)));
+        }
+
+        if let Some(p) = principal {
+            crate::policy::authorize_in_tx(&tx, p, &current.project_id, crate::policy::Access::Write).await?;
+        }
+
+        let existing = row_on(&tx, artifact_id)
+            .await?
+            .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+        let held = existing.live_version.filter(|live| *live > existing.version);
+        if held.is_some()
+            && !opts.force
+            && let (Some(holder), Some(mine)) = (existing.live_session.as_deref(), opts.session_id)
+            && holder != mine
+        {
+            return Err(Error::Conflict(format!(
+                "artifact {artifact_id} is being written live by session {holder}",
+            )));
+        }
+
+        let forking = held.is_none();
+        let version = held.unwrap_or(existing.version + 1);
+        let rel = blob::promote(
+            data_dir,
+            &pending,
+            &existing.project_id,
+            artifact_id,
+            version,
+            &existing.kind,
+        )?;
+        promoted = Some(rel.clone());
+        let envelope = envelope.resolve(existing.envelope.as_ref());
+        let envelope_json = envelope.as_ref().map(|value| value.to_string());
+        let protected = envelope_json.is_some();
+        let rev = if forking { 1 } else { existing.live_rev + 1 };
+
+        tx.execute(
+            "UPDATE artifacts SET live_version = ?1, live_rev = ?2, live_session = ?3 WHERE id = ?4",
+            vec![
+                Value::Integer(version),
+                Value::Integer(rev),
+                optional_text(opts.session_id),
+                Value::Text(artifact_id.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+
+        if forking {
+            // An abandoned live version can already sit at this number: a
+            // session that went quiet had its pointer cleared while its row
+            // stayed, and `current_ver` never moved. The number is free to
+            // reuse, so a row that is already there is overwritten rather than
+            // inserted, which keeps the next live session from colliding on the
+            // primary key.
+            if version_row_exists(&tx, artifact_id, version).await? {
+                update_version(
+                    &tx,
+                    artifact_id,
+                    version,
+                    &existing.title,
+                    &existing.description,
+                    &existing.kind,
+                    existing.label.as_deref(),
+                    protected,
+                    envelope_json.as_deref(),
+                    content.len() as i64,
+                    &rel,
+                    &updated_at,
+                )
+                .await?;
+            } else {
+                insert_version(
+                    &tx,
+                    artifact_id,
+                    version,
+                    &existing.title,
+                    &existing.description,
+                    &existing.kind,
+                    existing.label.as_deref(),
+                    protected,
+                    envelope_json.as_deref(),
+                    content.len() as i64,
+                    &rel,
+                    &updated_at,
+                )
+                .await?;
+            }
+            append_event(
+                &tx,
+                ceiling,
+                actor,
+                &existing.project_id,
+                "live",
+                artifact_id,
+                &existing.title,
+                &existing.kind,
+                version,
+                protected,
+                existing.label.as_deref(),
+                opts.session_id,
+            )
+            .await?;
+        } else {
+            update_version(
+                &tx,
+                artifact_id,
+                version,
+                &existing.title,
+                &existing.description,
+                &existing.kind,
+                existing.label.as_deref(),
+                protected,
+                envelope_json.as_deref(),
+                content.len() as i64,
+                &rel,
+                &updated_at,
+            )
+            .await?;
+        }
+
+        tx.commit().await.map_err(engine)?;
+        Ok(Artifact {
+            id: artifact_id.to_string(),
+            project_id: existing.project_id,
+            session_id: existing.session_id,
+            actor: existing.actor,
+            title: existing.title,
+            description: existing.description,
+            label: existing.label,
+            kind: existing.kind,
+            version: existing.version,
+            protected: existing.protected,
+            envelope: existing.envelope,
+            size_bytes: existing.size_bytes,
+            created_at: existing.created_at,
+            updated_at,
+            path: existing.path,
+            live_version: Some(version),
+            live_rev: rev,
+            live_session: opts.session_id.map(str::to_string),
+            comments_count: existing.comments_count,
+            comments_open: existing.comments_open,
+        })
+    }
+    .await;
+
+    match write {
+        Ok(written) => Ok(written),
+        Err(err) => {
+            if promoted.is_none() {
+                let _ = blob::remove(data_dir, &pending);
+            }
+            Err(err)
+        }
+    }
+}
+
+/// Clear live pointers whose holding session has gone quiet.
+///
+/// Runs from the same sweeper as the prune, on the same clock. A version that
+/// was left live keeps its row and its blob, so an abandoned session costs a
+/// version in the picker rather than a document that keeps changing: the
+/// artifact's own page reads `current_ver`, which a live write never moves.
+///
+/// A pointer with no session is left alone. The hub cannot tell a live write
+/// from an agent that never named a session, and the version it holds is
+/// reused by the next live write, so guessing idle there would only make the
+/// band flicker.
+pub async fn clear_idle_live(db: &Database, since: &str) -> Result<()> {
+    let conn = super::connect(db)?;
+    conn.execute(
+        "UPDATE artifacts SET live_version = NULL, live_rev = 0, live_session = NULL
+         WHERE live_version IS NOT NULL
+           AND live_session IS NOT NULL
+           AND live_session NOT IN (
+                 SELECT id FROM sessions WHERE last_activity >= ?1 AND deleted_at IS NULL
+           )",
+        vec![Value::Text(since.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
 }
 
 /// Delete an artifact and its history.
@@ -832,7 +1183,8 @@ pub async fn get_at_version(
                     v.encrypted, v.envelope, v.size_bytes, v.created_at, v.path,
                     a.session_id, a.actor,
                     (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1) AS comments_count,
-                    (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1 AND done = 0) AS comments_open
+                    (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1 AND done = 0) AS comments_open,
+                    a.live_version, a.live_rev, a.live_session
              FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
              WHERE v.artifact_id = ?1 AND v.version = ?2",
             vec![
@@ -869,6 +1221,9 @@ pub async fn get_at_version(
     let actor = text_at(&row, 11)?;
     let comments_count = int_at(&row, 12)?;
     let comments_open = int_at(&row, 13)?;
+    let live_version = opt_int_at(&row, 14)?;
+    let live_rev = int_at(&row, 15)?;
+    let live_session = text_at(&row, 16)?;
     let bytes = blob::read_named(
         data_dir,
         &path,
@@ -891,6 +1246,9 @@ pub async fn get_at_version(
             created_at: created_at.clone(),
             updated_at: created_at,
             path,
+            live_version,
+            live_rev,
+            live_session,
             comments_count,
             comments_open,
         },
@@ -955,7 +1313,8 @@ pub async fn list_with_session(
             "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
-                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
+                    a.live_version, a.live_rev, a.live_session
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.project_id = ?1 AND a.session_id = ?2
@@ -967,7 +1326,8 @@ pub async fn list_with_session(
             "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
-                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
+                    a.live_version, a.live_rev, a.live_session
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.project_id = ?1
@@ -999,7 +1359,8 @@ pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Art
             "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
-                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
+                    a.live_version, a.live_rev, a.live_session
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.session_id = ?1
@@ -1032,7 +1393,8 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
             "SELECT a.id, a.project_id, a.title, a.description, a.label, a.kind,
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
-                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open
+                    COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
+                    a.live_version, a.live_rev, a.live_session
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.id = ?1
@@ -1045,6 +1407,69 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
         Some(row) => Ok(Some(artifact_from_row(&row)?)),
         None => Ok(None),
     }
+}
+
+/// Whether a version row already exists for this artifact.
+///
+/// A live write reuses `current_ver + 1`, the number an abandoned live version
+/// may still occupy, so a fork has to tell a free number from a reused one.
+async fn version_row_exists(
+    tx: &turso::transaction::Transaction<'_>,
+    artifact_id: &str,
+    version: i64,
+) -> Result<bool> {
+    let mut rows = tx
+        .query(
+            "SELECT 1 FROM artifact_versions WHERE artifact_id = ?1 AND version = ?2",
+            vec![
+                Value::Text(artifact_id.to_string()),
+                Value::Integer(version),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    Ok(rows.next().await.map_err(engine)?.is_some())
+}
+
+/// Rewrite the row of a version in place: a live write, or the seal that turns
+/// it into an immutable one. Kept beside `insert_version` so the two column
+/// lists cannot drift.
+#[allow(clippy::too_many_arguments)]
+async fn update_version(
+    tx: &turso::transaction::Transaction<'_>,
+    artifact_id: &str,
+    version: i64,
+    title: &str,
+    description: &str,
+    kind: &str,
+    label: Option<&str>,
+    protected: bool,
+    envelope_json: Option<&str>,
+    size_bytes: i64,
+    path: &str,
+    created_at: &str,
+) -> Result<()> {
+    tx.execute(
+        "UPDATE artifact_versions SET title = ?1, description = ?2, kind = ?3, label = ?4,
+             encrypted = ?5, envelope = ?6, size_bytes = ?7, path = ?8, created_at = ?9
+         WHERE artifact_id = ?10 AND version = ?11",
+        vec![
+            Value::Text(title.to_string()),
+            Value::Text(description.to_string()),
+            Value::Text(kind.to_string()),
+            optional_text(label),
+            Value::Integer(i64::from(protected)),
+            optional_text(envelope_json),
+            Value::Integer(size_bytes),
+            Value::Text(path.to_string()),
+            Value::Text(created_at.to_string()),
+            Value::Text(artifact_id.to_string()),
+            Value::Integer(version),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1258,6 +1683,9 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         actor: text_at(row, 13)?,
         comments_count: int_at(row, 14)?,
         comments_open: int_at(row, 15)?,
+        live_version: opt_int_at(row, 16)?,
+        live_rev: int_at(row, 17)?,
+        live_session: text_at(row, 18)?,
     })
 }
 
@@ -1314,6 +1742,18 @@ fn int_at(row: &Row, index: usize) -> Result<i64> {
         Value::Integer(value) => Ok(value),
         other => Err(Error::Engine(format!(
             "expected an integer in an artifact column, found {other:?}"
+        ))),
+    }
+}
+
+/// A nullable integer column: the live version pointer is null far more often
+/// than it is set, so its absence is a value rather than a defect.
+fn opt_int_at(row: &Row, index: usize) -> Result<Option<i64>> {
+    match row.get_value(index).map_err(engine)? {
+        Value::Integer(value) => Ok(Some(value)),
+        Value::Null => Ok(None),
+        other => Err(Error::Engine(format!(
+            "expected an integer or null in an artifact column, found {other:?}"
         ))),
     }
 }

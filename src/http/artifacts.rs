@@ -125,6 +125,14 @@ pub struct ArtifactContent {
     pub comments_count: i64,
     /// Comments not marked done across all versions.
     pub comments_open: i64,
+    /// Whether the version returned is the artifact's live one.
+    pub live: bool,
+    /// Writes to the live version so far, or zero when it is not live.
+    pub live_rev: i64,
+    /// The live version's number, when one is held.
+    pub live_version: Option<i64>,
+    /// The session holding the live version, when one is held.
+    pub live_session: Option<String>,
 }
 
 /// The `?version=N` selector shared by the versioned artifact routes.
@@ -134,20 +142,45 @@ pub struct VersionQuery {
     pub version: Option<i64>,
 }
 
-/// The `?version=N&pass=...` selector of the public host page.
+/// The `?version=N&live=1&pass=...` selector of the public host page.
 #[derive(Debug, Default, Deserialize)]
 pub struct HostQuery {
     /// The version to read. Omitted, the current version is read.
     pub version: Option<i64>,
+    /// Read the version an agent is writing live, when one is held. Ignored
+    /// when `version` is given, and silently the current version when no
+    /// version is live.
+    #[serde(default, deserialize_with = "query_flag")]
+    pub live: bool,
     /// The owner pass, which reads a page an active share conceals.
     pub pass: Option<String>,
 }
 
-/// The `?version=N&theme=light|dark&pass=...` selector of the frame route.
+/// Read a query flag written the way a URL writes one: `1`, `true`, `yes`, `on`
+/// or a bare `?live`. A query string carries text, so a plain `bool` would
+/// refuse `live=1`, which is what a reader types.
+fn query_flag<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(match raw.as_deref() {
+        None | Some("") => true,
+        Some(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+    })
+}
+
+/// The `?version=N&live=1&theme=light|dark&pass=...` selector of the frame route.
 #[derive(Debug, Default, Deserialize)]
 pub struct FrameQuery {
     /// The version to read. Omitted, the current version is read.
     pub version: Option<i64>,
+    /// Read the live version, as [`HostQuery::live`].
+    #[serde(default, deserialize_with = "query_flag")]
+    pub live: bool,
     /// The frame theme. Only `dark` selects dark; anything else is light.
     pub theme: Option<String>,
     /// The owner pass, which reads a body an active share conceals.
@@ -212,6 +245,10 @@ pub async fn content(
         label: artifact.label,
         comments_count: artifact.comments_count,
         comments_open: artifact.comments_open,
+        live: artifact.live_version == Some(artifact.version),
+        live_rev: artifact.live_rev,
+        live_version: artifact.live_version,
+        live_session: artifact.live_session,
     }))
 }
 
@@ -577,6 +614,107 @@ pub async fn viewer_pass(
     }))
 }
 
+/// The version a public read wants.
+///
+/// An explicit `version` wins. Otherwise `live` asks for the version an agent
+/// is writing, when one is held, and falls back to the current version when
+/// none is. The live version is named explicitly because the plain address
+/// keeps serving the last sealed one, so a link quoted earlier still means
+/// what it meant.
+async fn read_target(
+    state: &AppState,
+    artifact_id: &str,
+    version: Option<i64>,
+    live: bool,
+) -> std::result::Result<(Artifact, Vec<u8>), Problem> {
+    if let Some(version) = version {
+        return artifact_store::get_at_version(&state.db, &state.data_dir, artifact_id, version)
+            .await
+            .map_err(|err| Problem::from_error(&err));
+    }
+    if live {
+        let held = artifact_store::metadata(&state.db, artifact_id)
+            .await
+            .ok()
+            .and_then(|meta| meta.live_version);
+        if let Some(held) = held {
+            return artifact_store::get_at_version(&state.db, &state.data_dir, artifact_id, held)
+                .await
+                .map_err(|err| Problem::from_error(&err));
+        }
+    }
+    artifact_store::get(&state.db, &state.data_dir, artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))
+}
+
+/// The live state of one artifact.
+#[derive(Debug, Serialize)]
+pub struct LiveState {
+    /// `live`, `idle`, or `sealed`.
+    pub state: String,
+    /// The live version's number, when one is held.
+    pub version: Option<i64>,
+    /// Writes to it so far.
+    pub live_rev: i64,
+    /// The session holding it, when one is held.
+    pub session_id: Option<String>,
+    /// The agent writing it, when one can be named.
+    pub actor: Option<String>,
+}
+
+/// `GET /api/v1/artifacts/{id}/live`
+///
+/// Admin only. Reports whether a version is being written live, which one, and
+/// by whom, so a viewer can follow it without refetching the content on every
+/// tick. `idle` is a version whose session has gone quiet past the active
+/// window: the work is parked rather than finished, which is when the human is
+/// most likely to want to look at it.
+pub async fn live(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<LiveState>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let artifact = artifact_store::metadata(&state.db, &artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    Ok(Json(live_state(&state, &artifact).await))
+}
+
+/// Derive the live state from the pointer and the holding session's activity.
+async fn live_state(state: &AppState, artifact: &Artifact) -> LiveState {
+    let Some(version) = artifact.live_version else {
+        return LiveState {
+            state: "sealed".to_string(),
+            version: None,
+            live_rev: 0,
+            session_id: None,
+            actor: None,
+        };
+    };
+    let mut actor = artifact.actor.clone();
+    let mut active = false;
+    if let Some(session_id) = artifact.live_session.as_deref()
+        && let Ok(Some(session)) = crate::store::sessions::get(&state.db, session_id).await
+    {
+        actor = Some(session.agent);
+        active =
+            session.deleted_at.is_none() && session.last_activity >= state.config.active_since();
+    }
+    LiveState {
+        state: if active { "live" } else { "idle" }.to_string(),
+        version: Some(version),
+        live_rev: artifact.live_rev,
+        session_id: artifact.live_session.clone(),
+        actor,
+    }
+}
+
 /// `GET /artifacts/{id}`
 ///
 /// Public: a recipient opens the link without a token. The host shell carries
@@ -593,16 +731,7 @@ pub async fn host(
     ProblemQuery(query): ProblemQuery<HostQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
-    let (artifact, bytes) = match query.version {
-        Some(version) => {
-            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
-                .await
-                .map_err(|err| Problem::from_error(&err))?
-        }
-        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
-            .await
-            .map_err(|err| Problem::from_error(&err))?,
-    };
+    let (artifact, bytes) = read_target(&state, &artifact_id, query.version, query.live).await?;
 
     if concealed(&state, &artifact, query.pass.as_deref()).await? {
         return Err(Problem::from_error(&Error::NotFound(format!(
@@ -610,8 +739,12 @@ pub async fn host(
         ))));
     }
 
+    // `version` is what `read_target` settled on: an explicit number, the live
+    // version when `?live=1` asked for it, or the sealed current one. The live
+    // pointer never decides this on its own, so the plain address is not dragged
+    // onto work in progress.
     let shown = query.version.unwrap_or(artifact.version);
-    let pinned = query.version.is_some();
+    let pinned = query.version.is_some() || query.live;
     let origin = request_origin(&state.config, &headers);
 
     let document = if artifact.protected {
@@ -660,16 +793,7 @@ pub async fn frame(
     ProblemQuery(query): ProblemQuery<FrameQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
-    let (artifact, bytes) = match query.version {
-        Some(version) => {
-            artifact_store::get_at_version(&state.db, &state.data_dir, &artifact_id, version)
-                .await
-                .map_err(|err| Problem::from_error(&err))?
-        }
-        None => artifact_store::get(&state.db, &state.data_dir, &artifact_id)
-            .await
-            .map_err(|err| Problem::from_error(&err))?,
-    };
+    let (artifact, bytes) = read_target(&state, &artifact_id, query.version, query.live).await?;
 
     if concealed(&state, &artifact, query.pass.as_deref()).await? {
         return Err(Problem::from_error(&Error::NotFound(format!(
@@ -1158,7 +1282,7 @@ fn reader_shell(
     let title = escape_html(&artifact.title);
     let with_history = versions.len() > 1 && share_token.is_none();
     let picker = if with_history {
-        picker_html(versions, shown)
+        picker_html(versions, shown, artifact.live_version)
     } else {
         String::new()
     };
@@ -1528,7 +1652,7 @@ fn salt_fingerprint(salt_b64: &str) -> String {
 }
 
 /// The version picker, newest first and capped at 50. Plain artifacts only.
-fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
+fn picker_html(versions: &[ArtifactVersion], shown: i64, live: Option<i64>) -> String {
     let mut options = String::new();
     for version in versions.iter().rev().take(50) {
         let v_str = format!("v{}", version.version);
@@ -1545,6 +1669,13 @@ fn picker_html(versions: &[ArtifactVersion], shown: i64) -> String {
                 format!("{v_str} · {label}")
             }
             _ => v_str,
+        };
+        // A version an agent is writing is offered like any other, marked so a
+        // reader who picks it knows the text is still moving.
+        let text = if live == Some(version.version) {
+            format!("{text} · being written")
+        } else {
+            text
         };
         let text = escape_html(&text);
         let selected = if version.version == shown {

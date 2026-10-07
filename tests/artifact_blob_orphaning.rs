@@ -6,15 +6,17 @@ use common::temp::TempDir;
 
 mod common;
 
+/// A failure after the blob has been promoted leaves the version path for
+/// reconcile rather than removing it, because another update may already have
+/// won that number.
 #[tokio::test]
-async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
+async fn a_failure_after_promotion_leaves_the_final_path_to_reconcile() {
     let dir = TempDir::new("blob-orphaning-update");
     let db = common::store::open(&dir).await;
     projects::create(&db, "proj", "Project")
         .await
         .expect("create project");
 
-    // Publish artifact v1
     let art = artifacts::publish(
         &db,
         &dir,
@@ -34,24 +36,14 @@ async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
     .await
     .expect("publish v1");
 
-    // Artificially inject a conflicting v2 row into artifact_versions table
-    // so that insert_version() fails on PRIMARY KEY constraint after blob::promote has already run.
-    let conn = db.connect().expect("connect");
-    conn.execute(
-        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, encrypted, size_bytes, path, created_at)
-         VALUES (?1, 2, 'Conflicting', '', 'markdown', 0, 10, 'dummy', '2026-09-25T00:00:00Z')",
-        [art.id.clone()],
-    )
-    .await
-    .expect("insert conflicting version row");
-
-    // Attempt update to v2. This will:
-    // 1. write pending blob
-    // 2. promote pending blob to v2.md (setting promoted = Some(...))
-    // 3. fail at insert_version with primary key conflict
-    let res = artifacts::update(
+    // The publish already spent the project's one event, so an update under a
+    // ceiling of one is refused after the blob has been promoted: the write
+    // order is blob, version row, index, event.
+    let res = artifacts::update_for_principal_capped(
         &db,
         &dir,
+        None,
+        1,
         "agent-one",
         &art.id,
         b"version 2 content that will fail commit",
@@ -61,10 +53,7 @@ async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
     )
     .await;
 
-    assert!(
-        res.is_err(),
-        "update must fail due to conflicting version row"
-    );
+    assert!(res.is_err(), "the event ceiling refuses the update");
 
     // The promoted version path is another update's to win once the write lock
     // is released, so the failed call leaves it alone and reconcile sweeps it.
@@ -89,6 +78,69 @@ async fn update_failure_after_promotion_leaves_the_final_path_to_reconcile() {
         "reconcile reclaims the unreferenced final path: {:?}",
         v2_path
     );
+}
+
+/// A row already sitting at the next number is reused, not collided with. A
+/// live session that went quiet leaves exactly that: its pointer is cleared
+/// while its version row stays, and `current_ver` never moved.
+#[tokio::test]
+async fn a_version_row_left_at_the_next_number_is_reused() {
+    let dir = TempDir::new("blob-orphaning-reuse");
+    let db = common::store::open(&dir).await;
+    projects::create(&db, "proj", "Project")
+        .await
+        .expect("create project");
+
+    let art = artifacts::publish(
+        &db,
+        &dir,
+        NewArtifact {
+            actor: "agent-one",
+            project_id: "proj",
+            title: "Artifact Title",
+            description: "",
+            label: None,
+            kind: "markdown",
+            content: b"version 1 content",
+            envelope: None,
+            session_id: None,
+        },
+        None,
+    )
+    .await
+    .expect("publish v1");
+
+    // A row an abandoned live session left at the next number.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, encrypted, size_bytes, path, created_at)
+         VALUES (?1, 2, 'Abandoned', '', 'markdown', 0, 10, 'dummy', '2026-09-25T00:00:00Z')",
+        [art.id.clone()],
+    )
+    .await
+    .expect("insert the abandoned row");
+
+    let updated = artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &art.id,
+        b"version 2 content",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("the update reuses the row rather than colliding");
+    assert_eq!(updated.version, 2);
+
+    let (_, bytes) = artifacts::get(&db, &dir, &art.id).await.expect("get");
+    assert_eq!(bytes, b"version 2 content");
+
+    let versions = artifacts::list_versions(&db, &art.id)
+        .await
+        .expect("versions");
+    assert_eq!(versions.len(), 2, "reuse adds no version row");
 }
 
 #[tokio::test]
