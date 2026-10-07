@@ -4,6 +4,30 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-07
+
+### An artifact version can be held live while an agent writes it
+
+* **Change**: a version can be held live while an agent writes it. The MCP tool
+  `artifact_draft` mints the next version and points the artifact at it, and
+  every later call mutates that one version in place; `artifact_update` seals it
+  by moving the current version onto it. The artifact's default public URL keeps
+  serving the last sealed version throughout, so a published link never shows
+  half-finished work. The live version is read at `?version=N`, or at `?live=1`
+  when its number is not known.
+* **Change**: `GET /api/v1/artifacts/:id/live` reports the live state (`live`,
+  `idle` or `sealed`), the version, `live_rev`, the agent and the session, and
+  the artifact viewer shows a live band naming the agent.
+* **Update**: [Artifacts](usage/artifacts.md) replaces its "no live editing"
+  statement with the live model; [Agent
+  surface](architecture/agent-surface.md) lists `artifact_draft` and [Human
+  surface](architecture/human-surface.md) lists the live route and the viewer's
+  live state. The `agent-hub` skill's artifact reference tells an agent to hold
+  a version live and open the returned viewer URL in its own browser.
+* **Decision**: [ADR 0025](adr/0025-live-artifact-versions.md) records that a
+  live version is a pointer on the artifact and not a draft, and why the public
+  URL holds still while one is live.
+
 ## 2026-10-06
 
 ### The embedded tailnet ships in the default build

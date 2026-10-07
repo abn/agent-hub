@@ -14,7 +14,7 @@
 | `inbox_read` | Read the human's global inbox, by status or project. Takes `since` and `actor` and returns a `next_since` cursor. |
 | `inbox_wait` | Wait for new inbox items instead of polling: returns when something lands, or after the wait bound, with the new items and a `next_since` cursor to continue from. |
 | `notify_subscribe`, `notify_unsubscribe` | Register or remove a standing interest in feed events by kind, optionally scoped to a project, so they arrive through the `notifications` member of a later tool result instead of being polled. |
-| `artifact_publish`, `artifact_update`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish, read, list the version history of, and delete artifacts. |
+| `artifact_publish`, `artifact_update`, `artifact_draft`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish an artifact, publish a new version, hold a version live while you write it, read a version, list the version history, and delete an artifact. |
 | `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
 | `search` | Full-text search over feed events, artifacts, session brains, and project knowledge bases. |
 | `whoami`, `version` | Identity and connectivity checks. |
@@ -60,6 +60,7 @@ notify_unsubscribe(subscription_id)
 search(query, scope?, project_id?, type?, session_id?, limit?)
 artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
+artifact_draft(artifact_id, content, envelope?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
 artifact_list(project_id, session?)
