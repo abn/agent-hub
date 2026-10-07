@@ -40,3 +40,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   not a draft
 * [0026](0026-contentless-notify-target.md) - A contentless nudge to an
   operator-configured target (refines 0016)
+* [0027](0027-deadlines-on-open-items.md) - An agent may put a deadline on the
+  item it asks
