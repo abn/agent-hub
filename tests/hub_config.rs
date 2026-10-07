@@ -862,3 +862,120 @@ fn config_check_reports_an_unusable_data_directory() {
         "the refusal names the problem: {err}"
     );
 }
+
+#[test]
+fn the_notify_target_is_off_unless_a_url_is_set() {
+    let home = TempHome::new("notify-off");
+    let lookup = env(&[
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_NOTIFY_TOKEN", "tk_without_a_url"),
+    ]);
+    assert!(
+        Config::resolve(&lookup).expect("resolve").notify.is_none(),
+        "a token alone does not turn the feature on"
+    );
+}
+
+#[test]
+fn the_notify_keys_are_read_from_the_file_with_a_default_interval() {
+    let home = TempHome::new("notify-file").with_config(concat!(
+        "[hub]\n",
+        "notify_url = \"http://ntfy.lan/agent-hub\"\n",
+        "notify_token = \"tk_file\"\n",
+    ));
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+    let target = Config::resolve(&lookup)
+        .expect("the notify keys are not unknown")
+        .notify
+        .expect("a URL turns the feature on");
+    assert_eq!(target.url.as_str(), "http://ntfy.lan/agent-hub");
+    assert_eq!(target.token.as_deref(), Some("tk_file"));
+    assert_eq!(target.interval, std::time::Duration::from_secs(60));
+
+    let lookup = env(&[
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_NOTIFY_INTERVAL_SECS", "300"),
+    ]);
+    assert_eq!(
+        Config::resolve(&lookup)
+            .expect("resolve")
+            .notify
+            .expect("on")
+            .interval,
+        std::time::Duration::from_secs(300)
+    );
+}
+
+#[test]
+fn a_notify_url_the_hub_cannot_post_to_fails_startup_naming_the_setting() {
+    let home = TempHome::new("notify-bad");
+    for (value, why) in [
+        ("ftp://ntfy.lan/agent-hub", "http or https"),
+        ("file:///etc/passwd", "http or https"),
+        ("ntfy.lan/agent-hub", "not a URL"),
+        ("http://user:pass@ntfy.lan/agent-hub", "credentials"),
+    ] {
+        let lookup = env(&[
+            ("HOME", home.0.to_str().expect("utf-8 path")),
+            ("HUB_NOTIFY_URL", value),
+        ]);
+        let err = Config::resolve(&lookup).expect_err(value).to_string();
+        assert!(err.contains("HUB_NOTIFY_URL"), "{value}: {err}");
+        assert!(err.contains(why), "{value}: {err}");
+    }
+}
+
+#[test]
+fn a_notify_interval_outside_its_range_fails_startup() {
+    let home = TempHome::new("notify-interval");
+    for value in ["0", "-5", "soon", "86401"] {
+        let lookup = env(&[
+            ("HOME", home.0.to_str().expect("utf-8 path")),
+            ("HUB_NOTIFY_URL", "http://ntfy.lan/agent-hub"),
+            ("HUB_NOTIFY_INTERVAL_SECS", value),
+        ]);
+        let err = Config::resolve(&lookup).expect_err(value).to_string();
+        assert!(err.contains("HUB_NOTIFY_INTERVAL_SECS"), "{value}: {err}");
+    }
+}
+
+#[test]
+fn config_command_masks_the_notify_token_and_the_topic() {
+    let home = TempHome::new("cli-notify").with_config(concat!(
+        "[hub]\n",
+        "notify_url = \"https://ntfy.lan/hub-topic-secret?auth=qs_secret\"\n",
+        "notify_token = \"tk_notify_secret_0123456789\"\n",
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
+        .arg("config")
+        .env("HOME", home.0.to_str().expect("utf-8 path"))
+        .env("XDG_CONFIG_HOME", home.0.join(".config"))
+        .env("AGENT_HUB_SYSTEM_CONFIG", home.0.join("absent-system.toml"))
+        .env_remove("HUB_NOTIFY_URL")
+        .env_remove("HUB_NOTIFY_TOKEN")
+        .output()
+        .expect("run agent-hub config");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("HUB_NOTIFY_URL") && stdout.contains("https://ntfy.lan/..."),
+        "the target is named by its origin: {stdout}"
+    );
+    assert!(
+        stdout.contains("tk_n... (27 chars)"),
+        "the notify token is masked: {stdout}"
+    );
+    for secret in [
+        "tk_notify_secret_0123456789",
+        "hub-topic-secret",
+        "qs_secret",
+    ] {
+        assert!(!stdout.contains(secret), "{secret} is printed: {stdout}");
+    }
+    assert!(
+        stdout.contains("HUB_NOTIFY_INTERVAL_SECS") && stdout.contains("60"),
+        "the interval shows its default: {stdout}"
+    );
+}

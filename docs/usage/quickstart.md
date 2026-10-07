@@ -18,7 +18,10 @@ contracts, and [artifacts](artifacts.md) covers authoring.
 Two things are intended design rather than shipped behaviour. Background push
 notifications are deferred: a fully closed installed app raises nothing, and
 the hub keeps an in-app notification and a freshness stream instead
-([ADR 0016](../adr/0016-push-notifications-deferred.md)). The embedded tailnet
+([ADR 0016](../adr/0016-push-notifications-deferred.md)). The one exception is
+opt-in: with `notify_url` set to a target the operator runs, such as a
+self-hosted ntfy topic, the hub POSTs a contentless nudge there when something
+starts waiting ([ADR 0026](../adr/0026-contentless-notify-target.md)). The embedded tailnet
 endpoint is experimental
 ([ADR 0014](../adr/0014-optional-embedded-tailnet.md)).
 
@@ -120,6 +123,9 @@ search paths, and validation status.
 | `tailnet` | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `tailnet_port` | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 | `tailnet_control_url` | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
+| `notify_url` | `HUB_NOTIFY_URL` | unset | An http or https URL the hub POSTs a fixed, contentless sentence to when something starts waiting on the human; unset sends nothing. It may not carry credentials, and only its origin is printed |
+| `notify_token` | `HUB_NOTIFY_TOKEN` | unset | Sent to the notify target as `Authorization: Bearer`; masked wherever the configuration is printed |
+| `notify_interval_secs` | `HUB_NOTIFY_INTERVAL_SECS` | `60` | Least time between two notify sends; items inside it become one trailing send; 1 to 86400 seconds |
 
 Without `HUB_PUBLIC_URL` the hub reads its own address off each request: the
 forwarded scheme and host, then the request host, then the bind. Set it when a

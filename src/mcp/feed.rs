@@ -65,7 +65,7 @@ impl HubServer {
             thread_id: params.thread_id,
             session_id,
         };
-        let event_id = if needs_action {
+        let appended = if needs_action {
             events::append_action_for_principal(
                 &self.state.db,
                 &self.state.config.inbox_caps,
@@ -84,10 +84,20 @@ impl HubServer {
                 event,
             )
             .await
+            .map(|id| events::Appended {
+                id,
+                replayed: false,
+            })
         }
         .map_err(to_error_data)?;
 
-        self.state.notify();
+        // A replayed approval waits on nothing new, so it does not nudge.
+        if needs_action && !appended.replayed {
+            self.state.notify_waiting();
+        } else {
+            self.state.notify();
+        }
+        let event_id = appended.id;
         Ok(CallToolResult::structured(json!({ "event_id": event_id })))
     }
 

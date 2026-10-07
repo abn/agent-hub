@@ -37,7 +37,10 @@ identity with a trust model, and an optional, experimental embedded tailnet.
 Two things are intended design rather than shipped behaviour, and every page
 says which it is. Background push notifications are deferred: an installed app
 that is fully closed raises nothing, and the hub keeps an in-app notification
-and a freshness stream instead. The embedded tailnet endpoint is experimental:
+and a freshness stream instead. An operator who runs a notification service on
+their own network, such as a self-hosted ntfy, can point the hub at it and get
+a contentless nudge when something starts waiting; with no target set, nothing
+is sent. The embedded tailnet endpoint is experimental:
 it has no tailnet name resolution and no certificate issuance, and its NAT
 traversal is in progress.
 

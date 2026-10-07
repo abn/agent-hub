@@ -167,7 +167,8 @@ they are is how you decide when to prune.
 
 `GET /metrics` reports the hub's own counters in Prometheus text: HTTP requests
 by method and status class, failed responses by hub error code, events appended
-by kind, and MCP tool calls by tool. It also carries storage gauges read fresh
+by kind, MCP tool calls by tool, and sends to the notify target by result
+(`agenthub_notify_sends_total`, `delivered` or `failed`). It also carries storage gauges read fresh
 for each scrape: free bytes on the data volume, the `hub.db` size, and the
 write-ahead log size, so a time-series system can alert before the readiness
 margin trips rather than only when the node is nearly out of room. The route is
@@ -185,6 +186,47 @@ sample runs), and `agenthub_integrity_failures_total`, a counter of samples that
 timed out, errored, or reported a problem. A failed sample is what tells you a
 zeroed page has appeared between offline `check` runs; the offline commands still
 walk the store with the full `PRAGMA integrity_check`.
+
+## Notify a closed app
+
+An installed app that is fully closed raises nothing on its own. If you run a
+notification service on your LAN or tailnet, the hub can nudge it instead: set
+`notify_url` to a URL that accepts a plain-text POST, and when a question, an
+approval or an enrolment request starts waiting, the hub POSTs this body to it:
+
+```
+Something is waiting for you in Agent Hub.
+```
+
+That sentence is the whole payload. It names no project, agent, title, id or
+count, so the target learns only that it is worth opening the app. The setting
+is off by default and nothing is sent without it
+([ADR 0026](../adr/0026-contentless-notify-target.md)). A retried
+write that the hub answers from its idempotency key posts nothing new, so it
+sends nothing.
+
+A self-hosted ntfy on the LAN, with an access token for a topic of its own:
+
+```toml
+[hub]
+notify_url = "https://ntfy.lan/agent-hub?title=Agent+Hub&click=https://hub.lan"
+notify_token = "tk_..."
+notify_interval_secs = 60
+```
+
+ntfy reads its own message options from the query, so the title and the tap
+target are set there, by you; the hub sends neither. Subscribe to the topic in
+the ntfy app on the phone. A target that wants another shape, such as Gotify's
+JSON message, needs a small bridge in front of it.
+
+Sends are coalesced: at most one per `notify_interval_secs`, and anything that
+arrives inside the quiet period is one trailing send when it ends. A send runs
+in the background with a ten-second timeout and is not retried, so a slow or
+unreachable target never holds up the agent's write. A failure is logged at
+warn with the target's origin and the cause, and counted in
+`agenthub_notify_sends_total{result="failed"}`. The token is sent only in the
+`Authorization` header and is never logged or printed; `agent-hub config` shows
+the URL by its origin alone.
 
 ## Doctor
 

@@ -13,6 +13,7 @@ pub mod markdown;
 pub mod mcp;
 pub mod metrics;
 pub mod net;
+pub mod notify;
 pub mod okf;
 pub mod ops;
 pub mod policy;

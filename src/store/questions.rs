@@ -40,6 +40,19 @@ pub async fn post(
     events_per_project: i64,
     question: NewQuestion<'_>,
 ) -> Result<String> {
+    post_outcome(db, caps, events_per_project, question)
+        .await
+        .map(|appended| appended.id)
+}
+
+/// [`post`], also saying whether the question was a replay of an earlier post
+/// with the same idempotency key.
+pub async fn post_outcome(
+    db: &Database,
+    caps: &crate::limits::InboxCaps,
+    events_per_project: i64,
+    question: NewQuestion<'_>,
+) -> Result<events::Appended> {
     let NewQuestion {
         actor,
         project_id,
@@ -72,7 +85,7 @@ pub async fn post(
     if let Some(options) = options {
         payload.insert("options".to_string(), serde_json::json!(options));
     }
-    let id = events::append_action(
+    let appended = events::append_action_outcome(
         db,
         caps,
         events_per_project,
@@ -95,7 +108,7 @@ pub async fn post(
     .await?;
 
     // The event writer roots a question's thread at its own id.
-    Ok(id)
+    Ok(appended)
 }
 
 /// Answer a question. The answer lands on the thread and resolves the item.
