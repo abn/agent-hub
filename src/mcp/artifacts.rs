@@ -14,9 +14,19 @@ use serde_json::json;
 
 use crate::error::Error;
 use crate::policy::{self, Access};
-use crate::store::artifacts::{self, NewArtifact, UpdateOptions};
+use crate::store::artifacts::{self, EnvelopeUpdate, LiveOptions, NewArtifact, UpdateOptions};
 
 use super::{HubServer, to_error_data};
+
+/// The request headers for a tool call, or an empty set on a transport with no
+/// HTTP request (stdio, where the local admin is the caller).
+fn request_headers(context: &RequestContext<RoleServer>) -> axum::http::HeaderMap {
+    context
+        .extensions
+        .get::<axum::http::request::Parts>()
+        .map(|parts| parts.headers.clone())
+        .unwrap_or_default()
+}
 
 #[tool_router(router = artifacts_router, vis = "pub")]
 impl HubServer {
@@ -108,9 +118,74 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
+        // Tell a viewer of this artifact that its live version has sealed, so
+        // the band clears and the document settles without a reload.
+        self.state.notify_live(&artifact.id, artifact.version, 0);
         Ok(CallToolResult::structured(
             json!({ "version": artifact.version }),
         ))
+    }
+
+    #[tool(
+        description = "Write the version an artifact holds live, forking one when none is held. Use this while you are still working: each call rewrites the same version in place, so the version count grows by one per live session rather than one per write, and the artifact's page always serves the last version you sealed. Returns a viewer_url you can open in your browser to show the human as you work; it carries no credential. A version held by another session is a conflict unless force is set. Publishing with artifact_update seals the live version."
+    )]
+    async fn artifact_draft(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<ArtifactDraftParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &existing.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let session_id = self.session_in(&principal, &existing.project_id).await;
+        let artifact = artifacts::draft_for_principal_capped(
+            &self.state.db,
+            &self.state.data_dir,
+            Some(&principal),
+            self.state.config.events_per_project.per_project,
+            &principal.actor,
+            &params.artifact_id,
+            params.content.as_bytes(),
+            match params.envelope {
+                None => EnvelopeUpdate::Keep,
+                Some(None) => EnvelopeUpdate::Clear,
+                Some(Some(envelope)) => EnvelopeUpdate::Set(envelope),
+            },
+            LiveOptions {
+                force: params.force,
+                session_id: session_id.as_deref(),
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+
+        if let Some(version) = artifact.live_version {
+            self.state
+                .notify_live(&artifact.id, version, artifact.live_rev);
+        }
+        let show = artifact.live_version.unwrap_or(artifact.version);
+        let headers = request_headers(&context);
+        let origin = crate::http::origin::request_origin(&self.state.config, &headers);
+        Ok(CallToolResult::structured(json!({
+            "artifact_id": artifact.id,
+            "version": artifact.version,
+            "live_version": artifact.live_version,
+            "live_rev": artifact.live_rev,
+            // The page is the artifact's own, so it needs no credential: an
+            // artifact with no active share is already readable at this
+            // address. The live version is named explicitly because the plain
+            // address keeps serving the last sealed one.
+            "viewer_url": format!("{origin}/artifacts/{}?version={show}", artifact.id),
+        })))
     }
 
     #[tool(description = "Read an artifact's metadata and its content, optionally at a version.")]
@@ -319,6 +394,22 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Arguments for `artifact_draft`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ArtifactDraftParams {
+    artifact_id: String,
+    content: String,
+    /// The same three-way envelope as `artifact_update`: absent keeps the
+    /// current envelope, an envelope replaces it, and an explicit null writes
+    /// this version in the clear.
+    #[serde(default, deserialize_with = "present_or_absent")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    envelope: Option<Option<serde_json::Value>>,
+    /// Take the live pointer from another session instead of conflicting.
+    #[serde(default)]
+    force: bool,
 }
 
 /// Arguments for `artifact_get`.

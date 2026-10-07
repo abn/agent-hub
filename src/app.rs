@@ -37,8 +37,10 @@ pub struct AppState {
     /// The name this node shows the human.
     pub host: String,
     /// Freshness ticks for the human stream. A write that changes the inbox or
-    /// feed sends one; the stream carries no data, only the nudge to refetch.
-    pub ticker: tokio::sync::broadcast::Sender<()>,
+    /// feed sends one; a live artifact write sends one naming the artifact and
+    /// its revision. The stream carries no content either way, only the nudge
+    /// to refetch.
+    pub ticker: tokio::sync::broadcast::Sender<Tick>,
     /// Share flag recorded during enrolment approvals.
     pub enrol_shares: Arc<std::sync::Mutex<std::collections::HashMap<String, bool>>>,
     /// How often the background store integrity sample runs. Zero disables it.
@@ -47,6 +49,26 @@ pub struct AppState {
     /// The readiness probe compares against this so a removed or replaced path
     /// is unavailable even while the open file descriptor still answers.
     pub store_identity: StoreIdentity,
+}
+
+/// A freshness tick for the human stream.
+///
+/// A plain tick means "something changed, refetch what you show". A tick that
+/// names a live artifact means the same thing with a topic, so a viewer of that
+/// artifact can refetch it and leave every other screen alone. Either way the
+/// stream carries no content.
+#[derive(Clone, Debug, Default)]
+pub struct Tick {
+    /// The artifact whose live version just moved, when this tick is about one.
+    pub live: Option<LiveTick>,
+}
+
+/// One live artifact write, as the stream reports it.
+#[derive(Clone, Debug)]
+pub struct LiveTick {
+    pub artifact_id: String,
+    pub version: i64,
+    pub live_rev: i64,
 }
 
 /// The device and inode of a path, for detecting that it was removed or
@@ -429,7 +451,24 @@ impl AppState {
     pub fn notify(&self) {
         self.generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let _ = self.ticker.send(());
+        let _ = self.ticker.send(Tick::default());
+    }
+
+    /// Nudge subscribers that one artifact's live version moved.
+    ///
+    /// The generation is bumped with it: a live write changes artifact bytes on
+    /// disk, so the storage and knowledge memos must recompute rather than
+    /// serve a figure that is a version behind.
+    pub fn notify_live(&self, artifact_id: &str, version: i64, live_rev: i64) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = self.ticker.send(Tick {
+            live: Some(LiveTick {
+                artifact_id: artifact_id.to_string(),
+                version,
+                live_rev,
+            }),
+        });
     }
 
     /// Commit every prune whose undo window has passed.
@@ -443,6 +482,10 @@ impl AppState {
             self.stats.forget_events();
             self.notify();
         }
+        // A live version whose session has gone quiet stops being live. Its
+        // row and blob stay, so nothing is destroyed; the artifact's own page
+        // reads `current_ver`, which a live write never moves.
+        store::artifacts::clear_idle_live(&self.db, &self.config.active_since()).await?;
         Ok(committed)
     }
 

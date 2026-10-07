@@ -224,7 +224,7 @@ impl HubServer {
             tokio::select! {
                 _ = tokio::time::sleep(remaining) => {}
                 received = ticker.recv() => match received {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     // Several writes landed while this query ran. Re-query now
                     // rather than wait for one more nudge.
                     Err(RecvError::Lagged(_)) => {}

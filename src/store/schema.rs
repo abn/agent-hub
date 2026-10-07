@@ -102,6 +102,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 22,
         ddl: V22,
     },
+    Migration {
+        version: 23,
+        ddl: V23,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -601,4 +605,26 @@ CREATE TABLE IF NOT EXISTS notify_subscriptions(
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS notify_subscriptions_agent ON notify_subscriptions(agent);
+"#;
+
+/// Version 23: the version an agent is writing live.
+///
+/// An artifact is always its versions, and live editing adds no second kind of
+/// content: `live_version` names the version row currently being written in
+/// place, or is null when nothing is. `live_rev` counts the writes to that one
+/// version, so a reader can tell a landed change from a repeat without
+/// comparing bytes. `live_session` is the session holding the pointer, which is
+/// what lets the human surface name the agent doing the writing.
+///
+/// `current_ver` deliberately does not move while a version is live. It keeps
+/// pointing at the last version that was sealed, so the artifact's own page
+/// serves sealed content through a live session and a link quoted earlier keeps
+/// meaning what it meant. Sealing is what moves the pointer.
+///
+/// At most one live version exists per artifact, which is why the pointer lives
+/// on the artifact rather than on the version row.
+const V23: &str = r#"
+ALTER TABLE artifacts ADD COLUMN live_version INTEGER;
+ALTER TABLE artifacts ADD COLUMN live_rev INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE artifacts ADD COLUMN live_session TEXT;
 "#;
