@@ -24,6 +24,7 @@ const READY_MIN_FREE_BYTES: i64 = 64 * 1024 * 1024;
 pub mod agents;
 pub mod artifacts;
 pub mod auth;
+pub mod backup;
 pub mod enrol;
 pub mod feed;
 pub mod inbox;
@@ -174,6 +175,7 @@ pub fn router(state: AppState) -> Router {
             delete(storage::prune_project),
         )
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
+        .route("/api/v1/backups", post(backup::create))
         .route("/api/v1/search", get(search::search))
         .route("/artifacts/{id}", get(artifacts::host))
         .route("/artifacts/{id}/frame", get(artifacts::frame))

@@ -73,6 +73,7 @@ DELETE /api/v1/storage/sessions/:id
 DELETE /api/v1/storage/sessions
 DELETE /api/v1/storage/projects/:id/sessions
 POST   /api/v1/prune/undo/:token
+POST   /api/v1/backups
 GET    /api/v1/search?q=&scope=&project=&type=&limit=
 GET    /healthz
 GET    /readyz
@@ -126,7 +127,9 @@ node out of rotation instead of holding it there while every call fails.
 
 The REST API is the operator's control surface. The destructive and privileged
 verbs on it, prune and undo, agent and token administration, grants, deleting a
-project, and making a confidential project public, require the admin token.
+project, making a confidential project public, and taking an online backup
+(`POST /api/v1/backups`, which writes only under the configured `backup_dir`;
+see [Operations](../usage/operations.md#back-up)), require the admin token.
 Agents reach the hub over MCP for their own work, and may also create and list
 the projects they can see. The trust posture behind this split is stated once in
 the [operating model](model.md).

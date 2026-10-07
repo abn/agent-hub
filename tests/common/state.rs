@@ -33,6 +33,7 @@ pub fn config(data_dir: &Path) -> Config {
         enrol_pending_ttl: Duration::from_secs(24 * 60 * 60),
         trusted_proxies: Vec::new(),
         notify: None,
+        backup_dir: None,
     }
 }
 

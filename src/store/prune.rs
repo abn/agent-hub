@@ -323,6 +323,9 @@ async fn revert_claim(
 
 async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &str) -> Result<()> {
     let store = crate::brain::BrainStore::for_data_dir(data_dir);
+    // The brain file is moved aside before the session row goes, so a backup
+    // snapshot taken in between would name a brain the copy cannot find.
+    let _removing = super::hold_removals().await;
 
     // 1. Quarantine the file under the session lock
     let _ = store.quarantine(project_id, session_id).await?;

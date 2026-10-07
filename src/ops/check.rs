@@ -182,7 +182,7 @@ async fn integrity(db: &turso::Database) -> Result<Vec<String>> {
 }
 
 /// The blob paths the artifact history names.
-async fn referenced_artifacts(db: &turso::Database) -> Result<Vec<String>> {
+pub(super) async fn referenced_artifacts(db: &turso::Database) -> Result<Vec<String>> {
     let conn = crate::store::connect(db)?;
     let mut rows = conn
         .query("SELECT path FROM artifact_versions", ())
