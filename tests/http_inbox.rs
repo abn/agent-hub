@@ -34,12 +34,33 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
             subject,
             body: None,
             context: None,
+            options: None,
             idempotency_key: None,
             session_id: None,
         },
     )
     .await
     .expect("post question")
+}
+
+async fn seed_question_with_options(state: &AppState, subject: &str, options: &[String]) -> String {
+    questions::post(
+        &state.db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        0,
+        NewQuestion {
+            actor: "agent-one",
+            project_id: "proj",
+            subject,
+            body: None,
+            context: None,
+            options: Some(options),
+            idempotency_key: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("post question with options")
 }
 
 async fn seed_finished(state: &AppState, summary: &str) -> String {
@@ -974,4 +995,95 @@ async fn an_inbox_item_names_its_project() {
         .find(|item| item["event_id"] == orphan.as_str())
         .expect("the orphan");
     assert!(unnamed["project_display_name"].is_null(), "{unnamed}");
+}
+
+#[tokio::test]
+async fn a_question_lists_its_options_and_a_picked_one_answers_it_once() {
+    let state = state().await;
+    let options = vec!["Keep it".to_string(), "Drop it".to_string()];
+    let question_id = seed_question_with_options(&state, "Keep the export?", &options).await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=action",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    let item = body["items"]
+        .as_array()
+        .expect("items array")
+        .iter()
+        .find(|item| item["event_id"] == question_id.as_str())
+        .expect("the question waits")
+        .clone();
+    assert_eq!(item["payload"]["options"], json!(["Keep it", "Drop it"]));
+
+    let answer = |body: &'static str| {
+        request(
+            "POST",
+            &format!("/api/v1/questions/{question_id}/answer"),
+            Some("Bearer token"),
+            Some(json!({ "body": body })),
+        )
+    };
+    let response = router(state.clone())
+        .oneshot(answer("Drop it"))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // A second pick, of the same option or another, decides nothing twice.
+    let response = router(state.clone())
+        .oneshot(answer("Keep it"))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+
+    let response = router(state.clone())
+        .oneshot(request(
+            "GET",
+            "/api/v1/inbox?status=resolved",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["answer"]["body"], "Drop it");
+}
+
+#[tokio::test]
+async fn refused_options_post_no_question() {
+    let state = state().await;
+    let refused = questions::post(
+        &state.db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        0,
+        NewQuestion {
+            actor: "agent-one",
+            project_id: "proj",
+            subject: "Ship it?",
+            body: None,
+            context: None,
+            options: Some(&["Yes".to_string(), "Yes".to_string()]),
+            idempotency_key: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect_err("a repeated option is refused");
+    assert_eq!(refused.code(), agent_hub::error::ErrorCode::InvalidArgument);
+
+    let response = router(state.clone())
+        .oneshot(request("GET", "/api/v1/home", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    assert_eq!(json_body(response).await["waiting"], 0);
 }

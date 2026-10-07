@@ -70,6 +70,7 @@ def main(argv: list[str]) -> int:
                         "approval": harness.APPROVAL_SUMMARY,
                         "secondApproval": harness.SECOND_APPROVAL_SUMMARY,
                         "question": harness.QUESTION_SUBJECT,
+                        "questionOptions": harness.QUESTION_OPTIONS,
                         "inboxRead": harness.INBOX_READ_SUMMARY,
                         "finished": harness.FINISHED_SUMMARY,
                         "markup": harness.MARKUP_SUMMARY,

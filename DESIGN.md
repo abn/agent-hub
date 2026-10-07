@@ -294,6 +294,18 @@ structure, not to line length.
   control is a 30px circle inside the field, 36px on a coarse pointer, centred
   vertically and inset 8px from the right. Enter posts, Shift+Enter breaks the
   line.
+- **Quick answers.** When a question suggests answers, the composer carries
+  them above its field as a group named "Quick answers": one secondary button
+  per option, at the 44px minimum, its label the option's own words in
+  sentence case as the agent wrote them, wrapping onto a second line rather
+  than past the pane's edge. A press sends that text as the answer, through the
+  composer's own send, so it is refused, reported and kept the same way a typed
+  reply is. There is no confirmation: a typed reply has none, and an answer is
+  not a decision with a blast radius the way an approval is. While an answer
+  is on its way the options, the field and the send control are all disabled,
+  which is the one-answer guarantee; a refusal is said in the composer and the
+  options come back. The composer's placeholder, "Or type a reply", reads
+  under them as the free-text path.
 - **Copy control.** A control whose whole job is to put a string on the
   clipboard is a 28px icon button, 36px on a coarse pointer, sitting on the row
   that owns the string. Never a text button, never floating over content.
@@ -311,8 +323,10 @@ Agents and access, Connect, and the knowledge base.
 - **Inbox.** Same shell, one index. Groups WAITING ON YOU, UNREAD, EARLIER.
   Waiting rows carry an action dot and a heavier title. The stage is the item:
   pill, title, body, its buttons, its thread, and a card naming what it points
-  at. The thread is in the stage, not a panel. Snoozing a row for an hour moves
-  it to a SNOOZED group and is remembered per device, not on the hub: a second
+  at. A question's buttons are its quick answers, when it suggests any, above
+  its composer; a row's Reply opens the same composer, quick answers and all.
+  The thread is in the stage, not a panel. Snoozing a row for an hour moves it
+  to a SNOOZED group and is remembered per device, not on the hub: a second
   device still shows the row as waiting. The limit is the device's, and the
   group says so.
 - **Project.** The index header carries Feed, Artifacts, Sessions as a

@@ -4,7 +4,7 @@
 import { api } from "./api.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { esc, glyph, main, paint, projectName, stale } from "./dom.mjs";
+import { esc, glyph, main, optionsAttr, optionsFrom, paint, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
@@ -199,7 +199,7 @@ function trays(item) {
   }
   if (item.kind === "question") {
     return `<div class="swipe-tray swipe-tray-actions" hidden>
-      <button type="button" class="action" data-action="inbox-tray-answer" data-id="${id}">Reply</button>
+      <button type="button" class="action" data-action="inbox-tray-answer" data-id="${id}"${optionsAttr(item.payload)}>Reply</button>
     </div>`;
   }
   return "";
@@ -333,7 +333,7 @@ function detail(item, state) {
       ${decline(item, "inbox-detail-decline")}
     </div>`;
   } else if (waits(item) && item.kind === "question") {
-    answers = `<div class="inbox-reply" data-id="${id}"></div>`;
+    answers = `<div class="inbox-reply" data-id="${id}"${optionsAttr(item.payload)}></div>`;
   }
   return `<article class="inbox-detail" aria-labelledby="inbox-detail-title">
     <a class="inbox-back" href="${back}"><span class="inbox-back-arrow" aria-hidden="true">&larr; </span><span class="inbox-back-label">Back to inbox</span><span class="inbox-close-label">Close</span></a>
@@ -360,6 +360,7 @@ function mountReply(state) {
   if (!slot) return;
   const reply = composer({
     label: "Your answer",
+    options: optionsFrom(slot.dataset.options),
     send: async (body) => {
       await sendAnswer(slot.dataset.id, body);
       await leave(state);
@@ -615,6 +616,7 @@ export async function answer(id, button) {
   }
   const reply = composer({
     label: "Your answer",
+    options: optionsFrom(button.dataset.options),
     send: async (body) => {
       await sendAnswer(id, body);
       await render();

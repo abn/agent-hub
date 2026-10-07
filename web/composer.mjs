@@ -33,9 +33,10 @@ function sendGlyph() {
 }
 
 // label: what the field is, for a reader who cannot see what it sits under.
-// placeholder: the resting line. send: what to call with the typed body; it
+// placeholder: the resting line. options: the answers the asker suggested,
+// each sent as the body when pressed. send: what to call with the body; it
 // rejects with the message the reader needs to see.
-export function composer({ label, placeholder = "Or type a reply", send }) {
+export function composer({ label, placeholder = "Or type a reply", options = [], send }) {
   sequence += 1;
   const errorId = `composer-error-${sequence}`;
 
@@ -64,18 +65,58 @@ export function composer({ label, placeholder = "Or type a reply", send }) {
   const row = document.createElement("div");
   row.className = "composer-row";
   row.append(field, button);
+
+  // A suggested answer is sent as it reads, through the same send as a typed
+  // one, so it is refused, retried and reported the same way.
+  const picks = options.map((option) => {
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "composer-option";
+    pick.textContent = option;
+    pick.addEventListener("click", () => submit(option, pick));
+    return pick;
+  });
+  if (picks.length) {
+    const group = document.createElement("div");
+    group.className = "composer-options";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Quick answers");
+    group.append(...picks);
+    form.append(group);
+  }
   form.append(row, error);
 
-  function fail(message) {
+  function fail(message, target = field) {
     error.hidden = false;
     error.textContent = message;
-    field.focus();
+    target.focus();
   }
 
+  // The one answer on its way. A question is answered once, so nothing else
+  // is sent until the hub has said yes or no to it.
+  let sending = false;
+
   function busy(state) {
+    sending = state;
     field.disabled = state;
     button.disabled = state;
+    for (const pick of picks) pick.disabled = state;
     form.setAttribute("aria-busy", String(state));
+  }
+
+  async function submit(body, from = field) {
+    if (sending) return;
+    error.hidden = true;
+    error.textContent = "";
+    busy(true);
+    try {
+      await send(body);
+    } catch (problem) {
+      // What was typed stays in the field: it is the reader's, and the send is
+      // the only thing that failed.
+      busy(false);
+      fail(`Nothing was sent: ${problem.message}`, from);
+    }
   }
 
   // The field rests at one line and grows with what is written in it, so a
@@ -93,22 +134,13 @@ export function composer({ label, placeholder = "Or type a reply", send }) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (sending) return;
     const body = field.value.trim();
     if (!body) {
       fail("Nothing was sent: the reply is empty.");
       return;
     }
-    error.hidden = true;
-    error.textContent = "";
-    busy(true);
-    try {
-      await send(body);
-    } catch (problem) {
-      // What was typed stays in the field: it is the reader's, and the send is
-      // the only thing that failed.
-      busy(false);
-      fail(`Nothing was sent: ${problem.message}`);
-    }
+    await submit(body);
   });
 
   return { element: form, focus: () => field.focus() };
