@@ -156,25 +156,21 @@ phone frame means deciding what a tools row for it would hold, which is a
 design question and not a sizing one, so the band stays as built until that is
 answered.
 
-**The live band sits above the document in the stage.** A version can be held
-live while an agent writes it. The stage then carries a 44px band between the
-meta line and the document: a state dot, the state word (live or idle), the
-agent name, and a follow or pause control. It is drawn only while a version is
-live or idle, so a sealed artifact shows nothing and the frame is exactly as it
-was. The band is a new element rather than a control row, which is a deliberate
-exception to "the frame does not move": a live document is content that arrives,
-and the band is how the reader is told it is arriving. It costs 44px of document
-offset only while something is being written.
+**The live band sits above the document in the stage.** While a version is
+live or idle, the stage carries a 34px band between the meta line and the
+document: a state dot, the state word (live or idle), the agent name, and a
+follow or pause control. A sealed artifact shows nothing. The band is a new
+element rather than a control row, so it offsets the document by 34px while
+something is being written. That is an exception to "the frame does not move",
+and it is recorded here for that reason.
 
 **Deviation: the band has no elapsed time, no jump-to-latest and no scroll
 anchor.** The handoff has follow or pause, the state word, the agent name, the
 elapsed time, and "N updates, jump to latest", with auto-follow restoring the
 scroll anchor and stopping when the reader scrolls away. As built the band
-carries the first three: follow or pause, the state word, the agent name. It
-counts pending updates while paused but has no jump control, and it does not yet
-track the reader's scroll position, so a following reader's place is restored by
-the browser's own scroll anchoring rather than by the viewer. Both are intended;
-the band is the smallest thing that tells the reader who is writing.
+carries the first three. It counts pending updates while paused but has no jump
+control, and it does not track the reader's scroll position, so a following
+reader's place is kept by the browser's own scroll anchoring.
 
 This extends the phone deviation above rather than settling it. The band is
 still the viewer's whole chrome on a phone, so what a tools row would hold for
