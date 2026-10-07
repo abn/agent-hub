@@ -8,10 +8,10 @@ import { esc, glyph, main, optionsAttr, optionsFrom, paint, projectName, stale }
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
-import { subjectAndMessage } from "./feed.mjs";
+import { expiredWords, subjectAndMessage } from "./feed.mjs";
 import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
-import { fullStamp, relative } from "./time.mjs";
+import { deadlineWords, fullStamp, relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // The design's swipe geometry: a 112px tray under a right swipe, 88px per
@@ -133,8 +133,24 @@ function removeSnooze(id) {
   saveSnoozes(map);
 }
 
+const expiredOf = (item) =>
+  item.status === "resolved" &&
+  Boolean((item.decision && item.decision.expired) || (item.answer && item.answer.expired));
+
+// The deadline the asking agent set, in words: what it will do to an item that
+// still waits, and what it did to one the hub resolved. Empty otherwise.
+function deadlineLine(item) {
+  if (waits(item) && item.expires_at) return deadlineWords(item.expires_at, item.on_expiry);
+  if (expiredOf(item)) return expiredWords(item.decision ? item.decision.decision : "");
+  return "";
+}
+
 function outcomeOf(item) {
   if (item.status !== "resolved") return "";
+  if (expiredOf(item)) {
+    if (!item.decision) return "Closed unanswered";
+    return item.decision.decision === "approved" ? "Approved at deadline" : "Declined at deadline";
+  }
   if (item.decision && item.decision.decision) {
     const d = String(item.decision.decision).toLowerCase();
     if (d === "approved" || d === "approve") return "Approved";
@@ -208,6 +224,7 @@ function trays(item) {
 function inboxRow(item, state, options = {}) {
   const isResolved = item.status === "resolved";
   const body = (waits(item) || isResolved) ? bodyOf(item) : "";
+  const deadline = deadlineLine(item);
   const tone = waits(item) ? "is-waiting" : item.status === "unread" ? "is-unread" : isResolved ? "is-resolved" : "is-read";
   const swipe = waits(item) ? (trays(item) ? "actions" : "") : isResolved ? "" : "read";
   const href = esc(address({ ...state, open: item.event_id }));
@@ -224,6 +241,7 @@ function inboxRow(item, state, options = {}) {
           <div class="title"${waits(item) || item.status === "unread" ? ' style="font-weight: 600;"' : ""}><a href="${href}">${esc(item.summary)}</a></div>
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
+        ${deadline ? `<div class="inbox-deadline">${esc(deadline)}</div>` : ""}
         <div class="inbox-foot">
           <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
         </div>
@@ -322,6 +340,7 @@ function detail(item, state) {
   const note = isResolved ? noteOf(item) : "";
   const enrol = enrolOf(item);
   const isEnrol = enrol !== null;
+  const deadline = deadlineLine(item);
   // One rule with the feed's stage: a summary that reads as a subject titles
   // the card, and a summary that is a whole message titles it with its leading
   // sentence and reads the rest as prose under it.
@@ -345,6 +364,7 @@ function detail(item, state) {
       <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>
     </div>
     <h2 class="item-title" id="inbox-detail-title">${esc(subject)}</h2>
+    ${deadline ? `<p class="inbox-detail-deadline">${esc(deadline)}</p>` : ""}
     ${message ? `<p class="inbox-detail-message">${esc(message)}</p>` : ""}
     ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}</div>` : ""}
     ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}

@@ -27,6 +27,9 @@ pub struct NewQuestion<'a> {
     pub idempotency_key: Option<&'a str>,
     /// The session the asker had open, when it had one.
     pub session_id: Option<&'a str>,
+    /// When the question closes itself unanswered, if the asker set a
+    /// deadline.
+    pub deadline: Option<inbox::Deadline>,
 }
 
 /// Post a question. It opens a thread, lands on the feed, and enters the inbox
@@ -62,6 +65,7 @@ pub async fn post_outcome(
         options,
         idempotency_key,
         session_id,
+        deadline,
     } = question;
 
     // Before anything is written, so a refused list posts nothing.
@@ -104,6 +108,7 @@ pub async fn post_outcome(
             thread_id: None,
             session_id: session_id.map(str::to_string),
         },
+        deadline.as_ref(),
     )
     .await?;
 
@@ -170,6 +175,16 @@ pub async fn answer(
                 "question {question_id} is not tracked in the inbox"
             )));
         }
+    }
+    // A deadline that passed before this answer landed has already closed the
+    // question, whether or not the sweep has recorded it yet.
+    if inbox::due_in_tx(&tx, question_id, time::OffsetDateTime::now_utc())
+        .await?
+        .is_some()
+    {
+        return Err(Error::Conflict(format!(
+            "question {question_id} reached its deadline and closed unanswered"
+        )));
     }
 
     let id = events::append_in_tx(
@@ -332,6 +347,18 @@ pub async fn decide_reporting(
             )));
         }
     }
+    if let Some(outcome) =
+        inbox::due_in_tx(&tx, approval_id, time::OffsetDateTime::now_utc()).await?
+    {
+        let word = if outcome == inbox::OnExpiry::Approve {
+            "approved"
+        } else {
+            "declined"
+        };
+        return Err(Error::Conflict(format!(
+            "approval {approval_id} reached its deadline and {word} itself"
+        )));
+    }
 
     // A self-enrolment approval admits or refuses its subject in this same
     // transaction. The subject comes from the event, never the payload: the
@@ -425,4 +452,105 @@ pub async fn decide_reporting(
         event_id: id,
         enrolled_agent,
     })
+}
+
+/// The actor recorded on a resolution the hub made because a deadline passed.
+/// It is reserved, so no agent can be enrolled under it and sign as the hub.
+pub const HUB_ACTOR: &str = "hub";
+
+/// How many due items one query reads. A sweep reads batch after batch until
+/// none is due, so a read that settles first never finds one still open.
+const EXPIRE_BATCH: i64 = 100;
+
+/// Resolve every open item whose deadline has passed at `now`, and return how
+/// many were resolved.
+///
+/// `now` is a parameter so a test can move time without sleeping; the serving
+/// hub passes the wall clock. Each item resolves in its own immediate
+/// transaction that re-reads its status and deadline first, the same guard a
+/// human decision takes, so whichever lands first wins and the other finds the
+/// item resolved. A batch in which every item failed ends the pass, so an item
+/// that keeps failing is retried on the next sweep rather than in a loop.
+pub async fn expire_due(db: &Database, now: time::OffsetDateTime) -> Result<usize> {
+    let mut resolved = 0;
+    loop {
+        let due = {
+            let conn = super::connect(db)?;
+            inbox::due_items(&conn, now, EXPIRE_BATCH).await?
+        };
+        let full = due.len() as i64 == EXPIRE_BATCH;
+        let mut progressed = false;
+        for event_id in due {
+            match expire_one(db, &event_id, now).await {
+                Ok(settled) => {
+                    resolved += usize::from(settled);
+                    progressed = true;
+                }
+                Err(err) => {
+                    tracing::warn!(event_id = %event_id, error = %err, "could not resolve an item at its deadline")
+                }
+            }
+        }
+        if !full || !progressed {
+            return Ok(resolved);
+        }
+    }
+}
+
+/// Resolve one item at its deadline, if it is still open and due.
+///
+/// The resolution is an `answer` on the item's thread, as a human's is, so
+/// every reader that sees a human decision sees this one the same way. Its
+/// actor is [`HUB_ACTOR`] and its payload says `expired`, so no reader takes
+/// it for the human's word. It is exempt from the project's event ceiling: a
+/// full feed must not leave an item open past the deadline its agent set.
+async fn expire_one(db: &Database, event_id: &str, now: time::OffsetDateTime) -> Result<bool> {
+    let mut conn = super::connect(db)?;
+    let tx = conn
+        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
+        .await
+        .map_err(crate::store::engine)?;
+    let Some(outcome) = inbox::due_in_tx(&tx, event_id, now).await? else {
+        return Ok(false);
+    };
+    let Some(item) = events::get_in_tx(&tx, event_id).await? else {
+        return Ok(false);
+    };
+    let payload = match (item.kind.as_str(), outcome) {
+        ("approval", inbox::OnExpiry::Approve) => serde_json::json!({
+            "body": "Approved: no decision before the deadline",
+            "decision": "approved",
+            "expired": true,
+        }),
+        ("approval", _) => serde_json::json!({
+            "body": "Declined: no decision before the deadline",
+            "decision": "declined",
+            "expired": true,
+        }),
+        _ => serde_json::json!({ "expired": true }),
+    };
+    events::append_in_tx(
+        &tx,
+        0,
+        HUB_ACTOR,
+        None,
+        NewEvent {
+            project_id: item.project_id.clone(),
+            kind: "answer".to_string(),
+            // An item's own summary may already sit at the event cap, and an
+            // expiry refused for its length would be retried every sweep.
+            summary: format!("re: {}", item.summary)
+                .chars()
+                .take(crate::limits::EVENT_SUMMARY_CHARS_MAX)
+                .collect(),
+            payload: Some(payload),
+            needs_action: false,
+            thread_id: Some(event_id.to_string()),
+            session_id: None,
+        },
+    )
+    .await?;
+    inbox::set_status_in_tx(&tx, event_id, "resolved").await?;
+    tx.commit().await.map_err(crate::store::engine)?;
+    Ok(true)
 }

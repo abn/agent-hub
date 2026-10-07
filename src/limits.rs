@@ -76,6 +76,14 @@ pub const QUESTION_OPTIONS_MAX: usize = 6;
 /// not a paragraph.
 pub const QUESTION_OPTION_CHARS_MAX: usize = 80;
 
+/// The shortest deadline an agent may put on a question or an approval, in
+/// seconds. Shorter than this and the human has no real chance to see it.
+pub const DEADLINE_SECS_MIN: u64 = 60;
+
+/// The longest deadline an agent may put on a question or an approval, in
+/// seconds: thirty days.
+pub const DEADLINE_SECS_MAX: u64 = 30 * 24 * 60 * 60;
+
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 

@@ -178,6 +178,7 @@ pub async fn home(
         )
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    state.settle_before_read().await;
     let summary = home_store::home(
         &state.db,
         HOME_RECENT_LIMIT,
@@ -223,6 +224,7 @@ pub async fn list(
     };
 
     let limit = params.limit.unwrap_or(crate::limits::FEED_LIMIT_DEFAULT);
+    state.settle_before_read().await;
     let items = inbox_store::list(&state.db, status, project, limit)
         .await
         .map_err(|err| Problem::from_error(&err))?;
@@ -247,6 +249,7 @@ pub async fn answer(
 
     let payload = json_body(body, "answer body must be JSON with a body field")?;
 
+    state.settle_before_read().await;
     let event_id = question_store::answer(
         &state.db,
         state.config.events_per_project.per_project,
@@ -303,6 +306,7 @@ pub async fn decide(
         }
     };
 
+    state.settle_before_read().await;
     let decision = question_store::decide_reporting(
         &state.db,
         state.config.events_per_project.per_project,

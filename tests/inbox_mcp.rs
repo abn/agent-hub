@@ -234,6 +234,87 @@ fn approval_signal_is_refused_at_the_inbox_cap() {
     );
 }
 
+#[test]
+fn a_deadline_is_taken_in_range_and_refused_outside_it() {
+    let data_dir = TempDir::new("deadline");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = spawn(data_dir.path(), &[]);
+    server.initialize();
+
+    let approval = server.call_tool(
+        "signal_append",
+        json!({
+            "project_id": "proj",
+            "kind": "approval",
+            "summary": "rotate keys?",
+            "expires_in_seconds": 3600,
+            "on_expiry": "approve",
+        }),
+    );
+    let approval_id = structured(&approval)["event_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("an approval with a deadline is admitted: {approval}"))
+        .to_string();
+    let question = server.call_tool(
+        "question_post",
+        json!({"project_id": "proj", "subject": "which region?", "expires_in_seconds": 600}),
+    );
+    let question_id = structured(&question)["question_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a question with a deadline is admitted: {question}"))
+        .to_string();
+
+    let open = server.call_tool("inbox_read", json!({"status": "action"}));
+    let open = items(&open);
+    let approval = item_with_id(open, &approval_id);
+    assert_eq!(approval["on_expiry"], "approve");
+    assert!(approval["expires_at"].as_str().is_some(), "{approval}");
+    assert_eq!(item_with_id(open, &question_id)["on_expiry"], "close");
+
+    for (tool, arguments) in [
+        (
+            "question_post",
+            json!({"project_id": "proj", "subject": "soon", "expires_in_seconds": 10}),
+        ),
+        (
+            "question_post",
+            json!({"project_id": "proj", "subject": "late", "expires_in_seconds": 2_592_001}),
+        ),
+        (
+            "question_post",
+            json!({"project_id": "proj", "subject": "named", "expires_in_seconds": 3600,
+                   "on_expiry": "approve"}),
+        ),
+        (
+            "question_post",
+            json!({"project_id": "proj", "subject": "bare", "on_expiry": "decline"}),
+        ),
+        (
+            "signal_append",
+            json!({"project_id": "proj", "kind": "approval", "summary": "x",
+                   "expires_in_seconds": 3600, "on_expiry": "shrug"}),
+        ),
+        (
+            "signal_append",
+            json!({"project_id": "proj", "kind": "signal", "summary": "x",
+                   "expires_in_seconds": 3600}),
+        ),
+    ] {
+        let refused = server.call_tool(tool, arguments.clone());
+        assert_eq!(
+            error_code(&refused),
+            "invalid_argument",
+            "{tool} {arguments} is refused"
+        );
+    }
+    let after = server.call_tool("inbox_read", json!({"status": "action"}));
+    assert_eq!(
+        items(&after).len(),
+        2,
+        "a refused item writes nothing: {after}"
+    );
+}
+
 /// Seed one finished event and let the human read it, before the hub starts.
 ///
 /// Only one process may hold the engine, so the human's side of this happens

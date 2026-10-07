@@ -6,6 +6,32 @@ software release notes and the repository changelog.
 
 ## 2026-10-07
 
+### A question or an approval can carry a deadline
+
+* **Change**: `question_post`, and `signal_append` with kind `approval`, take an
+  optional `expires_in_seconds` (60 to 2592000). An approval may name
+  `on_expiry` as `approve` or `decline` and declines by default; a question
+  closes with no answer. An item still open at its deadline is resolved by the
+  hub, recorded with `hub` as the actor and `expired: true`, and agents see it
+  in `inbox_read`, `inbox_wait` and the notification trailer as they see a human
+  resolution. A decision after the deadline is refused. Out-of-range input is
+  refused as `invalid_argument`. The sweep runs under embedded stdio as well as
+  over HTTP.
+* **Change**: `hub` is a reserved agent id. An agent a store from before already
+  holds under it has its token revoked when the hub opens the store, and is
+  refused a new one.
+* **Change**: the Inbox says what a deadline will do on a waiting row and card
+  ("Declines itself in 3h"), and says that an item expired, and how, in Earlier,
+  on its card and on the project feed.
+* **Update**: [Agent surface](architecture/agent-surface.md) gains a section on
+  deadlines, [Data model](architecture/data-model.md) lists the new inbox
+  columns, [Human surface](architecture/human-surface.md) describes the wording,
+  and [Using the hub as a brain](usage/agents.md) and the `agent-hub` skill tell an
+  agent how to ask with a deadline.
+* **Decision**: [ADR 0027](adr/0027-deadlines-on-open-items.md) records why an
+  agent-set deadline on one item is not retention, so the human remains the
+  garbage collector.
+
 ### A closed app can be nudged through a target the operator runs
 
 * **Change**: with `notify_url` (`HUB_NOTIFY_URL`) set, the hub POSTs a fixed

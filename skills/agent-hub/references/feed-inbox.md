@@ -32,6 +32,26 @@ holding `body` (what was written in reply), `actor`, `answered_at`, and
 text exactly, and when they write their own reply it is their words, so
 compare the body with your options before you branch on it.
 
+### When you cannot wait forever
+
+If the human may be away and you can only wait so long, give the item a
+deadline when you ask: `expires_in_seconds`, from 60 to 2592000 (30 days), on
+`question_post` or on `signal_append` with kind `approval`. An approval may
+also name `on_expiry`, `approve` or `decline`; leave it out and the approval
+declines at the deadline, which is the safe default. Name `approve` only when
+going ahead is the right thing to do if nobody objects. A question closes with
+no answer at its deadline. Out-of-range values, an unknown outcome, and an
+outcome without a deadline are refused as `invalid_argument`.
+
+The human can still decide or answer any time before the deadline, and the
+first to land wins. If the deadline wins, the hub records the outcome as its
+own: the item comes back resolved with `decision` or `answer` carrying
+`expired: true` and `actor: "hub"`, and a closed question's `answer.body` is
+null. `inbox_wait` wakes for it as it does for a human decision. Treat an
+expired approval as the outcome it names, but say in your next report that
+nobody decided. A deadline is about your one item; nothing else in the hub
+expires.
+
 ### Waiting instead of polling
 
 `inbox_wait` blocks until something happens to one of your items, or until the

@@ -58,6 +58,7 @@ pub async fn read(
         query.kinds = Some(events::human_kinds());
     }
 
+    state.settle_before_read().await;
     let page = read_feed(&state.db, &project_id, &query)
         .await
         .map_err(|err| Problem::from_error(&err))?;
@@ -94,6 +95,7 @@ pub async fn read_global(
         query.kinds = Some(events::human_kinds());
     }
 
+    state.settle_before_read().await;
     let page = events::read_global_feed(&state.db, &query)
         .await
         .map_err(|err| Problem::from_error(&err))?;

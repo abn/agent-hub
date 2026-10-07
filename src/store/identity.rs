@@ -258,6 +258,12 @@ pub async fn has_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
 /// inserted in the same transaction, so a reissue never leaves two usable
 /// tokens. The plaintext is returned once and never stored.
 pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
+    if RESERVED_AGENT_IDS.contains(&agent_id) {
+        return Err(Error::InvalidArgument(format!(
+            "agent id '{agent_id}' is reserved for the hub's own identities; \
+             create the agent under another id and issue that one a token"
+        )));
+    }
     let plaintext = generate_token();
     let token_hash = hash_token(&plaintext);
     let created_at = crate::store::now_rfc3339();
@@ -1058,13 +1064,49 @@ async fn audit(
     Ok(())
 }
 
+/// The names the hub records its own actions under, which no agent may hold.
+const RESERVED_AGENT_IDS: [&str; 3] = ["human", "local", "hub"];
+
+/// Revoke the live token of every agent whose id is reserved, and return
+/// their ids.
+///
+/// `hub` became reserved when the hub began recording the resolutions it
+/// makes at a deadline under it. A store from before may already hold an
+/// agent by that name, and while its token works its writes read as the
+/// hub's. The agent and its history stay; only the token goes, through the
+/// same audited revoke an operator would make, and [`issue_token`] refuses
+/// that id a new one.
+pub async fn retire_reserved_agents(db: &Database) -> Result<Vec<String>> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT DISTINCT a.id FROM agent_tokens t
+             JOIN agents a ON a.id = t.agent_id
+             WHERE t.revoked_at IS NULL AND a.id IN (?1, ?2, ?3)",
+            RESERVED_AGENT_IDS
+                .map(|id| Value::Text(id.to_string()))
+                .to_vec(),
+        )
+        .await
+        .map_err(engine)?;
+    let mut held = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        held.push(text(&row, 0)?);
+    }
+    drop(rows);
+    for agent_id in &held {
+        revoke_token(db, agent_id).await?;
+    }
+    Ok(held)
+}
+
 fn validate_agent_id(id: &str) -> Result<()> {
     if id.trim().is_empty() || id.chars().count() > 200 {
         return Err(Error::InvalidArgument(
             "an agent id must be non-empty and at most 200 characters".to_string(),
         ));
     }
-    if matches!(id, "human" | "local") {
+    if RESERVED_AGENT_IDS.contains(&id) {
         return Err(Error::InvalidArgument(format!(
             "agent id '{id}' is reserved for the hub's own identities"
         )));
