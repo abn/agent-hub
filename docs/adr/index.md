@@ -36,3 +36,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   with standard tools
 * [0024](0024-notifications-on-the-tool-result.md) - Deliver notifications on
   the tool result, not by polling
+* [0025](0025-live-artifact-versions.md) - A live artifact version is a pointer,
+  not a draft

@@ -254,13 +254,24 @@ content.
 
 ## Version history
 
-Versions are immutable snapshots. A change is always a new version published
-with `artifact_update`, and any version stays readable by number after newer
-ones land. A stale `base_version` without `force` is refused rather than
-overwritten. Deleting an artifact removes its snapshots, blobs, and search
-entry; the feed keeps the published, updated, and deleted events as the
-audit trail. There is no live editing: the hub does not stream, patch, or
-mutate a published artifact in place.
+Versions are immutable snapshots once sealed. A change is normally a new
+version published with `artifact_update`, and any version stays readable by
+number after newer ones land. A stale `base_version` without `force` is refused
+rather than overwritten.
+
+A version can also be held live while an agent writes it. An agent begins a live
+version with `artifact_draft`, which mints the next version and points the
+artifact at it; every later `artifact_draft` mutates that one version in place
+rather than minting another. The version being written is readable at
+`?version=N`, or at `?live=1` when the number is not known. While a version is
+live the artifact's default public URL keeps serving the last sealed version,
+so a published link never shows half-finished work.
+
+Publishing with `artifact_update` seals the live version: it becomes the current
+version and is immutable like any other. A live version is not indexed for
+search until it is sealed. Deleting an artifact removes its snapshots, blobs,
+and search entry; the feed keeps the published, updated, and deleted events as
+the audit trail.
 
 ## See also
 

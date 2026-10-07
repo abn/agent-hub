@@ -103,7 +103,8 @@ handing it the document.
 | `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, so they are delivered through the notification trailer instead of polled. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
 | `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
-| `artifact_update` | Publish a new version of an existing artifact. |
+| `artifact_update` | Publish a new version of an existing artifact, sealing any live version first. |
+| `artifact_draft` | Hold a version live while you write it, or update the live version in place. Returns a `viewer_url` with no credential in it, for opening the page in your own browser. |
 | `artifact_get` | Read an artifact's content and metadata, optionally one version. Includes total and open thread counts across all versions. |
 | `artifact_versions` | List an artifact's immutable version history. |
 | `artifact_list` | List a project's artifacts, optionally filtered by session. Each entry includes total and open thread counts across all versions. |

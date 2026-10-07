@@ -57,8 +57,10 @@ Run these when a session starts; each answers the next question:
   a nudge, not the record: the detail is read from the inbox or the feed. To be
   told about feed events without polling, register a standing interest with
   `notify_subscribe`.
-- **Artifacts are versioned snapshots.** There is no live editing; a change is a
-  new version. Publishing is yours; sharing outward is the human's act.
+- **Artifacts are versioned snapshots.** You can hold one version live with
+  `artifact_draft` while you write it, and seal it by publishing with
+  `artifact_update`; the public URL keeps serving the last sealed version until
+  then. Publishing is yours; sharing outward is the human's act.
 - **Retry safely.** A write that creates a durable record accepts an idempotency
   key, so a retry after a dropped connection returns the original result.
 - **Never send an actor.** The hub sets it from the token.

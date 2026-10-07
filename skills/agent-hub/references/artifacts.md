@@ -10,6 +10,7 @@ escaping, such as minified markup full of quotes, has less than 50 MiB of room.
 ```
 artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
+artifact_draft(artifact_id, content, envelope?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
 artifact_list(project_id, session?)
@@ -73,5 +74,27 @@ requests: inline all CSS and JS, embed images and fonts as `data:` URIs, keep
 no storage-backed state, support light and dark themes, avoid horizontal body
 scroll, and use no emoji or em-dashes.
 
-There is no live editing. Artifacts are versioned snapshots, and a change is a
-new version.
+## Live editing
+
+A version can be held live while you write it. Start one with
+`artifact_draft`: it mints the next version, points the artifact at it, and
+returns a `viewer_url`. Every later `artifact_draft` overwrites that one version
+in place, so one version is minted per session rather than one per save, and the
+page shows your latest bytes on a reload with no extra call.
+
+Open the `viewer_url` in your own browser tool and keep it open as you work. The
+human can watch the document take shape while you write it, and can comment or
+steer in the session meanwhile; comments and answers reach you on your next
+`artifact_draft` through the notification trailer. The URL carries no
+credential, because a plain artifact with no active share is already public. If
+the human has shared this artifact, its page is concealed and your URL returns
+not found: that is deliberate, and sharing is the human's act, so publish and
+let them open it.
+
+Publishing with `artifact_update` seals the version: it becomes the current
+version, immutable like any other, and is indexed for search. Until then the
+artifact's default public URL keeps serving the last sealed version, so a link
+the human has already shared never shows work in progress.
+
+If another agent already holds a version live, `artifact_draft` is refused with
+a conflict naming it; pass `force` to take it over.
