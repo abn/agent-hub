@@ -114,6 +114,35 @@ export function relative(ts, nowMs = Date.now()) {
   return shortDate(new Date(ms), new Date(nowMs));
 }
 
+// How long until an instant, in the units a row carries: 20m, 3h, 2d. It
+// rounds up under an hour, so a deadline a few seconds off still reads as a
+// minute away rather than as none. An instant already past, or not a time at
+// all, has no time left and is null.
+export function untilCompact(ts, nowMs = Date.now()) {
+  const ms = parse(ts);
+  if (ms === null) return null;
+  const gap = ms - nowMs;
+  if (gap <= 0) return null;
+  if (gap < HOUR) return units(Math.max(1, Math.ceil(gap / MINUTE)), "minute");
+  if (gap < 2 * DAY) return units(Math.max(1, Math.round(gap / HOUR)), "hour");
+  return units(Math.floor(gap / DAY), "day");
+}
+
+// What an agent's deadline will do to a waiting item, said in words so the
+// row does not lean on a colour or a clock glyph: "Declines itself in 3h".
+const DEADLINE_VERB = {
+  approve: "Approves itself",
+  decline: "Declines itself",
+  close: "Closes",
+};
+
+export function deadlineWords(expiresAt, onExpiry, nowMs = Date.now()) {
+  const verb = DEADLINE_VERB[onExpiry];
+  if (!verb || parse(expiresAt) === null) return "";
+  const left = untilCompact(expiresAt, nowMs);
+  return left ? `${verb} in ${left}` : `${verb} now`;
+}
+
 // Every mounted element, and the instant each one shows. The set is swept on
 // every tick, so an element the screen painted over leaves it without anyone
 // unmounting it by hand.

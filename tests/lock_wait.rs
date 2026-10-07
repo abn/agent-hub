@@ -115,6 +115,7 @@ async fn concurrent_same_key_questions_serialize() {
                     options: None,
                     idempotency_key: Some("q-key"),
                     session_id: None,
+                    deadline: None,
                 },
             )
             .await
@@ -161,6 +162,7 @@ async fn concurrent_same_key_answers_serialize() {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await

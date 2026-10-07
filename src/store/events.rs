@@ -95,9 +95,17 @@ pub async fn append(
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_with_caps(db, None, events_per_project, actor, idempotency_key, event)
-        .await
-        .map(|appended| appended.id)
+    append_with_caps(
+        db,
+        None,
+        events_per_project,
+        actor,
+        idempotency_key,
+        event,
+        None,
+    )
+    .await
+    .map(|appended| appended.id)
 }
 
 /// Append an open item with the inbox cap applied.
@@ -116,9 +124,17 @@ pub async fn append_action(
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_action_outcome(db, caps, events_per_project, actor, idempotency_key, event)
-        .await
-        .map(|appended| appended.id)
+    append_action_outcome(
+        db,
+        caps,
+        events_per_project,
+        actor,
+        idempotency_key,
+        event,
+        None,
+    )
+    .await
+    .map(|appended| appended.id)
 }
 
 /// What an append did: the event's id, and whether it was a replay of an
@@ -129,7 +145,8 @@ pub struct Appended {
     pub replayed: bool,
 }
 
-/// [`append_action`], also saying whether the write was a replay.
+/// [`append_action_with_deadline`], also saying whether the write was a
+/// replay.
 pub async fn append_action_outcome(
     db: &Database,
     caps: &crate::limits::InboxCaps,
@@ -137,6 +154,7 @@ pub async fn append_action_outcome(
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
+    deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
     append_with_caps(
         db,
@@ -145,8 +163,36 @@ pub async fn append_action_outcome(
         actor,
         idempotency_key,
         event,
+        deadline,
     )
     .await
+}
+
+/// As [`append_action`], with the deadline the asking agent set on the item.
+///
+/// The deadline is written in the same transaction as the item, so an item
+/// with a deadline is never visible without it. A replayed write returns the
+/// original item and leaves its deadline as it was.
+pub async fn append_action_with_deadline(
+    db: &Database,
+    caps: &crate::limits::InboxCaps,
+    events_per_project: i64,
+    actor: &str,
+    idempotency_key: Option<&str>,
+    event: NewEvent,
+    deadline: Option<&crate::store::inbox::Deadline>,
+) -> Result<String> {
+    append_action_outcome(
+        db,
+        caps,
+        events_per_project,
+        actor,
+        idempotency_key,
+        event,
+        deadline,
+    )
+    .await
+    .map(|appended| appended.id)
 }
 
 pub async fn append_for_principal(
@@ -163,11 +209,13 @@ pub async fn append_for_principal(
         principal,
         idempotency_key,
         event,
+        None,
     )
     .await
     .map(|appended| appended.id)
 }
 
+/// An open item written under a principal, with the deadline the agent set.
 pub async fn append_action_for_principal(
     db: &Database,
     caps: &crate::limits::InboxCaps,
@@ -175,6 +223,7 @@ pub async fn append_action_for_principal(
     principal: &crate::principal::Principal,
     idempotency_key: Option<&str>,
     event: NewEvent,
+    deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
     append_with_caps_and_principal(
         db,
@@ -183,6 +232,7 @@ pub async fn append_action_for_principal(
         principal,
         idempotency_key,
         event,
+        deadline,
     )
     .await
 }
@@ -194,6 +244,7 @@ async fn append_with_caps(
     actor: &str,
     idempotency_key: Option<&str>,
     event: NewEvent,
+    deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -202,6 +253,11 @@ async fn append_with_caps(
         .map_err(engine)?;
     let appended =
         append_in_tx_capped(&tx, caps, events_per_project, actor, idempotency_key, event).await?;
+    if !appended.replayed
+        && let Some(deadline) = deadline
+    {
+        crate::store::inbox::set_deadline_in_tx(&tx, &appended.id, deadline).await?;
+    }
     tx.commit().await.map_err(engine)?;
     Ok(appended)
 }
@@ -213,6 +269,7 @@ async fn append_with_caps_and_principal(
     principal: &crate::principal::Principal,
     idempotency_key: Option<&str>,
     event: NewEvent,
+    deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
     let mut conn = super::connect(db)?;
     let tx = conn
@@ -235,6 +292,11 @@ async fn append_with_caps_and_principal(
         event,
     )
     .await?;
+    if !appended.replayed
+        && let Some(deadline) = deadline
+    {
+        crate::store::inbox::set_deadline_in_tx(&tx, &appended.id, deadline).await?;
+    }
     tx.commit().await.map_err(engine)?;
     Ok(appended)
 }
@@ -257,6 +319,8 @@ pub(crate) async fn append_in_tx(
         .map(|appended| appended.id)
 }
 
+/// Append an event, reporting whether it is new. A write an idempotency key
+/// replayed returns the original id, marked as a replay.
 async fn append_in_tx_capped(
     tx: &turso::transaction::Transaction<'_>,
     caps: Option<&crate::limits::InboxCaps>,

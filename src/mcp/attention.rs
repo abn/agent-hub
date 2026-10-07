@@ -61,15 +61,24 @@ async fn read_pending(
     }
     let mut items = Vec::with_capacity(page.items.len());
     for item in &page.items {
-        let (kind, title, at) = match item.kind.as_str() {
+        // A resolution the hub made at a deadline arrives under the same kind
+        // as a human's, so an agent handles both on one path, and says it
+        // expired in its title and its own flag.
+        let (kind, title, at, expired) = match item.kind.as_str() {
             "question" => {
                 let Some(answer) = item.answer.as_ref() else {
                     continue;
                 };
+                let title = if answer.expired {
+                    format!("expired, closed with no answer: {}", item.summary)
+                } else {
+                    format!("answered: {}", item.summary)
+                };
                 (
                     "question_answered",
-                    format!("answered: {}", item.summary),
+                    title,
                     answer.answered_at.clone(),
+                    answer.expired,
                 )
             }
             "approval" => {
@@ -81,22 +90,32 @@ async fn read_pending(
                 } else {
                     "declined"
                 };
+                let title = if decision.expired {
+                    format!("expired, {verb}: {}", item.summary)
+                } else {
+                    format!("{verb}: {}", item.summary)
+                };
                 (
                     "approval_decided",
-                    format!("{verb}: {}", item.summary),
+                    title,
                     decision.decided_at.clone(),
+                    decision.expired,
                 )
             }
             _ => continue,
         };
-        items.push(json!({
+        let mut entry = json!({
             "source": "attention",
             "kind": kind,
             "id": item.event_id,
             "project_id": item.project_id,
             "title": title,
             "at": at,
-        }));
+        });
+        if expired {
+            entry["expired"] = Value::Bool(true);
+        }
+        items.push(entry);
     }
     if items.is_empty() {
         return Ok((Vec::new(), None));

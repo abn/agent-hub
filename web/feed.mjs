@@ -106,8 +106,19 @@ const UNREAD = `<span class="dot-unread" aria-hidden="true"></span><span class="
 // `decision`; the note is whatever was typed, so it goes through `esc`.
 const DECIDED = { approved: "Approved", declined: "Declined" };
 
+// A resolution the hub recorded because the asking agent's deadline passed.
+// It is said in words, apart from a human's decision, wherever one is shown.
+export function expiredWords(decision) {
+  if (decision === "approved") return "Expired: approved itself, no one decided in time";
+  if (decision === "declined") return "Expired: declined itself, no one decided in time";
+  return "Expired: closed with no answer";
+}
+
 function decisionNote(event) {
   const payload = event.payload;
+  if (event.kind === "answer" && payload && payload.expired === true) {
+    return `<div class="feed-note">${esc(expiredWords(payload.decision))}</div>`;
+  }
   const note = payload && typeof payload.note === "string" ? payload.note.trim() : "";
   if (!note) return "";
   const word = DECIDED[payload.decision] || "Note";
@@ -204,6 +215,9 @@ export function formatEventSummary(event) {
     return `asked: ${summary}`;
   }
   if (event.kind === "answer") {
+    if (event.payload && event.payload.expired === true) {
+      return `expired: ${summary.replace(/^re:\s*/i, "")}`;
+    }
     if (/^re:\s*/i.test(summary)) return `answered ${summary.replace(/^re:\s*/i, "")}`;
     if (/^answered\s+/i.test(summary)) return `answered ${summary.replace(/^answered\s+/i, "")}`;
     return `answered ${summary}`;

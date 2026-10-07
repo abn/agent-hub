@@ -32,6 +32,14 @@ pub struct InboxItem {
     /// How a question was answered, once it has been.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<Answer>,
+    /// When the asking agent said the item resolves itself, if it set a
+    /// deadline. An RFC 3339 UTC stamp in whole seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// What the hub does at the deadline if the item is still open: `approve`
+    /// or `decline` for an approval, `close` for a question.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_expiry: Option<String>,
 }
 
 /// The outcome of an approval, as its inbox entry shows it.
@@ -46,18 +54,27 @@ pub struct Decision {
     /// The answer event on the approval's thread that records the decision.
     pub event_id: String,
     pub decided_at: String,
+    /// True when no one decided and the deadline did: the hub recorded the
+    /// outcome the asking agent named, and `actor` is the hub.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub expired: bool,
 }
 
 /// How a question was answered, as its inbox entry shows it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Answer {
-    /// What was written in reply.
-    pub body: String,
+    /// What was written in reply. Null when the question closed at its
+    /// deadline with no answer.
+    pub body: Option<String>,
     /// Who answered.
     pub actor: String,
     /// The answer event on the question's thread that records the answer.
     pub event_id: String,
     pub answered_at: String,
+    /// True when the question closed at its deadline unanswered. The hub
+    /// recorded the closure, so `actor` is the hub and `body` is null.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub expired: bool,
 }
 
 /// Status counts for the home summary.
@@ -267,9 +284,10 @@ async fn list_as(
     let projection = if collapse_read {
         "CASE WHEN i.status = 'read' THEN 'unread' ELSE i.status END,
                 e.created_at,
-                CASE WHEN i.status IN ('unread', 'read') THEN e.created_at ELSE i.updated_at END"
+                CASE WHEN i.status IN ('unread', 'read') THEN e.created_at ELSE i.updated_at END,
+                i.expires_at, i.on_expiry"
     } else {
-        "i.status, e.created_at, i.updated_at"
+        "i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry"
     };
     // The answer that decides the entry, when one has: an answer on the entry's
     // own thread in the same project. A cursor counts it, so an answer that
@@ -421,6 +439,7 @@ async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<
         let Some(decision) = payload.get("decision").and_then(|value| value.as_str()) else {
             continue;
         };
+        let expired = payload.get("expired").and_then(serde_json::Value::as_bool) == Some(true);
         found.push((
             required_text(&row, 0)?,
             required_text(&row, 1)?,
@@ -433,6 +452,7 @@ async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<
                 actor: required_text(&row, 3)?,
                 event_id: required_text(&row, 2)?,
                 decided_at: required_text(&row, 5)?,
+                expired,
             },
         ));
     }
@@ -485,17 +505,23 @@ async fn attach_answers(conn: &Connection, items: &mut [InboxItem]) -> Result<()
                 .map_err(|err| Error::Engine(format!("stored payload is not JSON: {err}")))?,
             None => continue,
         };
-        let Some(body) = payload.get("body").and_then(|value| value.as_str()) else {
+        let expired = payload.get("expired").and_then(serde_json::Value::as_bool) == Some(true);
+        let body = payload
+            .get("body")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        if body.is_none() && !expired {
             continue;
-        };
+        }
         found.push((
             required_text(&row, 0)?,
             required_text(&row, 1)?,
             Answer {
-                body: body.to_string(),
+                body: if expired { None } else { body },
                 actor: required_text(&row, 3)?,
                 event_id: required_text(&row, 2)?,
                 answered_at: required_text(&row, 5)?,
+                expired,
             },
         ));
     }
@@ -521,7 +547,7 @@ pub async fn open_items(db: &Database, limit: i64) -> Result<Vec<InboxItem>> {
     let mut rows = conn
         .query(
             "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
-                    i.status, e.created_at, i.updated_at
+                    i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry
              FROM inbox i JOIN events e ON e.id = i.event_id
              WHERE i.status IN ('action', 'waiting')
              ORDER BY e.id DESC LIMIT ?1",
@@ -691,6 +717,195 @@ pub async fn counts(db: &Database) -> Result<Counts> {
     Ok(counts)
 }
 
+/// What the hub does to an item still open when its deadline passes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnExpiry {
+    /// Record the approval as approved.
+    Approve,
+    /// Record the approval as declined.
+    Decline,
+    /// Close the question with no answer.
+    Close,
+}
+
+impl OnExpiry {
+    /// The stored and wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approve => "approve",
+            Self::Decline => "decline",
+            Self::Close => "close",
+        }
+    }
+
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "approve" => Some(Self::Approve),
+            "decline" => Some(Self::Decline),
+            "close" => Some(Self::Close),
+            _ => None,
+        }
+    }
+}
+
+/// A deadline the asking agent set on one open item.
+///
+/// This is not retention: nothing expires unless the agent that asked said it
+/// can only wait so long, and then only that one item resolves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deadline {
+    /// When the item resolves itself if it is still open.
+    pub expires_at: time::OffsetDateTime,
+    /// What the hub records then.
+    pub on_expiry: OnExpiry,
+}
+
+impl Deadline {
+    /// Read the deadline an agent asked for on an item of `kind`.
+    ///
+    /// `expires_in_seconds` is counted from `now` and must fall within
+    /// [`crate::limits::DEADLINE_SECS_MIN`] and
+    /// [`crate::limits::DEADLINE_SECS_MAX`]. An approval names `approve` or
+    /// `decline` and declines by default, the safe outcome; a question closes
+    /// with no answer and takes no outcome. Anything else is refused, so a
+    /// mistaken call learns why rather than getting a deadline it did not
+    /// mean.
+    pub fn from_request(
+        kind: &str,
+        expires_in_seconds: Option<u64>,
+        on_expiry: Option<&str>,
+        now: time::OffsetDateTime,
+    ) -> Result<Option<Self>> {
+        let Some(seconds) = expires_in_seconds else {
+            if on_expiry.is_some() {
+                return Err(Error::InvalidArgument(
+                    "on_expiry needs expires_in_seconds".to_string(),
+                ));
+            }
+            return Ok(None);
+        };
+        let (min, max) = (
+            crate::limits::DEADLINE_SECS_MIN,
+            crate::limits::DEADLINE_SECS_MAX,
+        );
+        if !(min..=max).contains(&seconds) {
+            return Err(Error::InvalidArgument(format!(
+                "expires_in_seconds must be between {min} and {max}, got {seconds}"
+            )));
+        }
+        let on_expiry = match (kind, on_expiry) {
+            ("approval", None) => OnExpiry::Decline,
+            ("approval", Some("approve")) => OnExpiry::Approve,
+            ("approval", Some("decline")) => OnExpiry::Decline,
+            ("approval", Some(other)) => {
+                return Err(Error::InvalidArgument(format!(
+                    "on_expiry must be approve or decline, got '{other}'"
+                )));
+            }
+            ("question", None) => OnExpiry::Close,
+            ("question", Some(_)) => {
+                return Err(Error::InvalidArgument(
+                    "a question closes unanswered at its deadline and takes no on_expiry"
+                        .to_string(),
+                ));
+            }
+            (other, _) => {
+                return Err(Error::InvalidArgument(format!(
+                    "only a question or an approval can carry a deadline, not a {other}"
+                )));
+            }
+        };
+        let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
+        Ok(Some(Self {
+            expires_at: now + time::Duration::seconds(seconds),
+            on_expiry,
+        }))
+    }
+}
+
+/// An instant as a deadline is stored: RFC 3339 in UTC to the whole second,
+/// so every stored stamp has one length and a text comparison orders them.
+pub(crate) fn deadline_stamp(at: time::OffsetDateTime) -> String {
+    at.to_offset(time::UtcOffset::UTC)
+        .replace_nanosecond(0)
+        .unwrap_or(at)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
+/// Give a freshly written open item its deadline, inside the writer's
+/// transaction.
+pub(crate) async fn set_deadline_in_tx(
+    conn: &Connection,
+    event_id: &str,
+    deadline: &Deadline,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE inbox SET expires_at = ?1, on_expiry = ?2 WHERE event_id = ?3",
+        vec![
+            Value::Text(deadline_stamp(deadline.expires_at)),
+            Value::Text(deadline.on_expiry.as_str().to_string()),
+            Value::Text(event_id.to_string()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
+/// The outcome an open item's deadline names, when the deadline has passed
+/// at `now`. `None` when the item has no deadline, is not open, or still has
+/// time. Reads inside the caller's transaction, so the check and the write it
+/// guards cannot race.
+pub(crate) async fn due_in_tx(
+    conn: &Connection,
+    event_id: &str,
+    now: time::OffsetDateTime,
+) -> Result<Option<OnExpiry>> {
+    let mut rows = conn
+        .query(
+            "SELECT on_expiry FROM inbox
+             WHERE event_id = ?1 AND status IN ('action', 'waiting')
+               AND expires_at IS NOT NULL AND expires_at <= ?2",
+            vec![
+                Value::Text(event_id.to_string()),
+                Value::Text(deadline_stamp(now)),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(text_at(&row, 0)?.as_deref().and_then(OnExpiry::parse)),
+        None => Ok(None),
+    }
+}
+
+/// The open items whose deadline has passed at `now`, oldest deadline first.
+///
+/// The index on `expires_at` keeps this to the due rows, so a sweep that finds
+/// nothing costs one short range read.
+pub(crate) async fn due_items(
+    conn: &Connection,
+    now: time::OffsetDateTime,
+    limit: i64,
+) -> Result<Vec<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT event_id FROM inbox
+             WHERE expires_at IS NOT NULL AND expires_at <= ?1
+               AND status IN ('action', 'waiting')
+             ORDER BY expires_at ASC LIMIT ?2",
+            vec![Value::Text(deadline_stamp(now)), Value::Integer(limit)],
+        )
+        .await
+        .map_err(engine)?;
+    let mut due = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        due.push(required_text(&row, 0)?);
+    }
+    Ok(due)
+}
+
 fn item_from_row(row: &Row) -> Result<InboxItem> {
     let payload = match text_at(row, 5)? {
         Some(json) => Some(
@@ -712,6 +927,8 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         decision: None,
         answer: None,
         project_display_name: None,
+        expires_at: text_at(row, 9)?,
+        on_expiry: text_at(row, 10)?,
     })
 }
 

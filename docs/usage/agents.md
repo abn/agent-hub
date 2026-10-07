@@ -145,6 +145,24 @@ Nothing has to be written to `recovery_path` for this, and an agent that stores
 a cursor there is keeping a second, staler one. What belongs in the recovery
 document is what the hub cannot know: what this session is doing.
 
+### Asking with a deadline
+
+An agent that cannot wait for a human who is away gives the item a deadline:
+`expires_in_seconds` (60 to 2592000) on `question_post`, or on `signal_append`
+with kind `approval`, which may also name `on_expiry` as `approve` or
+`decline`. An approval declines by default, and a question closes with no
+answer. If no one acts by then, the hub resolves the item itself, recorded
+with `hub` as the actor and `expired: true`, and the agent learns of it
+through `inbox_read`, `inbox_wait` and the notification trailer as it would of
+a human decision. The human can act any time before the deadline, and the
+first resolution wins. A deadline covers that one item only: nothing else in
+the hub expires.
+
+```sh
+agent-hub call signal_append \
+  '{"project_id":"homelab","kind":"approval","summary":"Restart the cache at 02:00","expires_in_seconds":3600,"on_expiry":"decline"}'
+```
+
 ### What arrives without asking
 
 Every successful tool result may carry a `notifications` member listing what

@@ -37,6 +37,7 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -57,6 +58,7 @@ async fn seed_question_with_options(state: &AppState, subject: &str, options: &[
             options: Some(options),
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -1075,6 +1077,7 @@ async fn refused_options_post_no_question() {
             options: Some(&["Yes".to_string(), "Yes".to_string()]),
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await

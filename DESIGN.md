@@ -329,6 +329,15 @@ Agents and access, Connect, and the knowledge base.
   to a SNOOZED group and is remembered per device, not on the hub: a second
   device still shows the row as waiting. The limit is the device's, and the
   group says so.
+  An item the asking agent gave a deadline says what the deadline will do, on
+  its row under the body and on its card under the title, as one 12px line in
+  `--ink-2`: "Declines itself in 3h", "Approves itself in 20m", "Closes in 2d".
+  An item the hub resolved at its deadline reads "Expired: declined itself, no
+  one decided in time" in the same place, and its outcome pill says "Declined
+  at deadline" rather than "Declined", so a reader never takes the hub's call
+  for their own. The words carry it: no tint, no clock glyph, no countdown that
+  ticks. The project feed titles that resolution "expired:" and carries the
+  same line as its note.
 - **Project.** The index header carries Feed, Artifacts, Sessions as a
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is

@@ -304,6 +304,19 @@ impl AppState {
             }
         }
 
+        // An agent a store from before already holds under a reserved id would
+        // sign as the hub itself, so its token goes before anything is served.
+        // A store that cannot be made safe this way is not opened. The revoke
+        // writes an audit event, so it runs after the id high-water mark is
+        // seeded and its id sorts after every id the store holds.
+        for agent_id in store::identity::retire_reserved_agents(&db).await? {
+            tracing::warn!(
+                agent_id = %agent_id,
+                "revoked the token of an agent whose id the hub now reserves; \
+                 create it again under another id and give it the new token"
+            );
+        }
+
         // Captured once the store exists on disk, before any path can move
         // under the running process.
         let store_identity = capture_store_identity(&config.data_dir, &config.hub_db_path());
@@ -508,6 +521,61 @@ impl AppState {
         Ok(committed)
     }
 
+    /// Resolve every open item whose agent-set deadline has passed, and wake
+    /// the waiters when any did.
+    ///
+    /// The serving hub runs this on a short interval, and a read that shows
+    /// whether an item is open runs it first, so an item past its deadline
+    /// never reads as open between two sweeps.
+    pub async fn settle_deadlines(&self) -> Result<usize> {
+        self.settle_deadlines_at(time::OffsetDateTime::now_utc())
+            .await
+    }
+
+    /// Settle deadlines ahead of a read that shows whether an item is open.
+    ///
+    /// A failure is logged and the read goes on: the background sweep resolves
+    /// the item on its next pass, and a decision on it is refused in its own
+    /// transaction meanwhile.
+    pub async fn settle_before_read(&self) {
+        if let Err(err) = self.settle_deadlines().await {
+            tracing::warn!(error = %err, "could not resolve items at their deadline");
+        }
+    }
+
+    /// Start the background sweep that resolves items at their deadline.
+    ///
+    /// Every way of serving the store runs it, over HTTP and embedded on stdio,
+    /// so an agent waiting on an item is woken by its expiry whichever way it
+    /// reached the hub. The cadence is its own and shorter than the prune
+    /// sweeper's: a deadline is a promise to the waiting agent, so it is kept
+    /// within seconds rather than within a prune window. The caller aborts the
+    /// task before it checkpoints the store.
+    pub fn spawn_deadline_sweep(&self) -> tokio::task::JoinHandle<()> {
+        let settler = self.clone();
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(deadline_interval());
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                match settler.settle_deadlines().await {
+                    Ok(0) => {}
+                    Ok(settled) => tracing::info!(settled, "resolved items at their deadline"),
+                    Err(err) => tracing::warn!(error = %err, "deadline sweep failed"),
+                }
+            }
+        })
+    }
+
+    /// As [`Self::settle_deadlines`], as of `now` rather than the wall clock.
+    pub async fn settle_deadlines_at(&self, now: time::OffsetDateTime) -> Result<usize> {
+        let settled = store::questions::expire_due(&self.db, now).await?;
+        if settled > 0 {
+            self.notify();
+        }
+        Ok(settled)
+    }
+
     /// The generation a cached number must have been computed at to be served.
     pub fn generation(&self) -> u64 {
         self.generation.load(std::sync::atomic::Ordering::Relaxed)
@@ -565,6 +633,8 @@ pub async fn run(config: Config) -> Result<()> {
             tokio::time::sleep(interval).await;
         }
     });
+
+    let deadline_task = state.spawn_deadline_sweep();
 
     let router = http::router(state.clone())
         .merge(mcp::http_router(state.clone()))
@@ -647,6 +717,7 @@ pub async fn run(config: Config) -> Result<()> {
     // Stop the background writers before checkpointing, so the fold sees a
     // store no one else is touching.
     sweeper_task.abort();
+    deadline_task.abort();
     // The tailnet endpoint is a separate serve with its own reconnect-and-rebuild
     // loop and no shutdown handle, so it is dropped here rather than drained.
     // Stdio MCP is a different path entirely and never reaches this code.
@@ -732,6 +803,12 @@ fn sweep_interval() -> std::time::Duration {
         .filter(|secs| *secs > 0)
         .unwrap_or(store::prune::UNDO_WINDOW_SECS as u64);
     std::time::Duration::from_secs(secs)
+}
+
+/// How often the deadline sweep runs: every five seconds, or the prune
+/// sweeper's interval when a test has set that shorter.
+fn deadline_interval() -> std::time::Duration {
+    sweep_interval().min(std::time::Duration::from_secs(5))
 }
 
 /// The wall-clock cap on one integrity sample. A store too large or damaged to

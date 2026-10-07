@@ -531,17 +531,23 @@ fn error_object(err: &Error) -> serde_json::Value {
 /// Serve the MCP tool surface over stdio.
 pub async fn serve_stdio(config: Config) -> crate::Result<()> {
     let state = AppState::open(config).await?;
-    let running = HubServer::new(state)
-        .serve(rmcp::transport::stdio())
-        .await
-        .map_err(|err| Error::Config(format!("mcp stdio server failed to initialise: {err}")))?;
-
-    running
-        .waiting()
-        .await
-        .map_err(|err| Error::Config(format!("mcp stdio server task stopped: {err}")))?;
-
-    Ok(())
+    let deadline_task = state.spawn_deadline_sweep();
+    let served = async {
+        let running = HubServer::new(state)
+            .serve(rmcp::transport::stdio())
+            .await
+            .map_err(|err| {
+                Error::Config(format!("mcp stdio server failed to initialise: {err}"))
+            })?;
+        running
+            .waiting()
+            .await
+            .map_err(|err| Error::Config(format!("mcp stdio server task stopped: {err}")))?;
+        Ok(())
+    }
+    .await;
+    deadline_task.abort();
+    served
 }
 
 /// The MCP streamable HTTP endpoint, ready to mount on the server router at

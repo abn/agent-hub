@@ -28,12 +28,23 @@ impl HubServer {
     #[tool(description = "Post a question to the human and open its thread. \
                        Optional `options` offer 2 to 6 suggested answers the \
                        human can pick with one tap; the answer's body is then \
-                       the picked option's text, or the human's own words.")]
+                       the picked option's text, or the human's own words. Pass \
+                       expires_in_seconds (60 to 2592000) when you can only wait \
+                       so long: if no one has answered by then, the hub closes \
+                       the question with no answer, recorded as the hub's and \
+                       marked expired.")]
     async fn question_post(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<QuestionPostParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
+        let deadline = inbox::Deadline::from_request(
+            "question",
+            params.expires_in_seconds,
+            params.on_expiry.as_deref(),
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(to_error_data)?;
         let principal = self.principal(&context);
         policy::authorize(
             &self.state.db,
@@ -57,6 +68,7 @@ impl HubServer {
                 options: params.options.as_deref(),
                 idempotency_key: params.idempotency_key.as_deref(),
                 session_id: session_id.as_deref(),
+                deadline,
             },
         )
         .await
@@ -109,6 +121,7 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        self.state.settle_before_read().await;
         let event_id = questions::answer(
             &self.state.db,
             self.state.config.events_per_project.per_project,
@@ -146,6 +159,7 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
         let limit = params.limit.unwrap_or(FEED_LIMIT_DEFAULT);
+        self.state.settle_before_read().await;
         let page = inbox::page_for_agent(
             &self.state.db,
             params.status.as_deref(),
@@ -196,6 +210,7 @@ impl HubServer {
         let mut since = params.since.clone();
 
         loop {
+            self.state.settle_before_read().await;
             let page = inbox::page_for_agent(
                 &self.state.db,
                 None,
@@ -286,6 +301,16 @@ struct QuestionPostParams {
     /// returns the first question instead of posting a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
+    /// How long you can wait, in seconds: 60 at least, 2592000 (30 days) at
+    /// most. If the question is still unanswered then, the hub closes it with
+    /// no answer.
+    #[serde(default)]
+    expires_in_seconds: Option<u64>,
+    /// Not accepted on a question, which closes with no answer at its
+    /// deadline. It is read only so that passing it is refused rather than
+    /// ignored.
+    #[serde(default)]
+    on_expiry: Option<String>,
 }
 
 /// Arguments for `answer_post`.

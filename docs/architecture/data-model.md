@@ -39,7 +39,7 @@ inbox, which is global.
 | `artifacts` | Artifact metadata. Title, description, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
 | `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
-| `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, and update time. |
+| `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, update time, and, when the asking agent set one, a deadline (`expires_at`, an RFC 3339 UTC stamp to the second) and the outcome at it (`on_expiry`: `approve`, `decline` or `close`), indexed on the deadline for the sweep. |
 | `project_feed_cursors` | One row per project: the newest feed event the human has seen there, and when it was recorded. There is one human operator, so the project is the key. |
 | `agent_feed_cursors` | One row per agent and project: the newest feed event that agent has read there, so `feed_read` with no `since` resumes where the agent stopped without the agent carrying a cursor. |
 | `agent_notify_cursors` | One row per agent: the newest resolved item delivered in the notification trailer on a tool result, so each item is delivered once. |
@@ -88,6 +88,15 @@ had before, and `read` is not a status an agent can filter on. An agent
 therefore cannot poll the inbox to learn which of its reports the human has
 opened, or when. The listing is ordered by event id, which is minted in commit
 order, so reading an item never moves it or shifts the page a limit cuts.
+
+A deadline is the one way an open item resolves without the human. The
+asking agent sets it when it posts the question or the approval, and if the
+item is still open when it passes, the hub appends an `answer` on the item's
+thread, actor `hub` and payload `expired: true`, and resolves the inbox entry
+in the same transaction. The deadline and its outcome stay on the entry after
+it resolves, so the record says what was asked for. It is not retention:
+nothing is deleted, and no other row in the hub expires
+([ADR 0027](../adr/0027-deadlines-on-open-items.md)).
 
 The display name is the only name a project keeps in one place: every other
 table, every MCP call and every blob path names the slug, so renaming a project

@@ -28,7 +28,7 @@ const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval"];
 #[tool_router(router = feed_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", or \"approval\"; the kinds owned by other surfaces are refused."
+        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", or \"approval\"; the kinds owned by other surfaces are refused. An approval may carry expires_in_seconds (60 to 2592000) and on_expiry (\"approve\" or \"decline\", \"decline\" by default): if no one has decided by then, the hub records that outcome as its own, marked expired."
     )]
     async fn signal_append(
         &self,
@@ -41,6 +41,27 @@ impl HubServer {
                 params.kind,
                 SIGNAL_KINDS.join(", ")
             ))));
+        }
+        let deadline = crate::store::inbox::Deadline::from_request(
+            &params.kind,
+            params.expires_in_seconds,
+            params.on_expiry.as_deref(),
+            time::OffsetDateTime::now_utc(),
+        )
+        .map_err(to_error_data)?;
+        // A self-enrolment request is decided by the human or by the enrolment
+        // window, never by a deadline an agent set on it.
+        if deadline.is_some()
+            && params
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.get("action"))
+                .and_then(serde_json::Value::as_str)
+                == Some("enrol_request")
+        {
+            return Err(to_error_data(Error::InvalidArgument(
+                "an enrolment request cannot carry a deadline".to_string(),
+            )));
         }
         let principal = self.principal(&context);
         policy::authorize(
@@ -73,6 +94,7 @@ impl HubServer {
                 &principal,
                 params.idempotency_key.as_deref(),
                 event,
+                deadline.as_ref(),
             )
             .await
         } else {
@@ -153,6 +175,7 @@ impl HubServer {
             query.limit = limit;
         }
 
+        self.state.settle_before_read().await;
         let page = events::read_feed(&self.state.db, &params.project_id, &query)
             .await
             .map_err(to_error_data)?;
@@ -196,6 +219,14 @@ struct SignalAppendParams {
     /// returns the first call's event instead of appending a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
+    /// Approvals only. How long you can wait, in seconds: 60 at least, 2592000
+    /// (30 days) at most. If no one has decided by then, the hub decides.
+    #[serde(default)]
+    expires_in_seconds: Option<u64>,
+    /// Approvals only, with `expires_in_seconds`: `approve` or `decline`, the
+    /// outcome the hub records at the deadline. `decline` when absent.
+    #[serde(default)]
+    on_expiry: Option<String>,
 }
 
 /// Arguments for `feed_read`.

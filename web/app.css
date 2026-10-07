@@ -2523,6 +2523,10 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   font-size: var(--t-12); color: var(--ink-3);
 }
 .inbox-row.is-waiting .inbox-foot { margin-top: var(--s-2); }
+/* A deadline the asking agent set, said in words on the row: what it will do,
+   or what it did. Text, never a tint, carries it. */
+.inbox-deadline { margin-top: 2px; font-size: var(--t-12); color: var(--ink-2); }
+.inbox-detail-deadline { margin: var(--s-2) 0 0; font-size: var(--t-13); color: var(--ink-2); }
 .inbox-project { font-weight: 600; color: var(--ink-2); }
 .inbox-actor { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-acts { margin-left: auto; display: flex; gap: 6px; flex: none; }

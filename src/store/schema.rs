@@ -106,6 +106,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 23,
         ddl: V23,
     },
+    Migration {
+        version: 24,
+        ddl: V24,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -627,4 +631,19 @@ const V23: &str = r#"
 ALTER TABLE artifacts ADD COLUMN live_version INTEGER;
 ALTER TABLE artifacts ADD COLUMN live_rev INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE artifacts ADD COLUMN live_session TEXT;
+"#;
+
+/// Version 24: an agent-requested deadline on one open item.
+///
+/// An agent that asks a question or posts an approval may say how long it can
+/// wait. `expires_at` is the deadline as an RFC 3339 UTC stamp in whole
+/// seconds, so a text comparison orders it, and `on_expiry` is what the hub
+/// does if the item is still open then: `approve` or `decline` for an approval,
+/// `close` for a question. Both are null for an item without a deadline, which
+/// is every item written before this version. The index serves the sweep, which
+/// reads only the items whose deadline has passed.
+const V24: &str = r#"
+ALTER TABLE inbox ADD COLUMN expires_at TEXT;
+ALTER TABLE inbox ADD COLUMN on_expiry TEXT;
+CREATE INDEX IF NOT EXISTS inbox_deadline ON inbox(expires_at);
 "#;

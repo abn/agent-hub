@@ -3,7 +3,8 @@
 // page, the rule itself is held here, and a rename no longer breaks it.
 
 import { describe, expect, it } from "vitest";
-import { SUBJECT_MAX, formatEventSummary, subjectAndMessage } from "../../web/feed.mjs";
+import { SUBJECT_MAX, expiredWords, formatEventSummary, subjectAndMessage } from "../../web/feed.mjs";
+import { deadlineWords, untilCompact } from "../../web/time.mjs";
 import { displayTitle, terms } from "../../web/search.mjs";
 import { anchorQuote } from "../../web/comments.mjs";
 import { optionsAttr, optionsFrom, questionOptions } from "../../web/dom.mjs";
@@ -168,6 +169,49 @@ describe("formatEventSummary", () => {
     expect(summary("session", "nothing conventional here")).toBe("nothing conventional here");
     expect(summary("comment", "Asked: is this a question?")).toBe("Asked: is this a question?");
     expect(formatEventSummary({ kind: "signal" })).toBe("");
+  });
+});
+
+describe("deadline words", () => {
+  const now = Date.parse("2026-10-07T12:00:00Z");
+  const at = (ms) => new Date(now + ms).toISOString();
+  const MINUTE = 60 * 1000;
+  const HOUR = 60 * MINUTE;
+
+  it("says how long is left in the units a row carries", () => {
+    expect(untilCompact(at(20 * MINUTE), now)).toBe("20m");
+    expect(untilCompact(at(3 * HOUR), now)).toBe("3h");
+    expect(untilCompact(at(50 * HOUR), now)).toBe("2d");
+  });
+
+  it("rounds a deadline seconds away up to a minute, and has none left once it passes", () => {
+    expect(untilCompact(at(5000), now)).toBe("1m");
+    expect(untilCompact(at(-5000), now)).toBeNull();
+    expect(untilCompact("not a time", now)).toBeNull();
+  });
+
+  it("names what the deadline will do", () => {
+    expect(deadlineWords(at(3 * HOUR), "decline", now)).toBe("Declines itself in 3h");
+    expect(deadlineWords(at(20 * MINUTE), "approve", now)).toBe("Approves itself in 20m");
+    expect(deadlineWords(at(48 * HOUR), "close", now)).toBe("Closes in 2d");
+    expect(deadlineWords(at(-MINUTE), "decline", now)).toBe("Declines itself now");
+  });
+
+  it("says nothing for an outcome it does not know or a stamp that is not a time", () => {
+    expect(deadlineWords(at(HOUR), "explode", now)).toBe("");
+    expect(deadlineWords("soon", "decline", now)).toBe("");
+  });
+
+  it("says a resolution expired, and how, apart from a human decision", () => {
+    expect(expiredWords("approved")).toMatch(/^Expired: approved itself/);
+    expect(expiredWords("declined")).toMatch(/^Expired: declined itself/);
+    expect(expiredWords(undefined)).toBe("Expired: closed with no answer");
+  });
+
+  it("titles an expired resolution on the feed as expired, not answered", () => {
+    expect(
+      formatEventSummary({ kind: "answer", summary: "re: Rotate keys?", payload: { expired: true } }),
+    ).toBe("expired: Rotate keys?");
   });
 });
 

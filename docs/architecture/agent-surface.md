@@ -95,10 +95,10 @@ handing it the document.
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from the caller's own durable server-side cursor for the project and advances that cursor to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
-| `signal_append` | Append an event to a project feed. A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
-| `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. |
+| `signal_append` | Append an event to a project feed. An `approval` may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
+| `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. It may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
-| `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. |
+| `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. An item with a deadline carries `expires_at` and `on_expiry`, and a resolution the hub made at the deadline carries `expired: true` with `hub` as the actor. |
 | `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
 | `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, so they are delivered through the notification trailer instead of polled. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
 | `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
@@ -166,6 +166,49 @@ anchor is refused on versions the server holds only as ciphertext.
 Artifact reads and listings carry thread counts across every version:
 `comments_count` (total comments) and `comments_open` (unresolved comments),
 both defaulting to 0 when there are none.
+
+## Deadlines on questions and approvals
+
+An agent that cannot wait indefinitely says so when it asks. `question_post`,
+and `signal_append` with kind `approval`, take an optional
+`expires_in_seconds`, from 60 to 2592000 (30 days), counted from the moment the
+hub accepts the item. An approval may also name `on_expiry`: `approve` or
+`decline`. A deadline without one declines, the safe outcome. A question takes
+no `on_expiry`: at its deadline it closes with no answer. A value out of range,
+an unknown outcome, an outcome without a deadline, a deadline on any other
+kind, and a deadline on a self-enrolment request are refused as
+`invalid_argument` and nothing is written.
+
+If the item is still open when the deadline passes, the hub resolves it. The
+resolution is an `answer` on the item's thread, as a human's is, written in
+the same transaction that resolves the inbox item, so the feed and the queue
+agree. Its actor is `hub`, a reserved name no agent can enrol under, and its
+payload carries `expired: true`. For an approval it also carries the
+`decision` the agent named; for a question there is no body. `inbox_read`
+shows it as `decision` or `answer` with `expired: true`, the cursor counts it
+as it counts a human's, `inbox_wait` wakes on it, and the notification
+trailer delivers it under the same kind as a human resolution, with
+`expired: true` and a title that says so.
+
+Whichever lands first wins. A decision or an answer and the expiry each take
+the item's single immediate transaction and check that it is still open, so
+an item is resolved once. A decision that arrives after the deadline is
+refused as a conflict even if the sweep has not recorded the expiry yet. The
+hub sweeps for due items every few seconds through an index on the deadline,
+whether it serves over HTTP or runs embedded on stdio, and a read that shows
+whether an item is open settles every due item first, so an item past its
+deadline never reads as open.
+
+A store from before `hub` was reserved may already hold an agent by that name.
+When the hub opens such a store it revokes that agent's token, recorded as any
+revoke is, and refuses the name a new one, so nothing else signs as the hub.
+The agent's history stays. To keep the agent working, create it again under
+another id and give it the new token.
+
+This is not retention. Nothing else in the hub expires: a deadline is one
+agent's statement about one item it asked, and the human remains the garbage
+collector for everything else
+([ADR 0027](../adr/0027-deadlines-on-open-items.md)).
 
 `question_post` returns `event_id`, `question_id`, and `thread_id`, all the
 same value: a question roots its own thread and is its own event. `answer_post`

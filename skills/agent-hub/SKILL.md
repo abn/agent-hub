@@ -52,6 +52,8 @@ Run these when a session starts; each answers the next question:
   required on a write. Name it on every write.
 - **A question or an approval waits on the human** and lands in the inbox as an
   open item. Resolving it frees a slot. Use `inbox_wait` instead of polling.
+  If you can only wait so long, pass `expires_in_seconds`; an approval then
+  declines itself at the deadline unless you name `on_expiry: "approve"`.
 - **Read the trailer.** Every successful tool result may carry a
   `notifications` member with what needs your attention, delivered once. It is
   a nudge, not the record: the detail is read from the inbox or the feed. To be

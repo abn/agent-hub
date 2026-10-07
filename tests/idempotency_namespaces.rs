@@ -35,6 +35,7 @@ async fn signal_cannot_replay_question_id() {
             options: None,
             idempotency_key: Some("shared-key"),
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -85,6 +86,7 @@ async fn resolved_question_refuses_second_answer() {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -259,6 +261,7 @@ async fn signal_key_cannot_resolve_question_without_answer() {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -298,6 +301,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await
@@ -315,6 +319,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
             options: None,
             idempotency_key: None,
             session_id: None,
+            deadline: None,
         },
     )
     .await

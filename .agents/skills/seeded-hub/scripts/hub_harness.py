@@ -56,6 +56,7 @@ APPROVAL_SUMMARY = "Deploy the release to production"
 # A second approval, so the check that approves by key and the one that approves
 # by button each have one of their own to decide.
 SECOND_APPROVAL_SUMMARY = "Rotate the signing key on the build host"
+SECOND_APPROVAL_DEADLINE_SECONDS = 3 * 60 * 60
 QUESTION_SUBJECT = "Ship the release?"
 # The answers the open question suggests, so its card offers quick answers.
 QUESTION_OPTIONS = ["Ship it", "Hold until Monday"]
@@ -615,7 +616,18 @@ def seed(port: int) -> dict[str, str]:
         ("finished", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
         ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
-        ("approval-two", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": SECOND_APPROVAL_SUMMARY}),
+        # The second approval carries a deadline, so the inbox shows what one
+        # will do. Three hours outlasts any run, and it declines by default.
+        (
+            "approval-two",
+            "signal_append",
+            {
+                "project_id": PROJECT_ID,
+                "kind": "approval",
+                "summary": SECOND_APPROVAL_SUMMARY,
+                "expires_in_seconds": SECOND_APPROVAL_DEADLINE_SECONDS,
+            },
+        ),
         (
             "question",
             "question_post",

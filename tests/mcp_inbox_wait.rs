@@ -4,7 +4,9 @@
 //! answered from the same process. The hub runs as its own process and is driven
 //! over two HTTP MCP connections: one blocks in `inbox_wait`, the other posts the
 //! answer. The wait must wake on the answer rather than sit out its deadline, and
-//! the cursor it returns must not report the same answer twice.
+//! the cursor it returns must not report the same answer twice. An expiry needs
+//! no second caller, so one test drives embedded stdio, where only the hub's own
+//! deadline sweep can wake the wait.
 
 use std::time::{Duration, Instant};
 
@@ -82,6 +84,34 @@ fn connect(port: u16, token: &str) -> Connection {
     }
 }
 
+/// Post an approval as `actor` that approves itself `seconds` from now. The
+/// store takes the deadline directly, so it can be shorter than an agent may
+/// ask for and the test need not wait one.
+async fn post_expiring_approval(db: &turso::Database, actor: &str, seconds: i64) -> String {
+    agent_hub::store::events::append_action_with_deadline(
+        db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        0,
+        actor,
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: PROJECT.to_string(),
+            kind: "approval".to_string(),
+            summary: "Restart the cache?".to_string(),
+            payload: None,
+            needs_action: true,
+            thread_id: None,
+            session_id: None,
+        },
+        Some(&agent_hub::store::inbox::Deadline {
+            expires_at: time::OffsetDateTime::now_utc() + time::Duration::seconds(seconds),
+            on_expiry: agent_hub::store::inbox::OnExpiry::Approve,
+        }),
+    )
+    .await
+    .expect("post approval")
+}
+
 /// A hub holding one project and two connected sessions.
 ///
 /// The sessions are separate on purpose: a streamable HTTP session answers one
@@ -99,6 +129,12 @@ struct Fleet {
 
 impl Fleet {
     async fn new(tag: &str) -> Self {
+        Self::holding(tag, None).await.0
+    }
+
+    /// A fleet whose agent already has an approval waiting, with a deadline
+    /// `seconds` from now.
+    async fn holding(tag: &str, deadline_in: Option<i64>) -> (Self, Option<String>) {
         let dir = TempDir::new(tag);
         let db = common::store::open(&dir).await;
         agent_hub::store::projects::create(&db, PROJECT, "Project")
@@ -106,6 +142,10 @@ impl Fleet {
             .expect("create project");
         let token = common::seed::agent_token(&db, AGENT, "Waiter").await;
         let other_token = common::seed::agent_token(&db, OTHER_AGENT, "Bystander").await;
+        let held = match deadline_in {
+            Some(seconds) => Some(post_expiring_approval(&db, AGENT, seconds).await),
+            None => None,
+        };
         drop(db);
 
         let child = HubProcess::serve(&dir, ADMIN_TOKEN, &[]);
@@ -113,13 +153,16 @@ impl Fleet {
         let agent = connect(port, &token);
         let waiter = connect(port, &token);
         let other = connect(port, &other_token);
-        Self {
-            _child: child,
-            _dir: dir,
-            agent,
-            waiter,
-            other,
-        }
+        (
+            Self {
+                _child: child,
+                _dir: dir,
+                agent,
+                waiter,
+                other,
+            },
+            held,
+        )
     }
 
     /// Post a question and return its id.
@@ -179,6 +222,65 @@ async fn a_wait_wakes_on_the_answer_instead_of_timing_out() {
     assert!(
         elapsed < Duration::from_secs(20),
         "the wait did not run its full deadline: {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_wait_wakes_when_a_deadline_resolves_the_item() {
+    let (fleet, held) = Fleet::holding("wait-deadline", Some(4)).await;
+    let approval_id = held.expect("an approval is waiting");
+
+    let started = Instant::now();
+    let result = fleet.waiter.call(
+        "inbox_wait",
+        json!({"project_id": PROJECT, "wait_seconds": 30}),
+    );
+    let elapsed = started.elapsed();
+
+    let items = result["items"].as_array().expect("wait returns items");
+    assert_eq!(items.len(), 1, "the expiry ended the wait: {result}");
+    assert_eq!(items[0]["event_id"], approval_id.as_str());
+    assert_eq!(items[0]["status"], "resolved");
+    assert_eq!(items[0]["decision"]["decision"], "approved");
+    assert_eq!(items[0]["decision"]["expired"], true);
+    assert_eq!(items[0]["decision"]["actor"], "hub");
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the sweep woke the wait before its own deadline: {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_embedded_stdio_wait_wakes_when_a_deadline_resolves_the_item() {
+    let dir = TempDir::new("wait-deadline-stdio");
+    let approval_id = {
+        let db = common::store::open(&dir).await;
+        agent_hub::store::projects::create(&db, PROJECT, "Project")
+            .await
+            .expect("create project");
+        post_expiring_approval(&db, AGENT, 2).await
+    };
+    let mut server = common::stdio::StdioClient::mcp(
+        dir.path(),
+        &[("HUB_AGENT_ID", AGENT), ("HUB_SWEEP_INTERVAL_SECS", "1")],
+    );
+    server.initialize();
+
+    let started = Instant::now();
+    let response = server.call_tool(
+        "inbox_wait",
+        json!({"project_id": PROJECT, "wait_seconds": 15}),
+    );
+    let elapsed = started.elapsed();
+
+    let result = common::stdio::structured(&response);
+    let items = result["items"].as_array().expect("wait returns items");
+    assert_eq!(items.len(), 1, "the expiry ended the wait: {result}");
+    assert_eq!(items[0]["event_id"], approval_id.as_str());
+    assert_eq!(items[0]["decision"]["expired"], true);
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "the sweep woke the wait before its own deadline: {elapsed:?}"
     );
 }
 
