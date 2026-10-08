@@ -34,6 +34,8 @@ HUB_REQUIRE_BROWSER=1 make check
 5. The same workflow run sees `release_created`, builds the image, pushes
    `ghcr.io/abn/agent-hub:<version>` and `:latest`, runs it, and probes it. The
    release is not done until that step is green.
+6. In parallel it calls the binaries workflow, which builds the standalone
+   binary for each target and attaches the archives to the release.
 
 The workflow is `.github/workflows/release.yml`. The configuration is
 `release-please-config.json` and `.release-please-manifest.json`.
@@ -48,6 +50,41 @@ has no stdio proxy and no one-shot calls, which run on the agents' machines.
 
 The build runs in the release workflow rather than on the tag push, because a
 tag created with the default `GITHUB_TOKEN` does not trigger another workflow.
+
+## The binaries
+
+`.github/workflows/binaries.yml` is a reusable workflow. It takes the release
+tag, such as `agent-hub-v1.2.0`, and runs one job per target. Each job uploads
+`agent-hub-v1.2.0-<target>.tar.gz` and its `agent-hub-v1.2.0-<target>.sha256`
+to that release: the archive carries the version without the tag's prefix.
+Each archive holds one directory with the binary, `LICENSE` and `README.md`.
+The binary is the default build, so it carries the stdio proxy and the one-shot
+calls that the image leaves out.
+
+| Target | Runner | Notes |
+|---|---|---|
+| `x86_64-unknown-linux-musl` | `ubuntu-24.04` | Static, built with `cargo-zigbuild` |
+| `aarch64-unknown-linux-musl` | `ubuntu-24.04` | Static, built with `cargo-zigbuild` |
+| `aarch64-apple-darwin` | `macos-15` | Apple silicon |
+| `x86_64-apple-darwin` | `macos-15` | Intel, cross-compiled by the Apple toolchain |
+
+Windows and 32-bit ARM are not built. The store and the session filesystem
+assume a Unix host, and the engine's `io-uring` dependency has no 32-bit ARM
+bindings.
+
+Each job installs the pinned toolchain, and Zig with `cargo-zigbuild` for the
+Linux targets, then hands the build, the archive, the checksum and the upload to
+[`taiki-e/upload-rust-binary-action`](https://github.com/taiki-e/upload-rust-binary-action).
+The workflow builds the source at the tag. To attach binaries to a release by
+hand, dispatch it with that tag:
+
+```sh
+gh workflow run binaries.yml -f tag=agent-hub-v1.2.0
+```
+
+The `targets` input takes a JSON array of `{"target", "runner", "build-tool"}`
+objects when one archive needs rebuilding on its own. A re-run replaces the
+assets it uploaded.
 
 ## Verify the release
 
@@ -98,7 +135,8 @@ builds and verifies the current version.
 ## By hand
 
 The workflow is the whole release. When it cannot run, build and push the image
-with the same tools and create the release:
+with the same tools, create the release, and dispatch the binaries workflow for
+its tag:
 
 ```sh
 VERSION=1.0.0
