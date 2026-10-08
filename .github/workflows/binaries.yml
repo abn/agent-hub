@@ -1,0 +1,135 @@
+name: binaries
+
+# Builds the standalone binary for each target and attaches the archives to an
+# existing GitHub release. The release workflow calls it once release-please
+# has created the release; dispatch it by hand to build an older tag.
+#
+# taiki-e/upload-rust-binary-action builds, packages, checksums and uploads one
+# target. This workflow only holds the matrix and the toolchain around it.
+
+"on":
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+      bin:
+        description: The Cargo binary to build.
+        type: string
+        default: agent-hub
+      targets:
+        description: >-
+          A JSON array of {"target", "runner", "build-tool"} objects, one per
+          archive. build-tool is cargo or cargo-zigbuild.
+        type: string
+        default: >-
+          [
+            {"target": "x86_64-unknown-linux-musl", "runner": "ubuntu-24.04", "build-tool": "cargo-zigbuild"},
+            {"target": "aarch64-unknown-linux-musl", "runner": "ubuntu-24.04", "build-tool": "cargo-zigbuild"},
+            {"target": "aarch64-apple-darwin", "runner": "macos-15", "build-tool": "cargo"},
+            {"target": "x86_64-apple-darwin", "runner": "macos-15", "build-tool": "cargo"}
+          ]
+      toolchain:
+        description: The Rust toolchain to build with.
+        type: string
+        default: 1.97.1
+      zig-version:
+        description: The Zig release cargo-zigbuild uses.
+        type: string
+        default: 0.16.0
+      include:
+        description: Space-separated files packed beside the binary.
+        type: string
+        default: LICENSE README.md
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+      bin:
+        description: The Cargo binary to build.
+        type: string
+        default: agent-hub
+      targets:
+        description: >-
+          A JSON array of {"target", "runner", "build-tool"} objects, one per
+          archive. build-tool is cargo or cargo-zigbuild.
+        type: string
+        default: >-
+          [
+            {"target": "x86_64-unknown-linux-musl", "runner": "ubuntu-24.04", "build-tool": "cargo-zigbuild"},
+            {"target": "aarch64-unknown-linux-musl", "runner": "ubuntu-24.04", "build-tool": "cargo-zigbuild"},
+            {"target": "aarch64-apple-darwin", "runner": "macos-15", "build-tool": "cargo"},
+            {"target": "x86_64-apple-darwin", "runner": "macos-15", "build-tool": "cargo"}
+          ]
+      toolchain:
+        description: The Rust toolchain to build with.
+        type: string
+        default: 1.97.1
+      zig-version:
+        description: The Zig release cargo-zigbuild uses.
+        type: string
+        default: 0.16.0
+      include:
+        description: Space-separated files packed beside the binary.
+        type: string
+        default: LICENSE README.md
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.targets) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          target: ${{ matrix.target }}
+          build-warnings: ""
+          cache-key: ${{ matrix.target }}
+
+      # The action would pip-install cargo-zigbuild on its own; installing it
+      # and Zig here pins both.
+      - if: matrix.build-tool == 'cargo-zigbuild'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ inputs.zig-version }}
+
+      - if: matrix.build-tool == 'cargo-zigbuild'
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
+        with:
+          tool: cargo-zigbuild
+
+      # release-please tags agent-hub-v1.2.0; the archive carries v1.2.0 alone.
+      - name: Resolve the version
+        id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: printf 'version=%s\n' "${TAG##*-}" >> "$GITHUB_OUTPUT"
+
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
+        with:
+          bin: ${{ inputs.bin }}
+          target: ${{ matrix.target }}
+          build-tool: ${{ matrix.build-tool }}
+          locked: true
+          archive: $bin-${{ steps.version.outputs.version }}-$target
+          leading-dir: true
+          include: ${{ inputs.include }}
+          checksum: sha256
+          ref: refs/tags/${{ inputs.tag }}
+          token: ${{ github.token }}

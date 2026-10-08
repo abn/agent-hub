@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-08
+
+### Releases carry standalone binaries
+
+* **Change**: a release attaches a standalone binary archive per platform:
+  static Linux on x86_64 and arm64, and macOS on Apple silicon and Intel, each
+  with a SHA-256 checksum. The binary is the default build, server and client in
+  one.
+* **Update**: [Quickstart](usage/quickstart.md) adds installing from a release
+  binary.
+
 ## 2026-10-07
 
 ### The serving hub takes an online backup

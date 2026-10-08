@@ -75,6 +75,30 @@ HUB_ADMIN_TOKEN=change-me docker compose -f deploy/compose.yaml up --build
 
 That file is covered in [run with compose](#run-with-compose) below.
 
+### A release binary
+
+A GitHub release carries one archive per platform: Linux on x86_64 and arm64,
+statically linked, and macOS on Apple silicon and Intel. Windows is not built.
+The archive holds the full binary, server and client in one, with a `.sha256`
+checksum file beside it. Download the one for the host, check it, and unpack
+it:
+
+```sh
+VERSION=v1.2.0
+TARGET=aarch64-apple-darwin
+NAME="agent-hub-$VERSION-$TARGET"
+BASE="https://github.com/abn/agent-hub/releases/download/agent-hub-$VERSION"
+curl -fsSLO "$BASE/$NAME.tar.gz"
+curl -fsSLO "$BASE/$NAME.sha256"
+shasum -a 256 -c "$NAME.sha256"
+tar -xzf "$NAME.tar.gz"
+"./agent-hub-$VERSION-$TARGET/agent-hub" --help
+```
+
+`TARGET` is one of `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+`aarch64-apple-darwin` or `x86_64-apple-darwin`. Continue with
+[run the binary](#run-the-binary).
+
 ### From source
 
 A stable Rust toolchain, 1.97 or newer. Continue with

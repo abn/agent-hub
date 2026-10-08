@@ -1,7 +1,7 @@
 name: release
 
 # A tag created with the default GITHUB_TOKEN does not trigger another workflow,
-# so the image is built and pushed in this same run.
+# so the image and the binaries are built in this same run.
 "on":
   push:
     branches: [main]
@@ -32,6 +32,16 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  binaries:
+    name: Binaries
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/binaries.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
 
   image:
     name: Build, push and verify
