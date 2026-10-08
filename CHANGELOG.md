@@ -4,6 +4,24 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.1.0...agent-hub-v1.2.0) (2026-10-08)
+
+
+### Features
+
+* hold an artifact version live while an agent writes it ([4fef21a](https://github.com/abn/agent-hub/commit/4fef21a45b6653948b8df06ba0b8acba7362c8f8))
+* **inbox:** let an agent put a deadline on a question or an approval ([efc0156](https://github.com/abn/agent-hub/commit/efc0156db4ab2a744e809345cfde2e2d354304a8))
+* **inbox:** quick answers on a question ([ccd1bb3](https://github.com/abn/agent-hub/commit/ccd1bb39d6674517c2eb6a4a1e1df48a6dd7bd2c))
+* nudge an operator-configured target when something waits ([2b0ef64](https://github.com/abn/agent-hub/commit/2b0ef641d132ad568130b8c8be9dbeec6570eafe))
+* **ops:** take an online backup from the serving hub ([f3d3291](https://github.com/abn/agent-hub/commit/f3d3291363651ba59634e081de0ba904e0fc55f6))
+* **web:** show which agent is writing an artifact live ([ababa69](https://github.com/abn/agent-hub/commit/ababa69ab8e31e99a7567ad1a37b4589e0ef0f9d))
+
+
+### Bug Fixes
+
+* **web:** hold the comments bar at the bottom ([cf3d251](https://github.com/abn/agent-hub/commit/cf3d25186062878d84b741fac4d28aa72620627e))
+* **web:** redraw the composer send control ([474f36f](https://github.com/abn/agent-hub/commit/474f36fac6d37cfcaa10ff29792de60975604975))
+
 ## [1.1.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.0.0...agent-hub-v1.1.0) (2026-10-06)
 
 
