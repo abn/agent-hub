@@ -122,6 +122,20 @@ session at all is still about the active session, which a one-shot call has
 none of. Through the proxy, the connection holds the session and the argument
 is not needed.
 
+## Attaching a page as a resource
+
+Every page you may read is also an MCP resource, so a client that attaches
+resources can load one without a tool call:
+
+```
+agenthub://kb/homelab/runbooks/deploy.md     # /fs/runbooks/deploy.md in homelab
+```
+
+`resources/list` names every page in the projects you can see, 100 at a time;
+pass `nextCursor` back for the next page. `resources/templates/list` gives the
+form, `agenthub://kb/{project_id}/{+path}`, with each path segment
+percent-encoded. Resources are read-only: write with `brain_put`.
+
 ## Writing a page without clobbering another agent
 
 `brain_get` returns a `version`, the content hash of the bytes you read, and a

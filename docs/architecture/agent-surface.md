@@ -88,6 +88,50 @@ URL, and `agent-hub tools` prints each tool's `inputSchema`, so an agent wired
 only to MCP can discover both the tools and the conventions without a human
 handing it the document.
 
+## Resources
+
+Every knowledge base page the caller may read is also an MCP resource, so a
+client that attaches resources can put a page into context without a tool
+call. Resources are a read-only view over the brain tools: nothing is written
+through them and nothing about them is stored. See
+[ADR 0028](../adr/0028-knowledge-base-as-mcp-resources.md).
+
+| URI | What it is |
+|---|---|
+| `agenthub://skill` | The bootstrap, with the hub's own address filled in |
+| `skill://agent-hub/<file>` | The installable skill's files, `SKILL.md` and `references/` |
+| `agenthub://kb/<project_id>/<path>` | One knowledge base page, by its path under `/fs/` |
+
+A page's path segments are percent-encoded, so `/fs/svc/caddy notes.md` in
+`homelab` is `agenthub://kb/homelab/svc/caddy%20notes.md`.
+`resources/templates/list` returns `agenthub://kb/{project_id}/{+path}`; a
+client filling it percent-encodes each segment of the path itself and joins
+them with `/`, since `{+path}` passes reserved characters through as they are.
+A page is `text/markdown` when its name ends in `.md` and `text/plain`
+otherwise, so the template names no media type.
+
+`resources/read` on a page takes the read check `brain_get` makes with
+`store: "project"`: a confidential project needs a grant, and for an agent
+token a missing project and a denied one return the same `forbidden`. A
+missing page is `RESOURCE_NOT_FOUND` carrying the hub's `not_found`, a URI
+under `agenthub://kb/` that names no page is `INVALID_PARAMS`, and any other
+unknown URI is `RESOURCE_NOT_FOUND`.
+
+`resources/list` names the projects the caller can see, the same set a search is
+confined to, and pages it 100 resources at a time. The bootstrap and the skill
+open the first page, so it holds that many fewer knowledge base pages; the
+knowledge base pages follow in project and path order. A fuller page carries
+`nextCursor`, the URI of its last resource, and a request that passes it back
+resumes after it. A cursor the hub did not issue is `INVALID_PARAMS`. A
+knowledge base the engine finds locked fails the listing with a retryable
+error, to be asked again with the same cursor; one that cannot be walked for
+any other reason is left out, with a warning in the hub's log. `resources/subscribe` is not offered: a client reads a page again to
+see it current.
+
+The stdio proxy forwards `resources/list`, `resources/templates/list` and
+`resources/read` to the hub, so the pages it serves are the agent's own view,
+held to its token.
+
 ## Tools
 
 | Tool | Purpose |

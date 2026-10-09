@@ -9,9 +9,9 @@
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, ErrorData, ListResourcesResult, ListToolsResult,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerConfig,
-    ServerPeerInfo,
+    CallToolRequestParams, CallToolResponse, ErrorData, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
+    ReadResourceResponse, ServerConfig, ServerPeerInfo,
 };
 use rmcp::service::{Peer, RequestContext, RoleClient, ServiceError};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
@@ -57,8 +57,21 @@ impl ServerHandler for HubProxy {
         self.peer.list_resources(request).await.map_err(upstream)
     }
 
-    /// Forward a resource read, for the same reason: the agent guide the hub
-    /// serves at `agenthub://skill` has to arrive through the proxy.
+    /// Forward the resource templates, so a client can name a knowledge base
+    /// page it has not listed.
+    async fn list_resource_templates(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        self.peer
+            .list_resource_templates(request)
+            .await
+            .map_err(upstream)
+    }
+
+    /// Forward a resource read, for the same reason: the guide and the
+    /// knowledge base pages the hub serves have to arrive through the proxy.
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,

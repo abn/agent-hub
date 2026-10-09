@@ -135,6 +135,12 @@ pub const SEARCH_LIMIT_MAX: i64 = 100;
 /// while still reaching far past a page of matching hits.
 pub const SEARCH_FETCH_MAX: i64 = 5000;
 
+/// Resources one `resources/list` page returns.
+///
+/// A listing names every knowledge base page the caller may read, so it is
+/// paged rather than cut: a fuller listing carries a cursor to the next page.
+pub const RESOURCE_LIST_PAGE_MAX: usize = 100;
+
 /// Default feed page size.
 pub const FEED_LIMIT_DEFAULT: i64 = 50;
 

@@ -96,6 +96,42 @@ pub async fn list_visible(
     Ok(filtered)
 }
 
+/// The id and display name of every active project the principal may see,
+/// in id order.
+///
+/// The visibility `list_visible` applies, without the feed and session counts
+/// it carries, for a caller that walks the projects rather than shows them.
+pub(crate) async fn visible_names(
+    db: &Database,
+    principal: &crate::principal::Principal,
+) -> Result<Vec<(String, String)>> {
+    let visible = crate::policy::visibility(db, principal).await?;
+    let allowed: Option<std::collections::HashSet<&str>> = visible
+        .as_filter()
+        .map(|ids| ids.iter().map(String::as_str).collect());
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT id, display_name FROM projects WHERE status = 'active' ORDER BY id",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    let mut names = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let (Value::Text(id), Value::Text(name)) = (
+            row.get_value(0).map_err(engine)?,
+            row.get_value(1).map_err(engine)?,
+        ) && allowed
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(id.as_str()))
+        {
+            names.push((id, name));
+        }
+    }
+    Ok(names)
+}
+
 /// The display names of the projects named, by id, in one read.
 ///
 /// A response that carries project ids calls this once for all of them rather

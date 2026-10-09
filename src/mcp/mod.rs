@@ -15,9 +15,10 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, CustomRequest,
-    CustomResult, ErrorCode as McpErrorCode, ErrorData, ExtensionCapabilities, ListResourcesResult,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-    Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    CustomResult, ErrorCode as McpErrorCode, ErrorData, ExtensionCapabilities,
+    ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -40,6 +41,7 @@ mod feed;
 mod identity;
 mod inbox;
 mod notifications;
+mod resources;
 mod search;
 mod subscriptions;
 
@@ -391,33 +393,79 @@ impl ServerHandler for HubServer {
         ))
     }
 
-    /// List the hub's resources: the bootstrap, and the installable skill's
-    /// files. A client that supports the Skills extension uses `skills/list`
-    /// for the manifest; this is the base-Resources view.
+    /// List the hub's resources: the bootstrap, the installable skill's
+    /// files, and every knowledge base page the caller may read. A client that
+    /// supports the Skills extension uses `skills/list` for the manifest; this
+    /// is the base-Resources view.
+    ///
+    /// The fixed resources open the first page and the pages follow in project
+    /// and path order. A fuller listing ends with a cursor, the URI of its last
+    /// page, and the next request resumes after it.
     async fn list_resources(
         &self,
-        _request: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListResourcesResult, ErrorData> {
-        let text = guide_text(&self.state.config, &context);
-        let mut items = vec![
-            Resource::new(SKILL_URI, "Agent bootstrap")
-                .with_title("Agent Hub bootstrap")
-                .with_description("How to connect to this hub and get a token.")
-                .with_mime_type("text/markdown")
-                .with_size(text.len() as u64),
-        ];
-        for f in SKILL_FILES {
-            items.push(
-                Resource::new(format!("{SKILL_ROOT_URI}/{}", f.rel), f.rel)
-                    .with_mime_type("text/markdown")
-                    .with_size(f.body.len() as u64),
-            );
-        }
-        Ok(ListResourcesResult::with_all_items(items))
+        let principal = self.principal(&context);
+        let mut items = Vec::new();
+        let after = match request.and_then(|request| request.cursor) {
+            None => {
+                let text = guide_text(&self.state.config, &context);
+                items.push(
+                    Resource::new(SKILL_URI, "Agent bootstrap")
+                        .with_title("Agent Hub bootstrap")
+                        .with_description("How to connect to this hub and get a token.")
+                        .with_mime_type("text/markdown")
+                        .with_size(text.len() as u64),
+                );
+                for f in SKILL_FILES {
+                    items.push(
+                        Resource::new(format!("{SKILL_ROOT_URI}/{}", f.rel), f.rel)
+                            .with_mime_type("text/markdown")
+                            .with_size(f.body.len() as u64),
+                    );
+                }
+                None
+            }
+            Some(cursor) => match resources::parse_kb_uri(&cursor) {
+                Some(Ok(after)) => Some(after),
+                _ => {
+                    return Err(to_error_data(Error::InvalidArgument(format!(
+                        "'{cursor}' is not a cursor this hub issued"
+                    ))));
+                }
+            },
+        };
+        let room = crate::limits::RESOURCE_LIST_PAGE_MAX.saturating_sub(items.len());
+        let listing = self
+            .kb_resources(&principal, after.as_ref(), room)
+            .await
+            .map_err(to_error_data)?;
+        items.extend(listing.resources);
+        let next_cursor = if listing.more {
+            items.last().map(|last| last.uri.clone())
+        } else {
+            None
+        };
+        let mut result = ListResourcesResult::with_all_items(items);
+        result.next_cursor = next_cursor;
+        Ok(result)
     }
 
-    /// Read a resource by URI: the bootstrap, or one file of the skill.
+    /// The one template: a knowledge base page by project and path, for a
+    /// client that knows the page it wants without listing.
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(vec![
+            resources::kb_template(),
+        ]))
+    }
+
+    /// Read a resource by URI: the bootstrap, one file of the skill, or a
+    /// knowledge base page.
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
@@ -434,6 +482,15 @@ impl ServerHandler for HubServer {
             let contents = ResourceContents::text(body, request.uri.clone())
                 .with_mime_type("text/markdown; charset=utf-8");
             return Ok(ReadResourceResult::new(vec![contents]).into());
+        }
+        if let Some(page) = resources::parse_kb_uri(&request.uri) {
+            let (project_id, path) = page.map_err(to_error_data)?;
+            let principal = self.principal(&context);
+            return self
+                .kb_read(&principal, &request.uri, &project_id, &path)
+                .await
+                .map(Into::into)
+                .map_err(to_error_data);
         }
         Err(ErrorData::new(
             McpErrorCode::RESOURCE_NOT_FOUND,
