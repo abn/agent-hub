@@ -46,3 +46,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   read-only view as MCP resources
 * [0029](0029-knowledge-base-page-history.md) - A knowledge base page keeps
   every version, in its own file
+* [0030](0030-knowledge-base-folder-sync.md) - A knowledge base syncs with a
+  folder under the version guard
