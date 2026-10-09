@@ -498,11 +498,16 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
   let info = null;
 
   if (chosen) {
-    info = await artifactStage(chosen, id);
+    info = await artifactStage(chosen, id, selected ? params?.get?.("version") : null);
     if (info) {
       stageHead = shellStageHead(info.title, info.meta, info.actions, backHref);
-      stageControls = `<div class="shell-controls">${info.controls}</div>`;
+      stageControls = `<div class="shell-controls artifact-stage-controls">${info.controls}</div>`;
       stageBody = info.body;
+    } else if (selected) {
+      // The address names an artifact that has gone since the link was made,
+      // so the stage says so rather than showing nothing.
+      stageHead = shellStageHead("Artifact", "", "", backHref);
+      stageBody = `<div class="shell-pad"><p class="empty">This artifact is no longer on the hub.</p></div>`;
     }
   }
 
@@ -516,7 +521,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
       stageControls,
       stageBody,
       aside: info?.aside || "",
-      hasSelection: Boolean(selected && info),
+      hasSelection: Boolean(selected),
     }),
     info,
     selected,

@@ -1,14 +1,14 @@
-// The artifact viewer's own surface: where its actions menu opens, and the
-// number of headers and ways out its compose sheet offers. The project's own
-// Artifacts segment keeps a second More control in its stage header, so the
-// same geometry is asked of that one.
+// The artifact's own surface, the project's Artifacts stage: where its actions
+// menu opens, and the number of headers and ways out its compose sheet offers.
+// The stage is reached both by the artifact's own address and by picking a row
+// in the index, so the same geometry is asked of both ways in.
 //
 // The menu is a position rather than a value, so it is read as geometry: it
 // must begin under its trigger and share the trigger's right edge. Anchored to
-// the viewer instead, whose positioned box spans the index, the stage and the
-// comments column, it opened over the comments column several hundred pixels to
-// the right of the button. The bounding box is the standard tool for a position
-// and a redesign that keeps the menu on its trigger passes.
+// a box spanning the index, the stage and the comments column, it opened over
+// the comments column several hundred pixels to the right of the button. The
+// bounding box is the standard tool for a position and a redesign that keeps
+// the menu on its trigger passes.
 //
 // The compose sheet is opened from the viewer's own control, so both widths are
 // asked: the drawer mounts at every width and the sheet is what it becomes.
@@ -17,8 +17,8 @@ import { expect } from "@playwright/test";
 import { open, test } from "./app.mjs";
 import { api, newSession, structured, toolCall } from "./invariants.mjs";
 
-// One artifact read at its own address, the one a feed link and a share link
-// both reach, rather than the project stage.
+// One artifact opened by its own address, the one a feed link and a share link
+// both reach, which lands on the project's stage with it selected.
 async function openArtifact(page, hub) {
   await page.goto(`${hub.baseUrl}/#/artifacts/${hub.artifactId}?project=${hub.projectId}`);
   await expect(page.locator("#hub-frame")).toBeVisible();
@@ -239,8 +239,8 @@ test.describe("the artifact viewer's comments bar", () => {
     // message lands. Wait for it, or the bar is measured against a page with
     // nothing to scroll.
     await page.waitForFunction(() => {
-      const content = document.querySelector(".hub-viewer-content");
-      const stage = document.querySelector(".hub-viewer-stage");
+      const content = document.querySelector(".shell-stage .shell-body");
+      const stage = document.querySelector(".shell-stage");
       const tall = Math.max(
         document.documentElement.scrollHeight,
         content ? content.scrollHeight : 0,
@@ -258,8 +258,8 @@ test.describe("the artifact viewer's comments bar", () => {
     // stage's content on a desktop, the page on a phone.
     const scrollPos = () =>
       page.evaluate(() => {
-        const content = document.querySelector(".hub-viewer-content");
-        const stage = document.querySelector(".hub-viewer-stage");
+        const content = document.querySelector(".shell-stage .shell-body");
+        const stage = document.querySelector(".shell-stage");
         return Math.max(window.scrollY, content.scrollTop, stage.scrollTop);
       });
     // Zero is flush with the viewport bottom. The ceiling is the phone's 60px
@@ -275,12 +275,12 @@ test.describe("the artifact viewer's comments bar", () => {
 
     await held("at rest");
 
-    await page.locator(".hub-viewer-content").hover();
+    await page.locator(".shell-stage .shell-body").hover();
     const start = await scrollPos();
     await page.mouse.wheel(0, 1200);
     await page.waitForFunction((from) => {
-      const content = document.querySelector(".hub-viewer-content");
-      const stage = document.querySelector(".hub-viewer-stage");
+      const content = document.querySelector(".shell-stage .shell-body");
+      const stage = document.querySelector(".shell-stage");
       return Math.max(window.scrollY, content.scrollTop, stage.scrollTop) > from;
     }, start);
     await held("mid-document");
@@ -288,8 +288,8 @@ test.describe("the artifact viewer's comments bar", () => {
     // And at the end, where a bar built into the document would have settled.
     await page.mouse.wheel(0, 100000);
     await page.waitForFunction(() => {
-      const content = document.querySelector(".hub-viewer-content");
-      const stage = document.querySelector(".hub-viewer-stage");
+      const content = document.querySelector(".shell-stage .shell-body");
+      const stage = document.querySelector(".shell-stage");
       const end = Math.max(
         document.documentElement.scrollHeight - window.innerHeight,
         content.scrollHeight - content.clientHeight,

@@ -162,6 +162,21 @@ export function toggleAside(button) {
   button.setAttribute("aria-pressed", String(open));
 }
 
+// Whether this layout draws the aside at all, open or closed. Below the
+// desktop shell, or under a coarse pointer, the aside is not a surface, and
+// what it would hold is read in a sheet instead. Asked of the rendered layout,
+// so the answer follows the stylesheet's own breakpoint rather than a copy of
+// it here.
+export function asideAvailable(aside) {
+  if (!aside || typeof window === "undefined") return false;
+  if (window.matchMedia("(pointer: coarse)").matches) return false;
+  const closed = aside.hidden;
+  aside.hidden = false;
+  const drawn = getComputedStyle(aside).display !== "none";
+  aside.hidden = closed;
+  return drawn;
+}
+
 const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 6l-6 6 6 6"></path></svg>`;
 
 // The reserved chrome is the rule, so the shell draws both rows whether or not

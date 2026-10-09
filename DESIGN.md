@@ -144,17 +144,15 @@ the round-11 row form and keeps its 40px control row; its THIS HUB group ends
 with Version, a value row that promises nothing. Storage adds a fourth bar
 segment and one helper line, and a zero cell reads a dash. Agents and tokens is a
 list-and-item screen, an index beside a stage, like the inbox. The rail's sync
-line is hidden when healthy. The artifact viewer's chrome band is a 52px header
-like every other pane's, and every control in it is `--ctl`, 32px.
+line is hidden when healthy.
 
-**Deviation: the artifact viewer is the one phone screen with no phone frame.**
-Every other phone screen is the 76px header and the 44px tools row, with its
-content starting at y 120 at rest. The viewer's band already carries the back
-and every tool the screen has, so it was left where it is: it paints at y 28
-and its document at y 96, with the tab bar below it. Giving the viewer the
-phone frame means deciding what a tools row for it would hold, which is a
-design question and not a sizing one, so the band stays as built until that is
-answered.
+**An artifact has one surface.** It is read in its project's Artifacts shell
+with it selected in the stage, beside the index with its row marked. The
+address a link carries, `#/artifacts/<id>`, is replaced by the shell's own, so
+there is no second chrome for the same document: the stage's 52px header and
+40px control row and the aside's are the frame every other pane reserves, and
+on a phone the address lands on the stage with the phone frame and a back
+control to the index.
 
 **The live band sits above the document in the stage.** While a version is
 live or idle, the stage carries a 34px band between the meta line and the
@@ -171,10 +169,6 @@ scroll anchor and stopping when the reader scrolls away. As built the band
 carries the first three. It counts pending updates while paused but has no jump
 control, and it does not track the reader's scroll position, so a following
 reader's place is kept by the browser's own scroll anchoring.
-
-This extends the phone deviation above rather than settling it. The band is
-still the viewer's whole chrome on a phone, so what a tools row would hold for
-it remains the open design question.
 
 ### The frame does not move, on a desktop
 
@@ -288,11 +282,10 @@ structure, not to line length.
   - **Deviation: what is not built to this yet.** Some desktop buttons and
     fields still stretch across their pane, so the width rule is the design
     and not yet the build. The composer keeps its own sizes until it is
-    redrawn. Two phone controls answer to less than 44 by 44: the project
+    redrawn. One phone control answers to less than 44 by 44: the project
     switcher's tabs, because the switcher scrolls sideways in a 36px track and
-    a scroll box clips a hit area, and the artifact viewer's version toggle,
-    which sits on a 16px line between the band and the document. The browser
-    gate names both, and fails once either passes, so the list only shrinks.
+    a scroll box clips a hit area. The browser gate names it, and fails once it
+    passes, so the list only shrinks.
 - **Focus ring.** The ring is the shadow `--focus` carries, and it is drawn
   once. A field or a row that takes the ring on `:focus-within` is the one
   object, so the control inside it does not draw a second. What is left under
@@ -391,11 +384,16 @@ Agents and access, Connect, and the knowledge base.
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
   about.
-- **Artifact viewer.** The stage renders the document. The aside holds anchored
-  comments on a fine pointer; on a coarse pointer the same thread is one bottom
-  sheet. Never both. While open threads exist, a comments bar rides the bottom
-  of the reader's viewport, above the phone's fixed tab bar, and the document
-  scrolls under it.
+- **Artifact viewer.** The Artifacts shell with the artifact selected: the
+  stage renders the document, and its control row carries the path, Copy path,
+  the version control and Copy raw. A version picked there is read in the same
+  stage. The aside holds anchored comments wherever the layout draws it, a
+  fine pointer at desktop widths; on a coarse pointer, or a fine one below the
+  desktop shell where there is no aside, the same thread is one sheet. Never
+  both. The `c` key toggles the aside, with or without a thread, and opens the
+  sheet where there is no aside. While open threads
+  exist, a comments bar rides the bottom of the reader's viewport, above the
+  phone's fixed tab bar, and the document scrolls under it.
 - **Session detail.** The brain tree in the stage. A `kv` key is read in the
   aside, named in mono with the copy glyph. On a coarse pointer the aside is not
   drawn, so the same value opens as one bottom sheet, opened by the tree leaf
@@ -501,16 +499,21 @@ document was published.
 A screen that fails one of these is not done. The first four are the design's
 named checks from the current handoff.
 
-1. **Chrome alignment.** Feed, artifacts, sessions, inbox and the artifact
-   viewer photographed at 1440: every horizontal rule in the chrome lands on the
-   same y, and every pane's header band is 52px.
+1. **Chrome alignment.** Every desktop screen the router registers,
+   photographed at 1440: every horizontal rule in the chrome lands on the same
+   y, and every pane on screen, the index, the stage and an aside, has its 52px
+   header from y 0 and its control row from 52 to 92. The artifact viewer route
+   is the Artifacts shell, so it is held like any other screen. Search and More
+   are the recorded exceptions above.
 2. **Nothing jumps.** Opening or closing the aside does not move the article's
    left edge or its first line.
 3. **One left edge.** Every title in a list shares it, with or without a glyph,
    badge or count.
 4. **No "Copy" label.** No visible button label begins with "Copy".
-5. **One surface.** On a fine pointer no code path mounts a centred comment
-   sheet. The sheet is behind `(pointer: coarse)` only.
+5. **One surface.** Where the layout draws the aside, threads are read there
+   and no code path also opens them in a sheet. The sheet stands in for the
+   aside only where the layout draws none: under a coarse pointer, or below
+   the desktop shell.
 6. **Splitters.** A drag cannot take the stage under 560px, double-click
    restores the default, and widths survive a reload.
 7. **Pane titles.** Every pane title survives the pane's minimum width without
@@ -538,6 +541,10 @@ served to the page by the test, so the count and the pixels do not depend on a
 host's installed fonts. The baselines themselves are made on CI's own browser.
 The pin lives in the test run only; the shipped binary and the design's stack
 do not change.
+A screenshot baseline is a check tagged `@visual`, compared with one shared
+tolerance of 0.2% of the clip's pixels. Made and checked on the same browser,
+it absorbs only nondeterministic sub-pixel noise: a band moved or resized by
+4px fails it.
 
 ## Where the design source lives
 

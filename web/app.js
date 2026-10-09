@@ -15,15 +15,7 @@ import {
 } from "./agents.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
-import {
-  openArtifact,
-  pickVersion,
-  toggleRaw,
-  toggleVersionMenu,
-  toggleViewerTheme,
-  viewerBack,
-  viewerRoute,
-} from "./artifacts.mjs";
+import { artifactRoute, pickVersion, toggleVersionMenu } from "./artifacts.mjs";
 import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
 import { toggleKind } from "./feed.mjs";
@@ -82,9 +74,10 @@ setScreens({
     if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/sessions`;
     else toFirstProject("sessions", gen)();
   },
+  // `#/artifacts/<id>` opens the artifact in its project's Artifacts shell.
   artifacts: (params, gen, path) => {
     const segments = (path || "").split("/");
-    if (segments[2]) viewerRoute(params, gen, path);
+    if (segments[2]) return artifactRoute(params, gen, path);
     else if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/artifacts`;
     else toFirstProject("artifacts", gen)();
   },
@@ -134,8 +127,6 @@ main.addEventListener("click", (event) => {
   if (action === "agent-issue") acted(button, issueToken(id, button.dataset.name));
   if (action === "agent-revoke") acted(button, revokeToken(id, button.dataset.name));
   if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));
-  if (action === "artifact-open") openArtifact(id);
-  if (action === "viewer-back") viewerBack();
   if (action === "project-back") projectBack();
   if (action === "wiki-new") wikiNew(button);
   if (action === "wiki-save") acted(button, wikiSave(button));
@@ -150,8 +141,6 @@ main.addEventListener("click", (event) => {
   if (action === "wiki-instruction") wikiInstruction(button);
   if (action === "version-toggle") toggleVersionMenu(button);
   if (action === "version-pick") pickVersion(id, button.dataset.version);
-  if (action === "viewer-raw") toggleRaw(button);
-  if (action === "viewer-theme") toggleViewerTheme();
   if (action === "aside-toggle") {
     const panes = main.querySelector(".panes");
     if (panes) {

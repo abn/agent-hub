@@ -36,7 +36,6 @@ main { flex: 1; width: 100%; min-width: 0; margin: 0; padding: var(--s-4) var(--
 .prose,
 .empty-state,
 .hub-thread-body,
-.hub-viewer-prose,
 .wiki-page,
 .settings-group,
 .settings .card,
@@ -249,7 +248,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
    controls at --ctl on a fine pointer, so no control is taller than its band. */
 .row button { min-height: var(--ctl); padding: 0 var(--s-3); }
 @media (pointer: fine) {
-  :is(.shell-head, .shell-controls, .storage-head, .storage-controls, .hub-viewer-bar) :is(button, .button) {
+  :is(.shell-head, .shell-controls, .storage-head, .storage-controls) :is(button, .button) {
     min-height: var(--ctl);
   }
 }
@@ -262,10 +261,10 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
    touch screen beside a mouse keeps its targets: the area is invisible, and
    only the drawn sizes follow the primary pointer. */
 @media (any-pointer: coarse) {
-  .row button, .chip, .hub-back, .hub-btn-glyph, .hub-version-toggle, .projects-new,
+  .row button, .chip, .hub-btn-glyph, .hub-version-toggle, .projects-new,
   .storage-remeasure-btn, .storage-prune-all-btn, .projects-tab-btn, .reveal-copy,
   .shell-seg a, .settings-glyph-seg, .settings-theme-btn, .shell-filter { position: relative; }
-  .row button::after, .chip::after, .hub-back::after, .hub-btn-glyph::after,
+  .row button::after, .chip::after, .hub-btn-glyph::after,
   .hub-version-toggle::after, .projects-new::after, .storage-remeasure-btn::after,
   .storage-prune-all-btn::after, .projects-tab-btn::after, .reveal-copy::after,
   .shell-seg a::after, .settings-glyph-seg::after, .settings-theme-btn::after,
@@ -632,17 +631,15 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
    and Aside (320px). Panes are separated by 1px --line, scroll independently,
    and have sticky heads. */
 .panes { display: flex; flex-direction: column; gap: 0; width: 100%; }
-.pane-list, .pane-index { width: 100%; }
-.pane-detail, .pane-stage { width: 100%; min-width: 0; padding: var(--s-3) 0; }
-.pane-aside, aside.pane { display: none; }
+.pane-list { width: 100%; }
+.pane-detail { width: 100%; min-width: 0; padding: var(--s-3) 0; }
+aside.pane { display: none; }
 
 @media (max-width: 1099px) {
-  .panes.has-selection .pane-list,
-  .panes.has-selection .pane-index {
+  .panes.has-selection .pane-list {
     display: none;
   }
-  .panes.has-selection .pane-detail,
-  .panes.has-selection .pane-stage {
+  .panes.has-selection .pane-detail {
     display: flex;
     flex-direction: column;
   }
@@ -657,7 +654,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     height: 100%;
     overflow: hidden;
   }
-  .pane-list, .pane-index {
+  .pane-list {
     width: var(--index-w, 340px);
     flex: 0 0 var(--index-w, 340px);
     border-right: 1px solid var(--line);
@@ -665,37 +662,28 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     box-sizing: border-box;
     padding: var(--s-3) var(--s-4) var(--s-6);
   }
-  .panes.panes-artifacts .pane-index,
-  .panes.panes-artifacts .pane-list {
-    --index-w: 280px;
-  }
-  .panes.panes-sessions .pane-index,
   .panes.panes-sessions .pane-list {
     --index-w: 340px;
   }
-  .panes.panes-inbox .pane-index,
   .panes.panes-inbox .pane-list,
-  .panes.panes-search .pane-index,
   .panes.panes-search .pane-list {
     --index-w: 420px;
   }
-  .pane-detail, .pane-stage {
+  .pane-detail {
     flex: 1 1 640px;
     min-width: 640px;
     overflow-y: auto;
     box-sizing: border-box;
     padding: var(--s-3) var(--s-6) var(--s-6);
   }
-  .panes.panes-sessions .pane-detail,
-  .panes.panes-sessions .pane-stage {
+  .panes.panes-sessions .pane-detail {
     padding: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
-  .pane-detail .card, .pane-stage .card { margin-top: var(--s-3); }
-  .pane-aside, aside.pane { display: none; }
-  .panes.aside-open .pane-aside,
+  .pane-detail .card { margin-top: var(--s-3); }
+  aside.pane { display: none; }
   .panes.aside-open aside.pane {
     display: flex;
     flex-direction: column;
@@ -746,7 +734,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 
 @media (min-width: 1280px) {
   .aside-toggle { display: none; }
-  .pane-aside, aside.pane {
+  aside.pane {
     display: flex;
     flex-direction: column;
     width: 320px;
@@ -954,29 +942,11 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 }
 /* end component: project aside */
 
-/* component: viewer chrome */
-/* The route's own chrome around the framed artifact page, extending the
-   reserved .hub-viewer block: back and title block, then the comments, theme,
-   version and raw controls. The back chevron draws small as the design has
-   it and answers to the 44px control floor. */
-.hub-viewer { gap: var(--s-2); }
-.hub-back {
-  flex: none; width: 36px; height: 36px; border: 0; background: transparent;
-  color: var(--ink); border-radius: var(--r-1);
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.hub-title { font-size: var(--t-15); font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hub-meta { font-size: var(--t-12); color: var(--ink-3); margin: var(--s-1) 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* component: artifact stage controls */
 .comments-toggle {
   flex: none; min-height: 44px; border: 1px solid var(--line-strong);
   border-radius: var(--r-1); background: var(--surface); color: var(--ink);
   font-weight: 500; font-size: var(--t-13);
-}
-.hub-version-toggle, .hub-raw {
-  flex: none; min-height: var(--ctl); padding: 0 var(--s-3);
-  border: 1px solid var(--line-strong); border-radius: var(--r-1);
-  background: var(--surface); color: var(--ink); font-weight: 500;
-  display: inline-flex; align-items: center; gap: var(--s-1);
 }
 .hub-version-toggle svg { display: block; }
 .hub-version-menu {
@@ -994,11 +964,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 .hub-version-menu button[aria-current="true"] {
   background: var(--accent-bg); color: var(--accent); font-weight: 600;
 }
-.hub-raw { display: none; }
-@media (min-width: 720px) {
-  .hub-raw { display: inline-flex; }
-}
-/* end component: viewer chrome */
+/* end component: artifact stage controls */
 
 /* The router moves focus to a screen's heading after every render so a screen
    reader announces the screen that just arrived. That target is not
@@ -1049,15 +1015,8 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   main { padding-bottom: var(--s-6); }
 }
 
-/* Artifact host chrome. Reserved for the in-app viewer: nothing this
-   stylesheet reaches carries these names yet. The frame document carries its
-   own copy of the callout rules inside the srcdoc; these style the host shell
-   around it. */
-.hub-viewer { display: flex; flex-direction: column; gap: var(--s-3); }
-.hub-viewer-bar {
-  display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
-}
-.hub-viewer-bar .grow { flex: 1; }
+/* Artifact host chrome. The frame document carries its own copy of the
+   callout rules inside the srcdoc; these style the host shell around it. */
 #hub-frame {
   width: 100%; min-height: 60vh;
   border: 1px solid var(--line); border-radius: var(--r-1);
@@ -3492,8 +3451,6 @@ nav a,
 .rail a,
 .tabbar a,
 .seg a,
-.hub-back,
-.hub-viewer-bar a,
 .inbox-back,
 .meta a,
 p.meta a,
@@ -3921,76 +3878,8 @@ a.session-back {
   color: var(--ink);
 }
 
-/* Screen 01: Artifact viewer redraw */
-.hub-viewer {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 0 0 var(--s-6);
-  position: relative;
-}
-
-/* The viewer is a pane like any other, so its chrome band is the 52px header
-   the frame reserves everywhere else and the document below it starts on the
-   same y as the document on the Artifacts list. */
-.hub-viewer-bar {
-  display: flex;
-  align-items: center;
-  height: 52px;
-  min-height: 52px;
-  max-height: 52px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
-  padding: 0 4px;
-  position: relative;
-  z-index: 35;
-}
-
-/* One control height across the band: the back and the three glyphs are all
-   --ctl, so a row of glyph buttons does not mix two heights. Under a coarse
-   pointer the gap is what keeps two neighbours' hit areas from overlapping. */
-@media (any-pointer: coarse) {
-  .hub-viewer-bar { gap: calc(var(--tap) - var(--ctl)); }
-}
-.hub-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--ctl);
-  min-height: var(--ctl);
-  width: var(--ctl);
-  height: var(--ctl);
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  border-radius: var(--r-1);
-  flex: none;
-  text-decoration: none;
-}
-
-.hub-back:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.hub-viewer-path {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.3;
-  color: var(--ink-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-  padding: 0 4px;
-}
-
+/* The artifact stage's glyph controls: the comments and More controls in its
+   header and the copy controls in its control row, each drawn at --ctl. */
 .hub-btn-glyph {
   position: relative;
   display: inline-flex;
@@ -4039,94 +3928,30 @@ a.session-back {
   pointer-events: none;
 }
 
-.hub-overflow-menu {
-  position: absolute;
-  right: 4px;
-  top: 44px;
-  z-index: 50;
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  box-shadow: var(--shadow-2);
-  min-width: 160px;
-  padding: var(--s-1) 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.hub-overflow-menu[hidden] {
-  display: none;
-}
-
-.hub-overflow-menu button {
-  min-height: 44px;
-  padding: 0 var(--s-3);
-  text-align: left;
-  background: none;
-  border: none;
-  font-size: var(--t-13);
-  color: var(--ink);
-  cursor: pointer;
-  width: 100%;
-}
-
-.hub-overflow-menu button:hover {
-  background: var(--surface-2);
-}
-
-.hub-overflow-menu button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.hub-viewer-meta-wrap {
-  width: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-.hub-viewer-meta-wrap:has(.hub-version-toggle[aria-expanded="true"]) {
-  position: relative;
-  z-index: 95;
-}
-
-.hub-viewer-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 16px;
-  min-height: 16px;
-  max-height: 16px;
-  line-height: 16px;
-  font-size: 12px;
-  color: var(--ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 12px;
-}
-
-.hub-viewer-actor {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* The version control sits in the stage's control row with the copy glyphs, so
+   it is a band control drawn at --ctl: quiet mono text with its chevron, which
+   is what says it opens the version sheet. */
 .hub-version-toggle {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: 16px;
-  padding: 0;
+  gap: var(--s-1);
+  height: var(--ctl);
+  min-height: var(--ctl);
+  padding: 0 var(--s-2);
   border: none;
+  border-radius: var(--r-1);
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--t-12);
   font-weight: 400;
   cursor: pointer;
   flex: none;
+}
+
+.hub-version-toggle:hover {
+  background: var(--surface-2);
 }
 
 .hub-version-toggle:focus-visible {
@@ -4134,6 +3959,12 @@ a.session-back {
   outline-offset: 2px;
 }
 
+/* Under a coarse pointer the row's controls keep their drawn size, and the
+   gap between them is what keeps one control's hit area off its neighbour's
+   centre. */
+@media (any-pointer: coarse) {
+  .artifact-stage-controls { gap: calc(var(--tap) - var(--ctl)); }
+}
 
 /* Document frame: no inner card or scroller */
 #hub-frame {
@@ -4155,6 +3986,8 @@ a.session-back {
   align-items: center;
   gap: var(--s-2);
   width: 100%;
+  max-width: 640px;
+  box-sizing: border-box;
   min-height: 44px;
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--line);
@@ -4173,6 +4006,14 @@ a.session-back {
 @media (max-width: 719px) {
   .hub-comments-strip {
     bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Below 1100px the page is the scrollport, so the stage body must not be a
+   scroll box of its own, or the bar would stick to a box that never scrolls. */
+@media (max-width: 1099px) {
+  .shell-stage .shell-body:has(.hub-comments-strip) {
+    overflow: visible;
   }
 }
 
@@ -4726,195 +4567,9 @@ a.session-back {
   display: none;
 }
 
-.hub-viewer-locked {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 /* end component: share-sheet */
 
 /* Screen 04, 05, 06, 07: Document comments, phone sheet, list drawer, and desktop margin */
-.hub-viewer-content {
-  display: flex;
-  flex-direction: row;
-  min-height: 0;
-  width: 100%;
-}
-
-.hub-viewer-doc {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-
-@media (min-width: 900px) and (max-width: 1099px) {
-  .hub-viewer-doc {
-    max-width: 560px;
-  }
-}
-
-.hub-comments-column {
-  display: none;
-}
-
-@media (min-width: 900px) and (max-width: 1099px) {
-  .hub-comments-column {
-    display: flex;
-    flex: 0 0 272px;
-    width: 272px;
-    border-left: 1px solid var(--line);
-    background: var(--bg);
-    padding: var(--s-3) var(--s-3) 0;
-    flex-direction: column;
-    gap: 10px;
-    overflow-y: auto;
-  }
-}
-
-@media (min-width: 1100px) {
-  .hub-viewer.panes {
-    max-width: none;
-    margin: 0;
-    padding: 0;
-    flex-direction: row;
-    height: 100vh;
-  }
-
-  .hub-viewer.panes .hub-viewer-stage {
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1 1 640px;
-    overflow: hidden;
-  }
-
-  .hub-viewer.panes .hub-viewer-content {
-    justify-content: center;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .hub-viewer-doc {
-    max-width: 640px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 0 var(--s-4) var(--s-6);
-    box-sizing: border-box;
-  }
-
-  .hub-comments-column,
-  .pane-aside.hub-comments-column {
-    display: flex;
-    flex: 0 0 320px;
-    width: 320px;
-    border-left: 1px solid var(--line);
-    background: var(--bg);
-    padding: var(--s-3) var(--s-4) var(--s-6);
-    flex-direction: column;
-    gap: 10px;
-    overflow-y: auto;
-    box-sizing: border-box;
-  }
-}
-
-/* Viewer index pane (280px) */
-.hub-viewer-index.pane-index {
-  padding: 0;
-}
-
-.hub-viewer-index-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  min-height: 44px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.hub-viewer-index-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  text-transform: uppercase;
-}
-
-.hub-viewer-index-count {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.hub-viewer-index-list {
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 8px 12px;
-  gap: 2px;
-}
-
-.hub-viewer-index-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: var(--r-1);
-  text-decoration: none;
-  color: var(--ink);
-  box-sizing: border-box;
-}
-
-.hub-viewer-index-item:hover {
-  background: var(--surface-2);
-}
-
-.hub-viewer-index-item.active {
-  background: var(--surface-2);
-  outline: 1px solid var(--line-strong);
-}
-
-.hub-viewer-index-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hub-viewer-index-item-meta {
-  font-size: 12px;
-  color: var(--ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Comments column header & helpers */
-.hub-comments-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 8px;
-}
-
-.hub-comments-head-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  text-transform: uppercase;
-}
-
 .hub-comments-head-meta {
   font-size: 12px;
   color: var(--ink-3);
@@ -4922,51 +4577,11 @@ a.session-back {
   margin-right: auto;
 }
 
-/* A thread starts here, so this is a control that opens something and not a
-   copy glyph on a row: 36px, the same box as the glyph buttons in the band
-   above, with the coarse-pointer expansion for the tap floor. */
-.hub-comments-head-add {
-  display: grid;
-  place-items: center;
-  position: relative;
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  background: none;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-/* The expansion is measured from the padding box, and this is the one control
-   in the set that draws its own 1px border, so 4px of it is spent inside that
-   border and the target lands on 42. Five reaches the 44 the floor asks for,
-   and leaves the drawn box at 36 beside its 36px siblings. */
-@media (pointer: coarse) {
-  .hub-comments-head-add::after {
-    content: "";
-    position: absolute;
-    inset: -5px;
-  }
-}
-
-.hub-comments-head-add:hover {
-  background: var(--surface-2);
-}
-
 .hub-comments-cards-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex: 1;
-}
-
-.hub-comments-footer {
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
-  margin-top: auto;
 }
 
 .hub-comments-helper {

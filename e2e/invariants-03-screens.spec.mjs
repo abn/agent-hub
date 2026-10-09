@@ -165,6 +165,19 @@ test.describe("desktop chrome", () => {
         const head = [...document.querySelectorAll(".shell-head, .storage-head")].find(vis) || null;
         const ctl = [...document.querySelectorAll(".shell-controls, .storage-controls")].find(vis) || null;
         const row = ctl || head;
+        // Every pane on screen reserves its own two bands, so the stage and an
+        // aside are held as well as the first pane the page carries.
+        const band = (el) => (el ? [Math.round(el.getBoundingClientRect().top), Math.round(el.getBoundingClientRect().bottom)] : null);
+        const panes = [...document.querySelectorAll("main .shell-index, main .shell-stage, main .shell-aside")]
+          .filter((pane) => !pane.hidden && vis(pane))
+          .map((pane) => {
+            const own = (sel) => [...pane.children].find((child) => child.matches(sel) && vis(child)) || null;
+            return {
+              pane: [...pane.classList].find((c) => c.startsWith("shell-")),
+              head: band(own(".shell-head")),
+              ctl: band(own(".shell-controls")),
+            };
+          });
         const tall = row
           ? [...row.querySelectorAll("button, a, input, select, textarea, [role=tab], [role=button], [role=radio]")]
               .filter((e) => {
@@ -199,6 +212,7 @@ test.describe("desktop chrome", () => {
           ctl: ctl ? { top: Math.round(ctl.getBoundingClientRect().top), bottom: Math.round(ctl.getBoundingClientRect().bottom) } : null,
           tall: tall.slice(0, 6),
           labels,
+          panes,
         };
       });
       expect(geom.tall, `${name}: a control in the 40px row is taller than 32`).toEqual([]);
@@ -206,6 +220,10 @@ test.describe("desktop chrome", () => {
       expect(geom.head, `${name}: header does not land at 52`).toBe(52);
       expect(geom.ctl, `${name}: no control row found`).toBeTruthy();
       expect(geom.ctl.top === 52 && geom.ctl.bottom === 92, `${name}: control row does not span 52..92`).toBe(true);
+      for (const pane of geom.panes) {
+        expect(pane.head, `${name}: the ${pane.pane} pane's header does not span 0..52`).toEqual([0, 52]);
+        expect(pane.ctl, `${name}: the ${pane.pane} pane's control row does not span 52..92`).toEqual([52, 92]);
+      }
       for (const label of geom.labels) {
         expect(label.offset, `${name}: label ${JSON.stringify(label.text)} sits at the pane's x 0`).not.toBe(0);
         expect([16, 24], `${name}: label ${JSON.stringify(label.text)} is not on the 16/24 gutter`).toContain(label.offset);
@@ -440,34 +458,37 @@ test.describe("round 14", () => {
       // link yet" answer, so the response watch stands down for the open.
       const restore = watch.disarm();
       try {
-        // A fresh document per artifact: the two viewer routes differ only in
-        // the fragment, so a same-document hop would keep the previous viewer,
-        // its menu and its sheet mounted under the new one. A reload of the
+        // A fresh document per artifact: the two addresses differ only in the
+        // fragment, so a same-document hop would keep the previous stage, its
+        // menu and its sheet mounted under the new one. A reload of the
         // artifact's own address is a whole boot rather than a fragment move.
         await page.goto(
           `${hub.baseUrl}/#/artifacts/${encodeURIComponent(which)}?project=${encodeURIComponent(hub.projectId)}`,
         );
         await page.reload();
-        // The viewer's own spec waits for the frame before reaching for the
-        // overflow; the viewer re-renders as it loads, and a menu opened into a
-        // render that is still in flight is closed again under the click.
-        await expect(page.locator("#hub-frame")).toBeVisible({ timeout: 8000 });
+        // The address lands on the project's shell with the artifact selected;
+        // the stage re-renders as it loads, and a menu opened into a render
+        // that is still in flight is closed again under the click.
+        await expect(page.locator('.shell.has-selection[data-segment="artifacts"] #hub-frame')).toBeVisible({
+          timeout: 8000,
+        });
         // The menu is built before the share sheet it opens, so the sheet being
         // in the DOM is what says the item's handler is wired.
         await expect(page.locator(".hub-share-sheet")).toBeAttached({ timeout: 8000 });
-        await expect(page.locator(".hub-more")).toBeVisible({ timeout: 8000 });
-        // The viewer re-renders as its frame settles, which closes an open
+        const more = '.shell-stage [data-action="stage-more"]';
+        await expect(page.locator(more)).toBeVisible({ timeout: 8000 });
+        // The stage re-renders as its frame settles, which closes an open
         // overflow menu under a pointer. The menu's own handler is driven in one
         // page task, so the item the reader's click reaches is the one that
-        // opens the sheet; the menu's mechanics are the viewer spec's subject.
-        const opened = await page.evaluate(() => {
-          const more = document.querySelector(".hub-more");
-          const share = document.querySelector('[data-action="share"]');
-          if (!more || !share) return false;
-          more.click();
+        // opens the sheet; the menu's mechanics are the route spec's subject.
+        const opened = await page.evaluate((trigger) => {
+          const button = document.querySelector(trigger);
+          const share = document.querySelector('[data-action="stage-share"]');
+          if (!button || !share) return false;
+          button.click();
           share.click();
           return true;
-        });
+        }, more);
         expect(opened, `the artifact viewer for ${which} has no overflow control`).toBe(true);
         await expect(page.locator(".hub-share-sheet:not([hidden])")).toBeVisible({ timeout: 8000 });
         await expect(page.locator(".hub-share-primary")).toBeVisible({ timeout: 10_000 });

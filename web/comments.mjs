@@ -795,10 +795,7 @@ function renderComposeSheet() {
 
 // Desktop Margin Column (Screen 07): from 900px
 export function renderDesktopCards() {
-  const container =
-    document.querySelector(".hub-comments-cards-list") ||
-    commentsState.desktopContainer ||
-    document.querySelector(".hub-comments-column");
+  const container = document.querySelector(".hub-comments-cards-list") || commentsState.desktopContainer;
   if (!container) return;
   if (typeof window !== "undefined" && window.innerWidth < 900) {
     container.innerHTML = "";

@@ -6,6 +6,24 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### An artifact opens in its project's Artifacts shell
+
+* **Update**: [Human interface](design/human-interface.md) and
+  [Human surface](architecture/human-surface.md) state that an artifact has one
+  surface. The address a feed row, a search hit or an older link carries,
+  `#/artifacts/<id>`, is replaced by the project's Artifacts segment with the
+  artifact selected, and with the version when the link names one, so Back
+  leaves the artifact and Forward returns to it. On a phone it lands on the
+  artifact's stage with a back control to the index. The separate viewer
+  chrome is gone; its actions, Share among them, are in the stage's More menu.
+  A fine pointer below the desktop shell, where no aside is drawn, reads the
+  threads in the same sheet a coarse pointer does, and an address naming an
+  artifact that has since been deleted says so in the stage.
+* **Update**: the artifact viewer capture now follows the address of the
+  sealed note, which is not the newest artifact, so it shows the address
+  landing on its own selection; it and the desktop artifacts capture are
+  retaken.
+
 ### A waiting row keeps its title line
 
 * **Update**: [Human interface](design/human-interface.md) states how an index
