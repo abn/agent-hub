@@ -268,7 +268,8 @@ indexed for search as soon as it is written.
 
 Be clear about the boundary. The hub ships the server-side session brains, the
 durable project knowledge base, the MCP endpoint and the stdio proxy, the
-one-shot `call` and `kb` commands, and the served guide at `agenthub://skill`.
+one-shot `call` and `kb` commands, the served guide at `agenthub://skill`, and
+the knowledge base pages as MCP resources under `agenthub://kb/`.
 The workflow guide is the installable `agent-hub` skill.
 It does not ship a harness plugin, a session-start hook, or a bulk importer.
 Wiring the calls above into a harness's startup and choosing and moving the

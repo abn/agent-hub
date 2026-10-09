@@ -88,6 +88,11 @@ impl Hub {
             .unwrap_or_else(|err| panic!("the hub did not come back on port {}: {err}", self.port));
     }
 
+    /// The data directory the hub serves.
+    pub fn data_dir(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+
     pub fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }

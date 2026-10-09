@@ -41,6 +41,26 @@ software release notes and the repository changelog.
   it first in the session start sequence; the installable skill does the same
   and names its shape.
 
+### The knowledge base is served as MCP resources
+
+* **Change**: every knowledge base page the caller may read is an MCP resource,
+  `agenthub://kb/<project_id>/<path>`, with the path under `/fs/` and each
+  segment percent-encoded. `resources/read` takes the read check `brain_get`
+  makes on the project store, so a confidential project needs a grant.
+  `resources/list` pages 100 resources at a time with a cursor, and
+  `resources/templates/list` returns `agenthub://kb/{project_id}/{+path}`. A
+  page is `text/markdown` when its name ends in `.md` and `text/plain`
+  otherwise. Resources are read-only and store nothing.
+* **Change**: the stdio proxy forwards `resources/templates/list` as well as
+  the listing and the read.
+* **Decision**: [ADR 0028](adr/0028-knowledge-base-as-mcp-resources.md) records
+  the URI scheme and why resources are a view over the tools.
+* **Update**: the [agent surface](architecture/agent-surface.md#resources)
+  gains a Resources section;
+  [the knowledge base](usage/knowledge-base.md#agent-tools) and
+  [using the hub as a brain](usage/agents.md) name the resources, and the
+  installable skill's knowledge base reference says how to attach a page.
+
 ## 2026-10-08
 
 ### Releases carry standalone binaries

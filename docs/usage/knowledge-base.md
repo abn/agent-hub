@@ -259,6 +259,12 @@ tags?, if_version?)` reads `from_path` from the caller's active session brain
 and returns `{ok, path, version, lint[]}`. A `brain_delete` of a page that does
 not exist is `not_found`.
 
+Every page an agent may read is also an MCP resource,
+`agenthub://kb/<project_id>/<path>` with the path under `/fs/`, so a client that
+attaches resources puts a page into context without a tool call. The listing is
+paged with a cursor and the read takes the same check as `brain_get`; the
+[agent surface](../architecture/agent-surface.md#resources) has the details.
+
 ## The Wiki segment
 
 A project carries a fourth section, **Wiki**, beside Feed, Artifacts and

@@ -1035,35 +1035,56 @@ impl Brain {
                 }
                 Ok(entries)
             }
-            Namespace::Fs(path) => {
-                let dir = fs_path(path);
-                let Some(stats) = self.agent.fs.stat(&dir).await.map_err(engine_error)? else {
-                    return Ok(Vec::new());
-                };
-                if !stats.is_directory() {
-                    return Ok(Vec::new());
-                }
-                let base = if dir == "/" {
-                    "/fs".to_string()
-                } else {
-                    format!("/fs{dir}")
-                };
-                let mut entries = Vec::new();
-                for child in self.children(stats.ino).await? {
-                    let (kind, size_bytes) = if child.stats.is_directory() {
-                        (EntryKind::Dir, self.directory_bytes(child.stats.ino).await?)
-                    } else {
-                        (EntryKind::File, child.stats.size)
-                    };
-                    entries.push(Entry {
-                        path: format!("{base}/{}", child.name),
-                        kind,
-                        size_bytes,
-                    });
-                }
-                Ok(entries)
-            }
+            Namespace::Fs(path) => self.fs_children(path, true).await,
         }
+    }
+
+    /// The immediate children of an `/fs/<dir>`, as `list` names them, but
+    /// with no byte total for a child directory: its `size_bytes` is 0.
+    ///
+    /// For a walk that needs only names, kinds and page sizes, which `list`
+    /// would make pay a second directory read per child directory. A path
+    /// outside `/fs` yields an empty list.
+    pub async fn list_names(&self, prefix: &str) -> Result<Vec<Entry>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        match parse_path(prefix)? {
+            Namespace::Kv(_) => Ok(Vec::new()),
+            Namespace::Fs(path) => self.fs_children(path, false).await,
+        }
+    }
+
+    /// The children of one `/fs` directory, with directory byte totals when
+    /// `dir_bytes` is set. Called with the lock held.
+    async fn fs_children(&self, path: &str, dir_bytes: bool) -> Result<Vec<Entry>> {
+        let dir = fs_path(path);
+        let Some(stats) = self.agent.fs.stat(&dir).await.map_err(engine_error)? else {
+            return Ok(Vec::new());
+        };
+        if !stats.is_directory() {
+            return Ok(Vec::new());
+        }
+        let base = if dir == "/" {
+            "/fs".to_string()
+        } else {
+            format!("/fs{dir}")
+        };
+        let mut entries = Vec::new();
+        for child in self.children(stats.ino).await? {
+            let (kind, size_bytes) = if !child.stats.is_directory() {
+                (EntryKind::File, child.stats.size)
+            } else if dir_bytes {
+                (EntryKind::Dir, self.directory_bytes(child.stats.ino).await?)
+            } else {
+                (EntryKind::Dir, 0)
+            };
+            entries.push(Entry {
+                path: format!("{base}/{}", child.name),
+                kind,
+                size_bytes,
+            });
+        }
+        Ok(entries)
     }
 
     /// The bytes held directly under a directory.

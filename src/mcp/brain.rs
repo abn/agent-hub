@@ -1326,7 +1326,7 @@ impl HubServer {
 
     /// The project whose knowledge base a call acts on, once the caller is
     /// authorized for it.
-    async fn knowledge_project(
+    pub(super) async fn knowledge_project(
         &self,
         principal: &Principal,
         project_id: Option<&str>,
