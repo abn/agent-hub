@@ -246,11 +246,7 @@ async fn append_with_caps(
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let appended =
         append_in_tx_capped(&tx, caps, events_per_project, actor, idempotency_key, event).await?;
     if !appended.replayed
@@ -271,11 +267,7 @@ async fn append_with_caps_and_principal(
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     crate::policy::authorize_in_tx(
         &tx,
         principal,
@@ -308,7 +300,7 @@ async fn append_with_caps_and_principal(
 /// not applied here; an actionable write goes through [`append_action`]. A
 /// caller with no configured ceiling passes `0`.
 pub(crate) async fn append_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     events_per_project: i64,
     actor: &str,
     idempotency_key: Option<&str>,
@@ -322,7 +314,7 @@ pub(crate) async fn append_in_tx(
 /// Append an event, reporting whether it is new. A write an idempotency key
 /// replayed returns the original id, marked as a replay.
 async fn append_in_tx_capped(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     caps: Option<&crate::limits::InboxCaps>,
     events_per_project: i64,
     actor: &str,
@@ -554,11 +546,7 @@ async fn last_seen_on(conn: &Connection, project_id: &str) -> Result<Option<Stri
 /// The read and the write share an immediate transaction, so a cursor cannot
 /// step over an event committed between them.
 pub async fn mark_seen(db: &Database, project_id: &str, event_id: &str) -> Result<Seen> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let current = last_seen_on(&tx, project_id).await?;
     let belongs = get_on(&tx, event_id)
         .await?
@@ -595,7 +583,7 @@ pub async fn mark_seen(db: &Database, project_id: &str, event_id: &str) -> Resul
 /// Forget a project's cursor inside a caller's transaction, so a deleted
 /// project takes it along with everything else scoped to it.
 pub(crate) async fn forget_cursor_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     project_id: &str,
 ) -> Result<()> {
     tx.execute(
@@ -665,11 +653,7 @@ pub async fn advance_agent_cursor(
     agent: &str,
     event_id: &str,
 ) -> Result<AgentSeen> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let current = agent_cursor_on(&tx, project_id, agent).await?;
     let belongs = !event_id.is_empty()
         && get_on(&tx, event_id)
@@ -710,7 +694,7 @@ pub async fn advance_agent_cursor(
 /// Forget every agent's cursor for one project inside a caller's transaction,
 /// so a deleted project takes them along with everything else scoped to it.
 pub(crate) async fn forget_agent_cursors_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     project_id: &str,
 ) -> Result<()> {
     tx.execute(

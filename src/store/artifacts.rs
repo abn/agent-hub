@@ -200,7 +200,7 @@ pub async fn publish_for_principal_capped(
     let description = check_description(artifact.description)?;
     let label = check_label(artifact.label)?;
 
-    let mut conn = super::connect(db)?;
+    let conn = super::connect(db)?;
 
     // A retry with the same key returns what the first call produced, so a
     // dropped response does not leave a duplicate artifact. The lookup runs
@@ -226,10 +226,7 @@ pub async fn publish_for_principal_capped(
     let mut created_rel: Option<String> = None;
 
     let write = async {
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
+        let tx = super::begin_write(db).await?;
 
         let mut p_rows = tx
             .query(
@@ -495,7 +492,7 @@ pub async fn update_for_principal_capped(
         check_label(Some(l))?;
     }
 
-    let mut conn = super::connect(db)?;
+    let conn = super::connect(db)?;
     // Only the project and the kind are taken from this read, and neither ever
     // changes for an artifact, so it is enough to name the pending file. Every
     // decision below is made on the row the transaction reads.
@@ -534,10 +531,7 @@ pub async fn update_for_principal_capped(
     let _writing = super::hold_removals().await;
 
     let write = async {
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
+        let tx = super::begin_write(db).await?;
         let existing = row_on(&tx, artifact_id)
             .await?
             .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
@@ -837,7 +831,7 @@ pub async fn draft_for_principal_capped(
 ) -> Result<Artifact> {
     limits::check_artifact(content.len())?;
 
-    let mut conn = super::connect(db)?;
+    let conn = super::connect(db)?;
     // Only the project and the kind are needed to name the pending file; every
     // decision below is made on the row the transaction reads.
     let current = row_on(&conn, artifact_id)
@@ -860,10 +854,7 @@ pub async fn draft_for_principal_capped(
     let _writing = super::hold_removals().await;
 
     let write = async {
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
+        let tx = super::begin_write(db).await?;
 
         let mut p_rows = tx
             .query(
@@ -1051,6 +1042,7 @@ pub async fn draft_for_principal_capped(
 /// reused by the next live write, so guessing idle there would only make the
 /// band flicker.
 pub async fn clear_idle_live(db: &Database, since: &str) -> Result<()> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
         "UPDATE artifacts SET live_version = NULL, live_rev = 0, live_session = NULL
@@ -1078,11 +1070,7 @@ pub async fn delete(
     actor: &str,
     artifact_id: &str,
 ) -> Result<Artifact> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let existing = row_on(&tx, artifact_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
@@ -1428,7 +1416,7 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
 /// A live write reuses `current_ver + 1`, the number an abandoned live version
 /// may still occupy, so a fork has to tell a free number from a reused one.
 async fn version_row_exists(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     artifact_id: &str,
     version: i64,
 ) -> Result<bool> {
@@ -1450,7 +1438,7 @@ async fn version_row_exists(
 /// lists cannot drift.
 #[allow(clippy::too_many_arguments)]
 async fn update_version(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     artifact_id: &str,
     version: i64,
     title: &str,
@@ -1488,7 +1476,7 @@ async fn update_version(
 
 #[allow(clippy::too_many_arguments)]
 async fn insert_version(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     artifact_id: &str,
     version: i64,
     title: &str,
@@ -1525,7 +1513,7 @@ async fn insert_version(
 
 #[allow(clippy::too_many_arguments)]
 async fn append_event(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     events_per_project: i64,
     actor: &str,
     project_id: &str,
@@ -1822,11 +1810,7 @@ pub async fn create_or_rotate_share(
     artifact_id: &str,
     version: Option<i64>,
 ) -> Result<ArtifactShare> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     let art = match row_on(&tx, artifact_id).await? {
         Some(art) => art,
@@ -1886,6 +1870,7 @@ pub async fn create_or_rotate_share(
 pub async fn revoke_share(db: &Database, artifact_id: &str) -> Result<()> {
     let _ = metadata(db, artifact_id).await?;
     let now = crate::store::now_rfc3339();
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
         "UPDATE artifact_shares SET revoked_at = ?1 WHERE artifact_id = ?2 AND revoked_at IS NULL",

@@ -41,11 +41,7 @@ pub async fn advance(db: &Database, agent: &str, event_id: &str) -> Result<()> {
     if event_id.is_empty() {
         return Ok(());
     }
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(super::engine)?;
+    let tx = super::begin_write(db).await?;
     let current = cursor_on(&tx, agent).await?;
     if current.as_deref().is_some_and(|seen| event_id <= seen) {
         return Ok(());

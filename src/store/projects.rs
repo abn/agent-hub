@@ -155,11 +155,7 @@ pub async fn create_with_confidential(
 
     // Inside the immediate transaction so a concurrent create is a conflict
     // rather than a raw engine error.
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT 1 FROM projects WHERE id = ?1",
@@ -197,11 +193,7 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
         validate_display_name(display_name)?;
     }
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT 1 FROM projects WHERE id = ?1 AND status = 'active'",
@@ -247,7 +239,7 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
 /// `owner_agent` is set when the project is an agent's personal space, so the
 /// agent row and its space can be written as one unit.
 pub(crate) async fn insert_owned(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     id: &str,
     display_name: &str,
     owner_agent: Option<&str>,
@@ -423,11 +415,7 @@ pub(crate) fn is_quarantine(name: &str) -> bool {
 /// quarantined locations, deletes metadata rows in an immediate transaction,
 /// and then removes the quarantined files.
 pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT owner_agent, status FROM projects WHERE id = ?1",
@@ -500,11 +488,7 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
         let _ = std::fs::rename(&kb_dir, &q_kb);
     }
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     // Inbox and search rows hang off events, so they go first.
     tx.execute(
         "DELETE FROM inbox WHERE event_id IN (SELECT id FROM events WHERE project_id = ?1)",
@@ -719,6 +703,7 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
 
 /// Set a project's confidential posture.
 pub async fn set_confidential(db: &Database, id: &str, confidential: bool) -> Result<()> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
         "UPDATE projects SET confidential = ?1 WHERE id = ?2",

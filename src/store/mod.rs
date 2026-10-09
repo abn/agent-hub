@@ -42,6 +42,124 @@ pub(crate) fn connect(db: &turso::Database) -> Result<turso::Connection> {
     Ok(conn)
 }
 
+/// The queue every write to the hub store joins before it takes the engine's
+/// write lock.
+///
+/// The engine's busy handler is not a queue: a waiting writer retries on a
+/// backoff of up to 100ms, and a writer that has just committed takes the lock
+/// again before any waiter retries. Under a steady stream of appends a waiter
+/// can miss every free moment for the whole [`LOCK_WAIT`] and fail with
+/// "database is locked", though no transaction held the lock for anywhere near
+/// that long. The tokio mutex is fair, so writers take the lock in the order
+/// they asked for it.
+///
+/// One queue for the process, because one process serves one hub store. A per-
+/// session brain or project knowledge file is a different database and never
+/// joins it. A test binary that opens several stores shares the queue between
+/// them, so a test that holds a turn for the whole wait fails the writers of
+/// every other test running beside it; a test that needs a write refused makes
+/// the store refuse it instead.
+static WRITE_QUEUE: WriteQueue = WriteQueue::new();
+
+struct WriteQueue {
+    lock: tokio::sync::Mutex<()>,
+    /// When the queue last handed out a turn, in milliseconds on
+    /// [`queue_clock`].
+    last_turn_ms: AtomicU64,
+}
+
+fn queue_clock() -> std::time::Duration {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed()
+}
+
+impl WriteQueue {
+    const fn new() -> Self {
+        Self {
+            lock: tokio::sync::Mutex::const_new(()),
+            last_turn_ms: AtomicU64::new(0),
+        }
+    }
+
+    /// Wait for a turn, giving up only once no turn has been granted for
+    /// `wait`.
+    async fn turn(&self, wait: std::time::Duration) -> Result<tokio::sync::MutexGuard<'_, ()>> {
+        let mut waiting = std::pin::pin!(self.lock.lock());
+        loop {
+            let granted = self.last_turn_ms.load(Ordering::SeqCst);
+            let due = std::time::Duration::from_millis(granted) + wait;
+            let left = due.saturating_sub(queue_clock());
+            // The wait polls the lock before it checks the deadline, so a free
+            // queue is taken even when the last turn is long past.
+            if let Ok(turn) = tokio::time::timeout(left, &mut waiting).await {
+                let now = u64::try_from(queue_clock().as_millis()).unwrap_or(u64::MAX);
+                self.last_turn_ms.store(now, Ordering::SeqCst);
+                return Ok(turn);
+            }
+            if self.last_turn_ms.load(Ordering::SeqCst) == granted {
+                return Err(Error::Engine("database is locked".to_string()));
+            }
+        }
+    }
+}
+
+/// A turn in the hub store write queue, released on drop.
+pub(crate) type WriteTurn = tokio::sync::MutexGuard<'static, ()>;
+
+/// Wait for a turn in the hub store write queue.
+///
+/// A writer waits for as long as the queue keeps moving. It gives up only when
+/// no turn has been granted for a whole [`LOCK_WAIT`], which means the writer
+/// holding the turn has held it that long: the bound the engine puts on one
+/// holder. A stuck writer still surfaces as an error, and a long queue of quick
+/// writers does not.
+///
+/// An autocommit write takes a turn around its one statement and holds it until
+/// the statement's rows are dropped; a transaction takes one through
+/// [`begin_write`].
+pub(crate) async fn write_turn() -> Result<WriteTurn> {
+    WRITE_QUEUE.turn(LOCK_WAIT).await
+}
+
+/// An immediate transaction on the hub store that owns its connection and its
+/// turn in the write queue.
+///
+/// The connection is declared before the turn, so it is dropped first. A
+/// transaction that was neither committed nor rolled back is rolled back as its
+/// connection closes, and the engine's write lock is released, before the next
+/// writer is given the turn.
+pub(crate) struct WriteTx {
+    conn: turso::Connection,
+    _turn: WriteTurn,
+}
+
+impl std::ops::Deref for WriteTx {
+    type Target = turso::Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.conn
+    }
+}
+
+impl WriteTx {
+    pub(crate) async fn commit(self) -> turso::Result<()> {
+        self.conn.execute("COMMIT", ()).await.map(|_| ())
+    }
+
+    pub(crate) async fn rollback(self) -> turso::Result<()> {
+        self.conn.execute("ROLLBACK", ()).await.map(|_| ())
+    }
+}
+
+/// Begin an immediate write transaction on the hub store, on a connection of
+/// its own, once it has its turn in the write queue.
+pub(crate) async fn begin_write(db: &turso::Database) -> Result<WriteTx> {
+    let turn = write_turn().await?;
+    let conn = connect(db)?;
+    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(engine)?;
+    Ok(WriteTx { conn, _turn: turn })
+}
+
 /// The gate between removing store files and an online backup.
 ///
 /// An online backup snapshots `hub.db` first and copies the brain, knowledge
@@ -94,13 +212,16 @@ pub async fn open_engine(path: &Path) -> Result<turso::Database> {
 /// transaction, and its version is recorded in the same transaction so a
 /// failed migration leaves no partial version behind.
 pub async fn migrate(db: &turso::Database) -> Result<i64> {
-    let mut conn = connect(db)?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
-        (),
-    )
-    .await
-    .map_err(engine)?;
+    let conn = connect(db)?;
+    {
+        let _turn = write_turn().await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    }
 
     let current = read_version(&conn).await?;
     if current > schema::SUPPORTED_MAX {
@@ -115,10 +236,7 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
         .iter()
         .filter(|migration| migration.version > current)
     {
-        let tx = conn
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .map_err(engine)?;
+        let tx = begin_write(db).await?;
         tx.execute_batch(migration.ddl).await.map_err(engine)?;
         tx.execute(
             "INSERT INTO schema_version(version) VALUES (?1)",
@@ -321,6 +439,7 @@ pub(crate) async fn read_newest_event_ms(db: &turso::Database) -> Result<Option<
 /// Called once at clean shutdown, so a later process opens at the mark this
 /// one reached rather than at whatever the table held when it started.
 pub async fn persist_id_high_water(db: &turso::Database) -> Result<()> {
+    let _turn = write_turn().await?;
     let conn = connect(db)?;
     conn.execute(
         "INSERT OR REPLACE INTO id_high_water(singleton, millis) VALUES (1, ?1)",
@@ -375,7 +494,119 @@ pub(crate) fn next_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{millis_now, next_id, set_id_high_water};
+    use super::{WriteQueue, begin_write, millis_now, next_id, set_id_high_water};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// A queue of its own, so these tests never hold up the store's writers.
+    fn queue() -> &'static WriteQueue {
+        Box::leak(Box::new(WriteQueue::new()))
+    }
+
+    const WAIT: Duration = Duration::from_millis(300);
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn turns_are_granted_in_the_order_they_were_asked_for() {
+        let queue = queue();
+        let held = queue.turn(WAIT).await.expect("first turn");
+
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut waiters = Vec::new();
+        for index in 0..6 {
+            let order = order.clone();
+            waiters.push(tokio::spawn(async move {
+                let _turn = queue.turn(WAIT).await.expect("turn");
+                order.lock().expect("order").push(index);
+            }));
+            // Let this waiter join the queue before the next one asks.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        drop(held);
+        for waiter in waiters {
+            waiter.await.expect("join");
+        }
+        assert_eq!(*order.lock().expect("order"), vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn short_holds_in_a_row_outlast_the_wait_without_failing() {
+        let queue = queue();
+        let mut writers = Vec::new();
+        for _ in 0..6 {
+            writers.push(tokio::spawn(async move {
+                let _turn = queue.turn(WAIT).await?;
+                tokio::time::sleep(WAIT / 3).await;
+                crate::error::Result::Ok(())
+            }));
+        }
+        let started = std::time::Instant::now();
+        for writer in writers {
+            writer
+                .await
+                .expect("join")
+                .expect("a turn while the queue moves");
+        }
+        assert!(
+            started.elapsed() > WAIT,
+            "the queue as a whole took longer than one writer may wait"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_holder_past_the_wait_fails_the_writer_behind_it() {
+        let queue = queue();
+        let held = queue.turn(WAIT).await.expect("first turn");
+        let waiter = tokio::spawn(async move { queue.turn(WAIT).await.map(drop) });
+        tokio::time::sleep(WAIT * 2).await;
+        let err = waiter
+            .await
+            .expect("join")
+            .expect_err("a writer behind a stuck holder gives up");
+        assert!(err.to_string().contains("database is locked"), "{err}");
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_write_releases_the_engine_lock_with_its_turn() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock before epoch")
+            .as_nanos();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/tmp")
+            .join(format!("agent-hub-write-tx-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let db = super::open_engine(&dir.join("hub.db")).await.expect("open");
+        super::migrate(&db).await.expect("migrate");
+
+        let tx = begin_write(&db).await.expect("begin");
+        tx.execute("UPDATE id_high_water SET millis = 7", ())
+            .await
+            .expect("update");
+        drop(tx);
+
+        // No busy handler on this connection: it fails at once if the dropped
+        // transaction still holds the lock.
+        let raw = db.connect().expect("connect");
+        raw.execute("BEGIN IMMEDIATE", ())
+            .await
+            .expect("the lock was released when the write was dropped");
+        let mut rows = raw
+            .query("SELECT millis FROM id_high_water", ())
+            .await
+            .expect("read");
+        let row = rows.next().await.expect("row").expect("the mark");
+        assert_eq!(
+            row.get_value(0).expect("value"),
+            turso::Value::Integer(0),
+            "the dropped write was rolled back"
+        );
+        drop(rows);
+        raw.execute("ROLLBACK", ()).await.expect("rollback");
+        drop(raw);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ids_increase_in_generation_order() {

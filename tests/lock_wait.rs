@@ -1,8 +1,10 @@
-//! A concurrent writer waits for the engine lock instead of surfacing Busy.
+//! A concurrent writer waits for its turn at the write lock instead of
+//! surfacing Busy.
 //!
-//! The engine's busy handler is per-connection, so this pins the behaviour the
-//! store's connection helper adds: many same-key writers serialise to a single
-//! result and none reports "database is locked".
+//! Every hub store write queues for the lock in arrival order, so these pin
+//! what that gives a caller: many same-key writers serialise to a single
+//! result, a steady stream of writers starves none of them, and none reports
+//! "database is locked".
 
 use std::sync::Arc;
 
@@ -197,4 +199,74 @@ async fn concurrent_same_key_answers_serialize() {
         .filter(|event| event.kind == "answer" && event.thread_id.as_deref() == Some(&question_id))
         .count();
     assert_eq!(answers, 1, "the key produces one answer");
+}
+
+/// Before writers queued, the engine's busy handler let a waiter miss every
+/// free moment behind writers that commit and begin again back to back, and
+/// this failed in most runs on an idle machine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_steady_stream_of_appends_starves_no_writer() {
+    // Writers that commit and begin again back to back keep the write lock
+    // taken almost all the time. Each must still get its turn rather than
+    // miss every free moment for the whole lock wait, and so must a
+    // single-statement write that runs outside a transaction.
+    const STREAMS: usize = 12;
+    const PER_STREAM: usize = 10;
+    const MARKERS: usize = 3;
+
+    let dir = TempDir::new("lock-stream");
+    let db = Arc::new(open(&dir).await);
+    ensure_project(&db).await;
+
+    let mut handles = Vec::new();
+    for stream in 0..STREAMS {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            for index in 0..PER_STREAM {
+                let result = events::append(
+                    &db,
+                    0,
+                    "agent-one",
+                    None,
+                    events::NewEvent {
+                        project_id: "proj".to_string(),
+                        kind: "signal".to_string(),
+                        summary: format!("stream {stream} event {index}"),
+                        payload: None,
+                        needs_action: false,
+                        thread_id: None,
+                        session_id: None,
+                    },
+                )
+                .await;
+                assert_not_locked(&result);
+                result.expect("append");
+            }
+        }));
+    }
+    for _ in 0..MARKERS {
+        let db = db.clone();
+        handles.push(tokio::spawn(async move {
+            for _ in 0..PER_STREAM {
+                let result = agent_hub::store::inbox::mark_all_read(&db, Some("proj")).await;
+                assert_not_locked(&result);
+                result.expect("mark all read");
+            }
+        }));
+    }
+    for handle in handles {
+        handle.await.expect("join");
+    }
+
+    let feed = events::read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            limit: agent_hub::limits::FEED_LIMIT_MAX,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("feed");
+    assert_eq!(feed.events.len(), STREAMS * PER_STREAM);
 }

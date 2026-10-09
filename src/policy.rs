@@ -95,8 +95,8 @@ pub async fn authorize(
 ///
 /// Guards against TOCTOU races where a grant is revoked, confidentiality changed, or
 /// project deleted between pre-transaction authorization and write commit.
-pub async fn authorize_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+pub(crate) async fn authorize_in_tx(
+    tx: &crate::store::WriteTx,
     principal: &Principal,
     project_id: &str,
     access: Access,

@@ -1372,6 +1372,7 @@ impl HubServer {
         path: &str,
         body: &str,
     ) -> Result<()> {
+        let _turn = crate::store::write_turn().await?;
         let conn = crate::store::connect(&self.state.db)?;
         let updated_at = crate::store::now_rfc3339();
         let s_id = session_id.unwrap_or_default();
@@ -1394,6 +1395,7 @@ impl HubServer {
 
     /// Remove a session brain value's search row.
     async fn delete_doc(&self, session_id: Option<&str>, path: &str) -> Result<()> {
+        let _turn = crate::store::write_turn().await?;
         let conn = crate::store::connect(&self.state.db)?;
         let s_id = session_id.unwrap_or_default();
         let doc_id = format!("brain:{s_id}:{path}");
@@ -1581,8 +1583,8 @@ mod tests {
         .expect("open state")
     }
 
-    /// A touch is bookkeeping for a number on a screen. A store busy enough to
-    /// refuse it must not take the call the agent actually made down with it,
+    /// A touch is bookkeeping for a number on a screen. A store that refuses it
+    /// must not take the call the agent actually made down with it,
     /// so the tool path swallows what the store returns.
     #[tokio::test]
     async fn a_touch_the_store_refuses_does_not_reach_the_caller() {
@@ -1595,16 +1597,19 @@ mod tests {
             .expect("start");
         let server = HubServer::new(state.clone());
 
-        let mut holder = state.db.connect().expect("connect");
-        let blocking = holder
-            .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-            .await
-            .expect("hold the writer");
+        // The store refuses the write outright, so this is the failing path,
+        // reached the way a tool call reaches it. Holding the write lock instead
+        // would hold the process-wide write queue for the whole lock wait.
+        let conn = state.db.connect().expect("connect");
+        conn.execute(
+            "CREATE TRIGGER refuse_touch BEFORE UPDATE OF last_activity ON sessions
+             BEGIN SELECT RAISE(ABORT, 'touch refused'); END",
+            (),
+        )
+        .await
+        .expect("refuse the touch");
 
-        // The store cannot take the write while another writer holds it, so
-        // this is the failing path, reached the way a tool call reaches it.
         server.touch_activity(&session.id).await;
-        blocking.rollback().await.expect("release the writer");
 
         assert_eq!(
             sessions::get(&state.db, &session.id)

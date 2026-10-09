@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-09
+
+### Hub store writers queue for the write lock
+
+* **Update**: Every hub store write, a transaction or a single statement such
+  as a token touch or a search index row, now waits its turn in one in-process
+  queue before it takes the engine's write lock. The engine's busy
+  handler retries on a backoff and is not a queue, so under a steady stream of
+  appends from several agents a writer could miss every free moment for the
+  whole lock wait and fail with `database is locked`, though no transaction
+  held the lock for long. Writers now take the lock in the order they asked for
+  it, and a writer gives up only when the writer holding the turn has held it
+  for the whole lock wait.
+* **Update**: [Components](architecture/components.md) states the write queue
+  and its give-up rule, and narrows the busy handler to contention from outside
+  the queue.
+
 ## 2026-10-08
 
 ### Releases carry standalone binaries

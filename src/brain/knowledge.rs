@@ -488,6 +488,7 @@ async fn index(state: &AppState, project_id: &str, path: &str, body: &str) {
     let doc_id = doc_id(project_id, path);
     let updated_at = crate::store::now_rfc3339();
     let indexed = async {
+        let _turn = crate::store::write_turn().await?;
         let conn = crate::store::connect(&state.db)?;
         index_doc(
             &conn,
@@ -513,6 +514,7 @@ async fn index(state: &AppState, project_id: &str, path: &str, body: &str) {
 /// failed index write is.
 async fn unindex(state: &AppState, project_id: &str, path: &str) {
     let removed = async {
+        let _turn = crate::store::write_turn().await?;
         let conn = crate::store::connect(&state.db)?;
         conn.execute(
             "DELETE FROM search_docs WHERE doc_id = ?1",
