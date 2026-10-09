@@ -129,11 +129,7 @@ pub async fn answer(
     body: &str,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(crate::store::engine)?;
+    let tx = super::begin_write(db).await?;
 
     let question = events::get_in_tx(&tx, question_id)
         .await?
@@ -294,11 +290,7 @@ pub async fn decide_reporting(
         crate::limits::check_decision_note(note)?;
     }
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(crate::store::engine)?;
+    let tx = super::begin_write(db).await?;
 
     let approval = events::get_in_tx(&tx, approval_id)
         .await?
@@ -505,11 +497,7 @@ pub async fn expire_due(db: &Database, now: time::OffsetDateTime) -> Result<usiz
 /// it for the human's word. It is exempt from the project's event ceiling: a
 /// full feed must not leave an item open past the deadline its agent set.
 async fn expire_one(db: &Database, event_id: &str, now: time::OffsetDateTime) -> Result<bool> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(crate::store::engine)?;
+    let tx = super::begin_write(db).await?;
     let Some(outcome) = inbox::due_in_tx(&tx, event_id, now).await? else {
         return Ok(false);
     };

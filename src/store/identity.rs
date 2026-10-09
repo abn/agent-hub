@@ -112,6 +112,7 @@ async fn touch(
     let cutoff = format_time(now - time::Duration::seconds(TOUCH_INTERVAL_SECS));
     let stale = |value: Option<String>| value.is_none_or(|seen| seen.as_str() < cutoff.as_str());
     if stale(token_used) {
+        let _turn = super::write_turn().await?;
         conn.execute(
             "UPDATE agent_tokens SET last_used_at = ?1 WHERE token_hash = ?2",
             vec![
@@ -123,6 +124,7 @@ async fn touch(
         .map_err(engine)?;
     }
     if stale(agent_seen) {
+        let _turn = super::write_turn().await?;
         conn.execute(
             "UPDATE agents SET last_seen_at = ?1 WHERE id = ?2",
             vec![Value::Text(now_text), Value::Text(agent_id.to_string())],
@@ -178,11 +180,7 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
     let personal_project_id = format!("space-{}", crate::store::next_id());
     let personal_display_name = format!("{display_name} (personal)");
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT 1 FROM agents WHERE id = ?1",
@@ -268,11 +266,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     let token_hash = hash_token(&plaintext);
     let created_at = crate::store::now_rfc3339();
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT personal_project_id FROM agents WHERE id = ?1",
@@ -328,11 +322,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
 /// token is not an error. An unknown agent is not found.
 pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
     let now = crate::store::now_rfc3339();
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
             "SELECT personal_project_id FROM agents WHERE id = ?1",
@@ -388,11 +378,7 @@ pub async fn list_grants(db: &Database, agent_id: &str) -> Result<Vec<Grant>> {
 /// Grant an agent access to a project, replacing an existing grant.
 pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<Grant> {
     let created_at = crate::store::now_rfc3339();
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     // Checked inside the transaction, so the check and the insert cannot be
     // separated by a concurrent project delete.
     if !row_exists(&tx, Table::Agents, agent_id).await? {
@@ -477,11 +463,7 @@ pub async fn expire_pending(db: &Database, ttl: std::time::Duration) -> Result<u
 
 /// Remove a grant.
 pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Result<()> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let affected = tx
         .execute(
             "DELETE FROM grants WHERE agent_id = ?1 AND project_id = ?2",
@@ -532,11 +514,7 @@ pub async fn enrol_agent(
     let plaintext = generate_token();
     let token_hash = hash_token(&plaintext);
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     // One pending request per source at a time.
     let mut pending_rows = tx
@@ -686,11 +664,7 @@ pub async fn approve_enrolment(
     new_display_name: Option<&str>,
     projects: Option<&[String]>,
 ) -> Result<Agent> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let agent =
         approve_enrolment_in_tx(&tx, current_id, new_id, new_display_name, projects).await?;
     tx.commit().await.map_err(engine)?;
@@ -703,7 +677,7 @@ pub async fn approve_enrolment(
 /// records the decision, so the two cannot diverge. The caller owns commit and
 /// rollback; an error leaves the transaction to roll back when it is dropped.
 pub(crate) async fn approve_enrolment_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     current_id: &str,
     new_id: Option<&str>,
     new_display_name: Option<&str>,
@@ -881,11 +855,7 @@ pub(crate) async fn approve_enrolment_in_tx(
 /// Deletes the agent row, its tokens, grants, personal space, and inbox items,
 /// leaving the suggested id free for a fresh attempt.
 pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     refuse_enrolment_in_tx(&tx, id).await?;
     tx.commit().await.map_err(engine)?;
     Ok(())
@@ -896,10 +866,7 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
 /// The decision path wipes a refused self-enrolment in the same transaction
 /// that records the decision. The caller owns commit and rollback; an error
 /// leaves the transaction to roll back when it is dropped.
-pub(crate) async fn refuse_enrolment_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
-    id: &str,
-) -> Result<()> {
+pub(crate) async fn refuse_enrolment_in_tx(tx: &crate::store::WriteTx, id: &str) -> Result<()> {
     let mut rows = tx
         .query(
             "SELECT personal_project_id, state FROM agents WHERE id = ?1",
@@ -982,7 +949,7 @@ pub(crate) async fn refuse_enrolment_in_tx(
 /// path uses this to anchor an enrolment approval to the event's own actor and
 /// project, so a forged approval naming someone else cannot admit them.
 pub(crate) async fn pending_enrolment_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     agent_id: &str,
 ) -> Result<Option<String>> {
     let mut rows = tx
@@ -1040,7 +1007,7 @@ fn hex(bytes: &[u8]) -> String {
 /// the actor is the human. A future agent-callable path must pass its own
 /// principal instead of reusing this.
 async fn audit(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     project_id: &str,
     summary: String,
     payload: serde_json::Value,

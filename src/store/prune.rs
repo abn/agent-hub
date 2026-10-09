@@ -34,6 +34,7 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
     }
 
     let now = time::OffsetDateTime::now_utc();
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     // The checks above are advisory: they name the reason precisely, but the
     // row can change under them. The write carries them too, so a resume that
@@ -95,11 +96,7 @@ pub struct BatchPrune {
 /// neither are feed events, artifacts or a project knowledge base.
 pub async fn prune_ended(db: &Database, project_id: Option<&str>) -> Result<BatchPrune> {
     let now = time::OffsetDateTime::now_utc();
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     // The read and the write share the transaction and the predicate, so the
     // ids reported back are exactly the rows the update moved.
@@ -144,11 +141,7 @@ pub async fn prune_ended(db: &Database, project_id: Option<&str>) -> Result<Batc
 
 /// Restore a session pruned within the window.
 pub async fn undo(db: &Database, token: &str) -> Result<()> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     let mut rows = tx
         .query(
@@ -214,11 +207,7 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
 
 /// Claim an expired pruned session for sweep inside an immediate transaction.
 async fn claim(db: &Database, session_id: &str, deleted_at: &str) -> Result<bool> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     let updated = tx
         .execute(
@@ -309,6 +298,7 @@ async fn revert_claim(
         let mut q_path = path.into_os_string();
         q_path.push(".quarantine");
         if !std::path::Path::new(&q_path).exists() {
+            let _turn = super::write_turn().await?;
             let conn = super::connect(db)?;
             let _ = conn
                 .execute(
@@ -331,11 +321,7 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     let _ = store.quarantine(project_id, session_id).await?;
 
     // 2. Commit metadata deletion
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     // Only the session's own lifecycle events go. `kind = 'session'` stays in
     // the predicate: the column also names the signals, questions, approvals
     // and artifacts the session wrote, and storage acts on sessions, never on

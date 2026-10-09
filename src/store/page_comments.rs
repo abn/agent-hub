@@ -46,6 +46,7 @@ pub async fn add_comment(
 
     let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
         "INSERT INTO kb_comments(id, project_id, path, author, body, anchor, done, created_at)
@@ -105,6 +106,7 @@ pub async fn get_comment(db: &Database, comment_id: &str) -> Result<PageComment>
 
 /// Mark a comment done or reopen it, returning the updated row.
 pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Result<PageComment> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
@@ -125,6 +127,7 @@ pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Re
 
 /// Delete one comment. Replies are flat, so nothing else hangs off it.
 pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let changed = conn
         .execute(

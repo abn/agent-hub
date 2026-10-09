@@ -60,11 +60,7 @@ pub async fn start_resumed(
     validate_id("project", project_id)?;
     validate_id("session name", session_name)?;
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     assert_project_active(&tx, project_id).await?;
 
@@ -195,11 +191,7 @@ pub async fn start_from(
     validate_id("project", project_id)?;
     validate_id("session name", session_name)?;
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     assert_project_active(&tx, project_id).await?;
 
@@ -329,11 +321,7 @@ pub async fn insert_fork(
     caller: &str,
     new_id: &str,
 ) -> Result<Session> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     assert_project_active(&tx, &source.project_id).await?;
 
@@ -419,11 +407,7 @@ pub async fn reassign(
     to_agent: &str,
     actor: &str,
 ) -> Result<Session> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     let session = get_on(&tx, session_id)
         .await?
@@ -543,11 +527,7 @@ pub async fn end(
     if let Some(handoff) = handoff {
         crate::limits::check_handoff(handoff)?;
     }
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     // The status re-check and the lifecycle event share the transaction, so a
     // retried end and a concurrent end cannot both append.
@@ -685,6 +665,7 @@ impl Activity {
         let stamp = now
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default();
+        let _turn = super::write_turn().await?;
         let conn = super::connect(db)?;
         // The guard keeps the timestamp monotonic: a server clock that reads
         // behind an earlier touch must not move a session back out of the
@@ -1062,10 +1043,7 @@ fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
 
-async fn assert_project_active(
-    tx: &turso::transaction::Transaction<'_>,
-    project_id: &str,
-) -> Result<()> {
+async fn assert_project_active(tx: &crate::store::WriteTx, project_id: &str) -> Result<()> {
     let mut p_rows = tx
         .query(
             "SELECT status FROM projects WHERE id = ?1",

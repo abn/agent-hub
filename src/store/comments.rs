@@ -145,11 +145,7 @@ pub async fn add_comment(
     let body = check_body(body)?;
     let anchor_json = check_anchor(anchor)?;
 
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
 
     let (project_id, current_ver) = artifact_version(&tx, artifact_id).await?;
     if let Some(key) = idempotency_key
@@ -253,6 +249,7 @@ pub async fn get_comment(db: &Database, comment_id: &str) -> Result<Comment> {
 
 /// Mark a comment done or reopen it, returning the updated row.
 pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Result<Comment> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
@@ -276,11 +273,7 @@ pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Re
 /// key recorded for the deleted comment records fresh rather than resolving to
 /// a missing row as if the engine had faulted.
 pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let changed = tx
         .execute(
             "DELETE FROM comments WHERE id = ?1",
@@ -328,10 +321,7 @@ async fn artifact_exists(conn: &turso::Connection, artifact_id: &str) -> Result<
 }
 
 /// The owning project and current version of an artifact.
-async fn artifact_version(
-    tx: &turso::transaction::Transaction<'_>,
-    artifact_id: &str,
-) -> Result<(String, i64)> {
+async fn artifact_version(tx: &crate::store::WriteTx, artifact_id: &str) -> Result<(String, i64)> {
     let mut rows = tx
         .query(
             "SELECT a.project_id, a.current_ver, p.status
@@ -376,7 +366,7 @@ async fn artifact_version(
 /// Whether one version row is protected. A missing row fails closed: it is
 /// treated as protected rather than assumed public.
 async fn version_protected(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     artifact_id: &str,
     version: i64,
 ) -> Result<bool> {

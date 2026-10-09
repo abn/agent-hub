@@ -52,6 +52,7 @@ pub async fn create(
     kinds: &[String],
     last_seen_event_id: &str,
 ) -> Result<String> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let id = super::next_id();
     conn.execute(
@@ -97,6 +98,7 @@ pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
 /// The owner is part of the predicate, so an id belonging to another agent is
 /// indistinguishable from one that never existed.
 pub async fn delete(db: &Database, agent: &str, id: &str) -> Result<bool> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let removed = conn
         .execute(
@@ -114,6 +116,7 @@ pub async fn delete(db: &Database, agent: &str, id: &str) -> Result<bool> {
 /// above the stored one, so a drain that raced another leaves the later
 /// position and reports nothing twice.
 pub async fn set_cursor(db: &Database, id: &str, event_id: &str) -> Result<()> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
         "UPDATE notify_subscriptions SET last_seen_event_id = ?1
@@ -154,7 +157,7 @@ pub async fn drain_events(
 /// Forget every subscription scoped to one project, so a deleted project takes
 /// them with it.
 pub(crate) async fn forget_project_in_tx(
-    tx: &turso::transaction::Transaction<'_>,
+    tx: &crate::store::WriteTx,
     project_id: &str,
 ) -> Result<()> {
     tx.execute(

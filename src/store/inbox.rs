@@ -620,11 +620,7 @@ pub async fn mark_unread(db: &Database, event_id: &str) -> Result<ReadState> {
 /// The read and the write share an immediate transaction, so the status a
 /// decision was made on is the status that is written over.
 async fn set_read(db: &Database, event_id: &str, target: &str) -> Result<ReadState> {
-    let mut conn = super::connect(db)?;
-    let tx = conn
-        .transaction_with_behavior(turso::transaction::TransactionBehavior::Immediate)
-        .await
-        .map_err(engine)?;
+    let tx = super::begin_write(db).await?;
     let current = status_in_tx(&tx, event_id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("event {event_id} has no inbox entry to read")))?;
@@ -647,6 +643,7 @@ async fn set_read(db: &Database, event_id: &str, target: &str) -> Result<ReadSta
 /// Mark every unread entry read, optionally within one project, and return how
 /// many moved. Entries waiting on the human are left where they are.
 pub async fn mark_all_read(db: &Database, project_id: Option<&str>) -> Result<i64> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     let mut sql =
         String::from("UPDATE inbox SET status = 'read', updated_at = ?1 WHERE status = 'unread'");
@@ -664,6 +661,7 @@ pub async fn mark_all_read(db: &Database, project_id: Option<&str>) -> Result<i6
 
 /// Set an inbox entry's status.
 pub async fn set_status(db: &Database, event_id: &str, status: &str) -> Result<()> {
+    let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     set_status_in_tx(&conn, event_id, status).await
 }
