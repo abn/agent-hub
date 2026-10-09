@@ -44,3 +44,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   item it asks
 * [0028](0028-knowledge-base-as-mcp-resources.md) - The knowledge base is a
   read-only view as MCP resources
+* [0029](0029-knowledge-base-page-history.md) - A knowledge base page keeps
+  every version, in its own file
