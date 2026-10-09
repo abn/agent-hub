@@ -81,7 +81,7 @@ included), a backslash, and a canonical path over 512 bytes.
 | One page path | 512 bytes |
 | One JSON request body | 4 MiB |
 | One knowledge base file | 1 GiB; a write past 256 MiB carries a warning |
-| One history page | 200 rows |
+| One history page | 200 rows, for the write log and for one page's versions |
 | One listing | 500 entries |
 
 A session brain value keeps its own 4 MiB limit. The page limit applies only
@@ -97,9 +97,9 @@ is not the admin token.
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_argument` | a refused path, a JSON body that does not parse or carries a field the route does not know, a frontmatter value containing a control character, a review or a promote of a page whose frontmatter cannot be patched safely (a first line such as `--- # comment` or `---yaml`, which starts a block for some readers and not for the hub), `verified_by` naming anyone but the human, a history `limit` over 200, deleting a directory that still holds pages |
+| 400 | `invalid_argument` | a refused path, a JSON body that does not parse or carries a field the route does not know, a frontmatter value containing a control character, a review or a promote of a page whose frontmatter cannot be patched safely (a first line such as `--- # comment` or `---yaml`, which starts a block for some readers and not for the hub), `verified_by` naming anyone but the human, a history `limit` over 200, a revert body that does not parse, deleting a directory that still holds pages |
 | 401 | `unauthenticated` | no admin token, on every route |
-| 404 | `not_found` | the project, the page, the session or the session brain entry does not exist |
+| 404 | `not_found` | the project, the page, the session or the session brain entry does not exist; a version the page's history does not name, or whose bytes were not kept or were forgotten; a history to forget for a path the log never named |
 | 409 | `conflict` | `if_version` does not match; the detail ends `current_version=sha256:...`, or `current_version=absent` |
 | 413 | `payload_too_large` | a page over 1 MiB or a body over its limit, refused before it is buffered whole; nothing is written |
 | 415 | `invalid_argument` | a page sent as anything but JSON, `text/markdown` or `text/plain` |
@@ -149,9 +149,16 @@ is later than the newest `verified.at`, to the second.
 
 ### `GET /api/v1/projects/{id}/kb/pages/{path}`
 
-Returns `{path, content, version, size_bytes, last_write: {actor, at}}`.
-`version` is the token the next conditional write passes back. `last_write` is
-the newest row for the path in the write log, however old.
+Query: `version`. Returns `{path, content, version, size_bytes, last_write:
+{actor, at}}`. `version` is the token the next conditional write passes back.
+`last_write` is the newest row for the path in the write log, however old.
+
+With `version`, the response is that version of the page instead,
+`{path, content, version, size_bytes, current, at, actor}`, where `current`
+says whether it is what the page holds now and `at` and `actor` are the newest
+write of those bytes. The version must be one the page's own history
+names, and a deleted page can be read this way. A version whose bytes were not
+kept, or whose history was forgotten, is `not_found`.
 
 ### `PUT /api/v1/projects/{id}/kb/pages/{path}`
 
@@ -177,7 +184,10 @@ first line is exactly `---`. The hub stores the bytes as sent.
 Query: `if_version`. Returns `{ok, path}`. Deleting a page that does not exist
 is the same 404 a read of it gives: nothing is logged, nothing is signalled and
 no knowledge base file is created. A directory can be deleted once it is
-empty. A delete appends one `kb_deleted` signal to the project feed.
+empty. A delete appends one `kb_deleted` signal to the project feed. The page's
+bytes stay in its history, where a revert restores them and anyone who can read
+the project can read them, until its history is forgotten with
+`DELETE kb/versions`.
 
 ### `POST /api/v1/projects/{id}/kb/pages/{path}/review`
 
@@ -188,6 +198,19 @@ literal `human` and is otherwise a 400. `if_version` is the version the human
 read; when the page changed since, the review is a 409 and nothing is stamped.
 Returns `{ok, path, version}`, logs one `kb.review` row with the actor `human`,
 and appends one `kb_reviewed` signal.
+
+### `POST /api/v1/projects/{id}/kb/pages/{path}/revert`
+
+Body: `{version, if_version?}`. Writes the bytes of `version`, one the page's
+history names, back to the page as a new write by the human, logged as
+`kb.revert`. `if_version` guards it as it guards a put: the version the reader
+saw as current, or `absent` to restore a deleted page only while it is still
+gone. Returns `{ok, path, version, size_bytes, lint[], warnings[]}` and appends
+one `kb_reverted` signal. A revert removes nothing from the history, so the
+version it replaced can be reverted to in turn. A revert to the version the
+page already holds writes nothing, logs nothing and signals nothing; its
+result says so with `changed: false`, where a revert that wrote is
+`changed: true`.
 
 ### `POST /api/v1/projects/{id}/kb/promote`
 
@@ -211,10 +234,63 @@ and is at most 200; `limit=0` returns the count alone. `next_before` is the
 cursor for the next page and `truncated` is true whenever the filter matches
 rows the response does not carry.
 
-History answers who and when, never what changed: the hub keeps no earlier
-content. The log is bounded only by the knowledge base file's own 1 GiB limit
-and every request scans all of it, so `total` is the real count and a page
-never loses its history or its last writer by being old.
+This is the whole base's write log. One page's versions, with their bytes, are
+`kb/versions`. The log is bounded only by the knowledge base file's own 1 GiB
+limit and every request scans all of it, so `total` is the real count and a
+page never loses its history or its last writer by being old. `op` may also be
+`kb.revert`.
+
+### `GET /api/v1/projects/{id}/kb/versions`
+
+Query: `path`, `before`, `limit`. Returns `{path, current_version, versions[],
+total, next_before, truncated}`, newest first. A version row is `{id, op,
+actor, at, version, size_bytes, summary, kept, current}`: `id` is the log row
+and the `before` cursor, `version` and `size_bytes` are `null` on a delete,
+`summary` says what the write did (`created`, `edited`, `reviewed`, `promoted
+from a session brain`, `deleted`, `restored the version of <time>`, or
+`restored an earlier version` when the version it restored has no earlier
+write in the log to date it by), `kept` is
+whether its bytes can be read and restored, and `current` marks the newest
+write of what the page holds now. `current_version` is `null` for a page that
+is not there, which keeps its history. `limit` defaults to 50 and is at most
+200.
+
+Every write and delete keeps the bytes it replaces and the bytes it stores in
+the knowledge base file itself, so every version written since the hub kept
+versions reads back; a version a hub from before that replaced is listed with
+`kept: false`. Nothing expires: the versions are bounded by the file's 1 GiB
+limit until the operator forgets them. The limit is held against the pages the
+file uses, so space a purge frees counts at once, and a write is checked at its
+own size plus a copy of each version it keeps that the file does not already
+hold. A delete is never refused for the copy it keeps, at most one page, so a
+full knowledge base can still shed a page. The decision is
+[ADR 0029](../adr/0029-knowledge-base-page-history.md).
+
+### `DELETE /api/v1/projects/{id}/kb/versions`
+
+Query: `path`. Admin only, like prune. Forgets the kept bytes of one page's
+history: every version its log names except the one the page holds now, and
+all of them for a deleted page. Returns `{ok, path, versions_forgotten,
+bytes_forgotten, unreferenced_forgotten}`. It also sweeps kept versions that
+no log row of any page names, which only a crash between keeping a write's
+bytes and logging it leaves, and counts them in `unreferenced_forgotten`. The rows stay, so the history still says who wrote what and
+when, and they read `kept: false`; a version read or a revert of one is then
+`not_found`, and a deleted page can no longer be restored. A version whose bytes
+another page's history still names stays for that page and is not counted, but
+no longer reads back through this one. Writes after the purge keep their
+versions as before.
+
+The purge is recorded as a `system` event by the human with the payload
+`{action: "kb_history_forgotten", path, versions, bytes, unreferenced_versions,
+unreferenced_bytes}`, which no agent reads. It is appended before anything is
+removed, so a purge that cannot be recorded removes nothing, and the removals
+and the mark land together or not at all; a purge that rolls back after its
+audit appends a second event, `kb_history_forget_rolled_back`, with the same
+counts.
+The freed space is reused by later writes rather than given back to the disk,
+and the engine does not zero freed pages, so the bytes can stay on disk until
+they are overwritten; a backup taken before the purge still holds them. A path
+the log has never named is `not_found`.
 
 ### `GET /api/v1/projects/{id}/kb/backlinks`
 
@@ -265,6 +341,15 @@ attaches resources puts a page into context without a tool call. The listing is
 paged with a cursor and the read takes the same check as `brain_get`; the
 [agent surface](../architecture/agent-surface.md#resources) has the details.
 
+`brain_history(path, project_id?, before?, limit?)` lists a page's versions as
+`kb/versions` does, `brain_get` with `store: "project"` and `version` reads one
+with `at` and `actor`, the newest write of those bytes, and
+`brain_revert(path, version, project_id?, if_version?)` puts one back, deleted
+pages included, returning `{ok, path, store, version, size_bytes, lint[],
+warnings[], changed}`. History reads need the project's read access and a
+revert its write access, the same as any read and write. Forgetting a history
+is not an agent tool.
+
 ## The Wiki segment
 
 A project carries a fourth section, **Wiki**, beside Feed, Artifacts and
@@ -281,9 +366,18 @@ the human has read, carrying the version they read; **Needs review** lists the
 pages the hub judges not human-reviewed, and a row opens the page. A session
 brain entry offers **Save to wiki** (`kb/promote`). The Wiki home carries the
 page, needs-review and stale counts and holds the housekeeping screens:
-**Recent changes** (`kb/history`, who did what to which page and when; the rows
-are not tappable in this version) and **Lint** (`kb/lint`, the tree's findings
+**Recent changes** (`kb/history`, who did what to which page and when; a row
+opens that page's history) and **Lint** (`kb/lint`, the tree's findings
 with a Re-check that walks it again).
+
+A page's **History**, opened from the reader's control row, lists its versions
+newest first with who, when and what. A version opens as a line diff against
+the page as it is now, and **Revert to this** puts it back after a
+confirmation, carrying the version the reader saw as current. A deleted page's
+address says it was deleted and links to its history, where **Restore this**
+writes it back the same way. A diff too long to work out line by line says so
+and shows the version itself. **Forget history**, in the history's header,
+forgets the kept bytes after a confirmation that names the page.
 
 Not in this version: rename and move; a rendered-compare merge (the conflict
 path offers the hub's copy or yours, not a merge); and comment threads on a
@@ -292,8 +386,9 @@ page, which have no store in the hub at all.
 ## What there is not
 
 There is no move or rename. A move is a read, a write with
-`if_version: "absent"` and a delete, by the client. It drops the page's
-history, which is keyed by path, and links to the old path are not rewritten:
+`if_version: "absent"` and a delete, by the client. The new path starts a
+history of its own, since history is keyed by path; the old path keeps its
+history, and links to the old path are not rewritten:
 `backlinks` names them first. Wiki links (`[[page]]`) are not links to the hub;
 only markdown links are followed.
 

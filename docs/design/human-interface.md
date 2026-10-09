@@ -196,10 +196,25 @@ in through `kb/promote` and leaves the source where it was. The sheet is
 reachable in the index header on the desktop and in the tools row and the Wiki
 home on a phone, where the index control row is hidden.
 
+A page's **History** link sits in the reader's control row. The history is a
+stage of its own, one row per version with its time, actor, what it did and
+its size, and the version the page holds now marked current. A version opens as
+a line diff against the page as it is now, every changed line marked `+` or `-`
+with a hidden word for a screen reader, unchanged runs folded to a count. The
+header carries **Revert to this**, a neutral outline that asks in a dialog
+before it writes the version back; a revert deletes nothing, so it is not drawn
+in the danger tone. A deleted page's address links to its history, where the
+same control reads **Restore this**. A diff past the edit budget says there are
+too many changes to show line by line and shows the version itself, and a
+deleted page's version is shown as itself rather than as every line removed. The
+history's header carries **Forget history**, in the danger tone because it
+deletes: a dialog names the page and that the rows stay, focuses Cancel, and
+the purge removes every kept version but the current one.
+
 The Wiki home carries the page, needs-review and stale counts and holds the
 housekeeping screens: **Recent changes** (`kb/history`) reads who did what to
-which page and when, grouped by day, with rows that are not tappable in this
-version and an Earlier control that walks back a page of rows in place, and
+which page and when, grouped by day, with rows that open that page's history
+and an Earlier control that walks back a page of rows in place, and
 **Lint** (`kb/lint`) lists the whole tree's findings with a Re-check that walks
 it again. **Needs review** lists the pages the hub judges not human-reviewed,
 and a row opens the page. The Home storage card carries one housekeeping line,

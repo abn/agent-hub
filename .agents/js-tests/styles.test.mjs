@@ -487,9 +487,14 @@ const TEXT_PAIRS = [
 // A disabled control is exempt from the text contrast rule, but its label still
 // has to say what the control would do, so it is held to the non-text floor.
 const DISABLED_PAIRS = [["--ink-3", "--surface-2"]];
-// The artifact version sheet's selected row stands on --accent-bg, a ground the
+// The artifact version sheet's selected row and a wiki diff's added line stand
+// on --accent-bg, and a wiki diff's removed line on --danger-bg, grounds the
 // table above does not name.
-const TINTED_ROW_PAIRS = [["--ink-2", "--accent-bg"]];
+const TINTED_ROW_PAIRS = [
+  ["--ink-2", "--accent-bg"],
+  ["--ink", "--accent-bg"],
+  ["--ink", "--danger-bg"],
+];
 // The surfaces a bare text field sits on. Its border is the only thing that
 // says a control is there, so WCAG 1.4.11 asks 3:1 of it.
 const FIELD_SURFACES = ["--surface", "--bg"];

@@ -8,6 +8,7 @@
 | `session_brief` | Brief yourself on a project in one call: since your feed cursor, answers and decisions on your own items and the other events, ranked and capped with a count of the rest; your previous session with its handoff; and knowledge base pages past `stale_after`. Call it before `session_start`. Moves no feed cursor, and the answers it lists count as delivered. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write takes one to name your own session, and without one writes the connection's active session. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
+| `brain_history`, `brain_revert` | List a project page's versions, newest first, and write one back as a new write in your name, which also restores a deleted page. Reverting to the version the page holds writes nothing and returns `changed: false`. Read a version with `brain_get` and `version`. One `kb_reverted` signal goes to the project feed. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from your own durable server-side cursor for the project and advances it to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
@@ -48,13 +49,19 @@ session_brief(project_id)
                    more_capped?},
           stale_pages: {items: [{path, title, stale_after}], more}}
 from := session
-brain_get(path, session?, store?, project_id?)
+brain_get(path, session?, store?, project_id?, version?)
+      with version -> {path, store, content, version, size_bytes, current, at, actor}
 brain_put(path, content, store, session?, project_id?, if_version?)
 brain_list(path?, session?, store?, project_id?)
                                          -> entries: [{path, type: key|file|dir, size_bytes}]
 brain_delete(path, store, session?, project_id?, if_version?)
 brain_promote(from_path, to_path, project_id?, type?, title?, description?, tags?, if_version?)
                                          -> {ok, path, version, lint[]}
+brain_history(path, project_id?, before?, limit?)
+      -> {path, current_version, versions: [{id, op, actor, at, version,
+          size_bytes, summary, kept, current}], total, next_before, truncated}
+brain_revert(path, version, project_id?, if_version?)
+      -> {ok, path, store, version, size_bytes, lint[], warnings[], changed}
 session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?,

@@ -155,6 +155,10 @@ pub fn router(state: AppState) -> Router {
             post(kb_comments::set_done),
         )
         .route("/api/v1/projects/{id}/kb/history", get(kb::history))
+        .route(
+            "/api/v1/projects/{id}/kb/versions",
+            get(kb::versions).delete(kb::forget_versions),
+        )
         .route("/api/v1/projects/{id}/kb/backlinks", get(kb::backlinks))
         .route("/api/v1/projects/{id}/kb/lint", get(kb::lint))
         .route("/api/v1/projects/{id}/kb/stats", get(kb::stats))

@@ -84,6 +84,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/diff.mjs",
+        body: include_bytes!("../../web/diff.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/composer.mjs",
         body: include_bytes!("../../web/composer.mjs"),
         content_type: "text/javascript; charset=utf-8",

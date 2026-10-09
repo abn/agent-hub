@@ -90,9 +90,57 @@ pub struct WriteRecord {
     pub at: i64,
     /// The version the write stored. A delete stores none.
     pub version: Option<String>,
+    /// The bytes the write stored. A delete stores none.
+    pub bytes: Option<i64>,
     /// Whether the write brought in the entry's newest verification, as its
     /// [`Stamp`] judged it when the write landed.
     pub verifies: bool,
+}
+
+/// One page and one version of it, as [`Brain::page_version`] read them.
+#[derive(Debug, Clone, Default)]
+pub struct PageVersionState {
+    pub now: Option<Vec<u8>>,
+    /// The page's log rows, oldest first.
+    pub writes: Vec<WriteRecord>,
+    pub mark: Option<ForgetMark>,
+    /// The kept bytes of the version, when the page does not hold it now.
+    pub kept: Option<Vec<u8>>,
+}
+
+/// Where one page's history was forgotten.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForgetMark {
+    /// The newest log row of the page when it was forgotten.
+    pub through_id: i64,
+    /// What the page held then, which a purge keeps.
+    pub kept_version: Option<String>,
+}
+
+impl ForgetMark {
+    /// Whether a log row of the page still leads to bytes: it is newer than
+    /// the purge, or names what the page held when it was purged.
+    pub fn readable(&self, id: i64, version: Option<&str>) -> bool {
+        id > self.through_id
+            || version.is_some_and(|version| Some(version) == self.kept_version.as_deref())
+    }
+}
+
+/// What forgetting one page's history removed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Forgotten {
+    /// Kept versions whose bytes were removed.
+    pub versions: usize,
+    /// The bytes those versions held.
+    pub bytes: i64,
+    /// The newest log row the page is now forgotten through, or `None` when
+    /// the log names no write to the page.
+    pub through_id: Option<i64>,
+    /// Kept versions no log row of any page names, swept on the way: what a
+    /// crash between keeping a write's bytes and logging it leaves behind.
+    /// No history can read them.
+    pub unreferenced: usize,
+    pub unreferenced_bytes: i64,
 }
 
 /// What the write log says last about each path.
@@ -290,6 +338,9 @@ impl BrainStore {
         })
         .await
         .map_err(engine_error)?;
+        if session_id == KNOWLEDGE_FILE {
+            create_versions_table(&agent).await?;
+        }
         drop(guard);
 
         Ok(Some(Brain {
@@ -565,6 +616,425 @@ impl Brain {
             .map_err(engine_error)
     }
 
+    /// Whether this file keeps every version of what it stores. A project
+    /// knowledge base does; a session brain is working state and does not.
+    fn keeps_versions(&self) -> bool {
+        self.session_id == KNOWLEDGE_FILE
+    }
+
+    /// Keep one version's bytes, once however many writes store them. The
+    /// caller holds the write lock.
+    async fn keep_version(&self, bytes: &[u8]) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| Error::Engine(e.to_string()))?
+            .as_secs() as i64;
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO hub_page_versions (version, content, kept_at) VALUES (?1, ?2, ?3)",
+            vec![
+                turso::Value::Text(version(bytes)),
+                turso::Value::Blob(bytes.to_vec()),
+                turso::Value::Integer(now),
+            ],
+        )
+        .await
+        .map_err(|err| Error::Engine(err.to_string()))?;
+        Ok(())
+    }
+
+    /// What one page holds and its history knows about one version, read
+    /// under one hold of the lock: the page's bytes now, its log rows oldest
+    /// first, where its history was forgotten, and the kept bytes of the
+    /// version unless the page holds them now.
+    pub async fn page_version(&self, path: &str, version: &str) -> Result<PageVersionState> {
+        let namespace = parse_path(path)?;
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let now = self.read(&namespace).await?;
+        let mut writes = Vec::new();
+        self.scan_log_locked(|record| {
+            if record.path == path {
+                writes.push(record);
+            }
+            std::ops::ControlFlow::Continue(())
+        })
+        .await?;
+        writes.reverse();
+        let current = now
+            .as_deref()
+            .is_some_and(|bytes| super::version(bytes) == version);
+        let (mark, kept) = if self.keeps_versions() {
+            let mark = self.forgotten_locked().await?.remove(path);
+            let kept = if current {
+                None
+            } else {
+                self.kept_version_locked(version).await?
+            };
+            (mark, kept)
+        } else {
+            (None, None)
+        };
+        Ok(PageVersionState {
+            now,
+            writes,
+            mark,
+            kept,
+        })
+    }
+
+    /// The bytes of one kept version, or `None` when the file does not hold
+    /// them. The caller holds the write lock.
+    async fn kept_version_locked(&self, version: &str) -> Result<Option<Vec<u8>>> {
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let mut rows = conn
+            .query(
+                "SELECT content FROM hub_page_versions WHERE version = ?1",
+                vec![turso::Value::Text(version.to_string())],
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        let Some(row) = rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        else {
+            return Ok(None);
+        };
+        match row.get_value(0) {
+            Ok(turso::Value::Blob(bytes)) => Ok(Some(bytes)),
+            Ok(turso::Value::Text(text)) => Ok(Some(text.into_bytes())),
+            _ => Ok(None),
+        }
+    }
+
+    /// Which of `versions` this file holds the bytes of, in one query.
+    pub async fn kept_versions(
+        &self,
+        versions: &[&str],
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut wanted: Vec<&str> = versions.to_vec();
+        wanted.sort_unstable();
+        wanted.dedup();
+        if !self.keeps_versions() || wanted.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.kept_among_locked(&wanted).await
+    }
+
+    /// Which of `versions` the file holds the bytes of. The caller holds the
+    /// write lock and passes each version once.
+    async fn kept_among_locked(
+        &self,
+        versions: &[&str],
+    ) -> Result<std::collections::HashSet<String>> {
+        let mut kept = std::collections::HashSet::new();
+        if versions.is_empty() {
+            return Ok(kept);
+        }
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let marks = (1..=versions.len())
+            .map(|at| format!("?{at}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut rows = conn
+            .query(
+                &format!("SELECT version FROM hub_page_versions WHERE version IN ({marks})"),
+                versions
+                    .iter()
+                    .map(|version| turso::Value::Text(version.to_string()))
+                    .collect::<Vec<_>>(),
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            if let Ok(turso::Value::Text(version)) = row.get_value(0) {
+                kept.insert(version);
+            }
+        }
+        Ok(kept)
+    }
+
+    /// Whether the file already holds one version's bytes. The caller holds
+    /// the write lock.
+    async fn is_kept_locked(&self, bytes: &[u8]) -> Result<bool> {
+        let version = version(bytes);
+        Ok(self
+            .kept_among_locked(&[version.as_str()])
+            .await?
+            .contains(&version))
+    }
+
+    /// Where a page's history was forgotten, if it was.
+    pub async fn forgotten_through(&self, path: &str) -> Result<Option<ForgetMark>> {
+        if !self.keeps_versions() {
+            return Ok(None);
+        }
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        Ok(self.forgotten_locked().await?.remove(path))
+    }
+
+    /// Every forgotten page and where it was forgotten. The caller holds the
+    /// write lock.
+    async fn forgotten_locked(&self) -> Result<std::collections::HashMap<String, ForgetMark>> {
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let mut rows = conn
+            .query(
+                "SELECT path, through_id, kept_version FROM hub_page_forgotten",
+                (),
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        let mut forgotten = std::collections::HashMap::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            if let (Ok(turso::Value::Text(path)), Ok(turso::Value::Integer(through_id))) =
+                (row.get_value(0), row.get_value(1))
+            {
+                let kept_version = match row.get_value(2) {
+                    Ok(turso::Value::Text(version)) => Some(version),
+                    _ => None,
+                };
+                forgotten.insert(
+                    path,
+                    ForgetMark {
+                        through_id,
+                        kept_version,
+                    },
+                );
+            }
+        }
+        Ok(forgotten)
+    }
+
+    /// The bytes the file's pages hold, its free pages left out.
+    ///
+    /// A delete gives its pages back to the file rather than to the disk, and
+    /// the next write reuses them, so the size limit is held against what is
+    /// used rather than how large the file has grown. The write-ahead log
+    /// counts too, through the page count the connection sees.
+    pub async fn used_bytes(&self) -> Result<i64> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.used_bytes_locked().await
+    }
+
+    /// [`Brain::used_bytes`] for a caller that holds the write lock.
+    async fn used_bytes_locked(&self) -> Result<i64> {
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let pragma = async |name: &str| -> Result<i64> {
+            let mut rows = conn
+                .query(&format!("PRAGMA {name}"), ())
+                .await
+                .map_err(|err| Error::Engine(err.to_string()))?;
+            match rows
+                .next()
+                .await
+                .map_err(|err| Error::Engine(err.to_string()))?
+                .map(|row| row.get_value(0))
+            {
+                Some(Ok(turso::Value::Integer(value))) => Ok(value),
+                _ => Err(Error::Engine(format!("PRAGMA {name} returned no number"))),
+            }
+        };
+        let pages = pragma("page_count").await?;
+        let free = pragma("freelist_count").await?;
+        let size = pragma("page_size").await?;
+        Ok(pages.saturating_sub(free).saturating_mul(size))
+    }
+
+    /// What the size limit is held against: the used pages of a knowledge
+    /// base, whose history a purge hands back, and the file on disk for a
+    /// session brain. The caller holds the write lock.
+    async fn occupied_locked(&self) -> Result<i64> {
+        if self.keeps_versions() {
+            self.used_bytes_locked().await
+        } else {
+            Ok(self.file_bytes())
+        }
+    }
+
+    /// What the size limit is held against, as [`Brain::occupied_locked`].
+    pub async fn occupied_bytes(&self) -> Result<i64> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.occupied_locked().await
+    }
+
+    /// Forget the kept bytes of one page's history: every version its log
+    /// rows name except the one the page holds now, and for a deleted page
+    /// every one. The rows stay, so the history still says who wrote what and
+    /// when; they no longer lead to bytes.
+    ///
+    /// Versions are kept once per content, so bytes another page's history
+    /// still names stay for that page. The page is marked forgotten through
+    /// its newest row, so nothing up to there reads back through this path
+    /// even when the bytes stay for another.
+    ///
+    /// `audit` is given what the purge will remove before anything is, still
+    /// under the lock, so a purge whose audit fails removes nothing and the
+    /// record never misses one. The removals and the mark are one transaction.
+    pub async fn forget_history(
+        &self,
+        path: &str,
+        audit: impl AsyncFnOnce(&Forgotten) -> Result<()>,
+    ) -> Result<Forgotten> {
+        let namespace = parse_path(path)?;
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let mut forgotten = Forgotten::default();
+        if !self.keeps_versions() {
+            return Ok(forgotten);
+        }
+        let current = self.read(&namespace).await?.map(|bytes| version(&bytes));
+        let marks = self.forgotten_locked().await?;
+        let mut through = None;
+        let mut named = std::collections::BTreeSet::new();
+        let mut elsewhere = std::collections::HashSet::new();
+        let mut anywhere = std::collections::HashSet::new();
+        self.scan_log_locked(|record| {
+            if let Some(version) = record.version.clone() {
+                anywhere.insert(version);
+            }
+            if let Some(version) = record.version {
+                if record.path == path {
+                    through = through.max(Some(record.id));
+                    named.insert(version);
+                } else if marks
+                    .get(&record.path)
+                    .is_none_or(|mark| mark.readable(record.id, Some(&version)))
+                {
+                    elsewhere.insert(version);
+                }
+            } else if record.path == path {
+                through = through.max(Some(record.id));
+            }
+            std::ops::ControlFlow::Continue(())
+        })
+        .await?;
+        let Some(through) = through else {
+            return Ok(forgotten);
+        };
+        let going: Vec<&str> = named
+            .iter()
+            .map(String::as_str)
+            .filter(|version| Some(*version) != current.as_deref())
+            .filter(|version| !elsewhere.contains(*version))
+            .collect();
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        // What goes is counted first, so the audit names it before it goes.
+        let mut held = Vec::new();
+        for version in &going {
+            let mut rows = conn
+                .query(
+                    "SELECT length(content) FROM hub_page_versions WHERE version = ?1",
+                    vec![turso::Value::Text(version.to_string())],
+                )
+                .await
+                .map_err(|err| Error::Engine(err.to_string()))?;
+            if let Some(row) = rows
+                .next()
+                .await
+                .map_err(|err| Error::Engine(err.to_string()))?
+            {
+                if let Ok(turso::Value::Integer(length)) = row.get_value(0) {
+                    forgotten.bytes += length;
+                }
+                forgotten.versions += 1;
+                held.push(*version);
+            }
+        }
+        // Bytes no row names are read by nothing and only hold space.
+        let mut kept = conn
+            .query("SELECT version, length(content) FROM hub_page_versions", ())
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        let mut unreferenced = Vec::new();
+        while let Some(row) = kept
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            if let Ok(turso::Value::Text(version)) = row.get_value(0)
+                && !anywhere.contains(&version)
+            {
+                if let Ok(turso::Value::Integer(length)) = row.get_value(1) {
+                    forgotten.unreferenced_bytes += length;
+                }
+                forgotten.unreferenced += 1;
+                unreferenced.push(version);
+            }
+        }
+        drop(kept);
+        forgotten.through_id = Some(through);
+        audit(&forgotten).await?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| Error::Engine(e.to_string()))?
+            .as_secs() as i64;
+        conn.execute("BEGIN IMMEDIATE", ())
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        let removed = async {
+            for version in held
+                .iter()
+                .copied()
+                .chain(unreferenced.iter().map(String::as_str))
+            {
+                conn.execute(
+                    "DELETE FROM hub_page_versions WHERE version = ?1",
+                    vec![turso::Value::Text(version.to_string())],
+                )
+                .await
+                .map_err(|err| Error::Engine(err.to_string()))?;
+            }
+            conn.execute(
+                "INSERT INTO hub_page_forgotten (path, through_id, kept_version, forgotten_at) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(path) DO UPDATE SET through_id = excluded.through_id, \
+             kept_version = excluded.kept_version, forgotten_at = excluded.forgotten_at",
+                vec![
+                    turso::Value::Text(path.to_string()),
+                    turso::Value::Integer(through),
+                    current.map_or(turso::Value::Null, turso::Value::Text),
+                    turso::Value::Integer(now),
+                ],
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+            Ok::<(), Error>(())
+        }
+        .await;
+        let committed = match removed {
+            Ok(()) => conn
+                .execute("COMMIT", ())
+                .await
+                .map(|_| ())
+                .map_err(|err| Error::Engine(err.to_string())),
+            Err(err) => Err(err),
+        };
+        match committed {
+            Ok(()) => Ok(forgotten),
+            Err(err) => {
+                // A commit that fails leaves the transaction open; either way
+                // nothing it did stays.
+                let _ = conn.execute("ROLLBACK", ()).await;
+                Err(err)
+            }
+        }
+    }
+
     /// Run `work` on a connection to this file while holding its write lock.
     ///
     /// An online backup copies the file through this, so no write to it
@@ -616,10 +1086,18 @@ impl Brain {
     /// the log has grown.
     async fn scan_log(
         &self,
-        mut visit: impl FnMut(WriteRecord) -> std::ops::ControlFlow<()>,
+        visit: impl FnMut(WriteRecord) -> std::ops::ControlFlow<()>,
     ) -> Result<()> {
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
+        self.scan_log_locked(visit).await
+    }
+
+    /// [`Brain::scan_log`] for a caller that already holds the write lock.
+    async fn scan_log_locked(
+        &self,
+        mut visit: impl FnMut(WriteRecord) -> std::ops::ControlFlow<()>,
+    ) -> Result<()> {
         let conn = self.agent.get_connection().await.map_err(engine_error)?;
         let mut rows = conn
             .query(
@@ -669,6 +1147,10 @@ impl Brain {
                 actor: field(&parameters, "actor").unwrap_or_default(),
                 at: integer(5).or_else(|| integer(4)).unwrap_or_default(),
                 version: field(&json(3), "version"),
+                bytes: parameters
+                    .as_ref()
+                    .and_then(|parameters| parameters.get("bytes"))
+                    .and_then(serde_json::Value::as_i64),
                 verifies: parameters
                     .as_ref()
                     .and_then(|parameters| parameters.get("verifies"))
@@ -918,17 +1400,73 @@ impl Brain {
         alive: impl AsyncFnOnce() -> Result<()>,
         indexed: impl AsyncFnOnce(),
     ) -> Result<String> {
+        // Asked to write whatever is there, it always stores, so it always
+        // names a version.
+        let stored = self
+            .put_recorded(path, bytes, expected, stamp, false, alive, indexed)
+            .await?;
+        Ok(stored.unwrap_or_else(|| self::version(bytes)))
+    }
+
+    /// [`Brain::put_if_recorded`] that stores nothing when the entry already
+    /// holds exactly these bytes, answering `None` then. The comparison is made
+    /// under the same hold of the lock as the guard and the write, so a revert
+    /// to what the page holds is decided against what it holds as it lands.
+    pub async fn put_if_changed_recorded(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        expected: Option<&str>,
+        stamp: Stamp<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
+        indexed: impl AsyncFnOnce(),
+    ) -> Result<Option<String>> {
+        self.put_recorded(path, bytes, expected, stamp, true, alive, indexed)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn put_recorded(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        expected: Option<&str>,
+        stamp: Stamp<'_>,
+        unless_same: bool,
+        alive: impl AsyncFnOnce() -> Result<()>,
+        indexed: impl AsyncFnOnce(),
+    ) -> Result<Option<String>> {
         crate::limits::check_brain_value(bytes.len())?;
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
         alive().await?;
-        crate::limits::check_brain_file_projected(self.file_bytes(), bytes.len())?;
-        // One read serves both questions about what is being replaced.
-        let before = match (expected, stamp.verifies) {
-            (None, None) => None,
+        let keeps = self.keeps_versions();
+        // One read serves every question about what is being replaced.
+        let before = match (expected, stamp.verifies, keeps || unless_same) {
+            (None, None, false) => None,
             _ => self.read(&namespace).await?,
         };
+        if unless_same && before.as_deref() == Some(bytes) {
+            if let Some(expected) = expected {
+                ensure_expected(path, expected, before.as_deref())?;
+            }
+            return Ok(None);
+        }
+        // A knowledge base keeps a copy of the bytes it stores and of the
+        // bytes they replace, each unless it already holds them.
+        let mut incoming = bytes.len();
+        if keeps {
+            if !self.is_kept_locked(bytes).await? {
+                incoming += bytes.len();
+            }
+            if let Some(before) = before.as_deref()
+                && !self.is_kept_locked(before).await?
+            {
+                incoming += before.len();
+            }
+        }
+        crate::limits::check_brain_file_projected(self.occupied_locked().await?, incoming)?;
         if let Some(expected) = expected {
             ensure_expected(path, expected, before.as_deref())?;
         }
@@ -936,6 +1474,18 @@ impl Brain {
             .verifies
             .is_some_and(|judge| judge(before.as_deref(), bytes));
         self.write(&namespace, bytes).await?;
+        if keeps {
+            // Both sides are kept once the write has landed and before its log
+            // row, so a write the store refuses (a directory at the path, a
+            // file where a parent should be) keeps nothing, and no log row
+            // ever names a version whose bytes the file lacks. The bytes
+            // replaced are kept too: a page written before versions were kept
+            // has its last content saved the first time it changes.
+            if let Some(before) = before.as_deref() {
+                self.keep_version(before).await?;
+            }
+            self.keep_version(bytes).await?;
+        }
         let version = version(bytes);
         self.record_locked(
             stamp.op,
@@ -947,7 +1497,7 @@ impl Brain {
         )
         .await?;
         indexed().await;
-        Ok(version)
+        Ok(Some(version))
     }
 
     /// Refuse when what is stored is not what the caller expects to replace.
@@ -1154,6 +1704,15 @@ impl Brain {
             return Ok(false);
         }
         self.check_expected(&namespace, path, expected).await?;
+        if self.keeps_versions()
+            && let Some(going) = self.read(&namespace).await?
+            && !self.is_kept_locked(&going).await?
+        {
+            // A delete keeps what it removes, at most one page, and is never
+            // refused for it: a full knowledge base must still be able to
+            // shed a page.
+            self.keep_version(&going).await?;
+        }
         if !self.remove(&namespace).await? {
             return Ok(false);
         }
@@ -1533,6 +2092,41 @@ fn fs_path(rest: &str) -> String {
     } else {
         format!("/{}", components.join("/"))
     }
+}
+
+/// Create the table a knowledge base keeps its page versions in.
+///
+/// It lives in the knowledge base file itself, beside the AgentFS tables and
+/// written through the same handle and lock, so the file stays the one place
+/// a project's knowledge is held. A version is keyed by its token, the hash of
+/// its bytes, so a page that goes back to earlier bytes stores nothing new.
+async fn create_versions_table(agent: &AgentFS) -> Result<()> {
+    let conn = agent.get_connection().await.map_err(engine_error)?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS hub_page_versions (
+            version TEXT PRIMARY KEY,
+            content BLOB NOT NULL,
+            kept_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|err| Error::Engine(err.to_string()))?;
+    // A page whose history the operator forgot: its log rows up to and
+    // including `through_id` no longer name readable bytes, except those of
+    // `kept_version`, what the page held when it was forgotten.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS hub_page_forgotten (
+            path TEXT PRIMARY KEY,
+            through_id INTEGER NOT NULL,
+            kept_version TEXT,
+            forgotten_at INTEGER NOT NULL
+        )",
+        (),
+    )
+    .await
+    .map_err(|err| Error::Engine(err.to_string()))?;
+    Ok(())
 }
 
 /// The SDK error carries the detail; the hub reports it as an engine failure.

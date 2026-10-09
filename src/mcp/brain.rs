@@ -244,7 +244,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names a session to read, by session_id or by agent and name; omitted, it is this session. Returns the content and its version token."
+        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names a session to read, by session_id or by agent and name; omitted, it is this session. version reads an earlier version of a project page, one that brain_history lists, deleted pages included. Returns the content and its version token."
     )]
     async fn brain_get(
         &self,
@@ -254,6 +254,30 @@ impl HubServer {
         let principal = self.principal(&context);
         let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
         let path = store.read_path(&params.path).map_err(to_error_data)?;
+        if let Some(version) = params.version.as_deref() {
+            if store != Store::Project || params.session.is_some() {
+                return Err(to_error_data(Error::InvalidArgument(
+                    "a session brain keeps no earlier versions; version reads a page of the project store".to_string(),
+                )));
+            }
+            let project_id = self
+                .knowledge_project(&principal, params.project_id.as_deref(), Access::Read)
+                .await
+                .map_err(to_error_data)?;
+            let read = knowledge::read_version(&self.state, &project_id, &path, version)
+                .await
+                .map_err(to_error_data)?;
+            return Ok(CallToolResult::structured(json!({
+                "path": read.path,
+                "store": store.as_str(),
+                "size_bytes": read.content.len(),
+                "content": read.content,
+                "version": read.version,
+                "current": read.current,
+                "at": read.at,
+                "actor": read.actor,
+            })));
+        }
         let absent = || {
             to_error_data(Error::NotFound(format!(
                 "no brain value at '{}'",
@@ -468,7 +492,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Delete one value and its index row. store is required: \"session\" for a session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent. session names your own session to delete from, by session_id or by agent and name; omitted, it is this connection's active session."
+        description = "Delete one value and its index row. store is required: \"session\" for a session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent while its bytes stay in the page's history, where brain_revert restores it, until the operator forgets that history. session names your own session to delete from, by session_id or by agent and name; omitted, it is this connection's active session."
     )]
     async fn brain_delete(
         &self,
@@ -566,6 +590,78 @@ impl HubServer {
             "ok": true,
             "path": path,
             "store": store.as_str(),
+        })))
+    }
+
+    #[tool(
+        description = "List the history of one page of the project knowledge base, newest first: each write's version, actor, time, size and a short summary, whether its bytes were kept, and which row is the page as it is now. A deleted page keeps its history. Read a version with brain_get and store \"project\", and put one back with brain_revert. Page with before, the next_before of the previous call."
+    )]
+    async fn brain_history(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<BrainHistoryParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        Store::Project
+            .check_namespace(&params.path)
+            .map_err(to_error_data)?;
+        let limit = crate::limits::kb_history_rows(params.limit).map_err(to_error_data)?;
+        let project_id = self
+            .knowledge_project(&principal, params.project_id.as_deref(), Access::Read)
+            .await
+            .map_err(to_error_data)?;
+        let history =
+            knowledge::history(&self.state, &project_id, &params.path, params.before, limit)
+                .await
+                .map_err(to_error_data)?;
+        Ok(CallToolResult::structured(json!({
+            "path": history.path,
+            "store": Store::Project.as_str(),
+            "current_version": history.current_version,
+            "versions": history.rows,
+            "total": history.total,
+            "next_before": history.next_before,
+            "truncated": history.truncated,
+        })))
+    }
+
+    #[tool(
+        description = "Put a page of the project knowledge base back to an earlier version that brain_history lists, restoring a deleted page the same way. The revert is a new write in your name, so the history keeps every version and a revert is undone by another. Reverting to the version the page already holds writes nothing and returns changed: false. Pass if_version with the version you read to revert only while nothing changed, or \"absent\" to restore a deleted page only while it is still gone."
+    )]
+    async fn brain_revert(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<BrainRevertParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        Store::Project
+            .check_namespace(&params.path)
+            .map_err(to_error_data)?;
+        let project_id = self
+            .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+            .await
+            .map_err(to_error_data)?;
+        let session_id = self.session_in(&principal, &project_id).await;
+        let written = knowledge::revert(
+            &self.state,
+            &project_id,
+            &principal.actor,
+            session_id.as_deref(),
+            &params.path,
+            &params.version,
+            params.if_version.as_deref(),
+        )
+        .await
+        .map_err(to_error_data)?;
+        Ok(CallToolResult::structured(json!({
+            "ok": true,
+            "path": written.path,
+            "store": Store::Project.as_str(),
+            "version": written.version,
+            "size_bytes": written.size_bytes,
+            "lint": written.lint,
+            "warnings": written.warnings,
+            "changed": written.changed,
         })))
     }
 
@@ -1480,6 +1576,34 @@ struct BrainGetParams {
     /// The session to read. Omitted, it is the active session.
     #[serde(default)]
     session: Option<SessionRef>,
+    /// An earlier version of a project page, from `brain_history`.
+    #[serde(default)]
+    version: Option<String>,
+}
+
+/// Arguments for `brain_history`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct BrainHistoryParams {
+    path: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    /// The `next_before` of the previous page.
+    #[serde(default)]
+    before: Option<i64>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// Arguments for `brain_revert`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct BrainRevertParams {
+    path: String,
+    /// The version to put back, from `brain_history`.
+    version: String,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    if_version: Option<String>,
 }
 
 /// Arguments for `brain_put`.

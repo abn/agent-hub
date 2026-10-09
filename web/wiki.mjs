@@ -10,13 +10,15 @@
 // literal data, no trust ladder, no rename or move in this version.
 
 import { api } from "./api.mjs";
-import { slugify } from "./dialog.mjs";
+import { confirmAction, slugify } from "./dialog.mjs";
+import { diffStat, hunks, lineDiff, onlyFinalNewline } from "./diff.mjs";
 import { esc } from "./dom.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { toast } from "./toast.mjs";
+import { fullStamp } from "./time.mjs";
 
 const FILE_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>`;
 const FOLDER_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/></svg>`;
@@ -214,12 +216,25 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
     .join("")}</div>`;
 }
 
+// A page, or null when the hub says it is not there. Any other failure is
+// thrown: a hub that could not answer has not said the page is gone, so the
+// reader is never offered a restore on the strength of an outage.
 async function readPage(id, path) {
   try {
     return await api(wikiPageApi(id, path));
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
   }
+}
+
+// The stage for a page the hub could not be asked about.
+function unreadable(id, path, error, shellStageHead) {
+  return {
+    head: shellStageHead("Wiki", displayPath(path), "", `#/projects/${encodeURIComponent(id)}/wiki`),
+    controls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / wiki</span></div>`,
+    body: `<div class="shell-pad"><p class="empty">Could not read this page: ${esc(error?.message || "the hub did not answer")}</p></div>`,
+  };
 }
 
 // The frontmatter is metadata, not body. A page whose block cannot be read is
@@ -237,12 +252,30 @@ function pageBody(content) {
 }
 
 async function pageStage(id, path, shellStageHead) {
-  const page = await readPage(id, path);
+  let page;
+  try {
+    page = await readPage(id, path);
+  } catch (error) {
+    return unreadable(id, path, error, shellStageHead);
+  }
   if (!page) {
+    // A deleted page keeps its history, which is where it is restored from,
+    // unless the operator forgot its versions: then the history only says who
+    // wrote it.
+    const history = await readHistory(id, path, 200);
+    const listed = history && history.total > 0;
+    const kept = listed && (history.versions || []).some((row) => row.kept);
+    const link = `<a href="${wikiPageHash(id, displayPath(path), "&history=1")}" style="color:var(--accent)">history</a>`;
     return {
       head: shellStageHead("Wiki", "", "", `#/projects/${encodeURIComponent(id)}/wiki`),
       controls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / wiki</span></div>`,
-      body: `<div class="shell-pad"><p class="empty">That page is not in the wiki.</p></div>`,
+      body: `<div class="shell-pad"><p class="empty">${
+        kept
+          ? `That page was deleted. Its ${link} holds its earlier versions.`
+          : listed
+            ? `That page was deleted and its earlier versions were forgotten. Its ${link} still says who wrote it and when.`
+            : "That page is not in the wiki."
+      }</p></div>`,
     };
   }
   const rendered = await renderMarkdown(pageBody(page.content));
@@ -296,7 +329,7 @@ async function pageStage(id, path, shellStageHead) {
       `<span style="display:inline-flex;gap:8px;flex:none;align-items:center">${reviewBtn}<a class="btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="flex:none;display:inline-flex;align-items:center;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/1 var(--font-sans)">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
-    controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span></div>`,
+    controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
     body: `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${fm.description ? `<p class="wiki-description" style="font-size:15px;color:var(--ink-2);margin-top:0">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
@@ -338,6 +371,7 @@ const OP_WORDS = {
   "kb.delete": "deleted",
   "kb.review": "reviewed",
   "kb.promote": "promoted",
+  "kb.revert": "reverted",
 };
 
 function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
@@ -348,15 +382,14 @@ function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
   };
 }
 
-// Recent changes: who did what, to which page, and when. The rows are not
-// tappable in this version (round 14 item 7), and a row says only what the log
-// holds.
+// Recent changes: who did what, to which page, and when. A row opens that
+// page's history, which is where a change is read and undone.
 const HISTORY_PAGE = 25;
 
 // The write log, newest first, grouped under its day. The newest page is
 // drawn; Earlier walks back one page of rows at a time in place, its count
 // falling until every row is loaded.
-function historyRows(rows) {
+function historyRows(rows, changesProject) {
   let out = "";
   let day = null;
   for (const row of rows) {
@@ -366,12 +399,12 @@ function historyRows(rows) {
       day = date;
       out += `<div class="mono wiki-history-day" style="padding:10px 16px 4px;font-size:12px;color:var(--ink-3);letter-spacing:.06em">${esc(date)}</div>`;
     }
-    out += `<div class="row wiki-change" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line)">
+    out += `<a class="row wiki-change" href="${wikiPageHash(changesProject, displayPath(row.path), "&history=1")}" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">
       <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(stamp)}</span>
       <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(row.actor)}</span>
       <span class="mono" style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayPath(row.path))}</span>
       <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(OP_WORDS[row.op] || row.op)}</span>
-    </div>`;
+    </a>`;
   }
   return out;
 }
@@ -393,7 +426,7 @@ async function changesStage(id, shellStageHead) {
   }
   const rows = data.rows || [];
   const body = rows.length
-    ? `<div class="wiki-changes">${historyRows(rows)}${historyEarlier(id, data, rows.length)}</div>`
+    ? `<div class="wiki-changes">${historyRows(rows, id)}${historyEarlier(id, data, rows.length)}</div>`
     : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · recent changes</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No changes yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this wiki is logged here with who and when.</p></div>`;
   return simpleStage(shellStageHead, id, "Recent changes", `${data.total ?? rows.length} change${(data.total ?? rows.length) === 1 ? "" : "s"}`, body);
 }
@@ -410,7 +443,7 @@ export async function wikiHistoryEarlier(button) {
     const holder = button.parentElement;
     const rows = data.rows || [];
     const temp = document.createElement("div");
-    temp.innerHTML = historyRows(rows);
+    temp.innerHTML = historyRows(rows, id);
     while (temp.firstChild) holder.insertBefore(temp.firstChild, button);
     const loaded = holder.querySelectorAll(".wiki-change").length;
     const next = historyEarlier(id, data, loaded);
@@ -428,6 +461,231 @@ export async function wikiHistoryEarlier(button) {
     button.disabled = false;
     toast(error.message);
   }
+}
+
+// A page's history: every write to it, newest first, each one a version to
+// read against the page as it is now. The hub keeps the bytes of every write,
+// so a deleted page lists its versions too.
+async function readHistory(id, path, limit = HISTORY_PAGE, before = "") {
+  try {
+    return await api(
+      `/api/v1/projects/${encodeURIComponent(id)}/kb/versions?path=${encodeURIComponent(displayPath(path))}&limit=${limit}${
+        before ? `&before=${encodeURIComponent(before)}` : ""
+      }`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function versionRows(id, path, rows) {
+  return rows
+    .map((row) => {
+      const size = row.size_bytes == null ? "" : `${row.size_bytes} B`;
+      const facts = [row.actor, row.summary, size].filter(Boolean).join(" · ");
+      const state = row.current ? "current" : row.version && !row.kept ? "not kept" : "";
+      const inner = `<span style="display:flex;align-items:center;gap:8px;min-width:0">
+          <span class="mono" style="flex:1;min-width:0;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(row.at)}</span>
+          ${state ? `<span class="mono" style="flex:none;font-size:12px;color:var(--ink-2)">${esc(state)}</span>` : ""}
+        </span>
+        <span style="min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(facts)}</span>`;
+      const style =
+        "display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box";
+      // A delete stored no bytes, and a version the hub did not keep has none
+      // to show, so neither is a door.
+      if (!row.version || !row.kept) return `<div class="row wiki-version" style="${style}">${inner}</div>`;
+      const href = wikiPageHash(id, displayPath(path), `&history=1&version=${encodeURIComponent(row.version)}`);
+      return `<a class="row wiki-version" href="${href}" style="${style}">${inner}</a>`;
+    })
+    .join("");
+}
+
+function versionsEarlier(id, path, data, loaded) {
+  if (data.truncated && data.next_before) {
+    const remaining = Math.max(0, (data.total ?? loaded) - loaded);
+    return `<button type="button" class="btn-outline wiki-versions-earlier" data-action="wiki-versions-earlier" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-before="${esc(data.next_before)}" style="margin:12px 16px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--accent);font:600 13px/1 var(--font-sans);cursor:pointer">Earlier · ${remaining}</button>`;
+  }
+  return `<div class="mono wiki-history-done" style="padding:12px 16px;font-size:12px;color:var(--ink-3)">${loaded} version${loaded === 1 ? "" : "s"} · all loaded</div>`;
+}
+
+async function pageHistoryStage(id, path, shellStageHead) {
+  const back = wikiPageHash(id, displayPath(path));
+  const data = await readHistory(id, path);
+  const head = (meta) => shellStageHead("History", meta, "", back);
+  if (!data) {
+    return {
+      head: head(displayPath(path)),
+      controls: `<div class="shell-controls" style="padding:0 16px"></div>`,
+      body: `<div class="shell-pad"><p class="empty">Could not read this page's history.</p></div>`,
+    };
+  }
+  const rows = data.versions || [];
+  const total = data.total ?? rows.length;
+  // Something to forget: a version whose bytes are kept and that the page does
+  // not hold now.
+  // An older write of the bytes the page holds now is not current, but it is
+  // not forgettable either.
+  const forgettable = rows.some((row) => row.kept && row.version !== data.current_version);
+  const forget = forgettable
+    ? `<button type="button" class="danger" data-action="wiki-forget-history" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-deleted="${data.current_version ? "0" : "1"}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);font:600 13px/1 var(--font-sans);cursor:pointer">Forget history</button>`
+    : "";
+  const body = rows.length
+    ? `<div class="wiki-versions">${versionRows(id, path, rows)}${versionsEarlier(id, path, data, rows.length)}</div>`
+    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · history</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No history yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this page keeps a version here.</p></div>`;
+  return {
+    head: shellStageHead("History", displayPath(path), forget, back),
+    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">${total} version${total === 1 ? "" : "s"}${data.current_version ? "" : " · deleted"}</span></div>`,
+    body,
+  };
+}
+
+// Walk one page of versions further back, in place.
+export async function wikiVersionsEarlier(button) {
+  const id = button.dataset.id || "";
+  const path = button.dataset.path || "";
+  button.disabled = true;
+  const data = await readHistory(id, path, HISTORY_PAGE, button.dataset.before || "");
+  if (!data) {
+    button.disabled = false;
+    toast("Could not read the earlier versions.");
+    return;
+  }
+  const holder = button.parentElement;
+  const temp = document.createElement("div");
+  temp.innerHTML = versionRows(id, path, data.versions || []);
+  while (temp.firstChild) holder.insertBefore(temp.firstChild, button);
+  const loaded = holder.querySelectorAll(".wiki-version").length;
+  temp.innerHTML = versionsEarlier(id, path, data, loaded);
+  button.replaceWith(temp.firstElementChild);
+}
+
+// One diff line. The mark and a hidden word carry what changed, so the tint
+// is never the only way to tell an added line from a removed one.
+function diffLine(line) {
+  if (line.kind === "skip") {
+    return `<div class="wiki-diff-skip mono">${line.count} unchanged line${line.count === 1 ? "" : "s"}</div>`;
+  }
+  const mark = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+  const word = line.kind === "add" ? "Added: " : line.kind === "del" ? "Removed: " : "";
+  return `<div class="wiki-diff-line" data-kind="${line.kind}"><span class="wiki-diff-mark" aria-hidden="true">${mark}</span>${
+    word ? `<span class="sr-only">${word}</span>` : ""
+  }<span class="wiki-diff-text">${esc(line.text) || " "}</span></div>`;
+}
+
+// One version read against the page as it is now: what changed since, line by
+// line, and the one step that puts it back.
+async function versionStage(id, path, version, shellStageHead) {
+  const backToHistory = wikiPageHash(id, displayPath(path), "&history=1");
+  const failed = (message) => ({
+    head: shellStageHead("Version", displayPath(path), "", backToHistory),
+    controls: `<div class="shell-controls" style="padding:0 16px"></div>`,
+    body: `<div class="shell-pad"><p class="empty">${esc(message)}</p></div>`,
+  });
+  let older;
+  try {
+    older = await api(`${wikiPageApi(id, displayPath(path))}?version=${encodeURIComponent(version)}`);
+  } catch (error) {
+    return failed(error.message);
+  }
+  let now;
+  try {
+    now = await readPage(id, path);
+  } catch (error) {
+    return failed(error.message);
+  }
+  // The version read says when its bytes were written and by whom, so the
+  // header and the dialog keep both however far back the version is.
+  const when = older.at || "";
+  const lines = lineDiff(older.content, now ? now.content : "");
+  const name = pageFrontmatter(older.content).title || displayPath(path).split("/").pop();
+  const meta = [when, older.actor].filter(Boolean).join(" · ");
+  const revert = older.current
+    ? ""
+    : `<button type="button" class="btn-outline" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${now ? "Revert to this" : "Restore this"}</button>`;
+  let summary;
+  if (older.current) summary = "This is the page as it is now.";
+  else if (!now) summary = "The page was deleted after this version.";
+  else if (!lines) summary = "Too many changes to show line by line.";
+  else if (onlyFinalNewline(older.content, now.content)) summary = "Only the final newline differs.";
+  else {
+    const { added, removed } = diffStat(lines);
+    summary = `Since this version: ${added} line${added === 1 ? "" : "s"} added, ${removed} removed.`;
+  }
+  // A diff too long to find, or one against a page that is gone, which would
+  // mark every line removed, is shown as the version itself: what a revert or
+  // a restore would put back.
+  const body =
+    older.current || !lines || !now
+      ? `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${await renderMarkdown(pageBody(older.content))}</article>`
+      : `<div class="wiki-diff mono" role="group" aria-label="Changes since this version">${hunks(lines).map(diffLine).join("") || `<div class="wiki-diff-skip">${esc(summary === "Only the final newline differs." ? summary : "No line changed.")}</div>`}</div>`;
+  return {
+    head: shellStageHead(name, meta, revert, backToHistory),
+    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(summary)}</span></div>`,
+    body,
+  };
+}
+
+// Put a page back to the version on screen, once the reader confirms. The
+// revert carries the version the reader saw as current, so a page that moved
+// on since is refused rather than overwritten, and a deleted page is restored
+// only while it is still gone.
+export async function wikiRevert(button) {
+  const id = button.dataset.id || "";
+  const path = button.dataset.path || "";
+  const version = button.dataset.version || "";
+  const current = button.dataset.current || "absent";
+  const when = button.dataset.when || "";
+  const name = button.dataset.name || path;
+  const restoring = current === "absent";
+  // The version's time as the rest of the app spells it, not the raw stamp.
+  const at = Date.parse(when);
+  const stamp = Number.isFinite(at) ? fullStamp(at) : "";
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const confirmed = await confirmAction({
+    title: restoring ? `Restore ${name}?` : `Revert ${name}?`,
+    body: `The page is written back as it was${stamp ? ` on ${stamp}` : ""}. This is a new write in its history, so ${
+      restoring ? "the delete" : "the version it replaces"
+    } stays there to go back to.`,
+    safe: "Cancel",
+    danger: restoring ? "Restore page" : "Revert page",
+    tone: "primary",
+    commit: async () => {
+      await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/pages/${encoded}/revert`, {
+        method: "POST",
+        body: JSON.stringify({ version, if_version: current }),
+      });
+    },
+  });
+  if (!confirmed) return;
+  toast(restoring ? "Page restored." : "Page reverted.");
+  location.hash = wikiPageHash(id, path);
+}
+
+// Forget the kept bytes of a page's history, once the operator confirms. Every
+// version but the one the page holds stops reading back; the rows stay.
+export async function wikiForgetHistory(button) {
+  const id = button.dataset.id || "";
+  const path = button.dataset.path || "";
+  const deleted = button.dataset.deleted === "1";
+  const confirmed = await confirmAction({
+    title: "Forget this page's history?",
+    body: deleted
+      ? "The page is deleted, so every earlier version goes, and the page can no longer be restored."
+      : "Every earlier version goes, and none can be read or reverted to again. The page as it is now stays.",
+    list: [displayPath(path)],
+    note: "Who wrote what and when stays in the history. This cannot be undone.",
+    safe: "Cancel",
+    danger: "Forget history",
+    commit: async () => {
+      await api(
+        `/api/v1/projects/${encodeURIComponent(id)}/kb/versions?path=${encodeURIComponent(displayPath(path))}`,
+        { method: "DELETE" },
+      );
+    },
+  });
+  if (!confirmed) return;
+  toast("History forgotten.");
+  render();
 }
 
 // Lint: the tree's findings, with a Re-check that walks it again.
@@ -525,8 +783,17 @@ export async function wikiStage(id, params, shellStageHead, stats, projectName =
   if (view === "changes") return changesStage(id, shellStageHead);
   if (view === "lint") return lintStage(id, params, shellStageHead);
   if (isNew) return editorStage(id, "", "", "absent", true, shellStageHead);
+  if (selected && params?.get("history") === "1") {
+    const version = params.get("version") || "";
+    return version ? versionStage(id, selected, version, shellStageHead) : pageHistoryStage(id, selected, shellStageHead);
+  }
   if (editing && selected) {
-    const page = (await readPage(id, selected)) || { content: "", version: "absent" };
+    let page;
+    try {
+      page = (await readPage(id, selected)) || { content: "", version: "absent" };
+    } catch (error) {
+      return unreadable(id, selected, error, shellStageHead);
+    }
     return editorStage(id, selected, page.content || "", page.version || "absent", false, shellStageHead);
   }
   if (selected) return pageStage(id, selected, shellStageHead);
@@ -835,7 +1102,13 @@ export async function wikiSave(button) {
         note.appendChild(el);
       };
       action("Reload theirs", async () => {
-        const page = await readPage(id, path);
+        let page;
+        try {
+          page = await readPage(id, path);
+        } catch (failure) {
+          say(failure.message, "var(--danger)");
+          return;
+        }
         if (page) {
           document.getElementById("wiki-content").value = page.content || "";
           button.dataset.version = page.version || "absent";
@@ -843,7 +1116,13 @@ export async function wikiSave(button) {
         note.textContent = "Reloaded the hub's copy.";
       });
       action("Keep mine", async () => {
-        const page = await readPage(id, path);
+        let page;
+        try {
+          page = await readPage(id, path);
+        } catch (failure) {
+          say(failure.message, "var(--danger)");
+          return;
+        }
         if (page) button.dataset.version = page.version || "absent";
         note.textContent = "";
         wikiSave(button);

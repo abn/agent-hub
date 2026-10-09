@@ -145,6 +145,10 @@ usage:
                                  write a page from stdin or a file
   agent-hub kb list [path]       print one page path per line
   agent-hub kb delete <path>     delete a page
+  agent-hub kb history <path>    print the page's versions, newest first
+  agent-hub kb revert <path> <version>
+                                 put the page back to an earlier version
+  agent-hub kb forget <path>     forget the page's earlier versions (admin)
 
   --project <id>   the project, or the HUB_PROJECT setting
   --json           print the tool's JSON result instead
@@ -177,6 +181,21 @@ kb list walks the whole base under the path it is given, or the whole base when
 it is given none, and prints pages only: every line is a page kb get can read.
 --json is the tool's own result for that one listing instead, one level of
 entries with their types, directories included.
+
+kb history prints one line per write to the page, newest first: the version it
+stored, when, who, and what it did, with 'current' on the version the page holds
+now. A deleted page keeps its history. kb revert writes that version back as a
+new write in the caller's name, so it restores a deleted page too and never
+takes a version out of the history; --if-version guards it like a put, and
+'absent' restores a deleted page only while it is still gone. --json on history
+is the tool's result for the newest page of versions. Reverting to the version
+the page already holds writes nothing.
+
+kb delete removes the page but keeps its bytes in its history. kb forget is the
+operator's purge: it removes the kept bytes of every version but the one the
+page holds now, all of them for a deleted page, so they can no longer be read
+or restored and their space is reused. The history's rows stay. It needs the
+admin token as HUB_TOKEN; any other token gets the hub's refusal.
 ";
 
 fn main() -> ExitCode {
@@ -963,12 +982,10 @@ fn kb(args: &[String]) -> ExitCode {
     // An option a command accepts and then ignores misleads: a version guard
     // on a delete reads as a conditional delete and would delete regardless.
     let takes_content = command == "put";
-    let prints_a_view = matches!(command, "get" | "list");
+    let guarded = matches!(command, "put" | "revert");
+    let prints_a_view = matches!(command, "get" | "list" | "history");
     let unused = [
-        (
-            options.if_version.is_some() && !takes_content,
-            "--if-version",
-        ),
+        (options.if_version.is_some() && !guarded, "--if-version"),
         (options.file.is_some() && !takes_content, "--file"),
         (options.stdin && !takes_content, "-"),
         (options.json && !prints_a_view, "--json"),
@@ -978,6 +995,13 @@ fn kb(args: &[String]) -> ExitCode {
     if let Some(option) = unused {
         return fail(&Failure::Usage(format!(
             "kb {command} does not take {option}\n{KB_USAGE}"
+        )));
+    }
+    if command != "revert"
+        && let Some(extra) = &options.version
+    {
+        return fail(&Failure::Usage(format!(
+            "unexpected argument '{extra}'\n{KB_USAGE}"
         )));
     }
 
@@ -1037,6 +1061,74 @@ fn kb(args: &[String]) -> ExitCode {
             };
             arguments["path"] = page.into();
             emit(runtime.block_on(agent_hub::client::call(&config, "brain_delete", arguments)))
+        }
+        "history" => {
+            let Some(page) = page else {
+                return missing_page();
+            };
+            let mut listing = serde_json::json!({"project_id": project, "path": page});
+            if options.json {
+                return emit(runtime.block_on(agent_hub::client::call(
+                    &config,
+                    "brain_history",
+                    listing,
+                )));
+            }
+            listing["limit"] = agent_hub::limits::KB_HISTORY_ROWS_MAX.into();
+            loop {
+                let result = match runtime.block_on(agent_hub::client::call(
+                    &config,
+                    "brain_history",
+                    listing.clone(),
+                )) {
+                    Ok(result) => result,
+                    Err(failure) => return fail(&failure),
+                };
+                for row in result["versions"].as_array().into_iter().flatten() {
+                    println!("{}", history_line(row));
+                }
+                match result["next_before"].as_i64() {
+                    Some(before) => listing["before"] = before.into(),
+                    None => break,
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        "forget" => {
+            let Some(page) = page else {
+                return missing_page();
+            };
+            match runtime.block_on(agent_hub::client::projects::forget_kb_history(
+                &config, &project, &page,
+            )) {
+                Ok(result) => {
+                    let count = result["versions_forgotten"].as_u64().unwrap_or_default();
+                    println!(
+                        "forgot {count} kept version{} of {}, {} bytes",
+                        if count == 1 { "" } else { "s" },
+                        result["path"].as_str().unwrap_or(&page),
+                        result["bytes_forgotten"]
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(failure) => fail(&failure),
+            }
+        }
+        "revert" => {
+            let Some(page) = page else {
+                return missing_page();
+            };
+            let Some(version) = options.version.clone() else {
+                return fail(&Failure::Usage(format!(
+                    "kb revert needs the version to put back, from kb history\n{KB_USAGE}"
+                )));
+            };
+            let mut revert =
+                serde_json::json!({"project_id": project, "path": page, "version": version});
+            if let Some(guard) = options.if_version.as_deref() {
+                revert["if_version"] = guard.into();
+            }
+            emit(runtime.block_on(agent_hub::client::call(&config, "brain_revert", revert)))
         }
         other => fail(&Failure::Usage(format!(
             "unknown kb command '{other}'\n{KB_USAGE}"
@@ -1221,11 +1313,33 @@ fn kb_path(path: &str) -> String {
     format!("/fs/{}", path.trim_start_matches('/'))
 }
 
+/// One line of `kb history`: the version, when, who, what, and whether it is
+/// the page as it is now. A delete stored no version, so its column is a dash.
+#[cfg(feature = "client")]
+fn history_line(row: &serde_json::Value) -> String {
+    let text = |key: &str| row[key].as_str().unwrap_or("-").to_string();
+    let mut line = format!(
+        "{}  {}  {}  {}",
+        text("version"),
+        text("at"),
+        text("actor"),
+        text("summary")
+    );
+    if row["current"].as_bool() == Some(true) {
+        line.push_str("  current");
+    } else if row["version"].is_string() && row["kept"].as_bool() == Some(false) {
+        line.push_str("  not kept");
+    }
+    line
+}
+
 /// What a `kb` command line carried besides its command.
 #[cfg(feature = "client")]
 #[derive(Default)]
 struct KbOptions {
     path: Option<String>,
+    /// The second positional argument, which only `kb revert` takes.
+    version: Option<String>,
     project: Option<String>,
     if_version: Option<String>,
     file: Option<String>,
@@ -1257,6 +1371,9 @@ impl KbOptions {
                 "-" => options.stdin = true,
                 flag if flag.starts_with('-') => return Err(format!("unknown flag '{flag}'")),
                 path if options.path.is_none() => options.path = Some(path.to_string()),
+                version if options.version.is_none() => {
+                    options.version = Some(version.to_string());
+                }
                 extra => return Err(format!("unexpected argument '{extra}'")),
             }
         }

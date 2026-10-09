@@ -159,11 +159,13 @@ held to its token.
 | `comment_list` | List an artifact's comments. |
 | `comment_resolve` | Mark a comment done or reopen it. |
 | `comment_delete` | Delete a comment. |
-| `brain_get` | Read a path from a session brain, the caller's own or another named by `session`, or from a project knowledge base. |
+| `brain_get` | Read a path from a session brain, the caller's own or another named by `session`, or from a project knowledge base, at an earlier `version` too. |
 | `brain_put` | Write a path into a session brain, the caller's own active one or its own named by `session`, or a page into a project knowledge base. |
 | `brain_list` | List a store's entries, each with its type and size. |
-| `brain_delete` | Remove a path from either store. |
+| `brain_delete` | Remove a path from either store. A project page's bytes stay in its history, where `brain_revert` restores them, until the operator forgets that history. |
 | `brain_promote` | Copy an entry from the caller's active session brain into a project knowledge base page that cites the session it came from. |
+| `brain_history` | List one project knowledge base page's versions, newest first, deleted pages included. `brain_get` with `version` reads one. |
+| `brain_revert` | Write an earlier version of a project knowledge base page back as a new write, restoring a deleted page the same way. |
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
 | `whoami` | Report the calling identity, its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |

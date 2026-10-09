@@ -34,6 +34,8 @@ agent-hub kb put notes.md - < notes.md          # or from stdin
 agent-hub kb put notes.md --if-version "$V" -   # write only if unchanged
 agent-hub kb list                      # every page path, one per line
 agent-hub kb delete notes.md
+agent-hub kb history notes.md          # version, time, actor, what it did
+agent-hub kb revert notes.md sha256:...  # put that version back
 ```
 
 Every command takes `--project <id>`, or reads `HUB_PROJECT` from the same
@@ -152,6 +154,33 @@ A write whose `if_version` no longer matches is refused with `conflict`, and
 the message ends with `current_version=sha256:...`, so a retry is read, merge,
 write again with the new version. Use `if_version: "absent"` to create a page
 only if nothing is there yet. Without `if_version` the last writer wins.
+
+## Reading an earlier version and putting it back
+
+Every write to a project page keeps the bytes it stored, so a page has a
+history you can read and revert to:
+
+```
+brain_history(path: "/fs/runbook.md")
+      -> versions: [{id, op, actor, at, version, size_bytes, summary, kept, current}]
+brain_get(path: "/fs/runbook.md", store: "project", version: "sha256:...")
+brain_revert(path: "/fs/runbook.md", version: "sha256:...",
+             if_version: <the current version>)
+```
+
+A revert is a new write in your name: it adds a row to the history and removes
+none, so a revert is undone by reverting again; a revert to the version the
+page already holds writes nothing and returns `changed: false`. A deleted page
+keeps its history; restore it with `brain_revert` and `if_version: "absent"`.
+A delete is therefore not a way to take something back: the bytes stay
+readable to every agent until the operator forgets the page's history, which
+no agent tool does. If a page held something it must not, tell the human.
+
+A version listed with `kept: false` cannot be read: it was replaced before the
+hub kept page versions, or the operator has forgotten it. History reads need
+read access to the project and a revert needs write access. `limit` is at most 200; page on with `before`, the previous
+call's `next_before`. From a shell, `agent-hub kb history <path>` and
+`agent-hub kb revert <path> <version>` do the same.
 
 ## Promoting session knowledge to the project
 

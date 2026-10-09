@@ -366,6 +366,33 @@ Agents and access, Connect, and the knowledge base.
   helper line in the whole screen. No paragraph explains a toggle.
 - **Storage.** The summary and the by-project rows. Never touches feed events
   or artifacts.
+- **Knowledge base history.** A page's History is a stage of its own, reached
+  from a History link in the reader's control row (32px inline, 44px under a
+  coarse pointer) and from every Recent changes row, which opens that page's
+  history. It is not an aside: a version is read in place of the page, not
+  beside it. One row per version, newest first, at the 56px row minimum: the
+  time in mono with "current" or "not kept" as a word, then actor, what the
+  write did and its size. A version opens as a line diff against the page as it
+  is now, in mono at 13px, each changed line marked `+` or `-` in its own column
+  with a hidden "Added" or "Removed" for a screen reader, the added line tinted
+  `--accent-bg` and the removed one `--danger-bg`, so the tint repeats what the
+  mark says and never carries it alone. `--surface-2` was the removed tint
+  first and read as nearly the page itself in the dark theme; `--danger-bg` is
+  distinct in both, and `--ink` on it is held to AA by the contrast gate. The
+  revert dialog names the version's time with the app's full date formatter,
+  not the raw stamp, so it reads as a date and never breaks at a hyphen. Unchanged runs fold to one 12px count
+  line, three lines of context either side of a change. Long lines wrap, so the
+  diff never scrolls the pane sideways. The header carries **Revert to this**,
+  or **Restore this** for a deleted page, a neutral 44px outline: a revert is a
+  new write that deletes nothing, so it does not take `--danger`. It asks in a
+  dialog that focuses Cancel first and names what stays in the history. A
+  diff past its edit budget is not drawn as counts it cannot stand behind: the
+  controls row says "Too many changes to show line by line." and the stage
+  shows the version itself, as it does for a deleted page's version, where a
+  diff against nothing would mark every line removed. The history's header carries **Forget history**, a
+  44px `button.danger` outline, since it deletes the kept bytes for good; its
+  dialog names the page, says the rows stay and focuses Cancel. It shows only
+  while a version other than the current one is kept.
 
 ## Interaction
 
