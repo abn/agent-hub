@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -94,6 +94,18 @@ export default defineConfig({
       name: "sizing-touch",
       use: { viewport: WIDTHS.phone, hasTouch: true },
       testMatch: /control-sizing\.spec\.mjs/,
+    },
+    // A waiting row is measured at both widths in both themes and photographed,
+    // on hubs of its own so the question it posts moves no other check's queue.
+    {
+      name: "rows-desktop",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /index-rows\.spec\.mjs/,
+    },
+    {
+      name: "rows-phone",
+      use: { viewport: WIDTHS.phone, hasTouch: true },
+      testMatch: /index-rows\.spec\.mjs/,
     },
     {
       name: "prefix",

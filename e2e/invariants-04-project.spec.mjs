@@ -248,7 +248,7 @@ test.describe("inbox and search on a phone", () => {
           .map((row) => {
             const pill = row.querySelector(".pill-status");
             const title = row.querySelector(".title");
-            const bar = row.querySelector(".feed-row-title-bar");
+            const line = pill.parentElement;
             return {
               id: row.dataset.id || "",
               title: (title.textContent || "").replace(/\s+/g, " ").trim(),
@@ -263,7 +263,9 @@ test.describe("inbox and search on a phone", () => {
               titleScroll: title.scrollWidth,
               titleClient: title.clientWidth,
               titleTextOverflow: getComputedStyle(title).textOverflow,
-              barOverflow: bar ? r2(bar.scrollWidth - bar.clientWidth) : null,
+              lineOverflow: r2(line.scrollWidth - line.clientWidth),
+              titleBottom: r2(title.getBoundingClientRect().bottom),
+              pillTop: r2(pill.getBoundingClientRect().top),
             };
           });
       });
@@ -282,16 +284,14 @@ test.describe("inbox and search on a phone", () => {
           expect(measured.scrollHeight <= measured.clientHeight, `${what} spills out of its box`).toBe(true);
           expect(Math.round(measured.height), `${what} is taller than its single-line box`).toBe(Math.round(measured.clientHeight));
           expect(measured.scrollWidth <= measured.clientWidth, `${what} overflows its own width`).toBe(true);
-          expect(measured.barOverflow === null || measured.barOverflow <= 0.5, `${what} pushed the title bar out`).toBe(true);
+          expect(measured.lineOverflow <= 0.5, `${what} pushed its line out`).toBe(true);
         }
         const theRow = (await pillRows()).find((entry) => entry.id === event);
-        if (theRow) {
-          expect(theRow.titleTextOverflow, `at ${width}px the row's title does not ellipsise`).toBe("ellipsis");
-          expect(
-            theRow.titleScroll > theRow.titleClient,
-            `at ${width}px the row's title was not the element that truncated`,
-          ).toBe(true);
-        }
+        expect(theRow, `at ${width}px the seeded row draws no waiting pill`).toBeTruthy();
+        expect(
+          theRow.pillTop >= theRow.titleBottom - 0.5,
+          `at ${width}px the row's pill shares the title's line`,
+        ).toBe(true);
       }
     } finally {
       await api(hub, "POST", `/api/v1/questions/${event}/answer`, { body: "answered by the check" }).catch(() => {});

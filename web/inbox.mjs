@@ -4,7 +4,7 @@
 import { api } from "./api.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { esc, glyph, main, optionsAttr, optionsFrom, paint, projectName, stale } from "./dom.mjs";
+import { esc, glyph, main, optionsAttr, optionsFrom, paint, projectName, stale, waitingMarks } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
@@ -229,6 +229,7 @@ function inboxRow(item, state, options = {}) {
   const swipe = waits(item) ? (trays(item) ? "actions" : "") : isResolved ? "" : "read";
   const href = esc(address({ ...state, open: item.event_id }));
   const current = state.open === item.event_id ? ' aria-current="true"' : "";
+  const waiting = waits(item) ? waitingMarks(item.event_id) : null;
   const snoozeBar = options.snoozed
     ? `<div class="inbox-snooze-bar">${bringBackButton(item)}</div>`
     : "";
@@ -238,15 +239,15 @@ function inboxRow(item, state, options = {}) {
       ${glyph(item.kind)}
       <div class="grow">
         <div class="inbox-head">
-          <div class="title"${waits(item) || item.status === "unread" ? ' style="font-weight: 600;"' : ""}><a href="${href}">${esc(item.summary)}</a></div>
+          <div class="title"${waits(item) || item.status === "unread" ? ' style="font-weight: 600;"' : ""}><a href="${href}"${waiting ? waiting.described : ""}>${esc(item.summary)}</a></div>
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
         ${deadline ? `<div class="inbox-deadline">${esc(deadline)}</div>` : ""}
         <div class="inbox-foot">
-          <span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
+          ${waiting && options.snoozed ? waiting.pill : ""}<span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
         </div>
       </div>
-      ${waits(item) ? '<span class="dot-action" aria-hidden="true"></span><span class="sr-only">Waiting on you</span>' : ""}
+      ${waiting ? waiting.dot : ""}
       ${item.status === "unread" ? '<span class="dot-unread" aria-label="Unread" aria-hidden="true"></span><span class="sr-only">Unread</span>' : ""}
     </div>
     ${snoozeBar}

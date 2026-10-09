@@ -243,7 +243,19 @@ rather than repeating the refusal.
 - Feeds are grouped by day, with kind filters as chips. A project feed keeps
   Today and Yesterday open and folds older days behind "Earlier", a disclosure
   with the count of what it holds. An event the reader has not seen carries a
-  dot, a heavier title and the word for it, never the colour alone.
+  dot, a heavier title and the word for it, never the colour alone, unless it
+  is waiting on the reader: waiting outranks unread, and the row carries the
+  action dot instead.
+- A waiting row keeps its title line for the subject in every index. It ends
+  in the action dot, its title is drawn at 600, and the title takes the words
+  "Waiting on you" as its description, so a screen reader hears them once on
+  the link. The feed, and the inbox's SNOOZED group, put the "Waiting on you"
+  pill first on the meta line under the subject, before the agent and the
+  time; the inbox's waiting rows sit under a heading of those words and draw no
+  pill. A long agent name shortens before the time does. Waiting outranks
+  unread, so a waiting row carries the action dot rather than the unread dot.
+  At the 300px default index this shows 17 to 25 characters of a feed
+  subject, where the pill on the title line left 1 to 13.
 - Read is explicit, by opening an item, a swipe right, or the row's own Mark
   read control; never scroll-past. The Inbox header carries Mark all read and
   an Unread only filter, and marking one item read or unread offers an undo.
@@ -315,8 +327,9 @@ rather than repeating the refusal.
 ## Alert hierarchy
 
 Three levels, and no more. Quiet for read, ended, and signal items. Unread for
-a dot, weight, and a badge count. Waiting on you for an action pill and button,
-grouped at the top. Alerts are never red, never animated, and never a modal.
+a dot, weight, and a badge count. Waiting on you for the action dot, weight, an
+action pill and a button, grouped at the top; on an index row the pill is on the
+meta line. Alerts are never red, never animated, and never a modal.
 
 ## Accessibility
 
@@ -354,7 +367,13 @@ resolved: no text under 12px on any screen, no control in a header or control
 row taller than 32px or outside its band on a fine pointer, a 44 by 44 target
 for every button, chip and field on a coarse pointer, a distinct mark per kind,
 and one kind word per row. Both size checks walk every screen the router
-registers. An optional headless axe audit renders the
+registers. A waiting row in the feed and the inbox is held at both widths in
+both themes, set in a pinned Cantarell so the numbers and pixels match on every
+host: the title line shows at least 16 characters of the check's subject at the
+300px default index and 28 on a phone, the title is described as waiting, the
+feed's pill and a snoozed inbox row's pill sit below the title on the meta
+line, a long agent name never hides the time, and the row matches its
+screenshot baseline. An optional headless axe audit renders the
 eight screens in both themes and reports DOM, ARIA, label, heading, and
 computed-contrast problems. The last two need Playwright, a browser, and an axe
 build, and skip cleanly when they are absent.

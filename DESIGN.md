@@ -213,6 +213,21 @@ it remains the open design question.
   whole summary. A heading never carries a whole message.
 - A list's glyph column is a fixed box, 20px in the index and 28px on the
   mobile feed, so every title starts at the same x with or without a glyph.
+- An index row's title line is the subject's alone. A waiting row says so with
+  the action dot at the row's end and 600 title weight, the same in every
+  index. The title takes the words "Waiting on you" as its accessible
+  description, and they are hidden from browse mode so a screen reader hears
+  them once. Where a row is not under a WAITING ON YOU heading, in the feed and
+  in the inbox's SNOOZED group, the status pill sits first on the meta line
+  under the subject, hidden from assistive technology for the same reason. The
+  inbox's own waiting rows sit under that heading, so they carry no pill and
+  keep the meta line for the project, the agent and the time. On the meta line
+  a long agent name is what gives way, never the time. Waiting outranks
+  unread: a waiting row ends in the action dot and not the unread dot. Set in
+  Cantarell, a waiting feed row at the 300px default index shows 17 to 25
+  characters of its subject, after the feed's "asked: " where there is one,
+  where a pill beside the subject left 1 to 13; at the 260px minimum it shows
+  13 to 20, and on a phone 31 to 37.
 
 ### The phone
 
@@ -353,7 +368,9 @@ Agents and access, Connect, and the knowledge base.
 - **Home.** A status strip, a title and summary, the waiting card, the newest
   across projects, storage.
 - **Inbox.** Same shell, one index. Groups WAITING ON YOU, UNREAD, EARLIER.
-  Waiting rows carry an action dot and a heavier title. The stage is the item:
+  Waiting rows carry an action dot and a heavier title, and no pill, since the
+  group names the state; a snoozed waiting row carries the pill on its meta
+  line. The stage is the item:
   pill, title, body, its buttons, its thread, and a card naming what it points
   at. A question's buttons are its quick answers, when it suggests any, above
   its composer; a row's Reply opens the same composer, quick answers and all.
@@ -453,8 +470,9 @@ Agents and access, Connect, and the knowledge base.
 ## Alert hierarchy
 
 Three levels, and no more. Quiet for read, ended and signal items. Unread for a
-dot, weight and a badge count. Waiting on you for an action pill and a button,
-grouped at the top. Alerts are never red, never animated, and never a modal.
+dot, weight and a badge count. Waiting on you for the action dot, weight and
+an action pill and a button, grouped at the top; on an index row the pill is on
+the meta line, never the title line. Alerts are never red, never animated, and never a modal.
 
 ## Copy
 
@@ -513,6 +531,13 @@ named checks from the current handoff.
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said
 either that it matches the design or exactly where it deviates and why.
+A browser gate that holds a character count or a screenshot baseline pins the
+sans stack to Cantarell and the mono stack to DejaVu Sans Mono, from the
+dev-only `@fontsource/cantarell` and `@fontsource/dejavu-mono` packages,
+served to the page by the test, so the count and the pixels do not depend on a
+host's installed fonts. The baselines themselves are made on CI's own browser.
+The pin lives in the test run only; the shipped binary and the design's stack
+do not change.
 
 ## Where the design source lives
 

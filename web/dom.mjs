@@ -84,6 +84,23 @@ export const glyph = (kind) =>
     own(MARKS, kind) || MARKS.signal
   }</span><span class="sr-only">${esc(own(NAMES, kind) || kind)}</span>`;
 
+// The waiting state on an index row, drawn the same way in every index so the
+// subject keeps the whole title line. The action dot ends the row with the
+// words beside it, and the title takes those words as its description, so a
+// reader who gets neither colour nor shape hears them on the link, once: the
+// words are hidden from browse mode, where the description already carries
+// them. A list that does not group its rows under those words puts the pill on
+// the meta line for the eye, hidden from assistive technology for the same
+// reason.
+export function waitingMarks(id) {
+  const said = `waiting-${esc(id)}`;
+  return {
+    described: ` aria-describedby="${said}"`,
+    pill: `<span class="pill pill-status" aria-hidden="true"><span class="pill-dot"></span>Waiting on you</span>`,
+    dot: `<span class="dot-action" aria-hidden="true"></span><span class="sr-only" id="${said}" aria-hidden="true">Waiting on you</span>`,
+  };
+}
+
 export const when = (ts) => timeHTML(ts);
 
 // The answers a question's asker suggested, as the hub stored them. Anything
