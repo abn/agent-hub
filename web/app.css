@@ -1065,9 +1065,13 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 }
 .drawer-backdrop[hidden] { display: none; }
 .comments-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 31;
+  /* The drawer's script writes these from the visual viewport. */
+  --keyboard-inset: 0px; --visible-height: 100dvh;
+  position: fixed; top: 0; right: 0; bottom: var(--keyboard-inset); z-index: 31;
   width: min(420px, 100%);
   display: flex; flex-direction: column;
+  /* Its foot is a composer, so it clears a phone's home indicator. */
+  padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box;
   background: var(--surface); color: var(--ink);
   border-left: 1px solid var(--line); box-shadow: var(--shadow-2);
 }
@@ -1094,9 +1098,10 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
 .comment.done .comment-body { text-decoration: line-through; color: var(--ink-3); }
 .comment-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 .comments-compose {
-  display: block;
+  display: block; flex: none;
   padding: var(--s-3) var(--s-4); border-top: 1px solid var(--line);
 }
+.comments-compose .composer { margin: 0; }
 /* An author display beats the browser's own [hidden] rule, so a form the
    script hides stays on screen. The fourth control in this stylesheet to need
    saying out loud. */
@@ -1289,55 +1294,71 @@ html.has-dialog { overflow: hidden; }
   .toast-region { bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px)); }
 }
 
-/* component: thread composer. The reply box, in place of a prompt window. */
-.composer { margin: var(--s-3) 0 0; }
+/* component: composer. The one control a reply or a comment is written in.
+   The field is a form field at the pointer's form size, one line at rest, and
+   the send control sits beside it on the field's last line: --ctl on a fine
+   pointer and --tap on a coarse one, the same box a finger or a cursor meets
+   anywhere else. The script sets only the field's row count, so the lengths
+   here are all of its geometry. */
+.composer {
+  --composer-line: 20px;
+  max-width: 640px;
+  margin: var(--s-3) 0 0;
+}
 /* Opened under the row it answers, it takes the row's own gutters. */
 .row + .composer { margin: 0; padding: 0 var(--s-4) var(--s-3); }
-.composer-row {
-  display: flex; align-items: flex-end; gap: var(--s-2);
-  padding: 0 var(--s-1) 0 14px;
-  border: 1px solid var(--line-strong); border-radius: var(--r-2);
-  background: var(--surface);
-}
-/* The ring is drawn around the whole composer row, so nothing inside it draws
-   a second one. The transparent outline is what a browser in forced colours has
-   left to colour in, where the row's shadow is gone. */
-.composer-row:focus-within {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-  box-shadow: var(--focus);
-}
+/* Opened from a stage's action line, it takes the line's place under it. */
+.feed-stage-actions + .composer { margin: var(--s-3) 0 0; }
+.composer-row { display: flex; align-items: flex-end; gap: var(--s-2); }
+/* One line is the line plus the padding that makes the form size, so a field
+   at rest is exactly --ctl-form tall and each line it grows adds one line. */
 .composer-field {
-  flex: 1; min-height: 28px; max-height: 40vh;
-  padding: var(--s-2) 0; border: 0; border-radius: 0; background: transparent;
-  font-size: var(--t-15); line-height: 28px; resize: none; overflow-y: auto;
+  flex: 1; min-width: 0; box-sizing: border-box;
+  min-height: var(--ctl-form);
+  padding-block: calc((var(--ctl-form) - var(--composer-line) - 2px) / 2);
+  padding-inline: var(--s-3);
+  font-size: var(--t-15); line-height: var(--composer-line);
+  resize: none; overflow-y: auto; overflow-wrap: anywhere;
 }
 .composer-field::placeholder { color: var(--ink-3); }
-.composer-row .composer-field:focus-visible,
-.composer-row .composer-send:focus-visible {
-  outline: 2px solid transparent; outline-offset: 2px; box-shadow: none;
-}
+/* Bottom-aligned with the field, and lifted by half the difference between
+   the two boxes, so its centre is the centre of the field's last line however
+   many lines the field has grown to. */
 .composer-send {
-  align-self: center; flex: none; position: relative;
-  width: 36px; height: 36px; min-height: 36px; padding: 0;
+  flex: none; position: relative;
+  width: var(--ctl); height: var(--ctl); min-height: var(--ctl);
+  margin-bottom: calc((var(--ctl-form) - var(--ctl)) / 2);
+  padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 0; border-radius: 8px;
-  background: var(--ink); color: var(--ink-inverse);
+  background: var(--ink); color: var(--ink-inverse); border-color: var(--ink);
+}
+/* Nothing to send yet. It stays in the tab order, so the reason the hint gives
+   is read with it, and it is drawn the way every disabled button is. */
+.composer-send[aria-disabled="true"], .composer-send:disabled {
+  background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed;
+}
+.composer-send[aria-disabled="true"]:active { transform: none; }
+.composer-hint {
+  margin: var(--s-1) 0 0; min-height: var(--composer-line);
+  font-size: var(--t-12); line-height: var(--composer-line); color: var(--ink-3);
 }
 @media (pointer: coarse) {
-  .composer-send::after { content: ""; position: absolute; inset: -4px; }
+  .composer-field {
+    min-height: var(--tap);
+    padding-block: calc((var(--tap) - var(--composer-line) - 2px) / 2);
+  }
+  .composer-send { width: var(--tap); height: var(--tap); min-height: var(--tap); margin-bottom: 0; }
 }
 /* The answers the asker suggested, above the field. Each is an ordinary
-   secondary button at the full 44px, wrapping onto lines of its own rather
-   than running past a phone's edge, and its words are the whole answer. The
-   composer keeps its own sizes until it is redrawn, so the answer holds --tap
-   at either pointer. */
+   secondary button at the pointer's button size, wrapping onto lines of its
+   own rather than running past a phone's edge, and its words are the whole
+   answer. */
 .composer-options { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0 0 var(--s-2); }
 .composer-option {
-  min-height: var(--tap); max-width: 100%; padding: var(--s-2) var(--s-4);
+  max-width: 100%; padding: var(--s-2) var(--s-4);
   white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.3;
 }
-.composer-error { margin: var(--s-2) 0 0; color: var(--danger); font-size: var(--t-13); }
+.composer-error { margin: var(--s-1) 0 0; color: var(--danger); font-size: var(--t-13); }
 .composer-error[hidden] { display: none; }
 /* component: relative time */
 /* A timestamp is short on the row and whole on press. The compact form is the
@@ -4758,9 +4779,12 @@ a.session-back {
 .hub-comment-sheet {
   position: fixed;
   inset-inline: 0;
-  bottom: 0;
+  bottom: var(--keyboard-inset);
   top: auto;
   max-height: 85vh;
+  /* The visible height, which the drawer reads from the visual viewport, so a
+     sheet opened over a phone's keyboard sits on it and fits above it. */
+  max-height: calc(var(--visible-height) * 0.85);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
   border-top: 1px solid var(--line);
@@ -4880,130 +4904,16 @@ a.session-back {
   color: var(--ink-2);
 }
 
-/* component: composer. One box for both the new comment and the reply. The
-   send control sits inside the field, which is where a phone keyboard puts
-   it and what keeps the box one object rather than a field and a button that
-   happen to be adjacent. */
+/* A thread's reply composer is the foot of the sheet, outside the thread:
+   the thread scrolls above it and the composer stays where the thumb is. */
+.comments-foot { flex: none; }
 .hub-sheet-composer {
-  padding: 10px 12px;
+  padding: var(--s-3) var(--s-4);
   border-top: 1px solid var(--line);
   background: var(--surface);
   flex: none;
 }
-
-.hub-composer-field {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  border: 1px solid var(--line-strong);
-  /* The container radius. This read `--r-3`, a token no stylesheet declares, so
-     the field computed to square corners instead. */
-  border-radius: var(--r-2);
-  background: var(--bg);
-  padding: 4px;
-  box-sizing: border-box;
-}
-
-.hub-composer-field textarea {
-  flex: 1;
-  /* The field's resting height is this floor plus the field's own inset, and it
-     has to clear the coarse send control's 44px hit area. */
-  min-height: 42px;
-  max-height: 132px;
-  /* Room for the send control, which is inset into the right of this box. */
-  padding: 10px 48px 10px 10px;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--t-15);
-  line-height: 1.4;
-  resize: none;
-  overflow-y: hidden;
-}
-
-/* The field's own shadow is the ring here: the wrapper below only takes the
-   accent border, so there is nothing to double. The transparent outline is what
-   a browser in forced colours has left to colour in, where the shadow is gone. */
-.hub-composer-field textarea:focus-visible {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-}
-
-.hub-composer-field:focus-within {
-  border-color: var(--accent);
-}
-
-.hub-composer-label {
-  display: block;
-  font-size: var(--t-13);
-  color: var(--ink-2);
-  margin-bottom: 6px;
-}
-
-.hub-sheet-composer .hub-composer-label {
-  /* The reply box says Reply in its placeholder; a heading above it would be
-     the same word twice. Still read aloud. */
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* The send control is the design's 30px circle inside the field, 36px under a
-   coarse pointer, centred vertically and inset 8px from the right. The global
-   button floor is 44px, so the drawn circle overrides it and the area that
-   answers to a tap grows back to 44 under a coarse pointer, the two-step any
-   control drawn under the floor uses to reach it. */
-.hub-composer-send,
-.hub-sheet-send {
-  position: absolute;
-  right: 8px;
-  /* Top and bottom pinned with auto margins centres the circle in the field
-     however tall the field has grown, without a transform the active state
-     would clobber. */
-  top: 0;
-  bottom: 0;
-  margin-block: auto;
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--ink-inverse);
-  cursor: pointer;
-  flex: none;
-}
-
-@media (pointer: coarse) {
-  .hub-composer-send,
-  .hub-sheet-send {
-    width: 36px;
-    height: 36px;
-    min-height: 36px;
-  }
-  .hub-composer-send::after,
-  .hub-sheet-send::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
-  }
-}
-
-.hub-composer-send:disabled,
-.hub-sheet-send:disabled {
-  background: var(--surface-2);
-  color: var(--ink-3);
-  cursor: default;
-}
+.hub-sheet-composer .composer { margin: 0; }
 
 .hub-sheet-footer {
   display: flex;

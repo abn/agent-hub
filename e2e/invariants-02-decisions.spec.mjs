@@ -217,11 +217,14 @@ test.describe("one decision", () => {
     await goto(page, `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "Inbox");
     const group = page.getByRole("group", { name: "Quick answers" });
     await expect(group).toBeVisible();
+    // A quick answer is a button at the pointer's size: the form size on a
+    // fine pointer and the target on a coarse one.
+    const floor = (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) ? 44 : 36;
     for (const option of hub.fixture.questionOptions) {
       const pick = group.getByRole("button", { name: option, exact: true });
       await expect(pick).toBeVisible();
       const box = await pick.boundingBox();
-      expect(box.height, `the ${option} answer is under the 44px target`).toBeGreaterThanOrEqual(44);
+      expect(box.height, `the ${option} answer is under the ${floor}px button size`).toBeGreaterThanOrEqual(floor);
     }
     await expect(page.getByRole("textbox", { name: "Your answer" }), "quick answers took the composer's place").toBeVisible();
     const first = group.getByRole("button", { name: hub.fixture.questionOptions[0], exact: true });

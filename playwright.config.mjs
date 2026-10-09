@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -115,6 +115,19 @@ export default defineConfig({
       name: "rows-phone",
       use: { viewport: WIDTHS.phone, hasTouch: true },
       testMatch: /index-rows\.spec\.mjs/,
+    },
+    // The composer is drawn by the pointer, so it is held at a fine pointer on
+    // the desktop and a coarse one on the phone, each on its own hub because
+    // its sends are refused at the network and its comments seeded.
+    {
+      name: "composer-desktop",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /composer\.spec\.mjs/,
+    },
+    {
+      name: "composer-touch",
+      use: { viewport: WIDTHS.phone, hasTouch: true },
+      testMatch: /composer\.spec\.mjs/,
     },
     {
       name: "prefix",

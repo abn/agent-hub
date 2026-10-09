@@ -1231,12 +1231,11 @@ fn app_drawer_wiring_for_comments() {
         "comments-drawer",
         "comments-toggle",
         "comments-badge",
-        "comment-body",
         "comments-compose",
         "drawer-error",
         "Comments",
         "No comments yet. Be the first to leave one.",
-        "Write a comment before posting.",
+        "Write a comment to post it.",
         "Pinned",
         "Quoted",
         "/comments",
@@ -2889,10 +2888,6 @@ fn the_project_wiki_segment_is_wired() {
     assert!(
         WIKI_JS.contains("kb/promote"),
         "a session brain entry can be saved to the wiki"
-    );
-    assert!(
-        WIKI_JS.contains("kb/comments") && WIKI_JS.contains("wiki-comment-add"),
-        "a page carries a comment thread"
     );
     assert!(
         WIKI_JS.contains("wiki-history-earlier") && WIKI_JS.contains("all loaded"),

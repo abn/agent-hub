@@ -20,7 +20,6 @@ import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
 import { toggleKind } from "./feed.mjs";
 import {
-  wikiCommentAdd,
   wikiCommentResolve,
   wikiForgetHistory,
   wikiHistoryEarlier,
@@ -131,7 +130,6 @@ main.addEventListener("click", (event) => {
   if (action === "wiki-new") wikiNew(button);
   if (action === "wiki-save") acted(button, wikiSave(button));
   if (action === "wiki-review") acted(button, wikiReview(button));
-  if (action === "wiki-comment-add") wikiCommentAdd(button);
   if (action === "wiki-comment-resolve") wikiCommentResolve(button);
   if (action === "wiki-history-earlier") wikiHistoryEarlier(button);
   if (action === "wiki-versions-earlier") wikiVersionsEarlier(button);

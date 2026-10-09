@@ -629,7 +629,10 @@ const sendAnswer = (id, body) =>
 // Pressing Reply again on an open composer moves back into it rather than
 // stacking a second one.
 export async function answer(id, button) {
-  const row = button.closest(".inbox-item") || button.closest(".row") || button;
+  // A stage's action line is the row there: the composer goes under the line,
+  // not into it beside the button.
+  const row =
+    button.closest(".inbox-item") || button.closest(".row") || button.closest(".feed-stage-actions") || button;
   const open = row.nextElementSibling;
   if (open && open.classList.contains("composer")) {
     open.querySelector(".composer-field").focus();

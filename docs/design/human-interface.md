@@ -310,6 +310,15 @@ rather than repeating the refusal.
   opened it.
 - A question is answered in a composer under the item it belongs to, not in a
   browser prompt. A refused send keeps what was typed and says why in place.
+  The same composer is every place the reader writes: a question's card and
+  the row a Reply opens it under, an artifact's comments and replies, and a
+  wiki page's comments. Its field grows a line at a time to eight lines and
+  then scrolls, and its send control sits beside the field on the field's last
+  line, as an icon with a name. While the field is empty the send control is
+  dimmed and the line under the field says why. In every composer Enter breaks
+  the line and Ctrl+Enter, or Cmd+Enter on an Apple device, sends; under a
+  fine pointer the line under the field names the key once there is text to
+  send.
 - What an action did is reported in a toast, which is a live region so it is
   announced. A toast that carries an undo takes focus, because the undo is the
   only way back and the control that started the action has gone. One toast is
@@ -352,7 +361,10 @@ control is 32px on a desktop. On a phone a button or a field is drawn at 44px,
 and a smaller chrome control (a chip, a glyph, a segment, the filter field)
 keeps its drawn size and answers to a 44px hit area around its centre, in both
 axes. The hit area is there wherever a touch screen is, even one beside a mouse,
-and a link drawn as a button is held to the same 44px.
+and a link drawn as a button is held to the same 44px. A composer's field is a
+form field, 36px at rest under a fine pointer and 44px under a coarse one, and
+its send control is 32px under a fine pointer and 44px under a coarse one, its
+own box under a finger.
 
 The focus ring is the designed shadow over a transparent outline, because a
 browser in forced colours drops shadows and recolours outlines, and a ring that
@@ -377,7 +389,11 @@ host: the title line shows at least 16 characters of the check's subject at the
 300px default index and 28 on a phone, the title is described as waiting, the
 feed's pill and a snoozed inbox row's pill sit below the title on the meta
 line, a long agent name never hides the time, and the row matches its
-screenshot baseline. An optional headless axe audit renders the
+screenshot baseline. A composer check opens every composer at both pointers
+and holds its sizes, the send control's place on the last line, the growth cap,
+the keyboard rule, the empty state and its reason, and an axe pass in both
+themes, and compares the composer with a screenshot baseline at both widths
+and themes. An optional headless axe audit renders the
 eight screens in both themes and reports DOM, ARIA, label, heading, and
 computed-contrast problems. The last two need Playwright, a browser, and an axe
 build, and skip cleanly when they are absent.

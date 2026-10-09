@@ -10,6 +10,7 @@
 // literal data, no trust ladder, no rename or move in this version.
 
 import { api } from "./api.mjs";
+import { composer } from "./composer.mjs";
 import { confirmAction, slugify } from "./dialog.mjs";
 import { diffStat, hunks, lineDiff, onlyFinalNewline } from "./diff.mjs";
 import { esc } from "./dom.mjs";
@@ -75,11 +76,7 @@ async function commentsSection(id, path) {
   return `<section class="wiki-comments" style="padding:16px;border-top:1px solid var(--line)">
     <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:8px">COMMENTS · ${open.length}</div>
     ${open.length ? open.map((comment) => thread(comment, false)).join("") : `<p class="empty" style="margin:0;font-size:13px">No comments yet.</p>`}
-    <div class="wiki-comment-composer" style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-      <label style="display:flex;flex-direction:column;gap:6px"><span class="sr-only">Comment</span>
-        <textarea data-wiki-comment-body rows="3" placeholder="Add a comment" style="box-sizing:border-box;padding:10px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:400 14px/1.45 var(--font-sans);resize:vertical"></textarea></label>
-      <button type="button" class="primary" data-action="wiki-comment-add" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" style="align-self:flex-start;height:34px;padding:0 14px">Comment</button>
-    </div>
+    <div class="wiki-comment-composer" data-id="${esc(id)}" data-path="${esc(displayPath(path))}"></div>
     ${
       done.length
         ? `<details style="margin-top:12px"><summary class="mono" style="font-size:12px;color:var(--ink-3);cursor:pointer">Resolved · ${done.length}</summary>${done.map((comment) => thread(comment, true)).join("")}</details>`
@@ -826,24 +823,29 @@ export async function wikiReview(button) {
   }
 }
 
-// Post a comment on the page. The body is the composer's text; an empty one
-// sends nothing.
-export async function wikiCommentAdd(button) {
-  const id = button.dataset.id || "";
-  const path = button.dataset.path || "";
-  const body = (document.querySelector("[data-wiki-comment-body]")?.value || "").trim();
-  if (!body) return;
-  button.disabled = true;
-  try {
-    await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/comments`, {
-      method: "POST",
-      body: JSON.stringify({ path, body }),
-    });
-    render();
-  } catch (error) {
-    button.disabled = false;
-    toast(error.message);
-  }
+// Mount the page's comment composer once the stage is painted. It is the one
+// composer every screen uses; a post re-renders the page so the new thread is
+// listed above it.
+export function wireWikiComments(root) {
+  const slot = root.querySelector(".wiki-comment-composer");
+  if (!slot || slot.firstChild) return;
+  const { id = "", path = "" } = slot.dataset;
+  const made = composer({
+    label: "Comment",
+    placeholder: "Add a comment",
+    action: "Post",
+    empty: "Write a comment to post it.",
+    // The hub refuses a page comment over 2000 characters.
+    maxLength: 2000,
+    send: async (body) => {
+      await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/comments`, {
+        method: "POST",
+        body: JSON.stringify({ path, body }),
+      });
+      render();
+    },
+  });
+  slot.appendChild(made.element);
 }
 
 // Resolve a thread. Resolved threads fold under a count at the foot.
