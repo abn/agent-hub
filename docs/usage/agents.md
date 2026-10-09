@@ -102,24 +102,38 @@ agent writes is the brain it reads back after a compaction or a restart. Run
 this sequence at session start:
 
 ```
+session_brief(project_id: "homelab")
 session_start(project_id: "homelab", session_name: "nightly")
-feed_read(project_id: "homelab")
 brain_get(path: "/fs/RECOVERY.md", store: "session")
 brain_get(path: "/fs/index.md", store: "project")
 ```
 
 The four calls do four things:
 
-1. `session_start` registers or resumes the session and returns its
+1. `session_brief` says, in one compact read, what the agent would otherwise
+   gather from four tools: the answers and decisions on its own questions and
+   approvals and the project's other events since its own last look, ranked
+   and capped with a count of the rest, its previous session in the project
+   with the handoff note that session left, and the knowledge base
+   pages past their `stale_after`. It moves no feed cursor, and the answers
+   it lists count as delivered, so the notification trailer does not repeat
+   them. Call it before `session_start`: after a resume, the resumed session
+   is the one the connection works, so the brief would name the session
+   before it instead.
+2. `session_start` registers or resumes the session and returns its
    `session_id`, the namespaces to address the brain with, `recovery_path`,
    and `handoff`, the note the previous owner left when it ended the session.
    The notes are project and session name, never a file path.
-2. `feed_read` with no `since` returns the project's events since this agent's
-   own last look at it. See [the cursor](#the-feed-cursor) below.
 3. `brain_get` on `recovery_path` reads the session's own recovery document,
    the working note that orients a resumed agent.
 4. `brain_get` with `store: "project"` reads the project knowledge base index,
    the durable page every agent on the project shares.
+
+When the brief's events are not enough, `feed_read` with no `since` reads the
+same events in full and advances the cursor. See
+[the cursor](#the-feed-cursor) below and
+[the session brief](../architecture/agent-surface.md#the-session-brief) for
+each section's caps and ranking.
 
 An agent that resumes after its predecessor stopped reads what that
 predecessor left in two places: `handoff` on the `session_start` result is the

@@ -626,6 +626,24 @@ pub(crate) async fn needs_review_total(state: &AppState, project_id: &str) -> i6
     }
 }
 
+/// The page rows of a project's knowledge base whose `stale_after` has passed,
+/// from the same memo the stats read. Empty when the project has no knowledge
+/// base. The agent's session brief reads this.
+pub(crate) async fn stale_pages(state: &AppState, project_id: &str) -> crate::Result<Vec<Value>> {
+    let unavailable = |problem: Problem| Error::Unavailable(problem.detail);
+    let Some(brain) = existing(state, project_id).await.map_err(unavailable)? else {
+        return Ok(Vec::new());
+    };
+    let memo = get_or_compute_kb(state, project_id, &brain, false)
+        .await
+        .map_err(unavailable)?;
+    Ok(memo
+        .meta_pages
+        .into_iter()
+        .filter(|page| page["stale"].as_bool() == Some(true))
+        .collect())
+}
+
 /// `GET /api/v1/projects/{id}/kb/stats`
 pub async fn stats(
     State(state): State<AppState>,

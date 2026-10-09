@@ -765,6 +765,95 @@ pub async fn unseen_counts(db: &Database) -> Result<Vec<ProjectUnseen>> {
     Ok(counts)
 }
 
+/// Which of a project's events above a cursor a session brief reads.
+///
+/// The audit trail is never among them.
+#[derive(Debug, Clone, Copy)]
+pub enum BriefFilter<'a> {
+    /// Every event.
+    All,
+    /// Items still waiting on someone: the inbox status is `action` or
+    /// `waiting`.
+    Open,
+    /// Answers and decisions on the questions and approvals this actor
+    /// posted.
+    AnswersTo(&'a str),
+}
+
+/// The clause and parameters a brief read runs on, numbered from `?1`.
+fn brief_clause(
+    project_id: &str,
+    since: Option<&str>,
+    filter: BriefFilter<'_>,
+) -> (String, Vec<Value>) {
+    let mut sql = String::from(
+        "FROM events e LEFT JOIN inbox i ON i.event_id = e.id
+         WHERE e.project_id = ?1 AND e.id > ?2 AND e.kind <> 'system'",
+    );
+    let mut params = vec![
+        Value::Text(project_id.to_string()),
+        Value::Text(since.unwrap_or_default().to_string()),
+    ];
+    match filter {
+        BriefFilter::All => {}
+        BriefFilter::Open => sql.push_str(" AND i.status IN ('action', 'waiting')"),
+        BriefFilter::AnswersTo(actor) => {
+            params.push(Value::Text(actor.to_string()));
+            sql.push_str(
+                " AND e.kind = 'answer' AND EXISTS (
+                     SELECT 1 FROM events q WHERE q.id = e.thread_id AND q.actor = ?3
+                       AND q.kind IN ('question', 'approval'))",
+            );
+        }
+    }
+    (sql, params)
+}
+
+/// The newest of one project's events above `since` that `filter` keeps, at
+/// most `limit`. With no `since` every event of the project qualifies.
+pub async fn brief_events(
+    db: &Database,
+    project_id: &str,
+    since: Option<&str>,
+    filter: BriefFilter<'_>,
+    limit: i64,
+) -> Result<Vec<Event>> {
+    let conn = super::connect(db)?;
+    let (clause, mut params) = brief_clause(project_id, since, filter);
+    params.push(Value::Integer(limit.clamp(1, FEED_LIMIT_MAX)));
+    let sql = format!(
+        "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id,
+                e.needs_action, e.created_at, i.status
+         {clause} ORDER BY e.id DESC LIMIT ?{}",
+        params.len()
+    );
+    let mut rows = conn.query(&sql, params).await.map_err(engine)?;
+    let mut events = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        events.push(event_from_row(&row)?);
+    }
+    Ok(events)
+}
+
+/// How many of the same events there are, counting no further than
+/// `count_max`.
+pub async fn brief_count(
+    db: &Database,
+    project_id: &str,
+    since: Option<&str>,
+    filter: BriefFilter<'_>,
+    count_max: i64,
+) -> Result<i64> {
+    let conn = super::connect(db)?;
+    let (clause, mut params) = brief_clause(project_id, since, filter);
+    params.push(Value::Integer(count_max.max(1)));
+    let sql = format!(
+        "SELECT COUNT(*) FROM (SELECT 1 {clause} LIMIT ?{})",
+        params.len()
+    );
+    count_on(&conn, &sql, params).await
+}
+
 /// How many events one session produced.
 ///
 /// One count over `events_session`, so a session detail screen shows a real

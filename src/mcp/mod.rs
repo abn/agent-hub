@@ -34,6 +34,7 @@ use crate::principal::Principal;
 mod artifacts;
 mod attention;
 mod brain;
+mod brief;
 mod comments;
 mod feed;
 mod identity;
@@ -70,6 +71,7 @@ impl HubServer {
             tool_router: Self::tool_router()
                 + Self::feed_router()
                 + Self::brain_router()
+                + Self::brief_router()
                 + Self::inbox_router()
                 + Self::artifacts_router()
                 + Self::comments_router()
@@ -361,7 +363,7 @@ impl ServerHandler for HubServer {
         let principal = self.principal(&context);
         let tcc = ToolCallContext::new(self, request, context);
         let response = self.tool_router.call(tcc).await?;
-        Ok(merge_trailer(&self.state, &principal, response).await)
+        Ok(merge_trailer(&self.state, &principal, name.as_ref(), response).await)
     }
 
     /// Advertise the resource surface alongside the tools.
@@ -467,9 +469,13 @@ impl ServerHandler for HubServer {
 /// trailer merges under a `notifications` key and the text view is rebuilt
 /// from the merged object, so both views stay identical. Anything else passes
 /// through untouched, and the trailer never fails the call it rides on.
+///
+/// A session brief already carries the answers and decisions it lists, so the
+/// trailer on it delivers those without repeating them.
 async fn merge_trailer(
     state: &AppState,
     principal: &Principal,
+    tool: &str,
     response: CallToolResponse,
 ) -> CallToolResponse {
     let CallToolResponse::Complete(mut result) = response else {
@@ -485,9 +491,26 @@ async fn merge_trailer(
     else {
         return CallToolResponse::Complete(result);
     };
-    let Some(trailer) = notifications::trailer(state, principal).await else {
+    let Some(mut trailer) = notifications::trailer(state, principal).await else {
         return CallToolResponse::Complete(result);
     };
+    if tool == "session_brief" {
+        let shown: Vec<serde_json::Value> = body
+            .get("answers")
+            .and_then(|answers| answers.get("items"))
+            .and_then(serde_json::Value::as_array)
+            .map(|items| items.iter().map(|item| item["id"].clone()).collect())
+            .unwrap_or_default();
+        if let Some(pending) = trailer
+            .get_mut("pending")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            pending.retain(|item| item["source"] != "attention" || !shown.contains(&item["id"]));
+            if pending.is_empty() {
+                return CallToolResponse::Complete(result);
+            }
+        }
+    }
     body.insert("notifications".to_string(), trailer);
     let merged = serde_json::Value::Object(body.clone());
     result.content = vec![ContentBlock::text(merged.to_string())];

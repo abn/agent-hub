@@ -21,6 +21,26 @@ software release notes and the repository changelog.
   and its give-up rule, and narrows the busy handler to contention from outside
   the queue.
 
+### An agent briefs itself on a project in one call
+
+* **Change**: a new MCP tool, `session_brief(project_id)`, returns in one
+  result what an agent starting or resuming work would otherwise gather from
+  `inbox_read`, `session_list`, `feed_read` and the knowledge base: since its
+  feed cursor, answers and decisions on its own items and the project's other
+  events, open items first wherever they sit; its previous session in the
+  project with the handoff note it left; and knowledge base pages past
+  `stale_after`. Each section is capped and counts the rest, with
+  `more_capped` when the count stopped at 10,000, and every text but the
+  handoff note is cut to 200 characters. It needs read access to the project
+  and moves no feed cursor; the answers it lists count as delivered, so the
+  notification trailer on it leaves them out. It is meant to be called before
+  `session_start`.
+* **Update**: the [agent surface](architecture/agent-surface.md) lists the tool
+  and describes each section, its cap and its ranking, and the bootstrap
+  convention starts with it; [using the hub as a brain](usage/agents.md) puts
+  it first in the session start sequence; the installable skill does the same
+  and names its shape.
+
 ## 2026-10-08
 
 ### Releases carry standalone binaries

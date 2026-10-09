@@ -5,6 +5,7 @@
 | `session_start` | Start or resume your own session by project and session name; the agent is the authenticated identity. Resuming the same name reuses your brain, and the result carries the handoff note the previous owner left. With `from`, pick up another agent's session: the hub adopts it or forks it. |
 | `session_end` | Mark the session ended, with an optional `handoff` note for whoever picks the work up. Only the owner may end a session. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
+| `session_brief` | Brief yourself on a project in one call: since your feed cursor, answers and decisions on your own items and the other events, ranked and capped with a count of the rest; your previous session with its handoff; and knowledge base pages past `stale_after`. Call it before `session_start`. Moves no feed cursor, and the answers it lists count as delivered. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write takes one to name your own session, and without one writes the connection's active session. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from your own durable server-side cursor for the project and advances it to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
@@ -37,6 +38,15 @@ session_list(project_id?, status?, agent?, limit?)
       -> sessions: [{session_id, project_id, session_name, agent, status,
                      created_at, last_activity, handoff, handoff_truncated,
                      forked_from, adopted_from, brain_bytes}], truncated
+session_brief(project_id)
+      -> {project_id, agent, since: {event_id, basis},
+          answers: {items: [{id, answer_id, kind, outcome, summary, text, by, at,
+                             expired?}], more, more_capped?},
+          previous_session: {session_id, session_name, status, last_activity,
+                             handoff, recovery_path} | null,
+          events: {items: [{id, kind, actor, summary, at, thread_id?, open?}], more,
+                   more_capped?},
+          stale_pages: {items: [{path, title, stale_after}], more}}
 from := session
 brain_get(path, session?, store?, project_id?)
 brain_put(path, content, store, session?, project_id?, if_version?)
