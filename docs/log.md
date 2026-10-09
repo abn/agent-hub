@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### Styles live in the stylesheet
+
+* **Update**: [Human surface](architecture/human-surface.md) states that the
+  client's sizes, spacing, type and colours are classes in the stylesheet, so
+  the token, type floor and control-size gates read all of them. A `style`
+  attribute carries only a runtime value: a width or flex share computed from
+  data, a frame's reported height, a custom property set from data or layout,
+  a menu's position, a gesture's transform and a state-driven `display`
+  toggle.
+* **Update**: a browser check walks every screen the router registers and a
+  listed set of dialogs and states, at both widths and under a coarse pointer,
+  and refuses an element whose `style` attribute sets a box size, spacing,
+  type, colour, fill, border, shadow, outline or an unnamed custom property.
+  Nothing on screen changes.
+
 ### One composer for every reply and comment
 
 * **Update**: [Human interface](design/human-interface.md) describes the one

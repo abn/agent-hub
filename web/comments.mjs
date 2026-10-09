@@ -407,7 +407,7 @@ function renderListView() {
     resolvedBar.setAttribute("aria-expanded", String(commentsState.resolvedExpanded));
     resolvedBar.innerHTML = `
       ${glyphSvg("resolve", { size: 16 })}
-      <span class="hub-resolved-title grow" style="text-align:left">${resolvedComments.length} resolved</span>
+      <span class="hub-resolved-title grow">${resolvedComments.length} resolved</span>
       ${glyphSvg("chevronDown", { size: 16 })}
     `;
     resolvedBar.addEventListener("click", () => {

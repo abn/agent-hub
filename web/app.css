@@ -243,6 +243,11 @@ button:not([disabled]):not(.primary):not(.action):hover, .chip:not([aria-pressed
   background: var(--surface-2);
 }
 button:not([disabled]):active, .chip:active { transform: translateY(1px); }
+/* The outline button: a hairline in the strong line tone around ink, at the
+   button radius. Its size, label type and fill are the component's. */
+.btn-outline {
+  border: 1px solid var(--line-strong); border-radius: var(--r-1); color: var(--ink); cursor: pointer;
+}
 /* Inline in a row the drawn box is --ctl at either pointer, and a coarse
    pointer gets the hit area below. A pane header and a control row hold their
    controls at --ctl on a fine pointer, so no control is taller than its band. */
@@ -1530,6 +1535,10 @@ button.empty-link {
 .storage-seg[data-kind="sessions"], .storage-swatch[data-kind="sessions"] { background: var(--k-session); }
 .storage-seg[data-kind="artifacts"], .storage-swatch[data-kind="artifacts"] { background: var(--k-artifact); }
 .storage-seg[data-kind="knowledge"], .storage-swatch[data-kind="knowledge"] { background: var(--k-knowledge); }
+.storage-bar-seg[data-kind="events"] { background: var(--k-signal); }
+.storage-bar-seg[data-kind="sessions"] { background: var(--k-session); }
+.storage-bar-seg[data-kind="artifacts"] { background: var(--k-artifact); }
+.storage-bar-seg[data-kind="knowledge"] { background: var(--k-knowledge); }
 .storage-legend {
   display: flex; flex-wrap: wrap; gap: var(--s-1) 14px; margin: 0; padding: 0;
   list-style: none; font-size: var(--t-12); color: var(--ink-2);
@@ -1579,6 +1588,7 @@ button.empty-link {
   flex: none;
   white-space: nowrap;
   height: 32px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1590,9 +1600,7 @@ button.empty-link {
   font: 600 var(--t-13)/1 var(--font-sans);
   cursor: pointer;
 }
-.agents-add-btn:hover {
-  background: var(--surface-2);
-}
+.agents-add-btn[aria-pressed="true"] { background: var(--surface-2); }
 .agents-add-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus);
@@ -7106,10 +7114,6 @@ dialog.dialog-project-delete {
 @media (any-pointer: coarse) {
   .settings-glyph-seg, .settings-theme-btn { width: var(--tap); min-width: var(--tap); }
 }
-.agents-add-btn {
-  height: 32px;
-  min-height: 32px;
-}
 
 /* Search in the one shell: the results are the index, the preview the stage. */
 .shell-head .search-title { margin: 0; font-size: var(--t-15); font-weight: 600; }
@@ -7775,4 +7779,1106 @@ dialog.dialog-project-delete {
   border-block: 1px solid var(--line);
   font-size: var(--t-12);
   color: var(--ink-3);
+}
+/* Agents and tokens. */
+.row.agent-index-row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.row.agent-index-row[aria-current="true"] { background: var(--accent-bg); }
+.agent-index-meta { font-size: 12px; color: var(--ink-3); }
+.row.agent-index-row[aria-current="true"] .agent-index-meta { color: var(--ink-2); }
+.agents-list > .row:first-child { border-top: 1px solid var(--line); }
+.row.agent-project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+.agent-detail-label + .agent-project-row { border-top: 1px solid var(--line); }
+.row.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 10px 8px 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.agent-create-error { color: var(--danger); font-size: 12px; font-weight: 500; }
+.access-add-form { padding: 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.grant-picker-field { height: 36px; }
+.access-card-lead { margin-top: var(--s-3); margin-bottom: var(--s-1); }
+.shell-head.agents-index-head {
+  flex: none;
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.agents-index-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+}
+.shell-controls.agents-index-controls {
+  flex: none;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.agents-count { flex: 1; min-width: 0; }
+.row.agents-admin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+.agents-admin-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agents-admin-title { font-size: 14px; font-weight: 600; }
+.agents-admin-sub, .agent-create-hint { font-size: 12px; color: var(--ink-3); }
+.agents-env { font-family: var(--font-mono); }
+.agent-index-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.agent-index-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-index {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.agents-section-label {
+  padding: 16px 16px 8px;
+  font: 600 12px/1 var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.agents-empty-note {
+  padding: 16px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.shell-head.agent-stage-head {
+  flex: none;
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.agent-stage-title, .agents-list-admin-title { font-size: 15px; font-weight: 600; }
+.shell-controls.agent-create-controls {
+  flex: none;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.agent-create-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 0;
+}
+.agent-create-column {
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.agent-create-stage-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.agent-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.agent-create-label, .access-field-label { font-size: 13px; font-weight: 600; }
+input.agent-create-input {
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 14px/1 var(--font-sans);
+}
+input.agent-create-id { font-family: var(--font-mono); }
+.agent-create-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+button.agent-create-submit {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-1);
+  border: 0;
+  background: var(--ink);
+  color: var(--ink-inverse);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+button.agent-create-cancel,
+button.access-token-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+.agent-stage-meta { font: 500 12px/1 var(--font-mono); color: var(--ink-3); }
+.shell-controls.agent-detail-controls {
+  flex: none;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.agent-token-note {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+button.agent-reissue-btn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.agent-project-lock {
+  flex: none;
+  width: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+.agent-project-lead { flex: none; width: 24px; }
+.agent-project-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-row-menu {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+}
+.agent-projects-empty {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-3);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+button.agent-grant-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--accent);
+  font: 500 14px/1 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.agent-grant-glyph {
+  flex: none;
+  width: 24px;
+  display: grid;
+  place-items: center;
+}
+.agent-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 24px;
+}
+.agent-detail-column { max-width: 640px; }
+.agent-detail-label {
+  padding: 20px 0 8px;
+  font: 600 12px/1 var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.agent-detail-gap { height: 24px; }
+button.agent-revoke-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 14px/1 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+.shell-head.agent-empty-head {
+  flex: none;
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.shell-controls.agent-empty-controls {
+  flex: none;
+  height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.agent-empty-meta { font-size: 13px; color: var(--ink-3); }
+.agent-empty-pad { padding: 24px; }
+.shell-controls.access-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: 44px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.row.access-grant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+button.access-ungrant-btn {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.access-screen {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.access-section-label {
+  padding: 20px 16px 8px;
+  font: 600 12px/1 var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.agent-grants-list { border-top: 1px solid var(--line); }
+.access-grant-form {
+  margin: 0 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.access-field {
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--bg);
+  color: var(--ink);
+}
+button.access-grant-submit { height: 36px; align-self: flex-start; }
+.access-count {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+button.access-add-btn {
+  flex: none;
+  white-space: nowrap;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+.agents-list-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-row .agent-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+}
+.agent-row-chevron {
+  flex: none;
+  width: 32px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+.access-add-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+button.access-create-submit { height: 36px; margin-top: 4px; }
+.row.agents-list-admin {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  box-sizing: border-box;
+}
+/* The wiki. A tree row is indented by its depth, which the script sets as
+   --depth. */
+.row.wiki-row:not(.wiki-dir) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: 6px 12px 6px calc(16px + var(--depth, 0) * 20px);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.row.wiki-dir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px 0 calc(16px + var(--depth, 0) * 20px);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.row.wiki-version {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.wiki-editor-note[data-tone="danger"] { color: var(--danger); }
+.wiki-editor-note[data-tone="conflict"] { color: var(--ink-2); }
+button.wiki-conflict-btn {
+  margin-left: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wiki-sheet-input {
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 14px/1 var(--font-sans);
+}
+.wiki-sheet-path { font-family: var(--font-mono); }
+.wiki-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.wiki-comment { padding: 10px 0; border-top: 1px solid var(--line); }
+.wiki-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wiki-comment-author, .wiki-editor-label { font-size: 13px; font-weight: 600; }
+.wiki-comment-time, .wiki-editor-note, .wiki-finding-code, .wiki-stat-label { font-size: 12px; color: var(--ink-3); }
+.wiki-comment-gap { flex: 1; }
+button.wiki-comment-resolve {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wiki-comment-quote {
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 4px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wiki-comment-body {
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+.wiki-comments { padding: 16px; border-top: 1px solid var(--line); }
+.wiki-section-label {
+  font-size: 12px;
+  color: var(--ink-3);
+  letter-spacing: .06em;
+  margin-bottom: 8px;
+}
+.wiki-note-empty { margin: 0; font-size: 13px; }
+.wiki-resolved-summary {
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.wiki-resolved { margin-top: 12px; }
+.wiki-row-glyph {
+  flex: none;
+  color: var(--ink-3);
+  display: inline-flex;
+}
+.wiki-row-name,
+.wiki-review-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-dir-count,
+.wiki-change-time,
+.wiki-review-trust {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.wiki-row-line,
+.wiki-version-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wiki-row-meta {
+  align-self: stretch;
+  min-width: 0;
+  padding-left: 24px;
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-index-note { padding: 16px; }
+.wiki-empty { padding: 24px 16px; max-width: 640px; }
+.wiki-empty-label {
+  font-size: 12px;
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.wiki-empty-title {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 6px 0;
+}
+.wiki-empty-lead {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+.wiki-instruction-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+}
+.wiki-instruction-command {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-crumb-link { color: var(--accent); text-decoration: none; }
+.wiki-breadcrumb {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--ink-3);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.wiki-history-ref { color: var(--accent); }
+button.wiki-review-btn,
+button.wiki-revert-btn {
+  flex: none;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wiki-backlinks { padding: 16px 16px 24px; border-top: 1px solid var(--line); }
+.row.wiki-backlink {
+  display: block;
+  padding: 8px 0;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+}
+.wiki-edit-link {
+  flex: none;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  text-decoration: none;
+  font: 600 13px/1 var(--font-sans);
+}
+.wiki-page-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex: none;
+  align-items: center;
+}
+.wiki-meta-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-controls.wiki-page-controls .wiki-meta-line { flex: 1; }
+.shell-controls.wiki-page-controls { gap: 10px; padding: 0 16px; }
+.wiki-description {
+  font-size: 15px;
+  color: var(--ink-2);
+  margin-top: 0;
+}
+.wiki-article { max-width: 640px; padding: 16px; }
+.shell-controls.wiki-controls, button.wiki-editor-save, button.wiki-new-btn { padding: 0 16px; }
+.wiki-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.wiki-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+input.wiki-editor-path {
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 14px/1 var(--font-mono);
+}
+.wiki-editor-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+textarea.wiki-editor-text {
+  flex: 1;
+  min-height: 240px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--font-mono);
+  resize: vertical;
+}
+.wiki-editor-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.wiki-editor-cancel {
+  padding: 0 14px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  text-decoration: none;
+  font: 600 14px/1 var(--font-sans);
+}
+.wiki-history-day {
+  padding: 10px 16px 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.row.wiki-change {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+.wiki-change-actor,
+.wiki-change-op {
+  flex: none;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.wiki-change-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.wiki-history-earlier {
+  margin: 12px 16px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--accent);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wiki-history-done {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.wiki-empty-text {
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  margin: 0;
+}
+.wiki-version-time {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wiki-version-facts {
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.wiki-versions-earlier {
+  margin: 12px 16px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--accent);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+button.wiki-forget-btn {
+  flex: none;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wiki-recheck {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  text-decoration: none;
+  font: 600 13px/28px var(--font-sans);
+}
+.row.wiki-finding {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.wiki-finding-message { font-size: 14px; }
+.wiki-finding-path {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.row.wiki-review-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+.row.wiki-home-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+.wiki-home-new { padding: 16px 16px 0; }
+.wiki-stats {
+  padding: 16px;
+  display: flex;
+  gap: 24px;
+}
+.wiki-stat-value { font-size: 22px; font-weight: 600; }
+.wiki-version-state {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+/* Storage on a phone. */
+.shell-head .storage-remeasure {
+  background: none;
+  border: 0;
+  border-radius: var(--r-1);
+  color: var(--ink-2);
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.storage-prune-size { font-family: var(--font-mono); font-weight: 500; }
+button.storage-prune-all {
+  flex: none;
+  white-space: nowrap;
+  padding: 0 14px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--danger);
+  background: none;
+  color: var(--danger);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+}
+.shell-controls.storage-mobile-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: 44px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.storage-tools-ended {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.storage-project-prune {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--action);
+}
+.storage-project-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.storage-project-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.storage-project-total { font: 600 13px/1.3 var(--font-mono); color: var(--ink); }
+.storage-project-meta { font-size: 12px; color: var(--ink-3); }
+.storage-mobile-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.storage-mobile-summary {
+  padding: 18px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  border-left: 0;
+  border-right: 0;
+  border-radius: 0;
+}
+.storage-mobile-capacity { font: 500 12px/1 var(--font-mono); color: var(--ink-3); }
+.storage-section-label {
+  padding: 20px 16px 8px;
+  font: 600 12px/1 var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.row.storage-project-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+}
+.storage-projects-list > .storage-project-row:first-child { border-top: 1px solid var(--line); }
+.storage-legend-grid .storage-swatch { width: 10px; height: 10px; }
+/* Settings. */
+.settings-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.settings-row-title { font-size: 15px; font-weight: 500; }
+.settings-row-sub { font-size: 12px; color: var(--ink-3); }
+:is(.settings-flat-row, .form-row).settings-version-row { padding-right: 36px; }
+.settings-row-select { user-select: text; }
+.settings-row-label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+}
+.settings-row-value { font: 500 13px/1 var(--font-mono); color: var(--ink-2); }
+.settings-row-chevron {
+  flex: none;
+  width: 32px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+.settings-row-count { font-size: 13px; color: var(--ink-2); }
+.settings-data-path {
+  flex: 1;
+  min-width: 0;
+  font: 500 12px/1.4 var(--font-mono);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Project headers and rows. */
+.project-lock { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.project-lock-badge { flex: none; margin-right: 8px; font-size: 12px; white-space: nowrap; }
+.project-lock-meta { margin-right: 6px; }
+.projects-empty-note.projects-register-note { margin-top: 12px; font-size: 13px; color: var(--ink-3); }
+.shell-controls.brain-file-controls { gap: 8px; padding: 0 16px; }
+.shell-controls .brain-file-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.brain-promote-btn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+button.project-wiki-new {
+  flex: none;
+  padding: 0 12px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-strong);
+  background: none;
+  color: var(--ink);
+  font: 600 13px/1 var(--font-sans);
+  cursor: pointer;
+}
+.session-doc-content { max-width: 640px; margin: 0; padding: 24px 16px; }
+.state-dot.live { background: var(--ok); }
+.session-kv-read { margin: 0; padding: 16px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.session-kv-missing { padding: 16px; }
+.artifact-row-glyph { background: none; border-radius: 0; color: var(--ink-3); box-shadow: none; display: grid; place-items: center; }
+.inbox-head .title.inbox-title-strong { font-weight: 600; }
+.hub-resolved-title { text-align: left; }
+.search-hit { background: var(--action-bg); color: var(--ink); border-radius: 3px; padding: 0 2px; }
+.search-chip-count { font-family: var(--font-mono); font-weight: 500; }
+
+/* A row that draws its own hairline keeps it when it is the last row. */
+.row:is(.agent-index-row, .agent-project-row, .agent-row, .agents-admin-row, .access-grant-row, .agents-list-admin, .wiki-row, .wiki-version, .wiki-change, .wiki-finding, .wiki-review-row, .wiki-home-link, .storage-project-row):last-child {
+  border-bottom: 1px solid var(--line);
+}
+/* These controls had their fill written into the markup, which kept the shared
+   hover lift off them. They keep the fill they rest with on hover, which
+   DESIGN.md records as a deviation. */
+button:is(.agents-add-btn, .agent-create-cancel, .agent-reissue-btn, .access-token-btn, .access-ungrant-btn,
+  .access-add-btn, .wiki-comment-resolve, .wiki-review-btn, .wiki-history-earlier, .wiki-versions-earlier,
+  .wiki-revert-btn, .wiki-conflict-btn, .brain-promote-btn, .project-wiki-new, .storage-remeasure,
+  .storage-prune-all):not([disabled]):not(.primary):not(.action):hover {
+  background: none;
+}
+button.agents-add-btn[aria-pressed="true"]:not([disabled]):not(.primary):not(.action):hover {
+  background: var(--surface-2);
+}
+button:is(.agent-grant-open, .agent-revoke-btn):not([disabled]):not(.primary):not(.action):hover {
+  background: var(--surface);
 }

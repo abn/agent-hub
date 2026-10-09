@@ -99,10 +99,12 @@ export default defineConfig({
       use: { viewport: WIDTHS.desktop },
       testMatch: /control-sizing\.spec\.mjs/,
     },
+    // The touch project also holds the style-attribute check, because some
+    // screens draw different markup under a coarse pointer.
     {
       name: "sizing-touch",
       use: { viewport: WIDTHS.phone, hasTouch: true },
-      testMatch: /control-sizing\.spec\.mjs/,
+      testMatch: /(control-sizing|style-attributes)\.spec\.mjs/,
     },
     // A waiting row is measured at both widths in both themes and photographed,
     // on hubs of its own so the question it posts moves no other check's queue.

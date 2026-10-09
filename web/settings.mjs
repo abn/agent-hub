@@ -148,9 +148,9 @@ function alertsRow() {
 
   return `
     <div class="settings-flat-row row">
-      <span class="settings-row-text" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
-        <span class="title settings-row-title" style="font-size:15px;font-weight:500" id="alerts-label">Alert when waiting on you</span>
-        <span class="meta settings-row-sub" style="font-size:12px;color:var(--ink-3)">${esc(sub)}</span>
+      <span class="settings-row-text">
+        <span class="title settings-row-title" id="alerts-label">Alert when waiting on you</span>
+        <span class="meta settings-row-sub">${esc(sub)}</span>
       </span>
       ${switchControl("alerts-master", "alerts-label", checked, "toggle-alerts-switch")}
     </div>`;
@@ -323,13 +323,13 @@ export async function settingsScreen(gen) {
             </div>
             ${NAV_CHEVRON}
           </a>
-          <div class="form-row" style="padding-right: 36px">
+          <div class="form-row settings-version-row">
             <div class="form-row-main">
               <span class="form-row-title">Version</span>
             </div>
-            <span class="form-row-value" style="user-select: text">${esc(versionValue)}</span>
+            <span class="form-row-value settings-row-select">${esc(versionValue)}</span>
           </div>
-          <button type="button" class="form-row settings-btn-row" data-action="signout" style="border-top: 0">
+          <button type="button" class="form-row settings-btn-row" data-action="signout">
             <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
           </button>
         </section>
@@ -375,7 +375,7 @@ export async function settingsScreen(gen) {
       <div class="settings-flat-group">
         <div class="settings-group-title">THIS DEVICE</div>
         <div class="settings-flat-row row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">Theme</span>
+          <span class="title settings-row-label">Theme</span>
           <div role="radiogroup" aria-label="Theme" class="settings-theme-track">
             ${themeSegment("system", currentTheme)}
             ${themeSegment("light", currentTheme)}
@@ -383,13 +383,13 @@ export async function settingsScreen(gen) {
           </div>
         </div>
         <div class="settings-flat-row row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500" id="density-label">Compact rows</span>
+          <span class="title settings-row-label" id="density-label">Compact rows</span>
           ${switchControl("density", "density-label", densityCompact, "toggle-density")}
         </div>
         <div class="settings-flat-row row settings-row-shortcuts">
-          <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
-            <span class="title" style="font-size:15px;font-weight:500" id="shortcuts-label">Single-key shortcuts</span>
-            <span class="meta" style="font-size:12px;color:var(--ink-3)">j, k, e, r act with no modifier, suspended while a text field has focus.</span>
+          <span class="settings-row-text">
+            <span class="title settings-row-title" id="shortcuts-label">Single-key shortcuts</span>
+            <span class="meta settings-row-sub">j, k, e, r act with no modifier, suspended while a text field has focus.</span>
           </span>
           ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
         </div>
@@ -399,28 +399,28 @@ export async function settingsScreen(gen) {
       <div class="settings-flat-group">
         <div class="settings-group-title">THIS HUB</div>
         <a href="#/storage" class="settings-flat-row row settings-nav-row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">Storage</span>
-          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2)">${esc(storageValue)}</span>
-          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+          <span class="title settings-row-label">Storage</span>
+          <span class="mono settings-row-value">${esc(storageValue)}</span>
+          <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/access" class="settings-flat-row row settings-nav-row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">Agents and tokens</span>
-          <span class="meta" style="font-size:13px;color:var(--ink-2)">${esc(agentCountText)}</span>
-          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+          <span class="title settings-row-label">Agents and tokens</span>
+          <span class="meta settings-row-count">${esc(agentCountText)}</span>
+          <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/connect" class="settings-flat-row row settings-nav-row">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">Connect</span>
-          <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+          <span class="title settings-row-label">Connect</span>
+          <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
-        <div class="settings-flat-row row" style="padding-right: 36px">
-          <span class="title" style="flex:1;font-size:15px;font-weight:500">Version</span>
-          <span class="mono" style="font:500 13px/1 var(--font-mono);color:var(--ink-2);user-select:text">${esc(versionValue)}</span>
+        <div class="settings-flat-row row settings-version-row">
+          <span class="title settings-row-label">Version</span>
+          <span class="mono settings-row-value settings-row-select">${esc(versionValue)}</span>
         </div>
-        <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout" style="border-top: 0">Sign out of this browser</button>
+        <button type="button" class="settings-flat-row row settings-btn-row" data-action="signout">Sign out of this browser</button>
       </div>
 
       <footer class="settings-footer-row">
-        <span class="settings-data-path mono" style="flex:1;min-width:0;font:500 12px/1.4 var(--font-mono);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(lastTwoPath)}</span>
+        <span class="settings-data-path mono">${esc(lastTwoPath)}</span>
         <button type="button" aria-label="Copy full data path" class="settings-copy-btn settings-copy-path-btn" data-action="copy-path" data-path="${esc(dataPath)}">${COPY_PATH_SVG}</button>
       </footer>
     </form>`;
@@ -565,9 +565,6 @@ function setupSettingsEvents() {
         group.querySelectorAll("button[data-theme-val]").forEach((b) => {
           const match = b.dataset.themeVal === val;
           b.setAttribute("aria-checked", match ? "true" : "false");
-          b.style.background = match ? "var(--surface)" : "none";
-          b.style.color = match ? "var(--ink)" : "var(--ink-2)";
-          b.style.boxShadow = match ? "var(--shadow-1)" : "none";
         });
       }
       return;

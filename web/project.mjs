@@ -99,7 +99,7 @@ async function projectFootprint(projectId) {
 
 export function projectLockBadge(project) {
   if (!project || !project.confidential) return "";
-  return `<span class="project-lock" role="img" aria-label="confidential" style="display:inline-flex;align-items:center;gap:4px;flex:none;margin-right:8px;color:var(--ink-2);font-size:12px;white-space:nowrap">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`;
+  return `<span class="project-lock project-lock-badge" role="img" aria-label="confidential">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`;
 }
 
 // The project's own actions, in the header overflow the design draws. The
@@ -571,11 +571,11 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
         const provenance = `session brain · ${displayPath} · ${formatBytes(entryRes.entry.size_bytes)} · read-only`;
         const backHref = `#/projects/${encodeURIComponent(id)}/sessions?id=${encodeURIComponent(selectedSession.id)}`;
         stageHead = shellStageHead(fileName, "", "", backHref);
-        stageControls = `<div class="shell-controls" style="gap:8px;padding:0 16px">
-          <span class="shell-meta mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(provenance)}</span>
-          <button type="button" class="btn-outline" data-action="wiki-promote" data-id="${esc(id)}" data-session="${esc(selectedSession.id)}" data-session-name="${esc(selectedSession.session_name || selectedSession.id)}" data-path="${esc(entryRes.entry.path)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">Save to wiki</button>
+        stageControls = `<div class="shell-controls brain-file-controls">
+          <span class="shell-meta mono brain-file-meta">${esc(provenance)}</span>
+          <button type="button" class="btn-outline brain-promote-btn" data-action="wiki-promote" data-id="${esc(id)}" data-session="${esc(selectedSession.id)}" data-session-name="${esc(selectedSession.session_name || selectedSession.id)}" data-path="${esc(entryRes.entry.path)}">Save to wiki</button>
         </div>`;
-        stageBody = `<div class="hub-viewer-doc"><div class="session-doc-content" style="max-width: 640px; margin: 0; padding: 24px 16px;">${rendered}</div></div>`;
+        stageBody = `<div class="hub-viewer-doc"><div class="session-doc-content">${rendered}</div></div>`;
         aside = "";
         hasSelection = true;
       } else {
@@ -694,7 +694,7 @@ export async function projectScreen(params, gen, path) {
     const selected = params?.get("page") || "";
     const stage = await wikiStage(id, params, shellStageHead, stats, project?.display_name || id);
     const indexBody = await wikiIndexBody(id, selected, project?.display_name || id, params?.get("dir") || "");
-    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
+    const newBtn = `<button type="button" class="btn-outline project-wiki-new" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}">New page</button>`;
     shell = shellHTML({
       segment,
       indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,

@@ -260,6 +260,19 @@ structure, not to line length.
 
 ## Components
 
+- **Styles live in the stylesheet.** A `style` attribute carries only a value
+  computed at runtime, never a size, spacing, type or colour. The runtime
+  values are: a width or flex share computed from data, a frame's reported
+  height, a custom property set from data or layout (a tree row's depth, a
+  pane's width, the keyboard inset), a menu's position, a gesture's transform,
+  and a `display` toggle driven by state. Every other declaration is a class in
+  `web/app.css`, where the token, type and control-size gates read it.
+  - **Deviation: no hover fill on eighteen controls.** The buttons whose fill
+    the markup used to write keep their resting fill on hover instead of the
+    shared lift, as they did then: Add agent at both widths, Cancel, Reissue,
+    the phone token buttons, Remove access, Grant a project, Revoke token, the
+    wiki's Resolve, Review, Revert, both Earlier buttons and the conflict
+    buttons, Save to wiki, New page, Re-measure and Prune.
 - **Control sizes.** Four tokens: `--ctl` 32px, `--ctl-sm` 28px, `--ctl-form`
   36px and `--tap` 44px. No control is taller than the band that holds it.
   - **Bands and rows.** A control in a pane header, a control row or a row is
@@ -579,6 +592,13 @@ named checks from the current handoff.
     honoured.
 12. **Alert hierarchy.** L0 quiet, L1 unread, L2 waiting. No red, no animation,
     no modal for an alert.
+13. **Styles in the stylesheet.** On every screen the router registers, at a
+    desktop width, a phone width and under a coarse pointer, and in the states
+    the check lists (the token, grant, new project, delete project, new page,
+    save to wiki, revert, end session and prune dialogs, a brain file and key,
+    a comment thread, a refused save and the add-agent form), no element's
+    `style` attribute declares a box size, spacing, type, colour, fill, border,
+    shadow or outline, or a custom property the check does not name.
 
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said

@@ -239,7 +239,7 @@ function inboxRow(item, state, options = {}) {
       ${glyph(item.kind)}
       <div class="grow">
         <div class="inbox-head">
-          <div class="title"${waits(item) || item.status === "unread" ? ' style="font-weight: 600;"' : ""}><a href="${href}"${waiting ? waiting.described : ""}>${esc(item.summary)}</a></div>
+          <div class="title${waits(item) || item.status === "unread" ? " inbox-title-strong" : ""}"><a href="${href}"${waiting ? waiting.described : ""}>${esc(item.summary)}</a></div>
         </div>
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
         ${deadline ? `<div class="inbox-deadline">${esc(deadline)}</div>` : ""}

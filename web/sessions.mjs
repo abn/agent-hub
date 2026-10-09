@@ -32,7 +32,7 @@ export function sessionRow(s, current, isSelected = false) {
   const isPruned = s.status === "pruned" || s.pruned;
   const dot =
     s.status === "active"
-      ? `<span class="state-dot" style="background: var(--ok)"></span>`
+      ? `<span class="state-dot live"></span>`
       : isPruned
         ? `<span class="state-dot pruned"></span>`
         : `<span class="state-dot ring"></span>`;
@@ -192,7 +192,7 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
         <div class="session-header-main">
           <div class="session-detail-title-block">
             <div class="session-title-line">
-              <span class="session-status ${statusClass}"><span class="state-dot" style="${session.status === 'active' ? 'background: var(--ok)' : ''}"></span>${esc(session.status)}</span>
+              <span class="session-status ${statusClass}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span>
             </div>
             <div class="meta" data-owner="${esc(session.owner ?? session.agent)}">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
             ${handoff}
@@ -674,7 +674,7 @@ export function kvAsideHTML(path, content) {
       </button>
     </div>
     <div class="shell-body">
-      <pre class="mono session-kv-value" style="margin: 0; padding: 16px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all;">${esc(content)}</pre>
+      <pre class="mono session-kv-value session-kv-read">${esc(content)}</pre>
     </div>
   `;
 }
@@ -712,7 +712,7 @@ export function errorAsideHTML(path, message) {
     <div class="shell-controls">
       <span class="shell-meta mono">${esc(path)}</span>
     </div>
-    <div class="shell-body" style="padding: 16px;">
+    <div class="shell-body session-kv-missing">
       <p class="empty">${esc(message)}</p>
     </div>
   `;

@@ -23,12 +23,10 @@ import { fullStamp } from "./time.mjs";
 
 const FILE_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>`;
 const FOLDER_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/></svg>`;
-const INPUT_CSS =
-  "height:44px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans)";
 const CLOCK_GLYPH = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 const staleMark = (entry) =>
   entry && entry.stale
-    ? `<span class="wiki-stale" style="display:inline-flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--ink-3)">${CLOCK_GLYPH}stale</span>`
+    ? `<span class="wiki-stale">${CLOCK_GLYPH}stale</span>`
     : "";
 
 export function wikiPageApi(id, path) {
@@ -59,27 +57,27 @@ async function commentsSection(id, path) {
   }
   const open = comments.filter((comment) => !comment.done);
   const done = comments.filter((comment) => comment.done);
-  const thread = (comment, resolved) => `<div class="wiki-comment" style="padding:10px 0;border-top:1px solid var(--line)">
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-size:13px;font-weight:600">${esc(comment.author)}</span>
-      <span class="mono" style="font-size:12px;color:var(--ink-3)">${esc(comment.created_at)}</span>
-      <span style="flex:1"></span>
-      ${resolved ? "" : `<button type="button" class="btn-outline" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}" style="flex:none;height:28px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 12px/1 var(--font-sans);cursor:pointer">Resolve</button>`}
+  const thread = (comment, resolved) => `<div class="wiki-comment">
+    <div class="wiki-comment-head">
+      <span class="wiki-comment-author">${esc(comment.author)}</span>
+      <span class="mono wiki-comment-time">${esc(comment.created_at)}</span>
+      <span class="wiki-comment-gap"></span>
+      ${resolved ? "" : `<button type="button" class="btn-outline wiki-comment-resolve" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}">Resolve</button>`}
     </div>
     ${
       comment.anchor && comment.anchor.quote
-        ? `<p style="font-style:italic;font-size:13px;color:var(--ink-2);margin:4px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">\u201c${esc(comment.anchor.quote)}\u201d</p>`
+        ? `<p class="wiki-comment-quote">\u201c${esc(comment.anchor.quote)}\u201d</p>`
         : ""
     }
-    <p style="font-size:14px;line-height:1.45;margin:4px 0 0;white-space:pre-wrap">${esc(comment.body)}</p>
+    <p class="wiki-comment-body">${esc(comment.body)}</p>
   </div>`;
-  return `<section class="wiki-comments" style="padding:16px;border-top:1px solid var(--line)">
-    <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:8px">COMMENTS · ${open.length}</div>
-    ${open.length ? open.map((comment) => thread(comment, false)).join("") : `<p class="empty" style="margin:0;font-size:13px">No comments yet.</p>`}
+  return `<section class="wiki-comments">
+    <div class="mono wiki-section-label">COMMENTS · ${open.length}</div>
+    ${open.length ? open.map((comment) => thread(comment, false)).join("") : `<p class="empty wiki-note-empty">No comments yet.</p>`}
     <div class="wiki-comment-composer" data-id="${esc(id)}" data-path="${esc(displayPath(path))}"></div>
     ${
       done.length
-        ? `<details style="margin-top:12px"><summary class="mono" style="font-size:12px;color:var(--ink-3);cursor:pointer">Resolved · ${done.length}</summary>${done.map((comment) => thread(comment, true)).join("")}</details>`
+        ? `<details class="wiki-resolved"><summary class="mono wiki-resolved-summary">Resolved · ${done.length}</summary>${done.map((comment) => thread(comment, true)).join("")}</details>`
         : ""
     }
   </section>`;
@@ -117,7 +115,6 @@ function displayPath(path) {
 function rowHTML(entry, id, selected, narrow = false) {
   const path = entry.path;
   const depth = depthOf(path);
-  const pad = 16 + depth * 20;
   const name = entry.title || path.split("/").pop();
   const on = path === selected ? ' aria-current="true"' : "";
   if (entry.type === "dir") {
@@ -125,16 +122,15 @@ function rowHTML(entry, id, selected, narrow = false) {
     // desktop the full tree already shows what it holds, so it is a label and
     // does not navigate. Either way it must never address a page, which is what
     // sent the reader to a 404 for a folder that was in the tree beside it.
-    const inner = `<span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FOLDER_GLYPH}</span>
-      <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(path.split("/").pop())}</span>
+    const inner = `<span class="wiki-row-glyph" aria-hidden="true">${FOLDER_GLYPH}</span>
+      <span class="wiki-row-name">${esc(path.split("/").pop())}</span>
       ${staleMark(entry)}
-      <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${entry.children ?? 0}</span>`;
-    const itemStyle = `display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px 0 ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);box-sizing:border-box`;
+      <span class="mono wiki-dir-count">${entry.children ?? 0}</span>`;
     if (narrow) {
       const dirHref = `#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(displayPath(path))}`;
-      return `<a class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" href="${dirHref}"${on} style="${itemStyle};text-decoration:none">${inner}</a>`;
+      return `<a class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" href="${dirHref}"${on} style="--depth:${depth}">${inner}</a>`;
     }
-    return `<div class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" style="${itemStyle}">${inner}</div>`;
+    return `<div class="row wiki-row wiki-dir" role="treeitem" aria-level="${depth + 1}" style="--depth:${depth}">${inner}</div>`;
   }
   const href = wikiPageHash(id, path);
   const meta = [entry.page_type || "concept", entry.status || "draft", trustWords(entry)].join(" · ");
@@ -146,13 +142,13 @@ function rowHTML(entry, id, selected, narrow = false) {
   // inside that width. Without them its box ended 8.84px past a 300px index
   // pane, the pane's overflow cut the last glyph of "unverified", and the
   // ellipsis this span asks for never fired.
-  return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 12px 6px ${pad}px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box">
-    <span style="display:flex;align-items:center;gap:8px;min-width:0">
-      <span aria-hidden="true" style="flex:none;color:var(--ink-3);display:inline-flex">${FILE_GLYPH}</span>
-      <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+  return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="--depth:${depth}">
+    <span class="wiki-row-line">
+      <span class="wiki-row-glyph" aria-hidden="true">${FILE_GLYPH}</span>
+      <span class="wiki-row-name">${esc(name)}</span>
       ${staleMark(entry)}
     </span>
-    <span class="mono" style="align-self:stretch;min-width:0;padding-left:24px;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</span>
+    <span class="mono wiki-row-meta">${esc(meta)}</span>
   </a>`;
 }
 
@@ -161,7 +157,7 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
   try {
     data = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/pages?meta=1`);
   } catch (error) {
-    return `<p class="empty" style="padding:16px">Could not read the wiki: ${esc(error.message)}</p>`;
+    return `<p class="empty wiki-index-note">Could not read the wiki: ${esc(error.message)}</p>`;
   }
   const entries = data.entries || [];
   if (!entries.length) {
@@ -169,12 +165,12 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
     // the row that owns it and the copy control is a glyph on that row, which
     // is what the design's copy component is (no visible "Copy" label).
     const command = `hub wiki write ${projectName || id} --type concept`;
-    return `<div class="wiki-empty" style="padding:24px 16px;max-width:640px">
-      <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · empty</div>
-      <h2 style="font-size:17px;font-weight:600;margin:6px 0">No wiki yet in ${esc(projectName || id)}.</h2>
-      <p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0 0 12px">Agents write durable knowledge here; sessions come and go, these pages stay. The first write creates index.md.</p>
-      <div class="wiki-instruction-row" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 4px 0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface-2)">
-        <code class="mono" style="flex:1;min-width:0;font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(command)}</code>
+    return `<div class="wiki-empty">
+      <div class="mono wiki-empty-label">wiki · empty</div>
+      <h2 class="wiki-empty-title">No wiki yet in ${esc(projectName || id)}.</h2>
+      <p class="wiki-empty-lead">Agents write durable knowledge here; sessions come and go, these pages stay. The first write creates index.md.</p>
+      <div class="wiki-instruction-row">
+        <code class="mono wiki-instruction-command">${esc(command)}</code>
         <button type="button" class="hub-btn-glyph" data-action="wiki-instruction" data-id="${esc(id)}" data-project="${esc(projectName || id)}" aria-label="Copy agent instruction">${glyphSvg("copy", { size: 16 })}</button>
       </div>
     </div>`;
@@ -192,21 +188,21 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
     // At the root the crumb would say one word, "Wiki", which the tools row
     // above already says, so the index body is the tree and nothing else.
     const crumbs = displayPath(dir)
-      ? [`<a href="#/projects/${encodeURIComponent(id)}/wiki" style="color:var(--accent);text-decoration:none">Wiki</a>`]
+      ? [`<a class="wiki-crumb-link" href="#/projects/${encodeURIComponent(id)}/wiki">Wiki</a>`]
       : [];
     let acc = "";
     for (const part of displayPath(dir).split("/").filter(Boolean)) {
       acc = acc ? `${acc}/${part}` : part;
       crumbs.push(
-        `<a href="#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(acc)}" style="color:var(--accent);text-decoration:none">${esc(part)}</a>`,
+        `<a class="wiki-crumb-link" href="#/projects/${encodeURIComponent(id)}/wiki?dir=${encodeURIComponent(acc)}">${esc(part)}</a>`,
       );
     }
     const trail = crumbs.length
-      ? `<div class="wiki-breadcrumb mono" style="padding:8px 16px;font-size:12px;color:var(--ink-3);display:flex;gap:6px;flex-wrap:wrap">${crumbs.join(
+      ? `<div class="wiki-breadcrumb mono">${crumbs.join(
           "<span>/</span>",
         )}</div>`
       : "";
-    return `${trail}${level.length ? `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${level.map((entry) => rowHTML(entry, id, selected, true)).join("")}</div>` : `<p class="empty" style="padding:16px">This directory is empty.</p>`}`;
+    return `${trail}${level.length ? `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${level.map((entry) => rowHTML(entry, id, selected, true)).join("")}</div>` : `<p class="empty wiki-index-note">This directory is empty.</p>`}`;
   }
   return `<div class="wiki-tree" role="tree" aria-label="Wiki pages">${entries
     .map((entry) => rowHTML(entry, id, selected))
@@ -262,7 +258,7 @@ async function pageStage(id, path, shellStageHead) {
     const history = await readHistory(id, path, 200);
     const listed = history && history.total > 0;
     const kept = listed && (history.versions || []).some((row) => row.kept);
-    const link = `<a href="${wikiPageHash(id, displayPath(path), "&history=1")}" style="color:var(--accent)">history</a>`;
+    const link = `<a class="wiki-history-ref" href="${wikiPageHash(id, displayPath(path), "&history=1")}">history</a>`;
     return {
       head: shellStageHead("Wiki", "", "", `#/projects/${encodeURIComponent(id)}/wiki`),
       controls: `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / wiki</span></div>`,
@@ -295,7 +291,7 @@ async function pageStage(id, path, shellStageHead) {
   const needsReview = !entry || entry.trust !== "human_reviewed";
   // The reader's two header controls share one box: Edit is an anchor, so it
   // takes the button class and the stylesheet sizes both for the band.
-  const reviewBtn = `<button type="button" class="btn-outline" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${needsReview ? "Review" : "Review again"}</button>`;
+  const reviewBtn = `<button type="button" class="btn-outline wiki-review-btn" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}">${needsReview ? "Review" : "Review again"}</button>`;
   const last = page.last_write ? `${page.last_write.actor} · ${page.last_write.at}` : "no write recorded";
   const meta = [
     displayPath(page.path),
@@ -303,28 +299,28 @@ async function pageStage(id, path, shellStageHead) {
     fm.status || "draft",
     ...(fm.tags || []),
   ].join(" · ");
-  const back = `<div class="wiki-backlinks" style="padding:16px 16px 24px;border-top:1px solid var(--line)">
-    <div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em;margin-bottom:8px">BACKLINKS · ${(backlinks || []).length}</div>
+  const back = `<div class="wiki-backlinks">
+    <div class="mono wiki-section-label">BACKLINKS · ${(backlinks || []).length}</div>
     ${
       (backlinks || []).length
         ? (backlinks || [])
             .map(
               (link) =>
-                `<a class="row" href="${wikiPageHash(id, displayPath(link.path))}" style="display:block;padding:8px 0;color:var(--accent);text-decoration:none;font-size:14px">${esc(link.title || displayPath(link.path))}</a>`,
+                `<a class="row wiki-backlink" href="${wikiPageHash(id, displayPath(link.path))}">${esc(link.title || displayPath(link.path))}</a>`,
             )
             .join("")
-        : `<p class="empty" style="margin:0;font-size:13px">No page links here yet.</p>`
+        : `<p class="empty wiki-note-empty">No page links here yet.</p>`
     }
   </div>`;
   return {
     head: shellStageHead(
       fm.title || displayPath(page.path).split("/").pop(),
       meta,
-      `<span style="display:inline-flex;gap:8px;flex:none;align-items:center">${reviewBtn}<a class="button btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/1 var(--font-sans)">Edit</a></span>`,
+      `<span class="wiki-page-actions">${reviewBtn}<a class="button btn-outline wiki-edit-link" href="${wikiPageHash(id, path, "&edit=1")}">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
-    controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
-    body: `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${fm.description ? `<p class="wiki-description" style="font-size:15px;color:var(--ink-2);margin-top:0">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
+    controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta mono wiki-meta-line">${esc(last)}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
+    body: `<article class="shell-prose wiki-page wiki-article">${fm.description ? `<p class="wiki-description">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
 
@@ -336,22 +332,22 @@ function editorStage(id, path, content, version, isNew, shellStageHead) {
   }`;
   return {
     head: shellStageHead(title, "", "", back),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">${esc(note)}</span></div>`,
-    body: `<div class="wiki-editor" style="display:flex;flex-direction:column;gap:12px;padding:16px;height:100%;box-sizing:border-box">
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono">${esc(note)}</span></div>`,
+    body: `<div class="wiki-editor">
       ${
         isNew
-          ? `<label style="display:flex;flex-direction:column;gap:6px"><span style="font-size:13px;font-weight:600">Path</span>
-             <input id="wiki-new-path" name="path" autocomplete="off" placeholder="runbooks/deploy.md" style="height:40px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-mono)"></label>`
+          ? `<label class="wiki-editor-field"><span class="wiki-editor-label">Path</span>
+             <input class="wiki-editor-path" id="wiki-new-path" name="path" autocomplete="off" placeholder="runbooks/deploy.md"></label>`
           : ""
       }
-      <label style="display:flex;flex-direction:column;gap:6px;flex:1;min-height:0">
+      <label class="wiki-editor-content">
         <span class="sr-only">Page content</span>
-        <textarea id="wiki-content" name="content" spellcheck="false" style="flex:1;min-height:240px;box-sizing:border-box;padding:12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:400 14px/1.5 var(--font-mono);resize:vertical">${esc(content)}</textarea>
+        <textarea class="wiki-editor-text" id="wiki-content" name="content" spellcheck="false">${esc(content)}</textarea>
       </label>
-      <div class="wiki-editor-actions" style="display:flex;gap:8px;align-items:center">
-        <button type="button" class="primary" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}" style="padding:0 16px">${isNew ? "Create page" : "Save"}</button>
-        <a class="button btn-outline" href="${back}" style="padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 14px/1 var(--font-sans)">Cancel</a>
-        <span class="wiki-editor-note" style="font-size:12px;color:var(--ink-3)"></span>
+      <div class="wiki-editor-actions">
+        <button type="button" class="primary wiki-editor-save" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}">${isNew ? "Create page" : "Save"}</button>
+        <a class="button btn-outline wiki-editor-cancel" href="${back}">Cancel</a>
+        <span class="wiki-editor-note"></span>
       </div>
     </div>`,
   };
@@ -371,7 +367,7 @@ const OP_WORDS = {
 function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
   return {
     head: shellStageHead(title, "", actions, `#/projects/${encodeURIComponent(id)}/wiki`),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(controls)}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono wiki-meta-line">${esc(controls)}</span></div>`,
     body,
   };
 }
@@ -391,13 +387,13 @@ function historyRows(rows, changesProject) {
     const date = stamp.slice(0, 10);
     if (date !== day) {
       day = date;
-      out += `<div class="mono wiki-history-day" style="padding:10px 16px 4px;font-size:12px;color:var(--ink-3);letter-spacing:.06em">${esc(date)}</div>`;
+      out += `<div class="mono wiki-history-day">${esc(date)}</div>`;
     }
-    out += `<a class="row wiki-change" href="${wikiPageHash(changesProject, displayPath(row.path), "&history=1")}" style="display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">
-      <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(stamp)}</span>
-      <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(row.actor)}</span>
-      <span class="mono" style="flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayPath(row.path))}</span>
-      <span style="flex:none;font-size:13px;color:var(--ink-2)">${esc(OP_WORDS[row.op] || row.op)}</span>
+    out += `<a class="row wiki-change" href="${wikiPageHash(changesProject, displayPath(row.path), "&history=1")}">
+      <span class="mono wiki-change-time">${esc(stamp)}</span>
+      <span class="wiki-change-actor">${esc(row.actor)}</span>
+      <span class="mono wiki-change-path">${esc(displayPath(row.path))}</span>
+      <span class="wiki-change-op">${esc(OP_WORDS[row.op] || row.op)}</span>
     </a>`;
   }
   return out;
@@ -406,9 +402,9 @@ function historyRows(rows, changesProject) {
 function historyEarlier(id, data, loaded) {
   if (data.truncated && data.next_before) {
     const remaining = Math.max(0, (data.total ?? loaded) - loaded);
-    return `<button type="button" class="btn-outline wiki-history-earlier" data-action="wiki-history-earlier" data-id="${esc(id)}" data-before="${esc(data.next_before)}" style="margin:12px 16px;height:32px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--accent);font:600 13px/1 var(--font-sans);cursor:pointer">Earlier · ${remaining}</button>`;
+    return `<button type="button" class="btn-outline wiki-history-earlier" data-action="wiki-history-earlier" data-id="${esc(id)}" data-before="${esc(data.next_before)}">Earlier · ${remaining}</button>`;
   }
-  return `<div class="mono wiki-history-done" style="padding:12px 16px;font-size:12px;color:var(--ink-3)">${loaded} change${loaded === 1 ? "" : "s"} · all loaded</div>`;
+  return `<div class="mono wiki-history-done">${loaded} change${loaded === 1 ? "" : "s"} · all loaded</div>`;
 }
 
 async function changesStage(id, shellStageHead) {
@@ -421,7 +417,7 @@ async function changesStage(id, shellStageHead) {
   const rows = data.rows || [];
   const body = rows.length
     ? `<div class="wiki-changes">${historyRows(rows, id)}${historyEarlier(id, data, rows.length)}</div>`
-    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · recent changes</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No changes yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this wiki is logged here with who and when.</p></div>`;
+    : `<div class="wiki-empty"><div class="mono wiki-empty-label">wiki · recent changes</div><h2 class="wiki-empty-title">No changes yet.</h2><p class="wiki-empty-text">Every write to this wiki is logged here with who and when.</p></div>`;
   return simpleStage(shellStageHead, id, "Recent changes", `${data.total ?? rows.length} change${(data.total ?? rows.length) === 1 ? "" : "s"}`, body);
 }
 
@@ -478,18 +474,16 @@ function versionRows(id, path, rows) {
       const size = row.size_bytes == null ? "" : `${row.size_bytes} B`;
       const facts = [row.actor, row.summary, size].filter(Boolean).join(" · ");
       const state = row.current ? "current" : row.version && !row.kept ? "not kept" : "";
-      const inner = `<span style="display:flex;align-items:center;gap:8px;min-width:0">
-          <span class="mono" style="flex:1;min-width:0;font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(row.at)}</span>
-          ${state ? `<span class="mono" style="flex:none;font-size:12px;color:var(--ink-2)">${esc(state)}</span>` : ""}
+      const inner = `<span class="wiki-version-line">
+          <span class="mono wiki-version-time">${esc(row.at)}</span>
+          ${state ? `<span class="mono wiki-version-state">${esc(state)}</span>` : ""}
         </span>
-        <span style="min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(facts)}</span>`;
-      const style =
-        "display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:6px 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;box-sizing:border-box";
+        <span class="wiki-version-facts">${esc(facts)}</span>`;
       // A delete stored no bytes, and a version the hub did not keep has none
       // to show, so neither is a door.
-      if (!row.version || !row.kept) return `<div class="row wiki-version" style="${style}">${inner}</div>`;
+      if (!row.version || !row.kept) return `<div class="row wiki-version">${inner}</div>`;
       const href = wikiPageHash(id, displayPath(path), `&history=1&version=${encodeURIComponent(row.version)}`);
-      return `<a class="row wiki-version" href="${href}" style="${style}">${inner}</a>`;
+      return `<a class="row wiki-version" href="${href}">${inner}</a>`;
     })
     .join("");
 }
@@ -497,9 +491,9 @@ function versionRows(id, path, rows) {
 function versionsEarlier(id, path, data, loaded) {
   if (data.truncated && data.next_before) {
     const remaining = Math.max(0, (data.total ?? loaded) - loaded);
-    return `<button type="button" class="btn-outline wiki-versions-earlier" data-action="wiki-versions-earlier" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-before="${esc(data.next_before)}" style="margin:12px 16px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--accent);font:600 13px/1 var(--font-sans);cursor:pointer">Earlier · ${remaining}</button>`;
+    return `<button type="button" class="btn-outline wiki-versions-earlier" data-action="wiki-versions-earlier" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-before="${esc(data.next_before)}">Earlier · ${remaining}</button>`;
   }
-  return `<div class="mono wiki-history-done" style="padding:12px 16px;font-size:12px;color:var(--ink-3)">${loaded} version${loaded === 1 ? "" : "s"} · all loaded</div>`;
+  return `<div class="mono wiki-history-done">${loaded} version${loaded === 1 ? "" : "s"} · all loaded</div>`;
 }
 
 async function pageHistoryStage(id, path, shellStageHead) {
@@ -509,7 +503,7 @@ async function pageHistoryStage(id, path, shellStageHead) {
   if (!data) {
     return {
       head: head(displayPath(path)),
-      controls: `<div class="shell-controls" style="padding:0 16px"></div>`,
+      controls: `<div class="shell-controls wiki-controls"></div>`,
       body: `<div class="shell-pad"><p class="empty">Could not read this page's history.</p></div>`,
     };
   }
@@ -521,14 +515,14 @@ async function pageHistoryStage(id, path, shellStageHead) {
   // not forgettable either.
   const forgettable = rows.some((row) => row.kept && row.version !== data.current_version);
   const forget = forgettable
-    ? `<button type="button" class="danger" data-action="wiki-forget-history" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-deleted="${data.current_version ? "0" : "1"}" style="flex:none;padding:0 12px;border-radius:var(--r-1);font:600 13px/1 var(--font-sans);cursor:pointer">Forget history</button>`
+    ? `<button type="button" class="danger wiki-forget-btn" data-action="wiki-forget-history" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-deleted="${data.current_version ? "0" : "1"}">Forget history</button>`
     : "";
   const body = rows.length
     ? `<div class="wiki-versions">${versionRows(id, path, rows)}${versionsEarlier(id, path, data, rows.length)}</div>`
-    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · history</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">No history yet.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every write to this page keeps a version here.</p></div>`;
+    : `<div class="wiki-empty"><div class="mono wiki-empty-label">wiki · history</div><h2 class="wiki-empty-title">No history yet.</h2><p class="wiki-empty-text">Every write to this page keeps a version here.</p></div>`;
   return {
     head: shellStageHead("History", displayPath(path), forget, back),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">${total} version${total === 1 ? "" : "s"}${data.current_version ? "" : " · deleted"}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono">${total} version${total === 1 ? "" : "s"}${data.current_version ? "" : " · deleted"}</span></div>`,
     body,
   };
 }
@@ -572,7 +566,7 @@ async function versionStage(id, path, version, shellStageHead) {
   const backToHistory = wikiPageHash(id, displayPath(path), "&history=1");
   const failed = (message) => ({
     head: shellStageHead("Version", displayPath(path), "", backToHistory),
-    controls: `<div class="shell-controls" style="padding:0 16px"></div>`,
+    controls: `<div class="shell-controls wiki-controls"></div>`,
     body: `<div class="shell-pad"><p class="empty">${esc(message)}</p></div>`,
   });
   let older;
@@ -595,7 +589,7 @@ async function versionStage(id, path, version, shellStageHead) {
   const meta = [when, older.actor].filter(Boolean).join(" · ");
   const revert = older.current
     ? ""
-    : `<button type="button" class="btn-outline" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${now ? "Revert to this" : "Restore this"}</button>`;
+    : `<button type="button" class="btn-outline wiki-revert-btn" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}">${now ? "Revert to this" : "Restore this"}</button>`;
   let summary;
   if (older.current) summary = "This is the page as it is now.";
   else if (!now) summary = "The page was deleted after this version.";
@@ -610,11 +604,11 @@ async function versionStage(id, path, version, shellStageHead) {
   // a restore would put back.
   const body =
     older.current || !lines || !now
-      ? `<article class="shell-prose wiki-page" style="max-width:640px;padding:16px">${await renderMarkdown(pageBody(older.content))}</article>`
+      ? `<article class="shell-prose wiki-page wiki-article">${await renderMarkdown(pageBody(older.content))}</article>`
       : `<div class="wiki-diff mono" role="group" aria-label="Changes since this version">${hunks(lines).map(diffLine).join("") || `<div class="wiki-diff-skip">${esc(summary === "Only the final newline differs." ? summary : "No line changed.")}</div>`}</div>`;
   return {
     head: shellStageHead(name, meta, revert, backToHistory),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(summary)}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta wiki-meta-line">${esc(summary)}</span></div>`,
     body,
   };
 }
@@ -692,25 +686,25 @@ async function lintStage(id, params, shellStageHead) {
     return simpleStage(shellStageHead, id, "Lint", "", `<div class="shell-pad"><p class="empty">${esc(error.message)}</p></div>`);
   }
   const findings = data.findings || [];
-  const recheck = `<a class="btn-outline" href="#/projects/${encodeURIComponent(id)}/wiki?view=lint&fresh=1" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/28px var(--font-sans)">Re-check</a>`;
+  const recheck = `<a class="btn-outline wiki-recheck" href="#/projects/${encodeURIComponent(id)}/wiki?view=lint&fresh=1">Re-check</a>`;
   const body = findings.length
     ? findings
         .map(
-          (finding) => `<div class="row wiki-finding" style="display:flex;flex-direction:column;gap:3px;padding:10px 16px;border-bottom:1px solid var(--line)">
-        <span class="mono" style="font-size:12px;color:var(--ink-3)">${esc(finding.code)}</span>
-        <span style="font-size:14px">${esc(finding.message)}</span>
+          (finding) => `<div class="row wiki-finding">
+        <span class="mono wiki-finding-code">${esc(finding.code)}</span>
+        <span class="wiki-finding-message">${esc(finding.message)}</span>
         ${
           finding.path
-            ? `<a class="mono" href="${wikiPageHash(id, displayPath(finding.path))}" style="font-size:12px;color:var(--accent);text-decoration:none">${esc(displayPath(finding.path))}</a>`
+            ? `<a class="mono wiki-finding-path" href="${wikiPageHash(id, displayPath(finding.path))}">${esc(displayPath(finding.path))}</a>`
             : ""
         }
       </div>`,
         )
         .join("")
-    : `<div class="wiki-empty" style="padding:24px 16px;max-width:640px"><div class="mono" style="font-size:12px;color:var(--ink-3);letter-spacing:.06em">wiki · lint</div><h2 style="font-size:17px;font-weight:600;margin:6px 0">Nothing to fix.</h2><p style="font-size:13px;color:var(--ink-2);line-height:1.45;margin:0">Every page declares a type, every link resolves, and every page is listed in its index.</p></div>`;
+    : `<div class="wiki-empty"><div class="mono wiki-empty-label">wiki · lint</div><h2 class="wiki-empty-title">Nothing to fix.</h2><p class="wiki-empty-text">Every page declares a type, every link resolves, and every page is listed in its index.</p></div>`;
   return {
     head: shellStageHead("Lint", `${findings.length} finding${findings.length === 1 ? "" : "s"}`, recheck, `#/projects/${encodeURIComponent(id)}/wiki`),
-    controls: `<div class="shell-controls" style="padding:0 16px"><span class="shell-meta mono">checked ${esc(data.checked_at || "")}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono">checked ${esc(data.checked_at || "")}</span></div>`,
     body,
   };
 }
@@ -728,13 +722,13 @@ async function reviewStage(id, shellStageHead) {
   const body = rows.length
     ? rows
         .map(
-          (entry) => `<a class="row wiki-review-row" href="${wikiPageHash(id, displayPath(entry.path))}" style="display:flex;align-items:center;gap:12px;min-height:48px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">
-        <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(entry.title || displayPath(entry.path).split("/").pop())}</span>
-        <span class="mono" style="flex:none;font-size:12px;color:var(--ink-3)">${esc(trustWords(entry))}</span>
+          (entry) => `<a class="row wiki-review-row" href="${wikiPageHash(id, displayPath(entry.path))}">
+        <span class="wiki-review-title">${esc(entry.title || displayPath(entry.path).split("/").pop())}</span>
+        <span class="mono wiki-review-trust">${esc(trustWords(entry))}</span>
       </a>`,
         )
         .join("")
-    : `<p class="empty" style="padding:16px">Nothing needs review.</p>`;
+    : `<p class="empty wiki-index-note">Nothing needs review.</p>`;
   return simpleStage(shellStageHead, id, "Needs review", `${rows.length} page${rows.length === 1 ? "" : "s"}`, body);
 }
 
@@ -751,15 +745,15 @@ async function homeStage(id, stats, shellStageHead, projectName = "") {
   const review = s?.needs_review?.total ?? 0;
   const stale = s?.stale ?? 0;
   const link = (view, label) =>
-    `<a class="row" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}" style="display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">${label}</a>`;
+    `<a class="row wiki-home-link" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}">${label}</a>`;
   const body = `<div class="wiki-home">
-    <div style="padding:16px 16px 0">
-      <button type="button" class="primary" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="padding:0 16px">New page</button>
+    <div class="wiki-home-new">
+      <button type="button" class="primary wiki-new-btn" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}">New page</button>
     </div>
-    <div style="padding:16px;display:flex;gap:24px">
-      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">PAGES</div><div style="font-size:22px;font-weight:600">${pages}</div></div>
-      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">NEEDS REVIEW</div><div style="font-size:22px;font-weight:600">${review}</div></div>
-      <div><div class="mono" style="font-size:12px;color:var(--ink-3)">STALE</div><div style="font-size:22px;font-weight:600">${stale}</div></div>
+    <div class="wiki-stats">
+      <div><div class="mono wiki-stat-label">PAGES</div><div class="wiki-stat-value">${pages}</div></div>
+      <div><div class="mono wiki-stat-label">NEEDS REVIEW</div><div class="wiki-stat-value">${review}</div></div>
+      <div><div class="mono wiki-stat-label">STALE</div><div class="wiki-stat-value">${stale}</div></div>
     </div>
     ${link("review", "Needs review")}
     ${link("changes", "Recent changes")}
@@ -920,7 +914,7 @@ function openWikiSheet({ id, projectName = "", mode, sessionId = "", sessionName
     input.name = name;
     input.value = value;
     input.autocomplete = "off";
-    input.style.cssText = INPUT_CSS;
+    input.className = "wiki-sheet-input";
     wrap.append(span, input);
     form.appendChild(wrap);
     return input;
@@ -932,8 +926,7 @@ function openWikiSheet({ id, projectName = "", mode, sessionId = "", sessionName
   const descInput = field("description", "Description", "");
 
   const computed = document.createElement("p");
-  computed.className = "dialog-note mono";
-  computed.style.fontFamily = "var(--font-mono)";
+  computed.className = "dialog-note mono wiki-sheet-path";
   form.appendChild(computed);
 
   const note = document.createElement("p");
@@ -1070,11 +1063,12 @@ export async function wikiSave(button) {
   const say = (message, tone = "") => {
     if (note) {
       note.textContent = message;
-      note.style.color = tone;
+      if (tone) note.dataset.tone = tone;
+      else delete note.dataset.tone;
     }
   };
   if (!path) {
-    say("A page needs a path.", "var(--danger)");
+    say("A page needs a path.", "danger");
     return;
   }
   button.disabled = true;
@@ -1088,15 +1082,13 @@ export async function wikiSave(button) {
     // A page that changed under the reader is refused, not overwritten. The
     // reader either takes the hub's copy or keeps theirs over it.
     if (error.status === 409 && note) {
-      note.style.color = "var(--ink-2)";
+      note.dataset.tone = "conflict";
       note.textContent = "This page changed while you were editing. ";
       const action = (label, run) => {
         const el = document.createElement("button");
         el.type = "button";
-        el.className = "btn-outline";
+        el.className = "btn-outline wiki-conflict-btn";
         el.textContent = label;
-        el.style.cssText =
-          "margin-left:8px;height:28px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 12px/1 var(--font-sans);cursor:pointer";
         el.addEventListener("click", run);
         note.appendChild(el);
       };
@@ -1105,7 +1097,7 @@ export async function wikiSave(button) {
         try {
           page = await readPage(id, path);
         } catch (failure) {
-          say(failure.message, "var(--danger)");
+          say(failure.message, "danger");
           return;
         }
         if (page) {
@@ -1119,7 +1111,7 @@ export async function wikiSave(button) {
         try {
           page = await readPage(id, path);
         } catch (failure) {
-          say(failure.message, "var(--danger)");
+          say(failure.message, "danger");
           return;
         }
         if (page) button.dataset.version = page.version || "absent";
@@ -1128,6 +1120,6 @@ export async function wikiSave(button) {
       });
       return;
     }
-    say(error.message, "var(--danger)");
+    say(error.message, "danger");
   }
 }

@@ -1496,9 +1496,8 @@ fn desktop_settings_groups_are_device_keyboard_hub() {
         "the Version row must not carry a chevron"
     );
     assert!(
-        version_row.contains("36px")
-            || desktop.contains("padding-right: 36px")
-            || desktop.contains("padding-right:36px"),
+        desktop.contains("form-row settings-version-row")
+            && APP_CSS.contains(".settings-version-row { padding-right: 36px; }"),
         "Version row must provide 36px right padding to right-align with chevron rows"
     );
     assert!(
@@ -1615,7 +1614,9 @@ fn desktop_storage_summary_is_the_four_segment_bar() {
         "the desktop summary must draw the four-segment bar"
     );
     assert!(
-        STORAGE_JS.contains("--k-knowledge"),
+        APP_CSS.contains(
+            ".storage-bar-seg[data-kind=\"knowledge\"] { background: var(--k-knowledge); }"
+        ),
         "the knowledge segment must paint --k-knowledge"
     );
     assert!(
@@ -2422,8 +2423,14 @@ fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
     );
 
     // C10: Add agent 32 in 52 header
+    let add_agent = APP_CSS
+        .split(".agents-add-btn {")
+        .nth(1)
+        .and_then(|rule| rule.split('}').next())
+        .expect("the Add agent rule exists");
     assert!(
-        AGENTS_JS.contains("height:32px") && AGENTS_JS.contains("min-height:32px"),
+        add_agent.lines().any(|l| l.trim() == "height: 32px;")
+            && add_agent.lines().any(|l| l.trim() == "min-height: 32px;"),
         "C10: Add agent button is 32px tall with min-height 32px"
     );
 }
