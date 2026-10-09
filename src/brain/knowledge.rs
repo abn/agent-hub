@@ -11,7 +11,7 @@
 
 use serde_json::json;
 
-use super::{Brain, KNOWLEDGE_FILE, Stamp, canonical_path};
+use super::{Brain, KNOWLEDGE_FILE, Stamp, WriteFilter, WriteRecord, canonical_path};
 use crate::app::AppState;
 use crate::error::{Error, Result};
 use crate::okf::frontmatter::{PromoteParams, promote_frontmatter, review_frontmatter};
@@ -39,6 +39,10 @@ const VERIFIES_SKEW_SECS: i64 = 60;
 /// tell a review's own write from an edit made after it.
 pub const REVIEW_OP: &str = "kb.review";
 
+/// The operation a revert is logged under. It is an ordinary write of earlier
+/// bytes, so the page's history only ever grows.
+pub const REVERT_OP: &str = "kb.revert";
+
 /// What a write reports back.
 #[derive(Debug, Clone)]
 pub struct Written {
@@ -48,6 +52,9 @@ pub struct Written {
     pub size_bytes: usize,
     pub lint: Vec<LintFinding>,
     pub warnings: Vec<String>,
+    /// Whether the write stored anything. A revert to the version the page
+    /// already holds stores nothing and signals nothing.
+    pub changed: bool,
 }
 
 /// The canonical path of a knowledge base page, from the path a caller gave.
@@ -376,6 +383,423 @@ pub async fn promote(
     Ok(written)
 }
 
+/// One entry of a page's history: one row of the write log for its path.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PageVersion {
+    /// The log row id: the history's order, and its paging cursor.
+    pub id: i64,
+    pub op: String,
+    pub actor: String,
+    /// RFC 3339.
+    pub at: String,
+    /// The version the write stored. A delete stores none.
+    pub version: Option<String>,
+    pub size_bytes: Option<i64>,
+    /// What the write did, in a few words.
+    pub summary: String,
+    /// Whether the bytes of this version can be read and restored.
+    pub kept: bool,
+    /// Whether this is the version the page holds now.
+    pub current: bool,
+}
+
+/// One page of a page's history, newest first.
+#[derive(Debug, Clone, Default)]
+pub struct PageHistory {
+    pub path: String,
+    pub rows: Vec<PageVersion>,
+    /// Rows the page's history holds in all, not on this page.
+    pub total: usize,
+    pub next_before: Option<i64>,
+    pub truncated: bool,
+    /// The version the page holds now, or `None` when it is not there.
+    pub current_version: Option<String>,
+}
+
+/// Format unix seconds as RFC 3339.
+fn rfc3339(epoch_secs: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(epoch_secs)
+        .ok()
+        .and_then(|at| {
+            at.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| epoch_secs.to_string())
+}
+
+/// What one write did, read against the writes to the same path before it.
+fn summarise(record: &WriteRecord, earlier: &[WriteRecord]) -> String {
+    let had_content = earlier
+        .last()
+        .is_some_and(|previous| previous.version.is_some());
+    match record.op.as_str() {
+        "kb.delete" => "deleted".to_string(),
+        REVIEW_OP => "reviewed".to_string(),
+        "kb.promote" => "promoted from a session brain".to_string(),
+        REVERT_OP => match earlier
+            .iter()
+            .rev()
+            .find(|previous| previous.op != REVERT_OP && previous.version == record.version)
+        {
+            Some(restored) => format!("restored the version of {}", rfc3339(restored.at)),
+            None => "restored an earlier version".to_string(),
+        },
+        _ if had_content => "edited".to_string(),
+        _ => "created".to_string(),
+    }
+}
+
+/// Every write the log holds for one path, oldest first.
+async fn writes_to(brain: &Brain, path: &str) -> Result<Vec<WriteRecord>> {
+    let mut rows = brain
+        .write_log(
+            &WriteFilter {
+                path: Some(path),
+                ..WriteFilter::default()
+            },
+            None,
+            usize::MAX,
+        )
+        .await?
+        .rows;
+    rows.reverse();
+    Ok(rows)
+}
+
+/// One page's history, newest first, `limit` rows before the `before` cursor.
+///
+/// A page that was deleted keeps its history, so a path with nothing stored
+/// can still list the versions it held. A path the log has never named lists
+/// nothing.
+pub async fn history(
+    state: &AppState,
+    project_id: &str,
+    path: &str,
+    before: Option<i64>,
+    limit: usize,
+) -> Result<PageHistory> {
+    let path = page_path(path)?;
+    let Some(brain) = state
+        .knowledge
+        .open_existing(project_id, KNOWLEDGE_FILE)
+        .await?
+    else {
+        return Ok(PageHistory {
+            path,
+            ..PageHistory::default()
+        });
+    };
+    let current_version = brain.get(&path).await?.map(|bytes| super::version(&bytes));
+    let writes = writes_to(&brain, &path).await?;
+    let forgotten = brain.forgotten_through(&path).await?;
+    let total = writes.len();
+
+    let mut rows = Vec::new();
+    let mut more = false;
+    for (index, record) in writes.iter().enumerate().rev() {
+        if before.is_some_and(|before| record.id >= before) {
+            continue;
+        }
+        if rows.len() == limit {
+            more = true;
+            break;
+        }
+        rows.push(PageVersion {
+            id: record.id,
+            op: record.op.clone(),
+            actor: record.actor.clone(),
+            at: rfc3339(record.at),
+            version: record.version.clone(),
+            size_bytes: record.bytes,
+            summary: summarise(record, &writes[..index]),
+            kept: false,
+            current: false,
+        });
+    }
+    let versions: Vec<&str> = rows
+        .iter()
+        .filter(|row| readable(row.id, row.version.as_deref(), forgotten.as_ref()))
+        .filter_map(|row| row.version.as_deref())
+        .collect();
+    let kept = brain.kept_versions(&versions).await?;
+    // The newest write that stored what the page holds is the current one;
+    // an older write of the same bytes is history.
+    let newest_of_current = writes
+        .iter()
+        .rev()
+        .find(|record| record.version.is_some())
+        .filter(|record| record.version == current_version)
+        .map(|record| record.id);
+    for row in &mut rows {
+        row.current = Some(row.id) == newest_of_current;
+        row.kept = row.version.as_deref().is_some_and(|version| {
+            Some(version) == current_version.as_deref()
+                || (readable(row.id, Some(version), forgotten.as_ref()) && kept.contains(version))
+        });
+    }
+    Ok(PageHistory {
+        path,
+        next_before: if more {
+            rows.last().map(|row| row.id)
+        } else {
+            None
+        },
+        truncated: more,
+        rows,
+        total,
+        current_version,
+    })
+}
+
+/// Whether a log row still leads to bytes: the page's history was never
+/// forgotten, or the row survives the purge.
+fn readable(
+    id: i64,
+    version: Option<&str>,
+    forgotten: Option<&super::session::ForgetMark>,
+) -> bool {
+    forgotten.is_none_or(|mark| mark.readable(id, version))
+}
+
+/// One version of a page, as its history holds it.
+#[derive(Debug, Clone)]
+pub struct VersionRead {
+    pub path: String,
+    pub content: String,
+    pub version: String,
+    /// Whether it is what the page holds now.
+    pub current: bool,
+    /// When the newest write of these bytes landed, as RFC 3339, and who made
+    /// it. A page written before its log has neither.
+    pub at: Option<String>,
+    pub actor: Option<String>,
+}
+
+/// The bytes of one version of a page, with the newest write of them: what
+/// the page holds now, or a version its history names and whose bytes were
+/// kept and not forgotten. One read of the page and one scan of the log.
+async fn find_version(brain: &Brain, path: &str, version: &str) -> Result<VersionRead> {
+    let state = brain.page_version(path, version).await?;
+    let current = state
+        .now
+        .as_ref()
+        .is_some_and(|bytes| super::version(bytes) == version);
+    let newest = state
+        .writes
+        .iter()
+        .rev()
+        .find(|record| record.version.as_deref() == Some(version));
+    let bytes = if current {
+        state.now
+    } else {
+        let Some(newest) = newest else {
+            return Err(Error::NotFound(format!(
+                "no version {version} in the history of '{path}'"
+            )));
+        };
+        if !readable(newest.id, Some(version), state.mark.as_ref()) {
+            return Err(Error::NotFound(format!(
+                "the bytes of version {version} of '{path}' were forgotten"
+            )));
+        }
+        state.kept
+    };
+    let bytes = bytes.ok_or_else(|| {
+        // A page whose history was forgotten may have lost these bytes to the
+        // purge, so only a page never purged says they predate keeping.
+        Error::NotFound(match state.mark {
+            Some(_) => format!("the bytes of version {version} of '{path}' are no longer kept"),
+            None => format!(
+                "the bytes of version {version} of '{path}' were not kept: it was replaced before this hub kept page versions"
+            ),
+        })
+    })?;
+    let content = String::from_utf8(bytes).map_err(|_| {
+        Error::InvalidArgument(format!("version {version} of '{path}' is not UTF-8 text"))
+    })?;
+    Ok(VersionRead {
+        path: path.to_string(),
+        content,
+        version: version.to_string(),
+        current,
+        at: newest.map(|record| rfc3339(record.at)),
+        actor: newest.map(|record| record.actor.clone()),
+    })
+}
+
+/// Read one version of a page.
+pub async fn read_version(
+    state: &AppState,
+    project_id: &str,
+    path: &str,
+    version: &str,
+) -> Result<VersionRead> {
+    let path = page_path(path)?;
+    let Some(brain) = state
+        .knowledge
+        .open_existing(project_id, KNOWLEDGE_FILE)
+        .await?
+    else {
+        return Err(no_page(&path));
+    };
+    find_version(&brain, &path, version).await
+}
+
+/// Put a page back to the bytes of an earlier version.
+///
+/// The revert is a new write by the reverting actor, guarded by `if_version`
+/// like any other, so it never takes a row out of the history: undoing it is
+/// one more revert. A deleted page is restored the same way, with `absent` as
+/// its guard.
+#[allow(clippy::too_many_arguments)]
+pub async fn revert(
+    state: &AppState,
+    project_id: &str,
+    actor: &str,
+    session_id: Option<&str>,
+    path: &str,
+    version: &str,
+    if_version: Option<&str>,
+) -> Result<Written> {
+    let path = page_path(path)?;
+    // The version is looked up before anything is opened for writing, so a
+    // revert in a project with no knowledge base creates none.
+    let Some(existing) = state
+        .knowledge
+        .open_existing(project_id, KNOWLEDGE_FILE)
+        .await?
+    else {
+        return Err(no_page(&path));
+    };
+    let found = find_version(&existing, &path, version).await?;
+    crate::limits::check_kb_page(found.content.len())?;
+    let brain = open_for_write(state, project_id).await?;
+    // Whether the page already holds these bytes is decided under the same
+    // hold of the lock as the guard and the write, so a page that moves in
+    // between is judged as it is when the revert lands.
+    let written = store_unless_same(
+        state,
+        &brain,
+        project_id,
+        REVERT_OP,
+        actor,
+        path,
+        &found.content,
+        if_version,
+    )
+    .await?;
+    if !written.changed {
+        return Ok(written);
+    }
+    signal(
+        state,
+        project_id,
+        actor,
+        session_id,
+        format!("Knowledge base page {} reverted", written.path),
+        json!({
+            "action": "kb_reverted",
+            "store": "project",
+            "path": written.path,
+            "version": written.version,
+        }),
+    )
+    .await;
+    Ok(written)
+}
+
+/// Forget the kept bytes of one page's history, as the operator.
+///
+/// Every version the page's log names stops reading back, except the one the
+/// page holds now; a deleted page loses them all. The log rows stay, so the
+/// history still says who wrote what and when. The purge is recorded on the
+/// project feed as a system event by the human. It is the knowledge base's
+/// garbage collection, and like prune it is the operator's alone.
+pub async fn forget_history(
+    state: &AppState,
+    project_id: &str,
+    path: &str,
+) -> Result<(String, super::session::Forgotten)> {
+    let path = page_path(path)?;
+    let Some(brain) = state
+        .knowledge
+        .open_existing(project_id, KNOWLEDGE_FILE)
+        .await?
+    else {
+        return Err(no_page(&path));
+    };
+    // The audit is not best effort: a purge the hub does not record is one
+    // the operator cannot account for, so it is appended with what the purge
+    // will remove before anything is, and a failed append removes nothing. A
+    // purge that then fails and rolls back says so in a second event, so the
+    // record never claims a removal that did not happen. An audit event is
+    // outside the project's ceiling and out of every agent's feed and search.
+    let audit = async |action: &str, summary: String, forgotten: &super::session::Forgotten| {
+        let event = NewEvent {
+            project_id: project_id.to_string(),
+            kind: events::AUDIT_KIND.to_string(),
+            summary,
+            payload: Some(json!({
+                "action": action,
+                "store": "project",
+                "path": path,
+                "versions": forgotten.versions,
+                "bytes": forgotten.bytes,
+                "unreferenced_versions": forgotten.unreferenced,
+                "unreferenced_bytes": forgotten.unreferenced_bytes,
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        };
+        events::append(
+            &state.db,
+            state.config.events_per_project.per_project,
+            HUMAN,
+            None,
+            event,
+        )
+        .await
+        .map(|_| ())
+    };
+    let mut announced = None;
+    let purged = brain
+        .forget_history(&path, async |forgotten| {
+            audit(
+                "kb_history_forgotten",
+                format!("Knowledge base history of {path} forgotten"),
+                forgotten,
+            )
+            .await?;
+            announced = Some(forgotten.clone());
+            Ok(())
+        })
+        .await;
+    let forgotten = match purged {
+        Ok(forgotten) => forgotten,
+        Err(err) => {
+            if let Some(announced) = announced
+                && let Err(follow_up) = audit(
+                    "kb_history_forget_rolled_back",
+                    format!(
+                        "Forgetting the knowledge base history of {path} failed and was undone"
+                    ),
+                    &announced,
+                )
+                .await
+            {
+                tracing::warn!(project_id, error = %follow_up, "could not record a rolled back purge");
+            }
+            return Err(err);
+        }
+    };
+    if forgotten.through_id.is_none() {
+        return Err(Error::NotFound(format!("'{path}' has no history")));
+    }
+    state.notify();
+    Ok((path, forgotten))
+}
+
 /// Store a page under a canonical path, with its log row and its search row,
 /// then tell every reader of a derived number that the tree changed.
 #[allow(clippy::too_many_arguments)]
@@ -389,7 +813,6 @@ async fn store(
     content: &str,
     if_version: Option<&str>,
 ) -> Result<Written> {
-    crate::limits::check_brain_file(brain.file_bytes())?;
     let version = brain
         .put_if_recorded(
             &path,
@@ -404,10 +827,56 @@ async fn store(
             async || index(state, project_id, &path, content).await,
         )
         .await?;
-    state.notify();
+    finish(state, brain, path, content, version, true).await
+}
+
+/// [`store`] that writes nothing when the page already holds `content`,
+/// reporting `changed: false` then.
+#[allow(clippy::too_many_arguments)]
+async fn store_unless_same(
+    state: &AppState,
+    brain: &Brain,
+    project_id: &str,
+    op: &str,
+    actor: &str,
+    path: String,
+    content: &str,
+    if_version: Option<&str>,
+) -> Result<Written> {
+    let stored = brain
+        .put_if_changed_recorded(
+            &path,
+            content.as_bytes(),
+            if_version,
+            Stamp {
+                op,
+                actor,
+                verifies: Some(brings_in_newest_verification),
+            },
+            async || Ok(()),
+            async || index(state, project_id, &path, content).await,
+        )
+        .await?;
+    let changed = stored.is_some();
+    let version = stored.unwrap_or_else(|| super::version(content.as_bytes()));
+    finish(state, brain, path, content, version, changed).await
+}
+
+/// What a write reports once it is stored: its lint and warnings.
+async fn finish(
+    state: &AppState,
+    brain: &Brain,
+    path: String,
+    content: &str,
+    version: String,
+    changed: bool,
+) -> Result<Written> {
+    if changed {
+        state.notify();
+    }
 
     let mut warnings = Vec::new();
-    if brain.file_bytes() > crate::limits::BRAIN_FILE_BYTES_SOFT {
+    if brain.occupied_bytes().await? > crate::limits::BRAIN_FILE_BYTES_SOFT {
         warnings.push("brain file is over the soft limit".to_string());
     }
     let lint = lint_on_write(brain, &path, content).await;
@@ -417,6 +886,7 @@ async fn store(
         size_bytes: content.len(),
         lint,
         warnings,
+        changed,
     })
 }
 

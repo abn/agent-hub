@@ -237,7 +237,20 @@ and the version stored. The row is written under the same hold of the writer
 lock as the page, so the log is in the order the writes landed. It is what a
 page's history, its last writer and its trust tier are read from. It holds no
 content, it is never trimmed, and it is bounded only by the file's own size
-limit, so reading it is a scan. The routes over it are in
+limit, so reading it is a scan.
+
+The content is in a table of the same file, `hub_page_versions`: the bytes of
+every version a write stored or replaced and every page a delete removed, keyed
+by version token, so identical bytes are kept once. The wrapper writes it under
+the writer lock once the page write lands and before its log row, so a refused
+write keeps nothing and a row never names a version the file lacks. A page's history is its log rows joined to that table, and a
+revert writes kept bytes back as a new write. Session brains keep no versions.
+The operator forgets a page's history by deleting its kept bytes, all but the
+page's current ones, and recording in `hub_page_forgotten` the newest row it
+was forgotten through, so those rows read as not kept. A knowledge base's size
+limit is held against its used pages, free ones left out, since the file reuses
+the pages a purge frees rather than shrinking.
+The decision is [ADR 0029](../adr/0029-knowledge-base-page-history.md). The routes over it are in
 [project knowledge base](../usage/knowledge-base.md).
 
 ## Multi-writer stores

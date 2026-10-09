@@ -57,7 +57,7 @@ does not have.
 Some operations belong to the operator alone, not because agents cannot be
 trusted with projects, but because they are the operator's controls:
 
-- prune and its undo;
+- prune and its undo, and forgetting a knowledge base page's history;
 - creating and revoking agent tokens;
 - managing grants;
 - making a confidential project public;

@@ -68,6 +68,23 @@ pub async fn delete(config: &ClientConfig, id: &str) -> Result<(), Failure> {
     Ok(())
 }
 
+/// Forget the kept bytes of one knowledge base page's history. The route is
+/// the admin's, and a caller without the admin token gets the hub's refusal.
+pub async fn forget_kb_history(
+    config: &ClientConfig,
+    id: &str,
+    path: &str,
+) -> Result<Value, Failure> {
+    let mut url = url::Url::parse(&project_endpoint(config, id)?)
+        .map_err(|err| Failure::Config(format!("the project URL is not a URL: {err}")))?;
+    url.path_segments_mut()
+        .map_err(|_| Failure::Config("the project URL cannot carry a path".to_string()))?
+        .extend(["kb", "versions"]);
+    url.query_pairs_mut().append_pair("path", path);
+    let (_, text) = call(config, url.as_str(), |url, client| client.delete(url)).await?;
+    json_body(&text)
+}
+
 /// Send one request to a project route and return the status and body it
 /// answered with, having already turned a refusal into a failure.
 ///

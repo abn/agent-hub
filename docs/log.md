@@ -61,6 +61,45 @@ software release notes and the repository changelog.
   [using the hub as a brain](usage/agents.md) name the resources, and the
   installable skill's knowledge base reference says how to attach a page.
 
+### A knowledge base page keeps its history and can be reverted
+
+* **Change**: every write and delete of a knowledge base page keeps the bytes it
+  replaces and stores in the project's own knowledge base file, keyed by
+  version token, so an earlier version can be read and put back and a deleted
+  page restored. A revert is a new write by the reverting actor, logged as
+  `kb.revert`, guarded by `if_version`, and it removes nothing from the
+  history. A revert to the version the page already holds writes nothing and
+  returns `changed: false`.
+* **Change**: the operator forgets a page's history with `DELETE
+  kb/versions?path=`, `agent-hub kb forget <path>` or the PWA's Forget history:
+  every kept version but the current one goes, all of them for a deleted page,
+  the rows stay as not kept, and the purge is a `system` audit event. It is
+  admin only and not on the agent surface.
+* **Change**: a knowledge base's size limit is held against the pages the file
+  uses, so space a purge frees counts at once. A write is projected at the
+  copies it keeps that the file does not already hold, and a delete is never
+  refused for the copy it keeps. A purge also sweeps kept bytes no log row
+  names.
+* **Change**: `GET kb/versions?path=` lists one page's versions, `GET
+  kb/pages/{path}?version=` reads one, and `POST kb/pages/{path}/revert` puts
+  one back. The agent tools are `brain_history`, `brain_revert`, and
+  `brain_get` with `version`; the CLI is `agent-hub kb history <path>` and
+  `agent-hub kb revert <path> <version>`. A history page is at most 200 rows.
+* **Change**: the Wiki reader carries a History link; a version opens as a
+  line diff against the page, or the version itself when the diff is past its
+  budget, with a confirmed Revert, Recent changes rows open
+  the page's history, and a deleted page's address links to its history.
+* **New**: [ADR 0029](adr/0029-knowledge-base-page-history.md) records where the
+  history lives and that only the operator's purge takes it away.
+* **Update**: the four `wiki-reader` screenshots are captured again for the
+  reader's History link.
+* **Update**: [Project knowledge base](usage/knowledge-base.md),
+  [data model](architecture/data-model.md),
+  [agent surface](architecture/agent-surface.md),
+  [human interface](design/human-interface.md),
+  [operating model](architecture/model.md) and
+  [quickstart](usage/quickstart.md).
+
 ## 2026-10-08
 
 ### Releases carry standalone binaries

@@ -300,6 +300,9 @@ agent-hub kb put runbooks/deploy.md --file deploy.md
 agent-hub kb put runbooks/deploy.md --if-version "$V" - < deploy.md
 agent-hub kb list                           # one page path per line
 agent-hub kb delete runbooks/deploy.md
+agent-hub kb history runbooks/deploy.md     # one version per line, newest first
+agent-hub kb revert runbooks/deploy.md sha256:...
+agent-hub kb forget runbooks/deploy.md      # admin: drop the earlier versions
 ```
 
 A failed read prints nothing on stdout and says why in its exit code: 1 means

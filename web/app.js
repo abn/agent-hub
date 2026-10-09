@@ -30,12 +30,15 @@ import { toggleKind } from "./feed.mjs";
 import {
   wikiCommentAdd,
   wikiCommentResolve,
+  wikiForgetHistory,
   wikiHistoryEarlier,
   wikiInstruction,
   wikiNew,
   wikiPromote,
   wikiReview,
+  wikiRevert,
   wikiSave,
+  wikiVersionsEarlier,
 } from "./wiki.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
@@ -140,6 +143,9 @@ main.addEventListener("click", (event) => {
   if (action === "wiki-comment-add") wikiCommentAdd(button);
   if (action === "wiki-comment-resolve") wikiCommentResolve(button);
   if (action === "wiki-history-earlier") wikiHistoryEarlier(button);
+  if (action === "wiki-versions-earlier") wikiVersionsEarlier(button);
+  if (action === "wiki-revert") wikiRevert(button);
+  if (action === "wiki-forget-history") wikiForgetHistory(button);
   if (action === "wiki-promote") wikiPromote(button);
   if (action === "wiki-instruction") wikiInstruction(button);
   if (action === "version-toggle") toggleVersionMenu(button);

@@ -8205,3 +8205,54 @@ dialog.dialog-project-delete {
     height: 44px;
   }
 }
+
+/* The wiki's page history. The History control sits in the reader's control
+   row, drawn at the inline 32px and grown to 44px under a coarse pointer. */
+.wiki-history-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-1);
+  color: var(--accent);
+  font: 600 var(--t-13)/1 var(--font-sans);
+  text-decoration: none;
+}
+@media (pointer: coarse) {
+  .wiki-history-link { min-height: 44px; }
+}
+
+/* A version read against the page as it is now. The mark in its own column
+   and a hidden word say whether a line was added or removed; the tint only
+   repeats it. Long lines wrap rather than scroll the pane sideways. */
+.wiki-diff {
+  padding: var(--s-2) 0 var(--s-5);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.wiki-diff-line {
+  display: flex;
+  gap: var(--s-2);
+  padding: 0 var(--s-4);
+  color: var(--ink);
+}
+.wiki-diff-line[data-kind="add"] { background: var(--accent-bg); }
+.wiki-diff-line[data-kind="del"] { background: var(--danger-bg); }
+.wiki-diff-mark {
+  flex: none;
+  width: 1ch;
+  color: var(--ink-2);
+}
+.wiki-diff-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wiki-diff-skip {
+  padding: 6px var(--s-4);
+  border-block: 1px solid var(--line);
+  font-size: var(--t-12);
+  color: var(--ink-3);
+}

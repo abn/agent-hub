@@ -47,6 +47,14 @@ pub const BRAIN_FILE_BYTES_HARD: i64 = 1024 * 1024 * 1024;
 /// Maximum bytes of one knowledge base page path.
 pub const KB_PATH_BYTES_MAX: usize = 512;
 
+/// Rows one knowledge base history page returns when the caller names no
+/// limit, for the project's write log and for one page's versions alike.
+pub const KB_HISTORY_ROWS_DEFAULT: usize = 50;
+
+/// The most rows one knowledge base history page returns. Zero is allowed and
+/// returns the count alone.
+pub const KB_HISTORY_ROWS_MAX: usize = 200;
+
 /// Maximum bytes of the indexed body of one search document.
 pub const SEARCH_BODY_BYTES_MAX: usize = 64 * 1024;
 
@@ -322,6 +330,19 @@ pub fn check_brain_file_projected(file_bytes: i64, incoming_bytes: usize) -> Res
         )));
     }
     Ok(())
+}
+
+/// The rows a knowledge base history page returns, from the limit a caller
+/// named. A limit over the cap is refused rather than cut, so a caller never
+/// mistakes a short page for the end of the history.
+pub fn kb_history_rows(limit: Option<usize>) -> Result<usize> {
+    let limit = limit.unwrap_or(KB_HISTORY_ROWS_DEFAULT);
+    if limit > KB_HISTORY_ROWS_MAX {
+        return Err(Error::InvalidArgument(format!(
+            "limit is at most {KB_HISTORY_ROWS_MAX}"
+        )));
+    }
+    Ok(limit)
 }
 
 /// Reject a handoff note over the cap.

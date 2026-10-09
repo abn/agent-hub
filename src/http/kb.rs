@@ -1,8 +1,8 @@
 //! Knowledge base REST routes.
 //!
 //! The human's surface over the project knowledge base: pages, review,
-//! promotion from a session brain, the write history, backlinks, lint and the
-//! derived numbers. Every route sits behind the admin gate, which runs before
+//! promotion from a session brain, the write history, a page's versions and
+//! revert, backlinks, lint and the derived numbers. Every route sits behind the admin gate, which runs before
 //! anything else is looked at, and every write goes through the one write
 //! path in [`crate::brain::knowledge`] that the agent tools also use.
 
@@ -27,13 +27,6 @@ use crate::okf::parse_frontmatter;
 use crate::store::projects;
 use crate::store::sessions;
 use crate::store::storage::KbCacheEntry;
-
-/// Rows one history page returns when the caller names no limit.
-const HISTORY_LIMIT_DEFAULT: usize = 50;
-
-/// The most rows one history page returns. Zero is allowed and returns the
-/// count alone.
-const HISTORY_LIMIT_MAX: usize = 200;
 
 /// The query parameters for a page listing.
 #[derive(Debug, Default, Deserialize)]
@@ -69,6 +62,30 @@ pub struct ReviewBody {
     pub verified_by: Option<String>,
     /// The version the human read.
     pub if_version: Option<String>,
+}
+
+/// The query for reading a page, which may name an earlier version of it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageQuery {
+    pub version: Option<String>,
+}
+
+/// The body for reverting a page to an earlier version.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevertBody {
+    pub version: String,
+    pub if_version: Option<String>,
+}
+
+/// The query for one page's versions.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VersionsQuery {
+    pub path: String,
+    pub before: Option<i64>,
+    pub limit: Option<usize>,
 }
 
 /// The body for promoting a session brain entry into the knowledge base.
@@ -256,14 +273,33 @@ pub async fn pages(
     Ok(Json(page_of(entries, query.limit)))
 }
 
-/// `GET /api/v1/projects/{id}/kb/pages/{*path}`
+/// `GET /api/v1/projects/{id}/kb/pages/{*path}?version=`
+///
+/// With `version` this is that version of the page, from its history, and a
+/// deleted page can be read this way too.
 pub async fn page_get(
     State(state): State<AppState>,
     Path((project_id, path)): Path<(String, String)>,
     headers: HeaderMap,
+    ProblemQuery(query): ProblemQuery<PageQuery>,
 ) -> std::result::Result<Json<Value>, Problem> {
     check_access(&state, &headers, &project_id).await?;
     let path = page_path(&path)?;
+
+    if let Some(version) = query.version.as_deref() {
+        let read = knowledge::read_version(&state, &project_id, &path, version)
+            .await
+            .map_err(problem)?;
+        return Ok(Json(json!({
+            "path": read.path,
+            "size_bytes": read.content.len(),
+            "content": read.content,
+            "version": read.version,
+            "current": read.current,
+            "at": read.at,
+            "actor": read.actor,
+        })));
+    }
 
     let absent = || problem(knowledge::no_page(&path));
     let brain = existing(&state, &project_id).await?.ok_or_else(absent)?;
@@ -419,10 +455,11 @@ pub async fn page_delete(
     Ok(Json(json!({ "ok": true, "path": path })))
 }
 
-/// `POST /api/v1/projects/{id}/kb/pages/{*path}/review`
+/// `POST /api/v1/projects/{id}/kb/pages/{*path}/review` and
+/// `POST /api/v1/projects/{id}/kb/pages/{*path}/revert`
 ///
-/// The wildcard takes the whole tail, so the one POST under a page is matched
-/// here by its last segment.
+/// The wildcard takes the whole tail, so the POSTs under a page are matched
+/// here by their last segment.
 pub async fn page_post(
     State(state): State<AppState>,
     Path((project_id, full_path)): Path<(String, String)>,
@@ -430,6 +467,9 @@ pub async fn page_post(
     body: Body,
 ) -> std::result::Result<Json<Value>, Problem> {
     check_access(&state, &headers, &project_id).await?;
+    if let Some(page) = full_path.strip_suffix("/revert") {
+        return page_revert(&state, &project_id, page, &headers, body).await;
+    }
     let Some(page) = full_path.strip_suffix("/review") else {
         return Err(problem(Error::NotFound(
             "no route matches this path".to_string(),
@@ -460,6 +500,92 @@ pub async fn page_post(
         "ok": true,
         "path": written.path,
         "version": written.version,
+    })))
+}
+
+/// Put a page back to an earlier version, as a write by the human.
+async fn page_revert(
+    state: &AppState,
+    project_id: &str,
+    page: &str,
+    headers: &HeaderMap,
+    body: Body,
+) -> std::result::Result<Json<Value>, Problem> {
+    let path = page_path(page)?;
+    let bytes = read_body(headers, body, crate::limits::REQUEST_BODY_BYTES_MAX).await?;
+    let revert: RevertBody = serde_json::from_slice(&bytes)
+        .map_err(|err| problem(Error::InvalidArgument(format!("the revert body: {err}"))))?;
+    let written = knowledge::revert(
+        state,
+        project_id,
+        HUMAN,
+        None,
+        &path,
+        &revert.version,
+        revert.if_version.as_deref(),
+    )
+    .await
+    .map_err(problem)?;
+    let Json(mut result) = write_result(&written);
+    result["changed"] = json!(written.changed);
+    Ok(Json(result))
+}
+
+/// `GET /api/v1/projects/{id}/kb/versions?path=&before=&limit=`
+///
+/// One page's history, newest first, with what each version is and whether
+/// its bytes were kept. A deleted page keeps its history.
+pub async fn versions(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+    ProblemQuery(query): ProblemQuery<VersionsQuery>,
+) -> std::result::Result<Json<Value>, Problem> {
+    check_access(&state, &headers, &project_id).await?;
+    let limit = crate::limits::kb_history_rows(query.limit).map_err(problem)?;
+    let path = page_path(&query.path)?;
+    let history = knowledge::history(&state, &project_id, &path, query.before, limit)
+        .await
+        .map_err(problem)?;
+    Ok(Json(json!({
+        "path": history.path,
+        "current_version": history.current_version,
+        "versions": history.rows,
+        "total": history.total,
+        "next_before": history.next_before,
+        "truncated": history.truncated,
+    })))
+}
+
+/// The query for forgetting one page's history.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForgetQuery {
+    pub path: String,
+}
+
+/// `DELETE /api/v1/projects/{id}/kb/versions?path=`
+///
+/// Forget the kept bytes of one page's history: every version but the one the
+/// page holds now, and all of them for a deleted page. The rows stay and read
+/// `kept: false`, and the purge is an audit event on the project.
+pub async fn forget_versions(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+    ProblemQuery(query): ProblemQuery<ForgetQuery>,
+) -> std::result::Result<Json<Value>, Problem> {
+    check_access(&state, &headers, &project_id).await?;
+    let path = page_path(&query.path)?;
+    let (path, forgotten) = knowledge::forget_history(&state, &project_id, &path)
+        .await
+        .map_err(problem)?;
+    Ok(Json(json!({
+        "ok": true,
+        "path": path,
+        "versions_forgotten": forgotten.versions,
+        "bytes_forgotten": forgotten.bytes,
+        "unreferenced_forgotten": forgotten.unreferenced,
     })))
 }
 
@@ -521,12 +647,7 @@ pub async fn history(
     ProblemQuery(query): ProblemQuery<HistoryQuery>,
 ) -> std::result::Result<Json<Value>, Problem> {
     check_access(&state, &headers, &project_id).await?;
-    let limit = query.limit.unwrap_or(HISTORY_LIMIT_DEFAULT);
-    if limit > HISTORY_LIMIT_MAX {
-        return Err(problem(Error::InvalidArgument(format!(
-            "limit is at most {HISTORY_LIMIT_MAX}"
-        ))));
-    }
+    let limit = crate::limits::kb_history_rows(query.limit).map_err(problem)?;
     let path = query.path.as_deref().map(page_path).transpose()?;
     let prefix = query.prefix.as_deref().map(page_path).transpose()?;
 
