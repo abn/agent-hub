@@ -55,6 +55,16 @@ pub const KB_HISTORY_ROWS_DEFAULT: usize = 50;
 /// returns the count alone.
 pub const KB_HISTORY_ROWS_MAX: usize = 200;
 
+/// Most pages one knowledge base export or import carries.
+///
+/// An import lints the whole folder before it writes anything, so the bundle
+/// is held in memory at once; this and [`KB_BUNDLE_BYTES_MAX`] bound that.
+pub const KB_BUNDLE_PAGES_MAX: usize = 10_000;
+
+/// Most bytes of page content one knowledge base export or import carries
+/// (256 MiB, the knowledge base file's soft limit).
+pub const KB_BUNDLE_BYTES_MAX: u64 = 256 * 1024 * 1024;
+
 /// Maximum bytes of the indexed body of one search document.
 pub const SEARCH_BODY_BYTES_MAX: usize = 64 * 1024;
 

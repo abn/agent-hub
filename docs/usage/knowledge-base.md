@@ -83,6 +83,7 @@ included), a backslash, and a canonical path over 512 bytes.
 | One knowledge base file | 1 GiB; a write past 256 MiB carries a warning |
 | One history page | 200 rows, for the write log and for one page's versions |
 | One listing | 500 entries |
+| One folder export or import | 10,000 pages and 256 MiB of pages |
 
 A session brain value keeps its own 4 MiB limit. The page limit applies only
 to the knowledge base.
@@ -325,6 +326,139 @@ The `meta=1` listing, backlinks, lint and stats come from one walk of the
 tree, kept per project. Every write, from either surface, invalidates it, so a
 read straight after a write is current. An entry is also dropped after ten
 seconds.
+
+## Sync with a folder
+
+`agent-hub kb export` and `agent-hub kb import` move a whole knowledge base to a
+plain folder and back, so an operator can edit it in their own editor, diff it
+or keep it in git. Both are client commands: they read `HUB_URL`, `HUB_TOKEN`
+and `HUB_PROJECT` (or `--project`) like the rest of `agent-hub kb`, and go
+through the same agent tools on one connection. The pages land only in the
+directory named. The decision is
+[ADR 0030](../adr/0030-knowledge-base-folder-sync.md).
+
+```sh
+agent-hub kb export --dir ./kb               # every page, at its path under /fs
+$EDITOR ./kb/runbooks/deploy.md
+agent-hub kb import --dir ./kb --dry-run     # what would change, nothing written
+agent-hub kb import --dir ./kb               # write the pages that changed
+```
+
+### Export
+
+`kb export --dir D` writes each page to the file at its path under `/fs`, so
+`/fs/runbooks/deploy.md` is `D/runbooks/deploy.md`, and writes the manifest
+`D/.agent-hub-kb.json`:
+
+```json
+{
+  "format": 1,
+  "project": "homelab",
+  "pages": {
+    "/fs/index.md": "sha256:...",
+    "/fs/runbooks/deploy.md": "sha256:..."
+  }
+}
+```
+
+A directory that holds anything is refused. `--force` writes into it anyway:
+it writes over the page files and the manifest, and removes the file of each
+page the old manifest names that the hub no longer has, printing
+`removed <path>` for it, so the next import does not bring the page back. Only
+a regular file reached through plain directories inside D is removed; a
+directory left empty stays, and nothing the old manifest does not name is
+touched. A manifest that cannot be read, or one exported from another
+project, refuses the export.
+
+Every page is read, and every target checked, before D is created or the first
+file written: a path that would leave the folder, a symbolic link on the way
+to a page, or a directory where a page goes refuses the export. Each file is
+then opened without following a symbolic link, so one put in place after the
+check is refused rather than written through. A page whose path has a
+dot-named component is left out with a note on stderr, because an import does
+not read it back.
+
+Two pages whose paths differ only in case or Unicode normalisation, in a file
+name or a directory on the way to one (`Notes.md` and `notes.md`, `Runbooks/`
+and `runbooks/`), refuse the export. A filesystem that ignores case or
+normalisation, as macOS does by default, keeps them as one file, and the
+import after it would write the survivor to the wrong page. Rename one on the
+hub first. The check folds case with Unicode lowercasing after NFC
+normalisation, which is close to what such a filesystem does but not the same
+in every script.
+
+### Import
+
+`kb import --dir D` reads every file under D except dot-named files and
+directories, which keeps the manifest and a `.git` directory out of the bundle.
+A symbolic link, a file that is not UTF-8 text, a page over 1 MiB, a path the
+hub would refuse, two files whose paths differ only in case or normalisation,
+and a folder over the bundle limits are refused before anything is written.
+A file name is read as its NFC spelling, which is how an export wrote it, so a
+name macOS hands back decomposed is the same page. Once the hub is listed, a
+folder page that differs only in case or normalisation from a hub page the
+import keeps is refused too: a rename that changes only case is then one page
+again only with `--prune`, which deletes the old spelling.
+Files are opened without following a symbolic link. A manifest exported from
+another project is refused too, and so is one that names a page twice or names
+a path that is not a canonical page path under `/fs`.
+
+The import then plans every change against the hub, as below, and lints the
+folder whole with the hub's own lint. These findings refuse the import with
+nothing written when they are on a page it would create or update:
+`unparsed_frontmatter`, `okf_version_misplaced` and `link_escapes_bundle`. On a
+page the import leaves as it is, the hub already holds them, so they are
+printed as warnings and do not refuse. The rest
+(`missing_frontmatter`, `missing_type`, `broken_link`, `missing_index`,
+`missing_log`, `orphan_page`, `missing_index_entry`) say a bundle is
+incomplete. Each warning is one line on stderr,
+`agent-hub: lint <code> <path>:<line>: <message>`, or without `:<line>` for a
+finding about the whole page, and the import goes ahead, so a knowledge base whose pages already carry a broken
+link still imports its own export back.
+
+Each page is compared by version in the folder, on the hub and in the manifest,
+and gets one line on stdout:
+
+| Line | When | Written |
+|---|---|---|
+| none | the folder and the hub hold the same bytes | no |
+| `create <path>` | the folder has a page the hub and the export do not | with `if_version: "absent"` |
+| `update <path>` | the folder changed the page and the hub did not | with the manifest's version |
+| `hub newer <path>: left as is` | the folder holds the page as exported and the hub changed or deleted it since | no |
+| `delete <path>` | with `--prune`, the export had the page and the folder does not | with the manifest's version |
+| `keep <path>: ...` | without `--prune`, the export had the page and the folder does not | no |
+| `conflict <path>: ...` | the folder changed the page and the hub changed, deleted or created it too; with `--prune`, the folder removed a page the hub changed | no |
+| `delete <path>: already gone` | with `--prune`, the hub deleted the page while the import ran | no |
+| `not attempted <path>` | the hub refused an earlier change for a reason other than a conflict | no |
+
+A conflict is skipped and every other change is still made. A page that
+changes on the hub while the import runs is refused by its guard and reported
+as the same conflict. Any other refusal from the hub stops the import there:
+the lines above it are what was made, the page it refused and every later
+write or delete read `not attempted`, and the hub's error follows on stderr
+with its exit code. A manifest that cannot be saved once the hub was written
+is reported the same way, after the lines for what was made. A last line counts each kind. The import then rewrites the
+manifest with the version of every page it wrote or found in step, and drops
+each page that is gone from both the folder and the hub, so a second import of
+the same folder changes nothing. A `hub newer` page keeps the version it was
+exported at; the next export brings the hub's copy and its version into the
+folder. A folder with no manifest is taken as
+a new bundle: every page in it is a `create`, and one the hub already has with
+other bytes is a conflict.
+
+`--prune` deletes only pages the manifest names, so a page created on the hub
+after the export is never pruned. `--dry-run` prints the same lines, with
+`create`, `update` and `delete` as `would create`, `would update` and
+`would delete`, and writes nothing, the manifest included.
+
+The exit code is 0 when every change was made, 1 when any page was a conflict
+(on a dry run too, so a script can check first), when the lint refused the
+folder, or when a file refused, the hub's own code when it stopped the import, 2 for a usage mistake, and the
+client codes `agent-hub kb` already uses for an unreachable hub (69), a refused
+token (77) and no hub configured (78).
+
+There is no merge. To resolve a conflict, export again into a fresh folder and
+carry the change across, or write the page with `agent-hub kb put`.
 
 ## Agent tools
 
