@@ -6,6 +6,16 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### CI writes the visual baselines
+
+* **Add**: `.github/workflows/visual-baselines.yml`, run by hand on a branch,
+  runs both e2e shards in turn through `make e2e/baselines` on the runner the
+  e2e job uses, rewriting the `toHaveScreenshot` baselines that changed. A
+  second job, the only one that may write, pushes them to that branch as one
+  commit. It refuses the default branch and a branch that moved during the run.
+* **Update**: the [contributor guide](contribution/guide.md) states how a
+  branch gets its baselines and why a baseline made elsewhere never matches.
+
 ### Control sizes follow the pointer
 
 * **Update**: [Human interface](design/human-interface.md) states the control
