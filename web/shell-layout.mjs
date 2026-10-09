@@ -245,10 +245,10 @@ export function shellMobileBar(title, meta = "", backHref = "") {
 
 export function shellIndexControls(placeholder, group = "", right = "") {
   return `<div class="shell-controls">
-    <div class="shell-filter">
+    <label class="shell-filter">
       <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
       <input type="search" data-index-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}">
-    </div>
+    </label>
     ${group}
     ${right}
   </div>`;

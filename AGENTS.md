@@ -73,19 +73,24 @@ any access rule.
 - **No emoji.** Anywhere: interface, copy, mocks, or docs. Icons are inline
   SVG line glyphs or typographic marks.
 - **Accessibility is a build gate.** WCAG AA in both themes, a 12px UI text
-  floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
-  meaning carried by colour alone. Reduced motion is honoured.
+  floor, a visible focus ring, a full keyboard path, and no meaning carried by
+  colour alone. Reduced motion is honoured. Targets follow the pointer: under a
+  coarse pointer every control answers to at least 44 by 44px, by its own box
+  or by a hit area around it; under a fine pointer a control is drawn at the
+  size its band gives it and never under the 24px WCAG 2.5.8 minimum.
 - **The frame does not move, on a desktop.** Every pane reserves a 52px header
   and a 40px control row, in that order, whether or not it has content for
-  them. One gutter per pane, a fixed glyph column in every list, and prose
-  left-aligned and capped at 640. Panes change width; the reader's place does
-  not. **On a phone the frame is one header plus one tools row**: the header is
-  76px at rest and 52px once scrolled, the tools row is a sticky 44px, and the
-  48px leading slot and the title's left edge hold in both states. A phone
-  reader's place is their scroll position, so the phone reserves nothing. Round
-  12's content rules (a list, a summary, a settings row, a storage breakdown)
-  hold at both widths; its chrome rules (the collapsing header, the tools row,
-  the tab bar, More) are phone-only.
+  them. No control is taller than the band that holds it: a header or
+  control-row control is drawn at 32px on a fine pointer. One gutter per pane,
+  a fixed glyph column in every list, and prose left-aligned and capped at 640.
+  Panes change width; the reader's place does not. **On a phone the frame is
+  one header plus one tools row**: the header is 76px at rest and 52px once
+  scrolled, the tools row is a sticky 44px, and the 48px leading slot and the
+  title's left edge hold in both states. A phone reader's place is their scroll
+  position, so the phone reserves nothing. Round 12's content rules (a list, a
+  summary, a settings row, a storage breakdown) hold at both widths;
+  its chrome rules (the collapsing header, the tools row, the tab bar, More)
+  are phone-only.
 - **One surface per thing.** An object is read in one place at a time: the
   aside on a fine pointer, one sheet on a coarse pointer. No code path mounts
   both, and there is no comment modal on the desktop.

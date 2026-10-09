@@ -6,6 +6,24 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### Control sizes follow the pointer
+
+* **Update**: [Human interface](design/human-interface.md) states the control
+  sizes. A fine pointer draws a control in a pane header, a control row or a
+  row at 32px and any other button or field at 36px, so no control is taller
+  than its band; a coarse pointer draws a button or a field at 44px and gives a
+  smaller chrome control a 44px hit area in both axes, wherever a touch screen
+  is, including one beside a mouse. The phone's projects tabs, inbox filter
+  field and Settings theme segments now answer to 44 by 44.
+* **Update**: the accessibility gate is described as it now runs: the
+  stylesheet check reads the sizes per pointer, and the browser pass walks
+  every screen the router registers for both size rules.
+* **Update**: the captures whose controls moved are retaken: the artifact
+  viewer, artifacts, the feed, the inbox and an open item, projects, search,
+  sessions and the session detail, storage, the wiki and its reader at both
+  widths, and Settings at phone width. A phone capture
+  is now taken with a touch pointer, which is what draws the phone's sizes.
+
 ### Hub store writers queue for the write lock
 
 * **Update**: Every hub store write, a transaction or a single statement such

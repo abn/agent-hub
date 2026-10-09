@@ -167,7 +167,7 @@ h3.group {
 .pill-enrol { background: var(--surface-2); color: var(--ink-2); }
 /* component: chips */
 /* The design draws a chip at 32px, which is under the tap target, so the
-   drawn box stays 32px and the hit area grows to 44px with a pseudo-element. */
+   drawn box stays 32px and a coarse pointer gets the shared hit area. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -187,16 +187,6 @@ h3.group {
   flex: none;
   box-sizing: border-box;
   position: relative;
-}
-.chip::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  transform: translateY(-50%);
-  min-height: 44px;
-  height: 44px;
 }
 .chip[aria-pressed="true"] {
   background: var(--ink);
@@ -230,12 +220,14 @@ h3.group {
 /* end component: chips */
 
 /* component: buttons */
+/* Targets follow the pointer. A fine pointer draws a button at the form size,
+   and a band or a row draws it at --ctl; a coarse pointer draws it at --tap. */
 button, .button {
-  min-height: 44px; padding: 0 var(--s-4); border-radius: var(--r-1);
+  min-height: var(--ctl-form); padding: 0 var(--s-4); border-radius: var(--r-1);
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
   font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer;
 }
-a.button, a.chip { display: inline-flex; align-items: center; text-decoration: none; }
+a.button, a.chip { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 button.primary { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
 button.action { background: var(--action); color: var(--ink-inverse); border-color: var(--action); }
 /* Prune is the one destructive verb. It stays an outline wherever it sits on a
@@ -249,14 +241,35 @@ button:not([disabled]):not(.primary):not(.action):hover, .chip:not([aria-pressed
   background: var(--surface-2);
 }
 button:not([disabled]):active, .chip:active { transform: translateY(1px); }
-/* Inline in a row the drawn box is the design's 32px. Under a coarse pointer
-   the box stays 32px and the target it answers to grows to 44px. */
-.row button { min-height: 32px; padding: 0 var(--s-3); }
+/* Inline in a row the drawn box is --ctl at either pointer, and a coarse
+   pointer gets the hit area below. A pane header and a control row hold their
+   controls at --ctl on a fine pointer, so no control is taller than its band. */
+.row button { min-height: var(--ctl); padding: 0 var(--s-3); }
+@media (pointer: fine) {
+  :is(.shell-head, .shell-controls, .storage-head, .storage-controls, .hub-viewer-bar) :is(button, .button) {
+    min-height: var(--ctl);
+  }
+}
 @media (pointer: coarse) {
-  .row button { position: relative; }
-  .row button::after {
-    content: ""; position: absolute; left: 0; right: 0;
-    top: 50%; height: 44px; transform: translateY(-50%);
+  button, .button { min-height: var(--tap); }
+}
+/* The hit area. Wherever a coarse pointer is present, a control drawn under
+   the target keeps its drawn box and answers to a --tap box around its
+   centre, in both axes. It asks `any-pointer` rather than `pointer`, so a
+   touch screen beside a mouse keeps its targets: the area is invisible, and
+   only the drawn sizes follow the primary pointer. */
+@media (any-pointer: coarse) {
+  .row button, .chip, .hub-back, .hub-btn-glyph, .hub-version-toggle, .projects-new,
+  .storage-remeasure-btn, .storage-prune-all-btn, .projects-tab-btn, .reveal-copy,
+  .shell-seg a, .settings-glyph-seg, .settings-theme-btn, .shell-filter { position: relative; }
+  .row button::after, .chip::after, .hub-back::after, .hub-btn-glyph::after,
+  .hub-version-toggle::after, .projects-new::after, .storage-remeasure-btn::after,
+  .storage-prune-all-btn::after, .projects-tab-btn::after, .reveal-copy::after,
+  .shell-seg a::after, .settings-glyph-seg::after, .settings-theme-btn::after,
+  .shell-filter::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: max(100%, var(--tap)); height: max(100%, var(--tap));
+    transform: translate(-50%, -50%);
   }
 }
 /* component: rail */
@@ -962,7 +975,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
   font-weight: 500; font-size: var(--t-13);
 }
 .hub-version-toggle, .hub-raw {
-  flex: none; min-height: 44px; padding: 0 var(--s-3);
+  flex: none; min-height: var(--ctl); padding: 0 var(--s-3);
   border: 1px solid var(--line-strong); border-radius: var(--r-1);
   background: var(--surface); color: var(--ink); font-weight: 500;
   display: inline-flex; align-items: center; gap: var(--s-1);
@@ -1006,11 +1019,14 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
    every field is drawn one step darker. An outline button keeps --line-strong,
    because its own label is what identifies it. */
 input, select, textarea {
-  width: 100%; min-height: 44px; padding: var(--s-2) var(--s-3);
+  width: 100%; min-height: var(--ctl-form); padding: var(--s-2) var(--s-3);
   font: inherit; color: var(--ink); background: var(--surface);
   border: 1px solid var(--ink-3); border-radius: var(--r-1);
 }
 label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var(--s-2) 0 var(--s-1); }
+@media (pointer: coarse) {
+  input, select, textarea { min-height: var(--tap); }
+}
 
 .token {
   font-family: var(--font-mono); overflow-wrap: anywhere; word-break: break-all;
@@ -1225,8 +1241,10 @@ html.has-dialog { overflow: hidden; }
 }
 .reveal-copy {
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: var(--ctl);
+  padding: 0;
   display: grid;
   place-items: center;
   border: 0;
@@ -1354,10 +1372,12 @@ html.has-dialog { overflow: hidden; }
 }
 /* The answers the asker suggested, above the field. Each is an ordinary
    secondary button at the full 44px, wrapping onto lines of its own rather
-   than running past a phone's edge, and its words are the whole answer. */
+   than running past a phone's edge, and its words are the whole answer. The
+   composer keeps its own sizes until it is redrawn, so the answer holds --tap
+   at either pointer. */
 .composer-options { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0 0 var(--s-2); }
 .composer-option {
-  max-width: 100%; padding: var(--s-2) var(--s-4);
+  min-height: var(--tap); max-width: 100%; padding: var(--s-2) var(--s-4);
   white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.3;
 }
 .composer-error { margin: var(--s-2) 0 0; color: var(--danger); font-size: var(--t-13); }
@@ -1691,13 +1711,14 @@ button.empty-link {
   color: var(--ink-3);
 }
 /* The re-measure glyph is square like every other glyph button in the build.
-   Its box is its own 36, and the 44px floor is touch's, so under a coarse
+   Its box is the band's --ctl, and the 44px floor is touch's, so under a coarse
    pointer the hit area grows around it instead of the box growing taller. */
 .storage-remeasure-btn {
   flex: none;
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-height: var(--ctl);
+  padding: 0;
   display: grid;
   place-items: center;
   background: none;
@@ -1760,18 +1781,6 @@ button.empty-link {
 .storage-controls .storage-review,
 .storage-mobile-tools .storage-review {
   margin-top: 0;
-}
-@media (pointer: coarse) {
-  .storage-remeasure-btn::after,
-  .storage-prune-all-btn::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: -4px;
-    right: -4px;
-    height: 44px;
-    transform: translateY(-50%);
-  }
 }
 .storage-desktop-legend,
 .storage-legend-wrap {
@@ -2729,8 +2738,8 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   margin-top: 2px;
 }
 .projects-new {
-  min-height: 36px;
-  height: 36px;
+  min-height: var(--ctl);
+  height: var(--ctl);
   box-sizing: border-box;
   padding: 0 10px 0 8px;
   display: inline-flex;
@@ -2752,13 +2761,6 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .projects-new:focus-visible {
   outline: none;
   box-shadow: var(--focus);
-}
-@media (pointer: coarse) {
-  .projects-new::after {
-    content: "";
-    position: absolute;
-    inset: -4px 0;
-  }
 }
 .projects-acts {
   display: flex;
@@ -3400,7 +3402,8 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   flex: none;
 }
 .session-file-copy {
-  height: 28px;
+  height: var(--ctl);
+  min-height: var(--ctl);
   padding: 0 10px;
   background: none;
   border: 1px solid var(--line-strong);
@@ -3413,7 +3416,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 }
 @media (pointer: coarse) {
   .session-file-copy {
-    min-height: 44px;
+    min-height: var(--tap);
   }
 }
 .session-file-content {
@@ -3940,15 +3943,19 @@ a.session-back {
 }
 
 /* One control height across the band: the back and the three glyphs are all
-   36px, so a row of glyph buttons does not mix two heights. */
+   --ctl, so a row of glyph buttons does not mix two heights. Under a coarse
+   pointer the gap is what keeps two neighbours' hit areas from overlapping. */
+@media (any-pointer: coarse) {
+  .hub-viewer-bar { gap: calc(var(--tap) - var(--ctl)); }
+}
 .hub-back {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
-  min-height: 36px;
-  width: 36px;
-  height: 36px;
+  min-width: var(--ctl);
+  min-height: var(--ctl);
+  width: var(--ctl);
+  height: var(--ctl);
   padding: 0;
   border: none;
   background: transparent;
@@ -3983,10 +3990,10 @@ a.session-back {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: var(--ctl);
+  height: var(--ctl);
+  min-width: var(--ctl);
+  min-height: var(--ctl);
   padding: 0;
   border: none;
   background: transparent;
@@ -4013,18 +4020,6 @@ a.session-back {
   outline-offset: 2px;
 }
 
-/* The band's controls are 36px, so a coarse pointer gets the 44px floor from
-   the same expansion the glyph buttons already carry, rather than from a
-   second height in the row. */
-@media (pointer: coarse) {
-  .hub-back { position: relative; }
-  .hub-back::after,
-  .hub-btn-glyph::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
-  }
-}
 
 /* Beside the bubble, not inside it. Drawn within the glyph it had to shrink
    to 10px to fit, which is under this project's own 12px floor and read as a
@@ -4133,19 +4128,6 @@ a.session-back {
   outline-offset: 2px;
 }
 
-@media (pointer: coarse) {
-  .hub-version-toggle::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-  }
-}
 
 /* Document frame: no inner card or scroller */
 #hub-frame {
@@ -6860,8 +6842,9 @@ a.session-back {
 .proj-overflow-btn,
 .inbox-overflow-btn {
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: var(--ctl);
+  height: var(--ctl);
+  padding: 0;
   margin: 0 calc(-1 * var(--s-2)) 0 0;
   display: inline-flex;
   align-items: center;
@@ -6887,6 +6870,13 @@ a.session-back {
 .proj-overflow-btn svg,
 .inbox-overflow-btn svg {
   display: block;
+}
+@media (pointer: coarse) {
+  .proj-overflow-btn,
+  .inbox-overflow-btn {
+    width: var(--tap);
+    height: var(--tap);
+  }
 }
 .proj-overflow-menu,
 .inbox-overflow-menu {
@@ -7236,6 +7226,7 @@ dialog.dialog-project-delete {
   position: relative;
   flex: 1;
   min-width: 0;
+  margin: 0;
 }
 .shell-filter svg {
   position: absolute;
@@ -7259,6 +7250,13 @@ dialog.dialog-project-delete {
   font-size: var(--t-13);
 }
 .shell-filter input::placeholder { color: var(--ink-3); }
+/* The field sits above the wrapper's hit area, so a press on the field itself
+   places the caret where it landed, and the magnifier sits above the field,
+   which would otherwise paint over it. */
+@media (any-pointer: coarse) {
+  .shell-filter input { position: relative; z-index: 1; }
+  .shell-filter svg { z-index: 2; }
+}
 .shell-count {
   padding: 10px 16px 2px;
   font-family: var(--font-mono);
@@ -7530,19 +7528,6 @@ dialog.dialog-project-delete {
   cursor: pointer;
   position: relative;
 }
-/* The drawn segment is 32 in the rhythm; a coarse pointer's 44 is reached with
-   a pseudo-element around it, the same step `.chip` takes. */
-@media (pointer: coarse) {
-  .settings-glyph-seg::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 0;
-    right: 0;
-    height: 44px;
-    transform: translateY(-50%);
-  }
-}
 .settings-glyph-seg[aria-pressed="true"],
 .settings-glyph-seg[aria-checked="true"] {
   background: var(--surface);
@@ -7583,16 +7568,12 @@ dialog.dialog-project-delete {
   border-radius: var(--r-1);
   background: var(--surface-2);
 }
-@media (pointer: coarse) {
-  .settings-theme-btn::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 0;
-    right: 0;
-    height: 44px;
-    transform: translateY(-50%);
-  }
+/* The drawn segment is 32 in the rhythm; a coarse pointer's 44 is reached with
+   the shared hit area. Three segments side by side cannot each answer to 44 in
+   width without overlapping, so under a coarse pointer a segment is drawn at
+   the target's width. */
+@media (any-pointer: coarse) {
+  .settings-glyph-seg, .settings-theme-btn { width: var(--tap); min-width: var(--tap); }
 }
 .agents-add-btn {
   height: 32px;
@@ -7617,6 +7598,11 @@ dialog.dialog-project-delete {
 .shell-index .shell-head .shell-title { flex: 0 1 auto; }
 .shell-head .search-field { height: 32px; border-radius: var(--r-pill); }
 .shell-head .search-field input { height: 32px; font-size: var(--t-13); }
+@media (pointer: fine) {
+  .shell-head .search-field { min-height: var(--ctl); height: var(--ctl); }
+  .shell-head .search-field input { min-height: 0; height: 100%; }
+  .shell-head .search-clear { width: var(--ctl); min-height: 0; height: 100%; }
+}
 .shell-stage .search-stage { height: 100%; }
 
 /* The comments aside is part of the layout on a fine pointer. */
@@ -7750,6 +7736,9 @@ dialog.dialog-project-delete {
 .shell-controls .search-scopes {
   flex: 1;
   min-width: 0;
+  /* The full height of the row, so the scroll box does not clip a chip's hit
+     area. */
+  align-self: stretch;
   align-items: center;
   padding: 0;
   margin: 0;

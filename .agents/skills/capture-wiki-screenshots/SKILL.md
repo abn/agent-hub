@@ -20,8 +20,9 @@ claim against.
 - A written capture script a reviewer can re-run, not a folder of mystery
   bytes: `.agents/skills/capture-wiki-screenshots/scripts/wiki_screens.py`.
 - Four images per feature screen: desktop light and dark at 1440x900, phone
-  light and dark at 390x844, so a reader on either theme at either width sees
-  the real surface.
+  light and dark at 390x844 with a touch pointer, so a reader on either theme
+  at either width sees the real surface. Control sizes follow the pointer, so a
+  phone capture without touch would draw the desktop's sizes.
 - Dummy data from `.agents/skills/seeded-hub/scripts/hub_harness.py` (`running_hub(name)`,
   `seed(port)`), which seeds a `checks` project with a feed, a session with a
   brain, artifacts, an inbox and a knowledge base. Never a real hub, never the

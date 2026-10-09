@@ -49,7 +49,9 @@ export default defineConfig({
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name,
       use: { viewport },
-      testIgnore: /(a11y|focus-rings|prefix|invariants).*\.spec\.mjs/,
+      // Anchored on the file name, so a checkout whose own path carries one of
+      // these words does not ignore every spec.
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -79,6 +81,19 @@ export default defineConfig({
       name: "focus-touch",
       use: { viewport: { width: 390, height: 844 }, hasTouch: true },
       testMatch: /focus-rings\.spec\.mjs/,
+    },
+    // Control sizing follows the pointer, so its two projects are one fine
+    // pointer at the desktop width and one coarse pointer at the phone width,
+    // each on its own hub because they walk every screen.
+    {
+      name: "sizing-desktop",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /control-sizing\.spec\.mjs/,
+    },
+    {
+      name: "sizing-touch",
+      use: { viewport: WIDTHS.phone, hasTouch: true },
+      testMatch: /control-sizing\.spec\.mjs/,
     },
     {
       name: "prefix",

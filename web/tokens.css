@@ -44,6 +44,10 @@
   --r-1: 6px; --r-2: 12px; --r-pill: 999px;
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
   --row-y: 12px;
+  /* Control sizes. A band or a row draws a control at --ctl, a glyph inside a
+     line of text at --ctl-sm, a form field or a dialog action at --ctl-form,
+     and a coarse pointer answers to --tap in both axes. */
+  --ctl: 32px; --ctl-sm: 28px; --ctl-form: 36px; --tap: 44px;
 
   --t-12: 12px; --t-13: 13px; --t-15: 15px; --t-17: 17px; --t-22: 22px; --t-28: 28px;
 }
