@@ -689,7 +689,7 @@ export async function projectScreen(params, gen, path) {
     const selected = params?.get("page") || "";
     const stage = await wikiStage(id, params, shellStageHead, stats, project?.display_name || id);
     const indexBody = await wikiIndexBody(id, selected, project?.display_name || id, params?.get("dir") || "");
-    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
+    const newBtn = `<button type="button" class="btn-outline" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">New page</button>`;
     shell = shellHTML({
       segment,
       indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,

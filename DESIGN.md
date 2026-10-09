@@ -145,7 +145,7 @@ with Version, a value row that promises nothing. Storage adds a fourth bar
 segment and one helper line, and a zero cell reads a dash. Agents and tokens is a
 list-and-item screen, an index beside a stage, like the inbox. The rail's sync
 line is hidden when healthy. The artifact viewer's chrome band is a 52px header
-like every other pane's, and every control in it is 36px.
+like every other pane's, and every control in it is `--ctl`, 32px.
 
 **Deviation: the artifact viewer is the one phone screen with no phone frame.**
 Every other phone screen is the 76px header and the 44px tools row, with its
@@ -182,6 +182,10 @@ it remains the open design question.
   40px control row, in that order, whether or not it has anything to put in
   them. Content starts at the same y in every pane of every section. An empty
   control row is correct; a missing one is a bug.
+- **Deviation: two desktop screens do not reserve the frame.** Search draws a
+  48px header and no control row, and More, the phone's tab root, reaches a
+  desktop only by its address and has no control row. Their controls are still
+  held to the 32px band height.
 - On a phone the frame is one header and one tools row. The header is 76px at
   rest (title 22/600, its meta under it) and 52px once the list is scrolled
   past 20px (title 15/600, meta hidden), over 120ms and instant under reduced
@@ -247,6 +251,33 @@ structure, not to line length.
 
 ## Components
 
+- **Control sizes.** Four tokens: `--ctl` 32px, `--ctl-sm` 28px, `--ctl-form`
+  36px and `--tap` 44px. No control is taller than the band that holds it.
+  - **Bands and rows.** A control in a pane header, a control row or a row is
+    `--ctl` on a fine pointer.
+  - **Inline glyphs.** A glyph inside a line of text is `--ctl-sm`.
+  - **Forms and dialogs.** Fields and dialog actions are `--ctl-form`, which is
+    also what a button anywhere else is drawn at on a fine pointer.
+  - **Coarse pointer.** Drawn sizes follow the primary pointer: under a
+    coarse one, buttons, links drawn as buttons, form fields, dialog actions
+    and the composer are drawn at `--tap`. The hit area follows any coarse
+    pointer, primary or not, so a touch screen beside a mouse keeps its
+    targets: a chrome control drawn under the target (a chip, a glyph, a row
+    button, a segment, the filter field) keeps its drawn size and answers to a
+    `--tap` hit area around its centre, in both axes. Neighbours keep their
+    hit areas apart, with a gap of `--tap` minus the drawn size between
+    glyphs and a segment drawn `--tap` wide, so no control's centre is under
+    another's area, and a glyph stays above the field that draws it. A link
+    inside a sentence is text, not a control.
+  - **Width.** A button is as wide as its label.
+  - **Deviation: what is not built to this yet.** Some desktop buttons and
+    fields still stretch across their pane, so the width rule is the design
+    and not yet the build. The composer keeps its own sizes until it is
+    redrawn. Two phone controls answer to less than 44 by 44: the project
+    switcher's tabs, because the switcher scrolls sideways in a 36px track and
+    a scroll box clips a hit area, and the artifact viewer's version toggle,
+    which sits on a 16px line between the band and the document. The browser
+    gate names both, and fails once either passes, so the list only shrinks.
 - **Focus ring.** The ring is the shadow `--focus` carries, and it is drawn
   once. A field or a row that takes the ring on `:focus-within` is the one
   object, so the control inside it does not draw a second. What is left under
@@ -264,7 +295,7 @@ structure, not to line length.
   visually hidden word for the kind instead.
 - **Chips and pills.** A chip is a filter: pill radius, selected is ink fill,
   otherwise an outline. A pill is a value, not a door.
-- **Buttons.** 44px minimum, 32px inline in a row, radius 6, `white-space:
+- **Buttons.** Sized by the control sizes above, radius 6, `white-space:
   nowrap`. Primary is ink fill, secondary an outline, Approve the action tone,
   danger an outline on a screen and a fill only inside a dialog that deletes.
   Disabled is the inset surface with meta ink. A destructive action is never a
@@ -285,8 +316,8 @@ structure, not to line length.
   no row to carry a glyph: the project feed's empty state may read **Copy MCP
   setup**. The wiki's empty state does not take the exception: it shows the
   command on a row and the copy glyph sits on that row.
-- **Filter field.** Every index over about eight rows carries a 28px
-  pill-radius `type="search"` field in its control row, naming the list it
+- **Filter field.** Every index over about eight rows carries a `--ctl`, 32px,
+  `type="search"` field in its control row, naming the list it
   filters ("Filter artifacts"). It filters in place and does not navigate.
   While filtering, the group headers give way to one mono count line.
 - **Composer.** A rounded container, growing to a 120px maximum height, a 1px
@@ -307,8 +338,9 @@ structure, not to line length.
   options come back. The composer's placeholder, "Or type a reply", reads
   under them as the free-text path.
 - **Copy control.** A control whose whole job is to put a string on the
-  clipboard is a 28px icon button, 36px on a coarse pointer, sitting on the row
-  that owns the string. Never a text button, never floating over content.
+  clipboard is a `--ctl`, 32px, icon button with a `--tap` hit area under a
+  coarse pointer, sitting on the row that owns the string. Never a text
+  button, never floating over content.
   Confirmation is the button itself: the glyph becomes a check in the ok tone
   for 1.4s and the label becomes "Copied". No toast.
 
@@ -383,15 +415,16 @@ Agents and access, Connect, and the knowledge base.
   not the raw stamp, so it reads as a date and never breaks at a hyphen. Unchanged runs fold to one 12px count
   line, three lines of context either side of a change. Long lines wrap, so the
   diff never scrolls the pane sideways. The header carries **Revert to this**,
-  or **Restore this** for a deleted page, a neutral 44px outline: a revert is a
-  new write that deletes nothing, so it does not take `--danger`. It asks in a
-  dialog that focuses Cancel first and names what stays in the history. A
-  diff past its edit budget is not drawn as counts it cannot stand behind: the
-  controls row says "Too many changes to show line by line." and the stage
+  or **Restore this** for a deleted page, a neutral outline at the band's
+  `--ctl`: a revert is a new write that deletes nothing, so it does not take
+  `--danger`. It asks in a dialog that focuses Cancel first and names what
+  stays in the history. A diff past its edit budget is not drawn as counts it
+  cannot stand behind: the controls row says "Too many changes to show line by line." and the stage
   shows the version itself, as it does for a deleted page's version, where a
-  diff against nothing would mark every line removed. The history's header carries **Forget history**, a
-  44px `button.danger` outline, since it deletes the kept bytes for good; its
-  dialog names the page, says the rows stay and focuses Cancel. It shows only
+  diff against nothing would mark every line removed. The history's header
+  carries **Forget history**, a `button.danger` outline at the band's `--ctl`,
+  since it deletes the kept bytes for good; its dialog names the page, says
+  the rows stay and focuses Cancel. It shows only
   while a version other than the current one is kept.
 
 ## Interaction
@@ -468,8 +501,9 @@ named checks from the current handoff.
    its marker's text column; a wide table gets a scroll region with a sticky
    first column; no rendered table cell holding a paragraph is under 320px.
 9. **Type and contrast.** The 12px floor, 15px body, at least 5:1 body contrast
-   in both themes, 44px hit areas under a coarse pointer, and a visible focus
-   ring on every control.
+   in both themes, a 44 by 44 target for every button, chip and field under a
+   coarse pointer, no control in a header or control row taller than 32px on a
+   fine pointer, and a visible focus ring on every control.
 10. **Keyboard.** The full keyboard path above, in both directions.
 11. **Motion.** Nothing decorative, at most 150ms ease-out, reduced motion
     honoured.

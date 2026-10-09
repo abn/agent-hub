@@ -304,8 +304,9 @@ rather than repeating the refusal.
   swipe left uncovers the row's actions without deciding anything; both are
   also controls drawn on the row. Inbox rows are flat list rows without card
   wrapping, and an unread row carries both the accent dot and 600 title weight.
-  On a phone, the inbox tools row holds the filter field (flex: 1, 34px pill)
-  and an Unread chip, while the sync line lives on the More screen. A pull down
+  On a phone, the inbox tools row holds the filter field (flex: 1, 34px pill,
+  with a 44px hit area) and an Unread chip, while the sync line lives on the
+  More screen. A pull down
   at the top of the Inbox refreshes it, as does the Refresh control beside the
   last-synced line on More. The row follows the finger, and with reduced motion
   asked for it stays put and the release reveals. The edge swipe back, the tab
@@ -320,8 +321,21 @@ grouped at the top. Alerts are never red, never animated, and never a modal.
 ## Accessibility
 
 This is a build gate, not a guideline: WCAG AA in both themes, a 12px UI text
-floor, 44px tap targets, a visible focus ring, a full keyboard path, and no
-meaning carried by colour alone. Reduced motion is honoured.
+floor, a visible focus ring, a full keyboard path, and no meaning carried by
+colour alone. Reduced motion is honoured.
+
+Targets follow the pointer. Under a coarse pointer every control answers to at
+least 44 by 44px, by its own box or by a hit area around it. Under a fine
+pointer a control is drawn at the size its band gives it, and never under the
+24px WCAG minimum. Four tokens carry the sizes: 32px for a control in a pane
+header, a control row or a row; 28px for a glyph inside a line of text; 36px
+for a field, a dialog action and any other button; and 44px for the target. No
+control is taller than the band that holds it, so a header or control-row
+control is 32px on a desktop. On a phone a button or a field is drawn at 44px,
+and a smaller chrome control (a chip, a glyph, a segment, the filter field)
+keeps its drawn size and answers to a 44px hit area around its centre, in both
+axes. The hit area is there wherever a touch screen is, even one beside a mouse,
+and a link drawn as a button is held to the same 44px.
 
 The focus ring is the designed shadow over a transparent outline, because a
 browser in forced colours drops shadows and recolours outlines, and a ring that
@@ -334,10 +348,13 @@ The gate runs in three layers. A hermetic contract check computes WCAG contrast
 for every token pair on every surface it is painted on, enforces the 12px
 floor, holds the two typographic badge marks to the text threshold rather than
 the glyph one, and asserts the focus ring, the reduced-motion block, and the
-44px interactive minimum, so it runs on every machine. A browser pass then
-measures what the page actually resolved: no text under 12px on any screen,
-every control at 44px or at the 32px inline size inside a row, a distinct mark
-per kind, and one kind word per row. An optional headless axe audit renders the
+control sizes for each pointer with the hit area that covers both axes, so it
+runs on every machine. A browser pass then measures what the page actually
+resolved: no text under 12px on any screen, no control in a header or control
+row taller than 32px or outside its band on a fine pointer, a 44 by 44 target
+for every button, chip and field on a coarse pointer, a distinct mark per kind,
+and one kind word per row. Both size checks walk every screen the router
+registers. An optional headless axe audit renders the
 eight screens in both themes and reports DOM, ARIA, label, heading, and
 computed-contrast problems. The last two need Playwright, a browser, and an axe
 build, and skip cleanly when they are absent.

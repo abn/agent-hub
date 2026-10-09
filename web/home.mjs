@@ -344,10 +344,13 @@ const HOME_STYLE = `<style>
     color: var(--ink-2) !important;
     text-wrap: pretty;
   }
+  /* A scroll box clips what overflows it, so the flow carries room above its
+     chips for their hit area and gives it back in its margin. */
   .home-chips-flow {
     display: flex;
     gap: 8px;
-    padding: 0 16px 14px;
+    padding: 6px 16px 14px;
+    margin-top: -6px;
     overflow-x: auto;
   }
   .home-storage-wrap {

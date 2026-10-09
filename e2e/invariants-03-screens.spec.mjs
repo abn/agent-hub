@@ -8,6 +8,7 @@
 // the desktop screens driven where they are the subject.
 
 import { api, expect, goto, homeTitle, settle, test } from "./invariants.mjs";
+import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./screens.mjs";
 
 const headerHeight = (page) =>
   page.evaluate(() => document.querySelector(".shell-head")?.getBoundingClientRect().height ?? null);
@@ -144,16 +145,18 @@ test.describe("phone frame", () => {
 });
 
 test.describe("desktop chrome", () => {
+  // Every screen the router registers. Some do not reserve the frame yet, and
+  // DESIGN.md records them: Search draws a 48px header with no control row, and
+  // More is the phone's tab root, which a desktop reaches only by its address.
+  // Their controls are still held to the 32px row.
+  const FRAMELESS = new Set(["Search", "More"]);
+
   test("panes land at 52/92 and labels sit on the gutter", async ({ hub, page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await goto(page, "#/home");
-    for (const [route, name] of [
-      ["#/settings", "Settings"],
-      ["#/storage", "Storage"],
-      ["#/access", "Agents and tokens"],
-    ]) {
-      await goto(page, route);
-      await expect(page.locator("main h1").first()).toBeVisible();
+    const routes = screenRoutes(hub, await seedWikiPage(hub, "frame/desktop.md"));
+    await expectEveryScreen(page, routes);
+    for (const [name, route, ready] of Object.values(routes).flat()) {
+      await openScreen(page, hub, route, ready);
       const geom = await page.evaluate(() => {
         const vis = (e) => {
           const cs = getComputedStyle(e);
@@ -163,7 +166,7 @@ test.describe("desktop chrome", () => {
         const ctl = [...document.querySelectorAll(".shell-controls, .storage-controls")].find(vis) || null;
         const row = ctl || head;
         const tall = row
-          ? [...row.querySelectorAll("*")]
+          ? [...row.querySelectorAll("button, a, input, select, textarea, [role=tab], [role=button], [role=radio]")]
               .filter((e) => {
                 const r = e.getBoundingClientRect();
                 return r.height > 32.5 && r.height < 200;
@@ -198,10 +201,11 @@ test.describe("desktop chrome", () => {
           labels,
         };
       });
+      expect(geom.tall, `${name}: a control in the 40px row is taller than 32`).toEqual([]);
+      if (FRAMELESS.has(name)) continue;
       expect(geom.head, `${name}: header does not land at 52`).toBe(52);
       expect(geom.ctl, `${name}: no control row found`).toBeTruthy();
       expect(geom.ctl.top === 52 && geom.ctl.bottom === 92, `${name}: control row does not span 52..92`).toBe(true);
-      expect(geom.tall, `${name}: a control in the 40px row is taller than 32`).toEqual([]);
       for (const label of geom.labels) {
         expect(label.offset, `${name}: label ${JSON.stringify(label.text)} sits at the pane's x 0`).not.toBe(0);
         expect([16, 24], `${name}: label ${JSON.stringify(label.text)} is not on the 16/24 gutter`).toContain(label.offset);

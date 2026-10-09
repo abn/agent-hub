@@ -9,7 +9,7 @@
 // passes.
 //
 // The slice ported here is the design-token and gate set: token-only colours,
-// the 12px type floor, the 44px target, the transition bound, reduced motion,
+// the 12px type floor, the pointer's control sizes, the transition bound, reduced motion,
 // token use, and the focus ring. The rest of the stylesheet assertions in
 // `tests/web.rs` still hold source text and are the next phase's work.
 
@@ -206,32 +206,80 @@ describe("the type floor is 12px", () => {
   });
 });
 
-describe("the tap target is 44px", () => {
-  // DESIGN.md build gate 9: "44px hit areas under a coarse pointer."
-  it("gives a button, a chip and a field the 44px minimum", () => {
-    for (const [selector, property] of [
-      ["button, .button", "min-height"],
-      [".chip::before", "min-height"],
-      ["input, select, textarea", "min-height"],
-    ]) {
-      const first = selector.split(",")[0].trim();
-      const found = declaredOn(APP, first, property);
-      expect(found, `${first} declares no ${property}`).not.toBeNull();
-      expect(found.value, `${first} ${property}`).toBe("44px");
+describe("targets follow the pointer", () => {
+  // DESIGN.md, control sizes, and build gate 9: a fine pointer draws a control
+  // at the size its band gives it, and a coarse pointer answers to 44 by 44.
+  const SIZES = { "--ctl": "32px", "--ctl-sm": "28px", "--ctl-form": "36px", "--tap": "44px" };
+  const coarse = (rule) => rule.media !== null && /\(\s*pointer:\s*coarse\s*\)/.test(rule.media);
+  // The hit area is invisible, so it is there wherever a coarse pointer is,
+  // primary or not: a touch screen beside a mouse keeps its targets.
+  const anyCoarse = (rule) => rule.media !== null && /\(\s*any-pointer:\s*coarse\s*\)/.test(rule.media);
+  const fine = (rule) => rule.media !== null && /\(\s*pointer:\s*fine\s*\)/.test(rule.media);
+  const unconditional = (rule) => rule.media === null;
+  const compact = (value) => value.replace(/\s+/g, "");
+
+  /** What the last rule `where` accepts declares for `property` on `selector`. */
+  const sizeOf = (selector, property, where) => {
+    let found = null;
+    for (const rule of rules(APP)) {
+      if (!rule.selectors.includes(selector) || !where(rule)) continue;
+      const decl = rule.declarations.find((d) => d.property === property);
+      if (decl) found = decl.value;
+    }
+    return found;
+  };
+
+  /** Whether a length is the target or a `max()` with the target as a floor. */
+  const atLeastTap = (value) => {
+    const written = compact(value ?? "");
+    if (written === "var(--tap)") return true;
+    const max = /^max\((.*)\)$/.exec(written);
+    return Boolean(max) && max[1].split(",").includes("var(--tap)");
+  };
+
+  it("declares the four control sizes as tokens", () => {
+    for (const [token, value] of Object.entries(SIZES)) {
+      expect(tokenValue(TOKENS, token), token).toBe(value);
     }
   });
 
-  it("grows the hit area of a 32px control to 44px under a coarse pointer", () => {
-    // A chip is drawn at the design's 32px, which is under the target, so the
-    // drawn box stays and the area that answers to a tap grows. The pseudo
-    // element is what does it, so the check reads the pseudo element's rule and
-    // not the chip's own box.
-    const chip = declaredOn(APP, ".chip", "height");
-    expect(chip, "the chip keeps the design's 32px box").not.toBeNull();
-    expect(chip.value).toBe("32px");
-    const area = declaredOn(APP, ".chip::before", "height");
-    expect(area, "the chip's hit area is grown by a pseudo element").not.toBeNull();
-    expect(area.value).toBe("44px");
+  it("draws a button and a field at the form size, and at the target under a coarse pointer", () => {
+    for (const selector of ["button", ".button", "input", "select", "textarea"]) {
+      expect(sizeOf(selector, "min-height", unconditional), `${selector} on a fine pointer`).toBe("var(--ctl-form)");
+      expect(sizeOf(selector, "min-height", coarse), `${selector} under a coarse pointer`).toBe("var(--tap)");
+    }
+  });
+
+  it("holds a control in a pane header or a control row at --ctl on a fine pointer", () => {
+    const band = rules(APP).find(
+      (rule) =>
+        fine(rule) &&
+        /\.shell-head/.test(rule.selectorText) &&
+        /\.shell-controls/.test(rule.selectorText) &&
+        /\bbutton\b/.test(rule.selectorText),
+    );
+    expect(band, "no fine-pointer rule sizes the controls of a header and a control row").toBeDefined();
+    expect(band.declarations.find((d) => d.property === "min-height")?.value).toBe("var(--ctl)");
+    expect(sizeOf(".row button", "min-height", unconditional), "a button inline in a row").toBe("var(--ctl)");
+  });
+
+  it("grows the hit area to the target in both axes wherever a coarse pointer is", () => {
+    const area = rules(APP).find(
+      (rule) => anyCoarse(rule) && rule.selectors.includes(".row button::after") && rule.selectors.includes(".chip::after"),
+    );
+    expect(area, "no any-pointer coarse hit area is shared by a row button and a chip").toBeDefined();
+    const value = (property) => area.declarations.find((d) => d.property === property)?.value ?? null;
+    expect(atLeastTap(value("width")), `the hit area is ${value("width")} wide`).toBe(true);
+    expect(atLeastTap(value("height")), `the hit area is ${value("height")} tall`).toBe(true);
+    expect(value("position")).toBe("absolute");
+    expect(compact(value("transform") ?? ""), "the hit area is centred on its control").toBe("translate(-50%,-50%)");
+    // Each control the area grows from is the box it is positioned against.
+    for (const selector of area.selectors) {
+      const host = selector.replace(/::after$/, "");
+      expect(sizeOf(host, "position", anyCoarse) ?? sizeOf(host, "position", unconditional), `${host} position`).toBe(
+        "relative",
+      );
+    }
   });
 });
 

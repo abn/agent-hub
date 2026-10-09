@@ -296,12 +296,9 @@ async function pageStage(id, path, shellStageHead) {
     entry = null;
   }
   const needsReview = !entry || entry.trust !== "human_reviewed";
-  // The reader's two header controls share one box. Review and Edit were both
-  // written `height:30px`, but only the button carries the base rule's 44px
-  // minimum, so it painted 44px tall beside a 30px anchor: same class, same
-  // row, tops level, bottoms 14px apart. Both declare 44 and both are in the
-  // 52px header band, which holds it.
-  const reviewBtn = `<button type="button" class="btn-outline" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${needsReview ? "Review" : "Review again"}</button>`;
+  // The reader's two header controls share one box: Edit is an anchor, so it
+  // takes the button class and the stylesheet sizes both for the band.
+  const reviewBtn = `<button type="button" class="btn-outline" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${needsReview ? "Review" : "Review again"}</button>`;
   const last = page.last_write ? `${page.last_write.actor} · ${page.last_write.at}` : "no write recorded";
   const meta = [
     displayPath(page.path),
@@ -326,7 +323,7 @@ async function pageStage(id, path, shellStageHead) {
     head: shellStageHead(
       fm.title || displayPath(page.path).split("/").pop(),
       meta,
-      `<span style="display:inline-flex;gap:8px;flex:none;align-items:center">${reviewBtn}<a class="btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="flex:none;display:inline-flex;align-items:center;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/1 var(--font-sans)">Edit</a></span>`,
+      `<span style="display:inline-flex;gap:8px;flex:none;align-items:center">${reviewBtn}<a class="button btn-outline" href="${wikiPageHash(id, path, "&edit=1")}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 13px/1 var(--font-sans)">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
     controls: `<div class="shell-controls" style="gap:10px;padding:0 16px">${staleMark(entry)}<span class="shell-meta mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(last)}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
@@ -355,8 +352,8 @@ function editorStage(id, path, content, version, isNew, shellStageHead) {
         <textarea id="wiki-content" name="content" spellcheck="false" style="flex:1;min-height:240px;box-sizing:border-box;padding:12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:400 14px/1.5 var(--font-mono);resize:vertical">${esc(content)}</textarea>
       </label>
       <div class="wiki-editor-actions" style="display:flex;gap:8px;align-items:center">
-        <button type="button" class="primary" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}" style="height:36px;padding:0 16px">${isNew ? "Create page" : "Save"}</button>
-        <a class="btn-outline" href="${back}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 14px/34px var(--font-sans)">Cancel</a>
+        <button type="button" class="primary" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}" style="padding:0 16px">${isNew ? "Create page" : "Save"}</button>
+        <a class="button btn-outline" href="${back}" style="padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);color:var(--ink);text-decoration:none;font:600 14px/1 var(--font-sans)">Cancel</a>
         <span class="wiki-editor-note" style="font-size:12px;color:var(--ink-3)"></span>
       </div>
     </div>`,
@@ -527,7 +524,7 @@ async function pageHistoryStage(id, path, shellStageHead) {
   // not forgettable either.
   const forgettable = rows.some((row) => row.kept && row.version !== data.current_version);
   const forget = forgettable
-    ? `<button type="button" class="danger" data-action="wiki-forget-history" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-deleted="${data.current_version ? "0" : "1"}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);font:600 13px/1 var(--font-sans);cursor:pointer">Forget history</button>`
+    ? `<button type="button" class="danger" data-action="wiki-forget-history" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-deleted="${data.current_version ? "0" : "1"}" style="flex:none;padding:0 12px;border-radius:var(--r-1);font:600 13px/1 var(--font-sans);cursor:pointer">Forget history</button>`
     : "";
   const body = rows.length
     ? `<div class="wiki-versions">${versionRows(id, path, rows)}${versionsEarlier(id, path, data, rows.length)}</div>`
@@ -601,7 +598,7 @@ async function versionStage(id, path, version, shellStageHead) {
   const meta = [when, older.actor].filter(Boolean).join(" · ");
   const revert = older.current
     ? ""
-    : `<button type="button" class="btn-outline" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}" style="flex:none;height:44px;min-height:44px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${now ? "Revert to this" : "Restore this"}</button>`;
+    : `<button type="button" class="btn-outline" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}" style="flex:none;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${now ? "Revert to this" : "Restore this"}</button>`;
   let summary;
   if (older.current) summary = "This is the page as it is now.";
   else if (!now) summary = "The page was deleted after this version.";
@@ -760,7 +757,7 @@ async function homeStage(id, stats, shellStageHead, projectName = "") {
     `<a class="row" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}" style="display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none">${label}</a>`;
   const body = `<div class="wiki-home">
     <div style="padding:16px 16px 0">
-      <button type="button" class="primary" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="height:36px;padding:0 16px">New page</button>
+      <button type="button" class="primary" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}" style="padding:0 16px">New page</button>
     </div>
     <div style="padding:16px;display:flex;gap:24px">
       <div><div class="mono" style="font-size:12px;color:var(--ink-3)">PAGES</div><div style="font-size:22px;font-weight:600">${pages}</div></div>

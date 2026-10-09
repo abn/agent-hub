@@ -556,10 +556,10 @@ export async function inbox(gen) {
   const indexControls = isDesktop
     ? shellIndexControls("Filter inbox", "", syncLine())
     : `<div class="shell-controls">
-        <div class="shell-filter">
+        <label class="shell-filter">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
           <input type="search" data-index-filter placeholder="Filter inbox" aria-label="Filter inbox">
-        </div>
+        </label>
         <button type="button" class="chip" data-action="inbox-unread-only" aria-pressed="${state.unreadOnly}">Unread</button>
       </div>`;
 

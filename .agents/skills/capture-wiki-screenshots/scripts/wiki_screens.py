@@ -277,10 +277,14 @@ def run() -> int:
                             % (json.dumps(harness.ADMIN_TOKEN), json.dumps(theme))
                         )
                     else:
+                        # A phone is a coarse pointer: control sizes follow
+                        # the pointer, so a phone capture without touch would
+                        # draw the desktop's band sizes at a phone's width.
                         context = browser.new_context(
                             viewport=viewport,
                             color_scheme=theme,
                             reduced_motion="no-preference",
+                            has_touch=width == "phone",
                         )
                         context.add_init_script(
                             "localStorage.setItem('hub.token', %s);"
