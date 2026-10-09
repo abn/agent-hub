@@ -200,8 +200,7 @@ export function highlighted(snippet, words) {
     out.append("…");
   }
   for (const [index, length] of starts) {
-    const mark = el("mark", "", text.slice(index, index + length));
-    mark.style.cssText = "background: var(--action-bg); color: var(--ink); border-radius: 3px; padding: 0 2px;";
+    const mark = el("mark", "search-hit", text.slice(index, index + length));
     out.append(text.slice(at, index), mark);
     at = index + length;
   }
@@ -559,9 +558,7 @@ export async function searchScreen(term, gen) {
   }
 
   function setChipContent(chip, label, count) {
-    const span = el("span", "mono", String(count));
-    span.style.fontFamily = "var(--font-mono)";
-    span.style.fontWeight = "500";
+    const span = el("span", "mono search-chip-count", String(count));
     chip.replaceChildren(label, " ", span);
   }
 

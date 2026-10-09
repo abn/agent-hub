@@ -251,13 +251,13 @@ export async function projectsIndexScreen(gen, passedProjects) {
           stageControls: `<div class="shell-controls"></div>`,
           stageBody: `
             <div class="projects-screen">
-              <div class="projects-empty" style="padding: 24px 16px;">
+              <div class="projects-empty">
                 <h2 class="projects-empty-title">No projects yet</h2>
                 <p class="projects-empty-body">A project is a folder your agents can read and write, plus the threads and artifacts that come out of it.</p>
                 <button type="button" class="projects-empty-btn" data-action="new-project">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New project
                 </button>
-                <div class="projects-empty-note" style="margin-top: 12px; font-size: 13px; color: var(--ink-3);">Agents can also create one themselves on their first write, and it appears here.</div>
+                <div class="projects-empty-note projects-register-note">Agents can also create one themselves on their first write, and it appears here.</div>
               </div>
             </div>`,
         }),
@@ -339,7 +339,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
 
     const titleClass = hasWaiting || hasUnread ? "project-title unread" : "project-title";
     const lockMeta = p.confidential
-      ? `<span class="project-lock" role="img" aria-label="confidential" style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`
+      ? `<span class="project-lock project-lock-meta" role="img" aria-label="confidential">${glyphSvg("lock", { size: 16 })}<span>confidential</span></span>`
       : "";
 
     return `

@@ -408,6 +408,16 @@ against a seeded hub and checks the heading, the seeded data, the nav
 marking, the actions that write, and that nothing logged an error or left a
 request failing. Both skip cleanly where the browser toolchain is absent.
 
+Every size, spacing step, type setting and colour the client draws is a class
+in the stylesheet, where the token, type floor and control-size gates read it.
+A `style` attribute carries only a value the script works out at runtime: a
+width or flex share computed from data, the height a rendered document
+reports, a custom property set from data or layout (a wiki tree row's depth, a
+pane's width, the keyboard inset), a menu's position, a gesture's transform,
+and a `display` toggle driven by state. A browser check walks every screen and
+a listed set of dialogs and states, at both widths and under a coarse pointer,
+and refuses any other.
+
 The freshness stream carries no event data. It signals that a write changed
 the inbox or the feed, and the client refetches its waiting badge, so it is a
 mailbox nudge rather than a chat channel and the asynchronous interaction

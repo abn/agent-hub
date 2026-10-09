@@ -34,17 +34,17 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
   const confidentialProjects = projects.filter((p) => p.confidential);
   const confidentialCount = confidentialProjects.length;
 
-  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent"${isCreating ? ' aria-pressed="true"' : ""} style="flex:none;white-space:nowrap;height:32px;min-height:32px;display:inline-flex;align-items:center;gap:6px;padding:0 12px 0 9px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:${isCreating ? "var(--surface-2)" : "none"};color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
+  const addAgentBtn = `<button type="button" class="btn-outline agents-add-btn" data-action="toggle-add-agent"${isCreating ? ' aria-pressed="true"' : ""}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg>Add agent</button>`;
 
   const indexHead = `
-    <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;background:var(--surface);border-bottom:1px solid var(--line)">
-      <b class="shell-title-line" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px;font-weight:600">Agents and tokens</b>
+    <div class="shell-head agents-index-head">
+      <b class="shell-title-line agents-index-title">Agents and tokens</b>
       ${addAgentBtn}
     </div>`;
 
   const indexControls = `
-    <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)">
-      <span style="flex:1;min-width:0">${confidentialCount} confidential projects</span>
+    <div class="shell-controls agents-index-controls">
+      <span class="agents-count">${confidentialCount} confidential projects</span>
       ${
         agents.length > 8
           ? `<div class="form-column"><label class="sr-only" for="agents-filter">Filter agents</label><input id="agents-filter" type="search" class="index-filter" placeholder="Filter agents" data-filter="agents"></div>`
@@ -53,16 +53,16 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
     </div>`;
 
   const adminRow = `
-    <div class="row" style="display:flex;align-items:center;gap:10px;min-height:56px;padding:0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
-      <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
-        <span style="font-size:14px;font-weight:600">Admin token</span>
-        <span style="font-size:12px;color:var(--ink-3)">set by <span class="mono" style="font-family:var(--font-mono)">HUB_ADMIN_TOKEN</span></span>
+    <div class="row agents-admin-row">
+      <span class="agents-admin-text">
+        <span class="agents-admin-title">Admin token</span>
+        <span class="agents-admin-sub">set by <span class="mono agents-env">HUB_ADMIN_TOKEN</span></span>
       </span>
       <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
     </div>`;
 
   const agentRows = agents
-    .map((agent, idx) => {
+    .map((agent) => {
       const grants = grantsByAgent[agent.id] || [];
       const projectWord = grants.length === 1 ? "project" : "projects";
       const grantDesc = grants.length > 0 ? `${grants.length} ${projectWord}` : "no projects";
@@ -72,27 +72,24 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       const pending = agent.state === "pending";
       const metaDesc = pending ? `waiting to join · asked ${relative(agent.created_at)}` : `${grantDesc} · ${activeDesc}`;
       const isSelected = !isCreating && selectedAgent && selectedAgent.id === agent.id;
-      const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
-      const bg = isSelected ? "var(--accent-bg)" : "var(--surface)";
-      const metaColor = isSelected ? "var(--ink-2)" : "var(--ink-3)";
       const currentAttr = isSelected ? ' aria-current="true"' : "";
       return `
-        <a class="row agent-index-row" href="#/access?agent=${encodeURIComponent(agent.id)}"${currentAttr} style="display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:56px;padding:0 16px;${borderTop}border-bottom:1px solid var(--line);background:${bg};color:var(--ink);text-decoration:none;box-sizing:border-box">
-          <span style="display:flex;align-items:center;gap:6px;min-width:0;font-size:14px;font-weight:600">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(agent.display_name || agent.id)}</span>
+        <a class="row agent-index-row" href="#/access?agent=${encodeURIComponent(agent.id)}"${currentAttr}>
+          <span class="agent-index-name">
+            <span class="agent-index-label">${esc(agent.display_name || agent.id)}</span>
             ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
           </span>
-          <span style="font-size:12px;color:${metaColor}">${esc(metaDesc)}</span>
+          <span class="agent-index-meta">${esc(metaDesc)}</span>
         </a>`;
     })
     .join("");
 
   const indexBody = `
-    <div class="agents-index" style="flex:1;min-height:0;overflow:auto">
-      <div style="padding:16px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">HUB</div>
+    <div class="agents-index">
+      <div class="agents-section-label">HUB</div>
       ${adminRow}
-      <div style="padding:16px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">AGENTS · ${agents.length}</div>
-      <div class="agents-list">${agentRows || '<p class="empty" style="padding:16px;color:var(--ink-3);font-size:13px">No agents have identified themselves yet.</p>'}</div>
+      <div class="agents-section-label">AGENTS · ${agents.length}</div>
+      <div class="agents-list">${agentRows || '<p class="empty agents-empty-note">No agents have identified themselves yet.</p>'}</div>
     </div>`;
 
   let stageHead = "";
@@ -101,33 +98,33 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
 
   if (isCreating) {
     stageHead = `
-      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <b class="shell-title-line" style="font-size:15px;font-weight:600">New agent</b>
+      <div class="shell-head agent-stage-head">
+        <b class="shell-title-line agent-stage-title">New agent</b>
       </div>`;
 
     stageControls = `
-      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)">
+      <div class="shell-controls agent-create-controls">
         It gets its token once, when you create it.
       </div>`;
 
     stageBody = `
-      <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:20px 24px 0">
-        <div style="max-width:440px;display:flex;flex-direction:column;gap:16px">
-          <form class="agent-create-stage-form" data-action="desktop-agent-create" style="display:flex;flex-direction:column;gap:16px">
-            <label style="display:flex;flex-direction:column;gap:6px">
-              <span style="font-size:13px;font-weight:600">Agent id</span>
-              <input id="stage-agent-id" name="id" required autocomplete="off" placeholder="deploy-bot-2" style="height:40px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-mono)">
-              <span id="stage-agent-id-error" class="field-error" style="display:none;color:var(--danger);font-size:12px;font-weight:500"></span>
-              <span style="font-size:12px;color:var(--ink-3)">Lowercase letters, digits and dashes. Cannot change later.</span>
+      <div class="agent-stage-content agent-create-body">
+        <div class="agent-create-column">
+          <form class="agent-create-stage-form" data-action="desktop-agent-create">
+            <label class="agent-create-field">
+              <span class="agent-create-label">Agent id</span>
+              <input class="agent-create-input agent-create-id" id="stage-agent-id" name="id" required autocomplete="off" placeholder="deploy-bot-2">
+              <span id="stage-agent-id-error" class="field-error agent-create-error" style="display:none"></span>
+              <span class="agent-create-hint">Lowercase letters, digits and dashes. Cannot change later.</span>
             </label>
-            <label style="display:flex;flex-direction:column;gap:6px">
-              <span style="font-size:13px;font-weight:600">Display name</span>
-              <input id="stage-agent-name" name="display_name" required placeholder="Deploy bot (staging)" style="height:40px;box-sizing:border-box;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans)">
-              <span id="stage-agent-name-error" class="field-error" style="display:none;color:var(--danger);font-size:12px;font-weight:500"></span>
+            <label class="agent-create-field">
+              <span class="agent-create-label">Display name</span>
+              <input class="agent-create-input" id="stage-agent-name" name="display_name" required placeholder="Deploy bot (staging)">
+              <span id="stage-agent-name-error" class="field-error agent-create-error" style="display:none"></span>
             </label>
-            <div style="display:flex;gap:8px;padding-top:4px">
-              <button class="primary" type="submit" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:0;background:var(--ink);color:var(--ink-inverse);font:600 14px/1 var(--font-sans);cursor:pointer">Create agent</button>
-              <button type="button" class="btn-outline" data-action="agent-cancel-create" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Cancel</button>
+            <div class="agent-create-actions">
+              <button class="primary agent-create-submit" type="submit">Create agent</button>
+              <button type="button" class="btn-outline agent-create-cancel" data-action="agent-cancel-create">Cancel</button>
             </div>
           </form>
         </div>
@@ -142,35 +139,34 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
     const pending = selectedAgent.state === "pending";
 
     stageHead = `
-      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <b class="shell-title-line" style="font-size:15px;font-weight:600">${esc(selectedAgent.display_name || selectedAgent.id)}</b>
+      <div class="shell-head agent-stage-head">
+        <b class="shell-title-line agent-stage-title">${esc(selectedAgent.display_name || selectedAgent.id)}</b>
         ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
-        <span style="font:500 12px/1 var(--font-mono);color:var(--ink-3)">${esc(stageMeta)}</span>
+        <span class="agent-stage-meta">${esc(stageMeta)}</span>
       </div>`;
 
     const liveToken = selectedAgent.has_live_token !== false;
 
     stageControls = `
-      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:0 12px 0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <span style="flex:1;font-size:13px;color:var(--ink-2)">${liveToken ? `Token issued ${esc(issuedDate)}` : "No live token"}</span>
-        <button type="button" class="btn-outline" data-action="${liveToken ? "agent-token" : "agent-issue"}" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="flex:none;height:30px;padding:0 12px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 13px/1 var(--font-sans);cursor:pointer">${liveToken ? "Reissue token" : "Issue token"}</button>
+      <div class="shell-controls agent-detail-controls">
+        <span class="agent-token-note">${liveToken ? `Token issued ${esc(issuedDate)}` : "No live token"}</span>
+        <button type="button" class="btn-outline agent-reissue-btn" data-action="${liveToken ? "agent-token" : "agent-issue"}" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}">${liveToken ? "Reissue token" : "Issue token"}</button>
       </div>`;
 
     const projectRows = grants.length
       ? grants
-          .map((grant, idx) => {
+          .map((grant) => {
             const proj = projects.find((p) => p.id === grant.project_id);
             const projName = proj?.display_name || grant.project_id;
             const confidential = proj ? proj.confidential === true : true;
-            const borderTop = idx === 0 ? "border-top:1px solid var(--line);" : "";
             const lead = confidential
-              ? `<span class="agent-project-lock" role="img" aria-label="confidential" style="flex:none;width:24px;display:grid;place-items:center;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}</span>`
-              : `<span aria-hidden="true" style="flex:none;width:24px"></span>`;
+              ? `<span class="agent-project-lock" role="img" aria-label="confidential">${glyphSvg("lock", { size: 16 })}</span>`
+              : `<span class="agent-project-lead" aria-hidden="true"></span>`;
             return `
-              <div class="row agent-project-row" style="display:flex;align-items:center;gap:8px;height:48px;padding:0 4px 0 12px;${borderTop}border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
+              <div class="row agent-project-row">
                 ${lead}
-                <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(projName)}</span>
-                <span class="agent-row-menu" style="flex:none;position:relative;display:inline-flex">
+                <span class="agent-project-name">${esc(projName)}</span>
+                <span class="agent-row-menu">
                   <button type="button" class="hub-btn-glyph" data-action="agent-project-menu" aria-label="More actions for ${esc(projName)}" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 18 })}</button>
                   <div class="shell-group-menu" role="menu" hidden>
                     <button type="button" role="menuitem" data-action="agent-ungrant" data-id="${esc(selectedAgent.id)}" data-project="${esc(grant.project_id)}">Remove access</button>
@@ -179,11 +175,11 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
               </div>`;
           })
           .join("")
-      : `<div style="display:flex;align-items:center;height:48px;padding:0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink-3);font-size:13px;box-sizing:border-box">No confidential projects granted. Every public project is open to this agent.</div>`;
+      : `<div class="agent-projects-empty">No confidential projects granted. Every public project is open to this agent.</div>`;
 
     const grantRow = `
-      <button type="button" class="agent-grant-row" data-action="agent-grant-open" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="display:flex;align-items:center;gap:8px;width:100%;height:48px;padding:0 12px;border:0;border-bottom:1px solid var(--line);background:var(--surface);color:var(--accent);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">
-        <span aria-hidden="true" style="flex:none;width:24px;display:grid;place-items:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg></span>
+      <button type="button" class="agent-grant-row agent-grant-open" data-action="agent-grant-open" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}">
+        <span class="agent-grant-glyph" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M 12 5v14M 5 12h14"></path></svg></span>
         Grant a project
       </button>`;
 
@@ -196,31 +192,31 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
         : "";
 
     stageBody = `
-      <div class="agent-stage-content" style="flex:1;min-height:0;overflow:auto;padding:0 24px">
-        <div style="max-width:640px">
+      <div class="agent-stage-content agent-detail-body">
+        <div class="agent-detail-column">
           ${enrolReason}
-          <div style="padding:20px 0 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECTS · ${grants.length}</div>
+          <div class="agent-detail-label">PROJECTS · ${grants.length}</div>
           ${projectRows}
           ${grantRow}
-          <div style="height:24px"></div>
+          <div class="agent-detail-gap"></div>
           ${
             liveToken
-              ? `<button type="button" class="agent-revoke-btn" data-action="agent-revoke" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}" style="display:flex;align-items:center;width:100%;height:48px;padding:0 12px;border:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 14px/1 var(--font-sans);text-align:left;cursor:pointer">Revoke token</button>`
+              ? `<button type="button" class="agent-revoke-btn" data-action="agent-revoke" data-id="${esc(selectedAgent.id)}" data-name="${esc(selectedAgent.display_name || selectedAgent.id)}">Revoke token</button>`
               : ""
           }
         </div>
       </div>`;
   } else {
     stageHead = `
-      <div class="shell-head" style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <h1 class="shell-title-line" style="font-size:15px;font-weight:600">Agents and tokens</h1>
+      <div class="shell-head agent-empty-head">
+        <h1 class="shell-title-line agent-stage-title">Agents and tokens</h1>
       </div>`;
     stageControls = `
-      <div class="shell-controls" style="flex:none;height:40px;box-sizing:border-box;display:flex;align-items:center;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <span class="shell-meta mono" style="font-size:13px;color:var(--ink-3)">no agent selected</span>
+      <div class="shell-controls agent-empty-controls">
+        <span class="shell-meta mono agent-empty-meta">no agent selected</span>
       </div>`;
     stageBody = `
-      <div class="shell-pad" style="padding:24px">
+      <div class="shell-pad agent-empty-pad">
         <p class="empty">Select an agent from the list.</p>
       </div>`;
   }
@@ -243,13 +239,13 @@ function renderMobileAgentDetail(agent, projects, grants) {
   const stageHead = shellStageHead(agent.display_name || agent.id, meta, "", "#/access");
   const liveToken = agent.has_live_token !== false;
   const stageControls = `
-    <div class="shell-controls" style="display:flex;align-items:center;gap:8px;padding:0 16px;height:44px;background:var(--surface);border-bottom:1px solid var(--line);box-sizing:border-box">
+    <div class="shell-controls access-tools">
       ${
         liveToken
-          ? `<button type="button" class="btn-hairline" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Reissue token</button>
-      <button type="button" class="btn-hairline" data-action="agent-revoke" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Revoke token</button>`
-          : `<span style="flex:1;font-size:13px;color:var(--ink-2)">No live token</span>
-      <button type="button" class="btn-hairline" data-action="agent-issue" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}" style="height:36px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Issue token</button>`
+          ? `<button type="button" class="btn-hairline access-token-btn" data-action="agent-token" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}">Reissue token</button>
+      <button type="button" class="btn-hairline access-token-btn" data-action="agent-revoke" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}">Revoke token</button>`
+          : `<span class="agent-token-note">No live token</span>
+      <button type="button" class="btn-hairline access-token-btn" data-action="agent-issue" data-id="${esc(agent.id)}" data-name="${esc(agent.display_name || agent.id)}">Issue token</button>`
       }
     </div>
   `;
@@ -261,18 +257,18 @@ function renderMobileAgentDetail(agent, projects, grants) {
           const projName = proj?.display_name || grant.project_id;
           const confidential = proj ? proj.confidential === true : true;
           const lead = confidential
-            ? `<span role="img" aria-label="confidential" style="flex:none;width:24px;display:grid;place-items:center;color:var(--ink-2)">${glyphSvg("lock", { size: 16 })}</span>`
-            : `<span aria-hidden="true" style="flex:none;width:24px"></span>`;
+            ? `<span class="agent-project-lock" role="img" aria-label="confidential">${glyphSvg("lock", { size: 16 })}</span>`
+            : `<span class="agent-project-lead" aria-hidden="true"></span>`;
           return `
-        <div class="row" style="display:flex;align-items:center;gap:8px;min-height:48px;padding:0 8px 0 16px;border-bottom:1px solid var(--line);background:var(--surface)">
+        <div class="row access-grant-row">
           ${lead}
-          <span style="flex:1;min-width:0;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(projName)}</span>
-          <button type="button" class="btn-hairline" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}" style="height:32px;padding:0 10px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 12px/1 var(--font-sans);cursor:pointer">Remove access</button>
+          <span class="agent-project-name">${esc(projName)}</span>
+          <button type="button" class="btn-hairline access-ungrant-btn" data-action="agent-ungrant" data-id="${esc(agent.id)}" data-project="${esc(grant.project_id)}">Remove access</button>
         </div>
       `;
         })
         .join("")
-    : '<div style="padding:16px;color:var(--ink-3);font-size:13px">No confidential projects granted. Every public project is open to this agent.</div>';
+    : '<div class="agents-empty-note">No confidential projects granted. Every public project is open to this agent.</div>';
 
   const grantable = projects.filter((p) => p.confidential && !grantedIds.has(p.id));
   const projectOptions = grantable.length
@@ -285,7 +281,7 @@ function renderMobileAgentDetail(agent, projects, grants) {
     : '<option value="" disabled>No confidential projects to grant</option>';
 
   const content = `
-    <div class="access-screen" style="flex:1;min-height:0;overflow:hidden">
+    <div class="access-screen">
       ${
         pending && agent.enrol_note
           ? `<div class="agent-enrol-reason">
@@ -294,19 +290,19 @@ function renderMobileAgentDetail(agent, projects, grants) {
             </div>`
           : ""
       }
-      <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">PROJECT GRANTS</div>
-      <div class="agent-grants-list" style="border-top:1px solid var(--line)">
+      <div class="access-section-label">PROJECT GRANTS</div>
+      <div class="agent-grants-list">
         ${grantRows}
       </div>
-      <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">ADD GRANT</div>
-      <form class="card access-form-card" data-action="agent-grant" style="margin:0 16px;padding:16px;display:flex;flex-direction:column;gap:10px">
+      <div class="access-section-label">ADD GRANT</div>
+      <form class="card access-form-card access-grant-form" data-action="agent-grant">
         <input type="hidden" name="agent" value="${esc(agent.id)}">
-        <label for="grant-project" style="font-size:13px;font-weight:600">Project</label>
-        <select id="grant-project" name="project" required style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
+        <label class="access-field-label" for="grant-project">Project</label>
+        <select class="access-field" id="grant-project" name="project" required>
           <option value="" disabled selected>Select project…</option>
           ${projectOptions}
         </select>
-        <button class="primary" type="submit" style="height:36px;align-self:flex-start"${grantable.length ? "" : " disabled"}>Grant project</button>
+        <button class="primary access-grant-submit" type="submit"${grantable.length ? "" : " disabled"}>Grant project</button>
       </form>
     </div>
   `;
@@ -336,14 +332,14 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
 
   const stageHead = shellStageHead("Agents and tokens", metaText, "", "#/more");
   const stageControls = `
-    <div class="shell-controls" style="display:flex;align-items:center;gap:8px;padding:0 16px;height:44px;background:var(--surface);border-bottom:1px solid var(--line);box-sizing:border-box">
-      <span style="flex:1;min-width:0;font-size:13px;color:var(--ink-2)">${confidentialCount} confidential projects</span>
-      <button type="button" class="btn-outline" data-action="toggle-add-agent" style="flex:none;white-space:nowrap;height:36px;display:inline-flex;align-items:center;gap:6px;padding:0 14px;border-radius:var(--r-1);border:1px solid var(--line-strong);background:none;color:var(--ink);font:600 14px/1 var(--font-sans);cursor:pointer">Add agent</button>
+    <div class="shell-controls access-tools">
+      <span class="access-count">${confidentialCount} confidential projects</span>
+      <button type="button" class="btn-outline access-add-btn" data-action="toggle-add-agent">Add agent</button>
     </div>
   `;
 
   const agentRows = agents
-    .map((agent, idx) => {
+    .map((agent) => {
       const grants = grantsByAgent[agent.id] || [];
       const projectWord = grants.length === 1 ? "project" : "projects";
       const grantDesc = grants.length > 0 ? `${grants.length} ${projectWord}` : "no projects";
@@ -352,42 +348,42 @@ function renderMobileAgentsList(agents, projects, grantsByAgent) {
       const metaLine = pending ? `waiting to join · asked ${relative(agent.created_at)}` : `${grantDesc} · ${activeDesc}`;
 
       return `
-      <a class="row agent-row" href="#/access?agent=${encodeURIComponent(agent.id)}" style="display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 8px 10px 16px;${idx === 0 ? "border-top:1px solid var(--line);" : ""}border-bottom:1px solid var(--line);background:var(--surface);color:var(--ink);text-decoration:none;box-sizing:border-box">
-        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-          <span class="title" style="display:flex;align-items:center;gap:6px;font-size:15px;font-weight:600;min-width:0">
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(agent.display_name || agent.id)}</span>
+      <a class="row agent-row" href="#/access?agent=${encodeURIComponent(agent.id)}">
+        <span class="agents-list-text">
+          <span class="title agent-row-name">
+            <span class="agent-index-label">${esc(agent.display_name || agent.id)}</span>
             ${pending ? '<span class="pill agent-pending-pill">pending</span>' : ""}
           </span>
-          <span class="meta" style="font-size:12px;color:var(--ink-3)">${esc(metaLine)}</span>
+          <span class="meta agents-admin-sub">${esc(metaLine)}</span>
         </span>
-        <span style="flex:none;width:32px;height:44px;display:grid;place-items:center;color:var(--ink-3)">${glyphSvg("chevronRight", { size: 18 })}</span>
+        <span class="agent-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
       </a>
     `;
     })
     .join("");
 
   const content = `
-    <div class="access-screen" style="flex:1;min-height:0;overflow:hidden">
-      <div id="mobile-add-agent-form" style="display:none;padding:16px;background:var(--surface);border-bottom:1px solid var(--line)">
-        <form data-action="agent-create" style="display:flex;flex-direction:column;gap:8px">
-          <label for="mobile-agent-id" style="font-size:13px;font-weight:600">Agent id</label>
-          <input id="mobile-agent-id" name="id" required autocomplete="off" placeholder="laptop/claude" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
-          <label for="mobile-agent-name" style="font-size:13px;font-weight:600">Display name</label>
-          <input id="mobile-agent-name" name="display_name" required placeholder="Claude on laptop" style="height:36px;padding:0 8px;border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--bg);color:var(--ink)">
-          <button class="primary" type="submit" style="height:36px;margin-top:4px">Create agent</button>
+    <div class="access-screen">
+      <div id="mobile-add-agent-form" class="access-add-form" style="display:none">
+        <form class="access-add-fields" data-action="agent-create">
+          <label class="access-field-label" for="mobile-agent-id">Agent id</label>
+          <input class="access-field" id="mobile-agent-id" name="id" required autocomplete="off" placeholder="laptop/claude">
+          <label class="access-field-label" for="mobile-agent-name">Display name</label>
+          <input class="access-field" id="mobile-agent-name" name="display_name" required placeholder="Claude on laptop">
+          <button class="primary access-create-submit" type="submit">Create agent</button>
         </form>
       </div>
 
-      <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">HUB</div>
-      <div class="row" style="display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--surface);box-sizing:border-box">
-        <span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
-          <span style="font-size:15px;font-weight:600">Admin token</span>
-          <span style="font-size:12px;color:var(--ink-3)">set at startup by <span class="mono" style="font-family:var(--font-mono)">HUB_ADMIN_TOKEN</span></span>
+      <div class="access-section-label">HUB</div>
+      <div class="row agents-list-admin">
+        <span class="agents-list-text">
+          <span class="agents-list-admin-title">Admin token</span>
+          <span class="agents-admin-sub">set at startup by <span class="mono agents-env">HUB_ADMIN_TOKEN</span></span>
         </span>
         <span class="token-pill pill ok"><span class="pill-dot"></span>live</span>
       </div>
 
-      <div style="padding:20px 16px 8px;font:600 12px/1 var(--font-mono);color:var(--ink-3);letter-spacing:.06em">AGENTS · ${agents.length}</div>
+      <div class="access-section-label">AGENTS · ${agents.length}</div>
       <div class="agents-list">
         ${agentRows}
       </div>
@@ -717,7 +713,7 @@ export async function agentsSection() {
         </div>
       </div>
       <p><a class="button access-link" href="#/access">Manage access</a></p>
-      <div class="meta" style="margin-top: var(--s-3); margin-bottom: var(--s-1);">Agents that identified themselves:</div>
+      <div class="meta access-card-lead">Agents that identified themselves:</div>
       ${agentRows || '<p class="empty">No agents yet.</p>'}
     </div>
   `;
@@ -993,8 +989,7 @@ function openGrantPicker(agentId, agentName, projects, grants) {
     label.textContent = "Project";
     select = document.createElement("select");
     select.id = "grant-project-select";
-    select.className = "dialog-field";
-    select.style.height = "36px";
+    select.className = "dialog-field grant-picker-field";
     for (const project of options) {
       const option = document.createElement("option");
       option.value = project.id;

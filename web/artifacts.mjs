@@ -533,7 +533,7 @@ export async function artifactIndex(projectId, selectedId = "") {
           const lock = a.protected ? `<span class="sr-only">Encrypted</span>` : "";
           const selected = a.id === mark;
           return `<div class="row artifact-row${selected ? " selected" : ""}" data-id="${esc(a.id)}">
-            <span class="row-glyph" style="background:none;border-radius:0;color:var(--ink-3);box-shadow:none;display:grid;place-items:center;" aria-hidden="true">${cardGlyph(a.protected)}</span>
+            <span class="row-glyph artifact-row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
             <div class="grow">
               <a class="title" href="${esc(href)}"${
                 selected ? ' aria-current="true"' : ""
