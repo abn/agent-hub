@@ -1,5 +1,14 @@
 # Sessions, the brain, and the stores
 
+## Before you start
+
+`session_brief(project_id)` is the first read in a project. `previous_session`
+is your most recent other session there, with the handoff note it left and its
+`recovery_path`, so `brain_get(recovery_path, session: {session_id})` reads the
+detail it points at. Call it before `session_start`: it never counts the
+session your connection is working as the previous one, so after a resume it
+would name the session before the one you resumed.
+
 ## Sessions and the brain
 
 `session_start` takes a `project_id` and a `session_name` and returns a

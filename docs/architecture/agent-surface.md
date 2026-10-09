@@ -17,8 +17,9 @@ sequenceDiagram
   participant A as Agent
   participant H as Hub
   participant P as Human
+  A->>H: session_brief(project_id)
+  H-->>A: answers, previous handoff, events, stale pages
   A->>H: whoami
-  A->>H: feed_read(project_id)
   A->>H: session_start(project_id, session_name)
   H-->>A: session_id, recovery_path, handoff
   A->>H: brain_get(recovery_path)
@@ -94,6 +95,7 @@ handing it the document.
 | `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. Returns the handoff note the previous owner left. With `from`, it picks up another agent's session. |
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
+| `session_brief` | Brief the caller on a project in one call that moves no feed cursor: answers and decisions on its own items and the project's other events since its feed cursor, ranked and capped, its previous session's handoff, and knowledge base pages past `stale_after`. See [the session brief](#the-session-brief). |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from the caller's own durable server-side cursor for the project and advances that cursor to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
 | `signal_append` | Append an event to a project feed. An `approval` may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. It may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). |
@@ -373,14 +375,15 @@ is not coming back.
 
 ## Bootstrap convention
 
-An agent orients itself in three calls at session start. `session_start`
-establishes or resumes its session by project and session name, and returns the
-handoff note the previous owner left beside `recovery_path`. `feed_read` then
-reads the project feed since the agent last looked. `brain_get` reads the
-session's recovery document, and with `store: "project"` the project knowledge
-base page that outlives the session. That is the whole convention: it is the
-sequence an agent follows at session start, and it is how a harness wires the
-hub in. The hub ships the primitives and a served guide (`agenthub://skill`),
+An agent orients itself in a few calls at session start. `session_brief`
+says what changed in the project since the agent last looked and what its last
+session left. `session_start` establishes or resumes its session by project and
+session name, and returns the handoff note the previous owner left beside
+`recovery_path`. `brain_get` reads the session's recovery document, and with
+`store: "project"` the project knowledge base page that outlives the session.
+`feed_read` reads the feed in full when the brief's events are not enough.
+That is the whole convention: it is the sequence an agent follows at session
+start, and it is how a harness wires the hub in. The hub ships the primitives and a served guide (`agenthub://skill`),
 not per-harness scaffolding: wiring a harness to call these at session start,
 and migrating an existing notes file into a brain, are the operator's steps and
 are described in [using the hub as a brain](../usage/agents.md).
@@ -391,6 +394,49 @@ advances it, so a restarted agent resumes where it stopped with nothing of its
 own to carry. `session_start` returns no cursor because it has none of its own
 to return, and the recovery document holds what the hub cannot know, which is
 what the session is doing rather than where it got to.
+
+## The session brief
+
+`session_brief(project_id)` puts what an agent would otherwise gather from
+`inbox_read`, `session_list`, `feed_read` and the knowledge base into one
+compact result. It needs read access to the project, so a confidential project
+needs a grant. It makes no record and moves no feed cursor; the answers it
+lists count as delivered (see below). Every entry is a pointer with its text
+cut to 200 characters, `truncated: true` when cut, except the previous
+session's handoff note, which is carried in full because it is what the brief
+is for. Each section counts what it left out in `more`. A count stops at
+10,000, and a section whose count stopped there carries `more_capped: true`, so
+its `more` is a lower bound.
+
+Every section that reads the feed reads the same window: the events above the
+caller's feed cursor, or, when it has never read the feed, those minted after
+its previous session's last activity. What `answers` lists, `events` leaves
+out, and nothing else, so an answer is always in one of the two.
+
+| Section | What it holds |
+|---|---|
+| `answers` | Answers and decisions in the window on the caller's own questions and approvals, newest answer first, at most 10. Each carries the item's `id`, the `answer_id` of the answer event, its outcome, `answered` or `expired` for a question and `approved` or `declined` for an approval, with `expired: true` when the hub resolved it at the deadline, and the reply or note, who and when. |
+| `previous_session` | The caller's most recently active session in the project other than the one its connection is working, with its status, last activity, handoff note in full, and `recovery_path`. `null` when there is none. |
+| `events` | The rest of the window, at most 20. Items still waiting on someone come first wherever they sit in the feed, the caller's own included, each marked `open: true`; the rest are ranked among the newest 200: others' work, then the caller's own writes and session lifecycle, newest first within each. The answers `answers` lists are left out, and so is the audit trail. |
+| `stale_pages` | Knowledge base pages whose `stale_after` has passed, the longest overdue first, at most 10. |
+
+`since` names the cursor the events were read from and its basis:
+`feed_cursor`, `previous_session`, or `none` for an agent that has no history
+in the project, which gets the newest events.
+
+Call it before `session_start`. Called after one, the session the connection
+now works is never the previous one, so after a resume the brief names the
+session before it, and an agent that has never read the feed then gets events
+from that older session's last activity rather than from the resumed one's.
+After starting a new session name the two orders agree.
+
+The notification trailer rides on the brief as on any tool and advances the
+caller's attention cursor, so an answer the brief carries counts as delivered:
+the trailer leaves it out rather than repeat it, though a delivery whose cursor
+write fails may repeat. The brief itself does not depend on that cursor, so an
+answer already nudged on an earlier call is still in it, and a later brief
+over the same window shows it again. The feed cursor is left alone, so a
+`feed_read` after a brief reads the same events in full.
 
 ## See also
 

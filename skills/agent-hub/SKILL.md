@@ -36,13 +36,21 @@ Five things, and the split between them is the whole design:
 
 Run these when a session starts; each answers the next question:
 
-1. `whoami` names the identity and proves the token resolves.
-2. `feed_read(project_id)` reads what happened since your own last look. The
-   cursor is the hub's, per agent per project, so you carry nothing.
-3. `brain_get(recovery_path)` reads the note the previous owner left.
-4. `session_start(project_id, session_name)` makes a brain active and returns
+1. `session_brief(project_id)` says what you would otherwise piece together
+   from four tools: since your own last look, the answers and decisions on
+   your own items and what else happened, plus your previous session's
+   handoff and stale knowledge base pages. It is capped and moves no feed
+   cursor; the answers it lists count as delivered. Call it before
+   `session_start`, so a resumed session is still the previous one.
+2. `whoami` names the identity and proves the token resolves.
+3. `session_start(project_id, session_name)` makes a brain active and returns
    the `handoff` the predecessor left when the session ended.
+4. `brain_get(recovery_path)` reads the note the previous owner left.
 5. `brain_get(/fs/index.md, store: "project")` reads the durable index.
+
+Read the full record only where the brief points at more: `feed_read` for the
+events (the cursor is the hub's, per agent per project, so you carry nothing),
+`inbox_read` for an answer's whole text.
 
 ## Working rules
 

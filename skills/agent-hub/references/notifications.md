@@ -14,7 +14,10 @@ declined, and `at` is when it was resolved.
 
 Each item is delivered once. The hub records what it has shown you, so the
 next call carries only what is new since. When there is nothing to report,
-the `notifications` member is absent.
+the `notifications` member is absent. `session_brief` counts as delivery for
+the answers and decisions it lists: the trailer on it leaves those out. The
+brief reads its own window, so an answer the trailer already delivered is
+still in it.
 
 A notification is a nudge, not the record. `inbox_read` and `inbox_wait`
 remain the durable way to read the inbox: they show the full item, the answer

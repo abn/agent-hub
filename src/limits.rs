@@ -105,6 +105,29 @@ pub const BRAIN_LIST_ENTRIES_MAX: usize = 500;
 /// Characters of a handoff note carried in a session listing.
 pub const HANDOFF_SUMMARY_CHARS: usize = 200;
 
+/// Feed events one session brief carries. The rest are counted, and
+/// `feed_read` reads them in full.
+pub const SESSION_BRIEF_EVENTS_MAX: usize = 20;
+
+/// Newest events a session brief ranks before it keeps
+/// [`SESSION_BRIEF_EVENTS_MAX`]. An older event still counts toward the rest.
+pub const SESSION_BRIEF_EVENTS_SCAN: i64 = 200;
+
+/// Events a session brief counts toward its rest before it stops, so a brief
+/// on a large project never counts the whole feed. A count at the cap is a
+/// lower bound.
+pub const SESSION_BRIEF_COUNT_MAX: i64 = 10_000;
+
+/// Answers and decisions one session brief carries.
+pub const SESSION_BRIEF_ANSWERS_MAX: usize = 10;
+
+/// Stale knowledge base pages one session brief names.
+pub const SESSION_BRIEF_STALE_PAGES_MAX: usize = 10;
+
+/// Characters of one summary, answer or decision note a session brief
+/// carries. The brief points at the record; the record holds the whole text.
+pub const SESSION_BRIEF_TEXT_CHARS: usize = 200;
+
 /// Maximum search page size.
 pub const SEARCH_LIMIT_MAX: i64 = 100;
 

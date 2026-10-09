@@ -785,7 +785,7 @@ fn discard(path: &std::path::Path) {
 /// that wants what its predecessor left reads the row handoff `session_start`
 /// returns beside this path. It stays here so the bootstrap convention
 /// describes itself rather than living only in a skill file.
-const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
+pub(super) const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
 
 /// The handoff note as a listing carries it, with whether it was cut short.
 fn summarise(handoff: Option<&str>) -> (Option<String>, bool) {
