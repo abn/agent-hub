@@ -149,10 +149,20 @@ usage:
   agent-hub kb revert <path> <version>
                                  put the page back to an earlier version
   agent-hub kb forget <path>     forget the page's earlier versions (admin)
+  agent-hub kb export --dir D [--force]
+                                 write every page into D as an OKF bundle
+  agent-hub kb import --dir D [--dry-run] [--prune]
+                                 write the pages of D that changed back
 
   --project <id>   the project, or the HUB_PROJECT setting
   --json           print the tool's JSON result instead
   --if-version <v> write only while the page still reads as that version
+  --dir <D>        the folder an export writes or an import reads
+  --force          export into a folder that is not empty, writing over its
+                   page files and manifest and removing only the files of
+                   pages its old manifest names and the hub no longer has
+  --dry-run        list what an import would change and write nothing
+  --prune          delete pages the export had and the folder no longer has
 
 A path is a page of the knowledge base, so a path outside /fs is taken as
 relative to it: 'runbooks/deploy.md' is '/fs/runbooks/deploy.md'.
@@ -196,6 +206,17 @@ operator's purge: it removes the kept bytes of every version but the one the
 page holds now, all of them for a deleted page, so they can no longer be read
 or restored and their space is reused. The history's rows stay. It needs the
 admin token as HUB_TOKEN; any other token gets the hub's refusal.
+
+kb export writes each page at its path under /fs, with .agent-hub-kb.json
+recording the project and each page's version, and refuses a folder that is not
+empty unless --force is given; --force also removes the files of pages the old
+manifest names that the hub no longer has. kb import lints the folder and
+writes nothing when a page it would write has a lint error, then writes each
+changed page guarded by the version the export recorded: a page changed on
+both sides since then is a conflict, is skipped, and makes the exit code 1,
+and one changed only on the hub is left as it is. Dot-named files and
+directories are not pages, so the manifest and a .git directory stay out of the
+bundle. A page missing from the folder is kept unless --prune is given.
 ";
 
 fn main() -> ExitCode {
@@ -984,7 +1005,13 @@ fn kb(args: &[String]) -> ExitCode {
     let takes_content = command == "put";
     let guarded = matches!(command, "put" | "revert");
     let prints_a_view = matches!(command, "get" | "list" | "history");
+    let syncs = matches!(command, "export" | "import");
     let unused = [
+        (options.path.is_some() && syncs, "a page path"),
+        (options.dir.is_some() && !syncs, "--dir"),
+        (options.force && command != "export", "--force"),
+        (options.dry_run && command != "import", "--dry-run"),
+        (options.prune && command != "import", "--prune"),
         (options.if_version.is_some() && !guarded, "--if-version"),
         (options.file.is_some() && !takes_content, "--file"),
         (options.stdin && !takes_content, "-"),
@@ -1130,9 +1157,132 @@ fn kb(args: &[String]) -> ExitCode {
             }
             emit(runtime.block_on(agent_hub::client::call(&config, "brain_revert", revert)))
         }
+        "export" | "import" => {
+            let Some(dir) = options.dir.as_deref() else {
+                return fail(&Failure::Usage(format!(
+                    "kb {command} needs the folder: pass --dir <D>\n{KB_USAGE}"
+                )));
+            };
+            if command == "export" {
+                kb_export(&config, &runtime, &project, dir, options.force)
+            } else {
+                kb_import(&config, &runtime, &project, dir, &options)
+            }
+        }
         other => fail(&Failure::Usage(format!(
             "unknown kb command '{other}'\n{KB_USAGE}"
         ))),
+    }
+}
+
+/// Write the project knowledge base into a folder and say what was written.
+#[cfg(feature = "client")]
+fn kb_export(
+    config: &ClientConfig,
+    runtime: &tokio::runtime::Runtime,
+    project: &str,
+    dir: &str,
+    force: bool,
+) -> ExitCode {
+    use agent_hub::client::kb_bundle;
+
+    let exported = match runtime.block_on(kb_bundle::export(
+        config,
+        project,
+        std::path::Path::new(dir),
+        force,
+    )) {
+        Ok(exported) => exported,
+        Err(failure) => return fail(&failure),
+    };
+    for page in &exported.skipped {
+        eprintln!("agent-hub: skipped {page}: a dot-named path is not read back by kb import");
+    }
+    for page in &exported.removed {
+        println!("removed {page}: the hub no longer has it");
+    }
+    println!(
+        "exported {} pages, {} bytes, from {project} to {dir}",
+        exported.pages, exported.bytes
+    );
+    ExitCode::SUCCESS
+}
+
+/// Write a folder's changed pages into the project knowledge base, one line
+/// per page that changes or conflicts, and exit 1 when any conflicted.
+#[cfg(feature = "client")]
+fn kb_import(
+    config: &ClientConfig,
+    runtime: &tokio::runtime::Runtime,
+    project: &str,
+    dir: &str,
+    options: &KbOptions,
+) -> ExitCode {
+    use agent_hub::client::kb_bundle::{self, Action};
+
+    let imported = match runtime.block_on(kb_bundle::import(
+        config,
+        project,
+        std::path::Path::new(dir),
+        options.dry_run,
+        options.prune,
+    )) {
+        Ok(imported) => imported,
+        Err(failure) => return fail(&failure),
+    };
+    for finding in &imported.warnings {
+        eprintln!("agent-hub: lint {}", kb_bundle::describe(finding));
+    }
+    let would = if options.dry_run { "would " } else { "" };
+    let (mut created, mut updated, mut deleted, mut unchanged, mut kept) = (0, 0, 0, 0, 0);
+    for change in &imported.changes {
+        let path = &change.path;
+        match &change.action {
+            Action::Unchanged => unchanged += 1,
+            Action::Create => {
+                created += 1;
+                println!("{would}create {path}");
+            }
+            Action::Update => {
+                updated += 1;
+                println!("{would}update {path}");
+            }
+            Action::Delete => {
+                deleted += 1;
+                println!("{would}delete {path}");
+            }
+            Action::Kept => {
+                kept += 1;
+                println!("keep {path}: not in the folder; --prune deletes it");
+            }
+            Action::HubNewer => {
+                kept += 1;
+                println!("hub newer {path}: left as is");
+            }
+            Action::Conflict(why) => println!("conflict {path}: {why}"),
+            Action::Gone => println!("delete {path}: already gone"),
+            Action::NotAttempted => println!("not attempted {path}"),
+        }
+    }
+    let conflicts = imported.conflicts();
+    println!(
+        "{}{created} created, {updated} updated, {deleted} deleted, {unchanged} unchanged, {kept} kept, {conflicts} conflicts",
+        if options.dry_run {
+            "dry run, nothing written: "
+        } else {
+            ""
+        }
+    );
+    if let Some(first) = imported.failures.first() {
+        for failure in &imported.failures {
+            failure.report();
+        }
+        return ExitCode::from(first.exit_code());
+    }
+    if conflicts > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -1345,6 +1495,10 @@ struct KbOptions {
     file: Option<String>,
     stdin: bool,
     json: bool,
+    dir: Option<String>,
+    force: bool,
+    dry_run: bool,
+    prune: bool,
 }
 
 #[cfg(feature = "client")]
@@ -1368,6 +1522,10 @@ impl KbOptions {
                 }
                 "--file" => options.file = Some(flag_value(&mut args, "--file")?),
                 "--json" => options.json = true,
+                "--dir" => options.dir = Some(flag_value(&mut args, "--dir")?),
+                "--force" => options.force = true,
+                "--dry-run" => options.dry_run = true,
+                "--prune" => options.prune = true,
                 "-" => options.stdin = true,
                 flag if flag.starts_with('-') => return Err(format!("unknown flag '{flag}'")),
                 path if options.path.is_none() => options.path = Some(path.to_string()),

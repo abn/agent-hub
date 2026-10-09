@@ -36,6 +36,8 @@ agent-hub kb list                      # every page path, one per line
 agent-hub kb delete notes.md
 agent-hub kb history notes.md          # version, time, actor, what it did
 agent-hub kb revert notes.md sha256:...  # put that version back
+agent-hub kb export --dir ./kb         # every page into a folder, with versions
+agent-hub kb import --dir ./kb --dry-run   # lint, then list what would change
 ```
 
 Every command takes `--project <id>`, or reads `HUB_PROJECT` from the same
@@ -48,6 +50,13 @@ exits non-zero. A `kb list` walks the whole base under the path it is given and
 prints pages only, so every line is a page `kb get` can read; `--json` is the
 tool's own result for that one listing instead, one level of entries with their
 types.
+
+`kb export` and `kb import` move the whole base to a folder and back. An import
+writes nothing when a page it would write has a lint error, then writes only
+the pages that changed, guarded by the versions the export recorded: a page
+changed on both sides since the export is reported as a conflict, skipped, and
+exits 1, and one changed only on the hub is left as it is. Nothing is deleted
+without `--prune`.
 
 ### The shape of a page
 

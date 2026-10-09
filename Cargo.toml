@@ -47,6 +47,11 @@ hyper-rustls = { version = "0.27", default-features = false, features = ["aws-lc
 http-body-util = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"], optional = true }
+# Already in the build through the tailnet's own dependencies, at the version
+# the lock file pins; taken directly for the client's knowledge base export,
+# which refuses page paths a case-insensitive, normalising filesystem would
+# keep as one file.
+unicode-normalization = { version = "0.1.25", optional = true }
 
 [features]
 default = ["client", "tailnet"]
@@ -57,6 +62,7 @@ default = ["client", "tailnet"]
 # linkage would break the distroless image.
 client = [
   "dep:reqwest",
+  "dep:unicode-normalization",
   "rmcp/client",
   "rmcp/reqwest",
   "rmcp/transport-streamable-http-client-reqwest",

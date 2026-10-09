@@ -21,6 +21,7 @@ use crate::config::ClientConfig;
 
 pub mod backup;
 pub mod enrol;
+pub mod kb_bundle;
 pub mod projects;
 mod proxy;
 
@@ -271,6 +272,19 @@ pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result
         ));
     };
     let hub = connect(config).await?;
+    let value = call_on(&hub, config, tool, arguments).await;
+    hub.cancel().await.ok();
+    value
+}
+
+/// Call one tool over a connection the caller holds, for a command that makes
+/// many calls and should not open a connection for each.
+pub(crate) async fn call_on(
+    hub: &RunningService<RoleClient, ()>,
+    config: &ClientConfig,
+    tool: &str,
+    arguments: serde_json::Map<String, Value>,
+) -> Result<Value, Failure> {
     let result = within(
         config,
         hub.peer()
@@ -284,7 +298,6 @@ pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result
     // reads only stdout and the exit code, so it must see neither as success.
     let rejected = result.is_error == Some(true);
     let value = result_json(result);
-    hub.cancel().await.ok();
     if rejected {
         let error = match value.get("error") {
             Some(_) => value,

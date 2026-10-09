@@ -100,6 +100,35 @@ software release notes and the repository changelog.
   [operating model](architecture/model.md) and
   [quickstart](usage/quickstart.md).
 
+### A knowledge base syncs with a folder
+
+* **Change**: `agent-hub kb export --dir D` writes every page of a project
+  knowledge base to D at its path under `/fs`, with a manifest,
+  `.agent-hub-kb.json`, of each page's version. A directory that is not empty is
+  refused without `--force`, which writes over it and removes only the files of
+  pages the old manifest names and the hub no longer has. A target that would
+  leave the folder, and two pages whose paths differ only in case or Unicode
+  normalisation, are refused before the directory is created or any file is
+  written.
+* **Change**: `agent-hub kb import --dir D` lints the folder and writes nothing
+  when a page it would create or update has `unparsed_frontmatter`,
+  `okf_version_misplaced` or `link_escapes_bundle`. The same finding on a page
+  it leaves as it is, and every other finding, `broken_link` included, is a
+  warning, so an export always imports back. It then writes each changed page
+  guarded by the version the export recorded. A page changed on both sides
+  since the export is a conflict, is skipped, and makes the exit code 1; one the
+  folder left as exported and the hub changed or deleted is reported as
+  `hub newer` and left as is. Any other refusal from the hub stops the import,
+  listing what was made and what was not attempted. `--dry-run` lists the
+  changes and writes nothing; `--prune` deletes pages the export had and the
+  folder no longer has.
+  A bundle carries at most 10,000 pages and 256 MiB.
+* **Add**: [ADR 0030](adr/0030-knowledge-base-folder-sync.md) records the
+  decision.
+* **Update**: [Project knowledge base](usage/knowledge-base.md) describes both
+  commands, the manifest, the lint gate, the conflict rule and the exit codes;
+  the [quickstart](usage/quickstart.md) lists them.
+
 ## 2026-10-08
 
 ### Releases carry standalone binaries

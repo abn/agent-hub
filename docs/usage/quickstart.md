@@ -303,6 +303,8 @@ agent-hub kb delete runbooks/deploy.md
 agent-hub kb history runbooks/deploy.md     # one version per line, newest first
 agent-hub kb revert runbooks/deploy.md sha256:...
 agent-hub kb forget runbooks/deploy.md      # admin: drop the earlier versions
+agent-hub kb export --dir ./kb               # the whole base as a folder
+agent-hub kb import --dir ./kb --dry-run     # what writing it back would change
 ```
 
 A failed read prints nothing on stdout and says why in its exit code: 1 means
