@@ -42,3 +42,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   operator-configured target (refines 0016)
 * [0027](0027-deadlines-on-open-items.md) - An agent may put a deadline on the
   item it asks
+* [0028](0028-knowledge-base-as-mcp-resources.md) - The knowledge base is a
+  read-only view as MCP resources
