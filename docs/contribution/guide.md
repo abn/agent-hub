@@ -127,6 +127,24 @@ property. The old `check-web.py` and its
 target and the token gate are deleted rather than left beside their
 replacements, so a new gate has one place to live.
 
+## Visual baselines
+
+A `toHaveScreenshot` baseline matches only the browser build and the fonts it
+was taken with, so a baseline made on your machine fails in CI. CI makes them.
+`make e2e/baselines` runs the two e2e shards in turn, as the e2e job does, and
+rewrites every baseline that changed.
+
+1. Push your branch, then run the `visual-baselines` workflow on it, from the
+   Actions tab or with `gh workflow run visual-baselines --ref <branch>`. It
+   refuses the default branch.
+2. When a baseline changed, the workflow pushes a
+   `test(e2e): refresh visual baselines` commit to the branch. A push made with
+   the workflow's token starts no CI. If the branch moved while the run was
+   going, it pushes nothing and asks you to run it again.
+3. Pull that commit, fold it into the commit that changed the screen, and
+   force-push with `git push --force-with-lease`. That push runs CI against
+   the new baselines.
+
 ## The workflow
 
 1. **State the scope in one sentence** before starting: the unit of work, the

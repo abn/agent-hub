@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate gate/quick e2e e2e/shard check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -143,6 +143,13 @@ gate/quick: fmt/check lint/engine clippy web/units ## Fast inner loop: format, l
 e2e: web/e2e ## The browser behaviour checks
 e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2
 	npx playwright test --shard=$(SHARD)
+# A screenshot baseline only matches the browser build and fonts it was taken
+# with, so the baselines are written by the visual-baselines workflow on the e2e
+# runner. It runs the two shards in turn, as the e2e job does, so each check sees
+# the hub state it sees in CI.
+e2e/baselines: build node_tree ## Rewrite the changed screenshot baselines over both e2e shards (CI)
+	npx playwright test --shard=1/2 --update-snapshots=changed
+	npx playwright test --shard=2/2 --update-snapshots=changed
 check: gate e2e ## Full quality gate
 	@printf 'check: ok\n'
 
