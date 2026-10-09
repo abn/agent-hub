@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### A waiting row keeps its title line
+
+* **Update**: [Human interface](design/human-interface.md) states how an index
+  row says it is waiting: the action dot at the row's end, 600 title weight,
+  and the words "Waiting on you" as the title's description. The feed's pill
+  moves from beside the subject to the meta line, so the subject has the whole
+  title line; the inbox's waiting rows keep no pill, since their group names
+  the state, and a snoozed one carries the pill on its meta line. A long agent
+  name now shortens before the time on every feed row. At the 300px default
+  index a waiting feed row shows 17 to 25 characters of its subject, where it
+  showed 1 to 13.
+* **Update**: the accessibility gate describes the waiting-row check and its
+  pinned font.
+* **Update**: the feed captures at both widths and in both themes are retaken.
+
 ### CI writes the visual baselines
 
 * **Add**: `.github/workflows/visual-baselines.yml`, run by hand on a branch,

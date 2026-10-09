@@ -3,7 +3,7 @@
 // and what landed since the reader last looked carries the unread mark.
 
 import { api } from "./api.mjs";
-import { actionFor, esc, glyph, isOpen, main, when } from "./dom.mjs";
+import { actionFor, esc, glyph, isOpen, main, waitingMarks, when } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { focusAfterRender, render } from "./router.mjs";
 import { byDay } from "./time.mjs";
@@ -310,6 +310,12 @@ function collapseDayEvents(events) {
   return result;
 }
 
+// A row's meta line: the waiting pill when there is one, then the agent and
+// the time. A long agent name is what gives way, so the time always shows.
+function metaLine(actor, ts, pill = "") {
+  return `<div class="meta">${pill}<span class="meta-actor">${esc(actor)}</span><span aria-hidden="true">·</span>${when(ts)}</div>`;
+}
+
 function collapsedArtifactRow(item, baseline) {
   const unread = item.events.some((e) => e.id > baseline);
   const project = item.project_id || "";
@@ -319,7 +325,7 @@ function collapsedArtifactRow(item, baseline) {
     ${glyph("artifact")}
     <div class="grow" data-id="${esc(item.id)}">
       ${title}
-      <div class="meta">${esc(item.actor)} · ${when(item.created_at)}</div>
+      ${metaLine(item.actor, item.created_at)}
     </div>
     ${unread ? UNREAD : ""}
   </div>`;
@@ -335,22 +341,17 @@ function feedRow(event, baseline, selected = false) {
   const project = event.project_id || "";
   const href = `#/projects/${encodeURIComponent(project)}/feed?event=${encodeURIComponent(event.id)}`;
   const summaryText = formatEventSummary(event);
-  const open = isOpen(event);
-  const title = `<a class="title feed-link" href="${esc(href)}">${esc(summaryText)}</a>`;
-  const waitingPill = open
-    ? `<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>`
-    : "";
-  return `<div class="row feed-row${unread ? " unread" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
+  // Waiting outranks unread, so a waiting row ends in the action dot alone.
+  const waiting = isOpen(event) ? waitingMarks(event.id) : null;
+  const title = `<a class="title feed-link" href="${esc(href)}"${waiting ? waiting.described : ""}>${esc(summaryText)}</a>`;
+  return `<div class="row feed-row${unread ? " unread" : ""}${waiting ? " is-waiting" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
     ${glyph(event.kind)}
     <div class="grow">
-      <div class="feed-row-title-bar">
-        ${title}
-        ${waitingPill}
-      </div>
+      ${title}
       ${decisionNote(event)}
-      <div class="meta">${esc(event.actor)} · ${when(event.created_at)}</div>
+      ${metaLine(event.actor, event.created_at, waiting ? waiting.pill : "")}
     </div>
-    ${unread ? UNREAD : ""}
+    ${waiting ? waiting.dot : unread ? UNREAD : ""}
   </div>`;
 }
 
