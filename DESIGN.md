@@ -281,8 +281,7 @@ structure, not to line length.
   - **Width.** A button is as wide as its label.
   - **Deviation: what is not built to this yet.** Some desktop buttons and
     fields still stretch across their pane, so the width rule is the design
-    and not yet the build. The composer keeps its own sizes until it is
-    redrawn. One phone control answers to less than 44 by 44: the project
+    and not yet the build. One phone control answers to less than 44 by 44: the project
     switcher's tabs, because the switcher scrolls sideways in a 36px track and
     a scroll box clips a hit area. The browser gate names it, and fails once it
     passes, so the list only shrinks.
@@ -328,14 +327,63 @@ structure, not to line length.
   `type="search"` field in its control row, naming the list it
   filters ("Filter artifacts"). It filters in place and does not navigate.
   While filtering, the group headers give way to one mono count line.
-- **Composer.** A rounded container, growing to a 120px maximum height, a 1px
-  strong border, a placeholder naming the version it attaches to. The send
-  control is a 30px circle inside the field, 36px on a coarse pointer, centred
-  vertically and inset 8px from the right. Enter posts, Shift+Enter breaks the
-  line.
+- **Composer.** One component, `web/composer.mjs`, is every place a reader
+  writes: a question's card and the composer a row's Reply opens (Inbox, feed
+  stage, Home), an artifact's new comment, its comment list and a thread's
+  reply, and a wiki page's comments. No screen builds a field and a send
+  button of its own.
+  - **Field.** A form field at the pointer's size: one line at rest is
+    `--ctl-form` on a fine pointer and `--tap` on a coarse one, 15px text on a
+    20px line. It grows a line at a time to eight lines and then scrolls, and
+    shrinks back as lines are deleted. The script sets only its row count, so
+    no length lives in a `style` attribute. A long unbroken word wraps inside
+    the field; nothing scrolls sideways. The composer is at most 640 wide.
+  - **Send.** An icon button beside the field, never inside it: the send glyph
+    on the ink fill, named for what it does ("Send" for an answer, "Post" for
+    a comment). It is `--ctl` on a fine pointer and `--tap` on a coarse one,
+    bottom-aligned with the field and lifted by half the difference between
+    the two boxes, so its centre is the centre of the field's last line at one
+    line or eight.
+  - **Empty.** While the field holds nothing but spaces the send control is
+    `aria-disabled`, drawn as a disabled button, and stays in the tab order so
+    its reason is read with it. The reason is the line under the field, "Write
+    a reply to send it." or "Write a comment to post it.", which is also the
+    control's accessible description. Pressing it sends nothing and puts the
+    caret in the field.
+  - **Keyboard.** One rule in every composer: Enter breaks the line, and
+    Ctrl+Enter (Cmd+Enter on an Apple device) sends. A reply is a message in a
+    mailbox, not a chat line, and a phone's own keyboard has only Return, so
+    the rule that cannot surprise a reader on one composer holds on all of
+    them. Once there is text, the line under the field names the key on a
+    fine pointer; under a coarse pointer the line keeps its height and holds
+    nothing, so nothing is read for it either, because a touch keyboard has
+    no key to name. An input method that
+    is still composing is never sent.
+  - **Sending.** While a send is on its way the field is read-only rather
+    than disabled, so it keeps focus and a phone keeps its keyboard, and the
+    send control and quick answers are disabled; a second press sends nothing.
+    A sent field is emptied and keeps the caret.
+  - **Refusal.** A refused send keeps the words in the field and says why on
+    the composer's own alert line, "Nothing was sent:" and the hub's reason.
+  - **Phone.** The comment sheet and drawer, whose foot is a composer, clear
+    the home indicator with the safe-area inset. They read the visual viewport,
+    so with a keyboard open the drawer's foot sits on the keyboard and the
+    sheet is capped at 85% of what is still visible. Nothing else on the page
+    is moved for the keyboard: asking the browser to resize the whole page
+    instead would carry the fixed tab bar up onto the keyboard on every screen,
+    over whatever the reader is typing into. A sheet's composer sits under the
+    thread, outside the thread's live log, so its own line is not read out as
+    it changes.
+  - **Deviation: the keyboard is not photographed.** A headless browser
+    opens no on-screen keyboard, so the browser gate holds the sizes, the
+    growth, the keys and the safe-area rules but not the keyboard itself. A
+    composer in the page flow, such as a question's card, relies on the
+    browser scrolling the caret into view above the keyboard. The composer
+    carries words only, because the answer and comment routes take a body and
+    nothing else, so it has no attachment control.
 - **Quick answers.** When a question suggests answers, the composer carries
   them above its field as a group named "Quick answers": one secondary button
-  per option, at the 44px minimum, its label the option's own words in
+  per option, at the pointer's button size, its label the option's own words in
   sentence case as the agent wrote them, wrapping onto a second line rather
   than past the pane's edge. A press sends that text as the answer, through the
   composer's own send, so it is refused, reported and kept the same way a typed
@@ -457,7 +505,8 @@ Agents and access, Connect, and the knowledge base.
   fill only inside the dialog; on a screen it stays disabled until the session
   has ended. Danger is reserved for deletion.
 - Keyboard: `/` focuses the filter or search field, `j` and `k` move through
-  index rows, Enter opens, `a` approves, `r` replies, `c` toggles the aside,
+  index rows, Enter opens, `a` approves, `r` replies, Ctrl+Enter (Cmd+Enter on
+  an Apple device) sends from a composer, `c` toggles the aside,
   Esc closes what is on top, and the arrows move a focused splitter. Dialogs
   trap focus.
 - Time is short on a row and whole on request. No timestamp is a tab stop of

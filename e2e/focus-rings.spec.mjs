@@ -41,13 +41,6 @@ const RINGS = [
     route: "#/search?q={term}",
   },
   {
-    name: "reply composer",
-    wrapper: ".composer-row",
-    controls: [".composer-field", ".composer-send"],
-    ring: "focus",
-    route: "#/inbox?open={question}",
-  },
-  {
     name: "project register row",
     wrapper: ".project-row",
     controls: [".project-link"],
@@ -60,6 +53,15 @@ const RINGS = [
 // control inside carries the ring alone, so the count is still one.
 const SINGLE_RINGS = [
   {
+    // The field and the send control each draw their own ring; the row that
+    // holds them draws none.
+    name: "reply composer",
+    wrapper: ".composer-row",
+    controls: [".composer-field", ".composer-send"],
+    ring: "focus",
+    route: "#/inbox?open={question}",
+  },
+  {
     name: "connect submit",
     wrapper: "form[data-action='connect']",
     control: ".connect-submit-btn",
@@ -68,8 +70,8 @@ const SINGLE_RINGS = [
   },
   {
     name: "comment composer",
-    wrapper: ".hub-composer-field",
-    control: ".hub-composer-field textarea",
+    wrapper: ".comments-compose .composer-row",
+    control: ".comments-compose .composer-field",
     ring: "focus",
     route: "#/artifacts/{artifact}",
     openComments: true,

@@ -496,12 +496,11 @@ test.describe("wiki", () => {
     await page.click('[data-action="wiki-save"]');
     await expect(page.locator(".wiki-page")).toContainText("Edited by the check.", { timeout: 8000 });
 
-    if (await page.locator("[data-wiki-comment-body]").count()) {
-      await page.fill("[data-wiki-comment-body]", "A comment from the check.");
-      await page.click('[data-action="wiki-comment-add"]');
-      await expect(page.locator(".wiki-comments")).toContainText("A comment from the check.", { timeout: 8000 });
-      await expect(page.locator('[data-action="wiki-comment-resolve"]')).toHaveCount(1);
-    }
+    const comments = page.locator(".wiki-comments");
+    await comments.getByRole("textbox", { name: "Comment" }).fill("A comment from the check.");
+    await comments.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(comments).toContainText("A comment from the check.", { timeout: 8000 });
+    await expect(page.locator('[data-action="wiki-comment-resolve"]')).toHaveCount(1);
     await expect(page.locator('[data-action="wiki-review"]')).toHaveCount(1);
     await page.click('[data-action="wiki-review"]');
 

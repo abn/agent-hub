@@ -6,6 +6,32 @@ software release notes and the repository changelog.
 
 ## 2026-10-09
 
+### One composer for every reply and comment
+
+* **Update**: [Human interface](design/human-interface.md) describes the one
+  composer every place the reader writes now uses: a question's card and the
+  composer a row's Reply opens, an artifact's comments and replies, and a wiki
+  page's comments. The field is 36px at rest on a desktop and 44px on a phone,
+  grows a line at a time to eight lines and then scrolls; the send control is
+  an icon beside it, 32px on a desktop and 44px on a phone, centred on the
+  field's last line, and dimmed with its reason while the field is empty.
+* **Update**: one keyboard rule in every composer: Enter breaks the line and
+  Ctrl+Enter, or Cmd+Enter on an Apple device, sends, named under the field on
+  a desktop. Before this, Enter sent a reply on a desktop, sent a comment at
+  either pointer, and did nothing in a wiki comment.
+* **Update**: with a phone keyboard open, the comment drawer sits on the
+  keyboard and the sheet fits in what is still visible, read from the visual
+  viewport; the rest of the page, the tab bar included, does not move. A
+  sheet's composer sits under the thread rather than inside its live log.
+* **Update**: a feed stage's Reply opens the composer under the stage's action
+  line rather than beside the button, and quick answers are drawn at the
+  pointer's button size.
+* **Update**: [Human surface](architecture/human-surface.md) names the shared
+  composer and the quick answers' size, and the accessibility gate is described
+  with its composer check and screenshot baselines.
+* **Update**: the open inbox item captures are retaken at both widths and in
+  both themes, because the question card's composer moved.
+
 ### An artifact opens in its project's Artifacts shell
 
 * **Update**: [Human interface](design/human-interface.md) and

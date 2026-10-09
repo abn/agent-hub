@@ -317,6 +317,11 @@ describe("composer quick answers", () => {
     element.dispatchEvent(new Event("submit", { cancelable: true }));
     expect(sent).toEqual(["Drop it"]);
     expect(picks(element).every((pick) => pick.disabled)).toBe(true);
+    // The field is held, not disabled, so it keeps focus and a phone keeps its
+    // keyboard while the answer is on its way.
+    const field = element.querySelector(".composer-field");
+    expect(field.readOnly).toBe(true);
+    expect(field.disabled).toBe(false);
     finish();
   });
 
@@ -335,5 +340,97 @@ describe("composer quick answers", () => {
     expect(error.hidden).toBe(false);
     expect(error.textContent).toBe("Nothing was sent: question was already answered");
     expect(picks(element).some((pick) => pick.disabled)).toBe(false);
+  });
+});
+
+describe("the composer's keyboard rule and empty state", () => {
+  const build = (send = async () => {}) => {
+    const made = composer({ label: "Your answer", send });
+    document.body.appendChild(made.element);
+    const field = made.element.querySelector("textarea");
+    const button = made.element.querySelector("button[type=submit]");
+    const hint = made.element.querySelector(`#${button.getAttribute("aria-describedby")}`);
+    return { ...made, field, button, hint };
+  };
+  const type = (field, value) => {
+    field.value = value;
+    field.dispatchEvent(new Event("input"));
+  };
+  const key = (field, init) => {
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init });
+    field.dispatchEvent(event);
+    return event;
+  };
+
+  it("dims the send control while the field is blank, and says why", () => {
+    const { field, button, hint } = build();
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(hint.textContent).toBe("Write a reply to send it.");
+    type(field, "   ");
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    type(field, "yes");
+    expect(button.getAttribute("aria-disabled")).toBe("false");
+    expect(hint.textContent).toMatch(/^(Ctrl|Cmd)\+Enter to send$/);
+  });
+
+  it("breaks the line on Enter and sends on the command key with Enter", async () => {
+    const sent = [];
+    const { field } = build(async (body) => sent.push(body));
+    type(field, "hello");
+    expect(key(field, {}).defaultPrevented).toBe(false);
+    expect(key(field, { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(sent).toEqual([]);
+    expect(key(field, { ctrlKey: true }).defaultPrevented).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual(["hello"]);
+    type(field, "again");
+    key(field, { metaKey: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual(["hello", "again"]);
+  });
+
+  it("does not send while an input method is still composing", async () => {
+    const sent = [];
+    const { field } = build(async (body) => sent.push(body));
+    type(field, "kana");
+    expect(key(field, { ctrlKey: true, isComposing: true }).defaultPrevented).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual([]);
+  });
+
+  it("sends nothing from a blank field, and clears a field that was sent", async () => {
+    const sent = [];
+    const { element, field, button } = build(async (body) => sent.push(body));
+    element.dispatchEvent(new Event("submit", { cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual([]);
+    expect(element.querySelector(".composer-error").hidden).toBe(true);
+    type(field, "  sent words  ");
+    element.dispatchEvent(new Event("submit", { cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toEqual(["sent words"]);
+    expect(field.value).toBe("");
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("keeps the words and says why when the send is refused", async () => {
+    const { element, field } = build(async () => {
+      throw new Error("question was already answered");
+    });
+    type(field, "my answer");
+    element.dispatchEvent(new Event("submit", { cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(field.value).toBe("my answer");
+    expect(element.querySelector('[role="alert"]').textContent).toBe(
+      "Nothing was sent: question was already answered",
+    );
+  });
+
+  it("names its send control and its empty reason for what it posts", () => {
+    const made = composer({ label: "Comment", action: "Post", empty: "Write a comment to post it.", send: async () => {} });
+    const button = made.element.querySelector("button[type=submit]");
+    expect(button.getAttribute("aria-label")).toBe("Post");
+    expect(made.element.querySelector(".composer-hint").textContent).toBe("Write a comment to post it.");
+    expect(made.field.getAttribute("aria-label")).toBe("Comment");
   });
 });

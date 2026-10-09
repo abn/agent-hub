@@ -5,6 +5,7 @@
 // so no comment body or quote ever executes as markup.
 
 import { api } from "./api.mjs";
+import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { timeNode } from "./time.mjs";
@@ -252,67 +253,24 @@ export async function deleteComment(comment) {
   }
 }
 
-// The one composer. Before this there were two: a labelled textarea over a
-// full-width Post button in the list drawer, and a pill beside a circle in
-// the reply row. Same act, two drawings, one sheet.
-//
-// The send control lives inside the field rather than beside it, which is
-// where a phone keyboard puts it and what keeps the box one object. The
-// field grows with the text and then stops; `GROW_CAP` is a holding value
-// until the designer sets one.
-const GROW_CAP = 132;
+// A comment is written in the one composer every screen uses. Here it sits in
+// a wrapper that places it in the drawer or at the foot of a thread sheet.
+// Comments carry the limit they always have.
+const COMMENT_CHARS_MAX = 2000;
 
-function composer({ id, label, placeholder, className, onSend }) {
+function commentComposer({ className, label, placeholder, send }) {
   const wrap = document.createElement("div");
   wrap.className = className;
-
-  const field = document.createElement("div");
-  field.className = "hub-composer-field";
-
-  const name = document.createElement("label");
-  name.className = "hub-composer-label";
-  name.setAttribute("for", id);
-  name.textContent = label;
-
-  const box = document.createElement("textarea");
-  box.id = id;
-  box.name = "body";
-  box.rows = 1;
-  box.maxLength = 2000;
-  box.placeholder = placeholder;
-
-  const send = document.createElement("button");
-  send.type = "button";
-  send.className = "hub-composer-send hub-sheet-send";
-  send.setAttribute("aria-label", "Post");
-  send.innerHTML = glyphSvg("send", { size: 20 });
-  send.disabled = true;
-
-  const grow = () => {
-    // Measure from nothing. Growing from the current height only ever grows,
-    // so deleting a paragraph would leave the box the size the paragraph
-    // made it.
-    box.style.height = "auto";
-    const wanted = Math.max(Math.min(box.scrollHeight, GROW_CAP), 42);
-    box.style.height = `${wanted}px`;
-    box.style.overflowY = box.scrollHeight > GROW_CAP ? "auto" : "hidden";
-    send.disabled = !box.value.trim();
-  };
-
-  box.addEventListener("input", grow);
-  send.addEventListener("click", () => onSend(box, send, grow));
-  box.addEventListener("keydown", (event) => {
-    // Enter sends, shift-Enter opens a line. A box that grows needs a way to
-    // use the room it offers.
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      onSend(box, send, grow);
-    }
+  const made = composer({
+    label,
+    placeholder,
+    action: "Post",
+    empty: "Write a comment to post it.",
+    maxLength: COMMENT_CHARS_MAX,
+    send,
   });
-
-  field.append(box, send);
-  wrap.append(name, field);
-  return { wrap, box, send, grow };
+  wrap.appendChild(made.element);
+  return { wrap, field: made.field, focus: made.focus };
 }
 
 function commentRow(comment) {
@@ -409,6 +367,7 @@ function renderListView() {
 
   els.drawer.className = "comments-drawer hub-drawer-list";
   els.list.innerHTML = "";
+  els.foot?.replaceChildren();
 
   // The drawer's own head names the list it holds. The two sheet views build a
   // head of their own, so this one is hidden while they are mounted rather than
@@ -553,6 +512,7 @@ function renderPhoneSheet() {
 
   els.drawer.className = "comments-drawer hub-comment-sheet";
   els.list.innerHTML = "";
+  els.foot?.replaceChildren();
 
   if (els.head) els.head.hidden = true;
 
@@ -647,28 +607,23 @@ function renderPhoneSheet() {
   }
   els.list.appendChild(thread);
 
-  // Composer for replies. The same object as the new-comment one: the field
-  // carries its own send control and grows with the text.
-  const reply = composer({
-    id: "comment-reply",
+  // The reply composer is the same one the new comment is written in.
+  const reply = commentComposer({
     label: "Reply",
     placeholder: "Reply",
     className: "hub-sheet-composer",
-    onSend: async (box, send, grow) => {
-      const text = box.value.trim();
-      if (!text) return;
-      send.disabled = true;
-      try {
-        await postComment(text, comment.anchor ? comment.anchor.quote : null);
-        box.value = "";
-        renderPhoneSheet();
-      } catch (err) {
-        drawerError(err.message);
-        grow();
-      }
+    send: async (text) => {
+      await postComment(text, comment.anchor ? comment.anchor.quote : null);
+      renderPhoneSheet();
+      // The thread is drawn again with the reply in it, and a new composer
+      // under it; the reader is put back in that one rather than left on the
+      // page behind the sheet.
+      commentsState.elements?.foot?.querySelector(".composer-field")?.focus();
     },
   });
-  els.list.appendChild(reply.wrap);
+  // Beside the thread, not in it: the thread is a log, and a log reads out
+  // every change inside it, the composer's own line included.
+  els.foot.appendChild(reply.wrap);
 
   // Footer: "Swipe the sheet down to keep reading" · 1 of N
   const openDocs = commentsState.comments.filter((c) => !c.done && c.anchor_version === commentsState.shownVersion);
@@ -722,6 +677,7 @@ function renderComposeSheet() {
 
   els.drawer.className = "comments-drawer hub-comment-sheet";
   els.list.innerHTML = "";
+  els.foot?.replaceChildren();
 
   if (els.head) els.head.hidden = true;
 
@@ -754,43 +710,20 @@ function renderComposeSheet() {
     if (qb) els.list.appendChild(qb);
   }
 
-  const errLine = document.createElement("p");
-  errLine.className = "drawer-error";
-  errLine.hidden = true;
-
-  const made = composer({
-    id: "comment-body",
+  const made = commentComposer({
     label: "New comment",
     placeholder: commentsState.composeQuote
       ? "Write a comment on this text"
       : "Write a comment",
     className: "comments-compose",
-    onSend: async (box, send, grow) => {
-      const text = box.value.trim();
-      if (!text) {
-        errLine.hidden = false;
-        errLine.textContent = "Write a comment before posting.";
-        box.focus();
-        return;
-      }
-      errLine.hidden = true;
-      send.disabled = true;
-      try {
-        await postComment(text, commentsState.composeQuote);
-        commentsState.composeQuote = null;
-        closeCommentsDrawer();
-      } catch (err) {
-        errLine.hidden = false;
-        errLine.textContent = err.message;
-        grow();
-      }
+    send: async (text) => {
+      await postComment(text, commentsState.composeQuote);
+      commentsState.composeQuote = null;
+      closeCommentsDrawer();
     },
   });
-  const form = made.wrap;
-  form.insertBefore(errLine, form.querySelector(".hub-composer-field"));
-
-  els.list.appendChild(form);
-  setTimeout(() => made.box.focus(), 50);
+  els.foot.appendChild(made.wrap);
+  setTimeout(() => made.focus(), 50);
 }
 
 // Desktop Margin Column (Screen 07): from 900px
@@ -1102,45 +1035,36 @@ export function commentsPanel({ toggle, badge }) {
   list.setAttribute("role", "log");
   list.setAttribute("aria-label", "Comments");
 
-  const composeError = document.createElement("p");
-  composeError.className = "drawer-error";
-  composeError.setAttribute("role", "alert");
-  composeError.hidden = true;
-
-  // Its own id. The compose view's textarea is also `comment-body`, and two
-  // elements answering to one id is why the label reached whichever the
-  // document found first.
-  const made = composer({
-    id: "comment-body-list",
+  const made = commentComposer({
     label: "New comment",
-    placeholder: "Write a comment before posting.",
+    placeholder: "Write a comment",
     className: "comments-compose",
-    onSend: (box, send, grow) => {
-      const body = box.value.trim();
-      if (!body) {
-        composeError.hidden = false;
-        composeError.textContent = "Write a comment before posting.";
-        box.focus();
-        return;
-      }
-      composeError.hidden = true;
-      composeError.textContent = "";
-      send.disabled = true;
-      postComment(body, null)
-        .then(() => {
-          box.value = "";
-        })
-        .catch((err) => {
-          composeError.hidden = false;
-          composeError.textContent = err.message;
-        })
-        .finally(grow);
-    },
+    send: (body) => postComment(body, null),
   });
   const form = made.wrap;
-  form.insertBefore(composeError, form.querySelector(".hub-composer-field"));
 
-  drawer.append(head, error, list, form);
+  // Where a sheet view puts its composer: after the list, outside the log.
+  const foot = document.createElement("div");
+  foot.className = "comments-foot";
+
+  drawer.append(head, error, list, foot, form);
+
+  // A phone keyboard covers the bottom of the layout viewport without moving
+  // it, so the drawer is held above what is still visible: its foot is lifted
+  // by the part of the window the keyboard covers, and a sheet is capped at
+  // the visible height. A computed value, so it is the one style the script
+  // writes.
+  const viewport = globalThis.visualViewport;
+  if (viewport) {
+    const fit = () => {
+      const covered = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      drawer.style.setProperty("--keyboard-inset", `${Math.round(covered)}px`);
+      drawer.style.setProperty("--visible-height", `${Math.round(viewport.height)}px`);
+    };
+    viewport.addEventListener("resize", fit);
+    viewport.addEventListener("scroll", fit);
+    fit();
+  }
 
   drawer.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -1170,7 +1094,7 @@ export function commentsPanel({ toggle, badge }) {
   });
 
   commentsState.elements = {
-    backdrop, drawer, head, toggle, badge, close, list, error, compose: made.box, composeForm: form,
+    backdrop, drawer, head, toggle, badge, close, list, foot, error, compose: made.field, composeForm: form,
   };
   loadComments();
   return { backdrop, drawer };

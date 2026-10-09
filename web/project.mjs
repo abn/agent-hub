@@ -24,7 +24,7 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
 import { pickProject, projectsIndexScreen } from "./projects.mjs";
-import { wikiIndexBody, wikiStage } from "./wiki.mjs";
+import { wikiIndexBody, wikiStage, wireWikiComments } from "./wiki.mjs";
 export { projectsIndexScreen } from "./projects.mjs";
 import {
   errorAsideHTML,
@@ -723,6 +723,7 @@ export async function projectScreen(params, gen, path) {
   installShellLayout(main);
   if (artifactInfo) wireArtifactStage(main, artifactId, artifactInfo);
   if (sessionSelected) wireSessionDetail(main, id, sessionSelected.id);
+  if (segment === "wiki") wireWikiComments(main);
   wireProjectHeader(project, stats, footprint);
 }
 // The row selection the keyboard map owns: the project's segments all paint

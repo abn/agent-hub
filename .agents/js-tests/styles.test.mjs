@@ -263,6 +263,25 @@ describe("targets follow the pointer", () => {
     expect(sizeOf(".row button", "min-height", unconditional), "a button inline in a row").toBe("var(--ctl)");
   });
 
+  it("draws the composer at the form size with a --ctl send, and both at the target under a coarse pointer", () => {
+    // DESIGN.md, Composer. The field is a form field and the send control a
+    // band-sized control on a fine pointer; a coarse pointer draws both at the
+    // target, so a finger meets the send control's own box.
+    expect(sizeOf(".composer-field", "min-height", unconditional)).toBe("var(--ctl-form)");
+    expect(sizeOf(".composer-field", "min-height", coarse)).toBe("var(--tap)");
+    for (const property of ["width", "height", "min-height"]) {
+      expect(sizeOf(".composer-send", property, unconditional), `send ${property}`).toBe("var(--ctl)");
+      expect(sizeOf(".composer-send", property, coarse), `coarse send ${property}`).toBe("var(--tap)");
+    }
+    // The send control is lifted onto the field's last line by half the
+    // difference between the two boxes, and sits on the field's foot when they
+    // are the same size.
+    expect(compact(sizeOf(".composer-send", "margin-bottom", unconditional) ?? "")).toBe(
+      "calc((var(--ctl-form)-var(--ctl))/2)",
+    );
+    expect(sizeOf(".composer-send", "margin-bottom", coarse)).toBe("0");
+  });
+
   it("grows the hit area to the target in both axes wherever a coarse pointer is", () => {
     const area = rules(APP).find(
       (rule) => anyCoarse(rule) && rule.selectors.includes(".row button::after") && rule.selectors.includes(".chip::after"),
