@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -62,6 +62,15 @@ export default defineConfig({
       use: { viewport: { width: 390, height: 844 } },
       testMatch: /invariants.*\.spec\.mjs/,
     },
+    // The artifact address is followed from a project's feed, and reading a feed
+    // moves the hub's read cursor that Home's unread rows are drawn from. Its
+    // checks get their own hub per width, so they cannot empty the dots the
+    // behaviour checks count.
+    ...Object.entries(WIDTHS).map(([name, viewport]) => ({
+      name: `route-${name}`,
+      use: { viewport },
+      testMatch: /artifact-route\.spec\.mjs/,
+    })),
     ...Object.entries(WIDTHS).map(([name, viewport]) => ({
       name: `a11y-${name}`,
       use: { viewport },

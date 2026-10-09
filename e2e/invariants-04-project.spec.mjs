@@ -446,19 +446,19 @@ test.describe("artifact viewer chrome", () => {
     await page.setViewportSize({ width: 390, height: 844 });
   });
 
-  test("the viewer's chrome band is a 52px header with one control height", async ({ hub, page }) => {
+  test("the artifact's stage header is a 52px band with one control height", async ({ hub, page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, `#/artifacts/${encodeURIComponent(hub.artifactId)}?project=${encodeURIComponent(hub.projectId)}`);
-    await expect(page.locator(".hub-viewer-bar")).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('.shell.has-selection[data-segment="artifacts"] #hub-frame')).toBeVisible({ timeout: 8000 });
     const got = await page.evaluate(() => {
-      const bar = document.querySelector(".hub-viewer-bar");
-      if (!bar || !bar.getClientRects().length) return { missing: true };
-      const heights = [...bar.querySelectorAll("button, a")]
+      const head = document.querySelector(".shell-stage > .shell-head");
+      if (!head || !head.getClientRects().length) return { missing: true };
+      const heights = [...head.querySelectorAll("button")]
         .filter((el) => el.getClientRects().length)
         .map((el) => ({ cls: el.className.split(" ")[0], h: Math.round(el.getBoundingClientRect().height) }));
-      const add = document.querySelector(".hub-comments-head-add");
+      const add = document.querySelector('.shell-aside [aria-label="New thread"]');
       return {
-        band: Math.round(bar.getBoundingClientRect().height),
+        band: Math.round(head.getBoundingClientRect().height),
         heights,
         thread:
           add && add.getClientRects().length
@@ -466,11 +466,11 @@ test.describe("artifact viewer chrome", () => {
             : null,
       };
     });
-    expect(got.missing, "the viewer's chrome band is not on screen").toBeFalsy();
-    expect(got.band, `the viewer's chrome band is ${got.band}px, not 52`).toBe(52);
-    expect([...new Set(got.heights.map((h) => h.h))].length, `the band mixes control heights: ${JSON.stringify(got.heights)}`).toBeLessThanOrEqual(1);
+    expect(got.missing, "the artifact's stage header is not on screen").toBeFalsy();
+    expect(got.band, `the stage header is ${got.band}px, not 52`).toBe(52);
+    expect([...new Set(got.heights.map((h) => h.h))].length, `the header mixes control heights: ${JSON.stringify(got.heights)}`).toBeLessThanOrEqual(1);
     expect(got.thread, "the comments aside has no thread control on screen").toBeTruthy();
-    expect(got.thread.w === got.thread.h && got.thread.w === 36, `the thread control is ${got.thread.w}x${got.thread.h}, not 36x36`).toBe(true);
+    expect(got.thread.w === got.thread.h && got.thread.w === 32, `the thread control is ${got.thread.w}x${got.thread.h}, not 32x32`).toBe(true);
     await page.setViewportSize({ width: 390, height: 844 });
   });
 });

@@ -26,16 +26,12 @@ test.describe("gate and crypto", () => {
     await page.goto(`${hub.baseUrl}/`);
     const project = hub.projectId;
     const artifact = hub.protectedId;
-    await page.evaluate((value) => {
-      location.hash = `#/artifacts?project=${encodeURIComponent(value)}`;
-    }, project);
-    if (await settle(page, `!!document.querySelector('[data-action="artifact-open"][data-id="${artifact}"]')`, 3000)) {
-      await page.click(`[data-action="artifact-open"][data-id="${artifact}"]`);
-    } else {
-      await page.evaluate((value) => {
-        location.hash = `#/artifacts/${encodeURIComponent(value)}`;
-      }, artifact);
-    }
+    await page.evaluate(
+      ([value, from]) => {
+        location.hash = `#/artifacts/${encodeURIComponent(value)}?project=${encodeURIComponent(from)}`;
+      },
+      [artifact, project],
+    );
     const gate = gateOf(page);
     await expect(gate.locator("#hub-password")).toBeVisible({ timeout: 10_000 });
     await expect(gate.locator("#hub-remember")).toHaveCount(0);

@@ -18,6 +18,11 @@ const screens = (hub) => [
   ["feed", `#/projects/${hub.projectId}/feed`, "main .shell-index .feed-day .feed-row"],
   ["sessions", `#/projects/${hub.projectId}/sessions`, "main .session-row"],
   ["artifacts", `#/projects/${hub.projectId}/artifacts`, "main .shell-index .artifact-row"],
+  [
+    "artifact address",
+    `#/artifacts/${hub.artifactId}?project=${hub.projectId}`,
+    `main .shell.has-selection[data-segment="artifacts"] .shell-stage #hub-frame`,
+  ],
   ["storage", "#/storage", "main .storage .storage-row"],
   ["settings", "#/settings", "main .row .title, main .form-row-title"],
   ["access", "#/access", "main .access-screen, main .form-row-title"],

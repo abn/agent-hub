@@ -1077,10 +1077,6 @@ fn app_embeds_the_public_host_page() {
         "the embed pins sandbox allow-scripts"
     );
     assert!(
-        ARTIFACTS_JS.contains("Back to artifacts"),
-        "the app keeps its back link"
-    );
-    assert!(
         !ARTIFACTS_JS.contains("./crypto.mjs"),
         "in-app decrypt is gone; the host page owns unlock"
     );
@@ -1095,10 +1091,6 @@ fn app_embeds_the_public_host_page() {
     assert!(
         !ARTIFACTS_JS.contains("hub-markdown-body"),
         "markdown rendering is the host page's, not the app's"
-    );
-    assert!(
-        ARTIFACTS_JS.contains("viewer.raw") && ARTIFACTS_JS.contains("srcdoc"),
-        "the raw-view toggle is the only srcdoc the app composes"
     );
     assert!(
         INBOX_JS.contains("Your answer"),
@@ -2149,44 +2141,6 @@ fn phone_project_chrome_is_one_header_and_one_tools_row() {
             r#"document.querySelector(".shell-index .shell-controls:not(.project-tools-mobile)")"#
         ),
         "the filter glyph targets the chips row, not the tools row it comes before"
-    );
-}
-
-// commentsPanel returns the backdrop and the drawer, not a Node. Passing the
-// returned object to appendChild threw on the coarse-pointer path, so the whole
-// artifact stage painted an error card on a phone.
-#[test]
-fn phone_artifact_stage_mounts_both_comment_nodes() {
-    assert!(
-        ARTIFACTS_JS.contains("const { backdrop, drawer } = commentsPanel({ toggle, badge });"),
-        "the coarse-pointer path destructures the two nodes commentsPanel returns"
-    );
-    assert!(
-        ARTIFACTS_JS.contains("document.body.append(backdrop, drawer);"),
-        "both nodes are mounted; appending the returned object is not a Node"
-    );
-    assert!(
-        !ARTIFACTS_JS.contains("appendChild(commentsPanel("),
-        "commentsPanel returns an object, and appendChild of an object throws"
-    );
-}
-
-// C15: the comments panel carried three counts that disagreed, because the
-// panel's own header kept the build-time total while the artifact header and the
-// strip were updated live to the open count. One metric, open threads.
-#[test]
-fn comments_panel_header_shows_the_live_open_count() {
-    assert!(
-        COMMENTS_JS.contains(r#".hub-comments-head-meta"#),
-        "refreshCommentsToggle updates the panel header count, not only the glyph and strip"
-    );
-    assert!(
-        COMMENTS_JS.contains("headMeta.dataset.version"),
-        "the panel header keeps the version it was built with"
-    );
-    assert!(
-        ARTIFACTS_JS.contains("cMeta.dataset.version = String(shown);"),
-        "the panel header records its version, so the live count can replace the total"
     );
 }
 

@@ -5,6 +5,7 @@
 
 import { main } from "./dom.mjs";
 import { prefs } from "./prefs.mjs";
+import { asideAvailable, toggleAside } from "./shell-layout.mjs";
 
 // What a key does to a row, found in the markup the screens already paint: the
 // row's own link is what Enter follows, and the two verbs are the buttons the
@@ -178,11 +179,15 @@ function act(verb, event) {
 
 // `c` toggles the aside, which is the stage's own comment control. A screen
 // with no such control has no aside to toggle, so the key does nothing there.
+// Where the layout draws no aside, the control opens the sheet that stands in
+// for it.
 function toggleAsideKey(event) {
   const control = document.querySelector('.shell-stage [data-action="comments-toggle"]');
   if (!control) return;
   event.preventDefault();
-  control.click();
+  const aside = control.closest(".shell")?.querySelector(".shell-aside");
+  if (asideAvailable(aside)) toggleAside(control);
+  else control.click();
 }
 
 function buildPanel() {

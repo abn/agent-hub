@@ -208,7 +208,10 @@ test("the app works when served behind a prefix-stripping proxy", async ({ hub, 
   const frame = async (id, wanted, where) => {
     const start = entries.length;
     await page.evaluate(`location.hash = '#/artifacts/${encodeURIComponent(id)}?project=${encodeURIComponent(hub.projectId)}'`);
-    if (!(await settle(page, "document.querySelector('main .hub-viewer')"))) {
+    // The stage of the previous artifact is still on screen until the new one
+    // paints, so the wait is for this artifact's own frame.
+    const painted = `document.querySelector('main .shell.has-selection[data-segment="artifacts"] #hub-frame[src*="${id}"]')`;
+    if (!(await settle(page, painted))) {
       failures.push(`the ${where} artifact viewer never painted under the prefix`);
     }
     await page.waitForTimeout(700);
@@ -225,8 +228,8 @@ test("the app works when served behind a prefix-stripping proxy", async ({ hub, 
   // root.
   const rawStart = entries.length;
   await page.evaluate(`location.hash = '#/artifacts/${encodeURIComponent(hub.artifactId)}?project=${encodeURIComponent(hub.projectId)}'`);
-  if (await settle(page, "document.querySelector('[data-action=\"copy-raw\"]')")) {
-    await page.locator('[data-action="copy-raw"]').first().click();
+  if (await settle(page, `document.querySelector('.shell-controls [data-action="copy-raw"][data-id="${hub.artifactId}"]')`)) {
+    await page.getByRole("button", { name: "Copy raw" }).click();
     await page.waitForTimeout(1500);
     const raw = entries.slice(rawStart).filter(([u]) => u.includes("/raw"));
     if (!raw.length) failures.push("the raw fetch never reached the network under the prefix");

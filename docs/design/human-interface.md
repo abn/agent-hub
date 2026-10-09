@@ -88,9 +88,13 @@ list sit under the project as segmented tabs, each with its own route, and
 each section is the same project view. The tabs sit in the index header and
 carry their counts; the index pane is 300px by default and draggable to 480,
 and below a 360px pane the counts drop and the tabs take 6px of padding rather
-than 10, so all four labels read in full at the default width. The artifact
-viewer is itself a route, so reload and the browser's Back keep the artifact on
-screen. A desktop list
+than 10, so all four labels read in full at the default width. An artifact is
+read in one place, its project's Artifacts shell with it selected. The address a
+feed row, a search hit or an older link carries, `#/artifacts/<id>`, is
+replaced by the shell's own, `#/projects/<id>/artifacts?artifact=<id>` with
+`&version=<n>` for an older version, so reload, Back and Forward keep the
+artifact on screen, and Back leaves it rather than landing on a hop that
+forwards again. A desktop list
 plus detail layout is a layout primitive screens opt into; Sessions is the
 first to use it, with a 420px list beside a detail pane.
 
@@ -133,11 +137,11 @@ A project feed and its sessions:
 
 ![The session detail at desktop width: the brain tree, the handoff note and the lineage.](../assets/screens/session-detail-desktop-light.png)
 
-Artifacts and the viewer:
+Artifacts, with an artifact open in the stage:
 
-![The artifact index at desktop width.](../assets/screens/artifacts-desktop-light.png)
+![The artifact index at desktop width, with the newest artifact open in the stage and its comments in the aside.](../assets/screens/artifacts-desktop-light.png)
 
-![An artifact open in the sandboxed viewer.](../assets/screens/artifact-viewer-desktop-light.png)
+![A sealed artifact opened by its address at phone width: its stage with the password gate, and a back control to the index.](../assets/screens/artifact-viewer-phone-light.png)
 
 The knowledge base wiki, search, storage and settings:
 

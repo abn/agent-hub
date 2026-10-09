@@ -1,6 +1,7 @@
-// Artifacts: the per-project gallery, and the viewer that embeds an artifact's
-// own public page next to the comments drawer. The viewer is a route of its
-// own, so reload and the browser's Back both keep the artifact on screen.
+// Artifacts: the per-project index, and the artifact read in the stage beside
+// it with its comments in the aside. An artifact has one surface, so the
+// address a link carries, `#/artifacts/<id>`, opens its project's Artifacts
+// shell with the artifact selected, and reload and the browser's Back keep it.
 
 import { api } from "./api.mjs";
 import {
@@ -20,7 +21,7 @@ import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
-import { toggleAside } from "./shell-layout.mjs";
+import { asideAvailable, toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -153,16 +154,18 @@ function wireLiveBand(id, kind, protectedArtifact, frame, band) {
   refresh().then(redraw);
 }
 
-export async function artifactsScreen(selected, gen) {
-  if (selected) location.hash = `#/projects/${encodeURIComponent(selected)}/artifacts`;
-}
+// The project the stage last showed each artifact in. An in-app link that names
+// no project, a comment's "open v2" among them, is resolved from it rather than
+// by asking every project for its list.
+const stagedIn = new Map();
 
 // The artifact read in the stage. The index lists, the stage shows the
 // document: the title and its provenance in the header, the breadcrumb and the
 // document controls in the control row, the sandboxed page in the body. The
 // document is the hub's own frame route, so the app never renders agent HTML
-// in its own origin.
-export async function artifactStage(id, projectId) {
+// in its own origin. A version other than the newest is read when the address
+// names one.
+export async function artifactStage(id, projectId, version = null) {
   let versions = [];
   try {
     const listed = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
@@ -171,8 +174,10 @@ export async function artifactStage(id, projectId) {
     return null;
   }
   const newest = (versions.length && versions[versions.length - 1].version) || 1;
-  const current = versions.find((v) => v.version === newest) || versions[0];
+  const asked = Number(version) || newest;
+  const current = versions.find((v) => v.version === asked) || versions.find((v) => v.version === newest) || versions[0];
   if (!current) return null;
+  const shown = current.version;
 
   let commentsCount = 0;
   let openCommentsCount = 0;
@@ -183,40 +188,44 @@ export async function artifactStage(id, projectId) {
     openCommentsCount = arr.filter((c) => !c.done).length;
   } catch {}
 
-  const project = projectId || current.project_id || "";
+  const project = projectId || "";
+  stagedIn.set(id, project);
   const slug =
     (current.title || "artifact")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
 
-  const comments = openCommentsCount
+  // One control in two states. With no thread yet there is nothing to read, so
+  // it starts one; once a thread exists it opens the threads, and the numeral
+  // beside the bubble is the open count, kept live by the comments module.
+  const hasThreads = commentsCount > 0;
+  const comments = hasThreads
     ? `<span class="hub-glyph-count mono" aria-hidden="true">${openCommentsCount}</span>`
     : "";
   const stagePath = `${project} / artifacts / ${slug}`;
-  // The More control carries the same actions the standalone viewer offers,
-  // narrowed to what a stage can honour: it keeps no share sheet of its own, so
-  // Share is left out rather than drawn dead. The wrapper is the project
-  // header's own overflow pattern, so the menu hangs from its trigger in the
-  // head and cannot open over another pane.
+  // The More control carries every action on the artifact. The wrapper is the
+  // project header's own overflow pattern, so the menu hangs from its trigger
+  // in the head and cannot open over another pane.
   const actions = `
-    <button type="button" class="hub-btn-glyph" data-action="comments-toggle" aria-pressed="true" aria-label="${
-      openCommentsCount ? `Comments, ${openCommentsCount}` : "Start a thread"
-    }">${glyphSvg("comments", { size: 18 })}${comments}</button>
+    <button type="button" class="hub-btn-glyph${hasThreads ? " hub-comments-btn" : ""}" data-action="comments-toggle" data-threads="${
+      hasThreads ? "yes" : "no"
+    }" aria-label="${hasThreads ? `Comments, ${openCommentsCount}` : "Start a thread"}">${glyphSvg("comments", { size: 18 })}${comments}</button>
     <span class="proj-overflow-wrap">
       <button type="button" class="hub-btn-glyph" data-action="stage-more" aria-label="More" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 18 })}</button>
       <div class="proj-overflow-menu" role="menu" hidden>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-start-thread">Start a thread</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-comments">Comments</button>
-        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}">Copy raw</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}">Copy raw</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-path" data-path="${esc(stagePath)}">Copy path</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-copy-link">Copy link</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-share">Share</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-open-in-browser">Open in browser</button>
       </div>
     </span>`;
 
   const copyGlyph = glyphSvg("copy", { size: 14 });
-  const rawGlyph = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-4 5 4 5"></path><path d="M15 7l4 5-4 5"></path></svg>`;
+  const rawGlyph = glyphSvg("copyRaw", { size: 14 });
 
   const controls = `
     <span class="shell-meta mono" title="${esc(stagePath)}">${esc(stagePath)}</span>
@@ -224,43 +233,60 @@ export async function artifactStage(id, projectId) {
     <button type="button" class="hub-btn-glyph" data-action="copy-path" data-path="${esc(
       stagePath,
     )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
-    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${newest}">v${newest} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}</button>
-    <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${newest}" aria-label="Copy raw">${rawGlyph}</button>`;
+    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${shown}">v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}</button>
+    <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}" aria-label="Copy raw">${rawGlyph}</button>`;
 
   const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   // A plain artifact with a live share link is concealed at its id address, so
   // the frame asks for a pass and reads the page with it.
   const pass = await viewerPass(id);
+  // While threads exist, a bar rides the bottom of the reader's viewport and
+  // opens them, so the way to the threads is never scrolled away.
+  const strip = hasThreads
+    ? `<button type="button" class="hub-comments-strip" data-action="comments-strip">${glyphSvg("comments", {
+        size: 16,
+      })}<span class="grow">Comments</span><span class="mono hub-comments-count">${openCommentsCount}</span>${glyphSvg(
+        "chevronRight",
+        { size: 16 },
+      )}</button>`
+    : "";
   // The artifact's own host page. It carries the document and, for a protected
   // artifact, the gate and the client-side decryptor, so the app never renders
   // agent bytes in its own origin.
   const body = `<div class="hub-viewer-doc"><iframe id="hub-frame" sandbox="allow-scripts" data-pass="${esc(
     pass,
-  )}" title="${esc(current.title || slug)}" src="${esc(
-    frameSrc(id, newest, theme, pass),
-  )}"></iframe></div>`;
+  )}" title="${esc(current.title || slug)}" src="${esc(frameSrc(id, shown, theme, pass))}"></iframe>${strip}</div>`;
 
+  const plus = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 6v12M6 12h12"></path></svg>`;
+  // The open count is replaced live and the version it was built with is kept,
+  // so the aside, the header control and the bar always say the same number.
   const aside = `
     <div class="shell-head">
       <div class="shell-title"><span class="shell-title-line">Comments</span></div>
-      <span class="shell-meta mono">${openCommentsCount}</span>
+      <span class="shell-meta mono hub-comments-head-meta" data-version="${shown}">${openCommentsCount} · v${shown}</span>
+      <button type="button" class="hub-btn-glyph" data-action="new-thread" aria-label="New thread">${plus}</button>
     </div>
-    <div class="shell-controls"><span class="shell-meta mono">v${newest}</span></div>
+    <div class="shell-controls"></div>
     <div class="shell-body"><div class="hub-comments-cards-list"></div></div>
     <div class="shell-foot mono">Select text in the document to anchor a comment</div>`;
 
+  // A protected artifact names no author: what the reader can know about it is
+  // that it is sealed.
+  const who = current.protected ? "Locked · only readable with the password" : current.actor || "agent";
   return {
     aside,
     title: slug,
-    meta: `${current.actor || "agent"} · v${newest} of ${versions.length} · ${formatBytes(
-      current.size_bytes,
-    )} · ${relative(Date.parse(current.created_at))}`,
+    meta: `${who} · v${shown} of ${versions.length} · ${formatBytes(current.size_bytes)} · ${relative(
+      Date.parse(current.created_at),
+    )}`,
     actions,
     controls,
     body,
     commentsCount,
-    version: newest,
+    hasThreads,
+    version: shown,
     versions,
+    current,
     kind: current.kind,
     protected: Boolean(current.protected),
   };
@@ -292,31 +318,52 @@ export function wireArtifactStage(root, id, info) {
   // reading surface, but a text selection and Start a thread open the compose
   // sheet, and openCompose renders into this drawer. Without it the selection
   // callout posted a message nothing answered, so commenting on selected text
-  // did nothing on a desktop.
+  // did nothing on a desktop. It is mounted in the screen, so the next paint
+  // takes it with the stage rather than leaving one drawer per visit behind.
   const { toggle, badge } = commentsToggle();
   const { backdrop, drawer } = commentsPanel({ toggle, badge });
-  document.body.append(backdrop, drawer);
+  root.append(backdrop, drawer);
+  const aside = root.querySelector(".shell-aside");
+  const commentsBtn = root.querySelector('.shell-stage [data-action="comments-toggle"]');
+  // The threads are read in one place: the aside beside the document where the
+  // layout draws one, and one bottom sheet where it does not, which is a coarse
+  // pointer at any width and a fine pointer below the desktop shell. The layout
+  // is asked at the moment of the press, so a window resized since the paint
+  // still opens the surface it shows.
+  const openThreads = () => {
+    if (!asideAvailable(aside)) {
+      openCommentsDrawer();
+      return;
+    }
+    if (aside.hidden && commentsBtn) toggleAside(commentsBtn);
+    renderDesktopCards();
+  };
   if (!coarse) {
-    // The aside is part of the layout on a fine pointer: the threads read
-    // beside the document, and the control toggles it.
     const list = root.querySelector(".hub-comments-cards-list");
     if (list) commentsState.desktopContainer = list;
     loadComments();
     renderDesktopCards();
-    for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
-      btn.addEventListener("click", () => {
-        toggleAside(btn);
-        const aside = root.querySelector(".shell-aside");
-        const open = aside ? !aside.hidden : false;
-        btn.setAttribute("aria-pressed", String(open));
-        if (open) renderDesktopCards();
-      });
-    }
-  } else {
-    for (const btn of root.querySelectorAll('[data-action="comments-toggle"]')) {
-      btn.addEventListener("click", () => openCommentsDrawer());
-    }
+  } else if (aside) {
+    aside.hidden = true;
   }
+  if (commentsBtn) {
+    const threads = commentsBtn.dataset.threads === "yes";
+    if (threads && asideAvailable(aside)) commentsBtn.setAttribute("aria-pressed", String(!aside.hidden));
+    else commentsBtn.setAttribute("aria-haspopup", "dialog");
+    commentsBtn.addEventListener("click", () => {
+      if (!threads) {
+        openCompose(null);
+      } else if (!asideAvailable(aside)) {
+        if (commentsState.open && commentsState.viewMode === "list") closeCommentsDrawer();
+        else openCommentsDrawer();
+      } else {
+        toggleAside(commentsBtn);
+        if (!aside.hidden) renderDesktopCards();
+      }
+    });
+  }
+  root.querySelector('[data-action="comments-strip"]')?.addEventListener("click", openThreads);
+  root.querySelector('[data-action="new-thread"]')?.addEventListener("click", () => openCompose(null));
   for (const btn of root.querySelectorAll('[data-action="copy-path"]')) {
     btn.addEventListener("click", async () => {
       try {
@@ -336,40 +383,32 @@ export function wireArtifactStage(root, id, info) {
       }
     });
   }
-  // The stage's More menu, hung from its own trigger in the header. Start a
-  // thread and Comments open the surface this stage reads: the aside on a fine
-  // pointer, the sheet on a coarse one. The stage has no composer of its own on
-  // a fine pointer, so both offer the surface there. Copy raw and Copy path are
-  // wired by the loops above, because the menu carries the same data-actions.
+  // The stage's More menu, hung from its own trigger in the header. Comments
+  // opens the surface this pointer reads threads on, and Start a thread opens
+  // the composer. Copy raw and Copy path are wired by the loops above, because
+  // the menu carries the same data-actions.
   const stageMore = root.querySelector('[data-action="stage-more"]');
   const stageMenu = stageMore?.closest(".proj-overflow-wrap")?.querySelector(".proj-overflow-menu");
+  let share = null;
+  if (info && info.current) {
+    share = buildShareSheet(id, info.current, info.version, stageMore);
+    root.append(share.backdrop, share.sheet);
+  }
   if (stageMore && stageMenu) {
     const closeMenu = () => {
       stageMenu.hidden = true;
       stageMore.setAttribute("aria-expanded", "false");
     };
-    const openStageComments = () => {
-      if (coarse) {
-        openCommentsDrawer();
-        return;
-      }
-      const aside = root.querySelector(".shell-aside");
-      const commentsBtn = root.querySelector('[data-action="comments-toggle"]');
-      if (aside && aside.hidden) {
-        if (commentsBtn) toggleAside(commentsBtn);
-        else toggleAside(stageMore);
-      }
-      renderDesktopCards();
-    };
     const runs = {
-      "stage-start-thread": openStageComments,
-      "stage-comments": openStageComments,
+      "stage-start-thread": () => openCompose(null),
+      "stage-comments": openThreads,
       "stage-copy-link": async () => {
         try {
           await navigator.clipboard.writeText(location.href);
         } catch {}
         toast("Link copied");
       },
+      "stage-share": () => share?.openSheet(),
       "stage-open-in-browser": () => {
         const frame = root.querySelector("#hub-frame");
         if (frame) window.open(frame.src, "_blank");
@@ -404,9 +443,8 @@ export function wireArtifactStage(root, id, info) {
     });
   }
 
-  // The version control opens the same sheet the standalone viewer mounts. The
-  // stage used to render a version button nothing answered, so the control read
-  // as a dropdown and did nothing.
+  // The version control opens the version sheet; a pick reads that version in
+  // this same stage.
   if (info && Array.isArray(info.versions) && info.versions.length > 0) {
     const { backdrop, sheet } = buildVersionSheet(id, info.versions, info.version, "");
     root.append(backdrop, sheet);
@@ -526,21 +564,6 @@ if (typeof document !== "undefined") {
   });
 }
 
-export function openArtifact(id) {
-  const parts = location.hash.replace(/^#/, "").split("/");
-  const project = parts[1] === "projects" ? parts[2] : "";
-  const base = `#/artifacts/${encodeURIComponent(id)}`;
-  location.hash = project ? `${base}?project=${encodeURIComponent(project)}` : base;
-}
-
-export function viewerBack() {
-  const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const project = params.get("project") || viewer.project;
-  location.hash = project ? `#/projects/${encodeURIComponent(project)}/artifacts` : "#/projects";
-}
-
-const viewer = { id: null, version: null, kind: null, raw: false, project: null, pass: "" };
-
 // The version an agent is holding live, when the band has read one. The version
 // sheet labels that row so a reader knows the text is still moving.
 let liveVersion = null;
@@ -573,47 +596,6 @@ async function viewerPass(id) {
   }
 }
 
-function viewerSource(frame) {
-  if (!frame) return;
-  return frameSrc(
-    frame.dataset.id,
-    viewer.version,
-    frame.getAttribute("data-theme"),
-    frame.dataset.pass,
-  );
-}
-
-// Navigating the sandboxed frame in place pushes a history entry, which would
-// make the browser's Back undo the theme rather than leave the artifact.
-// Replacing the element avoids pushing history while preserving its setup.
-function replaceFrame(frame, src, srcdoc) {
-  const replacement = document.createElement("iframe");
-  if (frame.id) replacement.id = frame.id;
-  if (frame.hasAttribute("sandbox")) replacement.setAttribute("sandbox", frame.getAttribute("sandbox"));
-  if (frame.hasAttribute("title")) replacement.setAttribute("title", frame.getAttribute("title"));
-  for (const attr of frame.attributes) {
-    if (attr.name.startsWith("data-")) {
-      replacement.setAttribute(attr.name, attr.value);
-    }
-  }
-  if (srcdoc !== undefined) {
-    replacement.srcdoc = srcdoc;
-  } else if (src) {
-    replacement.src = src;
-  }
-  frame.replaceWith(replacement);
-  return replacement;
-}
-
-// A second local escape for the raw srcdoc: the host page's own `esc` spends
-// its budget on attributes, and the raw text lands in a text node.
-function escText(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 async function fetchRawText(id, version) {
   const query = version ? `?version=${version}` : "";
   const headers = {};
@@ -632,30 +614,6 @@ async function fetchRawText(id, version) {
   return await res.text();
 }
 
-export async function toggleRaw(button) {
-  const frame = main.querySelector("#hub-frame");
-  const id = frame && frame.dataset.id;
-  if (!id) return;
-  if (viewer.raw) {
-    replaceFrame(frame, viewerSource(frame));
-    viewer.raw = false;
-    if (button) button.textContent = "Open raw";
-    return;
-  }
-  try {
-    const text = await fetchRawText(id, viewer.version);
-    const doc =
-      `<style>body{margin:0;padding:24px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;` +
-      `font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}</style>` +
-      `<pre>${escText(text)}</pre>`;
-    replaceFrame(frame, null, doc);
-    viewer.raw = true;
-    if (button) button.textContent = "Back to view";
-  } catch (error) {
-    if (button) button.textContent = "Open raw";
-  }
-}
-
 export function toggleVersionMenu(button) {
   const menu = document.getElementById("hub-version-menu");
   const backdrop = document.getElementById("hub-version-backdrop");
@@ -670,50 +628,16 @@ export function toggleVersionMenu(button) {
   }
 }
 
+// A version is read in the stage it was picked from. The pick replaces the
+// address rather than adding to it, so Back still leaves the artifact.
 export function pickVersion(id, version) {
-  const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const project = params.get("project");
-  const base = `#/artifacts/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`;
-  const target = project ? `${base}&project=${encodeURIComponent(project)}` : base;
-  location.replace(target);
-}
-
-export function toggleViewerTheme() {
-  const frame = main.querySelector("#hub-frame");
-  if (!frame) return;
-  const next = frame.getAttribute("data-theme") === "dark" ? "light" : "dark";
-  frame.setAttribute("data-theme", next);
-  let src;
-  if (frame.dataset.kind === "html") {
-    const params = new URLSearchParams();
-    if (viewer.version) params.set("version", String(viewer.version));
-    params.set("theme", next);
-    // The frame route is the same artifact the pass was minted for, so the
-    // pass rides along; without it a shared artifact's body is concealed too.
-    if (frame.dataset.pass) params.set("pass", frame.dataset.pass);
-    src = `artifacts/${encodeURIComponent(frame.dataset.id)}/frame?${params.toString()}`;
-  } else {
-    src = viewerSource(frame);
-  }
-  replaceFrame(frame, src);
-}
-
-function svg(path, width, height, cls) {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  el.setAttribute("width", String(width));
-  el.setAttribute("height", String(height));
-  el.setAttribute("viewBox", "0 0 24 24");
-  el.setAttribute("fill", "none");
-  el.setAttribute("stroke", "currentColor");
-  el.setAttribute("stroke-width", "1.8");
-  el.setAttribute("stroke-linecap", "round");
-  el.setAttribute("stroke-linejoin", "round");
-  if (cls) el.setAttribute("class", cls);
-  el.setAttribute("aria-hidden", "true");
-  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  p.setAttribute("d", path);
-  el.appendChild(p);
-  return el;
+  const parts = location.hash.replace(/^#/, "").split("?")[0].split("/");
+  const project = parts[1] === "projects" ? decodeURIComponent(parts[2] || "") : "";
+  location.replace(
+    project
+      ? artifactHref(project, id, version)
+      : `#/artifacts/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`,
+  );
 }
 
 // Version sheet (Screen 02): replaces inline version select
@@ -1028,455 +952,62 @@ function buildShareSheet(id, current, shown, moreBtn) {
   return { backdrop, sheet, openSheet, closeSheet };
 }
 
-export async function viewerRoute(params, gen, path) {
-  const parts = (path || "").split("/");
-  const id = parts[2];
+// The address an artifact is read at: its project's Artifacts segment with it
+// selected, and the version when the reader asked for one.
+export function artifactHref(projectId, id, version = null) {
+  const query = new URLSearchParams({ artifact: id });
+  if (version) query.set("version", String(version));
+  return `#/projects/${encodeURIComponent(projectId)}/artifacts?${query}`;
+}
+
+async function listsArtifact(projectId, id) {
+  try {
+    const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
+    return (artifacts || []).some((a) => a.id === id);
+  } catch {
+    return false;
+  }
+}
+
+// The project an artifact belongs to, for a link that does not say. The hub's
+// artifact routes do not name it, so each project's own list is asked.
+async function projectOf(id) {
+  const staged = stagedIn.get(id);
+  if (staged && (await listsArtifact(staged, id))) return staged;
+  const { projects } = await api("/api/v1/projects");
+  for (const project of projects || []) {
+    if (await listsArtifact(project.id, id)) return project.id;
+  }
+  return "";
+}
+
+// `#/artifacts/<id>` is the address a feed row, a search hit, a comment's
+// "open v2" and an older saved link carry. An artifact has one surface, its
+// project's Artifacts shell with it selected, so this address is replaced by
+// that one rather than painted: Back then leaves the artifact instead of
+// stepping onto a hop that forwards again.
+export async function artifactRoute(params, gen, path) {
+  const id = decodeURIComponent((path || "").split("/")[2] || "");
   if (!id) {
-    location.hash = "#/projects";
+    location.replace("#/projects");
     return;
   }
-  const version = params.get("version");
-  const projectId = params.get("project") || "";
-  viewer.id = id;
-  viewer.version = version ? Number(version) : null;
-  viewer.raw = false;
-  startComments(id);
-
-  let versions = [];
+  // An artifact the hub does not hold is said here, in the hub's own words,
+  // rather than as an empty shell.
   try {
-    const listed = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
-    versions = listed.versions || [];
+    await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
   } catch (error) {
     paint(gen, `<h1>Artifact</h1><p class="error">${esc(error.message)}</p>`);
     return;
   }
+  // A project the address names is taken only when its own list holds the
+  // artifact, so a stale or mistyped name cannot open the wrong project.
+  const named = params.get("project");
+  const project = (named && (await listsArtifact(named, id)) ? named : "") || (await projectOf(id));
   if (stale(gen)) return;
-  const newest = (versions.length && versions[versions.length - 1].version) || 1;
-  const shown = viewer.version || newest;
-  const current = versions.find((v) => v.version === shown) || versions[versions.length - 1] || versions[0];
-  if (!current) {
-    paint(gen, `<h1>Artifact</h1><p class="error">No versions of this artifact.</p>`);
+  if (!project) {
+    paint(gen, `<h1>Artifact</h1><p class="error">No project on this hub lists this artifact.</p>`);
     return;
   }
-  viewer.version = shown;
-  viewer.kind = current.kind;
-  startComments(id, shown, current.protected);
-
-  // Mono path: {project} / {slug}
-  const projDisplay = projectId || current.project_id || "agent-hub";
-  viewer.project = projDisplay;
-  const slug = (current.title || "artifact")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
-  const monoPath = `${projDisplay} / ${slug}`;
-
-  // Fetch comments count for comments strip
-  let commentsCount = 0;
-  try {
-    const comList = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
-    commentsCount = Array.isArray(comList) ? comList.length : Array.isArray(comList?.comments) ? comList.comments.length : 0;
-  } catch {}
-  if (stale(gen)) return;
-
-  // A shared plain artifact's page needs a pass before the frame can name it.
-  viewer.pass = await viewerPass(id);
-  if (stale(gen)) return;
-
-  let projectArtifacts = [];
-  try {
-    const listRes = await api(`/api/v1/projects/${encodeURIComponent(projDisplay)}/artifacts`);
-    projectArtifacts = listRes.artifacts || [];
-  } catch {}
-  if (!projectArtifacts.length) {
-    projectArtifacts = [current];
-  }
-  if (stale(gen)) return;
-
-  main.innerHTML = "";
-  const wrap = document.createElement("div");
-  wrap.className = "hub-viewer panes panes-artifacts has-selection";
-
-  // Left index column: 280px for reading runs of artifacts
-  const indexCol = document.createElement("aside");
-  indexCol.className = "pane-index hub-viewer-index";
-  indexCol.setAttribute("aria-label", "Artifacts index");
-
-  const indexHead = document.createElement("div");
-  indexHead.className = "hub-viewer-index-head";
-  const indexTitle = document.createElement("span");
-  indexTitle.className = "hub-viewer-index-title";
-  indexTitle.textContent = "Artifacts";
-  const indexCount = document.createElement("span");
-  indexCount.className = "mono hub-viewer-index-count";
-  indexCount.textContent = String(projectArtifacts.length);
-  indexHead.append(indexTitle, indexCount);
-  indexCol.appendChild(indexHead);
-
-  const indexList = document.createElement("div");
-  indexList.className = "hub-viewer-index-list";
-
-  for (const a of projectArtifacts) {
-    const isCurrent = a.id === id;
-    const item = document.createElement("a");
-    item.href = `#/artifacts/${encodeURIComponent(a.id)}?project=${encodeURIComponent(projDisplay)}`;
-    item.className = "hub-viewer-index-item" + (isCurrent ? " active" : "");
-    if (isCurrent) item.setAttribute("aria-current", "page");
-
-    const tRow = document.createElement("span");
-    tRow.className = "hub-viewer-index-item-title";
-    if (a.protected) {
-      const lockIcon = document.createElement("span");
-      lockIcon.innerHTML = cardGlyph(true);
-      tRow.appendChild(lockIcon);
-    }
-    const tText = document.createElement("span");
-    tText.textContent = a.title || "artifact";
-    tRow.appendChild(tText);
-
-    const mRow = document.createElement("span");
-    mRow.className = "hub-viewer-index-item-meta mono";
-    const commentsInfo = a.comments_count ? ` · ${a.comments_count} comment${a.comments_count === 1 ? "" : "s"}` : "";
-    mRow.textContent = `v${a.version || 1} · ${formatBytes(a.size_bytes)}${commentsInfo}`;
-
-    item.append(tRow, mRow);
-    indexList.appendChild(item);
-  }
-  indexCol.appendChild(indexList);
-
-  // Top header (Screen 01): 52px band, mono path, 36px back and three 36px glyphs, each with a 44x44 coarse hit
-  const bar = document.createElement("div");
-  bar.className = "hub-viewer-bar";
-
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "hub-back";
-  back.dataset.action = "viewer-back";
-  back.setAttribute("aria-label", "Back to artifacts");
-  back.innerHTML = glyphSvg("chevronBack", { size: 20 });
-
-  const pathEl = document.createElement("div");
-  pathEl.className = "hub-viewer-path mono";
-  pathEl.textContent = monoPath;
-  pathEl.title = monoPath;
-
-  // One control in two states, not two controls. A bubble with a plus and a
-  // bubble with a count were never on screen together, so the set carried two
-  // glyphs for one place; the bubble alone is the empty state and the numeral
-  // beside it is the full one. What the control does still differs, because
-  // there is nothing to open until a thread exists.
-  const threadBtn = document.createElement("button");
-  threadBtn.type = "button";
-  const hasThreads = commentsCount > 0;
-  threadBtn.className = hasThreads
-    ? "hub-btn-glyph hub-comments-btn"
-    : "hub-btn-glyph hub-start-thread";
-  threadBtn.dataset.action = hasThreads ? "comments-toggle" : "start-thread";
-  threadBtn.setAttribute("aria-label", hasThreads ? `Comments, ${commentsCount}` : "Start a thread");
-  threadBtn.innerHTML =
-    glyphSvg("comments", { size: 20 }) +
-    (hasThreads
-      ? `<span class="hub-glyph-count mono" aria-hidden="true">${commentsCount}</span>`
-      : "");
-  threadBtn.addEventListener("click", () => {
-    if (!hasThreads) {
-      openCompose(null);
-    } else if (commentsState.open && commentsState.viewMode === "list") {
-      closeCommentsDrawer();
-    } else {
-      openCommentsDrawer();
-    }
-  });
-
-  // Glyph button 2: copy-raw
-  const copyRawBtn = document.createElement("button");
-  copyRawBtn.type = "button";
-  copyRawBtn.className = "hub-btn-glyph hub-copy-raw";
-  copyRawBtn.dataset.action = "copy-raw";
-  copyRawBtn.setAttribute("aria-label", "Copy raw text");
-  copyRawBtn.innerHTML = glyphSvg("copyRaw", { size: 20 });
-
-  const doCopyRaw = async () => {
-    try {
-      const text = await fetchRawText(id, viewer.version);
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
-        }
-      } catch {}
-      toast("Raw text copied");
-    } catch {
-      toast("Failed to copy raw text");
-    }
-  };
-  copyRawBtn.addEventListener("click", doCopyRaw);
-
-  // Glyph button 3: overflow
-  const moreBtn = document.createElement("button");
-  moreBtn.type = "button";
-  moreBtn.className = "hub-btn-glyph hub-more";
-  moreBtn.setAttribute("aria-label", "More");
-  moreBtn.setAttribute("aria-expanded", "false");
-  moreBtn.setAttribute("aria-haspopup", "true");
-  moreBtn.innerHTML = glyphSvg("overflow", { size: 20 });
-
-  const overflowMenu = document.createElement("div");
-  overflowMenu.className = "hub-overflow-menu";
-  overflowMenu.setAttribute("role", "menu");
-  overflowMenu.hidden = true;
-
-  let openShareSheet = () => {};
-
-  const menuItems = [
-    { text: "Start a thread", action: "start-thread", run: () => openCommentsDrawer() },
-    { text: "Comments", action: "comments-toggle", run: () => openCommentsDrawer() },
-    { text: "Copy raw", action: "copy-raw", run: doCopyRaw },
-    {
-      text: "Copy path",
-      action: "copy-path",
-      run: async () => {
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(monoPath);
-          }
-        } catch {}
-        toast("Path copied");
-      },
-    },
-    {
-      text: "Copy link",
-      action: "copy-link",
-      run: async () => {
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(location.href);
-          }
-        } catch {}
-        toast("Link copied");
-      },
-    },
-    {
-      text: "Share",
-      action: "share",
-      run: () => openShareSheet(),
-    },
-    {
-      text: "Open in browser",
-      action: "open-in-browser",
-      run: () => {
-        const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-        window.open(frameSrc(id, viewer.version, opened, viewer.pass), "_blank");
-      },
-    },
-  ];
-
-  for (const item of menuItems) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.setAttribute("role", "menuitem");
-    btn.dataset.action = item.action;
-    btn.textContent = item.text;
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      overflowMenu.hidden = true;
-      moreBtn.setAttribute("aria-expanded", "false");
-      item.run();
-    });
-    overflowMenu.appendChild(btn);
-  }
-
-  moreBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const open = overflowMenu.hidden;
-    overflowMenu.hidden = !open;
-    moreBtn.setAttribute("aria-expanded", String(open));
-  });
-  document.addEventListener("click", (e) => {
-    if (!overflowMenu.hidden && !overflowMenu.contains(e.target) && !e.target.closest(".hub-more")) {
-      overflowMenu.hidden = true;
-      moreBtn.setAttribute("aria-expanded", "false");
-    }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !overflowMenu.hidden) {
-      e.stopPropagation();
-      overflowMenu.hidden = true;
-      moreBtn.setAttribute("aria-expanded", "false");
-      moreBtn.focus();
-    }
-  });
-
-  // The menu is a child of the band rather than of the viewer: the viewer is a
-  // positioned box spanning the index, the stage and the comments column, so a
-  // menu anchored to it opened over the comments column instead of under its
-  // own button. Inside the band it hangs from the trigger.
-  bar.append(back, pathEl, threadBtn, copyRawBtn, moreBtn, overflowMenu);
-
-  // Document meta line with version toggle (Screen 01):
-  const metaWrap = document.createElement("div");
-  metaWrap.className = "hub-viewer-meta-wrap";
-
-  const metaLine = document.createElement("div");
-  metaLine.className = "hub-viewer-meta";
-
-  const actorSpan = document.createElement("span");
-  actorSpan.className = "hub-viewer-actor";
-  actorSpan.textContent = current.actor || "agent";
-
-  const dot1 = document.createElement("span");
-  dot1.textContent = "·";
-
-  const versionToggle = document.createElement("button");
-  versionToggle.type = "button";
-  versionToggle.className = "hub-version-toggle mono";
-  versionToggle.dataset.action = "version-toggle";
-  versionToggle.setAttribute("aria-expanded", "false");
-  versionToggle.setAttribute("aria-controls", "hub-version-menu");
-  versionToggle.setAttribute("aria-label", `Version ${shown}`);
-  versionToggle.innerHTML = `v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}`;
-
-  const dot2 = document.createElement("span");
-  dot2.textContent = "·";
-
-  const sizeSpan = document.createElement("span");
-  sizeSpan.className = "mono hub-viewer-size";
-  sizeSpan.textContent = formatBytes(current.size_bytes);
-
-  const dot3 = document.createElement("span");
-  dot3.textContent = "·";
-
-  const ageSpan = document.createElement("span");
-  ageSpan.className = "hub-viewer-age";
-  ageSpan.textContent = current.created_at ? relative(Date.parse(current.created_at)) : "";
-
-  if (current.protected) {
-    const lockedSpan = document.createElement("span");
-    lockedSpan.className = "hub-viewer-locked";
-    lockedSpan.textContent = "Locked · only readable with the password";
-    metaLine.append(lockedSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
-  } else {
-    metaLine.append(actorSpan, dot1, versionToggle, dot2, sizeSpan, dot3, ageSpan);
-  }
-  metaWrap.appendChild(metaLine);
-
-  // Center Stage: 640px document
-  const stageCol = document.createElement("div");
-  stageCol.className = "pane-stage hub-viewer-stage";
-
-  const content = document.createElement("div");
-  content.className = "hub-viewer-content";
-
-  const docCol = document.createElement("div");
-  docCol.className = "hub-viewer-doc";
-
-  // Sandboxed frame: replaces element rather than src on navigation to avoid pushing history
-  const opened = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-  const frame = document.createElement("iframe");
-  frame.id = "hub-frame";
-  frame.dataset.id = id;
-  frame.dataset.kind = current.kind;
-  // Read back by every later rebuild of this frame's address: a theme switch
-  // and the raw-view toggle both start from it.
-  if (viewer.pass) frame.dataset.pass = viewer.pass;
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("title", current.title);
-  frame.setAttribute("data-theme", opened);
-  frame.src = frameSrc(id, viewer.version, opened, viewer.pass);
-  docCol.appendChild(frame);
-
-  const band = liveBandElement();
-  docCol.prepend(band);
-  wireLiveBand(id, viewer.kind, Boolean(current.protected), frame, band);
-
-  content.appendChild(docCol);
-  stageCol.append(bar, metaWrap, content);
-
-  // Right Comments Column (Aside): 320px
-  const commentsCol = document.createElement("aside");
-  commentsCol.className = "pane-aside hub-comments-column";
-  commentsCol.setAttribute("aria-label", "Comments");
-
-  const commentsHead = document.createElement("div");
-  commentsHead.className = "hub-comments-head";
-  const cTitle = document.createElement("span");
-  cTitle.className = "hub-comments-head-title";
-  cTitle.textContent = "Comments";
-  const cMeta = document.createElement("span");
-  cMeta.className = "mono hub-comments-head-meta";
-  // The count is the open threads, written live by refreshCommentsToggle; the
-  // version the line carries is fixed here.
-  cMeta.dataset.version = String(shown);
-  cMeta.textContent = `${commentsCount} · v${shown}`;
-  const cAdd = document.createElement("button");
-  cAdd.type = "button";
-  cAdd.className = "hub-comments-head-add";
-  cAdd.dataset.action = "start-thread";
-  cAdd.setAttribute("aria-label", "New thread");
-  cAdd.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12"></path></svg>`;
-  cAdd.addEventListener("click", () => openCompose(null));
-
-  commentsHead.append(cTitle, cMeta, cAdd);
-
-  const cardsList = document.createElement("div");
-  cardsList.className = "hub-comments-cards-list";
-
-  const commentsFooter = document.createElement("div");
-  commentsFooter.className = "hub-comments-footer";
-  const cHelper = document.createElement("div");
-  cHelper.className = "hub-comments-helper";
-  cHelper.textContent = "Select text to comment on it";
-  commentsFooter.appendChild(cHelper);
-
-  commentsCol.append(commentsHead, cardsList, commentsFooter);
-
-  // Auto-size frame to avoid inner scrollbar
-  const onHeight = (event) => {
-    if (event.source !== frame.contentWindow) return;
-    const h = event.data && event.data.hubFrameHeight;
-    if (typeof h !== "number" || !isFinite(h)) return;
-    frame.style.height = `${Math.max(Math.round(h), 200)}px`;
-  };
-  window.addEventListener("message", onHeight);
-
-  // Comments footer strip (Screen 01) when thread exists on mobile
-  const { toggle, badge } = commentsToggle();
-  toggle.style.display = "none";
-  stageCol.appendChild(toggle);
-  if (commentsCount > 0) {
-    const strip = document.createElement("button");
-    strip.type = "button";
-    strip.className = "hub-comments-strip comments-toggle";
-    strip.dataset.action = "comments-toggle";
-    strip.innerHTML = `
-      ${glyphSvg("comments", { size: 16 })}
-      <span class="grow" style="text-align:left">Comments</span>
-      <span class="mono hub-comments-count">${commentsCount}</span>
-      ${glyphSvg("chevronRight", { size: 16 })}
-    `;
-    strip.addEventListener("click", () => {
-      openCommentsDrawer();
-    });
-    stageCol.appendChild(strip);
-  }
-
-  // Version sheet (Screen 02)
-  const { backdrop, sheet } = buildVersionSheet(id, versions, shown, projectId);
-  stageCol.append(backdrop, sheet);
-
-  // Share sheet (Screens 08 & 09)
-  const share = buildShareSheet(id, current, shown, moreBtn);
-  openShareSheet = share.openSheet;
-  stageCol.append(share.backdrop, share.sheet);
-
-  wrap.append(indexCol, stageCol, commentsCol);
-  main.appendChild(wrap);
-
-  const { backdrop: comBackdrop, drawer: comDrawer } = commentsPanel({ toggle, badge });
-  main.append(comBackdrop, comDrawer);
-
-  commentsState.desktopContainer = cardsList;
-  renderDesktopCards();
+  location.replace(artifactHref(project, id, params.get("version")));
 }
-
-// The old viewer name, kept so a caller that referenced it still resolves.
-export { viewerRoute as showArtifact };

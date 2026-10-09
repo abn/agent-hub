@@ -140,7 +140,10 @@ def seed_wiki(port: int) -> None:
 def captures(seeded: dict) -> list[tuple[str, str, str]]:
     project = seeded["project_id"]
     session = seeded["session_id"]
-    artifact = seeded["artifact_id"]
+    # The artifact address names the sealed note, which is not the newest, so
+    # its capture shows the address landing on an artifact the Artifacts
+    # capture's default selection does not.
+    sealed = seeded["protected_id"]
     return [
         ("home", "main .home .home-summary", "home"),
         ("inbox", "main .shell-index .inbox-item", "inbox"),
@@ -159,8 +162,8 @@ def captures(seeded: dict) -> list[tuple[str, str, str]]:
         ),
         (f"projects/{project}/artifacts", "main .shell-index .artifact-row", "artifacts"),
         (
-            f"artifacts/{artifact}?project={project}",
-            "main .hub-viewer-doc",
+            f"artifacts/{sealed}?project={project}",
+            "main .shell.has-selection .hub-viewer-doc",
             "artifact-viewer",
         ),
         (f"projects/{project}/wiki", "main .shell-index .wiki-row", "wiki"),
@@ -178,18 +181,16 @@ def captures(seeded: dict) -> list[tuple[str, str, str]]:
     ]
 
 
-# The artifact viewer renders the document in a nested frame, so the outer
-# `#hub-frame` element arriving says nothing about its content. Its two frames
-# are the shell and the document; this waits for the document frame to have a
-# child, so a shot is never taken mid-load. Playwright's frame locator crosses
-# the sandbox boundary that a direct DOM read cannot.
-def artifact_document_ready(page) -> None:
-    document = page.frame_locator("#hub-frame").frame_locator("#hub-frame")
-    document.locator("body > *").first.wait_for(timeout=10000)
+# The artifact address opens the sealed note, whose frame is its password gate
+# until it is unlocked, so the outer `#hub-frame` arriving says nothing about
+# its content; the shot waits for the gate's own field, which Playwright's frame
+# locator reaches across the sandbox boundary that a direct DOM read cannot.
+def artifact_gate_ready(page) -> None:
+    page.frame_locator("#hub-frame").locator("#hub-password").wait_for(timeout=10000)
 
 
 # The routes whose frame carries the document, and the extra wait each needs.
-READY = {"artifact-viewer": artifact_document_ready}
+READY = {"artifact-viewer": artifact_gate_ready}
 
 
 def shot(page, stem: str, width: str, theme: str) -> Path:
