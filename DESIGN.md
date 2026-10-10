@@ -206,8 +206,15 @@ reader's place is kept by the browser's own scroll anchoring.
   reserves no band. Home is the one exception at rest: it has no bar and its
   greeting is content at x 16, with the bar fading in at x 48 once the greeting
   leaves.
-- One gutter per pane: 16px on mobile and in the stage, 12px in the index,
-  14px in the aside. Headings, body and section headers share it.
+- One gutter per pane, and every heading, label and row a screen writes
+  starts on it. A pane hands the gutter to the rows inside it, so the pane
+  carries it and the rows sit on it rather than each declaring a padding of
+  its own: the session detail stage's brain tree pane carries 16px and the
+  footnote, the header line, the actions footer and the audit line all start
+  there. The phone header's leading slot is 48px in both of its states, and
+  Home's greeting at rest is content at 16 with no bar above it; those two are
+  the named offsets that differ. A browser check reads the offset each pane's
+  rows start at off the rows themselves.
 - Prose is left-aligned in the stage and capped at 640. Panes may change
   width; the reader's place in the prose may not. A pane that stages prose
   carries its own gutter in its own padding, because the stage body carries

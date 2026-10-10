@@ -6,6 +6,26 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### One gutter, read off the rows
+
+* **Update**: [Human interface](design/human-interface.md) states that one
+  gutter belongs to each pane and that every heading, label and row a screen
+  writes starts on it. The session audit line ran to the session detail
+  stage's own left edge, because the brain tree pane handed its gutter to the
+  rows inside it one row at a time and the audit line declared none. The pane
+  carries the gutter now and the rows inside it sit on it, so the footnote,
+  the header line, the actions footer and the audit line all start at the same
+  x. The session detail header sits on the pane's 16px gutter rather than a
+  24px one, and the search preview's content sits on 16 rather than 32.
+* **Add**: a browser check that reads the offset each pane's rows start at off
+  the rows themselves and holds every heading, label and row on the screen to
+  it. A pane hands its gutter to its rows, so the rows are the declaration, and
+  a row that starts somewhere else fails the check. The phone header's leading
+  slot and Home's greeting at rest are the two named offsets that differ, and
+  the check names them rather than allowing anything.
+
+## 2026-10-10
+
 ### Every pane reserves the frame
 
 * **Update**: [Human interface](design/human-interface.md) drops the two
