@@ -383,12 +383,23 @@ function previewPath(hit) {
 function renderPreview(stagePane, hit, words) {
   stagePane.innerHTML = "";
   if (!hit) {
-    const empty = el("div", "search-preview-empty", "Select a result to preview.");
-    stagePane.appendChild(empty);
+    // An empty stage still reserves the frame: a reader who selects a result
+    // finds it in the same place the last one was.
+    const head = el("div", "search-stage-head shell-head");
+    const path = el("span", "search-stage-path", "Select a result to preview.");
+    head.append(path);
+    const controls = el("div", "search-stage-controls shell-controls");
+    const content = el("div", "search-stage-content");
+    content.append(el("div", "search-preview-empty", ""));
+    stagePane.append(head, controls, content);
     return;
   }
 
-  const head = el("div", "search-stage-head");
+  // The stage reserves the frame every other pane reserves: a 52px header
+  // holding what the preview is, and a 40px control row holding what the reader
+  // does to it. The controls are band controls at --ctl, so no control is taller
+  // than the band that holds it.
+  const head = el("div", "search-stage-head shell-head");
   const path = el("span", "search-stage-path", previewPath(hit));
   const counter = el("span", "search-match-counter", "");
   // The count is the reader's position in the result they are stepping through,
@@ -411,7 +422,10 @@ function renderPreview(stagePane, hit, words) {
   const openBtn = el(href ? "a" : "button", "button primary search-open-btn", "Open");
   if (href) openBtn.href = href;
 
-  head.append(path, counter, prevBtn, nextBtn, openBtn);
+  head.append(path, counter);
+
+  const controls = el("div", "search-stage-controls shell-controls");
+  controls.append(prevBtn, nextBtn, openBtn);
 
   const content = el("div", "search-stage-content");
   const article = el("article", "search-preview-article prose");
@@ -432,7 +446,7 @@ function renderPreview(stagePane, hit, words) {
 
   article.append(title, meta, body);
   content.appendChild(article);
-  stagePane.append(head, content);
+  stagePane.append(head, controls, content);
 
   const matchElements = [...article.querySelectorAll(".search-match")];
   const totalMatches = matchElements.length;

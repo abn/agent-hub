@@ -2224,35 +2224,25 @@ button.empty-link {
   filter: brightness(0.95);
 }
 
-.search-stage-head {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  height: 48px;
-  min-height: 48px;
-  padding: 0 var(--s-5);
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  box-sizing: border-box;
-}
-.search-stage-path {
-  flex: 1;
-  min-width: 0;
-  font: 600 var(--t-12)/1.3 var(--font-mono);
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* The search stage reserves the frame every other pane reserves: the 52px header
+   and the 40px control row are the shell's own two bands, so an empty stage
+   carries both too and a reader who selects a result finds its controls where
+   the last one left them. What this screen adds is what fills them. */
+.search-stage-head { align-items: center; }
+.search-stage-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .search-match-counter {
   font: 500 var(--t-12)/1 var(--font-mono);
+  margin-left: auto;
   color: var(--ink-3);
   white-space: nowrap;
 }
+/* A stage control is a band control: --ctl on a fine pointer, and --tap under a
+   coarse one, so it is never taller than the band that holds it. */
 .search-step-btn {
-  width: 28px;
-  min-height: 28px;
-  height: 28px;
+  width: var(--ctl);
+  min-height: var(--ctl);
+  height: var(--ctl);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -2271,10 +2261,10 @@ button.empty-link {
   cursor: not-allowed;
 }
 .search-open-btn {
-  height: 30px;
-  min-height: 30px;
+  height: var(--ctl);
+  min-height: var(--ctl);
   padding: 0 var(--s-3);
-  font: 600 var(--t-12)/1 var(--font-sans);
+  font: 600 var(--t-13)/1 var(--font-sans);
   display: inline-flex;
   align-items: center;
   text-decoration: none;

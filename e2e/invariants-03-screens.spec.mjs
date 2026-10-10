@@ -145,12 +145,11 @@ test.describe("phone frame", () => {
 });
 
 test.describe("desktop chrome", () => {
-  // Every screen the router registers. Some do not reserve the frame yet, and
-  // DESIGN.md records them: Search draws a 48px header with no control row, and
-  // More is the phone's tab root, which a desktop reaches only by its address.
-  // Their controls are still held to the 32px row.
-  const FRAMELESS = new Set(["Search", "More"]);
-
+  // Every screen the router registers, and every pane each of them puts on
+  // screen, reserves the frame. Search's stage used to draw a 48px header with
+  // no control row, and More no control row at all: both now reserve the two
+  // bands, so the check holds them like any other screen and no screen is
+  // exempt.
   test("panes land at 52/92 and labels sit on the gutter", async ({ hub, page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const routes = screenRoutes(hub, await seedWikiPage(hub, "frame/desktop.md"));
@@ -216,7 +215,6 @@ test.describe("desktop chrome", () => {
         };
       });
       expect(geom.tall, `${name}: a control in the 40px row is taller than 32`).toEqual([]);
-      if (FRAMELESS.has(name)) continue;
       expect(geom.head, `${name}: header does not land at 52`).toBe(52);
       expect(geom.ctl, `${name}: no control row found`).toBeTruthy();
       expect(geom.ctl.top === 52 && geom.ctl.bottom === 92, `${name}: control row does not span 52..92`).toBe(true);
