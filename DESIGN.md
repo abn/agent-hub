@@ -59,7 +59,10 @@ you" would otherwise share a tone, so knowledge gets its own, and
 
 The scale is 28 for a page title, 22 for a section, 17 for an item title, 15
 for a row title and for body, 13 for meta, 12 for an uppercase section label
-and for mono data. Titles hold a line height of at least 1.3; body sits at
+and for mono data. There is one section-label style: 12/600 uppercase sans with
+0.06em tracking in the meta tone, and a label that carries literal data, a count
+or a path, keeps it in a span of its own rather than setting the whole label in
+mono. A row of labels drawn two ways reads as two different things. Titles hold a line height of at least 1.3; body sits at
 1.45 to 1.6. There is no 14: a size between meta and body was two sizes in
 practice, and every use has moved to 13 or 15.
 
@@ -639,14 +642,23 @@ named checks from the current handoff.
     honoured.
 12. **Alert hierarchy.** L0 quiet, L1 unread, L2 waiting. No red, no animation,
     no modal for an alert.
-13. **Styles in the stylesheet.** On every screen the router registers, at a
+13. **Labels, time, copy.** Every section label on every screen the router
+    registers is the one label style above, and no label is set in the mono
+    family. No history row on the knowledge base's change log or in a page's
+    History shows a raw ISO timestamp: a row shows the short time every other
+    row shows, and the full stamp is on the time element as its title and its
+    accessible name. Every copy control is a glyph on the row that owns the
+    string, with no visible label, drawn no wider than the 44px target and never
+    on the inset surface, and the session id appears once in the session detail
+    stage header.
+14. **Styles in the stylesheet.** On every screen the router registers, at a
     desktop width, a phone width and under a coarse pointer, and in the states
     the check lists (the token, grant, new project, delete project, new page,
     save to wiki, revert, end session and prune dialogs, a brain file and key,
     a comment thread, a refused save and the add-agent form), no element's
     `style` attribute declares a box size, spacing, type, colour, fill, border,
     shadow or outline, or a custom property the check does not name.
-14. **Forms.** Every form column is 640 or the pane that holds it, every button
+15. **Forms.** Every form column is 640 or the pane that holds it, every button
     is as wide as its label, and a one-line settings row is 48 on a fine pointer
     and 56 on a coarse one. The check walks every screen the router registers
     and the forms and dialogs behind a control, at both widths, and measures a

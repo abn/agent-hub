@@ -6,6 +6,32 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### One label style, short time, a copy glyph
+
+* **Update**: [Human interface](design/human-interface.md) states that there is
+  one section-label style, 12/600 uppercase sans with 0.06em tracking in the
+  meta tone, and that a label carrying literal data keeps it in a span of its
+  own rather than setting the whole label in mono. The Settings groups, the
+  Agents and tokens sections, the storage breakdown, the wiki's comments and
+  backlinks labels, the sessions index's group headers and the brain tree's
+  header were each set in the mono family, so a row of labels read as two
+  different things. The brain tree's header now reads "Brain" in the label
+  style with its size, its item count and its owner in a mono span.
+* **Update**: a history row shows the short time every other row shows, and
+  carries the full stamp on the time element as its title and its accessible
+  name. The knowledge base's change log and a page's History printed the raw
+  ISO stamp.
+* **Update**: a copy control is a glyph on the row that owns the string. The
+  session's copy-id chip was a text chip on the inset surface, and the id was
+  drawn twice in the header. The id now appears once, in the stage header's
+  meta line, with the copy glyph on the row that owns it.
+* **Add**: build gate 13, Labels, time, copy: every section label on every
+  screen the one style with no mono family, no history row showing a raw ISO
+  stamp, and every copy control a glyph with no visible label, no wider than
+  the 44px target and never on the inset surface.
+
+## 2026-10-10
+
 ### One gutter, read off the rows
 
 * **Update**: [Human interface](design/human-interface.md) states that one

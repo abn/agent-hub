@@ -72,7 +72,7 @@ h2 { font-size: var(--t-22); font-weight: 600; line-height: 1.3; margin: var(--s
    header rather than a section heading. */
 h2.day, .section-label {
   font-size: var(--t-12); font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.02em; color: var(--ink-3);
+  letter-spacing: 0.06em; color: var(--ink-3);
   margin: var(--s-4) 0 var(--s-1);
 }
 /* end component: typography */
@@ -2950,7 +2950,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 }
 .session-group-header {
   padding: var(--s-3) var(--s-4) var(--s-2);
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   letter-spacing: 0.06em;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -3165,35 +3165,37 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   gap: var(--s-2);
   flex: none;
 }
-.session-copy-id {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  align-self: flex-start;
-  min-height: 32px;
-  padding: 0 var(--s-3);
-  border: 1px solid var(--line);
+/* A copy control is a glyph on the row that owns the string: never a text chip,
+   never on the inset surface, and never wider than the target it answers to.
+   The row's own tap area carries the coarse pointer. */
+.row-copy-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ctl-sm);
+  min-width: var(--ctl-sm);
+  height: var(--ctl-sm);
+  padding: 0;
+  border: 0;
   border-radius: var(--r-1);
-  background: var(--surface-2);
-  color: var(--ink-2);
-  font: 500 var(--t-12)/1 var(--font-mono);
+  background: none;
+  color: var(--ink-3);
   cursor: pointer;
   position: relative;
-  white-space: nowrap;
+  vertical-align: middle;
 }
-.session-copy-id::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  transform: translateY(-50%);
-  min-height: 44px;
-}
-@media (pointer: coarse) {
-  .session-copy-id {
-    min-height: 44px;
-    padding: 0 var(--s-3);
+.row-copy-glyph:hover { color: var(--ink); }
+.row-copy-glyph svg { display: block; }
+@media (any-pointer: coarse) {
+  /* The glyph keeps its drawn size and answers to the target around it, the
+     pattern every other chrome control uses. */
+  .row-copy-glyph::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--tap));
+    height: max(100%, var(--tap));
+    transform: translate(-50%, -50%);
   }
 }
 /* Reassign sits beside the copy-id control as a secondary action. It is a menu
@@ -3292,9 +3294,14 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   padding: var(--s-3) 0;
   border-bottom: 1px solid var(--line);
 }
+.brain-label {
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 600;
+}
 .brain-header-line .brain-label {
   flex: 1;
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-2);
 }
 .brain-header-line .brain-size-col {
@@ -5811,7 +5818,6 @@ a.session-back {
   flex-direction: column;
 }
 .form-group-label {
-  font-family: var(--font-mono);
   font-size: var(--t-12);
   font-weight: 600;
   line-height: 1.2;
@@ -7934,9 +7940,10 @@ dialog.dialog-project-delete {
 }
 .agents-section-label {
   padding: var(--s-4) var(--s-4) var(--s-2);
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .agents-empty-note {
   padding: var(--s-4);
@@ -8197,9 +8204,10 @@ button.access-ungrant-btn {
 }
 .access-section-label {
   padding: var(--s-5) var(--s-4) var(--s-2);
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .agent-grants-list { border-top: 1px solid var(--line); }
 .access-grant-form {
@@ -8387,9 +8395,10 @@ button.wiki-comment-resolve {
 }
 .wiki-comments { padding: var(--s-4); border-top: 1px solid var(--line); }
 .wiki-section-label {
-  font-size: var(--t-12);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
   margin-bottom: var(--s-2);
 }
 .wiki-note-empty { margin: 0; font-size: var(--t-13); }
@@ -8592,9 +8601,10 @@ textarea.wiki-editor-text {
 }
 .wiki-history-day {
   padding: var(--s-3) var(--s-4) var(--s-1);
-  font-size: var(--t-12);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .row.wiki-change {
   display: flex;
@@ -8811,9 +8821,10 @@ button.storage-prune-all {
 .storage-mobile-capacity { font: 500 var(--t-12)/1 var(--font-mono); color: var(--ink-3); }
 .storage-section-label {
   padding: 20px var(--s-4) var(--s-2);
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .row.storage-project-row {
   display: flex;
@@ -8836,9 +8847,10 @@ button.storage-prune-all {
 .settings-flat-group { margin-bottom: var(--s-2); }
 .settings-group-title {
   padding: 20px var(--s-4) var(--s-2);
-  font: 600 var(--t-12)/1 var(--font-mono);
+  font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .settings-flat-row {
   display: flex;

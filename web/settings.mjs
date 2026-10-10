@@ -358,7 +358,7 @@ export async function settingsScreen(gen) {
   const form = `
     <form class="settings" data-action="prefs" onsubmit="event.preventDefault();">
       <div class="settings-flat-group">
-        <div class="settings-group-title">THIS DEVICE</div>
+        <div class="settings-group-title">This device</div>
         <div class="settings-flat-row row">
           <span class="title settings-row-label">Theme</span>
           <div role="radiogroup" aria-label="Theme" class="settings-theme-track">
@@ -382,7 +382,7 @@ export async function settingsScreen(gen) {
       </div>
 
       <div class="settings-flat-group">
-        <div class="settings-group-title">THIS HUB</div>
+        <div class="settings-group-title">This hub</div>
         <a href="#/storage" class="settings-flat-row row settings-nav-row">
           <span class="title settings-row-label">Storage</span>
           <span class="mono settings-row-value">${esc(storageValue)}</span>
