@@ -268,6 +268,23 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 @media (pointer: coarse) {
   button, .button { min-height: var(--tap); }
 }
+/* Under a coarse pointer a dialog's or a form's action row takes the sheet's
+   width between its actions, so no verb is left at its label's width beside an
+   empty sheet. A row divides between them and a column stretches to its own
+   width: one action takes the column, two take a half each. The primary keeps
+   its emphasis by its fill rather than by its width, which is the distinction
+   the contract already draws between a commit and a safe action. The delete
+   dialog's footer has shipped this way; this holds every action row to it. */
+@media (pointer: coarse) {
+  .dialog-actions > :is(button, .button),
+  .pset-actions > :is(button, .button),
+  .agent-create-actions > :is(button, .button),
+  .wiki-editor-actions > :is(button, .button) { flex: 1 1 0; min-width: 0; }
+  .project-create-actions > :is(button, .button),
+  .access-add-fields > :is(button, .button),
+  .session-actions-footer > :is(button, .button),
+  .hub-share-actions > :is(button, .button) { align-self: stretch; }
+}
 /* The hit area. Wherever a coarse pointer is present, a control drawn under
    the target keeps its drawn box and answers to a --tap box around its
    centre, in both axes. It asks `any-pointer` rather than `pointer`, so a
@@ -3447,7 +3464,8 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 }
 /* End session is not prune: it stops something live, so it keeps the action
    tone in an outline, not the danger tone. A button is as wide as its label,
-   so the footer's control is the verb and not the pane. */
+   so the footer's control is the verb and not the pane, and the one action
+   here takes the footer's width on a coarse pointer. */
 /* End session is a form action, so it is --ctl-form on a fine pointer and
    --tap on a coarse one, with the label style that control size carries, and it
    no longer stands at 48px and 17px beside a 36px Reassign. */
@@ -6330,7 +6348,8 @@ a.session-back {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
-  /* A button is as wide as its label, so the sheet's actions are the verbs. */
+  /* The sheet's one action takes the column on a coarse pointer; the base rule
+     keeps it at its label's width beside the pane's edge. */
   align-items: flex-start;
 }
 .project-create-submit {

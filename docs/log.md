@@ -6,6 +6,20 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### A phone dialog's actions take the sheet's width
+
+* **Update**: [Human interface](design/human-interface.md) states that under a
+  coarse pointer a dialog's or a form's action row takes the sheet's width
+  between its actions, so one action takes the column and two take a half each.
+  It used to show every action at its label's width, which left a phone sheet's
+  verb beside half a sheet of empty space. On a fine pointer the row is
+  unchanged: right-aligned at label width.
+* **Add**: captures for the phone surfaces this changes: the new project sheet,
+  the end session dialog, project settings, the wiki editor and the session
+  detail footer.
+
+## 2026-10-10
+
 ### The dialogs and the wiki's other three surfaces are photographed
 
 * **Update**: [Human interface](design/human-interface.md) states that New page

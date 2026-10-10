@@ -266,6 +266,16 @@ A button is as wide as its label. A control that is itself a row, a menu item,
 or a tab of a strip is as wide as the box that holds it, and a control that
 draws only a glyph is held to `--tap` rather than to a label.
 
+Under a coarse pointer a dialog's or a form's action row takes the sheet's width
+between its actions instead, so no verb is left at its label's width beside an
+empty sheet. A row divides between them and a column stretches to its own width,
+so one action takes the column and two take a half each. The primary keeps its
+emphasis by its fill rather than by its width: the commit is filled and the safe
+action is not, which is the distinction the contract already draws. The delete
+dialog's footer has always shipped this way; the rule holds every action row to
+it. On a fine pointer the row is right-aligned at label width, and a stretched
+verb beside a field remains the defect the label rule came from.
+
 ### The phone
 
 - One header and one tools row, sized as above. The tab bar is five labelled
@@ -666,8 +676,11 @@ named checks from the current handoff.
     declarations taken away, so a percentage `min-width` is caught. The
     allow-list names the controls that are as wide as their box: a row that is
     itself a control, a menu item, a delete action's 90px floor and a tab of a
-    strip. The artifact viewer's document is a separate page in a sandboxed
-    frame, so this gate does not walk into it.
+    strip. Under a coarse pointer the same check allows an action row's
+    controls, which the third check holds instead: the row's shares and gaps
+    account for the row's own width, and no action is narrower than the share
+    the row gives it. The artifact viewer's document is a separate page in a
+    sandboxed frame, so this gate does not walk into it.
 
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said

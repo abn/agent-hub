@@ -119,6 +119,14 @@ a settings row is 56, because a 44px control in 12px of padding is 56. A row
 whose label carries a second line of copy grows to hold that line, and never
 because of its control.
 
+Under a coarse pointer a dialog's or a form's action row is the one place the
+label width does not hold: the row takes the sheet's width between its actions,
+so one action takes the column and two take a half each, and a phone sheet's
+verb no longer sits beside half a sheet of empty space. The action that records
+the decision is filled and the one that does not is not, so the emphasis is
+carried by the fill and not by the width. On a fine pointer the row is
+right-aligned at label width, as everywhere else.
+
 The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.
 This page records what ships; that file records what is designed.
