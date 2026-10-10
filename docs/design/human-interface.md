@@ -162,6 +162,33 @@ The knowledge base wiki, search, storage and settings:
 
 ![Settings at desktop width, rows under quiet group labels.](../assets/screens/settings-desktop-light.png)
 
+The wiki's other three surfaces are the editor, a page's History and the
+change log:
+
+![The wiki editor at desktop width, its path field and its Save carrying the
+version the read carried.](../assets/screens/wiki-editor-desktop-light.png)
+
+![A page's History at phone width: one row per version with the short time, the
+actor, what it did and its size.](../assets/screens/wiki-history-phone-light.png)
+
+![The change log at desktop width: every write to the knowledge base, its short
+time on the row and the full stamp on request.](../assets/screens/wiki-diff-desktop-light.png)
+
+The dialogs, each at desktop width in the light theme, are where a decision is
+taken:
+
+![New project: the name and the slug it will use.](../assets/screens/new-project-desktop-light.png)
+
+![Delete a project, with the typed confirmation.](../assets/screens/delete-project-desktop-light.png)
+
+![End a session, with the pruning note under it.](../assets/screens/end-session-desktop-light.png)
+
+![Prune, reviewing the bytes it would delete.](../assets/screens/prune-desktop-light.png)
+
+![Issue a token, revealing it once.](../assets/screens/issue-token-desktop-light.png)
+
+![Revert, showing the version a revert would put back.](../assets/screens/revert-desktop-light.png)
+
 The dark theme draws the same surfaces from the same tokens:
 
 ![Home at desktop width in the dark theme.](../assets/screens/home-desktop-dark.png)
@@ -206,8 +233,10 @@ Description, the file name computed from the title, and a note naming the type,
 status and source. New page writes a page that is not there yet with
 `if_version: "absent"`; Save to wiki, offered on a session brain entry, copies it
 in through `kb/promote` and leaves the source where it was. The sheet is
-reachable in the index header on the desktop and in the tools row and the Wiki
-home on a phone, where the index control row is hidden.
+reachable in the index header on the desktop, where it appears once, and in the
+overflow menu on a phone, where the index control row is hidden and the tools row
+carries only the segment tabs. The Wiki home offers it once, at the foot of the
+page list.
 
 A page's **History** link sits in the reader's control row. The history is a
 stage of its own, one row per version with its time, actor, what it did and
