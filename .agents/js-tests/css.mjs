@@ -35,11 +35,19 @@ export function sheet(name) {
   return parsed.get(name);
 }
 
-/** A declaration as the walk reads it: its property, its value, its weight. */
-function declaration(node) {
+/**
+ * A declaration as the walk reads it: its property, its value, its weight.
+ *
+ * The value is the source text the parse spans rather than a regenerated form.
+ * css-tree's generator drops the whitespace after a `var()` function, so
+ * `padding: 0 var(--s-1) 0` comes back as `0 var(--s-1)0`, and a gate that read
+ * that would hold a value nobody wrote.
+ */
+function declaration(node, css) {
+  const raw = css ? css.slice(node.value.loc.start.offset, node.value.loc.end.offset) : null;
   return {
     property: node.property.toLowerCase(),
-    value: csstree.generate(node.value).trim(),
+    value: (raw ?? csstree.generate(node.value)).trim(),
     important: Boolean(node.important),
     line: node.loc?.start?.line ?? null,
   };
@@ -52,14 +60,14 @@ function declaration(node) {
  * read a phone-only rule as the desktop one.
  */
 export function rules(name) {
-  const { ast } = sheet(name);
+  const { ast, css } = sheet(name);
   const found = [];
   csstree.walk(ast, {
     visit: "Rule",
     enter(node) {
       const declarations = [];
       node.block.children.forEach((child) => {
-        if (child.type === "Declaration") declarations.push(declaration(child));
+        if (child.type === "Declaration") declarations.push(declaration(child, css));
       });
       found.push({
         selectors: csstree.generate(node.prelude)

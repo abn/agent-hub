@@ -424,10 +424,12 @@ describe("a rule is read as a rule", () => {
     // declares. Read as a substring it was satisfied by any `gap: 4px;` in the
     // file, so a gap added to an unrelated selector stood in for the toggle's
     // own and a toggle that lost its gap still passed. Here the value is read
-    // off the rule that carries it, and nowhere else can satisfy it.
+    // off the rule that carries it, and nowhere else can satisfy it. The value
+    // is the token the spacing scale now carries, so the check holds the step
+    // rather than the literal it was written as.
     const toggle = declaredOn(APP, ".hub-col-resolved-toggle", "gap");
     expect(toggle, "the Resolved toggle declares no gap").not.toBeNull();
-    expect(toggle.value, "the Resolved toggle's gap after the check glyph").toBe("4px");
+    expect(toggle.value, "the Resolved toggle's gap after the check glyph").toBe("var(--s-1)");
   });
 
   it("gives every fixed overlay a z-index, read per rule", () => {

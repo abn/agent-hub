@@ -60,10 +60,25 @@ you" would otherwise share a tone, so knowledge gets its own, and
 The scale is 28 for a page title, 22 for a section, 17 for an item title, 15
 for a row title and for body, 13 for meta, 12 for an uppercase section label
 and for mono data. Titles hold a line height of at least 1.3; body sits at
-1.45 to 1.6.
+1.45 to 1.6. There is no 14: a size between meta and body was two sizes in
+practice, and every use has moved to 13 or 15.
 
 A floor of 12px applies to any interface text. Where the handoff specifies
-11px, 12px wins. This is a build gate, not a preference.
+11px, 12px wins, and 9px becomes 12. This is a build gate, not a preference.
+
+**The scale is a token.** Radius is `--r-1`, `--r-2` or `--r-pill`. Spacing
+uses the `--s-*` steps, 4 to 32. Type uses the `--t-*` sizes. A value the
+token file does not carry is a design question, not a local decision, and
+`make web/styles` counts the declarations that still carry one: the count is
+pinned and only falls, so the stylesheet can be brought onto the scale a
+screen at a time without the rule being waived on the way. The gate reads the
+parsed declarations, holds the properties `font-size`, `font`, `border-radius`,
+`gap`, `row-gap`, `column-gap` and the `padding` and `margin` longhands, and
+names on its allow-list what is structural rather than a step: a band's own
+height, a control's own box, a row's own rhythm, a hairline, a glyph column and
+an offset that pulls an object back under its own edge. Each entry carries the
+property and the selector family it belongs to, and an entry that matches
+nothing fails the run.
 
 ## Glyphs
 
@@ -309,6 +324,13 @@ structure, not to line length.
     glyphs and a segment drawn `--tap` wide, so no control's centre is under
     another's area, and a glyph stays above the field that draws it. A link
     inside a sentence is text, not a control.
+  - **Label.** A button's label is one style per control size: 15/600 where
+    the control is `--ctl-form` or `--tap`, which is what a field's action, a
+    dialog's action and any button on a fine pointer is drawn at, and 13/600
+    where it is `--ctl` or `--ctl-sm`, which is what a band's or a row's
+    control is drawn at. A browser check reads the computed size and weight
+    off every labelled button on every screen, at both pointers, and holds them
+    against the box the control is drawn in.
   - **Width.** A button is as wide as its label.
   - **Deviation: one phone control answers to less than 44 by 44.** The project
     switcher's tabs, because the switcher scrolls sideways in a 36px track and
