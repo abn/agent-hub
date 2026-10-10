@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -105,6 +105,20 @@ export default defineConfig({
       name: "sizing-touch",
       use: { viewport: WIDTHS.phone, hasTouch: true },
       testMatch: /(control-sizing|style-attributes)\.spec\.mjs/,
+    },
+    // A form is a 640 column and a button is its label at every width, so its
+    // two projects are one fine pointer at the desktop width and one coarse
+    // pointer at the phone width, each on its own hub because they walk every
+    // screen.
+    {
+      name: "forms-desktop",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /forms\.spec\.mjs/,
+    },
+    {
+      name: "forms-touch",
+      use: { viewport: WIDTHS.phone, hasTouch: true },
+      testMatch: /forms\.spec\.mjs/,
     },
     // A waiting row is measured at both widths in both themes and photographed,
     // on hubs of its own so the question it posts moves no other check's queue.

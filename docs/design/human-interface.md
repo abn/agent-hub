@@ -110,6 +110,15 @@ the greeting, the standard 52px bar fades in with the title at x 48 and the chip
 pin under it in the 44px tools row. Settings carries no tools row and takes a
 bottom hairline.
 
+A form is a 640 column at every width, whatever pane it sits in, and a
+button is as wide as its label rather than as wide as the pane beside it. A
+settings row is 48 whatever its control on a fine pointer: the control is
+drawn at the row's 32px size, so the row's 16px of padding plus the control is
+exactly 48 and the separating hairline is one of the 48. Under a coarse pointer
+a settings row is 56, because a 44px control in 12px of padding is 56. A row
+whose label carries a second line of copy grows to hold that line, and never
+because of its control.
+
 The design contract the interface is being brought to, including the one
 shell the sections converge on, lives in `DESIGN.md` at the repository root.
 This page records what ships; that file records what is designed.

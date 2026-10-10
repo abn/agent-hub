@@ -223,6 +223,24 @@ reader's place is kept by the browser's own scroll anchoring.
   where a pill beside the subject left 1 to 13; at the 260px minimum it shows
   13 to 20, and on a phone 31 to 37.
 
+### Forms
+
+A form is a 640 column at every width, whatever the pane it sits in. Where the
+pane is narrower than 640 the column is the pane, so a phone form is the stage
+and a desktop one is not. The forms gate measures the column on the page rather
+than reading a rule.
+
+A settings row is 48 whatever its control. The control is drawn at `--ctl`, so
+32 inside the row's 16px of padding is exactly 48, and the separating hairline
+is one of the 48. A row whose label carries a second line of copy grows to hold
+that line, and never because of its control. Under a coarse pointer a row is 56,
+because a `--tap` control inside 12px of padding is 56 and 48 cannot hold the
+target.
+
+A button is as wide as its label. A control that is itself a row, a menu item,
+or a tab of a strip is as wide as the box that holds it, and a control that
+draws only a glyph is held to `--tap` rather than to a label.
+
 ### The phone
 
 - One header and one tools row, sized as above. The tab bar is five labelled
@@ -292,9 +310,7 @@ structure, not to line length.
     another's area, and a glyph stays above the field that draws it. A link
     inside a sentence is text, not a control.
   - **Width.** A button is as wide as its label.
-  - **Deviation: what is not built to this yet.** Some desktop buttons and
-    fields still stretch across their pane, so the width rule is the design
-    and not yet the build. One phone control answers to less than 44 by 44: the project
+  - **Deviation: one phone control answers to less than 44 by 44.** The project
     switcher's tabs, because the switcher scrolls sideways in a 36px track and
     a scroll box clips a hit area. The browser gate names it, and fails once it
     passes, so the list only shrinks.
@@ -599,6 +615,16 @@ named checks from the current handoff.
     a comment thread, a refused save and the add-agent form), no element's
     `style` attribute declares a box size, spacing, type, colour, fill, border,
     shadow or outline, or a custom property the check does not name.
+14. **Forms.** Every form column is 640 or the pane that holds it, every button
+    is as wide as its label, and a one-line settings row is 48 on a fine pointer
+    and 56 on a coarse one. The check walks every screen the router registers
+    and the forms and dialogs behind a control, at both widths, and measures a
+    control's drawn width against the width it asks for with its width
+    declarations taken away, so a percentage `min-width` is caught. The
+    allow-list names the controls that are as wide as their box: a row that is
+    itself a control, a menu item, a delete action's 90px floor and a tab of a
+    strip. The artifact viewer's document is a separate page in a sandboxed
+    frame, so this gate does not walk into it.
 
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said

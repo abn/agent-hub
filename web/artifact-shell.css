@@ -27,7 +27,7 @@ iframe#hub-frame[hidden]{display:none}
 #hub-password{width:100%;min-height:48px;font-size:17px;padding:0 var(--s-3);border:1px solid var(--line-strong);border-radius:var(--r-1);background:var(--surface);color:var(--ink);box-sizing:border-box}
 #hub-unlock-form .hub-show,#hub-unlock-form .hub-remember{display:flex;align-items:center;gap:var(--s-2);min-height:44px;margin:var(--s-2) 0 0;font-size:var(--t-13);color:var(--ink-2)}
 .hub-show input,.hub-remember input{width:20px;height:20px;accent-color:var(--accent)}
-#hub-unlock-form button[type="submit"]{width:100%;min-height:48px;margin-top:var(--s-3);font-size:17px;font-weight:600;border:0;border-radius:var(--r-1);background:var(--ink);color:var(--ink-inverse);cursor:pointer}
+#hub-unlock-form button[type="submit"]{min-height:var(--ctl-form);padding:0 var(--s-4);margin-top:var(--s-3);font:600 var(--t-15)/1 var(--font-sans);border:0;border-radius:var(--r-1);background:var(--ink);color:var(--ink-inverse);cursor:pointer}
 #hub-unlock-error{font-size:12px;color:var(--danger)}
 #hub-fingerprint{font-family:var(--font-mono);font-size:12px;color:var(--ink-3)}
 section#hub-comments{margin:var(--s-4) auto;max-width:40rem;padding:0 var(--s-4)}
@@ -41,4 +41,5 @@ section#hub-comments li{border-top:1px solid var(--line);padding:var(--s-3) 0}
 #hub-back,#hub-theme-toggle{width:44px;height:44px}
 #hub-forget{min-height:44px}
 #hub-version-select{min-height:44px}
+#hub-unlock-form button[type="submit"]{min-height:var(--tap)}
 }
