@@ -4,6 +4,31 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.2.0...agent-hub-v1.3.0) (2026-10-10)
+
+
+### Features
+
+* **kb:** export a knowledge base to a folder and import it back ([a2696fa](https://github.com/abn/agent-hub/commit/a2696fae5f31492b7da0e2302932385799ada8a8))
+* **kb:** keep page history and revert a page to an earlier version ([787003e](https://github.com/abn/agent-hub/commit/787003e1e8a0e5d6dd67ac60b91944ce476b4455))
+* **mcp:** brief an agent on a project in one call ([e586b52](https://github.com/abn/agent-hub/commit/e586b528235ade14eaea0aaacb1ef0794cf4cddb))
+* **mcp:** serve the knowledge base as MCP resources ([608c3fa](https://github.com/abn/agent-hub/commit/608c3fa44f5ae7ecba58e7512c21188c54b24fb0))
+* **web:** put every type size, radius and spacing step on a token ([cd81d9f](https://github.com/abn/agent-hub/commit/cd81d9fb2bbf614af611bfab91de6918f93dc9bb))
+* **web:** set every form in a 640 column and size buttons to their labels ([240d765](https://github.com/abn/agent-hub/commit/240d76580b982e367b050046f18035c3bff6ff2a))
+
+
+### Bug Fixes
+
+* **store:** queue hub store writers fairly for the write lock ([d8d4f83](https://github.com/abn/agent-hub/commit/d8d4f83eb4dcf94ea03c7ec10ccd182aa652cfa6))
+* **web:** give a waiting row's subject the whole title line ([6ca02f2](https://github.com/abn/agent-hub/commit/6ca02f291161054e626d9ac7d4d5e007627f8771))
+* **web:** let a phone dialog's actions take the sheet's width ([733c269](https://github.com/abn/agent-hub/commit/733c269e8b6cbaa426ac6692264ecd74d051c44b))
+* **web:** let every desktop pane reserve the frame ([ae4b412](https://github.com/abn/agent-hub/commit/ae4b412c7abcd791e1e9fd84449167379f192e7b))
+* **web:** let one pane own one gutter ([ba51226](https://github.com/abn/agent-hub/commit/ba51226d6cc28c51c9d27f0d34fbb5d4872c329b))
+* **web:** one composer for every reply and comment, sized by the pointer ([82f9cf1](https://github.com/abn/agent-hub/commit/82f9cf1e56dfa336b88174b244dc4b8a86f82912))
+* **web:** one label style, short time on a row, and a copy glyph ([dc5241d](https://github.com/abn/agent-hub/commit/dc5241dd47c882c9eaa1e2965ee42771a6316410))
+* **web:** open an artifact in its project's Artifacts shell ([55551ca](https://github.com/abn/agent-hub/commit/55551ca672c1bad9d09853feec8a7883112c0757))
+* **web:** size controls by the pointer and the band that holds them ([9b48285](https://github.com/abn/agent-hub/commit/9b482853034f8e23df2491e7a2be95de32611495))
+
 ## [1.2.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.1.0...agent-hub-v1.2.0) (2026-10-08)
 
 
