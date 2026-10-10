@@ -6,6 +6,24 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### The dialogs and the wiki's other three surfaces are photographed
+
+* **Update**: [Human interface](design/human-interface.md) states that New page
+  is reachable once on the desktop, in the index header, and in the overflow
+  menu on a phone, where the index control row is hidden; it used to describe it
+  as living in the tools row and on the Wiki home, and the desktop showed it
+  twice.
+* **Add**: captures for the wiki editor, a page's History and the change log,
+  and for the six dialogs a reader reaches from a screen: new project, delete
+  project, end session, prune, issue token and revert. The capture script now
+  carries the dialogs as their own set, presses the control that opens each one
+  and photographs the decision, and it reads the page's older version back from
+  the hub so the diff and the revert dialog are taken against a version that
+  exists. Issue a token opens over the agent detail stage, which a phone does
+  not reach, so it is carried at the desktop width alone.
+
+## 2026-10-10
+
 ### One label style, short time, a copy glyph
 
 * **Update**: [Human interface](design/human-interface.md) states that there is

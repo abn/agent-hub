@@ -63,6 +63,26 @@ THEMES = ["light", "dark"]
 # reader, and Search's knowledge hits all have real content. It reaches the
 # project store through brain_put, the same door an agent writes pages with.
 WIKI_PAGE = "notes/index.md"
+# The page's second version, so its History has a version to open as a diff and
+# one to revert to.
+WIKI_PAGE_BODY_SECOND = (
+    "---\n"
+    "type: Overview\n"
+    "title: Agent notes\n"
+    "description: What the checks project's agents write between sessions.\n"
+    "tags: [notes, checks]\n"
+    "---\n"
+    "\n"
+    "# Agent notes\n"
+    "\n"
+    "The checks project's agents write here what outlives a session: the\n"
+    "nightly run's shape, the release gate, and where the sealed notes live.\n"
+    "\n"
+    "## Nightly run\n"
+    "\n"
+    "The nightly session writes a finished notice when the check passes.\n"
+)
+
 WIKI_PAGE_BODY = (
     "---\n"
     "type: Overview\n"
@@ -108,24 +128,27 @@ def seed_wiki(port: int) -> None:
         },
     )
     harness.mcp_call(port, session, {"jsonrpc": "2.0", "method": "notifications/initialized"})
-    harness.mcp_call(
-        port,
-        session,
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "brain_put",
-                "arguments": {
-                    "store": "project",
-                    "project_id": harness.PROJECT_ID,
-                    "path": f"/fs/{WIKI_PAGE}",
-                    "content": WIKI_PAGE_BODY,
+    # The page twice, so its History has a version to open as a diff and one to
+    # revert to, and so the change log has a row that is not the newest.
+    for index, body in enumerate([WIKI_PAGE_BODY, WIKI_PAGE_BODY_SECOND]):
+        harness.mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": 2 + index,
+                "method": "tools/call",
+                "params": {
+                    "name": "brain_put",
+                    "arguments": {
+                        "store": "project",
+                        "project_id": harness.PROJECT_ID,
+                        "path": f"/fs/{WIKI_PAGE}",
+                        "content": body,
+                    },
                 },
             },
-        },
-    )
+        )
 
 
 # Each capture names the route it opens, the selector that only that screen
@@ -137,7 +160,7 @@ def seed_wiki(port: int) -> None:
 # by `shot`. The set follows the router's screens: home, inbox and an open
 # item, projects, the project feed, sessions and the session detail, artifacts
 # and the viewer, wiki and a reader page, search, storage, settings, access.
-def captures(seeded: dict) -> list[tuple[str, str, str]]:
+def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
     project = seeded["project_id"]
     session = seeded["session_id"]
     # The artifact address names the sealed note, which is not the newest, so
@@ -172,12 +195,52 @@ def captures(seeded: dict) -> list[tuple[str, str, str]]:
             "main .shell-prose.wiki-page",
             "wiki-reader",
         ),
+        (
+            f"projects/{project}/wiki?page={WIKI_PAGE}&history=1",
+            "main .wiki-versions",
+            "wiki-history",
+        ),
+        (
+            f"projects/{project}/wiki?page={WIKI_PAGE}&history=1&version={older_version}",
+            "main .wiki-diff",
+            "wiki-diff",
+        ),
+        (
+            f"projects/{project}/wiki?page={WIKI_PAGE}&edit=1",
+            "main .wiki-editor",
+            "wiki-editor",
+        ),
         ("search?q=nightly", "main .search-results .search-row", "search"),
         ("storage", "main .storage .storage-row", "storage"),
         ("settings", "main .form-row-title, main .row .title", "settings"),
         ("access", "main .access-screen, main .form-row-title", "access"),
         ("connect", "main .connect .connect-field", "connect"),
         ("more", "main .more-screen .more-row", "more"),
+    ]
+
+
+# The dialogs a reader reaches from a screen, each with the control that opens it
+# and what only that dialog paints. They are the second half of the set: a dialog
+# is where a decision is taken, and a bundle that never photographs one shows a
+# surface with nothing at stake in it. The routes carry no leading hash, because
+# the walk sets one.
+def dialogs(seeded: dict, older: int) -> list[tuple[str, str, str, str, tuple[str, ...]]]:
+    """(stem, route, ready selector, opener, widths) for each dialog carried.
+
+    Issue token opens over the agent detail stage, which a phone does not reach,
+    so it is carried at the desktop width; the rest are reachable at both.
+    """
+    project = seeded["project_id"]
+    at = f"projects/{project}"
+    diff = f"{at}/wiki?page={WIKI_PAGE}&history=1&version={older}"
+    both = ("desktop", "phone")
+    return [
+        ("new-project", "projects", "main .projects-screen .project-row", '[data-action="new-project"]', both),
+        ("delete-project", f"{at}/feed", "main .feed-row", ".proj-overflow-btn", both),
+        ("end-session", f"session?project={project}&id={seeded['session_id']}", "main .end-session", '[data-action="end"]', both),
+        ("prune", "storage", "main .storage", "[data-action='storage-prune-all'], .storage-prune-all-btn", both),
+        ("issue-token", "access", "main .agent-index-row", '[data-action="agent-issue"]', ("desktop",)),
+        ("revert", diff, "main .wiki-diff", '[data-action="wiki-revert"]', both),
     ]
 
 
@@ -225,6 +288,31 @@ def capture(page, route: str, selector: str, stem: str, width: str, theme: str) 
     return shot(page, stem, width, theme)
 
 
+def open_dialog(page, opener: str) -> None:
+    """Press the control a screen carries and wait for the dialog it opens."""
+    page.evaluate(
+        """(selector) => [...document.querySelectorAll(selector)]
+             .filter((control) => control.offsetParent !== null)
+             .pop()
+             ?.click()""",
+        opener,
+    )
+    page.wait_for_selector("dialog[open]", timeout=10000)
+
+
+def capture_dialog(page, route: str, ready: str, opener: str, stem: str, width: str, theme: str) -> Path:
+    """Press the control that opens a dialog and photograph the decision."""
+    page.evaluate("location.hash = '#/settings'")
+    page.wait_for_selector("main .form-row-title, main .row .title", timeout=10000)
+    page.evaluate(f"location.hash = '#/{route}'")
+    page.wait_for_selector(ready, timeout=15000)
+    open_dialog(page, opener)
+    page.evaluate(
+        "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+    )
+    return shot(page, stem, width, theme)
+
+
 def run() -> int:
     written: list[Path] = []
     failures: list[str] = []
@@ -242,6 +330,23 @@ def run() -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     with harness.running_hub(NAME, override="data", cwd=str(data_dir.parent)) as (port, seeded):
         seed_wiki(port)
+        # The page is written twice, so its history holds an older version. The
+        # version numbers are the hub's, read back rather than assumed, so the
+        # diff and the revert dialog are photographed against a version that
+        # exists.
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/v1/projects/{harness.PROJECT_ID}/kb/versions"
+            f"?path={WIKI_PAGE}",
+            headers={"Authorization": f"Bearer {harness.ADMIN_TOKEN}"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            history = json.load(response)
+        # A version the page does not hold now, which is the one a diff and a
+        # revert are about.
+        older_version = next(
+            (row["version"] for row in history["versions"] if row["version"] != history.get("current_version")),
+            "",
+        )
         from playwright.sync_api import sync_playwright
 
         # Obscura over CDP when OBSCURA_CDP names its endpoint and Obscura
@@ -295,7 +400,7 @@ def run() -> int:
                         )
                         page = context.new_page()
                     page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
-                    for route, selector, stem in captures(seeded):
+                    for route, selector, stem in captures(seeded, older_version):
                         try:
                             written.append(capture(page, route, selector, stem, width, theme))
                         except AssertionError as problem:
@@ -303,6 +408,17 @@ def run() -> int:
                         except Exception as problem:  # playwright timeout, etc.
                             failures.append(
                                 f"{width} {theme} #{route}: {type(problem).__name__}: {problem}"
+                            )
+                    for stem, route, ready, opener, widths in dialogs(seeded, older_version):
+                        if width not in widths:
+                            continue
+                        try:
+                            written.append(
+                                capture_dialog(page, route, ready, opener, stem, width, theme)
+                            )
+                        except Exception as problem:  # playwright timeout, etc.
+                            failures.append(
+                                f"{width} {theme} #{stem}: {type(problem).__name__}: {problem}"
                             )
                     # On a CDP connection the context is Obscura's only one and
                     # closing it ends the session; close the page instead. A
@@ -322,7 +438,9 @@ def run() -> int:
     # the report tests the whole route path rather than its first segment, and
     # names every screen left bare.
     fragments = set()
-    for route, _selector, _stem in captures(seeded):
+    for route, _selector, _stem in captures(seeded, older_version):
+        fragments.update(part for part in route.split("?")[0].split("/") if part)
+    for _stem, route, _ready, _opener, _widths in dialogs(seeded, older_version):
         fragments.update(part for part in route.split("?")[0].split("/") if part)
     uncovered = [name for name in harness.router_screens() if name not in fragments]
     if uncovered:
