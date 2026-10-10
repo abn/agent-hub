@@ -4,6 +4,32 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-10
+
+### A form is a 640 column
+
+* **Update**: [Human interface](design/human-interface.md) states that a form
+  is a 640 column at every width, that a settings row is 48 whatever its
+  control, and that a button is as wide as its label. Project settings, the
+  wiki editor, the New agent form and the add-agent form all sit in the 640
+  column, and the session detail's End session, project settings' Save,
+  Connect's submit and the encrypted artifact's Unlock are as wide as their
+  labels rather than as wide as their panes.
+* **Update**: a settings row is 48 whatever its control: the switch is drawn at
+  `--ctl` on a fine pointer and `--tap` on a coarse one, and the segmented
+  control's segment is `--ctl-sm` inside its own 2px padding. Under a coarse
+  pointer a settings row is 56, because a 44px control in 12px of padding is
+  56. A row whose label carries a second line of copy grows to hold that line.
+* **Add**: build gate 14, Forms, in the design contract. It walks every screen
+  the router registers and the forms and dialogs behind a control, at a desktop
+  width and a phone width, and measures a control's drawn width against the
+  width it asks for with its width declarations taken away, so a percentage
+  `min-width` is caught. The allow-list names what is as wide as its box: a row
+  that is itself a control, a menu item, the delete action's 90px floor and a
+  tab of a strip. What the eye sees: the phone settings rows, which measured
+  56 to 62px against each other, are a steady 56, and the compact-rows switch
+  no longer sets its row's height.
+
 ## 2026-10-09
 
 ### Styles live in the stylesheet

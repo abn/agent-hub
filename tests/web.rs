@@ -1407,22 +1407,6 @@ fn desktop_round12_records_the_content_and_chrome_split_in_the_contract() {
     );
 }
 
-#[test]
-fn desktop_round12_declares_the_shared_row_form_once() {
-    for class in [
-        ".form-column",
-        ".form-group-label",
-        ".form-row",
-        ".form-row-sub",
-        ".form-row-value",
-    ] {
-        assert!(
-            APP_CSS.contains(class),
-            "app.css must declare the shared row form class {class}"
-        );
-    }
-}
-
 // Round 12, desktop Settings. The pre-shell panels retire: the screen is a
 // 640px column of 48px rows under quiet mono group labels, one helper line in
 // the whole screen, the data path once on the reserved control row with its
@@ -1585,14 +1569,6 @@ fn desktop_settings_control_row_carries_the_path_and_the_copy_glyph() {
     assert!(
         desktop.contains("data-path="),
         "the copy glyph carries the full absolute path to copy"
-    );
-}
-
-#[test]
-fn desktop_settings_uses_the_shared_form_column() {
-    assert!(
-        APP_CSS.contains(".form-column") && APP_CSS.contains(".form-row"),
-        "the shared row form must be declared in app.css"
     );
 }
 
@@ -1801,8 +1777,9 @@ fn desktop_agents_is_list_and_item_shell() {
 // Round 13.1, RULE 13.3: Add agent opens the form in the stage on desktop.
 // Not an inline form in the list. Add agent takes aria-pressed="true" and
 // clears the index selection; stage 52 header "New agent", 40 row "It gets its
-// token once, when you create it.", form 440 max with Agent id, Display name,
-// Create agent, Cancel.
+// token once, when you create it.", and a stage form with Agent id, Display
+// name, Create agent and Cancel. The form's column is the shared 640 every
+// other form takes, which the forms gate measures on the page rather than here.
 #[test]
 fn desktop_agents_add_agent_opens_form_in_stage() {
     let desktop = AGENTS_JS
@@ -1817,10 +1794,6 @@ fn desktop_agents_add_agent_opens_form_in_stage() {
     assert!(
         desktop.contains("It gets its token once, when you create it."),
         "RULE 13.3: stage control row carries token copy when creating"
-    );
-    assert!(
-        desktop.contains("440"),
-        "RULE 13.3: stage form is capped at 440px"
     );
     assert!(
         desktop.contains("Agent id") && desktop.contains("Display name"),

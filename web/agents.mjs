@@ -30,7 +30,9 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
   // - Add agent button takes aria-pressed="true" and background var(--surface-2)
   // - The index selection clears
   // - Stage 52 header "New agent", 40 control row "It gets its token once, when you create it."
-  // - Stage body carries form, 440 max with Agent id, Display name, Create agent and Cancel.
+  // - Stage body carries form with Agent id, Display name, Create agent and Cancel.
+  // The form's column is the shared 640 every other form is, so round 13's 440
+  // no longer holds; the forms gate reads the column from the page.
   const confidentialProjects = projects.filter((p) => p.confidential);
   const confidentialCount = confidentialProjects.length;
 

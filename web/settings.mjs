@@ -357,21 +357,6 @@ export async function settingsScreen(gen) {
 
   const form = `
     <form class="settings" data-action="prefs" onsubmit="event.preventDefault();">
-      <style>
-        @media (pointer: coarse) {
-          .settings-row-shortcuts { display: none !important; }
-        }
-        .settings-flat-group { margin-bottom: 8px; }
-        .settings-group-title { padding: 20px 16px 8px; font: 600 12px/1 var(--font-mono); color: var(--ink-3); letter-spacing: .06em; }
-        .settings-flat-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; box-sizing: border-box; }
-        .settings-flat-row:first-of-type { border-top: 1px solid var(--line); }
-        .settings-nav-row { padding: 8px 8px 8px 16px; }
-        .settings-btn-row { width: 100%; border: 0; border-top: 0 !important; font: 500 15px/1 var(--font-sans); text-align: left; cursor: pointer; color: var(--ink); }
-        .settings-footer-row { display: flex; align-items: center; gap: 4px; padding: 14px 8px 0 16px; }
-        .settings-copy-btn { flex: none; width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 0; border-radius: var(--r-1); color: var(--ink-2); cursor: pointer; }
-        .settings-copy-btn:focus-visible { outline: 2px solid var(--focus); }
-      </style>
-
       <div class="settings-flat-group">
         <div class="settings-group-title">THIS DEVICE</div>
         <div class="settings-flat-row row">

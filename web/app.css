@@ -2067,7 +2067,7 @@ button.empty-link {
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 2px 0 0;
 }
 .proj-head-meta .pset-sub { margin: 0; }
-.pset { display: flex; flex-direction: column; }
+.pset { display: flex; flex-direction: column; max-width: 640px; }
 /* The form is the stage's content: it starts right under the reserved control
    row, at the same y as every other screen's body, with the pane's own gutter
    and nothing above it. */
@@ -2096,7 +2096,6 @@ button.empty-link {
   color: var(--ink-2);
 }
 .connect-show input { width: auto; min-height: 0; }
-.connect .primary { width: 100%; }
 
 .pset-field { display: flex; flex-direction: column; gap: 6px; margin-top: var(--s-3); }
 .pset-field label, .pset-label { margin: 0; font-size: var(--t-13); color: var(--ink-2); }
@@ -2120,7 +2119,7 @@ button.empty-link {
 .pset-error { margin: 0; color: var(--danger); font-size: var(--t-13); }
 .pset-problem { margin-top: var(--s-2); }
 .pset-actions { display: flex; gap: var(--s-2); margin-top: var(--s-5); }
-.pset-actions .primary { flex: 1; font-weight: 600; }
+.pset-actions .primary { font-weight: 600; }
 .pset-delete { background: transparent; color: var(--danger); }
 /* end component: project-settings */
 /* component: search. The design's 48px field with its glyph and clear, the
@@ -3434,8 +3433,11 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   gap: 8px;
   margin-top: auto;
 }
+/* End session is not prune: it stops something live, so it keeps the action
+   tone in an outline, not the danger tone. A button is as wide as its label,
+   so the footer's control is the verb and not the pane. */
 .session-actions-footer button {
-  width: 100%;
+  align-self: flex-start;
   min-height: 48px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
@@ -3445,8 +3447,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   cursor: pointer;
 }
 /* End session is not prune: it stops something live, so it keeps the action
-   tone in an outline, not the danger tone. The ellipsis and the confirmation
-   say it opens a dialog. */
+   tone in an outline, not the danger tone. */
 .session-actions-footer button.end-session {
   border-color: var(--action);
   color: var(--action);
@@ -5571,18 +5572,29 @@ a.session-back {
   gap: 12px;
 }
 
+/* The switch is a row control, not a hit target of its own: it is drawn at
+   --ctl on a fine pointer, where a 48px row holds it, and at --tap on a coarse
+   one, where the row grows to 56 to hold the target. Its track is the 40x24
+   the design draws, centred in the box. */
 .settings-switch {
-  flex: 0 0 44px;
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
+  flex: none;
+  position: relative;
+  width: var(--ctl);
+  min-width: var(--ctl);
+  height: var(--ctl);
+  min-height: var(--ctl);
   display: grid;
   place-items: center;
   background: none;
   border: 0;
   padding: 0;
   cursor: pointer;
+}
+@media (pointer: coarse) {
+  .settings-switch {
+    width: var(--tap); min-width: var(--tap);
+    height: var(--tap); min-height: var(--tap);
+  }
 }
 
 .settings-switch:focus,
@@ -5803,7 +5815,10 @@ a.session-back {
   align-items: center;
   gap: var(--s-3);
   min-height: 48px;
-  padding: 8px 12px;
+  /* The separating hairline is one of the row's 48, so the padding under it is
+     one less than the padding above: a --ctl control plus 15px of padding plus
+     the hairline is exactly 48. */
+  padding: 8px 12px 7px;
   border-bottom: 1px solid var(--line);
   box-sizing: border-box;
   background: var(--surface);
@@ -5827,6 +5842,12 @@ a.session-back {
   width: auto;
   flex: none;
 }
+/* A settings row is 48 whatever its control. The row's control is drawn at
+   --ctl, so 32 inside the row's 15px of padding plus its hairline is exactly 48
+   and no control sets the row's height. The segmented control carries 2px
+   either side of its track, so its segment is --ctl-sm. */
+.form-row .settings-segmented { height: var(--ctl); }
+.form-row .settings-segment { height: var(--ctl-sm); min-height: var(--ctl-sm); }
 .form-row-title {
   font-size: var(--t-15);
   font-weight: 500;
@@ -5857,7 +5878,8 @@ a.session-back {
 @media (pointer: coarse) {
   .fine-only,
   .settings-group-keyboard,
-  .form-group-keyboard {
+  .form-group-keyboard,
+  .settings-row-shortcuts {
     display: none !important;
   }
 }
@@ -6292,6 +6314,8 @@ a.session-back {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* A button is as wide as its label, so the sheet's actions are the verbs. */
+  align-items: flex-start;
 }
 .project-create-submit {
   height: 48px;
@@ -6305,7 +6329,6 @@ a.session-back {
   color: var(--ink-inverse);
   font: 600 16px/1 var(--font-sans);
   cursor: pointer;
-  width: 100%;
 }
 .project-create-submit:hover {
   filter: brightness(1.05);
@@ -6321,7 +6344,9 @@ a.session-back {
   font-size: var(--t-12);
   line-height: 1.5;
   color: var(--ink-3);
-  text-align: center;
+  /* Left-aligned below the width where the actions sit right: a centred line
+     that wraps reads ragged at a narrow phone width. */
+  text-align: left;
 }
 @media (min-width: 720px) {
   .project-create-close {
@@ -6354,7 +6379,6 @@ a.session-back {
     box-shadow: var(--focus);
   }
   .project-create-submit {
-    width: auto;
     min-height: 44px;
     height: 44px;
     padding: 0 18px;
@@ -7939,7 +7963,7 @@ dialog.dialog-project-delete {
   padding: 20px 24px 0;
 }
 .agent-create-column {
-  max-width: 440px;
+  max-width: 640px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -8231,8 +8255,9 @@ button.access-add-btn {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-width: 640px;
 }
-button.access-create-submit { height: 36px; margin-top: 4px; }
+button.access-create-submit { align-self: flex-start; height: 36px; margin-top: 4px; }
 .row.agents-list-admin {
   display: flex;
   align-items: center;
@@ -8503,6 +8528,7 @@ button.wiki-revert-btn {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
+  max-width: 640px;
   height: 100%;
   box-sizing: border-box;
 }
@@ -8790,6 +8816,46 @@ button.storage-prune-all {
 .storage-projects-list > .storage-project-row:first-child { border-top: 1px solid var(--line); }
 .storage-legend-grid .storage-swatch { width: 10px; height: 10px; }
 /* Settings. */
+/* The phone's flat rows. A row is 56 under a coarse pointer, because a 44px
+   control inside the row's 12px of padding is exactly 56 and 48 cannot hold
+   the target. A row that is itself a control, a nav row or the sign-out row,
+   keeps the reader's tap area. */
+.settings-flat-group { margin-bottom: 8px; }
+.settings-group-title {
+  padding: 20px 16px 8px;
+  font: 600 var(--t-12)/1 var(--font-mono);
+  color: var(--ink-3);
+  letter-spacing: .06em;
+}
+.settings-flat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  /* The hairline is one of the row's 56, so a --tap control plus 11px of
+     padding plus the hairline is exactly 56. */
+  padding: 6px 16px 5px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.settings-flat-row:first-of-type { border-top: 1px solid var(--line); }
+/* The sign-out row is a control rather than a row of the group, and it is the
+   first button among its siblings, so the group's top hairline does not apply. */
+.settings-flat-row.settings-btn-row { border-top: 0; }
+.settings-nav-row { padding: 6px 8px 5px 16px; }
+.settings-btn-row {
+  width: 100%; border: 0; border-top: 0;
+  font: 500 var(--t-15)/1 var(--font-sans); text-align: left; cursor: pointer; color: var(--ink);
+}
+.settings-footer-row { display: flex; align-items: center; gap: 4px; padding: 14px 8px 0 16px; }
+.settings-copy-btn {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+  background: none; border: 0; border-radius: var(--r-1); color: var(--ink-2); cursor: pointer;
+}
+.settings-copy-btn:focus-visible { outline: 2px solid var(--focus); }
 .settings-row-text {
   flex: 1;
   min-width: 0;
@@ -8810,7 +8876,7 @@ button.storage-prune-all {
 .settings-row-chevron {
   flex: none;
   width: 32px;
-  height: 44px;
+  height: 40px;
   display: grid;
   place-items: center;
   color: var(--ink-3);

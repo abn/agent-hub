@@ -122,15 +122,16 @@ const CONNECT_STYLE = `<style>
   color: var(--danger);
   line-height: 1.4;
 }
+/* A button is as wide as its label, and a form action is --ctl-form on a fine
+   pointer and --tap on a coarse one, which the shared button rule already
+   gives it. Only the fill is this screen's own. */
 .connect-submit-btn {
-  height: 48px;
-  min-height: 48px;
-  width: 100%;
+  align-self: flex-start;
   border: 0;
   border-radius: var(--r-1);
   background: var(--ink);
   color: var(--ink-inverse);
-  font: 600 15px/1 var(--font-sans);
+  font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
 .connect-submit-btn:hover {
