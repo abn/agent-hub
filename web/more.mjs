@@ -88,7 +88,10 @@ export async function moreScreen(gen) {
     shellHTML({
       noIndex: true,
       stageHead: shellStageHead("More", nodeLine),
-      stageControls: "",
+      // More has nothing to put in the control row, but the frame is reserved
+      // whether or not a pane has content for it: the row is there so a screen
+      // that grows one keeps its place.
+      stageControls: '<div class="shell-controls"></div>',
       stageBody: content,
     }),
   );

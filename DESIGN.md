@@ -599,12 +599,14 @@ document was published.
 A screen that fails one of these is not done. The first four are the design's
 named checks from the current handoff.
 
-1. **Chrome alignment.** Every desktop screen the router registers,
-   photographed at 1440: every horizontal rule in the chrome lands on the same
-   y, and every pane on screen, the index, the stage and an aside, has its 52px
-   header from y 0 and its control row from 52 to 92. The artifact viewer route
-   is the Artifacts shell, so it is held like any other screen. Search and More
-   are the recorded exceptions above.
+1. **Chrome alignment.** Every desktop screen the router registers, including
+   Search with a result selected, photographed at 1440: every horizontal rule in
+   the chrome lands on the same y, and every pane on screen, the index, the
+   stage and an aside, has its 52px header from y 0 and its control row from 52
+   to 92. The artifact viewer route is the Artifacts shell, so it is held like
+   any other screen. No screen is exempt: Search's stage once drew a 48px
+   header with no control row, and More no control row at all, and both now
+   reserve the two bands whether or not they have content for them.
 2. **Nothing jumps.** Opening or closing the aside does not move the article's
    left edge or its first line.
 3. **One left edge.** Every title in a list shares it, with or without a glyph,

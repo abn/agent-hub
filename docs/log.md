@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### Every pane reserves the frame
+
+* **Update**: [Human interface](design/human-interface.md) drops the two
+  recorded exceptions to the chrome-alignment gate. Search's stage drew a 48px
+  header with no control row and More drew no control row at all; both now
+  reserve the 52px header and the 40px control row, in that order, whether or
+  not they have content for them. On Search the stage's header names what the
+  preview is and the new control row holds the match stepper and the open
+  action, which used to sit in the header beside the path.
+* **Update**: the chrome-alignment gate walks every screen the router
+  registers with no exemption, and holds every visible pane, so a screen that
+  grows a pane is held the moment it appears.
+
+## 2026-10-10
+
 ### One type size, one radius and one spacing step per value
 
 * **Update**: [Human interface](design/human-interface.md) states that radius
