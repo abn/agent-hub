@@ -53,6 +53,38 @@ const ALLOWED = [
   ".projects-tab-btn",
 ];
 
+// The action rows the coarse-pointer rule is about: a dialog's or a form's
+// footer, holding the verbs a reader commits with. The phone's add-agent form
+// is a column whose fields and one submit sit together, so its action is the
+// submit and the row is the form, and the desktop's add-agent column holds its
+// own pair. Each one has to be measured somewhere in the walk, so the check
+// cannot pass by walking a set of screens that happens to hold no action row.
+const ACTION_ROWS = [
+  { selector: ".dialog-actions" },
+  { selector: ".dialog-del-actions" },
+  { selector: ".project-create-actions" },
+  { selector: ".pset-actions" },
+  { selector: ".agent-create-actions", fine: true },
+  { selector: ".wiki-editor-actions" },
+  { selector: ".session-actions-footer" },
+  { selector: ".access-add-fields", fine: false },
+];
+
+// Under a coarse pointer an action row's controls take the sheet's width
+// between them, so the label check cannot hold them and the third one does. A
+// button in one of these rows that is not named here is still held to its label
+// at either pointer, and the delete dialog's footer is already allowed at both
+// because it shipped this way before the rule was written down.
+const ALLOWED_COARSE = [
+  ".dialog-actions :is(button, .button)",
+  ".project-create-actions button",
+  ".pset-actions button",
+  ".agent-create-actions button",
+  ".wiki-editor-actions :is(button, .button)",
+  ".session-actions-footer button",
+  ".access-add-fields button",
+];
+
 // The declarations that make a control take the width of its box. They are
 // taken away and put back again, which is the whole of the measurement.
 const NEUTRALISED = {
@@ -132,6 +164,84 @@ function columns(page, where) {
   );
 }
 
+// The forms and dialogs the rule is about that sit behind a control, each
+// reached the way a reader reaches it. A state one pointer reaches names it,
+// because the phone reaches some of these from a different place or not at all.
+const openedStates = (hub, wiki) => {
+  const project = encodeURIComponent(hub.projectId);
+  const at = `#/projects/${project}`;
+  const page2 = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
+  const session = `${at}/sessions?id=${encodeURIComponent(hub.sessionId)}`;
+  return [
+    { name: "Add an agent", hash: "#/access", ready: "main .access-screen, main .agent-index-row", press: ['[data-action="toggle-add-agent"]'] },
+    { name: "New project", hash: "#/projects", ready: "main .projects-screen .project-row", press: ['[data-action="new-project"]'] },
+    { name: "Delete a project", hash: `${at}/feed`, ready: "main .feed-row", press: [".proj-overflow-btn", '[data-action="delete-project"]'] },
+    { name: "End a session", hash: session, ready: "main .end-session", press: ['[data-action="end"]'] },
+    { name: "New wiki page", hash: `${at}/wiki`, ready: "main .wiki-row", press: ['[data-action="wiki-new"]'], layout: "desktop" },
+    { name: "Wiki editor", hash: `${page2}&edit=1`, ready: "main .wiki-editor" },
+  ];
+};
+
+// An action row as the third check reads it: the width it has to give, the
+// share each control is drawn at, and whether its width is accounted for. A row
+// divides between its controls, so a row is full when its children and their
+// gaps account for it and a control's share is an equal part of what the
+// controls take. A column stretches its children across it, so a column is full
+// when every child spans it and a control's share is the column's own width.
+function actionRows(page, where, selectors) {
+  return page.evaluate(
+    ({ selectors, where }) => {
+      const isControl = (el) => el.tagName === "BUTTON" || (el.tagName === "A" && el.classList.contains("button"));
+      const found = [];
+      for (const selector of selectors) {
+        for (const row of document.querySelectorAll(selector)) {
+          if (row.closest("[hidden]")) continue;
+          if (!row.getClientRects().length) continue;
+          const style = getComputedStyle(row);
+          const pad = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+          const content = row.clientWidth - pad;
+          if (content === 0) continue;
+          const items = [...row.children].filter((el) => el.getClientRects().length);
+          if (!items.length) continue;
+          const column = !style.flexDirection.startsWith("row");
+          const gap = parseFloat(column ? style.rowGap : style.columnGap) || 0;
+          const controls = items.filter(isControl);
+          if (!controls.length) continue;
+          const widths = items.map((el) => el.getBoundingClientRect().width);
+          const accounted = column
+            ? Math.max(...widths)
+            : widths.reduce((sum, width) => sum + width, 0) + (items.length - 1) * gap;
+          // What the controls have to divide: the row's width, less what the
+          // other children take and less every gap the row carries, because a
+          // flex row divides its free space and the gaps are not free space.
+          let share = content;
+          if (!column) {
+            const others = items.filter((el) => !isControl(el));
+            const space = content
+              - others.reduce((sum, el) => sum + el.getBoundingClientRect().width, 0)
+              - (items.length - 1) * gap;
+            share = space / controls.length;
+          }
+          found.push({
+            where,
+            selector,
+            column,
+            content,
+            accounted,
+            shares: controls.map((el) => ({
+              label: (el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 32),
+              width: el.getBoundingClientRect().width,
+              share,
+            })),
+          });
+        }
+      }
+      return found;
+    },
+    { selectors, where },
+  );
+}
+
 test.describe("a form is a 640 column, a row is 48, a button is its label", () => {
   test("every form is a 640 column and every button is as wide as its label", async ({ hub, page }, testInfo) => {
     test.skip(
@@ -142,12 +252,14 @@ test.describe("a form is a 640 column, a row is 48, a button is its label", () =
     const routes = screenRoutes(hub, wiki);
     await page.goto(`${hub.baseUrl}/`);
     await expectEveryScreen(page, routes);
+    const fine = await page.evaluate(() => matchMedia("(pointer: fine)").matches);
+    const allowed = fine ? ALLOWED : ALLOWED.concat(ALLOWED_COARSE);
 
     const seen = [];
     const misfits = [];
     const stretches = [];
     const walk = async (name) => {
-      const found = [...(await controls(page, "button", name, ALLOWED)), ...(await controls(page, "a.button", name, ALLOWED))];
+      const found = [...(await controls(page, "button", name, allowed)), ...(await controls(page, "a.button", name, allowed))];
       for (const control of found) {
         if (control.exempt) continue;
         // A glyph control is held to the target's own width; a labelled one is
@@ -177,18 +289,7 @@ test.describe("a form is a 640 column, a row is 48, a button is its label", () =
     // reached the way a reader reaches it. A state one pointer reaches names
     // it, because the phone reaches some of these from a different place or
     // not at all.
-    const project = encodeURIComponent(hub.projectId);
-    const at = `#/projects/${project}`;
-    const page2 = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
-    const session = `${at}/sessions?id=${encodeURIComponent(hub.sessionId)}`;
-    const opened = [
-      { name: "Add an agent", hash: "#/access", ready: "main .access-screen, main .agent-index-row", press: ['[data-action="toggle-add-agent"]'] },
-      { name: "New project", hash: "#/projects", ready: "main .projects-screen .project-row", press: ['[data-action="new-project"]'] },
-      { name: "Delete a project", hash: `${at}/feed`, ready: "main .feed-row", press: [".proj-overflow-btn", '[data-action="delete-project"]'] },
-      { name: "End a session", hash: session, ready: "main .end-session", press: ['[data-action="end"]'] },
-      { name: "New wiki page", hash: `${at}/wiki`, ready: "main .wiki-row", press: ['[data-action="wiki-new"]'], layout: "desktop" },
-      { name: "Wiki editor", hash: `${page2}&edit=1`, ready: "main .wiki-editor" },
-    ];
+    const opened = openedStates(hub, wiki);
     const desktop = page.viewportSize().width >= 1100;
 
     for (const entries of Object.values(routes)) {
@@ -213,7 +314,6 @@ test.describe("a form is a 640 column, a row is 48, a button is its label", () =
     // The forms the rule names, each measured at least once. Without this a run
     // whose screens happen to hold no form would pass.
     const measured = new Set(seen.map((form) => form.name));
-    const fine = await page.evaluate(() => matchMedia("(pointer: fine)").matches);
     const missing = COLUMNS.filter((entry) => (entry.fine === undefined || entry.fine === fine) && !measured.has(entry.name));
     expect(missing.map((entry) => entry.name), "a form column the rule names was never measured").toEqual([]);
     expect(seen.length, "no form column was found on any screen").toBeGreaterThan(0);
@@ -260,5 +360,76 @@ test.describe("a form is a 640 column, a row is 48, a button is its label", () =
     // never taller because of the control beside it.
     const twoLine = rows.filter((row) => row.secondLine);
     expect(twoLine.length, "no two-line settings row was measured").toBeGreaterThan(0);
+  });
+
+  test("a coarse pointer divides an action row between its actions", async ({ hub, page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "forms-touch",
+      "an action row divides only under a coarse pointer",
+    );
+    const wiki = await seedWikiPage(hub, "forms/actions.md");
+    const routes = screenRoutes(hub, wiki);
+    await page.goto(`${hub.baseUrl}/`);
+    await expectEveryScreen(page, routes);
+    const opened = openedStates(hub, wiki);
+    const fine = await page.evaluate(() => matchMedia("(pointer: fine)").matches);
+    const selectors = ACTION_ROWS.filter((row) => row.fine === undefined || row.fine === fine).map((row) => row.selector);
+
+    const measured = [];
+    const ragged = [];
+    const empty = [];
+    const walk = async (name) => {
+      for (const row of await actionRows(page, name, selectors)) {
+        measured.push(row);
+        // The row is full: its children and their gaps account for the width it
+        // has to give, which is what keeps a verb from sitting beside an empty
+        // sheet.
+        if (Math.abs(row.accounted - row.content) > 1.5) {
+          const what = row.column ? "its widest child spans" : "its children account for";
+          empty.push(
+            `${name}: ${row.selector} ${what} ${Math.round(row.accounted)}px of ${Math.round(row.content)}px`,
+          );
+        }
+        // The controls share the row. One of them at the row's whole width while
+        // the others stay at their labels is the shape this refuses.
+        for (const item of row.shares) {
+          if (Math.abs(item.width - item.share) > 1.5) {
+            ragged.push(
+              `${name}: ${row.selector} draws ${item.label || "(glyph)"} at ${Math.round(item.width)}px where the row gives ${Math.round(item.share)}px`,
+            );
+          }
+        }
+      }
+    };
+
+    for (const entries of Object.values(routes)) {
+      for (const [name, hash, ready] of entries) {
+        await openScreen(page, hub, hash, ready);
+        await walk(name);
+      }
+    }
+    for (const state of opened) {
+      if (state.layout === "desktop" && !(page.viewportSize().width >= 1100)) continue;
+      await openScreen(page, hub, state.hash, state.ready);
+      for (const opener of state.press || []) {
+        const control = page.locator(opener).filter({ visible: true }).first();
+        await expect(control, `${state.name}: nothing reaches it with ${opener}`).toBeVisible();
+        await control.click();
+      }
+      await walk(state.name);
+      if (await page.locator("dialog[open]").count()) await page.keyboard.press("Escape");
+      await expect(page.locator("dialog[open]"), `${state.name}: the dialog did not close`).toHaveCount(0);
+    }
+
+    // Every row the rule names is measured somewhere, so a run whose screens
+    // happen to hold no action row cannot pass.
+    const missing = ACTION_ROWS.filter(
+      (row) => (row.fine === undefined || row.fine === fine)
+        && !measured.some((found) => found.selector === row.selector),
+    );
+    expect(missing.map((row) => row.selector), "an action row the rule names was never measured").toEqual([]);
+    expect(measured.length, "no action row was found on any screen").toBeGreaterThan(0);
+    expect(empty, "an action row leaves the sheet's width unaccounted for").toEqual([]);
+    expect(ragged, "an action row's controls do not share its width").toEqual([]);
   });
 });
