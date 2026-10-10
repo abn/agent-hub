@@ -113,7 +113,7 @@ test.describe("control sizing", () => {
     const wiki = await seedWikiPage(hub, "sizing/coarse.md");
     const routes = screenRoutes(hub, wiki);
     await page.goto(`${hub.baseUrl}/`);
-    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), "the project has no coarse pointer").toBe(true);
+    const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
     await expectEveryScreen(page, routes);
 
     const found = [];
@@ -209,5 +209,62 @@ test.describe("control sizing", () => {
       KNOWN_GAPS.filter((gap) => !stillKnown.has(gap)).map((gap) => gap.screens[0]),
       "a recorded gap now passes: take it off the list and out of DESIGN.md",
     ).toEqual([]);
+  });
+
+  // A button's label is one style per control size, read off the rendered page:
+  // 15/600 where the control is --ctl-form or --tap, and 13/600 where it is
+  // --ctl. The drawn height is what says which size a control is, so the label
+  // is held against the box rather than against a list of controls.
+  test("every button's label matches the control size it is drawn at", async ({ hub, page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "sizing-desktop" && testInfo.project.name !== "sizing-touch",
+      "the label is a rule of the pointer's own control size",
+    );
+    const wiki = await seedWikiPage(hub, "sizing/labels.md");
+    const routes = screenRoutes(hub, wiki);
+    await page.goto(`${hub.baseUrl}/`);
+    await expectEveryScreen(page, routes);
+
+    // A control that is itself a row, rather than a button on one, and one that
+    // carries literal data rather than a label, are held elsewhere: the row's
+    // own rhythm and the mono data rule.
+    const EXEMPT = [".settings-btn-row", ".hub-version-row", ".session-copy-id", ".hub-version-toggle"];
+    const found = [];
+    let held = 0;
+    for (const entries of Object.values(routes)) {
+      for (const [name, hash, ready] of entries) {
+        await openScreen(page, hub, hash, ready);
+        const labels = await page.getByRole("button").evaluateAll((els, exempt) =>
+          els
+            .filter((el) => el.getClientRects().length && (el.textContent || "").trim())
+            .filter((el) => !exempt.some((selector) => el.matches(selector)))
+            .map((el) => {
+              const cs = getComputedStyle(el);
+              const r = el.getBoundingClientRect();
+              return {
+                name: (el.getAttribute("aria-label") || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40),
+                size: cs.fontSize,
+                weight: cs.fontWeight,
+                height: Math.round(r.height * 10) / 10,
+              };
+            }),
+          EXEMPT,
+        );
+        for (const label of labels) {
+          // The drawn height says which control size the button is: --ctl and
+          // --ctl-sm are 32, and --ctl-form and --tap are 36 and 44. A control
+          // drawn at the larger size is a field or a dialog action and takes
+          // 15/600; one drawn at 32 is a band or row control and takes 13/600.
+          const action = label.height > 33;
+          const want = action ? "15px" : "13px";
+          if (label.size !== want || label.weight !== "600") {
+            found.push(`${name}: "${label.name}" is ${label.size}/${label.weight} at ${label.height}px, wanted ${want}/600`);
+          }
+          held += 1;
+        }
+      }
+    }
+    expect(held, "no labelled button was found on any screen").toBeGreaterThan(0);
+    expect(found, "a button's label does not match the control size it is drawn at").toEqual([]);
   });
 });

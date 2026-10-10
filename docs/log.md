@@ -6,6 +6,31 @@ software release notes and the repository changelog.
 
 ## 2026-10-10
 
+### One type size, one radius and one spacing step per value
+
+* **Update**: [Human interface](design/human-interface.md) states that radius
+  is `--r-1`, `--r-2` or `--r-pill`, that spacing uses the `--s-*` steps and
+  that type uses the `--t-*` sizes, and that there is no 14px: a size between
+  meta and body was two sizes in practice, and every use has moved to 13 or 15.
+  A button's label is one style per control size, 15/600 at `--ctl-form` and
+  `--tap` and 13/600 at `--ctl` and `--ctl-sm`, so no label is one size in one
+  place and another somewhere else.
+* **Add**: a stylesheet gate over the parsed declarations. It counts what
+  still carries a length the token file does not declare, pins that count and
+  only lets it fall, and names on its allow-list what is structural rather than
+  a step: a band's own height, a control's own box, a row's own rhythm, a
+  hairline, a glyph column and an offset that pulls an object back under its
+  own edge. A browser check reads the computed size and weight off every
+  labelled button on every screen, at both pointers.
+* **Update**: End session is `--ctl-form` on a fine pointer and `--tap` on a
+  coarse one, with the label style that control size carries, so it no longer
+  stands at 48px and 17px beside a 36px Reassign. Reassign takes the
+  `--ctl` label it is drawn at. The wiki editor's text and the search preview's
+  title move to 15 and 22; the storage table's row action takes the 13px a
+  `--ctl` control carries.
+
+## 2026-10-10
+
 ### A form is a 640 column
 
 * **Update**: [Human interface](design/human-interface.md) states that a form

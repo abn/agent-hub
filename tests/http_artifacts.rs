@@ -476,16 +476,16 @@ const VIEWER_RULES: &[&str] = &[
     "#hub-back[hidden]{display:none}",
     "#hub-forget[hidden]{display:none}",
     "#hub-forget-note:empty{display:none}",
-    "#hub-meta-line{font-family:var(--font-mono);font-size:12px;",
+    "#hub-meta-line{font-family:var(--font-mono);font-size:var(--t-12);",
     "iframe#hub-frame{width:100%;min-height:60vh;border:0;display:block}",
     // Without this the frame's own display:block beats the UA [hidden] rule
     // and the locked gate keeps reserving 60vh for an empty frame.
     "iframe#hub-frame[hidden]{display:none}",
-    "#hub-password{width:100%;min-height:48px;font-size:17px;",
+    "#hub-password{width:100%;min-height:48px;font-size:var(--t-17);",
     // The unlock action is as wide as its label, and it is --ctl-form on a fine
     // pointer and --tap on a coarse one.
     "#hub-unlock-form button[type=\"submit\"]{min-height:var(--ctl-form);padding:0 var(--s-4);",
-    "#hub-unlock-error{font-size:12px;color:var(--danger)}",
+    "#hub-unlock-error{font-size:var(--t-12);color:var(--danger)}",
     ".hub-comment-body{margin:0 0 var(--s-2);overflow-wrap:anywhere}",
     "@media (pointer:coarse){ #hub-back,#hub-theme-toggle{width:44px;height:44px} #hub-forget{min-height:44px} #hub-version-select{min-height:44px} #hub-unlock-form button[type=\"submit\"]{min-height:var(--tap)} }",
 ];

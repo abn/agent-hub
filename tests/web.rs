@@ -2317,7 +2317,7 @@ fn inbox_bar_has_mark_all_read_and_overflow_holding_refresh() {
 fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
     // C1 & C2: group labels 20 above, 8 below, no first-child zero padding
     assert!(
-        APP_CSS.contains("padding: 20px 0 8px;"),
+        APP_CSS.contains("padding: var(--s-5) 0 var(--s-2);"),
         "C1: group labels take 20px above and 8px below"
     );
     assert!(
@@ -2327,7 +2327,8 @@ fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
 
     // C3: desktop rows keep --surface fill and 12 inset
     assert!(
-        APP_CSS.contains("padding: 8px 12px;") && APP_CSS.contains("background: var(--surface);"),
+        APP_CSS.contains("padding: var(--s-2) var(--s-3);")
+            && APP_CSS.contains("background: var(--surface);"),
         "C3: desktop form rows keep --surface fill and 12 inset"
     );
 
