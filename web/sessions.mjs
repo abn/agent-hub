@@ -194,7 +194,7 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
             <div class="session-title-line">
               <span class="session-status ${statusClass}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span>
             </div>
-            <div class="meta" data-owner="${esc(session.owner ?? session.agent)}">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
+            <div class="meta" data-owner="${esc(session.owner ?? session.agent)}">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
             ${handoff}
             ${lineage}
           </div>
@@ -204,17 +204,13 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
             <button type="button" class="btn-outline session-reassign-btn" data-action="reassign-open" data-id="${esc(session.id)}" data-owner="${esc(session.owner ?? session.agent)}" aria-haspopup="menu" aria-expanded="false">Reassign</button>
             <div class="shell-group-menu session-reassign-menu" role="menu" aria-label="Move this session to an agent" hidden></div>
           </span>
-          <button type="button" class="session-copy-id" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">
-            <span>${truncatedId}</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5h10"></path></svg>
-          </button>
         </div>
       </header>
 
       <div class="session-stage-body">
         <div class="session-tree-pane" role="region" aria-label="Brain tree">
           <div class="brain-header-line">
-            <span class="brain-label mono">brain/ · ${brainSize} · ${totalItems} items</span>
+            <span class="brain-label">Brain <span class="mono">· ${brainSize} · ${totalItems} items</span></span>
             <span class="brain-size-col mono">size</span>
           </div>
           ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}

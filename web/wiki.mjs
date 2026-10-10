@@ -19,7 +19,7 @@ import { glyphSvg } from "./glyphs.mjs";
 import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { toast } from "./toast.mjs";
-import { fullStamp } from "./time.mjs";
+import { fullStamp, timeHTML } from "./time.mjs";
 
 const FILE_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>`;
 const FOLDER_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h6l2 2h10v11H3z"/></svg>`;
@@ -72,7 +72,7 @@ async function commentsSection(id, path) {
     <p class="wiki-comment-body">${esc(comment.body)}</p>
   </div>`;
   return `<section class="wiki-comments">
-    <div class="mono wiki-section-label">COMMENTS · ${open.length}</div>
+    <div class="wiki-section-label">Comments <span class="mono">· ${open.length}</span></div>
     ${open.length ? open.map((comment) => thread(comment, false)).join("") : `<p class="empty wiki-note-empty">No comments yet.</p>`}
     <div class="wiki-comment-composer" data-id="${esc(id)}" data-path="${esc(displayPath(path))}"></div>
     ${
@@ -300,7 +300,7 @@ async function pageStage(id, path, shellStageHead) {
     ...(fm.tags || []),
   ].join(" · ");
   const back = `<div class="wiki-backlinks">
-    <div class="mono wiki-section-label">BACKLINKS · ${(backlinks || []).length}</div>
+    <div class="wiki-section-label">Backlinks <span class="mono">· ${(backlinks || []).length}</span></div>
     ${
       (backlinks || []).length
         ? (backlinks || [])
@@ -387,10 +387,13 @@ function historyRows(rows, changesProject) {
     const date = stamp.slice(0, 10);
     if (date !== day) {
       day = date;
-      out += `<div class="mono wiki-history-day">${esc(date)}</div>`;
+      out += `<div class="wiki-history-day">${esc(date)}</div>`;
     }
+    // A row shows the short time, the way every other row in the app does, and
+    // the full stamp is available on request: the time element carries it as
+    // its title and its accessible name, and a click toggles it.
     out += `<a class="row wiki-change" href="${wikiPageHash(changesProject, displayPath(row.path), "&history=1")}">
-      <span class="mono wiki-change-time">${esc(stamp)}</span>
+      <span class="wiki-change-time">${timeHTML(stamp)}</span>
       <span class="wiki-change-actor">${esc(row.actor)}</span>
       <span class="mono wiki-change-path">${esc(displayPath(row.path))}</span>
       <span class="wiki-change-op">${esc(OP_WORDS[row.op] || row.op)}</span>
@@ -475,7 +478,7 @@ function versionRows(id, path, rows) {
       const facts = [row.actor, row.summary, size].filter(Boolean).join(" · ");
       const state = row.current ? "current" : row.version && !row.kept ? "not kept" : "";
       const inner = `<span class="wiki-version-line">
-          <span class="mono wiki-version-time">${esc(row.at)}</span>
+          <span class="wiki-version-time">${timeHTML(row.at)}</span>
           ${state ? `<span class="mono wiki-version-state">${esc(state)}</span>` : ""}
         </span>
         <span class="wiki-version-facts">${esc(facts)}</span>`;

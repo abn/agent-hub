@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -105,6 +105,13 @@ export default defineConfig({
       name: "sizing-touch",
       use: { viewport: WIDTHS.phone, hasTouch: true },
       testMatch: /(control-sizing|style-attributes)\.spec\.mjs/,
+    },
+    // The label style, the history row's time and the copy control, at a desktop
+    // width: they are read off the rendered page wherever a screen draws them.
+    {
+      name: "labels",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /labels\.spec\.mjs/,
     },
     // One gutter per pane, at every width.
     {
