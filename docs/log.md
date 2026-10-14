@@ -25,6 +25,17 @@ software release notes and the repository changelog.
   pages. Screenshots now live only under `assets/screens/` and are embedded
   from the Product tour and the pages that describe each screen.
 
+### The stdio proxy serves a modern MCP client
+
+* **Update**: [CLI](/reference/cli.md) states that the `agent-hub mcp` proxy
+  serves a client on either protocol revision. A client that negotiates
+  `2026-07-28` receives that revision's result shape, and one on an older
+  revision keeps the older shape. Because the link to the hub is legacy, the
+  proxy fills in the `resultType`, `ttlMs` and `cacheScope` a modern client
+  requires, which the hub does not send over that link. Before this, a modern
+  client received a `tools/list` that carried no `resultType`, and its tools
+  fetch failed.
+
 ## 2026-10-10
 
 ### A phone dialog's actions take the sheet's width

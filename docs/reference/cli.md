@@ -56,7 +56,12 @@ data directory.
 
 `mcp` serves MCP on stdio. With `HUB_URL` set it bridges stdio to that hub and
 holds one connection for the life of the process, which is what keeps a session
-active across calls. With no `HUB_URL` it serves the local data directory
+active across calls. It serves a client on either protocol revision. A client
+that negotiates `2026-07-28` receives that revision's result shape, and one on
+an older revision keeps the older shape. Because the link to the hub is legacy,
+the proxy fills in the `resultType`, `ttlMs` and `cacheScope` a modern client
+requires, which the hub does not send over that link. With no `HUB_URL` it
+serves the local data directory
 standalone as the human admin, and says so on stderr; that mode opens the data
 directory itself, so pointing it at a directory a hub is already serving fails
 at startup with `a hub is already using this directory; set HUB_URL to reach it

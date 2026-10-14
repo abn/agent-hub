@@ -96,6 +96,95 @@ fn the_proxy_serves_the_agent_guide_as_a_resource() {
     );
 }
 
+/// A harness that opens with `server/discover`, as a dual-era client does,
+/// negotiates protocol revision `2026-07-28`, and every result it then receives
+/// must carry `resultType`; a cacheable result must also carry `ttlMs` and
+/// `cacheScope`.
+///
+/// The proxy holds its link to the hub as a legacy session, so the hub answers
+/// it in the shape that predates that revision. Forwarding those results
+/// verbatim left the modern client with a `tools/list` it rejected as missing
+/// `resultType`, so the proxy completes the modern shape itself.
+#[test]
+fn a_modern_client_gets_the_modern_result_shape() {
+    let hub = Hub::start("proxy-modern");
+    let mut proxy = proxy(&hub);
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {"name": "modern-client", "version": "0"},
+    });
+
+    let discover = proxy.call("server/discover", json!({"_meta": meta.clone()}));
+    let versions = discover["result"]["supportedVersions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("discover lists the versions the proxy serves: {discover}"));
+    assert!(
+        versions
+            .iter()
+            .any(|version| version.as_str() == Some("2026-07-28")),
+        "the proxy serves the modern revision: {discover}"
+    );
+
+    let listed = proxy.call("tools/list", json!({"_meta": meta.clone()}));
+    assert_eq!(
+        listed["result"]["resultType"], "complete",
+        "a modern tools/list carries its resultType: {listed}"
+    );
+    assert!(
+        listed["result"]["ttlMs"].is_u64() && listed["result"]["cacheScope"].is_string(),
+        "a cacheable modern result carries its cache hints: {listed}"
+    );
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "whoami")),
+        "the hub's own tools come through: {listed}"
+    );
+
+    let who = proxy.call(
+        "tools/call",
+        json!({"name": "whoami", "arguments": {}, "_meta": meta.clone()}),
+    );
+    assert_eq!(
+        who["result"]["resultType"], "complete",
+        "a modern tool result carries its resultType: {who}"
+    );
+
+    let resources = proxy.call("resources/list", json!({"_meta": meta.clone()}));
+    assert_eq!(
+        resources["result"]["resultType"], "complete",
+        "a modern resources/list carries its resultType: {resources}"
+    );
+    assert!(
+        resources["result"]["ttlMs"].is_u64() && resources["result"]["cacheScope"].is_string(),
+        "a cacheable modern result carries its cache hints: {resources}"
+    );
+}
+
+/// A legacy client negotiates an older revision and keeps the historical wire
+/// shape: the discriminator the proxy set for a modern client is stripped again.
+#[test]
+fn a_legacy_client_keeps_the_legacy_result_shape() {
+    let hub = Hub::start("proxy-legacy-shape");
+    let mut proxy = proxy(&hub);
+    proxy.initialize();
+
+    let listed = proxy.call("tools/list", json!({}));
+    assert!(
+        listed["result"].get("resultType").is_none()
+            && listed["result"].get("ttlMs").is_none()
+            && listed["result"].get("cacheScope").is_none(),
+        "a legacy tools/list keeps the shape that predates the discriminator and the cache hints: {listed}"
+    );
+    assert!(
+        listed["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "whoami")),
+        "the hub's own tools come through: {listed}"
+    );
+}
+
 #[test]
 fn a_proxy_outlives_a_hub_restart() {
     let mut hub = Hub::start("proxy-restart");
