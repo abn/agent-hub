@@ -953,6 +953,11 @@ describe("the type floor holds across the whole client", () => {
 // to be a value tokens.css declares.
 const HEX = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
 
+// A binary asset is not a source a colour literal is written in: a PNG's
+// compressed bytes can spell "#eee" by chance, and that is not a hand copy of a
+// token. The readable sources, including the SVG icon, are scanned.
+const BINARY_ASSET = /\.(?:png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|wasm|pdf|mp4|webm)$/i;
+
 /** Every hand-copied colour in web/ that tokens.css does not declare. */
 function checkPaletteCopies() {
   const errors = [];
@@ -965,6 +970,7 @@ function checkPaletteCopies() {
   }
   for (const path of walk(WEB)) {
     if (basename(path) === "tokens.css") continue;
+    if (BINARY_ASSET.test(path)) continue;
     const lines = readFileSync(path, "utf8").split("\n");
     lines.forEach((line, index) => {
       for (const match of line.matchAll(HEX)) {

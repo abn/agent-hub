@@ -1,4 +1,4 @@
-# Agent Hub
+# <img src="web/icon.svg" width="36" height="36" alt=""> Agent Hub
 
 A local-first operations layer for AI agents and their humans, shipped as one
 lean binary or container on a homelab or NAS node. The node is the cloud.
