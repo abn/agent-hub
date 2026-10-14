@@ -18,6 +18,24 @@ something waits on you, never alarming. Warm paper in light, warm charcoal in
 dark, one humanist sans, monospace only for literal data. Every number shown
 is real.
 
+## Identity
+
+The mark is three blue nodes joined in a triangle: agents working together, as
+peers rather than spokes. It is drawn from the tokens, `--accent` for the nodes
+and `--ink` for the connections, on a `--bg` ground. One shape at every size: it
+holds as a 16px favicon and as a 512px app icon, and it carries no text, so it
+never depends on a language.
+
+The tile is the mark's ground. The app icon is a full-bleed `--bg` square,
+because the platform masks it; the wiki's brand mark is a rounded tile with a
+`--line` hairline, because it sits on a page. The maskable app icon holds the
+mark inside the safe circle rather than at full scale, so a launcher mask never
+cuts it.
+
+The mark ships as `web/icon.svg` and the three `web/icon-*.png` icons, and the
+docs site mirrors it in `wiki-theme/assets/brand-mark.svg` and
+`wiki-theme/assets/favicon.svg`.
+
 ## Tokens
 
 `web/tokens.css` is the design's token file, shipped verbatim except for the
