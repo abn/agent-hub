@@ -1,0 +1,385 @@
+/* ============================================================================
+   agent-hub: design tokens
+   ----------------------------------------------------------------------------
+   The wiki themed to the Agent Hub application. Every value here is taken from
+   the app's own token file (web/tokens.css) so the docs and the product read as
+   one house: a warm paper ground, near-black ink, one blue identity, and the
+   app's controls.
+
+   The ground is warm, not white. The app's light surface is #F5F3EE, a paper
+   tone, and its dark surface is #141311, a warm near-black; the wiki keeps that
+   warmth rather than switching to a neutral white or grey. Ink, rules, status
+   tones and the kind colours are the app's, unchanged.
+
+   Type is the app's, which is the system stack rather than a bundled face: the
+   application ships no webfont, so neither does the wiki. The display and UI
+   faces are the same stack, and code is the platform's mono stack.
+
+   Contrast was checked against the surface each value is read on. Text clears
+   4.5:1, the control boundary clears the 3:1 that SC 1.4.11 asks for, and each
+   status label clears 4.5:1 on its own tint. Dark is a second palette built for
+   the dark ground, not this file inverted.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ---- ground and surfaces ------------------------------------------------
+     The app's surfaces: a warm paper ground, a white raised surface, and two
+     sunken steps for the breadcrumb bar and for code and quote surfaces. */
+  --color-bg: #F5F3EE;
+  --color-surface: #FFFFFF;
+  --color-surface-sunken: #EDEAE3;
+  --color-surface-sunken-deep: #E4E0D8;
+  --color-bg-elevated: #FFFFFF;
+
+  /* ---- ink ----------------------------------------------------------------
+     The app's three ink steps: 15.37:1, 6.39:1 and 4.84:1 on the paper ground,
+     so even the faint step clears 4.5:1 as text. */
+  --color-text: #1D1C19;
+  --color-heading: #1D1C19;
+  --color-text-muted: #5C584F;
+  --color-text-faint: #6F6A61;
+
+  /* ---- rules --------------------------------------------------------------
+     A quiet decorative rule, a stronger one, and a control boundary held to
+     3:1 because it is the only thing describing that control's extent. */
+  --color-line: #E4E0D8;
+  --color-line-strong: #CFC9BE;
+  --color-line-control: #8B8579;   /* 3.31:1 on the paper ground */
+
+  /* ---- accent -------------------------------------------------------------
+     The app's split: a near-black action fill that carries the control's
+     silhouette, and a blue that carries identity on links, focus and current
+     state. The blue is 5.70:1 on the ground and 6.32:1 on white. */
+  --color-accent: #1D1C19;
+  --color-on-accent: #F5F3EE;
+  --color-accent-text: #2F5FA8;
+  --color-accent-soft: #E6ECF7;
+  --color-accent-ring: #B9C9E6;
+  --color-current-tint: #E6ECF7;
+
+  --focus-ring: #2F5FA8;
+  --focus-ring-offset: 2px;
+  --focus-ring-width: 2px;
+
+  /* ---- status ------------------------------------------------------------
+     The app's status family, one tint, line and label per role. Every label
+     clears 4.5:1 on its own tint. */
+  --status-success-tint: #E2F1E7;
+  --status-success-line: #C6E2D1;
+  --status-success-text: #246B43;
+  --status-info-tint: #E6ECF7;
+  --status-info-line: #C9D8F0;
+  --status-info-text: #2A5296;
+  --status-warn-tint: #F7EBD5;
+  --status-warn-line: #EBD6AC;
+  --status-warn-text: #85500A;
+  --status-danger-tint: #F6E3DF;
+  --status-danger-line: #E8C6BE;
+  --status-danger-text: #93321F;
+  --status-neutral-tint: #EDEAE3;
+  --status-neutral-line: #DAD5CB;
+  --status-neutral-text: #5C584F;
+
+  /* ---- type ---------------------------------------------------------------
+     The app's faces, which are the platform's: no webfont ships. Leading and
+     tracking run the same optical direction as the defaults, tightening as
+     size grows. */
+  --font-display: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
+  --font-ui: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --text-xs: 0.75rem;      /* 12, the app's type floor */
+  --text-sm: 0.875rem;     /* 14 / 20 */
+  --text-body: 1rem;       /* 16 */
+  --text-lg: 1.125rem;     /* 18 / 28 */
+  --text-h3: 1.25rem;      /* 20 */
+  --text-h2: 1.5rem;       /* 24 / 29 */
+  --text-h1: clamp(2.25rem, 1.5rem + 2.4vw, 3rem); /* 36 to 48 */
+
+  --lh-tight: 1.12;
+  --lh-snug: 1.25;
+  --lh-normal: 1.5;
+  --lh-relaxed: 1.6;
+
+  --ls-display: -0.03em;
+  --ls-tight: -0.02em;
+  --ls-snug: -0.01em;
+
+  --measure: 68ch;
+
+  /* ---- space --------------------------------------------------------------
+     A 4px base and its multiples, the same rhythm the app uses. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ---- radius -------------------------------------------------------------
+     The app's set is small: 6px for a control, 12px for a card, a pill. */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* ---- elevation ----------------------------------------------------------
+     Hairline first, shadow second, in the app's warm shadow tone. */
+  --shadow-sm: 0 1px 2px rgba(29, 28, 25, 0.06);
+  --shadow-md: 0 4px 8px -2px rgba(29, 28, 25, 0.08), 0 2px 4px -2px rgba(29, 28, 25, 0.06);
+  --shadow-lg: 0 8px 24px rgba(29, 28, 25, 0.12);
+
+  /* ---- motion -------------------------------------------------------------
+     One easing family with long tails, every duration named. */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 280ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* ---- scrim and layers --------------------------------------------------- */
+  --color-scrim: rgba(29, 28, 25, 0.44);
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-header: 30;
+  --z-overlay: 40;
+  --z-skip-link: 50;
+  --z-lightbox: 60;
+
+  /* ---- code and selection -------------------------------------------------
+     The code surface is warm near-black in both grounds, the app's ink taken
+     to a reading background, so a code block is a picture of code and keeps one
+     contrast regime. */
+  --color-code-bg: #1F1D1A;
+  --color-code-fg: #ECE8E0;
+  --color-code-line: #38352E;
+  --color-inline-code-bg: #EAE6DE;
+  --color-inline-code-fg: #1D1C19;
+  --color-selection-bg: #C9D8F0;
+  --color-selection-fg: #1D1C19;
+  --color-mark: #C9D8F0;
+  --color-mark-ink: #123A78;
+
+  /* ---- diagram palette ----------------------------------------------------
+     Read by diagrams.js. The light-ground values, paired to the paper ground
+     the way the tokens above are: ink, muted, and the app's blue for accent,
+     with the kind colours for the rest. The dark block redeclares the whole
+     set. */
+  --diagram-font: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
+  --diagram-ground: #F5F3EE;
+  --diagram-surface: #FFFFFF;
+  --diagram-surface-alt: #EDEAE3;
+  --diagram-ink: #1D1C19;
+  --diagram-muted: #5C584F;
+  --diagram-line: #CFC9BE;
+  --diagram-accent: #2F5FA8;
+  --diagram-accent-soft: #E6ECF7;
+  --diagram-accent-ink: #24487F;
+  --diagram-accent-2: #6E92D1;
+  --diagram-accent-3: #A9C0E4;
+  --diagram-yellow: #B98A12;
+  --diagram-cyan: #2B7C8A;
+  --diagram-red: #9E3B2B;
+  --diagram-amber: #95590B;
+  --diagram-green: #2E7D4F;
+  --diagram-blue: #2F5FA8;
+  --diagram-violet: #6E4B92;
+  --diagram-pink: #B4508C;
+
+  /* ---- lightbox -----------------------------------------------------------
+     The diagram viewer stages a diagram on a dark field in both grounds, so it
+     carries its own warm-dark tokens rather than borrowing the page's. */
+  --lb-bg: #141311;
+  --lb-bar: #1D1C19;
+  --lb-line: #2F2C26;
+  --lb-line-strong: #44403A;
+  --lb-text: #ECE8E0;
+  --lb-muted: #B3ADA2;
+  --lb-faint: #948E83;
+  --lb-accent: #8AAAE8;
+  --lb-accent-line: #35507E;
+  --lb-hint: #948E83;
+}
+
+/* ---- dark -----------------------------------------------------------------
+   A second palette for the app's warm near-black ground. Ink is 15.20:1,
+   muted 8.33:1, faint 5.71:1, and a raised surface is genuinely lighter than
+   the ground so elevation reads without a shadow. */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --color-bg: #141311;
+    --color-surface: #1D1C19;
+    --color-surface-sunken: #0F0E0C;
+    --color-surface-sunken-deep: #0A0908;
+    --color-bg-elevated: #26241F;
+
+    --color-text: #ECE8E0;
+    --color-heading: #F5F3EE;
+    --color-text-muted: #B3ADA2;
+    --color-text-faint: #948E83;
+
+    --color-line: #2F2C26;
+    --color-line-strong: #44403A;
+    --color-line-control: #6E685E;   /* 3.36:1 on the ground */
+
+    --color-accent: #ECE8E0;
+    --color-on-accent: #141311;
+    --color-accent-text: #8AAAE8;
+    --color-accent-soft: #26241F;
+    --color-accent-ring: #35507E;
+    --color-current-tint: #223052;
+
+    --focus-ring: #8AAAE8;
+
+    --status-success-tint: #1C3627;
+    --status-success-line: #2C523A;
+    --status-success-text: #6FC08C;
+    --status-info-tint: #223052;
+    --status-info-line: #34496F;
+    --status-info-text: #8AAAE8;
+    --status-warn-tint: #3A2C14;
+    --status-warn-line: #5A4522;
+    --status-warn-text: #DDA44E;
+    --status-danger-tint: #43221D;
+    --status-danger-line: #5F332B;
+    --status-danger-text: #E08373;
+    --status-neutral-tint: #26241F;
+    --status-neutral-line: #38352E;
+    --status-neutral-text: #B3ADA2;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+    --color-scrim: rgba(0, 0, 0, 0.62);
+    --color-code-bg: #0F0E0C;
+    --color-code-fg: #ECE8E0;
+    --color-code-line: #2F2C26;
+    --color-inline-code-bg: #26241F;
+    --color-inline-code-fg: #ECE8E0;
+    --color-selection-bg: #35507E;
+    --color-selection-fg: #F5F3EE;
+    --color-mark: #35507E;
+    --color-mark-ink: #D6E4F7;
+
+    /* ---- diagram palette, dark ground ------------------------------------- */
+    --diagram-ground: #141311;
+    --diagram-surface: #1D1C19;
+    --diagram-surface-alt: #0F0E0C;
+    --diagram-ink: #ECE8E0;
+    --diagram-muted: #948E83;
+    --diagram-line: #44403A;
+    --diagram-accent: #8AAAE8;
+    --diagram-accent-soft: #223052;
+    --diagram-accent-ink: #A9C0E4;
+    --diagram-accent-2: #6E92D1;
+    --diagram-accent-3: #A9C0E4;
+    --diagram-yellow: #DDA44E;
+    --diagram-cyan: #63B8B4;
+    --diagram-red: #E08373;
+    --diagram-amber: #DDA44E;
+    --diagram-green: #6FC08C;
+    --diagram-blue: #8AAAE8;
+    --diagram-violet: #B893D9;
+    --diagram-pink: #DB8FBE;
+  }
+}
+
+/* The explicit toggle, for a reader who pinned a ground. Mirrors the block
+   above; a pinned dark must beat prefers-color-scheme in both directions.
+   Screen only, so a printed page is always the light document. */
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-bg: #141311;
+    --color-surface: #1D1C19;
+    --color-surface-sunken: #0F0E0C;
+    --color-surface-sunken-deep: #0A0908;
+    --color-bg-elevated: #26241F;
+
+    --color-text: #ECE8E0;
+    --color-heading: #F5F3EE;
+    --color-text-muted: #B3ADA2;
+    --color-text-faint: #948E83;
+
+    --color-line: #2F2C26;
+    --color-line-strong: #44403A;
+    --color-line-control: #6E685E;
+
+    --color-accent: #ECE8E0;
+    --color-on-accent: #141311;
+    --color-accent-text: #8AAAE8;
+    --color-accent-soft: #26241F;
+    --color-accent-ring: #35507E;
+    --color-current-tint: #223052;
+
+    --focus-ring: #8AAAE8;
+
+    --status-success-tint: #1C3627;
+    --status-success-line: #2C523A;
+    --status-success-text: #6FC08C;
+    --status-info-tint: #223052;
+    --status-info-line: #34496F;
+    --status-info-text: #8AAAE8;
+    --status-warn-tint: #3A2C14;
+    --status-warn-line: #5A4522;
+    --status-warn-text: #DDA44E;
+    --status-danger-tint: #43221D;
+    --status-danger-line: #5F332B;
+    --status-danger-text: #E08373;
+    --status-neutral-tint: #26241F;
+    --status-neutral-line: #38352E;
+    --status-neutral-text: #B3ADA2;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+    --color-scrim: rgba(0, 0, 0, 0.62);
+    --color-code-bg: #0F0E0C;
+    --color-code-fg: #ECE8E0;
+    --color-code-line: #2F2C26;
+    --color-inline-code-bg: #26241F;
+    --color-inline-code-fg: #ECE8E0;
+    --color-selection-bg: #35507E;
+    --color-selection-fg: #F5F3EE;
+    --color-mark: #35507E;
+    --color-mark-ink: #D6E4F7;
+
+    /* ---- diagram palette, dark ground ------------------------------------- */
+    --diagram-ground: #141311;
+    --diagram-surface: #1D1C19;
+    --diagram-surface-alt: #0F0E0C;
+    --diagram-ink: #ECE8E0;
+    --diagram-muted: #948E83;
+    --diagram-line: #44403A;
+    --diagram-accent: #8AAAE8;
+    --diagram-accent-soft: #223052;
+    --diagram-accent-ink: #A9C0E4;
+    --diagram-accent-2: #6E92D1;
+    --diagram-accent-3: #A9C0E4;
+    --diagram-yellow: #DDA44E;
+    --diagram-cyan: #63B8B4;
+    --diagram-red: #E08373;
+    --diagram-amber: #DDA44E;
+    --diagram-green: #6FC08C;
+    --diagram-blue: #8AAAE8;
+    --diagram-violet: #B893D9;
+    --diagram-pink: #DB8FBE;
+  }
+}
