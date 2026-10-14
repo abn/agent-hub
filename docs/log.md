@@ -4,6 +4,27 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-15
+
+* **Update**: Restructured the bundle around reader goals into nine sections:
+  Get started, Guides, Operate, Reference, Architecture, Design, Contributing,
+  and Decisions, with the root index as a router. The old `usage/`,
+  `contribution/`, and `assets/` pages were split or moved, and every inbound
+  link was updated.
+* **Creation**: Added Get started (try it, choose your setup, install, first log
+  in, connect an agent, where next), a Product tour gallery of every screen at
+  both widths in both themes, an Operate section, and a Reference section for
+  settings, the CLI, the MCP tools, the REST API, the knowledge base page
+  format, and the glossary.
+* **Update**: Unified the taxonomy. One type per page, from Overview, Tutorial,
+  Guide, Reference, Runbook, Explanation, Decision Record, or Gallery; a
+  controlled tag vocabulary with one audience tag; shipped behaviour is
+  `stable` and intended design stays `draft`; and all thirty decision records
+  now carry `type: Decision Record`.
+* **Deprecation**: Retired `usage/`, `contribution/`, and the `assets/` index
+  pages. Screenshots now live only under `assets/screens/` and are embedded
+  from the Product tour and the pages that describe each screen.
+
 ## 2026-10-10
 
 ### A phone dialog's actions take the sheet's width

@@ -38,5 +38,5 @@ jobs:
           brand: agent-hub
           brand-sub: docs
           title: Agent Hub Docs
-          sections: "design:Design,architecture:Architecture,usage:Usage,contribution:Contribution,adr:Decisions"
+          sections: "start:Get started,guides:Guides,operate:Operate,reference:Reference,architecture:Architecture,design:Design,contribute:Contributing,adr:Decisions"
           nav-links: "abn.is=https://abn.is,GitHub=https://github.com/${{ github.repository }}"

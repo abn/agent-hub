@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: Prove the interface with standard tools, not bespoke scripts
 description: Why the UI is held by Playwright Test, Vitest, Stylelint, TypeScript and mutation testing rather than by pattern-matching scripts over source text.
 tags: [adr, testing, interface, tooling]

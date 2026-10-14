@@ -2366,10 +2366,10 @@ async fn the_skill_document_describes_the_promote_tool_that_exists() {
 }
 
 #[tokio::test]
-async fn the_usage_page_documents_every_route_and_its_refusals() {
+async fn the_knowledge_base_reference_documents_every_route_and_its_refusals() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/docs");
-    let page = std::fs::read_to_string(format!("{root}/usage/knowledge-base.md"))
-        .expect("the wiki has a knowledge base usage page");
+    let page = std::fs::read_to_string(format!("{root}/reference/knowledge-base-pages.md"))
+        .expect("the wiki has a knowledge base reference page");
     for route in [
         "GET /api/v1/projects/{id}/kb/pages",
         "GET /api/v1/projects/{id}/kb/pages/{path}",

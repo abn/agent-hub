@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: A contentless nudge to an operator-configured target
 description: Why the hub may POST one fixed sentence to a URL the operator runs when something starts waiting on the human, what that refines in the push deferral, and why Web Push stays deferred.
 tags: [adr, notifications, privacy, operations]

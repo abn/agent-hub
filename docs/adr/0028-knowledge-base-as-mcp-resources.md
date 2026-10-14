@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: The knowledge base is a read-only view as MCP resources
 description: Why knowledge base pages are served as MCP resources, the URI scheme that names them, and why resources stay a view over the tools rather than a second surface.
 tags: [adr, mcp, knowledge-base, agents]
@@ -33,7 +33,7 @@ Resources are a view over the tools, not a second surface:
 - A read is `brain_get` on the project store under another name. It takes the
   same access check, so a confidential project needs a grant, a missing project
   answers an agent token as a denied one does, and the operating model
-  ([model](../architecture/model.md)) needs no new rule.
+  ([model](/architecture/operating-model.md)) needs no new rule.
 - A listing walks the knowledge bases of the projects the caller can see, the
   same set a search or a project listing is confined to.
 - Nothing is written and nothing is stored: no subscription, no cache, no new

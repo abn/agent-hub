@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: Search ranks in the hub, bounded by a fetch cap
 description: Why the engine returns search rows unordered and the hub scores them, and what would change it.
 tags: [adr, search, engine]

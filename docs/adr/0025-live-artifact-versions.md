@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: A live artifact version is a pointer, not a draft
 description: Why a version can be held live and mutated in place while an agent writes it, and why the artifact's public URL keeps serving the last sealed version throughout.
 tags: [adr, artifacts, versioning, mcp]
@@ -27,7 +27,7 @@ half-finished document is most worth keeping. A version per write does not
 scale: a ten minute edit coalesced at 400ms is roughly 1500 versions, while the
 picker shows the last 50.
 
-The decision recorded in [Artifacts](../usage/artifacts.md), the served agent
+The decision recorded in [Artifacts](/guides/human/artifacts.md), the served agent
 reference and the skill was that there is no live editing. This record replaces
 that stance, and it changes what a public artifact URL means while a version is
 live.
