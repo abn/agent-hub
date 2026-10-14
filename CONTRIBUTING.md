@@ -4,7 +4,7 @@ Thanks for your interest in Agent Hub.
 
 ## Making a change
 
-Read the [contributor guide](docs/contribution/guide.md) for the workflow,
+Read the [contributor guide](docs/contribute/guide.md) for the workflow,
 conventions, and the verification gate. In short:
 
 ```

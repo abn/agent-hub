@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: A knowledge base page keeps every version, in its own file
 description: Why the project knowledge base keeps the bytes of every page version beside the pages, how a revert is an ordinary write, and why only the operator's purge takes them away.
 tags: [adr, knowledge-base, agentfs, history, retention]

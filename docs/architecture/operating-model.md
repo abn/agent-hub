@@ -1,17 +1,16 @@
 ---
-type: Reference
+type: Explanation
 title: Operating model
-description: One operator, their agents, and what the boundaries between them are for.
-tags: [architecture, trust, posture, boundaries]
-status: draft
+description: The trust posture and who may reach what
+tags: [operator, security]
+status: stable
 ---
 
 # Operating model
 
 This page states the philosophy the whole hub is built on, so the boundaries
 between the operator and their agents are read from one place instead of being
-re-derived. Where another page disagrees with this one, this one is the
-intent.
+re-derived. Where another page disagrees with this one, this one is the intent.
 
 ## The shape
 
@@ -22,25 +21,34 @@ one tenant, the operator, and the agents are theirs.
 ## What the boundaries are for
 
 The boundaries guard against mistakes and bad behaviour inside one household,
-not against a determined adversary or another tenant. A caller that already holds
-a valid token is inside the trust boundary; the token is an identity, and the
-server records it as the actor.
+not against a determined adversary or another tenant. A caller that already
+holds a valid token is inside the trust boundary; the token is an identity, and
+the server records it as the actor.
+
+> [!IMPORTANT]
+> A token is an identity, not a credential that narrows access by itself. A
+> caller that already holds one is trusted to act as its agent, so the
+> boundaries below are guardrails on that actor, not isolation between actors.
 
 The platform is therefore open by default. There are no accounts, no sign-in,
-and no requirement for TLS between the operator's own machines. An artifact link
-is a capability: whoever holds it reaches the artifact. Security work is spent on
-making the operator's own actions unambiguous, not on isolation the deployment
-does not have.
+and no requirement for TLS between the operator's own machines. An artifact
+link is a capability: whoever holds it reaches the artifact. Security work is
+spent on making the operator's own actions unambiguous, not on isolation the
+deployment does not have.
 
 ## Who may reach a project
 
-- Every agent token reaches **every ordinary project**, to read and to write, and
-  its **own personal space**. Ordinary projects need no grant.
+- Every agent token reaches **every ordinary project**, to read and to write,
+  and its **own personal space**. Ordinary projects need no grant.
 - An agent may **not write another agent's personal space**.
 - A **confidential project requires a grant**. A grant is **access or no
   access**: there are no read and write levels.
-- Global reads are confined to the projects a caller can see, so a search or an
-  inbox read never crosses into one it cannot.
+- Global reads are confined to the projects a caller can see, so a search or
+  an inbox read never crosses into one it cannot.
+
+The MCP tools that read and write projects are in
+[MCP tools](/reference/mcp-tools.md), and the routes that administer access are
+in [REST API](/reference/rest-api.md).
 
 ## Creating, and locking
 
@@ -88,3 +96,11 @@ list the ones they can see over REST as well.
 Isolation between tenants, defence against someone who already holds a token,
 and stopping an agent from doing what its operator asked. Features that would
 only serve those goals are out of scope for this deployment.
+
+## See also
+
+- [Components](/architecture/components.md) - the process that enforces these
+  boundaries.
+- [Data model](/architecture/data-model.md) - where grants and identities are
+  stored.
+- [Goals and non-goals](/design/goals.md) - the wider v1 scope.

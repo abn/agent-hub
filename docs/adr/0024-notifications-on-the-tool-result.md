@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: Deliver notifications on the tool result, not by polling
 description: Why the hub carries what needs an agent's attention on the next tool result it makes, and offers standing subscriptions, instead of a push channel or a per-harness poll.
 tags: [adr, mcp, notifications, agents]

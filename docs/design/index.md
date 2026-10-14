@@ -1,5 +1,4 @@
 # Design
 
-* [Goals and non-goals](goals.md) - what v1 does and does not cover
-* [Terminology](terminology.md) - the canonical vocabulary
-* [Human interface](human-interface.md) - the design system and interface rules
+* [Goals and non-goals](goals.md) - What the first version covers and what it deliberately leaves out
+* [Human interface](human-interface.md) - The design system, tokens, and interaction rules for the PWA

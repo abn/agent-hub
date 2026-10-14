@@ -12,7 +12,7 @@ the human watches everything from an installable PWA.
 The working specification is held in the gitignored scratch area and is never
 committed. The public design lives in the wiki under `docs/` and describes the
 shipped behaviour. The trust posture and the access rules are stated once in
-[the operating model](docs/architecture/model.md); read it before re-deriving
+[the operating model](docs/architecture/operating-model.md); read it before re-deriving
 any access rule.
 
 ## Invariants
@@ -24,7 +24,7 @@ any access rule.
   admin boundary is privilege, not use: prune and undo, token and grant
   administration, declassifying a project, and deleting a project. Multi-tenant
   isolation and defence against a caller that already holds a token are not
-  goals. The [operating model](docs/architecture/model.md) is the one statement
+  goals. The [operating model](docs/architecture/operating-model.md) is the one statement
   of this.
 - **The local hub is the cloud.** No vendor cloud, and no brain off the node:
   the node holds every brain and agents reach it over LAN or tailnet. The
@@ -173,5 +173,5 @@ and the bundle is validated by `make docs/check`.
 
 ## Contributor guide
 
-See the [contributor guide](docs/contribution/guide.md) and, for maintainers,
-the [maintainer guide](docs/contribution/maintainers.md).
+See the [contributor guide](docs/contribute/guide.md) and, for maintainers,
+the [maintainer guide](docs/contribute/maintainers.md).

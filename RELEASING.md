@@ -157,7 +157,7 @@ Then verify as above.
 ### The image
 
 An image is immutable, so a rollback is a redeploy of the previous tag. Pull it
-and replace the running container; [deploy the hub as a service](docs/usage/deploy.md)
+and replace the running container; [deploy the hub as a service](docs/operate/deploy-as-a-service.md)
 covers the restart for both Docker and Podman. Roll the `latest` tag back too,
 or the next pull re-breaks it.
 
@@ -176,7 +176,7 @@ the normal path; `release-please` proposes it from the fix commits.
 The store schema migrates forward on startup, one version per transaction, and a
 binary refuses to open a store whose schema is newer than the most it supports.
 So rolling the binary back is a data operation, not a file copy, and the
-[operations runbook](docs/usage/operations.md) owns it: stop the hub, copy the
+[operations runbook](docs/operate/upgrade-and-rollback.md) owns it: stop the hub, copy the
 matching `backups/pre-migration-v<from>-<stamp>.db` from the data directory's
 `backups/` over `hub.db`, copy the `-wal` and `-shm` sidecars with it, remove
 any the backup did not carry, and start the older binary. Take an offline backup

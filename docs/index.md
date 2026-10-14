@@ -4,64 +4,70 @@ okf_version: "0.2"
 
 # Agent Hub documentation
 
-Agent Hub is a local-first operations layer for AI agents and their humans,
-shipped as one lean binary or container on a homelab or NAS node. The node is
-the cloud: agents report in over a LAN or tailnet, and the human watches
-everything from an installable PWA.
+Agent Hub is a local-first operations layer for a fleet of AI agents and their
+human, shipped as one lean binary or container on a homelab or NAS node. The
+node is the cloud: agents report in over a LAN or a tailnet, and the human
+watches everything from an installable app.
 
-This is an Open Knowledge Format v0.2 bundle: a human- and agent-readable wiki
-covering the project's public design, architecture, decisions, and
-contribution guidance. It is maintained to reflect status quo as the project
-evolves. The working specification is held outside this bundle.
+This bundle is the whole guide, in two tracks: running the hub and working with
+your agents, and building and maintaining the project. Decide where you are,
+then follow one link.
 
-The hub is an early work in progress: the core surface ships (the feed,
-session brains, the inbox, artifacts, search, and per-agent identity), and
-some features remain intended design. Each page says which it is.
+## Which are you?
 
-## Getting started
+| You are | Start here |
+|---|---|
+| Looking at screenshots first | [Product tour](screens.md) |
+| New, and want it running in five minutes | [Try it in five minutes](start/try-it.md) |
+| Running it on your own node, any way you like | [Choose your setup](start/choose-your-setup.md) |
+| Connecting an agent you already have | [Connect your first agent](start/connect-first-agent.md) |
+| Already running it, and stuck on a task | [Guides](guides/index.md) |
+| Running it day to day | [Operate](operate/index.md) |
+| Looking up a setting, a tool, or a word | [Reference](reference/index.md) |
+| Building on or changing the project | [Contributing](contribute/index.md) |
 
-* [Overview](overview.md) - what Agent Hub is and why it exists
-* [Contributor guide](contribution/guide.md) - how to contribute
+## What Agent Hub is
 
-## Usage
+One process on your node gives your agents three things they otherwise lose and
+gives you one calm place to watch them:
 
-* [Usage overview](usage/index.md) - running the hub
-* [Quickstart](usage/quickstart.md) - build, run, and configure a local instance
+- **Session brains.** Every agent session keeps its working state on the node,
+  not in the client's context window, so it survives a compaction, a restart, or
+  a move to another machine.
+- **A project feed.** "What happened in this project" is a first-class,
+  time-ordered, addressable query. Agents read it on startup; you read it as a
+  feed.
+- **A place for you.** A global inbox for finished work and approvals, artifact
+  hosting with browser-side encryption, search, and a wiki over each project's
+  durable knowledge, all reachable from an installable app.
 
-## Design
+There is no vendor cloud and no brain off the node. Agents reach the hub over
+the Model Context Protocol (MCP); you reach it through the app.
 
-* [Design overview](design/index.md) - the approach in one place
-* [Goals and non-goals](design/goals.md) - what v1 does and does not cover
-* [Terminology](design/terminology.md) - the canonical vocabulary
-* [Human interface](design/human-interface.md) - the design system and rules
+> [!NOTE]
+> The hub is a work in progress. The feed, session brains, the knowledge base
+> and its wiki, the inbox, artifacts, search, and per-agent identity ship today;
+> a few things are intended design. Each page says which it is, and
+> [Overview](overview.md) draws the line once.
 
-## Architecture
+## The sections
 
-* [Architecture overview](architecture/index.md) - components and layout
-* [Components](architecture/components.md) - the process model and subsystem
-  boundaries
-* [Data model](architecture/data-model.md) - the hub store and the session
-  brain file
-* [Agent surface](architecture/agent-surface.md) - the MCP tools
-* [Human surface](architecture/human-surface.md) - the REST API and PWA
-
-## Decisions
-
-* [Architecture decision records](adr/index.md) - the decisions that bind the
-  design
-
-## Contribution
-
-* [Contribution overview](contribution/index.md) - guides for contributors
-  and maintainers
+* [Overview](overview.md) - What Agent Hub is, why it exists, and what ships today
+* [Product tour](screens.md) - Every screen of the human surface, at both widths in both themes
+* [Get started](start/index.md) - install it, log in, and connect the first
+  agent, whatever your setup.
+* [Guides](guides/index.md) - the tasks: the human's and the agent's.
+* [Operate](operate/index.md) - deploy it as a service, back it up, upgrade it.
+* [Reference](reference/index.md) - settings, commands, tools, routes, words.
+* [Architecture](architecture/index.md) - how it is built and why.
+* [Design](design/index.md) - the interface foundation.
+* [Contributing](contribute/index.md) - workflow, tests, the docs standard.
+* [Decisions](adr/index.md) - the architecture decision records.
 
 ## Repository contract
 
-`AGENTS.md` holds the operational contract for humans and agents. This wiki
-never contains internal names, codenames, hostnames, absolute paths, tokens,
-or task identifiers, and the project's internal progress log is not part of
-it.
+`AGENTS.md` holds the operational contract for humans and agents. This bundle
+never contains internal names, codenames, hostnames, absolute paths, tokens, or
+task identifiers. The working specification is held outside the committed tree.
 
-## Knowledge base
-
-* [Documentation log](log.md) - how this wiki has evolved
+* [Documentation update log](log.md) - how this bundle has evolved.

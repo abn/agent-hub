@@ -1,10 +1,6 @@
 # Architecture
 
-* [Operating model](model.md) - the trust posture and who may reach what
-* [Components](components.md) - the process model and subsystem boundaries
-* [Data model](data-model.md) - the hub store and the session brain file
-* [Agent surface](agent-surface.md) - the MCP tools
-* [Human surface](human-surface.md) - the REST API and the PWA
-
-Every page in this section describes intended design. The store, the brain
-wrapper, and the feed surface exist; the pages name what ships.
+* [Overview](overview.md) - The process shape and the two structural choices behind the hub
+* [Operating model](operating-model.md) - The trust posture and who may reach what
+* [Components](components.md) - The process model and the boundaries between subsystems
+* [Data model](data-model.md) - The hub store tables, the session brain, and the project knowledge base

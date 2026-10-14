@@ -1,9 +1,9 @@
 ---
-type: Reference
+type: Explanation
 title: Data model
-description: The hub store tables, the session brain files, and the project knowledge bases.
-tags: [architecture, data-model, schema]
-status: draft
+description: The hub store tables, the session brain, and the project knowledge base
+tags: [contributor, knowledge-base, sessions]
+status: stable
 ---
 
 # Data model
@@ -47,14 +47,14 @@ inbox, which is global.
 | `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
 | `agents` | Agent identity, display name, and the id of the agent's personal space. |
 | `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
-| `grants` | An agent and a project: access to a confidential project, with no read or write levels. The [operating model](model.md) states who may reach what. |
+| `grants` | An agent and a project: access to a confidential project, with no read or write levels. The [operating model](/architecture/operating-model.md) states who may reach what. |
 | `search_docs` | The search corpus: one row per indexed document (feed, artifact, session brain path, or knowledge base page) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable
 lookups cheap. Indexes support paging a project feed newest first and
 ordering the inbox by action and time. The `events` table carries a JSON
 payload, so structured detail rides along without a second schema. The event
-kind is a closed set of the six design families (`signal`, `finished`,
+kind is a closed set of the seven design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`) plus `system`;
 sub-actions such as an artifact publish or update ride in the payload.
 A question's payload carries its optional `body`, `context` and suggested
@@ -96,7 +96,7 @@ thread, actor `hub` and payload `expired: true`, and resolves the inbox entry
 in the same transaction. The deadline and its outcome stay on the entry after
 it resolves, so the record says what was asked for. It is not retention:
 nothing is deleted, and no other row in the hub expires
-([ADR 0027](../adr/0027-deadlines-on-open-items.md)).
+([ADR 0027](/adr/0027-deadlines-on-open-items.md)).
 
 The display name is the only name a project keeps in one place: every other
 table, every MCP call and every blob path names the slug, so renaming a project
@@ -123,11 +123,12 @@ backlog the human cannot clear in one gesture. A project created afterwards has
 no cursor, and its first events are new, which is the same rule read forward.
 
 Identity is a first-class table rather than a field on a token, so the server
-sets the `actor` on every event and a request cannot forge another agent. The identity model and grants are described in [the token is the identity,
-and trust is removed](../adr/0021-the-token-is-the-identity.md). An agent holds
-one token at a time. Multiple live tokens per agent is to be evaluated: it is
-not being built and is not refused, but would need tracking per-token device or
-client labels and last-used timestamps.
+sets the `actor` on every event and a request cannot forge another agent. The
+identity model and grants are described in
+[the token is the identity](/adr/0021-the-token-is-the-identity.md). An agent
+holds one token at a time. Multiple live tokens per agent is to be evaluated:
+it is not being built and is not refused, but would need tracking per-token
+device or client labels and last-used timestamps.
 
 Identity changes are audited. Creating an agent, issuing or revoking its token,
 and adding or removing a grant each append a `system` event to the affected
@@ -153,7 +154,7 @@ Retention is deliberately a per-layer concept. The schema carries
 `archived_at` column so the later layers slot in without a painful migration.
 Pruning is reversible for a short window: a session carries `deleted_at` while
 its removal can still be undone, and the file is removed only when the window
-closes. The [decision record](../adr/0004-manual-pruning-in-v1.md) explains why
+closes. The [decision record](/adr/0004-manual-pruning-in-v1.md) explains why
 no automatic layer ships in v1.
 
 Artifact blobs live in a filesystem store under a per-project directory. That
@@ -243,15 +244,17 @@ The content is in a table of the same file, `hub_page_versions`: the bytes of
 every version a write stored or replaced and every page a delete removed, keyed
 by version token, so identical bytes are kept once. The wrapper writes it under
 the writer lock once the page write lands and before its log row, so a refused
-write keeps nothing and a row never names a version the file lacks. A page's history is its log rows joined to that table, and a
+write keeps nothing and a row never names a version the file lacks. A page's
+history is its log rows joined to that table, and a
 revert writes kept bytes back as a new write. Session brains keep no versions.
 The operator forgets a page's history by deleting its kept bytes, all but the
 page's current ones, and recording in `hub_page_forgotten` the newest row it
 was forgotten through, so those rows read as not kept. A knowledge base's size
 limit is held against its used pages, free ones left out, since the file reuses
 the pages a purge frees rather than shrinking.
-The decision is [ADR 0029](../adr/0029-knowledge-base-page-history.md). The routes over it are in
-[project knowledge base](../usage/knowledge-base.md).
+The decision is [ADR 0029](/adr/0029-knowledge-base-page-history.md). The
+routes over it are in
+[knowledge base pages](/reference/knowledge-base-pages.md).
 
 ## Multi-writer stores
 
@@ -266,5 +269,8 @@ multi-process model and nothing depends on it.
 
 ## See also
 
-- [Components](components.md) - which component owns which state
-- [Agent surface](agent-surface.md) - the tools that read and write it
+- [Components](/architecture/components.md) - which component owns which
+  state.
+- [MCP tools](/reference/mcp-tools.md) - the tools that read and write it.
+- [REST API](/reference/rest-api.md) - the routes the human surface reads it
+  through.

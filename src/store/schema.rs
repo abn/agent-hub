@@ -459,7 +459,7 @@ ALTER TABLE artifacts ADD COLUMN actor TEXT;
 /// A grant carried `read` or `write`, but authorization only ever asked whether
 /// a grant existed, so the level was presented in the API and the interface
 /// without being enforced. The table is rebuilt without it: a grant is access or
-/// no access, the model in `docs/architecture/model.md`.
+/// no access, the model in `docs/architecture/operating-model.md`.
 const V14: &str = r#"
 CREATE TABLE grants_v14(
   agent_id TEXT NOT NULL REFERENCES agents(id),

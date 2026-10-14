@@ -1,9 +1,9 @@
 ---
-type: Reference
+type: Explanation
 title: Components
-description: The process model and the boundaries between subsystems.
-tags: [architecture, components]
-status: draft
+description: The process model and the boundaries between subsystems
+tags: [contributor, overview]
+status: stable
 ---
 
 # Components
@@ -39,9 +39,12 @@ One Rust process serves three client-facing endpoints over a shared core:
 The AgentFS wrapper sits between the core and the AgentFS files, one per
 session and one per project. It holds one write handle per file, so writes to a
 given file are serialised by construction and cross-session conflicts are
-structurally impossible. The hub event store runs under the engine's concurrent journal
-mode. The wrapper is also the single place that writes the search index, on
-every change it makes.
+structurally impossible. The hub event store runs under the engine's concurrent
+journal mode. The wrapper is also the single place that writes the search
+index, on every change it makes.
+
+The tools the MCP server exposes are in [MCP tools](/reference/mcp-tools.md);
+the routes the HTTP API serves are in [REST API](/reference/rest-api.md).
 
 ## Boundaries
 
@@ -53,7 +56,7 @@ every change it makes.
   matches the hub's single pinned engine.
 - **One engine version links.** The build fails if the dependency tree contains
   two engine versions, which is what vendoring the SDK prevents (see
-  [decision 0010](../adr/0010-one-pinned-engine.md)).
+  [decision 0010](/adr/0010-one-pinned-engine.md)).
 - **Search lives in the hub store.** One full-text index over a search
   documents table, written through by the wrapper, so no cross-file search is
   needed. Document bodies are clamped to the maximum search body bytes on UTF-8
@@ -87,7 +90,7 @@ scratch or distroless container as a non-root user with a read-only root
 filesystem. Persistence is a single mounted data volume. Backups are taken
 offline by `agent-hub backup`, online by the serving hub itself into a
 configured directory outside the data volume, or as node or NAS snapshots (see
-[Operations](../usage/operations.md#back-up)).
+[Back up and restore](/operate/backup-and-restore.md)).
 
 The default path is the plain container behind a reverse proxy, which owns
 TLS. An optional build embeds a tailnet endpoint through `tailscale-rs`, behind
@@ -96,14 +99,19 @@ in userspace and listen there with no open ports. That build is experimental:
 the library has no tailnet name resolution or certificate issuance yet and its
 NAT traversal is in progress, so it is addressed by tailnet IP, and the
 tailnet carries plain HTTP inside the WireGuard tunnel, with no hub TLS (see
-[decision 0014](../adr/0014-optional-embedded-tailnet.md)).
+[decision 0014](/adr/0014-optional-embedded-tailnet.md)).
 
 ## See also
 
-- [Data model](data-model.md) - what the components read and write
-- [Decision 0002](../adr/0002-single-turso-engine.md) - why one engine
-- [Decision 0003](../adr/0003-wrap-agentfs-per-session.md) - why the wrapper
-  is the single writer
-- [Decision 0010](../adr/0010-one-pinned-engine.md) - why the SDK is vendored
-- [Decision 0014](../adr/0014-optional-embedded-tailnet.md) - the tailnet
-  option
+- [Architecture overview](/architecture/overview.md) - the process shape in one
+  page.
+- [Operating model](/architecture/operating-model.md) - the trust posture the
+  boundaries enforce.
+- [Data model](/architecture/data-model.md) - what the components read and
+  write.
+- [Decision 0002](/adr/0002-single-turso-engine.md) - why one engine.
+- [Decision 0003](/adr/0003-wrap-agentfs-per-session.md) - why the wrapper
+  is the single writer.
+- [Decision 0010](/adr/0010-one-pinned-engine.md) - why the SDK is vendored.
+- [Decision 0014](/adr/0014-optional-embedded-tailnet.md) - the tailnet
+  option.

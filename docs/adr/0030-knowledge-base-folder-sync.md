@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: A knowledge base syncs with a folder under the version guard
 description: Why a project knowledge base exports to a plain folder with a manifest of page versions, and why an import lints first, skips a page the hub changed since, and deletes nothing unless asked.
 tags: [adr, knowledge-base, okf, cli]

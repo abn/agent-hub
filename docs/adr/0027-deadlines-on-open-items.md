@@ -1,5 +1,5 @@
 ---
-type: Decision
+type: Decision Record
 title: An agent may put a deadline on the item it asks
 description: Why an agent posting a question or an approval may say how long it can wait, why the hub then resolves that one item as itself, and why this is not retention.
 tags: [adr, inbox, approvals, questions, agents]

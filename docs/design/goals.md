@@ -1,9 +1,9 @@
 ---
-type: Concept
+type: Explanation
 title: Goals and non-goals
-description: What the first version covers and what it deliberately leaves out.
-tags: [design, goals, scope]
-status: draft
+description: What the first version covers and what it deliberately leaves out
+tags: [contributor, overview, design]
+status: stable
 ---
 
 # Goals and non-goals
@@ -34,6 +34,10 @@ status: draft
 - No reimplementation of AgentFS. The hub wraps the real thing, and FUSE is
   not used because agents are remote MCP clients.
 
+The trust posture behind these choices is stated once in the
+[operating model](/architecture/operating-model.md), and the words used here
+are defined in the [glossary](/reference/glossary.md).
+
 ## Milestone shape
 
 Work proceeds in independently shippable milestones: a skeleton with the
@@ -43,5 +47,5 @@ is a single binary that runs on a node, where an agent can signal, keep a
 brain across compaction, publish an artifact, and ask the human a question,
 and the human can see all of it and prune.
 
-The [architecture](../architecture/index.md) describes the intended design
+The [architecture](/architecture/index.md) describes the intended design
 those milestones build toward.
