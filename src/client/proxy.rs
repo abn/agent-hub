@@ -9,15 +9,47 @@
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, ErrorData, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResponse, ServerConfig, ServerPeerInfo,
+    CacheScope, CallToolRequestParams, CallToolResponse, ErrorData, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ResultType, ServerConfig, ServerPeerInfo,
 };
 use rmcp::service::{Peer, RequestContext, RoleClient, ServiceError};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
 
 use super::{Failure, connect};
 use crate::config::ClientConfig;
+
+/// Whether the client opened this connection on protocol revision `2026-07-28`
+/// or newer, the revisions whose results carry `resultType` and the cache hints.
+fn is_modern(context: &RequestContext<RoleServer>) -> bool {
+    context
+        .protocol_version()
+        .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+}
+
+/// Fill in the fields a `2026-07-28` client requires on a cacheable result and
+/// the hub, reached over the proxy's legacy link, does not send.
+///
+/// The proxy holds its link to the hub as a legacy session, so the hub answers
+/// it in the shape that predates `2026-07-28` and never carries `resultType`.
+/// A client that negotiated the modern revision requires it on every result,
+/// and `ttlMs` and `cacheScope` on a cacheable one, so they are set here: the
+/// server handler strips `resultType` again for a client on an older revision,
+/// leaving its historical shape, and the cache hints belong to the modern era
+/// alone. A zero `ttlMs` marks the result immediately stale and a private
+/// scope keeps it out of a shared cache.
+fn complete_cacheable(
+    result_type: &mut Option<ResultType>,
+    ttl_ms: &mut Option<u64>,
+    cache_scope: &mut Option<CacheScope>,
+    modern: bool,
+) {
+    *result_type = Some(ResultType::COMPLETE);
+    if modern {
+        *ttl_ms = Some(0);
+        *cache_scope = Some(CacheScope::Private);
+    }
+}
 
 /// The stdio server, holding the hub's client peer.
 struct HubProxy {
@@ -34,9 +66,16 @@ impl ServerHandler for HubProxy {
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        self.peer.list_tools(request).await.map_err(upstream)
+        let mut result = self.peer.list_tools(request).await.map_err(upstream)?;
+        complete_cacheable(
+            &mut result.result_type,
+            &mut result.ttl_ms,
+            &mut result.cache_scope,
+            is_modern(&context),
+        );
+        Ok(result)
     }
 
     async fn call_tool(
@@ -44,7 +83,11 @@ impl ServerHandler for HubProxy {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        self.peer.call_tool_once(request).await.map_err(upstream)
+        let mut response = self.peer.call_tool_once(request).await.map_err(upstream)?;
+        if let CallToolResponse::Complete(result) = &mut response {
+            result.result_type = Some(ResultType::COMPLETE);
+        }
+        Ok(response)
     }
 
     /// Forward resource listing, so the `resources` capability `hub_info`
@@ -52,9 +95,16 @@ impl ServerHandler for HubProxy {
     async fn list_resources(
         &self,
         request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        self.peer.list_resources(request).await.map_err(upstream)
+        let mut result = self.peer.list_resources(request).await.map_err(upstream)?;
+        complete_cacheable(
+            &mut result.result_type,
+            &mut result.ttl_ms,
+            &mut result.cache_scope,
+            is_modern(&context),
+        );
+        Ok(result)
     }
 
     /// Forward the resource templates, so a client can name a knowledge base
@@ -62,12 +112,20 @@ impl ServerHandler for HubProxy {
     async fn list_resource_templates(
         &self,
         request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        self.peer
+        let mut result = self
+            .peer
             .list_resource_templates(request)
             .await
-            .map_err(upstream)
+            .map_err(upstream)?;
+        complete_cacheable(
+            &mut result.result_type,
+            &mut result.ttl_ms,
+            &mut result.cache_scope,
+            is_modern(&context),
+        );
+        Ok(result)
     }
 
     /// Forward a resource read, for the same reason: the guide and the
@@ -75,13 +133,23 @@ impl ServerHandler for HubProxy {
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        self.peer
+        let mut response: ReadResourceResponse = self
+            .peer
             .read_resource(request)
             .await
-            .map(Into::into)
-            .map_err(upstream)
+            .map_err(upstream)?
+            .into();
+        if let ReadResourceResponse::Complete(result) = &mut response {
+            complete_cacheable(
+                &mut result.result_type,
+                &mut result.ttl_ms,
+                &mut result.cache_scope,
+                is_modern(&context),
+            );
+        }
+        Ok(response)
     }
 }
 
