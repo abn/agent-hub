@@ -7,6 +7,7 @@ name: Publish wiki
     branches: [main]
     paths:
       - "docs/**"
+      - "wiki-theme/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -34,6 +35,7 @@ jobs:
         uses: abn/okf-wiki/action@052f3d746f1fc96aa218a460fe41572f136a2140 # main
         with:
           content: docs
+          theme: wiki-theme
           deploy: true
           brand: agent-hub
           brand-sub: docs

@@ -1,0 +1,10 @@
+{
+  "name": "agent-hub",
+  "version": "1.0.0",
+  "description": "The Agent Hub house style: a warm paper ground, blue identity, system type, and the app's control radii, layered over the paper defaults.",
+  "assets": {
+    "tokens.css": { "mode": "replace" },
+    "brand-mark.svg": { "mode": "replace" },
+    "favicon.svg": { "mode": "replace" }
+  }
+}
