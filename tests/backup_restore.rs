@@ -202,7 +202,7 @@ fn backup_includes_the_tailnet_key_state() {
     std::fs::write(&keys, br#"{"device":"example"}"#).expect("write the key state");
 
     let report = block_on(agent_hub::ops::backup(&data, &out)).expect("back up the store");
-    assert_eq!(report.files, 6, "hub, brain, knowledge, blob, tailnet key, and the store sidecar");
+    assert_eq!(report.files, 5, "hub, brain, knowledge, blob, tailnet key");
 
     let manifest = agent_hub::ops::Manifest::read(&out).expect("read the manifest");
     assert!(
