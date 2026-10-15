@@ -206,10 +206,24 @@ function isPersonalSpace(p) {
 }
 
 // Render regular projects into the rail's PROJECTS list.
+//
+// The list is the hub's own, so it is drawn from a token and has to be asked
+// again when that token is kept or when the project set moves: the Connect
+// screen does so on the token it saves, and the create, rename and delete paths
+// on the project they changed. A load with no token empties the list rather than
+// leaving one hub's projects on screen under another's name.
 export async function renderRailProjects() {
-  if (!railProjects || !prefs.token) return;
+  if (!railProjects) return;
+  const token = prefs.token;
+  if (!token) {
+    railProjects.replaceChildren();
+    return;
+  }
   try {
     const { projects } = await api("/api/v1/projects");
+    // A token saved or dropped while this was in flight owns the rail now, so a
+    // reply on its way for the token it replaced is dropped.
+    if (token !== prefs.token) return;
     const regular = (projects || []).filter((p) => !isPersonalSpace(p));
 
     // The live dot rides on the listing this already fetched. It used to ask

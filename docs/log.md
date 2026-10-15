@@ -33,6 +33,15 @@ software release notes and the repository changelog.
   pages. Screenshots now live only under `assets/screens/` and are embedded
   from the Product tour and the pages that describe each screen.
 
+### The rail's project list follows the token and the project set
+
+* **Fix**: [Human interface](design/human-interface.md) states that the rail's
+  PROJECTS rows are taken again when a token is kept and when a project is
+  created, renamed or deleted. The list was drawn once as the page loaded, so a
+  reader who connected after a tokenless load saw an empty PROJECTS section
+  until they reloaded, and a project made, renamed or deleted during a session
+  never reached the rail.
+
 ### The stdio proxy serves a modern MCP client
 
 * **Update**: [CLI](/reference/cli.md) states that the `agent-hub mcp` proxy

@@ -126,10 +126,13 @@ order:
 | Aside | 320 default, 288 to 440, draggable | only where something is read against the stage |
 
 The rail is navigation, not a pane. It is one 52px identity block, then rows,
-then a footer, and it owes no control row. The project's section switcher is a
-segmented control inside the index header, not a tab strip above the panes: it
-selects what the index lists and never changes the shell. The inbox is the same
-shell with one index and no switcher.
+then a footer, and it owes no control row. Its PROJECTS rows are the hub's
+ordinary projects, drawn from the same listing the register reads and taken
+again when a token is kept or a project is created, renamed or deleted. An
+agent's personal space never appears among them. The project's section switcher
+is a segmented control inside the index header, not a tab strip above the panes:
+it selects what the index lists and never changes the shell. The inbox is the
+same shell with one index and no switcher.
 
 An index exists only where items are opened one at a time, so Settings is the
 one screen with no index: a short form is not a list. An aside exists only

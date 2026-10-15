@@ -24,6 +24,7 @@ import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
 import { pickProject, projectsIndexScreen } from "./projects.mjs";
+import { renderRailProjects } from "./shell.mjs";
 import { wikiIndexBody, wikiStage, wireWikiComments } from "./wiki.mjs";
 export { projectsIndexScreen } from "./projects.mjs";
 import {
@@ -445,6 +446,7 @@ export function wireProjectHeader(project, stats, footprint) {
         if (confirmed) {
           try {
             await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+            renderRailProjects();
             location.hash = "#/projects";
             toast("Project deleted.");
           } catch (err) {

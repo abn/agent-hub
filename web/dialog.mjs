@@ -19,6 +19,7 @@
 import { api } from "./api.mjs";
 import { esc, main } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
+import { renderRailProjects } from "./shell.mjs";
 import { formatBytes } from "./storage.mjs";
 
 let sequence = 0;
@@ -431,6 +432,7 @@ export function openCreateProjectDialog({ onCreated } = {}) {
       });
       busy = false;
       dialog.close("created");
+      renderRailProjects();
       if (onCreated) onCreated(created);
       location.hash = `#/projects/${encodeURIComponent(slug)}/feed`;
     } catch (err) {
