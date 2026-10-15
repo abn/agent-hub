@@ -59,10 +59,12 @@ a sheet on a phone. A comment may anchor to a quote or to a point on a version.
 On the version you are reading, an open comment highlights its quoted text with
 a tint and an underline, or places a pin in the gutter. Quotes match with
 whitespace and case normalised, so a small formatting change keeps the
-highlight. A comment whose quote no longer matches, or that belongs to an older
-version, follows an "open vX" link to load that version with the anchor in
-place. Resolved comments fold away. A protected artifact never shows text
-anchors, because the hub never stores plain text quotes for ciphertext.
+highlight. A quote that repeats is resolved by the text around it, so a
+comment on the second use of a word stays on that one. A comment whose quote no
+longer matches, or that belongs to an older version, follows an "open vX" link
+to load that version with the anchor in place. Resolved comments fold away. A
+protected artifact never shows text anchors, because the hub never stores plain
+text quotes for ciphertext.
 
 ## Sharing
 

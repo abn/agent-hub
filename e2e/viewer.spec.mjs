@@ -79,6 +79,61 @@ test.describe("the artifact viewer's actions", () => {
     await expect(page.getByRole("heading", { name: "Comments" })).toBeHidden();
     await expect(sheet.getByRole("button", { name: /^Close/ })).toHaveCount(1);
   });
+
+  test("a comment on a repeated word lands where it was written", async ({ hub, page }, testInfo) => {
+    // The anchor stored only the quote and the frame took its first match, so a
+    // comment on the second "quality" highlighted the first one instead. The
+    // selection now carries the text around it, and the frame resolves the
+    // occurrence whose context matches.
+    test.skip(testInfo.project.name !== "desktop", "the callout is a fine-pointer surface");
+    const session = await newSession(hub);
+    const published = await toolCall(hub, session, "artifact_publish", {
+      project_id: hub.projectId,
+      title: "Repeated word",
+      kind: "markdown",
+      content:
+        "## First section\n\nThe first card values latency over quality today.\n\n" +
+        "## Second section\n\nThe profile objective quality wins on card 86.",
+    });
+    const id = structured(published).artifact_id;
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    await expect(page.locator("#hub-frame")).toBeVisible();
+
+    const document = page.frameLocator("#hub-frame").frameLocator("#hub-frame");
+    await document.locator("body").first().waitFor();
+
+    // Select the word "quality" in the second section together with the spaces
+    // a drag tends to catch, so the context boundary has to line up with the
+    // trimmed quote rather than sit one space off.
+    await document
+      .locator("p", { hasText: "profile objective" })
+      .evaluate((paragraph) => {
+        const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node && node.nodeValue.indexOf("quality") === -1) node = walker.nextNode();
+        const start = node.nodeValue.indexOf("quality") - 1;
+        const range = document.createRange();
+        range.setStart(node, start);
+        range.setEnd(node, start + "quality".length + 2);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.dispatchEvent(new Event("selectionchange"));
+      });
+
+    await document.getByRole("button", { name: "Comment on selection" }).click();
+    const sheet = page.locator(".comments-drawer.hub-comment-sheet:not([hidden])");
+    await expect(sheet).toBeVisible();
+    await sheet.locator("textarea").first().fill("the second one");
+    await sheet.getByRole("button", { name: "Post", exact: true }).click();
+    await expect(sheet).toHaveCount(0);
+
+    // The painted highlight sits in the second section, not the first.
+    const painted = await document
+      .locator(".hub-comment-highlight")
+      .evaluate((el) => (el.closest("p") ? el.closest("p").textContent : ""));
+    expect(painted, "the highlight landed on the wrong occurrence").toContain("profile objective");
+  });
 });
 
 test.describe("the project artifact stage's actions", () => {

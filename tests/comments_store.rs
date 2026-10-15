@@ -338,6 +338,8 @@ async fn validation_rejects_bad_comments() {
         "Hi.",
         Some(AnchorInput::Text {
             quote: "  ".to_string(),
+            prefix: None,
+            suffix: None,
         }),
         None,
         None,
@@ -356,6 +358,8 @@ async fn validation_rejects_bad_comments() {
         "Hi.",
         Some(AnchorInput::Text {
             quote: "q".repeat(2001),
+            prefix: None,
+            suffix: None,
         }),
         None,
         None,
@@ -364,6 +368,101 @@ async fn validation_rejects_bad_comments() {
     .await;
     assert_eq!(
         long_quote.expect_err("long quote").code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[tokio::test]
+async fn a_text_anchor_keeps_its_context_and_caps_it() {
+    let dir = TempDir::new("comment-context");
+    let db = open(&dir).await;
+    let artifact_id = publish(&db, &dir).await;
+
+    // The surrounding text the selection came from round-trips beside the
+    // quote, so a repeated word resolves to the occurrence the reader chose.
+    let (comment, _) = comments::add_comment(
+        &db,
+        &artifact_id,
+        "agent-one",
+        "This one.",
+        Some(AnchorInput::Text {
+            quote: "quality".to_string(),
+            prefix: Some("the profile objective ".to_string()),
+            suffix: Some(" wins on card 86".to_string()),
+        }),
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("post with context");
+    let anchor = comment.anchor.expect("anchor");
+    assert_eq!(anchor["prefix"].as_str(), Some("the profile objective "));
+    assert_eq!(anchor["suffix"].as_str(), Some(" wins on card 86"));
+
+    // An anchor with no context keeps the shape it always had: mode and quote.
+    let (plain, _) = comments::add_comment(
+        &db,
+        &artifact_id,
+        "agent-one",
+        "No context.",
+        Some(AnchorInput::Text {
+            quote: "quality".to_string(),
+            prefix: None,
+            suffix: None,
+        }),
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("post without context");
+    let anchor = plain.anchor.expect("anchor");
+    assert!(anchor.get("prefix").is_none());
+    assert!(anchor.get("suffix").is_none());
+
+    // A context past the cap is refused rather than stored.
+    let long_context = comments::add_comment(
+        &db,
+        &artifact_id,
+        "agent-one",
+        "Too much.",
+        Some(AnchorInput::Text {
+            quote: "quality".to_string(),
+            prefix: Some("p".repeat(65)),
+            suffix: None,
+        }),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        long_context.expect_err("long context").code(),
+        ErrorCode::InvalidArgument
+    );
+}
+
+#[test]
+fn parse_anchor_reads_context_and_refuses_a_non_string() {
+    let parsed = comments::parse_anchor(Some(serde_json::json!({
+        "mode": "text", "quote": "quality", "prefix": "the ", "suffix": " wins",
+    })))
+    .expect("parse")
+    .expect("an anchor");
+    match parsed {
+        AnchorInput::Text { prefix, suffix, .. } => {
+            assert_eq!(prefix.as_deref(), Some("the "));
+            assert_eq!(suffix.as_deref(), Some(" wins"));
+        }
+        other => panic!("expected a text anchor, got {other:?}"),
+    }
+
+    let refused = comments::parse_anchor(Some(serde_json::json!({
+        "mode": "text", "quote": "quality", "prefix": 5,
+    })));
+    assert_eq!(
+        refused.expect_err("non-string context").code(),
         ErrorCode::InvalidArgument
     );
 }
@@ -397,6 +496,8 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
         "About this line.",
         Some(AnchorInput::Text {
             quote: "a public line".to_string(),
+            prefix: None,
+            suffix: None,
         }),
         Some(1),
         None,
@@ -414,6 +515,8 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
         "About this line.",
         Some(AnchorInput::Text {
             quote: "a secret line".to_string(),
+            prefix: None,
+            suffix: None,
         }),
         None,
         None,

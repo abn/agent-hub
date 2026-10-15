@@ -6,6 +6,14 @@ software release notes and the repository changelog.
 
 ## 2026-10-15
 
+### A repeated quote anchors where it was written
+
+* **Update**: [Artifacts](/guides/human/artifacts.md) states that a quote that
+  repeats is resolved by the text around it, so a comment on the second use of
+  a word stays on that one. Before this, the frame highlighted the first
+  occurrence of the quote, so a comment written on a repeated word opened on
+  the wrong line.
+
 * **Update**: Restructured the bundle around reader goals into nine sections:
   Get started, Guides, Operate, Reference, Architecture, Design, Contributing,
   and Decisions, with the root index as a router. The old `usage/`,
