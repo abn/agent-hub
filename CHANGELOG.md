@@ -4,6 +4,18 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.3.0...agent-hub-v1.4.0) (2026-10-15)
+
+
+### Features
+
+* **brand:** a collaboration mark across the app, the wiki, and the README ([b1334f1](https://github.com/abn/agent-hub/commit/b1334f140b3eff6228715b1d882a733ad78ee248))
+
+
+### Bug Fixes
+
+* **client:** serve a modern client the result shape it requires ([072a777](https://github.com/abn/agent-hub/commit/072a777943c901cbea5b785c4d22bb502aad934a))
+
 ## [1.3.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.2.0...agent-hub-v1.3.0) (2026-10-10)
 
 
