@@ -2817,6 +2817,13 @@ software release notes and the repository changelog.
 
 ### Feed surface
 
+* **Update**: Grouped `answer` events under their question or approval thread on
+  the project feed (Gmail-style): a reply renders under its root row instead of
+  as its own entry, the stage shows the whole thread, and cross-day/cross-page
+  replies that have no loaded root still render as a fallback row rather than
+  being dropped. Per-page kind counts exclude answers since they now nest rather
+  than stand alone.
+
 * **Creation**: The MCP server exposes the feed: `signal_append` writes an
   event, and `feed_read` pages a project feed with `next_since` and
   `next_before` cursors. The streamable HTTP transport requires a bearer token.

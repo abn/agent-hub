@@ -336,7 +336,26 @@ function collapsedArtifactRow(item, baseline) {
 // A row opens the event in the stage; the artifact or session it is about is
 // reached from the stage's own card, so the row is a door to the item and not
 // straight past it.
-function feedRow(event, baseline, selected = false) {
+function threadRepliesHTML(replies) {
+  if (!replies.length) return "";
+  return replies
+    .slice()
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+    .map(
+      (reply) => `
+    <div class="feed-thread-reply">
+      <div class="feed-thread-meta">${esc(reply.actor)} · ${when(reply.created_at)}</div>
+      <div class="feed-thread-body">${esc(
+        typeof reply.payload?.body === "string" && reply.payload.body.trim()
+          ? reply.payload.body.trim()
+          : formatEventSummary(reply),
+      )}</div>
+    </div>`,
+    )
+    .join("");
+}
+
+function feedRow(event, baseline, selected = false, replies = []) {
   const unread = event.id > baseline;
   const project = event.project_id || "";
   const href = `#/projects/${encodeURIComponent(project)}/feed?event=${encodeURIComponent(event.id)}`;
@@ -350,24 +369,53 @@ function feedRow(event, baseline, selected = false) {
       ${title}
       ${decisionNote(event)}
       ${metaLine(event.actor, event.created_at, waiting ? waiting.pill : "")}
+      ${threadRepliesHTML(replies)}
     </div>
     ${waiting ? waiting.dot : unread ? UNREAD : ""}
   </div>`;
 }
 
 function dayGroups(groups, baseline, selectedId = "") {
+  // One reply map for the whole loaded set, so a reply and its root are
+  // matched even if they land on different days inside the feed.
+  const loaded = groups.flatMap((group) => collapseDayEvents(group.events));
+  const repliesByRoot = new Map();
+  for (const item of loaded) {
+    if (item.kind === "answer" && item.thread_id && item.thread_id !== item.id) {
+      const key = item.thread_id;
+      if (!repliesByRoot.has(key)) repliesByRoot.set(key, []);
+      repliesByRoot.get(key).push(item);
+    }
+  }
+  // A root that is actually present on the loaded page owns its replies; any
+  // answer whose root is not on the loaded page falls back to its own row.
+  const rootIds = new Set(loaded.filter((item) => item.kind !== "answer").map((item) => item.id));
   return groups
-    .map(
-      (group) =>
-        `<h2 class="day">${esc(group.label)}</h2>
-         <div class="card feed-day">${collapseDayEvents(group.events)
-           .map((item) =>
-             item.collapsed
-               ? collapsedArtifactRow(item, baseline)
-               : feedRow(item, baseline, item.id === selectedId),
-           )
-           .join("")}</div>`,
-    )
+    .map((group) => {
+      const events = collapseDayEvents(group.events);
+      const repliesFor = (id) =>
+        repliesByRoot.has(id)
+          ? repliesByRoot.get(id).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+          : [];
+      const visible = events
+        .filter((item) => item.kind !== "answer")
+        .map((item) =>
+          item.collapsed
+            ? collapsedArtifactRow(item, baseline)
+            : feedRow(item, baseline, item.id === selectedId, repliesFor(item.id)),
+        );
+      const fallback = events
+        .filter((item) => item.kind === "answer")
+        .filter((item) => !rootIds.has(item.thread_id))
+        .map((item) => feedRow(item, baseline, item.id === selectedId));
+      const rows = visible.concat(fallback);
+      // A day with nothing to show (for instance every row below was a reply)
+      // must not paint an empty header and an empty card.
+      if (!rows.length) return "";
+      return `<h2 class="day">${esc(group.label)}</h2>
+         <div class="card feed-day">${rows.join("")}</div>`;
+    })
+    .filter((html) => html !== "")
     .join("");
 }
 
@@ -473,9 +521,16 @@ export async function feedSection(current, stats = null, { chips = true } = {}) 
         allEvents = unfiltered.events;
       } catch {}
     }
-    counts = { total: stats?.events ?? allEvents.length };
+    counts = { total: 0 };
     for (const k of FEED_KINDS) counts[k.kind] = 0;
     for (const event of allEvents) {
+      if (event.kind === "answer") continue;
+      counts.total++;
+    }
+    for (const event of allEvents) {
+      // An answer is a reply on a thread: it is not an entry of its own, so
+      // it neither counts nor feeds the "All" total.
+      if (event.kind === "answer") continue;
       if (counts[event.kind] != null) counts[event.kind]++;
     }
   }
@@ -549,6 +604,29 @@ export function eventStage(event, projectId) {
   if (!event) {
     return `<div class="shell-prose"><p class="empty">Select an event from the list.</p></div>`;
   }
+  // An answer is a reply: reading it reads its whole thread, Gmail-style, so
+  // the main question and every reply render together rather than one at a
+  // time.
+  const visit = feedVisit(projectId);
+  const rootId =
+    event.kind === "answer" && event.thread_id ? event.thread_id : event.id || event.event_id;
+  let rootEvent = event;
+  if (event.kind === "answer" && visit?.events) {
+    const found = visit.events.find((candidate) => candidate.id === rootId || candidate.event_id === rootId);
+    if (found) rootEvent = found;
+  }
+  event = rootEvent;
+  const threadReplies = visit?.events
+    ? visit.events
+        .filter(
+          (candidate) =>
+            candidate.kind === "answer" &&
+            (candidate.thread_id === rootId || candidate.thread_id === event.id || candidate.thread_id === event.event_id) &&
+            (candidate.id || candidate.event_id) !== (event.id || event.event_id),
+        )
+        .slice()
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+    : [];
   const open = isOpen(event);
   const word = KIND_WORD[event.kind] || event.kind;
   // A finished event's summary is a report, not a subject, so the stage titles
@@ -580,6 +658,23 @@ export function eventStage(event, projectId) {
       ${body ? `<p class="feed-stage-body">${esc(body)}</p>` : ""}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}
+      ${
+        threadReplies.length
+          ? `<div class="feed-stage-thread">${threadReplies
+              .map(
+                (reply) => `
+        <div class="feed-stage-reply">
+          <div class="meta mono">${esc(reply.actor)} · ${when(reply.created_at)}</div>
+          <p class="feed-stage-body">${esc(
+            typeof reply.payload?.body === "string" && reply.payload.body.trim()
+              ? reply.payload.body.trim()
+              : formatEventSummary(reply),
+          )}</p>
+        </div>`,
+              )
+              .join("")}</div>`
+          : ""
+      }
     </article>`;
 }
 
