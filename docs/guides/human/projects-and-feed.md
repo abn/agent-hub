@@ -55,7 +55,10 @@ Events are one of seven kind families: signal, finished, question, answer,
 approval, artifact, and session. Filter by kind with the chips in the row: All,
 Questions, Approvals, Finished, each with its count. Kinds with no events are
 hidden. Two artifact publishes from one agent inside two minutes collapse into
-one row, "published N artifacts". An artifact row links to that artifact in the
+one row, "published N artifacts". An answer to a question or approval renders under
+that item's row rather than as its own row, so a thread reads as one
+conversation; a reply whose root sits beyond the loaded page still renders as
+its own row so nothing is lost. An artifact row links to that artifact in the
 project's Artifacts stage; rows with no destination of their own stay
 unlinked.
 

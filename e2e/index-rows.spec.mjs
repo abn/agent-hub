@@ -75,7 +75,7 @@ async function expectPillOnMetaLine(row, link, what) {
   expect(boxes.length, `${what}: the row draws no waiting pill`).toBe(1);
   const [drawn] = boxes;
   const title = await link.boundingBox();
-  const stamp = await row.locator("time").boundingBox();
+  const stamp = await row.locator(".meta time, .inbox-foot time").boundingBox();
   expect.soft(drawn.y, `${what}: the pill is on the title line`).toBeGreaterThanOrEqual(title.y + title.height - 0.5);
   const middle = drawn.y + drawn.height / 2;
   expect.soft(
@@ -173,7 +173,7 @@ test.describe("a waiting row in an index", () => {
       ["the waiting row", row],
       ["a row with nothing waiting", quiet],
     ]) {
-      const stamp = held.locator("time");
+      const stamp = held.locator(".meta time, .inbox-foot time");
       await expect(stamp, `${which} shows no time`).toBeVisible();
       const fits = await held.evaluate((el, long) => {
         const time = el.querySelector("time");
@@ -213,7 +213,7 @@ test.describe("a waiting row in an index", () => {
         await page.mouse.move(0, 0);
         await expect(row).toHaveScreenshot(`${screen}-waiting-row-${scheme}.png`, {
           ...SCREENSHOT,
-          mask: [row.locator("time")],
+          mask: [row.locator(".meta time, .inbox-foot time")],
         });
       }
     }

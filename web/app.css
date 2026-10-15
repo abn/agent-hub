@@ -8992,3 +8992,9 @@ button.agents-add-btn[aria-pressed="true"]:not([disabled]):not(.primary):not(.ac
 button:is(.agent-grant-open, .agent-revoke-btn):not([disabled]):not(.primary):not(.action):hover {
   background: var(--surface);
 }
+
+.feed-thread-reply { border-top: 1px solid var(--line); padding: var(--s-2) 0 var(--s-2) var(--s-5); }
+.feed-thread-meta { font-size: var(--t-12); color: var(--ink-3); }
+.feed-thread-body { margin: 0; font-size: var(--t-13); line-height: 1.45; color: var(--ink-2); }
+.feed-stage-thread { margin-top: var(--s-4); border-top: 1px solid var(--line); }
+.feed-stage-reply { padding: var(--s-3) 0; border-top: 1px solid var(--line); }
