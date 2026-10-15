@@ -11,6 +11,7 @@ import { esc, main, paint, stale } from "./dom.mjs";
 import { emptyStateHTML } from "./empty.mjs";
 import { deleteProject } from "./settings.mjs";
 import { projectLockBadge, projectOverflow, wireProjectHeader } from "./project.mjs";
+import { renderRailProjects } from "./shell.mjs";
 import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { toast } from "./toast.mjs";
 
@@ -243,6 +244,7 @@ export async function projectSettingsScreen(gen, path) {
         body: JSON.stringify(body),
       });
       show();
+      if ("display_name" in body) renderRailProjects();
       // Save goes quiet once nothing is left to save, and a disabled button
       // drops the focus it held, so the reader is put back on the form.
       if (!form.contains(document.activeElement) || document.activeElement === save) name.focus();

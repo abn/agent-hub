@@ -644,6 +644,88 @@ test.describe("register and connect", () => {
     // Put the working token back for the checks that follow.
     await page.evaluate((token) => window.localStorage.setItem("hub.token", token), hub.token);
   });
+
+  // The rail's list is the hub's own, and each of these reaches it without a
+  // reload: a project made, a project deleted, and the token that names the hub
+  // at all. The rail is drawn at the desktop width, where a reader can see the
+  // row, and the seeded project is addressed by its id rather than by the name
+  // the harness gave it.
+  const railItem = (page, id) =>
+    page.locator(`#rail-projects .rail-project-item[data-project-id="${id}"]`);
+
+  test("a project created here joins the rail", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const slug = "rail-latecomer";
+    await goto(page, "#/projects", "Projects");
+    await expect(
+      railItem(page, hub.projectId),
+      "the rail is missing the project the hub was seeded with",
+    ).toBeVisible();
+    try {
+      await page.locator('[data-action="new-project"]').first().click();
+      await page.locator("#project-create-name").fill("Rail latecomer");
+      await page.locator(".project-create-submit").click();
+      await expect(
+        railItem(page, slug),
+        "a project created on the register never reached the rail",
+      ).toBeVisible();
+    } finally {
+      await api(hub, "DELETE", `/api/v1/projects/${slug}`);
+    }
+  });
+
+  // The project header's own overflow deletes a project by a second path, so it
+  // is the one the rail is asked about as well.
+  test("a project deleted from its own header leaves the rail", async ({ hub, page }) => {
+    const slug = "rail-doomed";
+    await api(hub, "POST", "/api/v1/projects", { id: slug, display_name: "Rail doomed" });
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // A fresh load, so the rail is drawn with the project already there.
+      await page.evaluate((id) => {
+        location.hash = `#/projects/${id}/feed`;
+      }, slug);
+      await page.reload();
+      await expect(
+        railItem(page, slug),
+        "the rail is missing a project that exists before it is deleted",
+      ).toBeVisible();
+      await page.locator(".proj-overflow-btn").filter({ visible: true }).first().click();
+      await page.locator('[data-action="delete-project"]').filter({ visible: true }).first().click();
+      const dialog = page.locator("dialog.dialog-project-delete");
+      await expect(dialog).toBeVisible();
+      await dialog.locator(".dialog-del-input").fill(slug);
+      await dialog.locator(".dialog-del-btn").click();
+      await expect(
+        railItem(page, slug),
+        "a deleted project keeps its row on the rail",
+      ).toHaveCount(0);
+    } finally {
+      await api(hub, "DELETE", `/api/v1/projects/${slug}`);
+    }
+  });
+
+  test("the rail takes the projects of the hub just connected to", async ({ hub, page, watch }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Boot the way a first run does: with no token, so the rail is drawn before
+    // there is a hub to draw it from. Whatever the app asks for first is refused
+    // for that reason and no other, so the refusals are the check's own.
+    await page.addInitScript(() => window.localStorage.removeItem("hub.token"));
+    watch.ignore(/401/);
+    await page.goto(`${hub.baseUrl}/`);
+    const field = page.locator(".connect-field");
+    await expect(field).toBeVisible();
+    await expect(
+      page.locator("#rail-projects .rail-project-item"),
+      "the rail drew projects before there was a hub to draw them from",
+    ).toHaveCount(0);
+    await field.fill(hub.token);
+    await page.locator('button[type="submit"]').click();
+    await expect(
+      railItem(page, hub.projectId),
+      "the rail did not take the projects of the hub just connected to",
+    ).toBeVisible();
+  });
 });
 
 test.describe("settings and storage", () => {

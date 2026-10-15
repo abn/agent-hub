@@ -7,6 +7,7 @@ import { esc, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { alertsEnabled, applyPrefs, prefs, savePrefs, saveToken, setAlertsEnabled } from "./prefs.mjs";
 import { render } from "./router.mjs";
+import { renderRailProjects } from "./shell.mjs";
 import { shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
@@ -686,6 +687,7 @@ export async function signOut() {
   });
   if (!confirmed) return;
   const forgotten = saveToken("");
+  renderRailProjects();
   location.hash = "#/connect";
   toast(
     forgotten
@@ -704,6 +706,7 @@ export async function deleteProject(id, leave) {
   });
   if (!confirmed) return;
   await api(`/api/v1/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+  renderRailProjects();
   if (leave) leave();
   else await render();
   toast("Project deleted.");

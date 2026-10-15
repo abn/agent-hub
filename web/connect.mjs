@@ -8,6 +8,7 @@
 import { api } from "./api.mjs";
 import { esc, paint } from "./dom.mjs";
 import { saveToken } from "./prefs.mjs";
+import { renderRailProjects } from "./shell.mjs";
 import {
   installShellLayout,
   shellHTML,
@@ -310,6 +311,7 @@ export async function connectSubmit(form) {
   if (!saveToken(typed)) {
     toast("This browser would not store the token, so the hub will ask for it again.");
   }
+  renderRailProjects();
   // The answer can arrive after the reader has moved on. `paint` replaces the
   // region, so a form still in the page is one the reader is still looking at.
   if (form.isConnected) location.hash = `#${form.dataset.next || "/home"}`;
