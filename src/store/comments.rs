@@ -21,6 +21,8 @@ pub const AUTHOR_CHARS_MAX: usize = 200;
 pub const ANCHOR_BYTES_MAX: usize = 2048;
 /// Maximum characters of a text anchor quote.
 pub const QUOTE_CHARS_MAX: usize = 2000;
+/// Maximum characters of a text anchor's prefix or suffix context.
+pub const CONTEXT_CHARS_MAX: usize = 64;
 
 /// One comment on an artifact. The delete token hash stays internal.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -86,6 +88,8 @@ pub fn parse_anchor(value: Option<serde_json::Value>) -> Result<Option<AnchorInp
                 .ok_or_else(|| Error::InvalidArgument("text anchor needs a quote".to_string()))?;
             Ok(Some(AnchorInput::Text {
                 quote: quote.to_string(),
+                prefix: context_field(obj.get("prefix"))?,
+                suffix: context_field(obj.get("suffix"))?,
             }))
         }
         _ => Err(Error::InvalidArgument(
@@ -94,11 +98,32 @@ pub fn parse_anchor(value: Option<serde_json::Value>) -> Result<Option<AnchorInp
     }
 }
 
-/// A validated anchor: a canvas point or a verbatim quote.
+/// Read an optional text-anchor context field. Absent and null are both no
+/// context; anything that is present must be a string.
+fn context_field(value: Option<&serde_json::Value>) -> Result<Option<String>> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(text)) => Ok(Some(text.clone())),
+        Some(_) => Err(Error::InvalidArgument(
+            "text anchor context must be a string".to_string(),
+        )),
+    }
+}
+
+/// A validated anchor: a canvas point or a verbatim quote. A quote may carry
+/// the surrounding text it was selected from, so a word that repeats resolves
+/// to the occurrence the reader chose rather than the first one.
 #[derive(Debug, Clone)]
 pub enum AnchorInput {
-    Point { x: f64, y: f64 },
-    Text { quote: String },
+    Point {
+        x: f64,
+        y: f64,
+    },
+    Text {
+        quote: String,
+        prefix: Option<String>,
+        suffix: Option<String>,
+    },
 }
 
 impl AnchorInput {
@@ -107,9 +132,22 @@ impl AnchorInput {
             Self::Point { x, y } => serde_json::json!({
                 "mode": "point", "x": x, "y": y,
             }),
-            Self::Text { quote } => serde_json::json!({
-                "mode": "text", "quote": quote,
-            }),
+            Self::Text {
+                quote,
+                prefix,
+                suffix,
+            } => {
+                let mut anchor = serde_json::json!({
+                    "mode": "text", "quote": quote,
+                });
+                if let Some(prefix) = prefix.filter(|text| !text.is_empty()) {
+                    anchor["prefix"] = serde_json::Value::String(prefix);
+                }
+                if let Some(suffix) = suffix.filter(|text| !text.is_empty()) {
+                    anchor["suffix"] = serde_json::Value::String(suffix);
+                }
+                anchor
+            }
         }
     }
 }
@@ -431,7 +469,11 @@ fn check_anchor(anchor: Option<AnchorInput>) -> Result<Option<serde_json::Value>
                 ));
             }
         }
-        AnchorInput::Text { quote } => {
+        AnchorInput::Text {
+            quote,
+            prefix,
+            suffix,
+        } => {
             let quote = quote.trim();
             if quote.is_empty() {
                 return Err(Error::InvalidArgument(
@@ -442,6 +484,15 @@ fn check_anchor(anchor: Option<AnchorInput>) -> Result<Option<serde_json::Value>
                 return Err(Error::InvalidArgument(format!(
                     "text anchor quote exceeds {QUOTE_CHARS_MAX} characters"
                 )));
+            }
+            for (label, context) in [("prefix", prefix), ("suffix", suffix)] {
+                if let Some(context) = context
+                    && context.chars().count() > CONTEXT_CHARS_MAX
+                {
+                    return Err(Error::InvalidArgument(format!(
+                        "text anchor {label} exceeds {CONTEXT_CHARS_MAX} characters"
+                    )));
+                }
             }
         }
     }

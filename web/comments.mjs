@@ -18,7 +18,7 @@ export const commentsState = {
   comments: [],
   open: false,
   activeThreadId: null,
-  composeQuote: null,
+  composeSelection: null,
   viewMode: "list", // "list" | "sheet" | "compose"
   resolvedExpanded: false,
   lastFocus: null,
@@ -189,11 +189,43 @@ export function anchorQuote(text) {
   return out;
 }
 
-export async function postComment(body, quote) {
+// A selection is the quote plus the short normalised context around it. The
+// frame sends the context so a word that repeats anchors to the occurrence the
+// reader chose; a bare string, from a caller that has only the quote, still
+// builds a text anchor with no context.
+function selectionAnchor(selection) {
+  if (!selection) return null;
+  const quote = typeof selection === "string" ? selection : selection.quote;
+  if (typeof quote !== "string" || !quote.trim()) return null;
+  const anchor = { mode: "text", quote: anchorQuote(quote) };
+  const prefix = dropLoneSurrogates(String(selection.prefix || "").slice(0, 32));
+  const suffix = dropLoneSurrogates(String(selection.suffix || "").slice(0, 32));
+  if (prefix) anchor.prefix = prefix;
+  if (suffix) anchor.suffix = suffix;
+  return anchor;
+}
+
+// A context boundary can fall inside a character outside the BMP, leaving half
+// a surrogate pair. JSON carries it, but the store's parser refuses a lone
+// surrogate, so the cap is taken first and the unpaired half is dropped
+// after. `for...of` yields a whole pair as one string and a lone surrogate as
+// one, so the range check catches exactly the unpaired half.
+function dropLoneSurrogates(text) {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    out += ch;
+  }
+  return out;
+}
+
+export async function postComment(body, selection) {
   const id = commentsState.artifactId;
   const payload = { body };
-  if (quote && !commentsState.isProtected) {
-    payload.anchor = { mode: "text", quote: anchorQuote(quote) };
+  const anchor = commentsState.isProtected ? null : selectionAnchor(selection);
+  if (anchor) {
+    payload.anchor = anchor;
     payload.anchor_version = commentsState.shownVersion;
   }
   const created = await api(commentsBase(id), {
@@ -613,7 +645,7 @@ function renderPhoneSheet() {
     placeholder: "Reply",
     className: "hub-sheet-composer",
     send: async (text) => {
-      await postComment(text, comment.anchor ? comment.anchor.quote : null);
+      await postComment(text, comment.anchor);
       renderPhoneSheet();
       // The thread is drawn again with the reply in it, and a new composer
       // under it; the reader is put back in that one rather than left on the
@@ -700,9 +732,10 @@ function renderComposeSheet() {
   head.append(title, closeBtn);
   els.list.appendChild(head);
 
-  if (commentsState.composeQuote && !commentsState.isProtected) {
+  const selection = commentsState.composeSelection;
+  if (selection && !commentsState.isProtected) {
     const dummy = {
-      anchor: { mode: "text", quote: commentsState.composeQuote },
+      anchor: selectionAnchor(selection),
       anchor_version: commentsState.shownVersion,
       done: false,
     };
@@ -712,13 +745,13 @@ function renderComposeSheet() {
 
   const made = commentComposer({
     label: "New comment",
-    placeholder: commentsState.composeQuote
+    placeholder: selection
       ? "Write a comment on this text"
       : "Write a comment",
     className: "comments-compose",
     send: async (text) => {
-      await postComment(text, commentsState.composeQuote);
-      commentsState.composeQuote = null;
+      await postComment(text, selection);
+      commentsState.composeSelection = null;
       closeCommentsDrawer();
     },
   });
@@ -934,12 +967,12 @@ export function openCommentSheet(comment) {
   }
 }
 
-export function openCompose(quote) {
+export function openCompose(selection) {
   const els = commentsState.elements;
   if (!els) return;
   commentsState.lastFocus = document.activeElement;
   commentsState.open = true;
-  commentsState.composeQuote = quote || null;
+  commentsState.composeSelection = selection || null;
   commentsState.viewMode = "compose";
   clearDrawerError();
   els.backdrop.hidden = false;
@@ -952,7 +985,7 @@ export function closeCommentsDrawer() {
   const els = commentsState.elements;
   commentsState.open = false;
   commentsState.viewMode = "list";
-  commentsState.composeQuote = null;
+  commentsState.composeSelection = null;
   if (!els) return;
   els.backdrop.hidden = true;
   els.drawer.hidden = true;
@@ -970,7 +1003,7 @@ export function startComments(id, shownVersion = 1, isProtected = false) {
   commentsState.comments = [];
   commentsState.open = false;
   commentsState.activeThreadId = null;
-  commentsState.composeQuote = null;
+  commentsState.composeSelection = null;
   commentsState.viewMode = "list";
   commentsState.lastFocus = null;
   commentsState.elements = null;
@@ -1111,6 +1144,8 @@ export function commentsPanel({ toggle, badge }) {
 // fixed to a viewport that scrolls. The frame posts the selection out, and
 // this is what hears it.
 let selectionFab = null;
+// The selection the fixed button would comment on, quote and context together.
+let selectionPick = null;
 
 // The button lives on the body, outside the region the router repaints, so
 // nothing about a route change removes it on its own. Leaving an artifact
@@ -1125,10 +1160,12 @@ function removeSelectionButton() {
     leave(selectionFab);
     selectionFab = null;
   }
+  selectionPick = null;
 }
 
-function selectionButton(quote) {
-  const wanted = typeof quote === "string" ? quote.trim() : "";
+function selectionButton(selection) {
+  const wanted =
+    selection && typeof selection.quote === "string" ? selection.quote.trim() : "";
   if (!wanted) {
     removeSelectionButton();
     return;
@@ -1137,13 +1174,13 @@ function selectionButton(quote) {
     typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   if (!coarse) return;
   if (selectionFab) {
-    selectionFab.dataset.quote = wanted;
+    selectionPick = selection;
     return;
   }
   const button = document.createElement("button");
   button.type = "button";
   button.className = "hub-comment-fab";
-  button.dataset.quote = wanted;
+  selectionPick = selection;
   // The word as well as the glyph. A lone glyph arriving unannounced in a
   // corner is a generic compose button; the word says what it will do in the
   // half second it is on screen before a thumb reaches it.
@@ -1155,9 +1192,9 @@ function selectionButton(quote) {
   // the press, which is what the quote is taken from.
   button.addEventListener("pointerdown", (event) => {
     event.preventDefault();
-    const text = button.dataset.quote || "";
+    const pick = selectionPick;
     removeSelectionButton();
-    openCompose(text);
+    openCompose(pick);
   });
   document.body.appendChild(button);
   selectionFab = button;
@@ -1228,10 +1265,10 @@ if (typeof window !== "undefined") {
     const data = event.data;
     if (!data || typeof data !== "object") return;
     if (data.type === "hub:selection-change") {
-      selectionButton(data.quote);
+      selectionButton({ quote: data.quote, prefix: data.prefix, suffix: data.suffix });
     } else if (data.type === "hub:create-comment") {
       removeSelectionButton();
-      openCompose(data.quote);
+      openCompose({ quote: data.quote, prefix: data.prefix, suffix: data.suffix });
     } else if (data.type === "hub:open-comment") {
       const comment = commentsState.comments.find(
         (c) => String(c.id) === String(data.commentId),

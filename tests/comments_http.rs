@@ -412,6 +412,8 @@ async fn host_escapes_comment_bodies_and_quotes() {
         "</script><script>alert(1)</script>",
         Some(AnchorInput::Text {
             quote: "</script><script>alert(2)</script>".to_string(),
+            prefix: None,
+            suffix: None,
         }),
         None,
         None,

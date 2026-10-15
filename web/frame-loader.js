@@ -80,6 +80,14 @@ function normalizeText(s) {
   return String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+// Anchor context keeps its boundary spaces: the space next to the quote is
+// part of where it sits, and trimming it is what left a prefix and the text
+// before an occurrence a character out of step. Collapsed and lowercased, but
+// not trimmed.
+function normalizeContext(s) {
+  return String(s || "").replace(/\s+/g, " ").toLowerCase();
+}
+
 function getTextNodes(root) {
   var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: function (node) {
@@ -105,14 +113,20 @@ function getTextNodes(root) {
   return nodes;
 }
 
-function findQuoteRange(root, normQuote) {
+// The document as one normalised string, with the maps a range needs: where
+// each text node starts, and which normalised position each raw character
+// holds. Selection-time context and match-time resolution both read this, so
+// the two agree on whitespace and case.
+function flattenText(root) {
   var textNodes = getTextNodes(root);
-  if (!textNodes.length || !normQuote) return null;
-
   var chars = [];
+  var starts = new Map();
+  var lengths = new Map();
   for (var i = 0; i < textNodes.length; i++) {
     var node = textNodes[i];
+    starts.set(node, chars.length);
     var text = node.nodeValue;
+    lengths.set(node, text.length);
     for (var j = 0; j < text.length; j++) {
       chars.push({ char: text[j], node: node, offset: j });
     }
@@ -126,37 +140,164 @@ function findQuoteRange(root, normQuote) {
 
   var normStr = "";
   var normMap = [];
+  var normAt = new Array(chars.length);
   var inWhitespace = false;
   for (var cIdx = 0; cIdx < chars.length; cIdx++) {
     var c = chars[cIdx].char;
     if (/\s/.test(c)) {
       if (!inWhitespace) {
+        normAt[cIdx] = normStr.length;
         normStr += " ";
         normMap.push(cIdx);
         inWhitespace = true;
+      } else {
+        normAt[cIdx] = normStr.length - 1;
       }
     } else {
+      normAt[cIdx] = normStr.length;
       normStr += c.toLowerCase();
       normMap.push(cIdx);
       inWhitespace = false;
     }
   }
+  return { chars: chars, starts: starts, lengths: lengths, normStr: normStr, normMap: normMap, normAt: normAt };
+}
 
-  var matchIdx = normStr.indexOf(normQuote);
-  if (matchIdx === -1) return null;
+// The document's flattened form, kept until the highlights are repainted. A
+// selection drag fires selectionchange many times and none of them change the
+// document, so the drag reads this rather than reflattening each time. The
+// only content mutation a frame sees is the highlight spans applyComments
+// inserts; the callout beside a selection is excluded from the flatten by
+// getTextNodes, so it does not retire this.
+var documentText = null;
 
-  var startCharIdx = normMap[matchIdx];
-  var endCharIdx = normMap[matchIdx + normQuote.length - 1];
+function cachedText() {
+  if (!documentText) documentText = flattenText(document.body);
+  return documentText;
+}
 
-  while (startCharIdx < chars.length && !chars[startCharIdx].node) {
+// The normalised text just before and just after a selection: the context a
+// quote carries so a repeated word resolves to the occurrence the reader
+// chose. Capped, since it is a pointer rather than the words themselves.
+function selectionContext(range) {
+  var max = 32;
+  var startNode = range.startContainer;
+  var endNode = range.endContainer;
+  if (startNode.nodeType !== 3 || endNode.nodeType !== 3) {
+    return { prefix: "", suffix: "" };
+  }
+  var flat = cachedText();
+  // An artifact's own inline script can change a text node after the flatten
+  // was kept. The mapping is good only while the node still holds the text it
+  // was built from, so a changed node rebuilds it once.
+  if (
+    flat.lengths.get(startNode) !== startNode.nodeValue.length ||
+    flat.lengths.get(endNode) !== endNode.nodeValue.length
+  ) {
+    documentText = null;
+    flat = cachedText();
+  }
+  var startBase = flat.starts.get(startNode);
+  var endBase = flat.starts.get(endNode);
+  var startLen = flat.lengths.get(startNode);
+  var endLen = flat.lengths.get(endNode);
+  if (startBase === undefined || endBase === undefined) {
+    return { prefix: "", suffix: "" };
+  }
+  // The quote is trimmed, so the context is measured from the first and last
+  // non-space characters the reader selected. A drag that caught the space
+  // beside the word still lines up with where the quote sits, instead of
+  // ending one character short of it.
+  var chars = flat.chars;
+  var first = startBase + range.startOffset;
+  var last = endBase + range.endOffset - 1;
+  if (first < startBase || first >= startBase + startLen || last < endBase || last >= endBase + endLen) {
+    return { prefix: "", suffix: "" };
+  }
+  while (first <= last && first < chars.length && /\s/.test(chars[first].char)) first++;
+  while (last >= first && last >= 0 && /\s/.test(chars[last].char)) last--;
+  if (first > last || first >= chars.length || last < 0) {
+    return { prefix: "", suffix: "" };
+  }
+  var startNorm = flat.normAt[first];
+  var endNorm = flat.normAt[last];
+  if (!Number.isFinite(startNorm) || !Number.isFinite(endNorm)) {
+    return { prefix: "", suffix: "" };
+  }
+  return {
+    prefix: flat.normStr.slice(Math.max(0, startNorm - max), startNorm),
+    suffix: flat.normStr.slice(endNorm + 1, endNorm + 1 + max),
+  };
+}
+
+function sharedPrefixLen(a, b) {
+  var n = Math.min(a.length, b.length);
+  var i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
+}
+
+function sharedSuffixLen(a, b) {
+  var n = Math.min(a.length, b.length);
+  var i = 0;
+  while (i < n && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
+  return i;
+}
+
+// The quote's range in the document. A quote that repeats is resolved by the
+// context it was selected from: each occurrence is scored by how much of the
+// prefix and suffix sits around it, and the best one wins. With no context, or
+// none that matches, the first occurrence is taken, as it always was.
+function findQuoteRange(root, normQuote, normPrefix, normSuffix) {
+  if (!normQuote) return null;
+  var flat = flattenText(root);
+  if (!flat.normStr) return null;
+
+  var candidates = [];
+  var from = 0;
+  while (from <= flat.normStr.length) {
+    var at = flat.normStr.indexOf(normQuote, from);
+    if (at === -1) break;
+    candidates.push(at);
+    from = at + 1;
+  }
+  if (!candidates.length) return null;
+
+  var chosen = candidates[0];
+  if (normPrefix || normSuffix) {
+    var best = 0;
+    var bestScore = -1;
+    for (var k = 0; k < candidates.length; k++) {
+      var score = 0;
+      var hit = candidates[k];
+      if (normPrefix) {
+        var before = flat.normStr.slice(Math.max(0, hit - normPrefix.length), hit);
+        score += sharedSuffixLen(before, normPrefix);
+      }
+      if (normSuffix) {
+        var after = flat.normStr.slice(hit + normQuote.length, hit + normQuote.length + normSuffix.length);
+        score += sharedPrefixLen(after, normSuffix);
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = k;
+      }
+    }
+    chosen = candidates[best];
+  }
+
+  var startCharIdx = flat.normMap[chosen];
+  var endCharIdx = flat.normMap[chosen + normQuote.length - 1];
+
+  while (startCharIdx < flat.chars.length && !flat.chars[startCharIdx].node) {
     startCharIdx++;
   }
-  var startItem = chars[startCharIdx];
+  var startItem = flat.chars[startCharIdx];
 
-  while (endCharIdx >= 0 && !chars[endCharIdx].node) {
+  while (endCharIdx >= 0 && !flat.chars[endCharIdx].node) {
     endCharIdx--;
   }
-  var endItem = chars[endCharIdx];
+  var endItem = flat.chars[endCharIdx];
 
   if (!startItem || !endItem || !startItem.node || !endItem.node) return null;
 
@@ -183,7 +324,10 @@ function clearHighlights() {
 }
 
 function applyComments(comments, shownVersion) {
+  // The highlight spans clearHighlights and this pass insert or remove change
+  // the text nodes the flatten points at, so the cached one is retired here.
   clearHighlights();
+  documentText = null;
   if (!Array.isArray(comments) || !comments.length) {
     if (document.body) document.body.classList.remove("has-comments");
     return;
@@ -209,7 +353,9 @@ function applyComments(comments, shownVersion) {
       if (anchor.mode === "text" && typeof anchor.quote === "string" && anchor.quote) {
         var normQuote = normalizeText(anchor.quote);
         if (!normQuote) return;
-        var range = findQuoteRange(document.body, normQuote);
+        var normPrefix = normalizeContext(anchor.prefix || "");
+        var normSuffix = normalizeContext(anchor.suffix || "");
+        var range = findQuoteRange(document.body, normQuote, normPrefix, normSuffix);
         if (range) {
           var span = document.createElement("span");
           span.className = "hub-comment-highlight";
@@ -295,7 +441,14 @@ function handleSelection() {
     notifyParent({ type: "hub:selection-change", quote: "" });
     return;
   }
-  notifyParent({ type: "hub:selection-change", quote: text });
+  var range = sel.getRangeAt(0);
+  var context = selectionContext(range);
+  notifyParent({
+    type: "hub:selection-change",
+    quote: text,
+    prefix: context.prefix,
+    suffix: context.suffix,
+  });
   if (isProtected) {
     return;
   }
@@ -307,7 +460,6 @@ function handleSelection() {
     return;
   }
 
-  var range = sel.getRangeAt(0);
   var rect = range.getBoundingClientRect();
   if (!rect || (rect.width === 0 && rect.height === 0)) return;
 
@@ -323,16 +475,24 @@ function handleSelection() {
   callout.style.top = top + "px";
   callout.style.left = left + "px";
 
+  var create = function () {
+    notifyParent({
+      type: "hub:create-comment",
+      quote: text,
+      prefix: context.prefix,
+      suffix: context.suffix,
+    });
+  };
   callout.addEventListener("pointerdown", function (e) {
     e.preventDefault();
     e.stopPropagation();
-    notifyParent({ type: "hub:create-comment", quote: text });
+    create();
     removeCallout();
   });
   callout.addEventListener("click", function (e) {
     e.preventDefault();
     e.stopPropagation();
-    notifyParent({ type: "hub:create-comment", quote: text });
+    create();
     removeCallout();
   });
   document.body.appendChild(callout);

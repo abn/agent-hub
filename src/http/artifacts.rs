@@ -277,7 +277,10 @@ pub async fn versions(
 pub struct CommentPostBody {
     /// The comment text.
     pub body: String,
-    /// Optional anchor: `{mode: "point", x, y}` or `{mode: "text", quote}`.
+    /// Optional anchor: `{mode: "point", x, y}` or
+    /// `{mode: "text", quote, prefix?, suffix?}`, where the prefix and suffix
+    /// are the text around the quote so a repeated quote resolves to the right
+    /// occurrence.
     #[serde(default)]
     pub anchor: Option<Value>,
     /// Optional anchored version; omitted stamps the current version.
