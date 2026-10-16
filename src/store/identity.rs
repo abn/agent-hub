@@ -516,22 +516,26 @@ pub async fn enrol_agent(
 
     let tx = super::begin_write(db).await?;
 
-    // One pending request per source at a time.
-    let mut pending_rows = tx
-        .query(
-            "SELECT 1 FROM agents WHERE state = 'pending' AND enrol_source = ?1",
-            vec![Value::Text(source.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    if pending_rows.next().await.map_err(engine)?.is_some() {
+    // One pending request per source at a time. An unresolved peer, which is
+    // how the tailnet listener surfaces, has no stable source to key on, so
+    // those callers share only the whole-hub pending ceiling checked below.
+    if source != "unknown" {
+        let mut pending_rows = tx
+            .query(
+                "SELECT 1 FROM agents WHERE state = 'pending' AND enrol_source = ?1",
+                vec![Value::Text(source.to_string())],
+            )
+            .await
+            .map_err(engine)?;
+        if pending_rows.next().await.map_err(engine)?.is_some() {
+            drop(pending_rows);
+            tx.rollback().await.map_err(engine)?;
+            return Err(Error::RateLimited(format!(
+                "a pending enrolment request from source '{source}' is already awaiting decision"
+            )));
+        }
         drop(pending_rows);
-        tx.rollback().await.map_err(engine)?;
-        return Err(Error::RateLimited(format!(
-            "a pending enrolment request from source '{source}' is already awaiting decision"
-        )));
     }
-    drop(pending_rows);
 
     // A whole-hub ceiling, checked in the same transaction, so a caller that
     // varies its source cannot fill the store with pending agents.
