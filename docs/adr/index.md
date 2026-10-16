@@ -52,3 +52,4 @@ consequences, and is not edited after the fact except to mark it superseded.
   without a token
 * [0032](0032-session-replay.md) - A session brain exposes time travel and
   fork-from-here
+* [0033](0033-semantic-recall.md) - Semantic recall across projects
