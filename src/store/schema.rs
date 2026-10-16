@@ -110,6 +110,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 24,
         ddl: V24,
     },
+    Migration {
+        version: 25,
+        ddl: V25,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -646,4 +650,15 @@ const V24: &str = r#"
 ALTER TABLE inbox ADD COLUMN expires_at TEXT;
 ALTER TABLE inbox ADD COLUMN on_expiry TEXT;
 CREATE INDEX IF NOT EXISTS inbox_deadline ON inbox(expires_at);
+"#;
+
+/// Version 25: optional actor filters on a notification subscription.
+///
+/// An agent that only wants to hear about other actors writes, or about one
+/// specific actors writes, can say so when it subscribes. A null filter means
+/// every actor; exclude_self drops the registering actors own events. The
+/// filters apply at drain time on top of the kind and project scope.
+const V25: &str = r#"
+ALTER TABLE notify_subscriptions ADD COLUMN actor_filter TEXT;
+ALTER TABLE notify_subscriptions ADD COLUMN exclude_self INTEGER NOT NULL DEFAULT 0;
 "#;
