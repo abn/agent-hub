@@ -229,8 +229,8 @@ content hash of the bytes the writer read, and the hub applies it only while
 the stored content still hashes to that value; the comparison and the write
 happen under the same writer lock, so two writers holding one version cannot
 both win. An agent's personal space is a project, so it gets a knowledge base
-like any other: a durable store the agent alone writes, and every trusted agent
-and the human can read.
+like any other: a durable store the agent alone writes, and every agent and the
+human can read.
 
 Every write to a page is one row in the file's own append-only tool call log:
 the operation, the canonical path, the actor the hub authenticated, the time

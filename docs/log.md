@@ -4,6 +4,15 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-16
+
+### Agent identity: the trust-level record is superseded
+
+* **Deprecation**: [Agent identity and trust](adr/0012-agent-identity-and-trust.md) is
+  now marked deprecated in favour of [The token is the identity](adr/0021-the-token-is-the-identity.md),
+  so the record no longer reads as current guidance. The data model's description
+  of a personal space now refers to every agent rather than to "trusted" agents.
+
 ## 2026-10-15
 
 ### A repeated quote anchors where it was written
