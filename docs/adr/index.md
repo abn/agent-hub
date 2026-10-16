@@ -53,3 +53,4 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0032](0032-session-replay.md) - A session brain exposes time travel and
   fork-from-here
 * [0033](0033-semantic-recall.md) - Semantic recall across projects
+* [0034](0034-human-idea-capture-surface.md) - Human idea capture surface
