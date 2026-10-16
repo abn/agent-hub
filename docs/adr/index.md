@@ -50,3 +50,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   folder under the version guard
 * [0031](0031-loopback-local-identity.md) - Loopback may resolve identity
   without a token
+* [0032](0032-session-replay.md) - A session brain exposes time travel and
+  fork-from-here
