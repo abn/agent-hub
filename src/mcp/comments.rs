@@ -56,6 +56,29 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        if !replayed {
+            let _ = crate::store::events::append(
+                &self.state.db,
+                self.state.config.events_per_project.per_project,
+                &principal.actor,
+                None,
+                crate::store::events::NewEvent {
+                    project_id: existing.project_id.clone(),
+                    kind: "artifact".to_string(),
+                    summary: format!("comment on {}", existing.title),
+                    payload: Some(serde_json::json!({
+                        "action": "commented",
+                        "artifact_id": params.artifact_id,
+                        "comment_id": comment.id,
+                    })),
+                    needs_action: false,
+                    thread_id: None,
+                    session_id: None,
+                },
+            )
+            .await;
+        }
+
         self.state.notify();
         let mut payload = json!({ "comment": comment_view(&comment) });
         if !replayed {
