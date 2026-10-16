@@ -48,6 +48,7 @@ GET    /api/v1/sessions?project=
 GET    /api/v1/sessions/:id
 GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/sessions/:id/brain/entry?path=
+GET    /api/v1/sessions/:id/replay
 POST   /api/v1/sessions/:id/end
 POST   /api/v1/sessions/:id/reassign
 
@@ -84,7 +85,7 @@ DELETE /api/v1/storage/sessions
 DELETE /api/v1/storage/projects/:id/sessions
 POST   /api/v1/prune/undo/:token
 POST   /api/v1/backups
-GET    /api/v1/search?q=&scope=&project=&type=&limit=
+GET    /api/v1/search?q=&scope=&project=&type=&limit=&mode=
 
 GET    /artifacts/:id
 GET    /artifacts/:id/frame
@@ -147,6 +148,8 @@ holding it there while every call fails.
   needs no token.
 - Shared artifacts use a password and browser-side encryption, so the recipient
   needs nothing else.
+- The freshness stream at `GET /api/v1/stream` also accepts any active agent
+  token, so an agent can wake on inbox or feed changes as well as the app.
 - The app asks for the admin token on the Connect screen, and only there, so a
   token is never kept without the hub having accepted it first. It keeps the
   token in local storage, so a script running in the hub origin could read it.
@@ -211,9 +214,10 @@ from a proxy, and a number that cannot be measured is absent rather than zero.
 | `GET /api/v1/projects/:id/kb/...` | the knowledge base pages, their history, backlinks, lint and derived numbers, route by route in [Knowledge base pages](/reference/knowledge-base-pages.md) |
 | `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
 | `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
+| `GET /api/v1/sessions/:id/replay` | `session_id` and `events`, the brain's tool-call audit entries oldest first; admin token required, and an empty list when the brain is gone |
 | `GET /api/v1/sessions/:id/brain?path=` | `entries[]` with `path`, `type` (`key`, `file` or `dir`) and `size_bytes`, one directory level per request, with `path` echoed and `truncated` when the level held more |
 | `GET /api/v1/sessions/:id/brain/entry?path=` | one entry's `path`, `type` (`key` or `file`), `size_bytes`, `content` as text, and `written_at` (null when unrecorded). Refuses directory paths with 409 and non-UTF-8 bytes with 422 |
-| `GET /api/v1/search` | `count`, the hits on this page before grouping, `truncated` when the limit cut the result, `took_ms` around the store call, and `groups[]` each with its own `count`; every hit carries its `project_display_name` beside `project_id`, and by family: `event_kind` and `actor` on a feed hit, `version` and `size_bytes` (the current version's) on an artifact hit, `session_name` and `session_status` on a session brain hit. They are read after the ranked fetch, one query per family on the page, and never change the order |
+| `GET /api/v1/search` | `count`, the hits on this page before grouping, `truncated` when the limit cut the result, `took_ms` around the store call, `backend` (the recall backend that served the page), and `groups[]` each with its own `count`; every hit carries its `project_display_name` beside `project_id`, and by family: `event_kind` and `actor` on a feed hit, `version` and `size_bytes` (the current version's) on an artifact hit, `session_name` and `session_status` on a session brain hit. They are read after the ranked fetch, one query per family on the page, and never change the order. `mode=semantic` asks for semantic recall; when no embedding model is configured the hub falls back to the lexical index and reports `fts-fallback` |
 | `GET /api/v1/inbox` | `items[]`, each with `event_id`, `project_id` and its `project_display_name` (null for an id no project row carries), `kind`, `actor`, `summary`, `payload`, `status`, `created_at` and `updated_at`; a decided approval also carries `decision` (`decision`, `approved` or `declined`; `note`, null when none was left; `actor`; `event_id`, the answer that records it; `decided_at`); a resolved question carries `answer` (`body`, what was written in reply; `actor`; `event_id`, the answer that records it; `answered_at`) |
 | `POST /api/v1/approvals/:id/decision` | takes `decision` (`approve` or `decline`), an optional `note` and an optional `idempotency_key`; answers with `event_id`, the answer appended to the approval's thread, whose payload holds `body`, `decision` and, when one was left, `note` |
 | `POST /api/v1/inbox/:id/read` and `.../unread` | `event_id`, the `status` the entry carries now, and `changed`, false when the entry was already there or carries no read state |

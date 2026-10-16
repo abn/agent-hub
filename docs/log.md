@@ -17,6 +17,53 @@ software release notes and the repository changelog.
   so the record no longer reads as current guidance. The data model's description
   of a personal space now refers to every agent rather than to "trusted" agents.
 
+### Agents can wait for a relevant update
+
+* **Change**: `notify_wait` joins the subscription tools. It blocks until
+  something is pending for the caller (an answer, a decision, or a subscribed
+  feed event), or its deadline elapses, and returns the same `notifications`
+  member as an ordinary tool result, delivered once. A zero-second wait polls
+  once.
+* **Update**: [MCP tools](/reference/mcp-tools.md) lists the tool and
+  [Notifications](../../skills/agent-hub/references/notifications.md) documents
+  the idle case.
+
+### Subscriptions gain actor filters
+
+* **Update**: `notify_subscribe` now accepts `actor` and `exclude_self`, so a
+  standing interest can be narrowed to one writer or omit the caller's own
+  events. [MCP tools](/reference/mcp-tools.md) and the served skill describe
+  them.
+
+### Session replay is exposed over REST
+
+* **Addition**: `GET /api/v1/sessions/:id/replay` returns the session brain's
+  tool-call audit log, oldest first. [REST API](/reference/rest-api.md) documents
+  the route.
+
+### Search reports its backend
+
+* **Update**: Search carries a requested `mode` and a served `backend`. A
+  `semantic` request with no embedding model configured falls back to the
+  lexical index and reports `fts-fallback`.
+  [REST API](/reference/rest-api.md) documents both.
+
+### Comments append a feed event
+
+* **Update**: Posting a comment appends an `artifact` feed event, so a thread
+  can be followed through the feed and subscriptions.
+
+### Agents may read the freshness stream
+
+* **Update**: `GET /api/v1/stream` accepts any active agent token, not just
+  the admin token.
+
+### Enrolment allows several pending requests without a peer
+
+* **Fix**: Without a socket peer (the embedded tailnet listener) the
+  per-source check no longer applies, so several enrolments may be pending at
+  once, subject to the whole-hub ceiling.
+
 ## 2026-10-15
 
 ### A repeated quote anchors where it was written
@@ -2898,16 +2945,3 @@ software release notes and the repository changelog.
 * **Note**: Every architecture page describes an intended design, not shipped
   behaviour, and says so. Pages are rewritten against the code as the code
   lands.
-
-## 2026-10-16
-
-### Agents can wait for a relevant update
-
-* **Change**: `notify_wait` joins the subscription tools. It blocks until
-  something is pending for the caller (an answer, a decision, or a subscribed
-  feed event), or its deadline elapses, and returns the same `notifications`
-  member as an ordinary tool result, delivered once. A zero-second wait polls
-  once.
-* **Update**: [Agent surface](architecture/agent-surface.md) lists the tool and
-  [Notifications](../../skills/agent-hub/references/notifications.md) documents
-  the idle case.

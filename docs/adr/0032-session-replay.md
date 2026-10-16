@@ -9,7 +9,7 @@ status: stable
 # 0032. Session replay and time travel
 
 ## Status
-Proposed (companion to ADR 0003 and ADR 0020).
+Accepted (standalone companion to ADR 0003 and ADR 0020).
 
 ## Context
 A session brain holds a versioned KV store and an append-only audit log
