@@ -455,7 +455,7 @@ and resolving an item frees its slot. See
 ## Kind families
 
 Event kinds are a closed set of seven design families (`signal`, `finished`,
-`question`, `answer`, `approval`, `artifact`, `session`) plus `system`.
+`question`, `answer`, `approval`, `artifact`, `session`, `idea`) plus `system`.
 Sub-actions ride in the payload, so an artifact has an action of `published` or
 `updated` and a session has `started`, `ended`, `adopted`, `forked`, or
 `reassigned`.

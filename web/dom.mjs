@@ -54,6 +54,7 @@ const mark = (d, filled) =>
 // of the identifier pattern the commit hooks reject.
 const MARKS = {
   signal: mark("M 12 12h.01"),
+  idea: mark("M 12 3l2.5 5 5.5 .8-4 3.9 1 5.5-5-2.6-5 2.6 1-5.5-4-3.9 5.5-.8z"),
   finished: mark("M 5 12l5 5L20 7"),
   question: "?",
   answer: mark("M 10 16l-4-4 4-4 M 6 12h7a5 5 0 0 1 5 5v1"),
@@ -67,6 +68,7 @@ const MARKS = {
 // and the text is announced by every reader and found by a page search.
 const NAMES = {
   signal: "Update",
+  idea: "Idea",
   finished: "Finished",
   question: "Question",
   answer: "Answer",
