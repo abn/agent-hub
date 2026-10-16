@@ -476,3 +476,21 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
         );
     }
 }
+
+#[tokio::test]
+async fn search_with_semantic_mode_returns_backend() {
+    let state = state().await;
+    seed(&state).await;
+    let app = router(state.clone());
+
+    let response = app
+        .oneshot(get(
+            "/api/v1/search?q=engine&mode=semantic",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["backend"], "fts-fallback");
+}

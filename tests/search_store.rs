@@ -57,6 +57,7 @@ fn q(text: &str) -> SearchQuery {
         kind: None,
         session_id: None,
         limit: 50,
+        mode: None,
     }
 }
 
@@ -169,6 +170,7 @@ async fn filters_by_type_and_project() {
             kind: Some("artifact".to_string()),
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -184,6 +186,7 @@ async fn filters_by_type_and_project() {
             kind: None,
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -211,6 +214,7 @@ async fn unknown_type_is_rejected() {
             kind: Some("nonsense".to_string()),
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -328,6 +332,7 @@ async fn a_project_scope_reaches_below_the_ranked_prefix() {
             kind: None,
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -351,6 +356,7 @@ async fn a_type_scope_reaches_below_the_ranked_prefix() {
             kind: Some("brain".to_string()),
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -389,6 +395,7 @@ async fn a_project_scope_keeps_relevance_order() {
             kind: None,
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -411,6 +418,7 @@ async fn a_type_scope_keeps_relevance_order() {
             kind: Some("brain".to_string()),
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -434,6 +442,7 @@ async fn a_confined_search_keeps_relevance_order() {
             kind: None,
             session_id: None,
             limit: 50,
+            mode: None,
         },
         Some(&visible),
     )
@@ -456,6 +465,7 @@ async fn the_page_is_capped_at_the_search_limit() {
             kind: None,
             session_id: None,
             limit: 500,
+            mode: None,
         },
     )
     .await
@@ -478,6 +488,7 @@ async fn the_knowledge_base_is_a_corpus_family_of_its_own() {
             kind: Some("kb".to_string()),
             session_id: None,
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -552,6 +563,7 @@ async fn a_session_scope_returns_only_that_session_in_relevance_order() {
             kind: None,
             session_id: Some("wanted-session".to_string()),
             limit: 50,
+            mode: None,
         },
     )
     .await
@@ -581,6 +593,7 @@ async fn a_session_scope_is_confined_like_every_other() {
             kind: None,
             session_id: Some("wanted-session".to_string()),
             limit: 50,
+            mode: None,
         },
         Some(&visible),
     )
@@ -618,6 +631,7 @@ async fn hostile_search_queries_do_not_error() {
                 kind: None,
                 session_id: None,
                 limit: 10,
+                mode: None,
             },
         )
         .await

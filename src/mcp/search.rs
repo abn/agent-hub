@@ -65,6 +65,7 @@ impl HubServer {
             kind: params.kind,
             session_id: params.session_id,
             limit: params.limit.unwrap_or(50),
+            mode: None,
         };
         let results = search::search(&self.state.db, &query, visible.as_filter())
             .await
