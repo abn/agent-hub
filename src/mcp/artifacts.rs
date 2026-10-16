@@ -81,18 +81,13 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactUpdateParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
-        policy::authorize(
-            &self.state.db,
-            &principal,
-            &existing.project_id,
-            Access::Write,
-        )
-        .await
-        .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &existing.project_id).await;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
+            .await
+            .map_err(to_error_data)?;
+        let session_id = self.session_in(&principal, &project_id).await;
         let artifact = artifacts::update_for_principal_capped(
             &self.state.db,
             &self.state.data_dir,
@@ -135,18 +130,13 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactDraftParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
-        policy::authorize(
-            &self.state.db,
-            &principal,
-            &existing.project_id,
-            Access::Write,
-        )
-        .await
-        .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &existing.project_id).await;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
+            .await
+            .map_err(to_error_data)?;
+        let session_id = self.session_in(&principal, &project_id).await;
         let artifact = artifacts::draft_for_principal_capped(
             &self.state.db,
             &self.state.data_dir,
@@ -195,17 +185,15 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactIdParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Read)
+            .await
+            .map_err(to_error_data)?;
         let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
-        policy::authorize(
-            &self.state.db,
-            &principal,
-            &existing.project_id,
-            Access::Read,
-        )
-        .await
-        .map_err(to_error_data)?;
         let (artifact, bytes) = match params.version {
             Some(version) => artifacts::get_at_version(
                 &self.state.db,
@@ -252,17 +240,12 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactVersionsParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let artifact = artifacts::metadata(&self.state.db, &params.artifact_id)
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
-        policy::authorize(
-            &self.state.db,
-            &principal,
-            &artifact.project_id,
-            Access::Read,
-        )
-        .await
-        .map_err(to_error_data)?;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Read)
+            .await
+            .map_err(to_error_data)?;
         let versions = artifacts::list_versions(&self.state.db, &params.artifact_id)
             .await
             .map_err(to_error_data)?;
@@ -277,17 +260,12 @@ impl HubServer {
         Parameters(params): Parameters<ArtifactDeleteParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
-        policy::authorize(
-            &self.state.db,
-            &principal,
-            &existing.project_id,
-            Access::Write,
-        )
-        .await
-        .map_err(to_error_data)?;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
+            .await
+            .map_err(to_error_data)?;
         let deleted = artifacts::delete(
             &self.state.db,
             &self.state.data_dir,

@@ -1145,6 +1145,23 @@ pub async fn delete(
     Ok(existing)
 }
 
+/// Read only the project an artifact belongs to, for authorization before
+/// loading any of its metadata.
+pub async fn project_id(db: &Database, artifact_id: &str) -> Result<String> {
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT project_id FROM artifacts WHERE id = ?1",
+            vec![Value::Text(artifact_id.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => required_text(&row, 0),
+        None => Err(Error::NotFound(format!("artifact {artifact_id} not found"))),
+    }
+}
+
 /// Read an artifact's metadata without its blob.
 ///
 /// Reads that must authorize before touching up to the artifact cap use this,
