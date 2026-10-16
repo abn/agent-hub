@@ -759,3 +759,54 @@ async fn ending_a_session_checkpoints_its_brain_log() {
         "the data survives"
     );
 }
+
+#[tokio::test]
+async fn replay_without_token_is_a_problem() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/does-not-exist/replay",
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn replay_unknown_session_is_not_found() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/does-not-exist/replay",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn replay_for_a_session_returns_its_audit() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/replay", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = json_body(response).await;
+    assert_eq!(body["session_id"], session.id);
+    assert!(body["events"].is_array());
+}

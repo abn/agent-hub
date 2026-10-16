@@ -457,3 +457,47 @@ async fn list_entries(
         }
     })
 }
+
+/// `GET /api/v1/sessions/{id}/replay`
+///
+/// A valid admin bearer token is required. Returns the tool-call audit log of
+/// the session's brain as a chronological timeline, oldest first.
+pub async fn replay(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<SessionReplay>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let session = live(&state, &session_id).await?;
+
+    let events = if let Ok(Some(brain)) = state
+        .brain
+        .open_existing(&session.project_id, &session.id)
+        .await
+    {
+        brain
+            .audit_recent(None)
+            .await
+            .map_err(|err| Problem::from_error(&err))?
+    } else {
+        Vec::new()
+    };
+
+    Ok(Json(SessionReplay {
+        session_id: session.id,
+        events,
+    }))
+}
+
+/// The replay timeline of a session's brain.
+#[derive(Debug, Serialize)]
+pub struct SessionReplay {
+    /// The session the timeline belongs to.
+    pub session_id: String,
+    /// The brain's tool-call audit entries, oldest first.
+    pub events: Vec<crate::brain::ToolCall>,
+}
