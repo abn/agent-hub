@@ -68,6 +68,17 @@ sw.addEventListener("fetch", (/** @type {any} */ event) => {
   );
 });
 
+sw.addEventListener("sync", (/** @type {any} */ event) => {
+  if (event.tag !== "agent-hub-offline-queue") return;
+  event.waitUntil(
+    sw.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        client.postMessage({ type: "flush-offline-queue" });
+      }
+    })
+  );
+});
+
 sw.addEventListener("message", (/** @type {any} */ event) => {
   const data = event.data || {};
   if (data.type !== "waiting") return;

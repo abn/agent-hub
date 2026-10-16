@@ -2,6 +2,7 @@
 // the verbs that clear each: answer, decide, and mark read.
 
 import { api } from "./api.mjs";
+import { enqueue, flushQueue } from "./offline-queue.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, glyph, main, optionsAttr, optionsFrom, paint, projectName, stale, waitingMarks } from "./dom.mjs";
@@ -628,6 +629,16 @@ const sendAnswer = (id, body) =>
 // readable while the answer is written and a failed send keeps the words.
 // Pressing Reply again on an open composer moves back into it rather than
 // stacking a second one.
+
+function isOfflineError(error) {
+  return !navigator.onLine || !error || error.status == null;
+}
+
+window.addEventListener("agent-hub:queue-flushed", () => {
+  if (location.hash.startsWith("#/inbox")) render();
+});
+
+
 export async function answer(id, button) {
   // A stage's action line is the row there: the composer goes under the line,
   // not into it beside the button.
@@ -642,7 +653,20 @@ export async function answer(id, button) {
     label: "Your answer",
     options: optionsFrom(button.dataset.options),
     send: async (body) => {
-      await sendAnswer(id, body);
+      try {
+        await sendAnswer(id, body);
+      } catch (error) {
+        if (isOfflineError(error)) {
+          await enqueue({
+            method: "POST",
+            url: `/api/v1/questions/${encodeURIComponent(id)}/answer`,
+            body: JSON.stringify({ body }),
+          });
+          toast("Queued, will send when online.");
+          return;
+        }
+        throw error;
+      }
       await render();
       toast("Answer sent, recorded on the feed.");
     },
@@ -660,7 +684,7 @@ const deciding = new Set();
 async function decide(id, decision, note) {
   deciding.add(id);
   try {
-    await send(id, decision, note);
+    return await send(id, decision, note);
   } finally {
     deciding.delete(id);
   }
@@ -673,12 +697,15 @@ const NOTE = { label: "Add guidance with your decision", limit: 2000 };
 
 // A blank note is no note, so the key is left out rather than sent empty.
 async function send(id, decision, note) {
+  const body = JSON.stringify(note ? { decision, note } : { decision });
+  const url = `/api/v1/approvals/${encodeURIComponent(id)}/decision`;
   try {
-    await api(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
-      method: "POST",
-      body: JSON.stringify(note ? { decision, note } : { decision }),
-    });
+    await api(url, { method: "POST", body });
   } catch (error) {
+    if (isOfflineError(error)) {
+      await enqueue({ method: "POST", url, body });
+      return true;
+    }
     // A note past the limit is refused whole: nothing was decided and nothing
     // moved, so the dialog says so beside the field and the list stays put.
     if (error.status === 413) {
@@ -690,6 +717,7 @@ async function send(id, decision, note) {
     throw new Error(`Nothing changed: ${error.message}`);
   }
   await render();
+  return false;
 }
 
 // A decision is recorded on the feed and leaves the waiting queue, so the
@@ -699,6 +727,7 @@ async function send(id, decision, note) {
 async function ask(id, decision, { title, danger, tone, done }) {
   if (deciding.has(id)) return;
   let noted = false;
+  let queued = false;
   const confirmed = await confirmAction({
     title,
     body: "Your decision is recorded on the feed and resolves the waiting item.",
@@ -708,10 +737,13 @@ async function ask(id, decision, { title, danger, tone, done }) {
     field: NOTE,
     commit: async (note) => {
       noted = !!note;
-      await decide(id, decision, note);
+      queued = await decide(id, decision, note);
     },
   });
-  if (confirmed) toast(`${done}${noted ? " with your note" : ""}, recorded on the feed.`);
+  if (confirmed) {
+    if (queued) toast("Queued, will send when online.");
+    else toast(`${done}${noted ? " with your note" : ""}, recorded on the feed.`);
+  }
 }
 
 export const approve = (id, summary) =>

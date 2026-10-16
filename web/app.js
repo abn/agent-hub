@@ -33,6 +33,7 @@ import {
 } from "./wiki.mjs";
 import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
+import "./offline-queue.mjs";
 import { installKeys } from "./keys.mjs";
 import { moreScreen } from "./more.mjs";
 import { savePrefs } from "./prefs.mjs";
