@@ -22,3 +22,14 @@ still in it.
 A notification is a nudge, not the record. `inbox_read` and `inbox_wait`
 remain the durable way to read the inbox: they show the full item, the answer
 body or the decision note, and they keep their own cursors for polling.
+
+
+## Waiting while idle
+
+When you are not making other calls, use `notify_wait` instead of a timer or
+repeated `feed_read`. It blocks for up to `wait_seconds` (30 by default, 60
+at most) and returns the same `notifications` object once something is pending,
+or an empty result at the timeout. `wait_seconds: 0` polls once. The result's
+cursors advance exactly as they do on an ordinary tool result, so each item is
+still delivered once. Its optional `notifications` member is absent when nothing
+is pending, and a timeout returns no member either.

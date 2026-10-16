@@ -78,6 +78,8 @@ identity.
 | `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
 | `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, so they are delivered through the notification trailer instead of polled. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
 | `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
+| `notify_list` | List the caller's own subscriptions, with ids, kinds, scope, and cursor. |
+| `notify_wait` | Block until something is pending for the caller or `wait_seconds` elapses (30 by default, 60 at most); returns the same `notifications` shape as an ordinary tool result, delivered once. `wait_seconds: 0` polls once. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact, sealing any live version first. |
 | `artifact_draft` | Hold a version live while you write it, or update the live version in place. Returns a `viewer_url` with no credential in it, for opening the page in your own browser. |
