@@ -1090,3 +1090,28 @@ async fn refused_options_post_no_question() {
         .expect("request");
     assert_eq!(json_body(response).await["waiting"], 0);
 }
+
+#[tokio::test]
+async fn an_agent_token_can_open_the_freshness_stream() {
+    let state = state().await;
+    let token = common::seed::agent_token(&state.db, "agent-one", "Agent").await;
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/stream",
+            Some(&format!("Bearer {token}")),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream"),
+    );
+}
