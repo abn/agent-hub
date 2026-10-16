@@ -178,6 +178,7 @@ async fn search_and_inbox_respect_the_confined_set() {
         kind: None,
         session_id: None,
         limit: 10,
+        mode: None,
     };
     let confined = vec!["p1".to_string()];
     let scoped = search::query_visible(&db, &query, Some(&confined))
@@ -246,6 +247,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
         kind: None,
         session_id: None,
         limit: 1,
+        mode: None,
     };
     let visible = vec!["mine".to_string()];
     let hits = search::query_visible(&db, &query, Some(&visible))
@@ -281,6 +283,7 @@ async fn a_confined_search_keeps_relevance_order() {
         kind: None,
         session_id: None,
         limit: 2,
+        mode: None,
     };
     let visible = vec!["mine".to_string()];
     let hits = search::query_visible(&db, &query, Some(&visible))
@@ -437,6 +440,7 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
         kind: None,
         session_id: None,
         limit: 50,
+        mode: None,
     };
     let visible = vec!["open".to_string()];
     for confinement in [Some(visible.as_slice()), None] {

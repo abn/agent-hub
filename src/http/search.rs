@@ -38,6 +38,7 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
     let mut scope = None;
     let mut project = None;
     let mut kind = None;
+    let mut mode = None;
     let mut limit = 50i64;
 
     for (key, value) in pairs(raw) {
@@ -46,6 +47,7 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
             "scope" => scope = Some(value),
             "project" => project = Some(value),
             "type" => kind = Some(value),
+            "mode" => mode = Some(value),
             "limit" => {
                 limit = value
                     .parse()
@@ -83,6 +85,7 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
         kind,
         session_id: None,
         limit,
+        mode,
     })
 }
 
