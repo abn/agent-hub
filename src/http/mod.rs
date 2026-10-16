@@ -27,6 +27,7 @@ pub mod auth;
 pub mod backup;
 pub mod enrol;
 pub mod feed;
+pub mod ideas;
 pub mod inbox;
 pub mod kb;
 pub mod kb_comments;
@@ -130,6 +131,7 @@ pub fn router(state: AppState) -> Router {
                 .delete(projects::delete),
         )
         .route("/api/v1/projects/{id}/stats", get(projects::stats))
+        .route("/api/v1/projects/{id}/ideas", post(ideas::create))
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/projects/{id}/feed/seen", post(feed::seen))
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))

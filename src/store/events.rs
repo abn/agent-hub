@@ -9,7 +9,7 @@ use crate::store::search::{SearchDoc, index_doc};
 
 /// The closed set of event kinds.
 pub const KINDS: &[&str] = &[
-    "signal", "finished", "question", "answer", "approval", "artifact", "session", "system",
+    "signal", "finished", "question", "answer", "approval", "artifact", "session", "system", "idea",
 ];
 
 /// The kind carrying the hub's record of itself: who was created, whose trust

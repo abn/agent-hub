@@ -33,6 +33,7 @@ DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
 POST   /api/v1/projects/:id/feed/seen
+POST   /api/v1/projects/:id/ideas
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/projects/:id/kb/...      the routes in Knowledge base pages
 
@@ -209,6 +210,7 @@ from a proxy, and a number that cannot be measured is absent rather than zero.
 | `GET /api/v1/projects` and `GET /api/v1/projects/:id` | each project with its `id`, `display_name`, `owner_agent`, `created_at` and `unseen_events` |
 | `GET /api/v1/projects/:id/feed` | `events`, `next_since`, `next_before`, and `last_seen`, the newest event the human has seen, so a client draws the unread dot on an event whose id is above it |
 | `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move |
+| `POST /api/v1/projects/:id/ideas` | `id`, the event id of the idea; the idea is appended as a needs-action signal and surfaces in the inbox for triage |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `events_shared_bytes`, `prunable`, and a row per project with its `project_display_name`, its `events_bytes`, `session_bytes`, `artifact_bytes` and `kb_bytes`, its prunable sessions and bytes, and its optional `last_write` timestamp. Every project has a row, one that holds nothing with zeros, so a project a prune has just emptied keeps its row |
 | `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages`, `agents_active`, `threads`, `agents_written`, and `disk_bytes` for the project header, its tab labels, and the deletion manifest |
 | `GET /api/v1/projects/:id/kb/...` | the knowledge base pages, their history, backlinks, lint and derived numbers, route by route in [Knowledge base pages](/reference/knowledge-base-pages.md) |
