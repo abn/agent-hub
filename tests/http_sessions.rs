@@ -759,3 +759,33 @@ async fn ending_a_session_checkpoints_its_brain_log() {
         "the data survives"
     );
 }
+
+#[tokio::test]
+async fn replay_without_token_is_a_problem() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/does-not-exist/replay",
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn replay_unknown_session_is_not_found() {
+    let state = state().await;
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/api/v1/sessions/does-not-exist/replay",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
