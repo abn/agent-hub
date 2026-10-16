@@ -15,7 +15,7 @@
 | `answer_post` | Reply to a question by its question id. |
 | `inbox_read` | Read the human's global inbox, by status or project. Takes `since` and `actor` and returns a `next_since` cursor. |
 | `inbox_wait` | Wait for new inbox items instead of polling: returns when something lands, or after the wait bound, with the new items and a `next_since` cursor to continue from. |
-| `notify_subscribe`, `notify_unsubscribe` | Register or remove a standing interest in feed events by kind, optionally scoped to a project, so they arrive through the `notifications` member of a later tool result instead of being polled. |
+| `notify_subscribe`, `notify_unsubscribe`, `notify_list`, `notify_wait` | Register, remove, list, or wait on a standing interest in feed events by kind, optionally scoped to a project or narrowed to an actor, so they arrive through the `notifications` member of a later tool result instead of being polled. |
 | `artifact_publish`, `artifact_update`, `artifact_draft`, `artifact_get`, `artifact_versions`, `artifact_list`, `artifact_delete` | Publish an artifact, publish a new version, hold a version live while you write it, read a version, list the version history, and delete an artifact. |
 | `comment_post`, `comment_list`, `comment_resolve`, `comment_delete` | Comment on an artifact, list its comments, and resolve or delete one. |
 | `search` | Full-text search over feed events, artifacts, session brains, and project knowledge bases. |
@@ -72,10 +72,14 @@ answer_post(question_id, body, idempotency_key?)
 inbox_read(status?, project_id?, limit?, since?, actor?)
 inbox_wait(wait_seconds?, project_id?, since?)
       -> {items, next_since}
-notify_subscribe(kinds, project_id?)
+notify_subscribe(kinds, project_id?, actor?, exclude_self?)
       -> {subscription_id, cursor}
 notify_unsubscribe(subscription_id)
       -> {removed}
+notify_list()
+      -> {subscriptions: [{subscription_id, kinds, project_id, cursor, created_at}]}
+notify_wait(wait_seconds?)
+      -> {notifications}?
 search(query, scope?, project_id?, type?, session_id?, limit?)
 artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)

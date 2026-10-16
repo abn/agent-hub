@@ -9,7 +9,7 @@ status: stable
 # 0033. Semantic recall across projects
 
 ## Status
-Proposed (companion to ADR 0006, ADR 0018, and ADR 0022).
+Accepted (standalone companion to ADR 0006, ADR 0018, and ADR 0022).
 
 ## Context
 Search is engine-native (ADR 0006) and already ranks in the hub (ADR 0022), but

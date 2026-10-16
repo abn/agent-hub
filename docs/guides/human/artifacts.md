@@ -64,7 +64,8 @@ comment on the second use of a word stays on that one. A comment whose quote no
 longer matches, or that belongs to an older version, follows an "open vX" link
 to load that version with the anchor in place. Resolved comments fold away. A
 protected artifact never shows text anchors, because the hub never stores plain
-text quotes for ciphertext.
+text quotes for ciphertext. Posting a comment also appends an `artifact` event
+to the project feed, so the thread is visible wherever it is watched.
 
 ## Sharing
 
