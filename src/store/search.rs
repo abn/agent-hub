@@ -101,6 +101,8 @@ pub struct SearchQuery {
     pub session_id: Option<String>,
     /// Maximum hits to return.
     pub limit: i64,
+    /// Requested recall backend: `lexical` (default) or `semantic`.
+    pub mode: Option<String>,
 }
 
 /// One search hit.
@@ -428,6 +430,9 @@ pub struct SearchResults {
     pub truncated: bool,
     /// How long the query itself took, floored at zero.
     pub took_ms: u64,
+    /// Which recall backend served this page: `fts` today, or `fts-fallback`
+    /// when a semantic mode is requested but no embedding model is configured.
+    pub backend: String,
     pub groups: Vec<SearchGroup>,
 }
 
@@ -449,10 +454,16 @@ pub async fn search(
     let took_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let truncated = hits.len() as i64 > limit;
     hits.truncate(limit as usize);
+    let backend = if query.mode.as_deref() == Some("semantic") {
+        "fts-fallback".to_string()
+    } else {
+        "fts".to_string()
+    };
     Ok(SearchResults {
         count: hits.len(),
         truncated,
         took_ms,
+        backend,
         groups: group(hits),
     })
 }
