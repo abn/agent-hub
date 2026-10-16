@@ -82,6 +82,14 @@ route being admin-only is about which surface owns it, not a claim that agents
 may not touch projects; agents reach projects over MCP, and they may create and
 list the ones they can see over REST as well.
 
+## Loopback
+
+On a loopback bind the hub may resolve a principal without a token: an agent
+declares its identity through `X-Agent-Id`, and the control surface resolves
+to the admin when no admin token is configured. Every process on that machine
+is already the operator, so nothing crosses a trust boundary. Any bind past
+loopback requires a token for every caller.
+
 ## Artifacts and links
 
 - A **plain artifact** is reached by a link. The link is the capability, one per
