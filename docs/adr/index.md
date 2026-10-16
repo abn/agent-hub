@@ -48,3 +48,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   every version, in its own file
 * [0030](0030-knowledge-base-folder-sync.md) - A knowledge base syncs with a
   folder under the version guard
+* [0031](0031-web-push-opt-in.md) - Opt-in Web Push for items the human has
+  waiting
