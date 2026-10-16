@@ -3,7 +3,7 @@ type: Decision Record
 title: Human idea capture surface
 description: Where and how the human captures an idea into a project's inbox, aligned with the design frame.
 tags: [adr, ideas, inbox, ui, human-surface]
-status: draft
+status: stable
 ---
 
 # 0034. Human idea capture surface
