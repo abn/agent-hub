@@ -245,7 +245,7 @@ function inboxRow(item, state, options = {}) {
         ${body ? `<div class="inbox-body">${esc(body)}</div>` : ""}
         ${deadline ? `<div class="inbox-deadline">${esc(deadline)}</div>` : ""}
         <div class="inbox-foot">
-          ${waiting && options.snoozed ? waiting.pill : ""}<span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
+          ${waiting && options.snoozed ? waiting.pill : ""}${item.kind === "idea" ? '<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Idea</span>' : ""}<span class="inbox-project">${esc(projectName(item))}</span><span aria-hidden="true">·</span><span class="inbox-actor">${esc(item.actor)}</span><span aria-hidden="true">·</span>${stamp(item.updated_at)}
         </div>
       </div>
       ${waiting ? waiting.dot : ""}
@@ -360,7 +360,8 @@ function detail(item, state) {
     <a class="inbox-back" href="${back}"><span class="inbox-back-arrow" aria-hidden="true">&larr; </span><span class="inbox-back-label">Back to inbox</span><span class="inbox-close-label">Close</span></a>
     <div class="inbox-detail-head">
       ${glyph(item.kind)}
-      ${waits(item) ? '<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>' : ""}
+      ${waits(item) && item.kind !== "idea" ? '<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>' : ""}
+      ${item.kind === "idea" ? '<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Idea</span>' : ""}
       ${waits(item) && isEnrol ? '<span class="pill pill-enrol">Pending enrolment</span>' : ""}
       ${outcome ? `<span class="pill pill-outcome">${esc(outcome)}</span>` : ""}
       <span class="inbox-detail-meta"><span class="inbox-project">${esc(projectName(item))}</span> · ${esc(item.actor)} · ${stamp(item.updated_at)}</span>

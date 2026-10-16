@@ -34,6 +34,8 @@ never by colour alone.
 
 ## Questions
 
+<img src="../../assets/screens/idea-capture-desktop-light.png" alt="Capturing an idea into a project's inbox.">
+
 A question asks you something and lands as an action item. Open it to read the
 whole thing, as a card with a composer held open. A question may suggest
 answers, shown as one-tap buttons above the composer, and you can always write

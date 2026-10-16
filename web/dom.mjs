@@ -54,7 +54,7 @@ const mark = (d, filled) =>
 // of the identifier pattern the commit hooks reject.
 const MARKS = {
   signal: mark("M 12 12h.01"),
-  idea: mark("M 12 3l2.5 5 5.5 .8-4 3.9 1 5.5-5-2.6-5 2.6 1-5.5-4-3.9 5.5-.8z"),
+  idea: mark("M 9 18h6 M 10 22h4 M 12 2a7 7 0 0 0-4 12.7c.9.7 1.5 1.8 1.5 3h5c0-1.2.6-2.3 1.5-3A7 7 0 0 0 12 2z"),
   finished: mark("M 5 12l5 5L20 7"),
   question: "?",
   answer: mark("M 10 16l-4-4 4-4 M 6 12h7a5 5 0 0 1 5 5v1"),

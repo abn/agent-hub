@@ -248,6 +248,7 @@ const PROJECT_MOBILE_STYLE = `<style>
     cursor: pointer;
     border-radius: var(--r-1);
     flex: none;
+    overflow: hidden;
   }
   .project-filter-btn:hover,
   .project-filter-btn:focus-visible {
@@ -280,6 +281,9 @@ function projectToolsMobile(id, segment, stats, project) {
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
     </button>
+    <button type="button" class="project-filter-btn" aria-label="Capture idea" data-action="capture-idea" data-project="${esc(id)}">
+      Capture idea
+    </button>
     ${projectOverflow(project, { lock: false, newPage: segment === "wiki" })}
   </div>`;
 }
@@ -287,6 +291,30 @@ function projectToolsMobile(id, segment, stats, project) {
 const FEED_GLYPH = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>`;
 
 let lastOpenSession = "";
+
+async function captureIdea(projectId, opener) {
+  const confirmed = await confirmAction({
+    title: "Capture an idea",
+    body: "It lands in the project's inbox as an open item for triage.",
+    safe: "Cancel",
+    danger: "Capture",
+    tone: "action",
+    field: { label: "Idea", limit: 2000 },
+    commit: async (note) => {
+      const summary = (note || "").trim();
+      if (!summary) throw new Error("Write an idea to capture.");
+      await api(`/api/v1/projects/${encodeURIComponent(projectId)}/ideas`, {
+        method: "POST",
+        body: JSON.stringify({ summary }),
+      });
+    },
+  });
+  if (confirmed) {
+    toast("Idea captured, open in the inbox.");
+    // Re-render the feed so the new item is visible after triage.
+    if (typeof window !== "undefined") window.location.hash = window.location.hash;
+  }
+}
 
 function returnSessionFocus(id) {
   requestAnimationFrame(() => {
@@ -314,6 +342,13 @@ if (typeof document !== "undefined") {
       if (controls) {
         controls.classList.toggle("mobile-filter-open");
       }
+      return;
+    }
+    const captureBtn = event.target.closest?.('[data-action="capture-idea"]');
+    if (captureBtn) {
+      event.preventDefault();
+      const projectId = captureBtn.dataset.project;
+      captureIdea(projectId, captureBtn);
       return;
     }
     const link = event.target.closest?.(".session-link, .session-row a");
@@ -470,7 +505,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   return shellHTML({
     segment,
     indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
-    indexControls: shellIndexControls("Filter events", group),
+    indexControls: shellIndexControls("Filter events", group, `<button type="button" class="primary" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>`),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
     stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(
