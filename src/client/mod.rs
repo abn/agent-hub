@@ -137,6 +137,15 @@ pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient,
     let mut transport_config = StreamableHttpClientTransportConfig::with_uri(endpoint.as_str());
     if let Some(token) = config.token.clone() {
         transport_config = transport_config.auth_header(token);
+    } else if let Some(agent_id) = config.agent_id.clone().filter(|id| !id.trim().is_empty()) {
+        // On a loopback hub the client may connect without a token; forward
+        // the configured agent id so the hub can resolve the identity.
+        let name = axum::http::HeaderName::from_static("x-agent-id");
+        if let Ok(value) = axum::http::HeaderValue::from_str(agent_id.trim()) {
+            let mut headers = std::collections::HashMap::new();
+            headers.insert(name, value);
+            transport_config = transport_config.custom_headers(headers);
+        }
     }
     let transport = StreamableHttpClientTransport::from_config(transport_config);
 

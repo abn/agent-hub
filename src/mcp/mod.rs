@@ -672,6 +672,51 @@ async fn require_bearer(
             (scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty()).then(|| token.to_owned())
         });
 
+    // On loopback the hub runs for the operator alone: a caller that presents
+    // no token declares its identity through X-Agent-Id instead. This never
+    // applies past loopback, so a networked hub keeps requiring a token.
+    // Local identity without a token is available only on loopback when no admin
+    // token is configured, so a hub that pins an admin token keeps requiring
+    // agent tokens too.
+    if token.is_none() && state.config.bind.ip().is_loopback() && state.config.admin_token.is_none()
+    {
+        let declared = request
+            .headers()
+            .get("x-agent-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("loopback")
+            .to_string();
+        match crate::store::identity::ensure_local_agent(&state.db, &declared).await {
+            Ok(agent_id) => {
+                let principal = crate::principal::Principal {
+                    actor: agent_id.clone(),
+                    agent_id: Some(agent_id),
+                    is_admin: false,
+                    is_pending: false,
+                };
+                request.extensions_mut().insert(principal);
+                return next.run(request).await;
+            }
+            Err(err) => {
+                crate::metrics::record_error(err.code());
+                return (
+                    crate::http::problem::status_for(err.code()),
+                    axum::Json(serde_json::json!({
+                        "error": {
+                            "code": err.code().as_str(),
+                            "message": err.to_string(),
+                            "retryable": err.retryable(),
+                            "details": {},
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     match state.auth.resolve_agent(&state.db, token.as_deref()).await {
         Ok(principal) => {
             request.extensions_mut().insert(principal);
