@@ -114,6 +114,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/offline-queue.mjs",
+        body: include_bytes!("../../web/offline-queue.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/feed.mjs",
         body: include_bytes!("../../web/feed.mjs"),
         content_type: "text/javascript; charset=utf-8",
