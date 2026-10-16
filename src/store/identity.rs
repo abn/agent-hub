@@ -172,6 +172,23 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
     }
 }
 
+/// Make sure an active agent with this id exists, creating one on loopback.
+///
+/// Used by the loopback MCP gate when a caller declares its identity through
+/// `X-Agent-Id` instead of a bearer token. The agent is active and non-admin,
+/// with its own personal space, like one enrolled normally.
+pub async fn ensure_local_agent(db: &Database, id: &str) -> Result<String> {
+    validate_agent_id(id)?;
+    if get_agent(db, id).await?.is_some() {
+        return Ok(id.to_string());
+    }
+    match create_agent(db, id, id).await {
+        Ok(_) => Ok(id.to_string()),
+        Err(Error::Conflict(_)) => Ok(id.to_string()),
+        Err(err) => Err(err),
+    }
+}
+
 /// Create an agent and its personal space as one unit.
 pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
     validate_agent_id(id)?;
