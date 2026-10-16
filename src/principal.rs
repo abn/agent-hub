@@ -141,14 +141,18 @@ impl Auth {
     }
 }
 
-/// Compare two tokens without an early exit on the first differing byte.
+/// Compare two tokens without leaking their byte length.
+///
+/// Both inputs are hashed first, so the comparison runs over two fixed-size
+/// digests and their original lengths never take part in the decision.
 fn constant_time_eq(expected: &str, presented: &str) -> bool {
-    let (expected, presented) = (expected.as_bytes(), presented.as_bytes());
-    if expected.len() != presented.len() {
-        return false;
-    }
+    use sha2::{Digest, Sha256};
+
+    let expected = Sha256::digest(expected.as_bytes());
+    let presented = Sha256::digest(presented.as_bytes());
+
     let mut diff = 0u8;
-    for (a, b) in expected.iter().zip(presented) {
+    for (a, b) in expected.iter().zip(presented.iter()) {
         diff |= a ^ b;
     }
     diff == 0
