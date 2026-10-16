@@ -227,3 +227,30 @@ fn comment_resolve_across_artifacts_is_not_found() {
         "a comment of another artifact does not delete"
     );
 }
+
+#[test]
+fn comment_post_appends_a_feed_event() {
+    let data_dir = TempDir::new("comment-feed");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    server.initialize();
+
+    let artifact_id = publish(&mut server);
+    let posted = server.call_tool(
+        "comment_post",
+        json!({"artifact_id": artifact_id, "body": "Needs a second look"}),
+    );
+    assert!(posted.get("error").is_none(), "{posted}");
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let items = structured(&feed)["events"].as_array().expect("feed events");
+    assert!(
+        items.iter().any(|item| {
+            item["kind"] == "artifact"
+                && item["summary"]
+                    .as_str()
+                    .is_some_and(|summary| summary.contains("comment on"))
+        }),
+        "posting a comment records a feed event: {feed}"
+    );
+}

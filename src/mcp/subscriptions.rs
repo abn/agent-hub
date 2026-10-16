@@ -647,4 +647,162 @@ mod tests {
 
         assert_eq!(titles(&state, &principal).await, vec!["yours"]);
     }
+
+    #[tokio::test]
+    async fn a_subscription_actor_filter_drops_other_actors() {
+        let state = state("subs-actor").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let kinds = parse_kinds("signal").expect("kinds");
+        let visible = policy::visibility(&state.db, &principal)
+            .await
+            .expect("visibility");
+        let cursor = newest_matching(
+            &state.db,
+            &visible,
+            Some("p1"),
+            &kinds,
+            Some("seeder"),
+            false,
+            &principal.actor,
+        )
+        .await
+        .expect("cursor");
+        let id = subscriptions::create_with_filters(
+            &state.db,
+            &principal.actor,
+            Some("p1"),
+            &kinds,
+            &cursor,
+            Some("seeder"),
+            false,
+        )
+        .await
+        .expect("create");
+        assert!(!id.is_empty());
+
+        crate::store::events::append(
+            &state.db,
+            0,
+            &principal.actor,
+            None,
+            crate::store::events::NewEvent {
+                project_id: "p1".to_string(),
+                kind: "signal".to_string(),
+                summary: "mine".to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append mine");
+        crate::store::events::append(
+            &state.db,
+            0,
+            "seeder",
+            None,
+            crate::store::events::NewEvent {
+                project_id: "p1".to_string(),
+                kind: "signal".to_string(),
+                summary: "theirs".to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append theirs");
+
+        let items = drain(&state, &principal)
+            .await
+            .expect("a match is reported");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["title"], "theirs");
+
+        assert!(
+            drain(&state, &principal).await.is_none(),
+            "the delivered event is not reported twice"
+        );
+    }
+
+    #[tokio::test]
+    async fn excluding_self_drops_the_callers_own_events() {
+        let state = state("subs-self").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let kinds = parse_kinds("signal").expect("kinds");
+        let visible = policy::visibility(&state.db, &principal)
+            .await
+            .expect("visibility");
+        let cursor = newest_matching(
+            &state.db,
+            &visible,
+            Some("p1"),
+            &kinds,
+            None,
+            true,
+            &principal.actor,
+        )
+        .await
+        .expect("cursor");
+        subscriptions::create_with_filters(
+            &state.db,
+            &principal.actor,
+            Some("p1"),
+            &kinds,
+            &cursor,
+            None,
+            true,
+        )
+        .await
+        .expect("create");
+
+        crate::store::events::append(
+            &state.db,
+            0,
+            &principal.actor,
+            None,
+            crate::store::events::NewEvent {
+                project_id: "p1".to_string(),
+                kind: "signal".to_string(),
+                summary: "mine".to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append mine");
+        crate::store::events::append(
+            &state.db,
+            0,
+            "seeder",
+            None,
+            crate::store::events::NewEvent {
+                project_id: "p1".to_string(),
+                kind: "signal".to_string(),
+                summary: "theirs".to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append theirs");
+
+        let items = drain(&state, &principal)
+            .await
+            .expect("a match is reported");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["title"], "theirs");
+    }
 }
