@@ -3,10 +3,12 @@ type: Decision Record
 title: Agent identity and trust
 description: Every agent has an identity and a trust level; trusted reads all, untrusted is confined to its spaces.
 tags: [adr, security, auth, agents]
-status: stable
+status: deprecated
 ---
 
 # 0012. Agent identity and trust
+
+Deprecated by [ADR 0021](0021-the-token-is-the-identity.md), which removes the trust level from code.
 
 ## Context
 
