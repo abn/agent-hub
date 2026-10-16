@@ -3,7 +3,7 @@ type: Decision Record
 title: Semantic recall across projects
 description: Add on-node semantic search and relation panels over knowledge base pages, artifacts, and promoted feed events, respecting existing project visibility.
 tags: [adr, search, knowledge-base, embeddings, cross-project]
-status: draft
+status: stable
 ---
 
 # 0033. Semantic recall across projects
