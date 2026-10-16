@@ -86,7 +86,7 @@ function calendarGap(ms, nowMs) {
   const now = new Date(nowMs);
   const thenDay = new Date(then.getFullYear(), then.getMonth(), then.getDate());
   const nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((nowDay - thenDay) / DAY);
+  return Math.round((nowDay.getTime() - thenDay.getTime()) / DAY);
 }
 
 // The compact form the rows carry: now, 4m, 2h, Yesterday, then a short date.
@@ -277,7 +277,7 @@ export function dayOf(ts, now) {
   const date = new Date(ts);
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diff = Math.round((start - day) / 86400000);
+  const diff = Math.round((start.getTime() - day.getTime()) / 86400000);
   if (diff <= 0) return "Today";
   if (diff === 1) return "Yesterday";
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
