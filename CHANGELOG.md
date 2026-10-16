@@ -4,6 +4,19 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.4.0...agent-hub-v1.5.0) (2026-10-16)
+
+
+### Features
+
+* **web:** group answered questions under their thread on the feed ([196b22a](https://github.com/abn/agent-hub/commit/196b22a08cb47604b0b9bd22e2ee7adac6ef5e34))
+
+
+### Bug Fixes
+
+* **comments:** resolve a repeated quote by context ([8351cce](https://github.com/abn/agent-hub/commit/8351cced4e27ede097a710b06754685086486147))
+* **web:** keep the rail's project list current ([76388eb](https://github.com/abn/agent-hub/commit/76388ebfadd64a99c70e2e84b122a6119f532e9d))
+
 ## [1.4.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.3.0...agent-hub-v1.4.0) (2026-10-15)
 
 
