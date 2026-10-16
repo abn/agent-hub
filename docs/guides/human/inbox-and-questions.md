@@ -40,6 +40,10 @@ answers, shown as one-tap buttons above the composer, and you can always write
 your own reply instead. Pressing a suggested answer sends it as the reply body,
 with no confirmation. The answer lands on the question's thread and closes it.
 
+If you answer while offline, the reply is queued in the browser and sent when
+the connection returns; the queue survives a reload and is flushed in the
+order it was written. The item stays open until the hub confirms it.
+
 ## Approvals
 
 An approval asks you to approve or decline something, and the decision is asked
