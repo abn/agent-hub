@@ -3,7 +3,7 @@ type: Decision Record
 title: Session replay and time travel
 description: Expose a session brain's audit log and versioned KV state as a replay timeline, and let a reader fork a new session from any captured point.
 tags: [adr, session, brain, audit, replay, time-travel]
-status: draft
+status: stable
 ---
 
 # 0032. Session replay and time travel
