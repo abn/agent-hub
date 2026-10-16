@@ -6,6 +6,10 @@ software release notes and the repository changelog.
 
 ## 2026-10-16
 
+### Loopback hubs resolve identity without a token
+
+* **Creation**: Added [Loopback may resolve identity without a token](adr/0031-loopback-local-identity.md). A hub bound to `127.0.0.1` or `::1` with no admin token accepts an `X-Agent-Id` in place of an agent token and resolves the control surface as the admin, so a single-machine workstation hub needs no enrolment and no token.
+
 ### Agent identity: the trust-level record is superseded
 
 * **Deprecation**: [Agent identity and trust](adr/0012-agent-identity-and-trust.md) is

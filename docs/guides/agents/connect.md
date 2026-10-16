@@ -86,6 +86,20 @@ the same endpoint and the same tools.
 > and may carry the token. Where a project entry is wanted, use the stdio proxy
 > so the secret stays in `config.toml` outside the repo.
 
+## Loopback: no token needed
+
+On a hub bound to `127.0.0.1` or `::1`, no agent token is required. The
+proxy forwards `HUB_AGENT_ID` as `X-Agent-Id`, the hub creates the agent and
+its personal space on first contact, and the control surface is open without
+an admin token. Set `HUB_AGENT_ID` per harness so two agents on one machine
+do not share an identity:
+
+```sh
+HUB_URL=http://127.0.0.1:8080 HUB_AGENT_ID=claude agent-hub mcp
+```
+
+This exception ends at loopback; a hub bound past it keeps requiring tokens.
+
 ## Prove it
 
 Ask the agent to call `whoami`. It reports the identity the token resolves to,
