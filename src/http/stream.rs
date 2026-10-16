@@ -16,12 +16,12 @@ use crate::http::problem::Problem;
 
 /// `GET /api/v1/stream`
 ///
-/// A valid bearer token is required. The stream carries a topic and never
-/// content: a plain `tick` says a write changed the inbox or feed, so the PWA
-/// refetches what it shows, and an `artifact-live` event names one artifact
-/// whose live version moved, so a viewer of it refetches that. It is a mailbox
-/// nudge, not a chat channel, so it stays consistent with the asynchronous
-/// interaction model.
+/// A valid bearer token is required: an admin token or any active agent token. The
+/// stream carries a topic and never content: a plain `tick` says a write changed
+/// the inbox or feed, so the PWA refetches what it shows, and an
+/// `artifact-live` event names one artifact whose live version moved, so a
+/// viewer of it refetches that. It is a mailbox nudge, not a chat channel, so
+/// it stays consistent with the asynchronous interaction model.
 pub async fn stream(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -31,7 +31,8 @@ pub async fn stream(
 > {
     state
         .auth
-        .require_admin(bearer_token(&headers).as_deref())
+        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
+        .await
         .map_err(|err| Problem::from_error(&err))?;
 
     // A subscriber that falls behind gets a plain tick rather than an error: a
