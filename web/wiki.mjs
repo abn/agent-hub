@@ -1015,7 +1015,7 @@ function openWikiSheet({ id, projectName = "", mode, sessionId = "", sessionName
     const edge = event.shiftKey ? ring[0] : ring[ring.length - 1];
     if (document.activeElement !== edge) return;
     event.preventDefault();
-    (event.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+    (/** @type {HTMLElement} */ (event.shiftKey ? ring[ring.length - 1] : ring[0])).focus();
   });
 
   el.appendChild(form);
@@ -1058,9 +1058,9 @@ export async function wikiSave(button) {
   const id = button.dataset.id || "";
   const isNew = button.dataset.new === "1";
   const path = isNew
-    ? (document.getElementById("wiki-new-path")?.value || "").trim()
+    ? ((/** @type {HTMLInputElement | null} */ (document.getElementById("wiki-new-path")))?.value || "").trim()
     : button.dataset.path || "";
-  const content = document.getElementById("wiki-content")?.value ?? "";
+  const content = (/** @type {HTMLTextAreaElement | null} */ (document.getElementById("wiki-content")))?.value ?? "";
   const version = button.dataset.version || "absent";
   const note = button.closest(".wiki-editor-actions")?.querySelector(".wiki-editor-note");
   const say = (message, tone = "") => {
@@ -1104,7 +1104,7 @@ export async function wikiSave(button) {
           return;
         }
         if (page) {
-          document.getElementById("wiki-content").value = page.content || "";
+          (/** @type {HTMLTextAreaElement} */ (document.getElementById("wiki-content"))).value = page.content || "";
           button.dataset.version = page.version || "absent";
         }
         note.textContent = "Reloaded the hub's copy.";
