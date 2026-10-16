@@ -99,6 +99,34 @@ impl HubServer {
     }
 
     #[tool(
+        description = "List the subscriptions the caller registered: their ids, kinds, scope, and cursor. An agent uses this to see what it is currently watching before it waits or unsubscribes."
+    )]
+    async fn notify_list(
+        &self,
+        context: RequestContext<RoleServer>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let owned = subscriptions::list(&self.state.db, &principal.actor)
+            .await
+            .map_err(to_error_data)?;
+        let items: Vec<Value> = owned
+            .into_iter()
+            .map(|row| {
+                json!({
+                    "subscription_id": row.id,
+                    "kinds": row.kinds,
+                    "project_id": row.project_id,
+                    "cursor": row.last_seen_event_id,
+                    "created_at": row.created_at,
+                })
+            })
+            .collect();
+        Ok(CallToolResult::structured(
+            json!({ "subscriptions": items }),
+        ))
+    }
+
+    #[tool(
         description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to one of its questions, a decision on one of its approvals, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
     )]
     async fn notify_wait(
