@@ -30,6 +30,9 @@ pub struct Principal {
 pub struct Auth {
     admin_token: Option<String>,
     local_actor: String,
+    /// Whether the bind is loopback, which is the only place the hub resolves
+    /// a principal without a token.
+    loopback: bool,
 }
 
 impl Auth {
@@ -42,6 +45,7 @@ impl Auth {
         Self {
             admin_token: config.admin_token.clone(),
             local_actor,
+            loopback: config.bind.ip().is_loopback(),
         }
     }
 
@@ -126,15 +130,27 @@ impl Auth {
     }
 
     /// Resolve a token for the REST control surface: the admin token only.
+    ///
+    /// On loopback the control surface stays open without a token, the same way
+    /// the local stdio transport is: every process on that machine is already
+    /// the operator.
     pub fn require_admin(&self, token: Option<&str>) -> Result<Principal> {
         if let Some(principal) = self.admin(token) {
             return Ok(principal);
         }
-        match self.admin_token {
-            Some(_) => Err(Error::Unauthenticated(
+        if self.loopback && self.admin_token.is_none() && token.is_none() {
+            return Ok(Principal {
+                actor: "human".to_string(),
+                agent_id: None,
+                is_admin: true,
+                is_pending: false,
+            });
+        }
+        match (self.admin_token.is_some(), token) {
+            (true, _) => Err(Error::Unauthenticated(
                 "a valid admin bearer token is required".to_string(),
             )),
-            None => Err(Error::Unauthenticated(
+            (false, _) => Err(Error::Unauthenticated(
                 "no admin token is configured, so the control surface is disabled".to_string(),
             )),
         }
