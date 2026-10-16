@@ -2885,3 +2885,16 @@ software release notes and the repository changelog.
 * **Note**: Every architecture page describes an intended design, not shipped
   behaviour, and says so. Pages are rewritten against the code as the code
   lands.
+
+## 2026-10-16
+
+### Agents can wait for a relevant update
+
+* **Change**: `notify_wait` joins the subscription tools. It blocks until
+  something is pending for the caller (an answer, a decision, or a subscribed
+  feed event), or its deadline elapses, and returns the same `notifications`
+  member as an ordinary tool result, delivered once. A zero-second wait polls
+  once.
+* **Update**: [Agent surface](architecture/agent-surface.md) lists the tool and
+  [Notifications](../../skills/agent-hub/references/notifications.md) documents
+  the idle case.

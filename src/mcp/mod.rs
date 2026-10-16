@@ -548,6 +548,12 @@ async fn merge_trailer(
     else {
         return CallToolResponse::Complete(result);
     };
+    // A tool that already reports notifications (such as notify_wait) is the
+    // one that drained them; do not attach a second trailer that could
+    // overwrite it.
+    if body.contains_key("notifications") {
+        return CallToolResponse::Complete(result);
+    }
     let Some(mut trailer) = notifications::trailer(state, principal).await else {
         return CallToolResponse::Complete(result);
     };

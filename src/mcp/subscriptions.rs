@@ -97,6 +97,63 @@ impl HubServer {
         }
         Ok(CallToolResult::structured(json!({ "removed": true })))
     }
+
+    #[tool(
+        description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to one of its questions, a decision on one of its approvals, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
+    )]
+    async fn notify_wait(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<NotifyWaitParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let wait = params
+            .wait_seconds
+            .unwrap_or(DEFAULT_WAIT_SECONDS)
+            .min(MAX_WAIT_SECONDS);
+
+        // Subscribe first so a write cannot land between the first query
+        // and listening.
+        let mut ticker = self.state.ticker.subscribe();
+
+        if let Some(trailer) = super::notifications::trailer(&self.state, &principal).await {
+            return Ok(CallToolResult::structured(json!({
+                "notifications": trailer,
+            })));
+        }
+        if wait == 0 {
+            return Ok(CallToolResult::structured(json!({})));
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
+
+        loop {
+            if let Some(trailer) = super::notifications::trailer(&self.state, &principal).await {
+                return Ok(CallToolResult::structured(json!({
+                    "notifications": trailer,
+                })));
+            }
+
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Ok(CallToolResult::structured(json!({})));
+            }
+            let remaining = deadline - now;
+
+            let received = tokio::time::timeout(remaining, ticker.recv()).await;
+            match received {
+                Ok(Ok(_)) => {}
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    tokio::time::sleep(remaining).await;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+
+        Ok(CallToolResult::structured(json!({})))
+    }
 }
 
 /// Report every subscription the caller owns through the next tool result.
@@ -282,6 +339,18 @@ struct NotifySubscribeParams {
 struct NotifyUnsubscribeParams {
     subscription_id: String,
 }
+
+/// Arguments for `notify_wait`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct NotifyWaitParams {
+    /// How long to wait, in seconds. 30 by default, 60 at most; 0 polls once and returns.
+    #[serde(default)]
+    wait_seconds: Option<u64>,
+}
+
+/// The default and maximum waits, in seconds, for `notify_wait`.
+const DEFAULT_WAIT_SECONDS: u64 = 30;
+const MAX_WAIT_SECONDS: u64 = 60;
 
 #[cfg(test)]
 mod tests {
