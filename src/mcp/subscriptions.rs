@@ -57,15 +57,20 @@ impl HubServer {
             &visible,
             params.project_id.as_deref(),
             &kinds,
+            params.actor.as_deref(),
+            params.exclude_self,
+            &principal.actor,
         )
         .await
         .map_err(to_error_data)?;
-        let subscription_id = subscriptions::create(
+        let subscription_id = subscriptions::create_with_filters(
             &self.state.db,
             &principal.actor,
             params.project_id.as_deref(),
             &kinds,
             &cursor,
+            params.actor.as_deref(),
+            params.exclude_self,
         )
         .await
         .map_err(to_error_data)?;
@@ -241,9 +246,9 @@ async fn drain_one(
 
     let page = subscriptions::drain_events(&state.db, subscription, DRAIN_LIMIT).await?;
     // An unscoped read spans every project in the store, so what the caller may
-    // read is applied here and the cursor moves only as far as the newest event
-    // actually reported: an event in a project the caller cannot read is left
-    // above the cursor rather than consumed, and arrives if access is granted.
+    // read is applied here. The cursor still moves across the page, including
+    // events the caller cannot read or that the actor filters drop: they are
+    // left behind rather than retried on every call.
     let page: Vec<&events::Event> = match subscription.project_id {
         Some(_) => page.iter().collect(),
         None => page
@@ -255,14 +260,30 @@ async fn drain_one(
         return Ok(Vec::new());
     }
 
-    // Forward from a cursor reads oldest first, so the last on the page is the
-    // newest reported.
     let newest = page
         .last()
         .expect("a non-empty page has a newest event")
         .id
         .clone();
     subscriptions::set_cursor(&state.db, &subscription.id, &newest).await?;
+
+    let page: Vec<&events::Event> = page
+        .into_iter()
+        .filter(|event| {
+            if let Some(actor) = &subscription.actor_filter
+                && event.actor != *actor
+            {
+                return false;
+            }
+            if subscription.exclude_self && event.actor == principal.actor {
+                return false;
+            }
+            true
+        })
+        .collect();
+    if page.is_empty() {
+        return Ok(Vec::new());
+    }
 
     Ok(page.into_iter().map(item).collect())
 }
@@ -300,13 +321,16 @@ async fn newest_matching(
     visible: &policy::Visibility,
     project_id: Option<&str>,
     kinds: &[String],
+    actor_filter: Option<&str>,
+    exclude_self: bool,
+    caller_actor: &str,
 ) -> crate::error::Result<String> {
     let page = events::read_feed_scoped(
         db,
         project_id,
         &events::FeedQuery {
             kinds: Some(kinds.to_vec()),
-            limit: 1,
+            limit: DRAIN_LIMIT,
             ..events::FeedQuery::default()
         },
     )
@@ -314,7 +338,14 @@ async fn newest_matching(
     Ok(page
         .events
         .iter()
-        .find(|event| may_read(visible, &event.project_id))
+        .rfind(|event| {
+            may_read(visible, &event.project_id)
+                && match actor_filter {
+                    Some(actor) => event.actor == *actor,
+                    None => true,
+                }
+                && !(exclude_self && event.actor == caller_actor)
+        })
         .map(|event| event.id.clone())
         .unwrap_or_default())
 }
@@ -360,6 +391,12 @@ struct NotifySubscribeParams {
     /// caller may read.
     #[serde(default)]
     project_id: Option<String>,
+    /// Only report events authored by this actor.
+    #[serde(default)]
+    actor: Option<String>,
+    /// Drop the registering agent's own events at drain time.
+    #[serde(default)]
+    exclude_self: bool,
 }
 
 /// Arguments for `notify_unsubscribe`.
@@ -450,9 +487,17 @@ mod tests {
             .await
             .expect("visibility");
         let kinds = parse_kinds(kinds).expect("kinds");
-        let cursor = newest_matching(&state.db, &visible, Some("p1"), &kinds)
-            .await
-            .expect("cursor");
+        let cursor = newest_matching(
+            &state.db,
+            &visible,
+            Some("p1"),
+            &kinds,
+            None,
+            false,
+            &principal.actor,
+        )
+        .await
+        .expect("cursor");
         subscriptions::create(&state.db, &principal.actor, Some("p1"), &kinds, &cursor)
             .await
             .expect("create")

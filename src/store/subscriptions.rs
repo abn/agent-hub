@@ -34,6 +34,11 @@ pub struct Subscription {
     pub project_id: Option<String>,
     /// The event kinds it reports, in the order they were registered.
     pub kinds: Vec<String>,
+    /// Only events authored by this actor are reported when set; `None` means
+    /// every actor.
+    pub actor_filter: Option<String>,
+    /// Whether the registering actor's own events are dropped at drain time.
+    pub exclude_self: bool,
     /// The newest event id already reported: the exclusive cursor of the next
     /// drain. Empty before the subscription's first drain.
     pub last_seen_event_id: String,
@@ -75,12 +80,49 @@ pub async fn create(
     Ok(id)
 }
 
+/// Register a subscription with optional actor filters.
+pub async fn create_with_filters(
+    db: &Database,
+    agent: &str,
+    project_id: Option<&str>,
+    kinds: &[String],
+    last_seen_event_id: &str,
+    actor_filter: Option<&str>,
+    exclude_self: bool,
+) -> Result<String> {
+    let conn = super::connect(db)?;
+    let id = super::next_id();
+    conn.execute(
+        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        vec![
+            Value::Text(id.clone()),
+            Value::Text(agent.to_string()),
+            match project_id {
+                Some(project_id) => Value::Text(project_id.to_string()),
+                None => Value::Null,
+            },
+            Value::Text(kinds.join(",")),
+            Value::Text(last_seen_event_id.to_string()),
+            Value::Text(super::now_rfc3339()),
+            match actor_filter {
+                Some(actor) => Value::Text(actor.to_string()),
+                None => Value::Null,
+            },
+            Value::Integer(if exclude_self { 1 } else { 0 }),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(id)
+}
+
 /// Every subscription one agent owns, oldest first.
 pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, agent, project_id, kinds, last_seen_event_id, created_at
+            "SELECT id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self
              FROM notify_subscriptions WHERE agent = ?1 ORDER BY id",
             vec![Value::Text(agent.to_string())],
         )
@@ -177,11 +219,22 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
             .collect::<Vec<String>>(),
         None => Vec::new(),
     };
+    let exclude_self = match row.get_value(7).map_err(engine)? {
+        Value::Integer(n) => n != 0,
+        Value::Null => false,
+        other => {
+            return Err(Error::Engine(format!(
+                "expected integer in a column, found {other:?}"
+            )));
+        }
+    };
     Ok(Subscription {
         id: required_text(row, 0)?,
         agent: required_text(row, 1)?,
         project_id: text_at(row, 2)?,
         kinds,
+        actor_filter: text_at(row, 6)?,
+        exclude_self,
         last_seen_event_id: required_text(row, 4)?,
         created_at: required_text(row, 5)?,
     })
