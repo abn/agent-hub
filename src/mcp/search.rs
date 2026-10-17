@@ -30,6 +30,10 @@ struct SearchParams {
     /// Restrict the results to one session's brain content.
     #[serde(default)]
     session_id: Option<String>,
+    /// Recall backend: "lexical" (default) or "semantic". Semantic mode falls
+    /// back to the lexical index when no embedding model is configured.
+    #[serde(default)]
+    mode: Option<String>,
     #[serde(default)]
     limit: Option<i64>,
 }
@@ -65,7 +69,7 @@ impl HubServer {
             kind: params.kind,
             session_id: params.session_id,
             limit: params.limit.unwrap_or(50),
-            mode: None,
+            mode: params.mode,
         };
         let results = search::search(&self.state.db, &query, visible.as_filter())
             .await
