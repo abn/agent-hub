@@ -66,6 +66,7 @@ session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?,
               expires_in_seconds?, on_expiry?)
+      kind is one of "signal", "finished", "approval", or "idea"
 question_post(project_id, subject, body?, context?, options?, idempotency_key?,
               expires_in_seconds?)
 answer_post(question_id, body, idempotency_key?)
@@ -80,7 +81,7 @@ notify_list()
       -> {subscriptions: [{subscription_id, kinds, project_id, cursor, created_at}]}
 notify_wait(wait_seconds?)
       -> {notifications}?
-search(query, scope?, project_id?, type?, session_id?, limit?)
+search(query, scope?, project_id?, type?, session_id?, limit?, mode?)
 artifact_publish(project_id, title, kind, content, description?, label?, envelope?, idempotency_key?)
 artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, idempotency_key?)
 artifact_draft(artifact_id, content, envelope?)
@@ -93,6 +94,10 @@ comment_list(artifact_id)
 comment_resolve(artifact_id, comment_id, done, delete_token?)
 comment_delete(artifact_id, comment_id, delete_token?)
 ```
+
+`mode` selects the recall backend: `lexical` (the default) or `semantic`.
+Semantic mode falls back to the lexical index when no embedding model is
+configured, and reports `fts-fallback` in the result's `backend` field.
 
 A `search` query is read as words: any text is accepted and never an error,
 a `"quoted phrase"` is matched as a phrase, and punctuation and the bare

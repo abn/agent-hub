@@ -104,6 +104,15 @@ use the stdio proxy so the secret stays in `config.toml` outside the repo.
 }
 ```
 
+## On the hub's own machine
+
+When the agent runs on the same host as the hub, the connection is local.
+A request from loopback may carry `X-Agent-Id: <agent id>` instead of a token,
+and the hub resolves the identity from it. Embedded stdio mode needs no
+token at all: it runs as the local admin against the data directory, and
+refuses to start when a serving hub already holds that directory. Set
+`HUB_URL` to reach a running hub as the token's agent instead.
+
 ## Prove it
 
 `whoami` reports the calling identity, its personal space, and the URL of this
