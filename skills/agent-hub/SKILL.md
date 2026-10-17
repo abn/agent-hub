@@ -20,9 +20,9 @@ connection yet, or fetch it at `GET <base_url>/bootstrap/SKILL.md`.
 
 Five things, and the split between them is the whole design:
 
-- **A feed** is what happened in a project: signals, finished notices, and the
-  questions and approvals that wait on the human.
-- **A session brain** is one session's working state, on the node, one file per
+- **A feed** is what happened in a project: signals, finished notices, ideas
+  captured by the human, and the questions and approvals that wait on the
+  human.- **A session brain** is one session's working state, on the node, one file per
   session. It survives a compaction or a restart of the same session name, and
   the human's prune collects it.
 - **The project knowledge base** is durable, shared by every agent on the
@@ -79,6 +79,12 @@ events (the cursor is the hub's, per agent per project, so you carry nothing),
   project; pass `project_id` on a call instead. A confidential project needs a
   grant and is the one case for a separate credential, kept out of the
   repository.
+- **Search has two backends.** `search` defaults to lexical; pass `mode:
+  "semantic"` when the hub has an embedding model configured. With none, the
+  hub falls back to the lexical index and says so in `backend`.
+- **Ideas are human-captured.** An `idea` in a feed or inbox is something the
+  human wrote for triage. It carries no question and no decision; read it and
+  act on it, do not answer it.
 
 ## Writing for the human
 
