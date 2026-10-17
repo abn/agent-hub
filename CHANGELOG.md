@@ -4,6 +4,32 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.5.0...agent-hub-v1.6.0) (2026-10-17)
+
+
+### Features
+
+* **auth:** resolve admin implicitly on loopback without a token ([7b80c73](https://github.com/abn/agent-hub/commit/7b80c73ab2296dfa785506b8b4930bbd222323d3))
+* **comments:** append a feed event when a comment is posted ([a8abf7e](https://github.com/abn/agent-hub/commit/a8abf7ea24197040ba633f42e5fbd494c5617296))
+* **http:** let agents read the freshness stream ([b0e1590](https://github.com/abn/agent-hub/commit/b0e1590c150486bd54c24f179a2c4b8bdc021660))
+* **ideas:** let a human capture an idea into a project's inbox ([bc48052](https://github.com/abn/agent-hub/commit/bc48052a61dcc1c988128ebb3df5b154887c23f6))
+* **mcp:** add actor filters to notification subscriptions ([3c9178d](https://github.com/abn/agent-hub/commit/3c9178d32af7ec01eb8d683a419b06aca328abf6))
+* **mcp:** expose semantic search mode and idea capture to agents ([14d4ccf](https://github.com/abn/agent-hub/commit/14d4ccff9e9351d055d0a22c96d39a9ec17b3dc6))
+* **mcp:** let agents wait for a relevant update with notify_wait ([1335a6f](https://github.com/abn/agent-hub/commit/1335a6fe0aa76475647e1ef532bd8cb370796e58))
+* **mcp:** list an agent's notification subscriptions ([bb4e4a4](https://github.com/abn/agent-hub/commit/bb4e4a480f2a8252ba17576c86fdaed5680bb59d))
+* **mcp:** resolve loopback agent identity via X-Agent-Id ([ed0b3d8](https://github.com/abn/agent-hub/commit/ed0b3d803353556af2ca0c090ba1290890224803))
+* **pwa:** queue answers and decisions while offline ([3d41a31](https://github.com/abn/agent-hub/commit/3d41a3169288af1eafddf574e1707db4c1b50ade))
+* **search:** add a semantic mode with lexical fallback ([d877623](https://github.com/abn/agent-hub/commit/d87762380f40c1d293911977cfeff5a4c5cc8d33))
+* **sessions:** expose a read-only replay timeline endpoint ([1b731c1](https://github.com/abn/agent-hub/commit/1b731c1e7ebcd8626585b88e251f97841fb185f6))
+* **ui:** capture an idea from the project feed ([68273e1](https://github.com/abn/agent-hub/commit/68273e1b61fe3b5b5fd43f5dc53a9cbefb9949d4))
+
+
+### Bug Fixes
+
+* **enrol:** allow multiple pending enrolments without a socket peer ([839ee49](https://github.com/abn/agent-hub/commit/839ee49d98b13801f3b22c3ce05ab9e5415b8d72))
+* **mcp:** gate artifact metadata behind project authorization ([058075f](https://github.com/abn/agent-hub/commit/058075f2a711979fb556d3413310a48f7a61f465))
+* **principal:** compare admin tokens without leaking their length ([09f6907](https://github.com/abn/agent-hub/commit/09f690714f9b714d1658eafbeda06a2605d13f6c))
+
 ## [1.5.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.4.0...agent-hub-v1.5.0) (2026-10-16)
 
 
