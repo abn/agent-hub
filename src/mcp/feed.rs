@@ -23,12 +23,12 @@ use super::{HubServer, to_error_data};
 
 /// The kinds an agent may write through `signal_append`, named in the refusal
 /// so a caller that guessed `session` or `artifact` learns the allowed set.
-const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval"];
+const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval", "idea"];
 
 #[tool_router(router = feed_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", or \"approval\"; the kinds owned by other surfaces are refused. An approval may carry expires_in_seconds (60 to 2592000) and on_expiry (\"approve\" or \"decline\", \"decline\" by default): if no one has decided by then, the hub records that outcome as its own, marked expired."
+        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", \"approval\", or \"idea\"; the kinds owned by other surfaces are refused. An approval may carry expires_in_seconds (60 to 2592000) and on_expiry (\"approve\" or \"decline\", \"decline\" by default): if no one has decided by then, the hub records that outcome as its own, marked expired. An idea lands in the inbox for triage and carries no question or decision."
     )]
     async fn signal_append(
         &self,
@@ -75,7 +75,7 @@ impl HubServer {
         // The client cannot set the action flag. Only an approval waits on the
         // human, so an agent cannot flood the inbox with ordinary signals. An
         // approval is an open item and is subject to the inbox cap.
-        let needs_action = params.kind == "approval";
+        let needs_action = params.kind == "approval" || params.kind == "idea";
         let session_id = self.session_in(&principal, &params.project_id).await;
         let event = NewEvent {
             project_id: params.project_id,
