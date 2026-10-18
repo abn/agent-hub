@@ -9,12 +9,15 @@ import { focusAfterRender, render } from "./router.mjs";
 import { byDay } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
-// Feed chips cover question, approval, finished, signal only.
+// Feed chips cover the kinds a reader filters by. Anchors and scores are
+// session-scoped, but they are ordinary feed events and read here too.
 const FEED_KINDS = [
   { kind: "question", label: "Questions" },
   { kind: "approval", label: "Approvals" },
   { kind: "finished", label: "Finished" },
   { kind: "signal", label: "Signals" },
+  { kind: "anchor", label: "Anchors" },
+  { kind: "score", label: "Scores" },
 ];
 const VALID_KINDS = new Set(FEED_KINDS.map((k) => k.kind));
 const ALL = "all";
@@ -594,7 +597,47 @@ const KIND_WORD = {
   approval: "Approval",
   artifact: "Artifact",
   session: "Session",
+  anchor: "Anchor",
+  score: "Score",
 };
+
+// The events an anchor cites, or the anchors a score grades, as rows that open
+// the cited event in the feed. The id is the link's text, so a pruned source
+// still reads as a citation rather than as an empty row.
+function linkList(label, ids, projectId) {
+  if (!ids.length) return "";
+  const rows = ids
+    .map(
+      (id) =>
+        `<a class="points-row" href="#/projects/${encodeURIComponent(projectId)}/feed?event=${encodeURIComponent(id)}"><span class="points-name mono">${esc(id)}</span><span class="points-chev" aria-hidden="true">${CHEVRON}</span></a>`,
+    )
+    .join("");
+  return `<section class="points-card" aria-label="${esc(label)}"><div class="points-head mono">${esc(label)}</div>${rows}</section>`;
+}
+
+// An anchor's stage: the phase it closes, the plan it leaves, and the events it
+// rests on. The summary is the title; this is the detail a resumed reader uses.
+function anchorDetail(event, projectId) {
+  const phase = typeof event.payload?.phase === "string" ? event.payload.phase.trim() : "";
+  const steps = Array.isArray(event.payload?.next_steps) ? event.payload.next_steps : [];
+  const sources = Array.isArray(event.payload?.source_ids) ? event.payload.source_ids : [];
+  const stepsHTML = steps.length
+    ? `<p class="feed-stage-label mono">NEXT STEPS</p><ol class="feed-stage-list">${steps
+        .map((step) => `<li>${esc(step)}</li>`)
+        .join("")}</ol>`
+    : "";
+  return `${phase ? `<p class="feed-stage-body meta mono">Phase ${esc(phase)}</p>` : ""}${stepsHTML}${linkList("SOURCES", sources, projectId)}`;
+}
+
+// A score's stage: the value, the words that justify it, and the anchors it
+// grades. A score never edits the run, so the slice is a set of links back to
+// the anchors rather than a rewritten summary.
+function scoreDetail(event, projectId) {
+  const score = event.payload?.score;
+  const rationale = typeof event.payload?.rationale === "string" ? event.payload.rationale : "";
+  const slice = Array.isArray(event.payload?.slice) ? event.payload.slice : [];
+  return `${score != null ? `<p class="feed-stage-body"><span class="pill" data-kind="score">Score ${esc(score)}/5</span></p>` : ""}${rationale ? `<p class="feed-stage-body">${esc(rationale)}</p>` : ""}${linkList("SLICE", slice, projectId)}`;
+}
 
 // What a feed event is, when it is opened in the stage: the kind, whether it
 // still waits on the reader, its words, the verbs it offers, and a card naming
@@ -634,6 +677,12 @@ export function eventStage(event, projectId) {
   // short subject keeps the title it always had.
   const { subject, message } = subjectAndMessage(formatEventSummary(event));
   const body = typeof event.payload?.body === "string" ? event.payload.body.trim() : "";
+  const detail =
+    event.kind === "anchor"
+      ? anchorDetail(event, projectId)
+      : event.kind === "score"
+        ? scoreDetail(event, projectId)
+        : "";
   const dest = feedDestination(event);
   const sessionId = event.kind === "session" ? event.payload?.session_id : null;
   let pointsAt = "";
@@ -656,6 +705,7 @@ export function eventStage(event, projectId) {
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
       ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
       ${body ? `<p class="feed-stage-body">${esc(body)}</p>` : ""}
+      ${detail}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}
       ${

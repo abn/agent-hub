@@ -61,6 +61,13 @@ const MARKS = {
   approval: "!",
   artifact: mark("M 6 3h9l4 4v14H6z M 8 12h8 M 8 16h8"),
   session: mark("M 12 3a9 9 0 1 0 0 18z", true),
+  // A phase boundary is a place in the run a resumed agent comes back to, so
+  // the anchor is a bookmark.
+  anchor: mark("M 6 3h12v18l-6-4-6 4z"),
+  // The human's review of a run, drawn as a star because a score is one.
+  score: mark(
+    "M 12 3.5l2.6 5.4 5.9 .8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z",
+  ),
 };
 
 // What the row says its kind is. The badge stays hidden and the label carries
@@ -75,6 +82,8 @@ const NAMES = {
   approval: "Approval",
   artifact: "Artifact",
   session: "Session",
+  anchor: "Anchor",
+  score: "Score",
 };
 
 // A kind is an agent's word, so it is looked up among the table's own keys:

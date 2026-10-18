@@ -567,13 +567,14 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
 async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, project = null) {
   const selectedId = params?.get?.("id") || params?.get?.("session") || "";
   const filePath = params?.get?.("file") || params?.get?.("entry") || "";
+  const resumeMode = params?.get?.("resume") === "1";
   const { sessions, card } = await sessionRows(id, selectedId);
   const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
   const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
   let detailHTML = "";
   // The generation goes with it: the detail's own `stale` guard is what keeps
   // a slow paint off the screen, and without it every detail returned empty.
-  if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen);
+  if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen, resumeMode);
   const meta = selectedSession
     ? `${selectedSession.agent} · ${selectedSession.status} · ${formatBytes(selectedSession.brain_bytes || 0)}`
     : "";
@@ -584,7 +585,23 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
     "",
     `#/projects/${encodeURIComponent(id)}/sessions`,
   );
-  let stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(activeSessionId || id)}</span></div>`;
+  // The session stage: the brain tree, or the events after the anchor. The
+  // pair is two links rather than a script toggle, so each view is its own
+  // address and the browser's own Back returns to the other.
+  const brainHref = `#/projects/${encodeURIComponent(id)}/sessions?id=${encodeURIComponent(
+    activeSessionId || "",
+  )}`;
+  const viewToggle =
+    selectedSession && !filePath
+      ? `<div class="session-view-toggle" role="group" aria-label="Session view">
+          <a class="session-view-link" href="${brainHref}&resume=1"${resumeMode ? ' aria-current="page"' : ""}>Resume</a>
+          <a class="session-view-link" href="${brainHref}"${resumeMode ? "" : ' aria-current="page"'}>Brain</a>
+        </div>`
+      : "";
+  let stageControls = `<div class="shell-controls session-view-controls">
+    <span class="shell-meta mono session-view-id">${esc(activeSessionId || id)}</span>
+    ${viewToggle}
+  </div>`;
   let stageBody = detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`;
   let aside = "";
   let hasSelection = Boolean(selectedId || filePath);

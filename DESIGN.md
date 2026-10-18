@@ -387,8 +387,9 @@ structure, not to line length.
 - **Kind glyph badge.** A 24px circle on the kind's background with its own
   colour inside. A dot for signal, a check for finished, a question mark, an
   exclamation mark for approval, a document for artifact, a half disc for
-  session. The badge is hidden from assistive technology and the row carries a
-  visually hidden word for the kind instead.
+  session, a bookmark for anchor and a star for score. The badge is hidden from
+  assistive technology and the row carries a visually hidden word for the kind
+  instead.
 - **Chips and pills.** A chip is a filter: pill radius, selected is ink fill,
   otherwise an outline. A pill is a value, not a door.
 - **Buttons.** Sized by the control sizes above, radius 6, `white-space:
@@ -531,16 +532,31 @@ Agents and access, Connect, and the knowledge base.
   sheet where there is no aside. While open threads
   exist, a comments bar rides the bottom of the reader's viewport, above the
   phone's fixed tab bar, and the document scrolls under it.
-- **Session detail.** The brain tree in the stage. A `kv` key is read in the
-  aside, named in mono with the copy glyph. On a coarse pointer the aside is not
-  drawn, so the same value opens as one bottom sheet, opened by the tree leaf
-  and closed by its own control, its backdrop or Esc. Never both. An `fs` file
-  opens in the stage rendered by the same parser as an artifact, read-only, with
-  a back control and a mono provenance line. The header side carries the owner,
-  the handoff note and the lineage, with a Reassign control beside the copy-id
-  glyph: a secondary menu trigger that names the agent a session moves to in the
-  confirmation dialog. Reassign never takes the Prune/End slot, which belongs to
-  the session's own life.
+- **Session detail.** The brain tree in the stage, under an anchor card. The
+  card opens with the section label Anchor, then the session owner's last phase
+  boundary: the phase as a value pill, the summary capped at 640, an ordered
+  list of next steps, the sources it rests on, and the owner and time. A found
+  source opens the event in the project's feed; a source that no longer
+  resolves keeps its mono id and the word "missing" rather than being dropped.
+  The latest score reads "Score 4/5" with its rationale. A session with no
+  anchor says so in one line and offers no score control. **Score this run**
+  appears only with an anchor and opens one dialog: a 1 to 5 segmented radio
+  group and a required rationale of up to 2000 characters, counted as it is
+  written. A refused score stays in the dialog with the hub's reason.
+  The stage control row carries a Resume/Brain link pair for the selected
+  session, `aria-current` on the view in use; `?resume=1` replaces the tree with
+  the events after the anchor, oldest first, each a row that opens the event in
+  the project's feed, with "No events since this anchor." when there are none
+  and a footnote naming the brain when the list is cut short. A `kv` key is read
+  in the aside, named in mono with the copy glyph. On a coarse pointer the aside
+  is not drawn, so the same value opens as one bottom sheet, opened by the tree
+  leaf and closed by its own control, its backdrop or Esc. Never both. An `fs`
+  file opens in the stage rendered by the same parser as an artifact, read-only,
+  with a back control and a mono provenance line. The header side carries the
+  owner, the handoff note and the lineage, with a Reassign control beside the
+  copy-id glyph: a secondary menu trigger that names the agent a session moves
+  to in the confirmation dialog. Reassign never takes the Prune/End slot, which
+  belongs to the session's own life.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents
