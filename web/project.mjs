@@ -118,7 +118,8 @@ export function projectOverflow(project, { lock = true, full = true, newPage = f
     ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="wiki-new" data-id="${esc(project.id)}" data-project="${esc(name)}">New page</button>`
     : "";
   const extras = full
-    ? `<a role="menuitem" class="proj-menu-item" href="#/projects/${encodeURIComponent(project.id)}/settings">Project settings</a>
+    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="capture-idea" data-project="${esc(project.id)}">Capture idea</button>
+      <a role="menuitem" class="proj-menu-item" href="#/projects/${encodeURIComponent(project.id)}/settings">Project settings</a>
       <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-project-path">Copy path</button>
       <div class="proj-menu-divider" role="separator"></div>
       <button type="button" role="menuitem" class="proj-menu-item proj-menu-delete" data-action="delete-project">Delete project</button>`
@@ -280,9 +281,6 @@ function projectToolsMobile(id, segment, stats, project) {
     </div>
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
-    </button>
-    <button type="button" class="project-filter-btn" aria-label="Capture idea" data-action="capture-idea" data-project="${esc(id)}">
-      Capture idea
     </button>
     ${projectOverflow(project, { lock: false, newPage: segment === "wiki" })}
   </div>`;

@@ -26,6 +26,35 @@ test.describe("project tools and sessions", () => {
     expect(box.width >= 44 && box.height >= 44, `the filter button is ${box.width}x${box.height}, not 44x44`).toBe(true);
   });
 
+  test("the phone tools row clips no control, and Capture idea is in the project menu", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await goto(page, projectRoute(hub, "feed"), "Feed");
+    const tools = page.locator(".project-tools-mobile");
+    await expect(tools).toBeVisible();
+    // A control is drawn at the width its words need. A label wider than its
+    // own box is cut where the box ends, which is how "Capture idea" read as
+    // "ture i" on every project screen at phone width.
+    const clipped = await tools.evaluate((row) =>
+      [...row.querySelectorAll("button, a")]
+        .filter((control) => control.offsetParent !== null)
+        .map((control) => ({
+          label: (control.getAttribute("aria-label") || control.textContent || "").trim(),
+          drawn: control.scrollWidth,
+          visible: control.clientWidth,
+        }))
+        .filter((control) => control.drawn > control.visible + 0.5),
+    );
+    expect(clipped, `the tools row cuts ${JSON.stringify(clipped)}`).toEqual([]);
+    // The action the row cannot hold lives in the row's own menu.
+    await tools.locator(".proj-overflow-btn").click();
+    const item = tools.locator('[data-action="capture-idea"]');
+    await expect(item, "the project menu does not offer the capture action").toBeVisible();
+    await item.click();
+    await expect(page.locator("dialog.dialog[open]"), "capture opened no dialog").toBeVisible({
+      timeout: 5000,
+    });
+  });
+
   test("session detail renders exactly one title", async ({ hub, page }) => {
     await goto(page, `#/projects/${encodeURIComponent(hub.projectId)}/sessions?id=${encodeURIComponent(hub.sessionId)}`, hub.fixture.sessionName);
     expect(await page.locator(".shell-head .shell-title-line").count(), "session detail has no bar title").toBeGreaterThan(0);
