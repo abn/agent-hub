@@ -54,9 +54,15 @@ The event id is a time-ordered ULID, which makes feed paging and addressable
 lookups cheap. Indexes support paging a project feed newest first and
 ordering the inbox by action and time. The `events` table carries a JSON
 payload, so structured detail rides along without a second schema. The event
-kind is a closed set of the seven design families (`signal`, `finished`,
-`question`, `answer`, `approval`, `artifact`, `session`) plus `system`;
+kind is a closed set of the ten design families (`signal`, `finished`,
+`question`, `answer`, `approval`, `artifact`, `session`, `idea`, `anchor`,
+`score`) plus `system`;
 sub-actions such as an artifact publish or update ride in the payload.
+An `anchor` payload carries `phase`, `summary`, `next_steps` and the optional
+`source_ids` it rests on, with the server-set actor as its owner. A `score`
+payload carries a `slice` of anchor ids in the same session, a `score` from 1
+to 5, and a `rationale`. Both are session-scoped ordinary events: they page,
+search, subscribe and prune with the session.
 A question's payload carries its optional `body`, `context` and suggested
 answer `options`, so a question needs no table of its own.
 

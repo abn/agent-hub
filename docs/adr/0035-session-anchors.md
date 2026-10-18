@@ -3,13 +3,13 @@ type: Decision Record
 title: Session handoffs are anchors and scores are derived facts
 description: A phase boundary writes a compact anchor event, resume reads the latest anchor plus what came after it, and a human score is a derived event that cites the slice it grades.
 tags: [adr, session, brain, context, scoring]
-status: draft
+status: stable
 ---
 
 # 0035. Session handoffs are anchors and scores are derived facts
 
 ## Status
-Proposed (companion to ADR 0020 and ADR 0032).
+Accepted (companion to ADR 0020 and ADR 0032).
 
 ## Context
 The event store is already an append-only log. A session brain survives a

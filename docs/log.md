@@ -13,6 +13,24 @@ software release notes and the repository changelog.
   `anchor` event with a phase, summary, next steps and source event ids; resume
   reads the latest anchor plus what came after it; and a human `score` event
   cites the anchor slice it grades.
+* **Update**: Refreshed the Home, feed and session-detail captures at both
+  widths and in both themes, so the anchor card, the resume view and the score
+  read against the shipped surface.
+
+### Session anchors, resume and scoring reach the surfaces
+
+* **Update**: `session_anchor` writes an `anchor` event at a phase boundary and
+  mirrors a rendered view to `RECOVERY.md`; `session_resume` reads the latest
+  anchor, the scores that cite it and the events after it. `session_start`
+  returns the latest anchor and `session_brief`'s previous session carries it.
+  [MCP tools](/reference/mcp-tools.md)
+* **Addition**: `GET /api/v1/sessions/:id/resume` and
+  `POST /api/v1/sessions/:id/scores` join the session routes. A score is
+  human-only, from 1 to 5 with a rationale and a slice of anchor ids in the same
+  session. [REST API](/reference/rest-api.md)
+* **Update**: The session detail carries an anchor card and a Resume view, and
+  the feed draws and filters `anchor` and `score` rows.
+  [Human interface](/design/human-interface.md)
 
 ### A wiki row is indented by its place in the tree
 

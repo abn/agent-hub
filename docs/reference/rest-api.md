@@ -50,6 +50,8 @@ GET    /api/v1/sessions/:id
 GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/sessions/:id/brain/entry?path=
 GET    /api/v1/sessions/:id/replay
+GET    /api/v1/sessions/:id/resume
+POST   /api/v1/sessions/:id/scores
 POST   /api/v1/sessions/:id/end
 POST   /api/v1/sessions/:id/reassign
 
@@ -164,7 +166,8 @@ holding it there while every call fails.
 The REST API is the operator's control surface. The destructive and privileged
 verbs on it require the admin token: prune and undo, agent and token
 administration, grants, deleting a project, making a confidential project public,
-and taking an online backup (`POST /api/v1/backups`, which writes only under the
+reading a session's resume, scoring a run, and taking an online backup
+(`POST /api/v1/backups`, which writes only under the
 configured `backup_dir`; see [Back up and restore](/operate/backup-and-restore.md)).
 Agents reach the hub over MCP for their own work, and may also create and list
 the projects they can see. The trust posture behind this split is stated once in
@@ -217,6 +220,8 @@ from a proxy, and a number that cannot be measured is absent rather than zero.
 | `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
 | `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
 | `GET /api/v1/sessions/:id/replay` | `session_id` and `events`, the brain's tool-call audit entries oldest first; admin token required, and an empty list when the brain is gone |
+| `GET /api/v1/sessions/:id/resume` | `session_id`, `anchor` (the latest anchor or null, carrying `id`, `phase`, `summary`, `next_steps`, `sources` with each source's `id`, `kind`, `summary` and `found`, `owner` and `created_at`), `scores` (each carrying `id`, `slice`, `score`, `rationale`, `reviewer` and `created_at`), `events` (the session events after the anchor, oldest first), `next_since`, `recovery_path` and `truncated`; admin token required |
+| `POST /api/v1/sessions/:id/scores` | takes `slice`, the anchor ids it grades, `score` from 1 to 5, a `rationale`, and an optional `idempotency_key`; a score is human-only, and a slice id must be an anchor in the same session. Admin token required |
 | `GET /api/v1/sessions/:id/brain?path=` | `entries[]` with `path`, `type` (`key`, `file` or `dir`) and `size_bytes`, one directory level per request, with `path` echoed and `truncated` when the level held more |
 | `GET /api/v1/sessions/:id/brain/entry?path=` | one entry's `path`, `type` (`key` or `file`), `size_bytes`, `content` as text, and `written_at` (null when unrecorded). Refuses directory paths with 409 and non-UTF-8 bytes with 422 |
 | `GET /api/v1/search` | `count`, the hits on this page before grouping, `truncated` when the limit cut the result, `took_ms` around the store call, `backend` (the recall backend that served the page), and `groups[]` each with its own `count`; every hit carries its `project_display_name` beside `project_id`, and by family: `event_kind` and `actor` on a feed hit, `version` and `size_bytes` (the current version's) on an artifact hit, `session_name` and `session_status` on a session brain hit. They are read after the ranked fetch, one query per family on the page, and never change the order. `mode=semantic` asks for semantic recall; when no embedding model is configured the hub falls back to the lexical index and reports `fts-fallback` |

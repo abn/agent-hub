@@ -5,12 +5,14 @@
 | `session_start` | Start or resume your own session by project and session name; the agent is the authenticated identity. Resuming the same name reuses your brain, and the result carries the handoff note the previous owner left. With `from`, pick up another agent's session: the hub adopts it or forks it. |
 | `session_end` | Mark the session ended, with an optional `handoff` note for whoever picks the work up. Only the owner may end a session. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note, and where they were picked up from. |
-| `session_brief` | Brief yourself on a project in one call: since your feed cursor, answers and decisions on your own items and the other events, ranked and capped with a count of the rest; your previous session with its handoff; and knowledge base pages past `stale_after`. Call it before `session_start`. Moves no feed cursor, and the answers it lists count as delivered. |
+| `session_brief` | Brief yourself on a project in one call: since your feed cursor, answers and decisions on your own items and the other events, ranked and capped with a count of the rest; your previous session with its handoff and anchor; and knowledge base pages past `stale_after`. Call it before `session_start`. Moves no feed cursor, and the answers it lists count as delivered. |
+| `session_anchor` | Write an `anchor` event at a phase boundary: `phase`, `summary`, `next_steps`, and optional `source_ids`, the project event ids the summary rests on. Owner-only and session-scoped. Best-effort mirrors a rendered document to `/fs/RECOVERY.md` and returns `{anchor, recovery_path, recovery_written}`. |
+| `session_resume` | Read a session's latest anchor, the scores that cite it, and the events after the anchor oldest first, with `next_since`, `recovery_path` and `truncated`. The full log stays one cursor page away. |
 | `brain_get`, `brain_put`, `brain_list`, `brain_delete` | Read and write one of two stores: a session brain, or the project knowledge base. `store` is required on a write. A read takes an optional `session` and reaches another session's brain; a write takes one to name your own session, and without one writes the connection's active session. Every write is indexed for search. |
 | `brain_promote` | Copy an entry from your active session brain into a project knowledge base page that cites the session it came from. The source entry is left as it was, and one `kb_promoted` signal goes to the project feed. |
 | `brain_history`, `brain_revert` | List a project page's versions, newest first, and write one back as a new write in your name, which also restores a deleted page. Reverting to the version the page holds writes nothing and returns `changed: false`. Read a version with `brain_get` and `version`. One `kb_reverted` signal goes to the project feed. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from your own durable server-side cursor for the project and advances it to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
-| `signal_append` | Append `signal`, `finished`, or `approval` to a project feed. |
+| `signal_append` | Append `signal`, `finished`, `approval`, or `idea` to a project feed. Refuses `anchor` and `score`, which have their own tools. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed and returns the question id. |
 | `answer_post` | Reply to a question by its question id. |
 | `inbox_read` | Read the human's global inbox, by status or project. Takes `since` and `actor` and returns a `next_since` cursor. |
@@ -33,7 +35,7 @@ The argument shapes, with a trailing `?` for optional:
 ```
 session_start(project_id, session_name, from?)
       -> {session_id, project_id, agent, session_name, status, resumed, pickup,
-          namespaces, recovery_path, handoff, brain_bytes}
+          namespaces, recovery_path, handoff, anchor, brain_bytes}
 session_end(session_id, handoff?)
 session_list(project_id?, status?, agent?, limit?)
       -> sessions: [{session_id, project_id, session_name, agent, status,
@@ -44,10 +46,15 @@ session_brief(project_id)
           answers: {items: [{id, answer_id, kind, outcome, summary, text, by, at,
                              expired?}], more, more_capped?},
           previous_session: {session_id, session_name, status, last_activity,
-                             handoff, recovery_path} | null,
+                             handoff, anchor, recovery_path} | null,
           events: {items: [{id, kind, actor, summary, at, thread_id?, open?}], more,
                    more_capped?},
           stale_pages: {items: [{path, title, stale_after}], more}}
+session_anchor(phase, summary, next_steps, source_ids?, session?, idempotency_key?)
+      -> {anchor, recovery_path, recovery_written}
+session_resume(session?)
+      -> {session_id, anchor|null, scores, events, next_since, recovery_path,
+          truncated}
 from := session
 brain_get(path, session?, store?, project_id?, version?)
       with version -> {path, store, content, version, size_bytes, current, at, actor}
@@ -66,7 +73,8 @@ session := {session_id} | {agent, name, project_id?}
 feed_read(project_id, since?, before?, limit?, kinds?, session?)
 signal_append(project_id, kind, summary, payload?, thread_id?, idempotency_key?,
               expires_in_seconds?, on_expiry?)
-      kind is one of "signal", "finished", "approval", or "idea"
+      kind is one of "signal", "finished", "approval", or "idea"; "anchor" and
+      "score" are refused and have their own tools
 question_post(project_id, subject, body?, context?, options?, idempotency_key?,
               expires_in_seconds?)
 answer_post(question_id, body, idempotency_key?)

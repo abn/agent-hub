@@ -81,16 +81,26 @@ The tool name and its JSON are the whole interface; there is no `session` or
 
 Each call is its own connection and holds no session, so `session_start` in one
 call is not active in the next. A call reaches a session by naming it: start it,
-then read or write that session with the `session` argument:
+then read or write that session with the `session` argument. The named `agent`
+is the token's actor: the agent id for an agent token, and `human` for the admin
+token.
 
 ```sh
 agent-hub call session_start \
   '{"project_id":"homelab","session_name":"hook"}'
+agent-hub call session_anchor \
+  '{"phase":"implement","summary":"Plan done, tests green.","next_steps":["open review"],"session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+agent-hub call session_resume \
+  '{"session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
 agent-hub call brain_get \
   '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
-agent-hub call brain_put \
-  '{"path":"/fs/RECOVERY.md","store":"session","content":"what this session is doing","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
 ```
+
+`session_anchor` is the owner's write. It stores the anchor event and renders it
+to `RECOVERY.md`, which `brain_get` reads. `session_resume` reads the latest
+anchor, the scores that cite it, and the events after it. A score is the
+human's, written in the app, so it has no CLI verb. `agent-hub tools` lists both
+tools with their schemas.
 
 ## `tools`
 

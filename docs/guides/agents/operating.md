@@ -92,15 +92,30 @@ read continues forward from there.
 
 ## Handoffs
 
-An agent that resumes after its predecessor stopped reads what that predecessor
-left in two places:
+An anchor is the record a phase boundary leaves; `RECOVERY.md` is its rendered
+view. When you reach a boundary, call `session_anchor` with the five fields:
 
-- `handoff` on the `session_start` result is the short note from `session_end`;
-- the full recovery document is the brain entry under `recovery_path`.
+- `phase`: a short name for the phase, 1 to 80 characters;
+- `summary`: one line, 1 to 1024 characters;
+- `next_steps`: one to ten short strings;
+- `source_ids`: up to 50 project event ids the summary rests on, optional, each
+  one validated against a real event in the same project;
+- the owner: the hub sets it from your token, never a client field.
 
-Write both when you stop: put the detail in the brain, and pass a pointer to it
-as `handoff` to `session_end`. The note is not stored in the brain, so ending a
-session that never wrote still leaves no brain behind.
+`session_anchor` stores the `anchor` event and mirrors a rendered document to
+`/fs/RECOVERY.md`, best effort, returning `anchor`, `recovery_path` and
+`recovery_written`. The event is the anchor of record: a failed mirror does not
+fail the anchor. An anchor is session-scoped and does not wait on the human.
+
+Resume is anchor-scoped. `session_resume` returns the latest anchor, the scores
+that cite it, and the session events after the anchor oldest first, with a
+`next_since` cursor, `recovery_path` and `truncated`. `session_start` returns
+the latest anchor too, or null when the session has none, so a resumed agent can
+orient before it reads the log. The full log stays one cursor page away: pass
+`next_since` to `feed_read` for the rest.
+
+`session_end` still takes a `handoff` note, and a session that never anchored
+resumes exactly as before: its handoff note and its full event log.
 
 ## Asking with a deadline
 

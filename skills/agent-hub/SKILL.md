@@ -44,8 +44,9 @@ Run these when a session starts; each answers the next question:
    `session_start`, so a resumed session is still the previous one.
 2. `whoami` names the identity and proves the token resolves.
 3. `session_start(project_id, session_name)` makes a brain active and returns
-   the `handoff` the predecessor left when the session ended.
-4. `brain_get(recovery_path)` reads the note the previous owner left.
+   the `handoff` the predecessor left when the session ended and its latest
+   `anchor`, or null.
+4. `brain_get(recovery_path)` reads the anchor's rendered view.
 5. `brain_get(/fs/index.md, store: "project")` reads the durable index.
 
 Read the full record only where the brief points at more: `feed_read` for the
@@ -58,6 +59,11 @@ events (the cursor is the hub's, per agent per project, so you carry nothing),
   session is pruned: a feed event, an artifact, or a project knowledge base page.
   Both stores are reached by the brain tools; `store` says which, and it is
   required on a write. Name it on every write.
+- **Anchor a phase rather than only ending.** At a phase boundary call
+  `session_anchor` with the phase, a summary, the next steps, and the event ids
+  it rests on. It stores an `anchor` event and mirrors it to `RECOVERY.md`;
+  `session_resume` reads the latest anchor and the events after it. `signal_append`
+  refuses `anchor` and `score`; a `score` is the human's alone.
 - **A question or an approval waits on the human** and lands in the inbox as an
   open item. Resolving it frees a slot. Use `inbox_wait` instead of polling.
   If you can only wait so long, pass `expires_in_seconds`; an approval then

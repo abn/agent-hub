@@ -66,12 +66,14 @@ identity.
 
 | Tool | Purpose |
 |---|---|
-| `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. Returns the handoff note the previous owner left. With `from`, it picks up another agent's session. |
+| `session_start` | Register or resume the caller's own session by project and session name; the agent is the authenticated identity. Idempotent on the name, so a resume reuses the same brain. Returns the handoff note the previous owner left and the latest `anchor`, or null. With `from`, it picks up another agent's session. |
 | `session_end` | Mark a session ended, with an optional handoff note. Only its owner, or the human admin, may end it. Active leases clear and brain mutations under lock are refused. The brain is retained until the human prunes it. |
 | `session_list` | List sessions with their owner, status, handoff note and lineage, confined to the projects the caller may read. |
-| `session_brief` | Brief the caller on a project in one call that moves no feed cursor: answers and decisions on its own items and the project's other events since its feed cursor, ranked and capped, its previous session's handoff, and knowledge base pages past `stale_after`. See [the session brief](#the-session-brief). |
+| `session_brief` | Brief the caller on a project in one call that moves no feed cursor: answers and decisions on its own items and the project's other events since its feed cursor, ranked and capped, its previous session's handoff and anchor, and knowledge base pages past `stale_after`. See [the session brief](#the-session-brief). |
+| `session_anchor` | Write an `anchor` event at a phase boundary: a `phase`, a `summary`, `next_steps`, and optional `source_ids`. Owner-only and session-scoped, and it never waits on the human. An idempotency key is scoped to the session as well as the project, and a retry returns the original anchor even after the session ends or a source is pruned. Best-effort mirrors a rendered document to `/fs/RECOVERY.md` in the session brain and returns `{anchor, recovery_path, recovery_written}`. |
+| `session_resume` | Read a session scoped to its latest anchor: the anchor, the scores that cite it, the events after the anchor oldest first, `recovery_path`, `next_since` and `truncated`. The full log stays one cursor page away. |
 | `feed_read` | Read a project feed, optionally filtered by kind or session. A stateful read: with no `since` it polls forward from the caller's own durable server-side cursor for the project and advances that cursor to the returned `next_since`, so a restarted agent resumes where it stopped; an explicit `since` is honoured and also advances the stored cursor. With `since` and no `before`, the page is oldest first, continuing forward from the cursor; otherwise it is newest first. |
-| `signal_append` | Append an event to a project feed. An `approval` may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
+| `signal_append` | Append an event to a project feed. An `approval` may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). Refuses `anchor` and `score`, which have their own tools. A write past the project's event ceiling (`HUB_EVENTS_PER_PROJECT`) is refused with the cap named; artifact writes and the knowledge base's lifecycle signal are bounded by the same ceiling, while session lifecycle and audit records are exempt. |
 | `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. It may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. An item with a deadline carries `expires_at` and `on_expiry`, and a resolution the hub made at the deadline carries `expired: true` with `hub` as the actor. |
@@ -149,11 +151,16 @@ An agent orients itself in a few calls at session start:
 1. `session_brief` says what changed in the project since the agent last looked
    and what its last session left.
 2. `session_start` establishes or resumes its session by project and session
-   name, and returns the handoff note the previous owner left beside
-   `recovery_path`.
-3. `brain_get` reads the session's recovery document; with `store: "project"` it
-   reads the project knowledge base page that outlives the session.
+   name, and returns the handoff note the previous owner left, the latest
+   `anchor` or null, and `recovery_path`.
+3. `brain_get` reads the session's recovery document, the rendered view of the
+   latest anchor; with `store: "project"` it reads the project knowledge base
+   page that outlives the session.
 4. `feed_read` reads the feed in full when the brief's events are not enough.
+
+An agent that has an anchor resumes from it: `session_resume` returns the latest
+anchor, the scores that cite it, and the session events after the anchor oldest
+first, with a `next_since` cursor, so the full log stays one cursor page away.
 
 That is the whole convention: it is the sequence an agent follows at session
 start, and it is how a harness wires the hub in. The hub ships the primitives
@@ -189,7 +196,7 @@ and nothing else, so an answer is always in one of the two.
 | Section | What it holds |
 |---|---|
 | `answers` | Answers and decisions in the window on the caller's own questions and approvals, newest answer first, at most 10. Each carries the item's `id`, the `answer_id` of the answer event, its outcome (`answered` or `expired` for a question, `approved` or `declined` for an approval, with `expired: true` when the hub resolved it at the deadline), and the reply or note, who and when. |
-| `previous_session` | The caller's most recently active session in the project other than the one its connection is working, with its status, last activity, handoff note in full, and `recovery_path`. `null` when there is none. |
+| `previous_session` | The caller's most recently active session in the project other than the one its connection is working, with its status, last activity, handoff note in full, `anchor` (the latest anchor or null), and `recovery_path`. `null` when there is none. |
 | `events` | The rest of the window, at most 20. Items still waiting on someone come first wherever they sit in the feed, the caller's own included, each marked `open: true`; the rest are ranked among the newest 200: others' work, then the caller's own writes and session lifecycle, newest first within each. The answers `answers` lists are left out, and so is the audit trail. |
 | `stale_pages` | Knowledge base pages whose `stale_after` has passed, the longest overdue first, at most 10. |
 
@@ -400,9 +407,9 @@ anything else is an `invalid_argument` naming `/fs/` as the namespace the store
 has, since the knowledge base has no `/kv/` to be redirected to. No tool exposes a
 raw file handle or the server path of a file: `session_start` returns the session
 id, its owner and status, the two namespaces to address the brain with, the
-conventional recovery path, and the handoff note the previous owner left. One
-value is capped at 4 MiB and one knowledge base page at 1 MiB, and a larger write
-is refused with `payload_too_large` before anything is stored.
+conventional recovery path, the latest anchor, and the handoff note the previous
+owner left. One value is capped at 4 MiB and one knowledge base page at 1 MiB,
+and a larger write is refused with `payload_too_large` before anything is stored.
 
 A read returns a `version`, the content hash of the bytes it returns, and a write
 returns the version of the bytes it stored. Passing one back as `if_version`
@@ -454,11 +461,14 @@ and resolving an item frees its slot. See
 
 ## Kind families
 
-Event kinds are a closed set of seven design families (`signal`, `finished`,
-`question`, `answer`, `approval`, `artifact`, `session`, `idea`) plus `system`.
-Sub-actions ride in the payload, so an artifact has an action of `published` or
-`updated` and a session has `started`, `ended`, `adopted`, `forked`, or
-`reassigned`.
+Event kinds are a closed set of ten design families (`signal`, `finished`,
+`question`, `answer`, `approval`, `artifact`, `session`, `idea`, `anchor`,
+`score`) plus `system`. Sub-actions ride in the payload, so an artifact has an
+action of `published` or `updated` and a session has `started`, `ended`,
+`adopted`, `forked`, or `reassigned`. An `anchor` and a `score` are ordinary
+session events: they page, search, subscribe and prune with the session. An
+anchor is written by `session_anchor` and a score only by the human, so
+`signal_append` refuses both.
 
 ## See also
 
