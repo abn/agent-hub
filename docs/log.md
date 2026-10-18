@@ -6,6 +6,23 @@ software release notes and the repository changelog.
 
 ## 2026-10-18
 
+### A wiki row is indented by its place in the tree
+
+* **Fix**: every page is held under the store's `/fs/` namespace, and the wiki
+  tree counted those path segments as levels, so a page at the root was drawn
+  two steps in: 64px of padding before its glyph, with its title starting at
+  88px in a 390px pane, and a root row reporting `aria-level` 3. The depth is
+  read from the reader's path now, so a root page sits on the pane's 16px gutter
+  with its title at 40px, and a page inside one directory is one 24px step in.
+  The tree's nesting is unchanged; every row moves 48px to the left.
+
+### The captures repaint on the default index
+
+* **Update**: the capture set is re-run in full. The frames that show an index
+  pane had drifted apart, drawn at a wider index in some screens and the 300px
+  default in others, so the set no longer showed one layout. Every frame is on
+  the default index now, and the wiki frames carry the tree indent above.
+
 ### The phone tools row holds no control wider than its own box
 
 * **Fix**: `Capture idea` in a project's phone tools row was drawn in the 44px

@@ -114,7 +114,11 @@ function displayPath(path) {
 
 function rowHTML(entry, id, selected, narrow = false) {
   const path = entry.path;
-  const depth = depthOf(path);
+  // The tree's depth is the reader's path, not the store's: every page is held
+  // under `/fs/`, and counting those segments indented a root page two levels
+  // deep. `displayPath` strips the namespace, so a root page sits on the pane's
+  // gutter and a page inside one directory is one step in.
+  const depth = depthOf(displayPath(path));
   const name = entry.title || path.split("/").pop();
   const on = path === selected ? ' aria-current="true"' : "";
   if (entry.type === "dir") {

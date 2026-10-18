@@ -641,6 +641,55 @@ test.describe("wiki", () => {
     await page.setViewportSize({ width: 390, height: 844 });
   });
 
+  test("a wiki row is indented by its place in the tree, not by the store's path", async ({ hub, page }) => {
+    const project = hub.projectId;
+    await api(hub, "PUT", `/api/v1/projects/${encodeURIComponent(project)}/kb/pages/indent-root.md`, {
+      content: "---\ntype: note\n---\n# Root\n",
+    });
+    await api(hub, "PUT", `/api/v1/projects/${encodeURIComponent(project)}/kb/pages/indent-dir/child.md`, {
+      content: "---\ntype: note\n---\n# Child\n",
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await goto(page, "#/settings", "Settings");
+    await goto(page, projectRoute(hub, "wiki"), "Wiki");
+    await expect(page.locator(".shell-index .wiki-row").first()).toBeVisible({ timeout: 8000 });
+    // The store holds every page under /fs/, and counting those segments as
+    // tree levels indented a root page two steps in: 64px of padding before
+    // its glyph, so its title began at 88px in a 390px pane.
+    const got = await page.evaluate(() => {
+      const pane = document.querySelector(".shell-index");
+      if (!pane) return { error: "the wiki index drew no pane" };
+      const rowFor = (name) =>
+        [...pane.querySelectorAll(".wiki-row")].find(
+          (row) => (row.querySelector(".wiki-row-name") || {}).textContent === name,
+        );
+      const root = rowFor("indent-root.md");
+      const child = rowFor("child.md");
+      if (!root || !child) return { error: "the seeded rows did not draw" };
+      const style = getComputedStyle(root);
+      return {
+        gutter: parseFloat(style.getPropertyValue("--s-4")),
+        step: parseFloat(style.getPropertyValue("--s-5")),
+        rootPad: parseFloat(getComputedStyle(root).paddingLeft),
+        childPad: parseFloat(getComputedStyle(child).paddingLeft),
+        rootLevel: Number(root.getAttribute("aria-level")),
+        childLevel: Number(child.getAttribute("aria-level")),
+      };
+    });
+    expect(got.error, got.error).toBeUndefined();
+    expect(
+      got.rootPad,
+      `a root page is indented ${got.rootPad}px instead of the pane's ${got.gutter}px gutter`,
+    ).toBe(got.gutter);
+    expect(
+      got.childPad,
+      `a page one directory down is indented ${got.childPad}px instead of ${got.gutter + got.step}`,
+    ).toBe(got.gutter + got.step);
+    expect(got.rootLevel, "a root page reports a level below the tree's root").toBe(1);
+    expect(got.childLevel, "a page one directory down is not one level in").toBe(2);
+    await page.setViewportSize({ width: 390, height: 844 });
+  });
+
   test("a long page name is cut at the row's edge, not scrolled past the pane", async ({ hub, page }) => {
     const project = hub.projectId;
     await page.setViewportSize({ width: 390, height: 844 });
