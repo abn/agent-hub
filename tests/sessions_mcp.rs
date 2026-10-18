@@ -981,3 +981,197 @@ async fn a_session_ended_over_mcp_is_offered_for_pruning_at_once() {
         "and the bytes it would free: {after}"
     );
 }
+
+#[tokio::test]
+async fn an_owner_anchors_the_session_and_start_returns_it() {
+    let fleet = Fleet::new("anchor-write", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+    let started = agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "phases"}),
+    );
+    let session_id = text(&started, "session_id");
+
+    let anchored = agent.call(
+        "session_anchor",
+        json!({
+            "phase": "implement",
+            "summary": "Plan done, tests green.",
+            "next_steps": ["open review", "ship"],
+            "source_ids": [],
+        }),
+    );
+    assert_eq!(anchored["recovery_path"], "/fs/RECOVERY.md");
+    assert_eq!(anchored["recovery_written"], true, "{anchored}");
+    assert_eq!(anchored["anchor"]["phase"], "implement");
+    assert_eq!(anchored["anchor"]["summary"], "Plan done, tests green.");
+    assert_eq!(anchored["anchor"]["owner"], "agent-one");
+
+    // The event is stored as an anchor in the project feed.
+    let feed = agent.call(
+        "feed_read",
+        json!({"project_id": PROJECT, "kinds": ["anchor"]}),
+    );
+    let events = feed["events"].as_array().expect("events");
+    assert_eq!(events.len(), 1, "one anchor event: {feed}");
+    assert_eq!(events[0]["kind"], "anchor");
+    assert_eq!(events[0]["summary"], "Plan done, tests green.");
+
+    // The rendered recovery document is written into the session brain.
+    let recovery = agent.call("brain_get", json!({"path": "/fs/RECOVERY.md"}));
+    let document = text(&recovery, "content");
+    assert!(
+        document.contains("Phase: implement"),
+        "the recovery doc names the phase: {document}"
+    );
+    assert!(
+        document.contains("- open review"),
+        "the recovery doc lists the next steps: {document}"
+    );
+
+    // A later start returns the latest anchor so a resumed agent can orient
+    // before it reads the log.
+    let resumed = agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "phases"}),
+    );
+    assert_eq!(text(&resumed, "session_id"), session_id, "same brain");
+    assert_eq!(resumed["anchor"]["phase"], "implement");
+    assert_eq!(resumed["anchor"]["summary"], "Plan done, tests green.");
+}
+
+#[tokio::test]
+async fn session_resume_returns_the_latest_anchor_and_later_events_only() {
+    let fleet = Fleet::new("anchor-resume", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+    agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "phases"}),
+    );
+    agent.call(
+        "signal_append",
+        json!({"project_id": PROJECT, "kind": "signal", "summary": "before the anchor"}),
+    );
+    agent.call(
+        "session_anchor",
+        json!({
+            "phase": "review",
+            "summary": "Review opened.",
+            "next_steps": ["address review"],
+        }),
+    );
+    agent.call(
+        "signal_append",
+        json!({"project_id": PROJECT, "kind": "signal", "summary": "after the anchor"}),
+    );
+
+    let resume = agent.call("session_resume", json!({}));
+    assert_eq!(resume["anchor"]["phase"], "review");
+    assert_eq!(resume["anchor"]["summary"], "Review opened.");
+    let summaries: Vec<String> = resume["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .map(|event| text(event, "summary"))
+        .collect();
+    assert!(
+        summaries
+            .iter()
+            .any(|summary| summary == "after the anchor"),
+        "the work after the anchor is listed: {summaries:?}"
+    );
+    assert!(
+        !summaries
+            .iter()
+            .any(|summary| summary == "before the anchor"),
+        "the anchor scopes the view to what came after it: {summaries:?}"
+    );
+}
+
+#[tokio::test]
+async fn another_agent_cannot_anchor_a_session() {
+    let fleet = Fleet::new("anchor-owner", &["agent-one", "agent-two"]).await;
+    let started = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "mine"}),
+    );
+    let session_id = text(&started, "session_id");
+
+    let (code, message) = fleet.agent(1).refusal(
+        "session_anchor",
+        json!({
+            "phase": "steal",
+            "summary": "not mine to write",
+            "next_steps": ["stop"],
+            "session": {"session_id": session_id},
+        }),
+    );
+    assert_eq!(code, "forbidden");
+    assert!(
+        message.contains("owner=agent-one"),
+        "the refusal names the owner: {message}"
+    );
+
+    // Nothing was written: the session keeps its own feed.
+    let feed = fleet.agent(0).call(
+        "feed_read",
+        json!({"project_id": PROJECT, "kinds": ["anchor"]}),
+    );
+    assert_eq!(
+        feed["events"].as_array().expect("events").len(),
+        0,
+        "a refused anchor leaves no event: {feed}"
+    );
+}
+
+#[tokio::test]
+async fn an_anchor_refuses_a_source_from_another_project() {
+    let fleet = Fleet::new("anchor-source", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+    let other = "workshop";
+    create_project(fleet.port, other);
+
+    // An event that exists, but in another project.
+    let outside = agent.call(
+        "signal_append",
+        json!({"project_id": other, "kind": "signal", "summary": "elsewhere"}),
+    );
+    let outside_id = text(&outside, "event_id");
+
+    agent.call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "phases"}),
+    );
+    let (code, message) = agent.refusal(
+        "session_anchor",
+        json!({
+            "phase": "implement",
+            "summary": "cites work from another project",
+            "next_steps": ["fix the citation"],
+            "source_ids": [outside_id],
+        }),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert!(
+        message.contains("is not in project"),
+        "the refusal names the project boundary: {message}"
+    );
+}
+
+#[tokio::test]
+async fn signal_append_still_refuses_anchor_and_score() {
+    let fleet = Fleet::new("signal-kinds", &["agent-one"]).await;
+    let agent = fleet.agent(0);
+
+    for kind in ["anchor", "score"] {
+        let (code, message) = agent.refusal(
+            "signal_append",
+            json!({"project_id": PROJECT, "kind": kind, "summary": "not through here"}),
+        );
+        assert_eq!(code, "invalid_argument", "kind {kind}: {message}");
+        assert!(
+            message.contains(kind),
+            "the refusal names the refused kind '{kind}': {message}"
+        );
+    }
+}

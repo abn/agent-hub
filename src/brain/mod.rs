@@ -19,6 +19,9 @@
 pub mod knowledge;
 mod session;
 
+/// The well-known path a session's latest anchor is rendered to.
+pub const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
+
 pub use agentfs_sdk::ToolCall;
 pub use session::{
     Brain, BrainStore, Entry, EntryKind, KNOWLEDGE_FILE, LastWrites, Stamp, VERSION_ABSENT,

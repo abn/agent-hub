@@ -170,6 +170,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sessions/{id}/reassign", post(sessions::reassign))
         .route("/api/v1/sessions/{id}/brain", get(sessions::brain))
         .route("/api/v1/sessions/{id}/replay", get(sessions::replay))
+        .route("/api/v1/sessions/{id}/resume", get(sessions::resume))
+        .route("/api/v1/sessions/{id}/scores", post(sessions::score))
         .route(
             "/api/v1/sessions/{id}/brain/entry",
             get(sessions::brain_entry),

@@ -29,13 +29,13 @@ use super::{HubServer, to_error_data};
 /// The kinds an agent may subscribe to. `session` and `system` are the hub's
 /// own bookkeeping and are not offered.
 const SUBSCRIBABLE_KINDS: &[&str] = &[
-    "signal", "finished", "approval", "question", "answer", "artifact",
+    "signal", "finished", "approval", "question", "answer", "artifact", "anchor", "score",
 ];
 
 #[tool_router(router = subscriptions_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, and artifact; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id and the cursor it started at. Matching events are delivered through the notifications member of a later tool result."
+        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, and score; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id and the cursor it started at. Matching events are delivered through the notifications member of a later tool result."
     )]
     async fn notify_subscribe(
         &self,

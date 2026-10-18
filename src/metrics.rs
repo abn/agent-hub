@@ -52,7 +52,7 @@ const ERROR_CODES: [ErrorCode; 9] = [
 /// The number of event kinds the counter distinguishes, matching
 /// [`KINDS`]. A kind the store does not know never reaches the append, and a
 /// kind that somehow did is ignored rather than minting an unbounded label.
-const EVENT_KINDS: usize = 9;
+const EVENT_KINDS: usize = 11;
 
 /// The name an unknown tool is counted under.
 ///

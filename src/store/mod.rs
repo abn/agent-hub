@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 
+pub mod anchors;
 pub mod artifacts;
 pub mod comments;
 pub mod events;
