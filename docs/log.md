@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-18
+
+### The phone tools row holds no control wider than its own box
+
+* **Fix**: `Capture idea` in a project's phone tools row was drawn in the 44px
+  box the filter glyph uses, which also hides its overflow, so the label was cut
+  to "ture i" on every project screen at phone width. The action is an item in
+  the project's menu now, where its words fit, and the tools row holds the
+  segment strip, the filter and the overflow as it did before the control was
+  added. The strip keeps the width it had.
+
 ## 2026-10-17
 
 ### A long wiki row line is cut at the pane's edge, not scrolled past it
