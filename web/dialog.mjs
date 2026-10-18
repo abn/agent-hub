@@ -29,9 +29,13 @@ let openDialog = null;
 // note: the footer line, for the reversible path. safe: the label that keeps
 // things as they are, focused first. danger: the label that commits. tone:
 // `danger` for a destructive commit, `action` for a decision that is recorded.
-// field: `{ label, limit }`, an optional note. commit: the work itself, given
-// the trimmed note and run while the dialog is still open; what it throws is
-// shown in the dialog, and the dialog closes as committed once it returns.
+// field: `{ label, limit, optional, alwaysCount }`, a note. The note is
+// optional unless `optional` is false, and its count shows only near the limit
+// unless `alwaysCount` is true. score: true for a 1 to 5 segmented choice a
+// dialog that records a judgement carries; its value is handed to the commit
+// beside the note. commit: the work itself, given the trimmed note and the
+// score, run while the dialog is still open; what it throws is shown in the
+// dialog, and the dialog closes as committed once it returns.
 export function confirmAction({
   title,
   body,
@@ -41,6 +45,7 @@ export function confirmAction({
   danger,
   tone = "danger",
   field = null,
+  score = false,
   commit: work = null,
 }) {
   // Two dialogs at once would fight over the top layer and over which control
@@ -82,9 +87,45 @@ export function confirmAction({
     form.appendChild(items);
   }
 
+  // The score: a 1 to 5 choice the commit records beside the note. Native
+  // radios, so the arrow keys and the group's one tab stop are the browser's
+  // rather than a second set of rules here. Nothing starts checked: a score is
+  // the human's judgement, and a default would record one they did not make.
+  let scoreInputs = null;
+  if (score) {
+    const group = document.createElement("div");
+    group.className = "dialog-score";
+    const legend = document.createElement("span");
+    legend.className = "dialog-label";
+    legend.id = `dialog-score-label-${sequence}`;
+    legend.textContent = "Score";
+    const options = document.createElement("div");
+    options.className = "score-choice";
+    options.setAttribute("role", "radiogroup");
+    options.setAttribute("aria-labelledby", legend.id);
+    scoreInputs = [];
+    for (let value = 1; value <= 5; value += 1) {
+      const option = document.createElement("label");
+      option.className = "score-choice-option";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = `dialog-score-${sequence}`;
+      radio.value = String(value);
+      const shown = document.createElement("span");
+      shown.className = "score-choice-value";
+      shown.textContent = String(value);
+      option.append(radio, shown);
+      options.appendChild(option);
+      scoreInputs.push(radio);
+    }
+    group.append(legend, options);
+    form.appendChild(group);
+  }
+
   // The count is how long the note is against the hub's limit, in the hub's
   // own measure: characters of the trimmed text. It shows from nine tenths of
-  // the limit and says in words when the note is past it. The field carries no
+  // the limit, or always where the caller asks, and says in words when the note
+  // is past it. The field carries no
   // `maxlength`, which would cut a pasted note short without saying so; the
   // hub refuses a note that is too long and decides nothing.
   let input = null;
@@ -97,14 +138,19 @@ export function confirmAction({
     label.className = "dialog-label";
     label.htmlFor = `dialog-field-${sequence}`;
     label.textContent = field.label;
-    const optional = document.createElement("span");
-    optional.className = "dialog-optional";
-    optional.textContent = " (optional)";
-    label.appendChild(optional);
+    if (field.optional !== false) {
+      const optional = document.createElement("span");
+      optional.className = "dialog-optional";
+      optional.textContent = " (optional)";
+      label.appendChild(optional);
+    }
     input = document.createElement("textarea");
     input.className = "dialog-field";
     input.id = label.htmlFor;
     input.rows = 3;
+    // Said to a reader without the native constraint, which would block the
+    // safe action too: a required note is a rule the commit enforces.
+    if (field.optional === false) input.setAttribute("aria-required", "true");
     count = document.createElement("p");
     count.className = "dialog-count";
     count.id = `dialog-count-${sequence}`;
@@ -116,17 +162,23 @@ export function confirmAction({
     kept.setAttribute("role", "status");
     wrap.append(label, input, count, kept);
     form.appendChild(wrap);
-    input.addEventListener("input", () => {
+    const showCount = () => {
       const length = [...input.value.trim()].length;
-      count.hidden = length < field.limit * 0.9;
+      count.hidden = field.alwaysCount ? false : length < field.limit * 0.9;
       count.textContent =
         `${length} of ${field.limit} characters` +
         (length > field.limit ? `, ${length - field.limit} over the limit` : "");
+    };
+    input.addEventListener("input", () => {
+      showCount();
       kept.textContent = "";
       // A refusal was about the note as it was sent, so an edit withdraws it.
       if (problem) problem.hidden = true;
       input.removeAttribute("aria-invalid");
     });
+    // A count the reader watches as they write, rather than one that appears
+    // only near the limit.
+    if (field.alwaysCount) showCount();
   }
 
   // What a refused commit says, beside the field when there is one. It is in
@@ -169,7 +221,13 @@ export function confirmAction({
   // as focus having left. This keeps the ring on the dialog's own controls.
   el.addEventListener("keydown", (event) => {
     if (event.key !== "Tab") return;
-    const ring = [...el.querySelectorAll("textarea, button:not([disabled])")];
+    // A radio group is one tab stop, so the ring holds only the chosen radio
+    // rather than all five, which is where the browser leaves the caret.
+    const chosen =
+      el.querySelector('input[type="radio"]:checked') || el.querySelector('input[type="radio"]');
+    const ring = [...el.querySelectorAll("input, textarea, button:not([disabled])")].filter(
+      (node) => !node.matches('input[type="radio"]') || node === chosen,
+    );
     if (!ring.length) return;
     const edge = event.shiftKey ? ring[0] : ring[ring.length - 1];
     if (document.activeElement !== edge) return;
@@ -208,8 +266,9 @@ export function confirmAction({
       form.setAttribute("aria-busy", "true");
       problem.hidden = true;
       if (input) input.removeAttribute("aria-invalid");
+      const chosen = scoreInputs ? scoreInputs.find((radio) => radio.checked) : null;
       try {
-        await work(input ? input.value.trim() : "");
+        await work(input ? input.value.trim() : "", chosen ? Number(chosen.value) : null);
       } catch (error) {
         problem.textContent = error.message;
         problem.hidden = false;

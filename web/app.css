@@ -129,6 +129,15 @@ h3.group {
 .glyph[data-kind="session"], .kind-chip[data-kind="session"] {
   --kind: var(--k-session); --kind-bg: var(--k-session-bg);
 }
+/* The anchor is a phase boundary inside a session's life, so it carries the
+   session tone; a score is the human's recorded judgement, so it takes the
+   action tone the approval kind already uses for a decision. */
+.glyph[data-kind="anchor"], .kind-chip[data-kind="anchor"] {
+  --kind: var(--k-session); --kind-bg: var(--k-session-bg);
+}
+.glyph[data-kind="score"], .kind-chip[data-kind="score"] {
+  --kind: var(--k-approval); --kind-bg: var(--k-approval-bg);
+}
 .glyph {
   width: 24px; height: 24px; border-radius: 50%; flex: none;
   display: flex; align-items: center; justify-content: center;
@@ -1211,6 +1220,58 @@ html.has-dialog { overflow: hidden; }
 .dialog-count, .dialog-kept { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
 .dialog-kept:empty { display: none; }
 .dialog-error { margin: 0; font-size: var(--t-13); color: var(--danger); }
+/* The score choice: a 1 to 5 segmented radio group. The radios stay in the
+   document, so the arrow keys and the group's one tab stop are the browser's;
+   the drawn value is the label the reader sees and clicks. */
+.dialog-score { display: flex; flex-direction: column; gap: var(--s-2); }
+.score-choice {
+  display: flex;
+  gap: var(--s-1);
+  padding: var(--s-1);
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+}
+.score-choice-option {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: block;
+  margin: 0;
+}
+.score-choice-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  cursor: pointer;
+}
+.score-choice-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ctl-form);
+  border-radius: var(--r-1);
+  color: var(--ink-2);
+  font-size: var(--t-15);
+  font-weight: 600;
+}
+.score-choice-option input:checked + .score-choice-value {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+.score-choice-option input:focus-visible + .score-choice-value {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .score-choice-value { height: var(--tap); }
+}
 /* The reissue reveal (round 12.1, section 13). State 2 shows the token once, in
    a 44px field with the copy glyph on the row that owns the string. */
 .dialog-reveal .dialog-note[data-tone="danger"] { color: var(--danger); }
@@ -3278,6 +3339,9 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   width: 100%;
   display: flex;
   flex-direction: column;
+  /* One gutter per pane: the anchor card, the brain header, the audit row and
+     the actions all start where the session header does. */
+  padding: 0 var(--s-4);
 }
 .session-file-viewer {
   width: 100%;
@@ -3506,6 +3570,203 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
     display: flex;
     flex-direction: column;
   }
+}
+
+/* The session view toggle: the brain tree, or the events after the anchor. Two
+   links in the control row, each its own address, so the browser's Back
+   returns to the view the reader left. */
+.session-view-controls { justify-content: space-between; }
+.session-view-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-view-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1);
+  background: var(--bg);
+  border-radius: var(--r-1);
+  flex: none;
+}
+.session-view-link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--ctl-sm);
+  min-height: var(--ctl-sm);
+  padding: 0 var(--s-3);
+  border-radius: var(--r-1);
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: var(--t-13);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.session-view-link[aria-current="page"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+@media (pointer: coarse) {
+  /* The tools row is 44px on a phone, so the toggle drops its track and each
+     view takes the target rather than overrunning the band. */
+  .session-view-toggle { padding: 0; background: none; }
+  .session-view-link {
+    height: var(--tap);
+    min-height: var(--tap);
+    font-size: var(--t-15);
+  }
+}
+
+/* The anchor card: the phase boundary a session's owner left, read before the
+   tree or the resume list. It is a summary, so it carries the label, the phase,
+   the plan, the sources it rests on and the human's latest score. */
+.session-anchor {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) 0 var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.session-anchor-label { margin: 0; }
+.session-anchor-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0;
+  padding: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-1);
+}
+.session-anchor-empty { margin: 0; }
+.session-anchor-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.session-anchor-phase { background: var(--surface-2); color: var(--ink-2); }
+.session-anchor-summary {
+  margin: 0;
+  max-width: 640px;
+  font-size: var(--t-15);
+  line-height: 1.5;
+  color: var(--ink);
+}
+.session-anchor-steps {
+  margin: 0;
+  padding-left: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-width: 640px;
+  font-size: var(--t-15);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.session-anchor-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-width: 640px;
+}
+.session-anchor-source {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  font-size: var(--t-13);
+}
+.session-anchor-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1;
+  min-width: 0;
+  color: var(--accent);
+  text-decoration: none;
+}
+.session-anchor-source-link:hover { text-decoration: underline; }
+@media (pointer: coarse) {
+  /* The row is the link's target under a coarse pointer, so a short citation
+     is still a full row to the finger. */
+  .session-anchor-source-link { min-height: var(--tap); }
+}
+.session-anchor-source-link .glyph { width: 20px; height: 20px; }
+.session-anchor-source-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-anchor-source-id { color: var(--ink-3); }
+.session-anchor-source-state { font-size: var(--t-12); color: var(--ink-3); }
+.session-anchor-score {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  max-width: 640px;
+  padding: var(--s-3);
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+}
+.session-anchor-score-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.session-anchor-score-value { font-size: var(--t-13); font-weight: 600; color: var(--ink); }
+.session-anchor-score-meta { font-size: var(--t-12); color: var(--ink-2); }
+.session-anchor-score-rationale {
+  margin: 0;
+  font-size: var(--t-13);
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.session-anchor-actions { display: flex; }
+
+/* The resume list: the events after the anchor, oldest first, each the same
+   door the feed's own row is. */
+.session-resume-list { flex: none; list-style: none; margin: 0; padding: 0; }
+.session-resume-row {
+  padding: var(--row-y) var(--s-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.session-resume-row:last-child { border-bottom: 0; }
+.session-resume-link {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.session-resume-link .grow { flex: 1; min-width: 0; }
+.session-resume-title {
+  font-size: var(--t-15);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (pointer: coarse) {
+  .session-resume-link { min-height: var(--tap); }
+}
+.session-resume-empty { padding: var(--s-4); }
+.session-resume-footnote {
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-12);
+  color: var(--ink-3);
 }
 /* end Sessions redraw */
 
@@ -6952,6 +7213,17 @@ dialog.dialog-project-delete {
    weight as the event's own body rather than as a second heading. */
 .feed-stage-message { margin: var(--s-4) 0 0; font-size: var(--t-15); font-weight: 400; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
 .feed-stage-body { margin: var(--s-4) 0 0; font-size: var(--t-15); line-height: 1.55; color: var(--ink-2); }
+.feed-stage-label { margin: var(--s-4) 0 0; font-size: var(--t-12); font-weight: 600; letter-spacing: .06em; color: var(--ink-3); }
+.feed-stage-list {
+  margin: var(--s-2) 0 0;
+  padding-left: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--t-15);
+  line-height: 1.55;
+  color: var(--ink-2);
+}
 .feed-stage-actions { margin-top: var(--s-4); display: flex; gap: var(--s-2); }
 
 .points-card {
@@ -6988,6 +7260,8 @@ dialog.dialog-project-delete {
 .pill[data-kind="approval"] { background: var(--k-approval-bg); color: var(--k-approval); }
 .pill[data-kind="artifact"] { background: var(--k-artifact-bg); color: var(--k-artifact); }
 .pill[data-kind="session"] { background: var(--k-session-bg); color: var(--k-session); }
+.pill[data-kind="anchor"] { background: var(--k-session-bg); color: var(--k-session); }
+.pill[data-kind="score"] { background: var(--k-approval-bg); color: var(--k-approval); }
 /* end component: shell content */
 
 /* The stage carries a back control only where the shell shows one zone at a

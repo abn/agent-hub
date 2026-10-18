@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels|anchors)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -75,6 +75,14 @@ export default defineConfig({
       name: `a11y-${name}`,
       use: { viewport },
       testMatch: /a11y\.spec\.mjs/,
+    })),
+    // The anchors checks read a project feed, which moves the hub's own read
+    // cursor. Their own hubs keep the unread counts the behaviour checks
+    // assert against.
+    ...Object.entries(WIDTHS).map(([name, viewport]) => ({
+      name: `anchors-${name}`,
+      use: { viewport },
+      testMatch: /anchors\.spec\.mjs/,
     })),
     {
       name: "focus-desktop",

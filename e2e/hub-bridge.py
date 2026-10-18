@@ -63,6 +63,7 @@ def main(argv: list[str]) -> int:
                     # invariant checks that read a brain or drive the password
                     # gate address the harness's own fixture.
                     "sessionId": seeded.get("session_id", ""),
+                    "anchorId": seeded.get("anchor_id", ""),
                     "protectedId": seeded.get("protected_id", ""),
                     # The fixture the checks name. It is the harness's, read
                     # from here rather than repeated as literals in the tests.
@@ -75,6 +76,11 @@ def main(argv: list[str]) -> int:
                         "finished": harness.FINISHED_SUMMARY,
                         "markup": harness.MARKUP_SUMMARY,
                         "sessionName": harness.SESSION_NAME,
+                        "anchorPhase": harness.ANCHOR_PHASE,
+                        "anchorSummary": harness.ANCHOR_SUMMARY,
+                        "anchorSteps": list(harness.ANCHOR_STEPS),
+                        "anchorAfter": harness.ANCHOR_AFTER_SUMMARY,
+                        "scoreRationale": harness.SCORE_RATIONALE,
                         "brainValue": harness.BRAIN_VALUE,
                         "brainFsPath": harness.BRAIN_FS_PATH,
                         "brainFsTop": harness.BRAIN_FS_TOP,

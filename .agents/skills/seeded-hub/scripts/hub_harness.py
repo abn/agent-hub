@@ -32,6 +32,13 @@ PROJECT_NAME = "Checks"
 AGENT_ID = "checks/agent"
 AGENT_NAME = "Check agent"
 SESSION_NAME = "nightly"
+# The anchor the session leaves at its phase boundary, and the event a later
+# phase writes after it, so the resume view has something to read.
+ANCHOR_PHASE = "implement"
+ANCHOR_SUMMARY = "Phase one done; the tree and the feed read the same run."
+ANCHOR_STEPS = ("Open the review", "Ship the release")
+ANCHOR_AFTER_SUMMARY = "Review opened after the anchor"
+SCORE_RATIONALE = "The plan is traceable to the finished event."
 BRAIN_PATH = "/kv/last-run"
 # A second kv key, so the kv tree has two leaves and the arrow-key check
 # can move the selection within it.
@@ -614,7 +621,6 @@ def seed(port: int) -> dict[str, str]:
             {"project_id": PROJECT_ID, "subject": INBOX_QUESTION_SUBJECT, "body": INBOX_BODY},
         ),
         ("finished", "signal_append", {"project_id": PROJECT_ID, "kind": "finished", "summary": FINISHED_SUMMARY}),
-        ("markup", "signal_append", {"project_id": PROJECT_ID, "kind": "signal", "summary": MARKUP_SUMMARY}),
         ("approval", "signal_append", {"project_id": PROJECT_ID, "kind": "approval", "summary": APPROVAL_SUMMARY}),
         # The second approval carries a deadline, so the inbox shows what one
         # will do. Three hours outlasts any run, and it declines by default.
@@ -691,6 +697,70 @@ def seed(port: int) -> dict[str, str]:
             },
         )
         results[name] = answer.get("result", {}).get("structuredContent", {}) or {}
+
+    # The anchor is written by the session's owner after the brain writes, so
+    # the recovery document and the resume view have a real boundary to show.
+    # The finished event is the source it cites, and a later signal gives the
+    # resume list one event that came after it.
+    session_id = results.get("session", {}).get("session_id", "")
+    anchor_id = ""
+    if session_id:
+        source_id = results.get("finished", {}).get("event_id", "")
+        anchor_call = mcp_call(
+            port,
+            session,
+            {
+                "jsonrpc": "2.0",
+                "id": len(calls) + 20,
+                "method": "tools/call",
+                "params": {
+                    "name": "session_anchor",
+                    "arguments": {
+                        "phase": ANCHOR_PHASE,
+                        "summary": ANCHOR_SUMMARY,
+                        "next_steps": list(ANCHOR_STEPS),
+                        "source_ids": [source_id] if source_id else [],
+                    },
+                },
+            },
+        )
+        anchor_id = (
+            (anchor_call.get("result", {}).get("structuredContent", {}) or {})
+            .get("anchor", {})
+            .get("id", "")
+        )
+        if anchor_id:
+            request(
+                port,
+                "POST",
+                f"/api/v1/sessions/{session_id}/scores",
+                {
+                    "slice": [anchor_id],
+                    "score": 4,
+                    "rationale": SCORE_RATIONALE,
+                },
+            )
+            # The markup signal is written after the anchor so it stays among
+            # Home's newest events, where the escaping check reads it.
+            for offset, summary in enumerate((MARKUP_SUMMARY, ANCHOR_AFTER_SUMMARY), start=21):
+                mcp_call(
+                    port,
+                    session,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": len(calls) + offset,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "signal_append",
+                            "arguments": {
+                                "project_id": PROJECT_ID,
+                                "kind": "signal",
+                                "summary": summary,
+                            },
+                        },
+                    },
+                )
+
     answered = mcp_call(
         port,
         session,
@@ -715,6 +785,7 @@ def seed(port: int) -> dict[str, str]:
         "protected_id": results.get("protected", {}).get("artifact_id", ""),
         "question_id": results.get("question", {}).get("question_id", ""),
         "inbox_read_id": results.get("inbox-read", {}).get("event_id", ""),
+        "anchor_id": anchor_id,
     }
 
 

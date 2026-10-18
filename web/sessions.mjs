@@ -4,7 +4,7 @@
 import { api } from "./api.mjs";
 import { focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { esc, main, paint, stale } from "./dom.mjs";
+import { esc, glyph, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { pickProject, withProject } from "./projects.mjs";
 import { render, restoreFocusAfterRender } from "./router.mjs";
@@ -137,7 +137,129 @@ function lineageLine(lineage) {
   return `<span class="meta">${verb}${who} · ${esc(lineage.session_id)}${prunedNote}</span>`;
 }
 
-export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = []) {
+function feedEventHref(project, id) {
+  return `#/projects/${encodeURIComponent(project)}/feed?event=${encodeURIComponent(id)}`;
+}
+
+// The newest score by the time it was written. A score is append-only, so the
+// latest one is the human's current judgement of the run the anchor closes. Two
+// scores can land in one clock tick, and the id is the tie-break: it is a ULID,
+// so a later append always sorts after an earlier one.
+function latestScore(scores) {
+  if (!Array.isArray(scores) || scores.length === 0) return null;
+  return scores.reduce((newest, score) => {
+    const at = Date.parse(score.created_at);
+    const held = Date.parse(newest.created_at);
+    if (at !== held) return at > held ? score : newest;
+    return String(score.id) > String(newest.id) ? score : newest;
+  });
+}
+
+// A source the anchor says it rests on. A found one opens the event in the
+// project's feed; a pruned one stays visible as its id, because a citation that
+// no longer resolves is a fact about the log rather than something to hide.
+function anchorSourceHTML(source, project) {
+  if (source.found) {
+    return `<li class="session-anchor-source">
+      <a class="session-anchor-source-link" href="${feedEventHref(project, source.id)}">
+        ${glyph(source.kind || "signal")}<span class="session-anchor-source-summary">${esc(source.summary || source.id)}</span>
+      </a>
+    </li>`;
+  }
+  return `<li class="session-anchor-source is-missing">
+    <span class="mono session-anchor-source-id">${esc(source.id)}</span>
+    <span class="session-anchor-source-state">missing</span>
+  </li>`;
+}
+
+// The anchor card: the last phase boundary the session's owner wrote, the plan
+// it left, the events it rests on, and the human's latest score. It sits above
+// the tree or the resume list, so the checkpoint is read before the work.
+function anchorCardHTML(project, resume, session) {
+  if (!resume) return "";
+  const anchor = resume.anchor;
+  if (!anchor) {
+    return `<div class="session-anchor">
+      <h2 class="section-label session-anchor-label" id="session-anchor-label">Anchor</h2>
+      <section class="session-anchor-card" aria-labelledby="session-anchor-label">
+        <p class="meta session-anchor-empty">No anchor yet. An agent writes one at a phase boundary.</p>
+      </section>
+    </div>`;
+  }
+
+  const steps = Array.isArray(anchor.next_steps) ? anchor.next_steps : [];
+  const stepsHTML = steps.length
+    ? `<ol class="session-anchor-steps">${steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`
+    : "";
+  const sources = Array.isArray(anchor.sources) ? anchor.sources : [];
+  const sourcesHTML = sources.length
+    ? `<ul class="session-anchor-sources">${sources
+        .map((source) => anchorSourceHTML(source, project))
+        .join("")}</ul>`
+    : "";
+  const score = latestScore(resume.scores);
+  const scoreHTML = score
+    ? `<div class="session-anchor-score">
+        <span class="session-anchor-score-line">
+          <span class="session-anchor-score-value">Score ${esc(score.score)}/5</span>
+          <span class="session-anchor-score-meta">${esc(score.reviewer)} · ${relative(score.created_at)}</span>
+        </span>
+        <p class="session-anchor-score-rationale">${esc(score.rationale)}</p>
+      </div>`
+    : "";
+
+  return `<div class="session-anchor">
+    <h2 class="section-label session-anchor-label" id="session-anchor-label">Anchor</h2>
+    <section class="session-anchor-card" aria-labelledby="session-anchor-label">
+      <div class="session-anchor-head">
+        <span class="pill session-anchor-phase">${esc(anchor.phase)}</span>
+        <span class="meta session-anchor-meta">${esc(anchor.owner)} · ${relative(anchor.created_at)}</span>
+      </div>
+      <p class="session-anchor-summary">${esc(anchor.summary)}</p>
+      ${stepsHTML}
+      ${sourcesHTML}
+      ${scoreHTML}
+      <div class="session-anchor-actions">
+        <button type="button" class="btn-outline session-anchor-score-btn" data-action="score-open" data-id="${esc(session.id)}" data-anchor="${esc(anchor.id)}">Score this run</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+// The events after the anchor, oldest first, as the list a resumed reader
+// starts from. A row is the same door the feed's own row is, so the reader can
+// read the event where the rest of the project's log lives.
+function resumeListHTML(project, resume) {
+  const events = Array.isArray(resume.events) ? resume.events : [];
+  const rows = events
+    .map(
+      (event) => `<li class="session-resume-row">
+        <a class="session-resume-link" href="${feedEventHref(project, event.id)}">
+          ${glyph(event.kind)}
+          <div class="grow">
+            <div class="session-resume-title">${esc(event.summary)}</div>
+            <div class="meta">${esc(event.actor)} · ${relative(event.created_at)}</div>
+          </div>
+        </a>
+      </li>`,
+    )
+    .join("");
+  const empty = `<p class="empty session-resume-empty">No events since this anchor.</p>`;
+  // The list is one page of the log; the brain is where the rest of it lives.
+  const foot = resume.truncated
+    ? `<p class="session-resume-footnote meta">The full log is in the brain.</p>`
+    : "";
+  return `${rows ? `<ol class="session-resume-list" aria-label="Events since the anchor">${rows}</ol>` : empty}${foot}`;
+}
+
+export function sessionDetailHTML(
+  session,
+  current,
+  kvEntries = [],
+  fsEntries = [],
+  resume = null,
+  resumeMode = false,
+) {
   const isEnded = session.status === "ended" || session.status === "pruned";
   const statusClass = session.status === "active" ? "active" : "ended";
   const eventsCount = session.events ?? 0;
@@ -174,6 +296,22 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
   const brainFilesCount = fsEntries ? fsEntries.length : 0;
   const brainFootnote = `${brainFilesCount} files · ${brainSize} · written by ${esc(session.owner ?? session.agent ?? "agent")}`;
 
+  // The pane shows the brain tree or, at `?resume=1`, the events after the
+  // anchor. The header line names which, so the reader knows what they are
+  // looking at without the control row in view.
+  const resumeEvents = resume && Array.isArray(resume.events) ? resume.events : [];
+  const resumeActive = Boolean(resumeMode && resume);
+  const stageTree = resumeActive
+    ? `<div class="brain-header-line">
+            <span class="brain-label">Resume <span class="mono">· ${resumeEvents.length} event${resumeEvents.length === 1 ? "" : "s"}</span></span>
+          </div>
+          ${resumeListHTML(current, resume)}`
+    : `<div class="brain-header-line">
+            <span class="brain-label">Brain <span class="mono">· ${brainSize} · ${totalItems} items</span></span>
+            <span class="brain-size-col mono">size</span>
+          </div>
+          ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}`;
+
   return `
     <div class="session-detail-view" data-session-id="${esc(session.id)}">
       <style>
@@ -208,12 +346,9 @@ export function sessionDetailHTML(session, current, kvEntries = [], fsEntries = 
       </header>
 
       <div class="session-stage-body">
-        <div class="session-tree-pane" role="region" aria-label="Brain tree">
-          <div class="brain-header-line">
-            <span class="brain-label">Brain <span class="mono">· ${brainSize} · ${totalItems} items</span></span>
-            <span class="brain-size-col mono">size</span>
-          </div>
-          ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}
+        <div class="session-tree-pane" role="region" aria-label="${resumeActive ? "Resume" : "Brain tree"}">
+          ${anchorCardHTML(current, resume, session)}
+          ${stageTree}
           <div class="tree-pane-footnote mono">${brainFootnote}</div>
           ${lastEvent}
           <div class="session-actions-footer">
@@ -252,7 +387,7 @@ export function wireSessionDetail(container, current, sessionId) {
   }
 }
 
-export async function sessionDetailView(project, id, gen) {
+export async function sessionDetailView(project, id, gen, resumeMode = false) {
   if (!id) return "";
   let detail = null;
   try {
@@ -263,16 +398,20 @@ export async function sessionDetailView(project, id, gen) {
   }
   if (stale(gen) || !detail) return "";
   const query = encodeURIComponent(id);
-  let kv = { entries: [] };
-  let fs = { entries: [] };
-  try {
-    kv = (await api(`/api/v1/sessions/${query}/brain?path=${encodeURIComponent("/kv")}`)) || kv;
-  } catch {}
-  try {
-    fs = (await api(`/api/v1/sessions/${query}/brain?path=${encodeURIComponent("/fs")}`)) || fs;
-  } catch {}
+  // The three reads are independent, so one round trip waits for all of them
+  // rather than three in turn. Each is tolerated: a brain with no entries or a
+  // hub without the resume route still draws the detail rather than failing
+  // the paint.
+  const [kvRead, fsRead, resumeRead] = await Promise.allSettled([
+    api(`/api/v1/sessions/${query}/brain?path=${encodeURIComponent("/kv")}`),
+    api(`/api/v1/sessions/${query}/brain?path=${encodeURIComponent("/fs")}`),
+    api(`/api/v1/sessions/${query}/resume`),
+  ]);
+  const kv = kvRead.status === "fulfilled" ? kvRead.value : { entries: [] };
+  const fs = fsRead.status === "fulfilled" ? fsRead.value : { entries: [] };
+  const resume = resumeRead.status === "fulfilled" ? resumeRead.value : null;
   if (stale(gen)) return "";
-  return sessionDetailHTML(detail, project, kv.entries, fs.entries);
+  return sessionDetailHTML(detail, project, kv.entries, fs.entries, resume, resumeMode);
 }
 
 // The compatibility entry for `#/session?...`, the address older links carry.
@@ -357,6 +496,38 @@ export async function reassignSession(id, agent, from) {
     },
   });
   if (confirmed) toast(`Session reassigned to ${agent}.`);
+}
+
+// The human's review of a run: one score from 1 to 5 and the words that say
+// why. A score is a derived fact that cites the anchor, so it is written once
+// and never edits the run. The dialog asks in the shared confirm pattern, with
+// the score control it does not otherwise carry.
+async function openScoreDialog(button) {
+  const sessionId = button.dataset.id;
+  const anchorId = button.dataset.anchor;
+  if (!sessionId || !anchorId) return;
+  const committed = await confirmAction({
+    title: "Score this run",
+    body: "A score is your judgement of the run this anchor closes. It cites the anchor and never changes it.",
+    safe: "Cancel",
+    danger: "Save score",
+    tone: "action",
+    score: true,
+    field: { label: "Rationale", limit: 2000, optional: false, alwaysCount: true },
+    commit: async (rationale, score) => {
+      const text = (rationale || "").trim();
+      if (!score) throw new Error("Choose a score from 1 to 5.");
+      if (!text) throw new Error("Write a rationale to score this run.");
+      await api(`/api/v1/sessions/${encodeURIComponent(sessionId)}/scores`, {
+        method: "POST",
+        body: JSON.stringify({ slice: [anchorId], score, rationale: text }),
+      });
+    },
+  });
+  if (committed) {
+    toast("Score saved.");
+    await render();
+  }
 }
 
 // The menu of agents a session can move to, opened from the header control.
@@ -744,6 +915,15 @@ if (typeof document !== "undefined") {
         } catch {}
         toast("Copied session id.");
       }
+      return;
+    }
+
+    const scoreOpen =
+      event.target instanceof Element
+        ? event.target.closest('[data-action="score-open"]')
+        : null;
+    if (scoreOpen) {
+      await openScoreDialog(scoreOpen);
       return;
     }
 
