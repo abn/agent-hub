@@ -4,6 +4,15 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.6.0...agent-hub-v1.7.0) (2026-10-18)
+
+
+### Bug Fixes
+
+* **web:** cut a long wiki row line at the pane, not past it ([caabf74](https://github.com/abn/agent-hub/commit/caabf7450fa710d6ebe25faa76ddbe872d91d915))
+* **web:** indent a wiki row by the reader's path, not the store's ([47f7aaa](https://github.com/abn/agent-hub/commit/47f7aaaab3cf2e16bd66faa2c73f859e4c1dcf7f))
+* **web:** move Capture idea into the project menu ([b22adf8](https://github.com/abn/agent-hub/commit/b22adf8685777180621eddd6153647a5afb8a97a))
+
 ## [1.6.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.5.0...agent-hub-v1.6.0) (2026-10-17)
 
 
