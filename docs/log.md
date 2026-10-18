@@ -6,6 +6,14 @@ software release notes and the repository changelog.
 
 ## 2026-10-18
 
+### Session handoffs become anchors, and a run can be scored
+
+* **Creation**: Added [Session handoffs are anchors and scores are derived
+  facts](adr/0035-session-anchors.md). A phase boundary writes a compact
+  `anchor` event with a phase, summary, next steps and source event ids; resume
+  reads the latest anchor plus what came after it; and a human `score` event
+  cites the anchor slice it grades.
+
 ### A wiki row is indented by its place in the tree
 
 * **Fix**: every page is held under the store's `/fs/` namespace, and the wiki

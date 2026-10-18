@@ -54,3 +54,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   fork-from-here
 * [0033](0033-semantic-recall.md) - Semantic recall across projects
 * [0034](0034-human-idea-capture-surface.md) - Human idea capture surface
+* [0035](0035-session-anchors.md) - Session handoffs are anchors and scores
+  are derived facts
