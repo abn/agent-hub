@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-17
+
+### A long wiki row line is cut at the pane's edge, not scrolled past it
+
+* **Fix**: a wiki name long enough to fill its row ran past the index pane
+  rather than shortening, so a phone reader met a list that slid sideways under
+  the tab bar and a clipped name with no ellipsis. The row is a column flexbox
+  and left its lines to size themselves; the name line, which asks for `nowrap`
+  and an ellipsis, took its own content's width and so had nothing to shrink
+  into. It stretches to the row's width now, shortens at the row's edge, and
+  the ellipsis it asks for fires. The trailing mark on the line follows the
+  convention every other row's trailing value already keeps.
+* **Fix**: the facts line of a version row had the same defect where a long
+  agent name ran past the stage. It takes the row's width now too; the time's
+  line beside it keeps its own, so "current" or "not kept" stays beside the
+  time rather than at the far edge.
+
 ## 2026-10-16
 
 ### Loopback hubs resolve identity without a token

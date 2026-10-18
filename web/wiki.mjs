@@ -134,14 +134,10 @@ function rowHTML(entry, id, selected, narrow = false) {
   }
   const href = wikiPageHash(id, path);
   const meta = [entry.page_type || "concept", entry.status || "draft", trustWords(entry)].join(" · ");
-  // The row is a column flexbox that inherits the row base's `align-items:
-  // flex-start`, so a child is sized by its own content and may run past the
-  // row rather than ellipsising inside it. The meta line asked for both halves
-  // of the fix and needed both: `align-self:stretch` takes the row's width
-  // instead of its content's, and `min-width:0` lets the no-wrap text shrink
-  // inside that width. Without them its box ended 8.84px past a 300px index
-  // pane, the pane's overflow cut the last glyph of "unverified", and the
-  // ellipsis this span asks for never fired.
+  // The row is a column flexbox that stretches its children to its own width,
+  // so a line is as wide as the row and a no-wrap line with `min-width: 0`
+  // shrinks inside it and ellipsises. A line left to size itself instead ran
+  // past the pane: the pane's overflow cut it and the ellipsis never fired.
   return `<a class="row wiki-row" role="treeitem" aria-level="${depth + 1}" href="${href}"${on} style="--depth:${depth}">
     <span class="wiki-row-line">
       <span class="wiki-row-glyph" aria-hidden="true">${FILE_GLYPH}</span>

@@ -611,6 +611,89 @@ test.describe("wiki", () => {
     expect(metaSeen, "no wiki meta line was long enough to need an ellipsis").toBe(true);
     await page.setViewportSize({ width: 390, height: 844 });
   });
+
+  test("a long page name is cut at the row's edge, not scrolled past the pane", async ({ hub, page }) => {
+    const project = hub.projectId;
+    await page.setViewportSize({ width: 390, height: 844 });
+    // A name no index pane can hold. The row must shorten it with the ellipsis
+    // its own rule asks for rather than grow past the pane, which is what left
+    // a phone reader with a list that slid sideways under the tab bar.
+    const name = "a-name-far-longer-than-any-phone-index-pane-can-hold.md";
+    await api(hub, "PUT", `/api/v1/projects/${encodeURIComponent(project)}/kb/pages/${name}`, {
+      content: "---\ntype: note\nstatus: draft\n---\n# Long\n\nA page the check reads.\n",
+    });
+    await goto(page, "#/settings", "Settings");
+    await goto(page, projectRoute(hub, "wiki"), "Wiki");
+    await expect(page.locator(".shell-index .wiki-row").first()).toBeVisible({ timeout: 8000 });
+    const got = await page.evaluate((want) => {
+      const pane = document.querySelector(".shell-index");
+      if (!pane) return { error: "the wiki index drew no pane" };
+      const body = pane.querySelector(".shell-body");
+      const row = [...pane.querySelectorAll(".wiki-row")].find(
+        (candidate) => (candidate.querySelector(".wiki-row-name") || {}).textContent === want,
+      );
+      if (!row) return { error: "the long-named page drew no row" };
+      const line = row.querySelector(".wiki-row-name");
+      const paneBox = pane.getBoundingClientRect();
+      const lineBox = line.getBoundingClientRect();
+      return {
+        paneRight: Math.round(paneBox.right * 10) / 10,
+        lineRight: Math.round(lineBox.right * 10) / 10,
+        cut: line.scrollWidth > line.clientWidth + 0.5,
+        rowSideways: row.scrollWidth > row.clientWidth + 0.5,
+        paneSideways: body.scrollWidth > body.clientWidth + 0.5,
+      };
+    }, name);
+    expect(got.error, got.error).toBeUndefined();
+    expect(got.cut, "the long name is not shortened with an ellipsis").toBe(true);
+    expect(got.lineRight <= got.paneRight + 0.5, `the name line runs past the pane (${got.lineRight} > ${got.paneRight})`).toBe(true);
+    expect(got.rowSideways, "the row scrolls sideways").toBe(false);
+    expect(got.paneSideways, "the index pane scrolls sideways").toBe(false);
+  });
+
+  test("a long agent name on a version row is cut, not scrolled past the pane", async ({ hub, page }) => {
+    const project = hub.projectId;
+    await page.setViewportSize({ width: 390, height: 844 });
+    const long = "release-coordinator-for-the-staging-and-production-edge-hosts";
+    // The versions list is answered with a long agent name, the way a write by
+    // an agent with one reads, so the row's facts line must give way rather
+    // than run past the stage.
+    await page.route("**/api/v1/projects/*/kb/versions*", async (route) => {
+      const answer = await route.fetch();
+      const body = await answer.json();
+      for (const row of body.versions || []) row.actor = long;
+      await route.fulfill({ response: answer, json: body });
+    });
+    const pageApi = `/api/v1/projects/${encodeURIComponent(project)}/kb/pages/probe/versions.md`;
+    await api(hub, "PUT", pageApi, { content: "---\ntype: note\n---\n# One\n" });
+    await api(hub, "PUT", pageApi, { content: "---\ntype: note\n---\n# Two\n" });
+    await goto(page, "#/settings", "Settings");
+    await goto(page, projectRoute(hub, "wiki") + "?page=probe%2Fversions.md&history=1");
+    await expect(page.locator(".wiki-version").first()).toBeVisible({ timeout: 8000 });
+    const got = await page.evaluate((actor) => {
+      const stage = document.querySelector(".shell-stage .shell-body");
+      const row = document.querySelector(".wiki-version");
+      const facts = row.querySelector(".wiki-version-facts");
+      const line = row.querySelector(".wiki-version-line");
+      const time = line.querySelector(".wiki-version-time");
+      const state = line.querySelector(".wiki-version-state");
+      return {
+        stageRight: Math.round(stage.getBoundingClientRect().right * 10) / 10,
+        factsRight: Math.round(facts.getBoundingClientRect().right * 10) / 10,
+        cut: facts.scrollWidth > facts.clientWidth + 0.5,
+        rowSideways: row.scrollWidth > row.clientWidth + 0.5,
+        stageSideways: stage.scrollWidth > stage.clientWidth + 0.5,
+        carries: (facts.textContent || "").includes(actor),
+        stateGap: state ? Math.round((state.getBoundingClientRect().left - time.getBoundingClientRect().right) * 10) / 10 : null,
+      };
+    }, long);
+    expect(got.carries, "the facts line lost the agent name it should carry").toBe(true);
+    expect(got.cut, "the long agent name is not shortened with an ellipsis").toBe(true);
+    expect(got.factsRight <= got.stageRight + 0.5, `the facts line runs past the stage (${got.factsRight} > ${got.stageRight})`).toBe(true);
+    expect(got.rowSideways, "the version row scrolls sideways").toBe(false);
+    expect(got.stageSideways, "the stage scrolls sideways").toBe(false);
+    expect(got.stateGap !== null && got.stateGap <= 12, `the current word is not beside its time (gap ${got.stateGap})`).toBe(true);
+  });
 });
 
 test.describe("index pane geometry", () => {
