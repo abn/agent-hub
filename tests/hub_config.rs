@@ -49,11 +49,24 @@ impl TempHome {
 }
 
 /// An environment lookup over a fixed set of pairs.
+///
+/// The system-wide file is pointed at a path that does not exist unless a test
+/// names one. Left to its default, the lookup reads this machine's own
+/// `/etc/agent-hub/config.toml`, so a host that is set up as a client resolves
+/// a url and a token here and the tests that assert a default fail on that
+/// machine and pass everywhere else.
 fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
-    let map: HashMap<String, String> = pairs
+    let mut map: HashMap<String, String> = pairs
         .iter()
         .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
         .collect();
+    map.entry("AGENT_HUB_SYSTEM_CONFIG".to_string())
+        .or_insert_with(|| {
+            PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+                .join("no-system-config.toml")
+                .to_string_lossy()
+                .into_owned()
+        });
     move |key: &str| map.get(key).cloned()
 }
 

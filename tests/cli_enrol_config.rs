@@ -3,7 +3,7 @@
 //! A shared approval saves both the hub url and the token, so the command the
 //! client prints as its next step runs with none of the hub environment set.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
@@ -21,6 +21,13 @@ fn clean_client(home: &Path) -> Command {
     command
         .env("RUST_LOG", "error")
         .env("HOME", home)
+        // The system-wide file is pointed at a path that is not one, so the
+        // hub under test is the one this test started rather than whatever
+        // this machine is configured to talk to.
+        .env(
+            "AGENT_HUB_SYSTEM_CONFIG",
+            PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("no-system-config.toml"),
+        )
         .env_remove("HUB_URL")
         .env_remove("HUB_TOKEN")
         .env_remove("HUB_CONFIG")
