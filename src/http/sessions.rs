@@ -501,3 +501,81 @@ pub struct SessionReplay {
     /// The brain's tool-call audit entries, oldest first.
     pub events: Vec<crate::brain::ToolCall>,
 }
+
+/// The body of `POST /api/v1/sessions/{id}/scores`.
+#[derive(Debug, Deserialize)]
+pub struct ScoreBody {
+    /// The anchor ids this score grades.
+    pub slice: Vec<String>,
+    /// The human's score, 1 to 5.
+    pub score: i64,
+    /// Why the score was given.
+    pub rationale: String,
+    /// Idempotency key, or null.
+    pub idempotency_key: Option<String>,
+}
+
+/// `GET /api/v1/sessions/{id}/resume`
+///
+/// A valid admin bearer token is required. Returns the latest anchor, the
+/// scores citing it, and the events after it.
+pub async fn resume(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<crate::store::anchors::Resume>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let session = live(&state, &session_id).await?;
+    let resumed =
+        crate::store::anchors::resume(&state.db, &session, crate::limits::FEED_LIMIT_DEFAULT)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+    Ok(Json(resumed))
+}
+
+/// `POST /api/v1/sessions/{id}/scores`
+///
+/// A valid admin bearer token is required. Appends a human score citing anchors
+/// in the session.
+pub async fn score(
+    State(state): State<AppState>,
+    ProblemPath(session_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<ScoreBody>, axum::extract::rejection::JsonRejection>,
+) -> std::result::Result<Json<crate::store::anchors::Score>, Problem> {
+    let principal = state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let Json(payload) = body.map_err(|_| {
+        Problem::from_error(&Error::InvalidArgument(
+            "the body must be JSON naming the slice, score, rationale and idempotency key"
+                .to_string(),
+        ))
+    })?;
+
+    let session = live(&state, &session_id).await?;
+    let request = crate::store::anchors::ScoreRequest {
+        slice: payload.slice,
+        score: payload.score,
+        rationale: payload.rationale,
+    };
+    let score = crate::store::anchors::append_score(
+        &state.db,
+        state.config.events_per_project.per_project,
+        &principal,
+        payload.idempotency_key.as_deref(),
+        &session,
+        request,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+
+    state.notify();
+    Ok(Json(score))
+}

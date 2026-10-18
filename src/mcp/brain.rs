@@ -16,11 +16,12 @@ use serde::Deserialize;
 use serde_json::json;
 use turso::Value;
 
-use crate::brain::{self, Brain, Stamp, knowledge};
+use crate::brain::{self, Brain, RECOVERY_PATH, Stamp, knowledge};
 use crate::error::{Error, Result};
 use crate::limits::{HANDOFF_SUMMARY_CHARS, SESSION_LIST_LIMIT_MAX};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
+use crate::store::anchors;
 use crate::store::search::{SearchDoc, index_doc};
 use crate::store::{projects, sessions};
 
@@ -83,10 +84,13 @@ impl HubServer {
         // The brain is reached only through the namespaced tool paths, so the
         // server's file layout is not the agent's business.
         //
-        // The recovery document is a convention nothing writes for the agent,
-        // so the row's own handoff note, left by the previous owner at
-        // `session_end`, travels beside the path. A resumed agent reads what
-        // its predecessor left without a second call.
+        // The row's own handoff note is left by the previous owner at
+        // `session_end`, and the latest anchor is written by `session_anchor`,
+        // so a resumed agent reads what its predecessor left without a second
+        // call.
+        let anchor = anchors::latest_anchor_view(&self.state.db, &session.id)
+            .await
+            .map_err(to_error_data)?;
         Ok(CallToolResult::structured(json!({
             "session_id": session.id,
             "project_id": session.project_id,
@@ -98,8 +102,92 @@ impl HubServer {
             "namespaces": { "kv": "/kv", "fs": "/fs" },
             "recovery_path": RECOVERY_PATH,
             "handoff": session.handoff,
+            "anchor": anchor,
             "brain_bytes": self.brain_bytes(&session),
         })))
+    }
+
+    #[tool(
+        description = "Write a phase anchor: the compact checkpoint a successor resumes from. It is stored as an `anchor` event on the session and rendered to the session's recovery document. phase, summary and next_steps are required, and source_ids cite project events the summary rests on, each of which must exist in the same project. The session must be the caller's own; omitted, it is this connection's active session. A retry with the same idempotency_key returns the first anchor instead of appending another."
+    )]
+    async fn session_anchor(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<SessionAnchorParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        // A named session is anchored as itself; omitted, it is the active one.
+        // The write target enforces the owner rule and that the session is live.
+        let target = self
+            .target_for_write(&principal, None, params.session.as_ref())
+            .await
+            .map_err(to_error_data)?;
+        let session_id = target
+            .session_id
+            .clone()
+            .ok_or_else(|| to_error_data(Error::Engine("an anchor needs a session".to_string())))?;
+        let session = sessions::get(&self.state.db, &session_id)
+            .await
+            .map_err(to_error_data)?
+            .ok_or_else(|| {
+                to_error_data(Error::NotFound(format!("session {session_id} not found")))
+            })?;
+        let anchor = anchors::append_anchor(
+            &self.state.db,
+            self.state.config.events_per_project.per_project,
+            &principal,
+            params.idempotency_key.as_deref(),
+            &session,
+            anchors::AnchorRequest {
+                phase: params.phase,
+                summary: params.summary,
+                next_steps: params.next_steps,
+                source_ids: params.source_ids.unwrap_or_default(),
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+
+        // The event is the anchor of record; the file is a view of it, so a
+        // failed mirror does not fail the tool.
+        let recovery_written = match target
+            .brain
+            .put(RECOVERY_PATH, anchors::render_recovery(&anchor).as_bytes())
+            .await
+        {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::warn!(error = %err, session_id, "could not write the recovery document");
+                false
+            }
+        };
+
+        self.state.notify();
+        Ok(CallToolResult::structured(json!({
+            "anchor": anchor,
+            "recovery_path": RECOVERY_PATH,
+            "recovery_written": recovery_written,
+        })))
+    }
+
+    #[tool(
+        description = "Read a session's resume view: its latest anchor, the scores that cite it, the session events after the anchor oldest first, the recovery path and a cursor to page on. Names any session the caller may read, by session_id or by agent and name; omitted, it is this connection's active session. A session with no anchor returns the empty view, and its handoff note and full log still reach the caller through session_start and feed_read."
+    )]
+    async fn session_resume(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<SessionResumeParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let session = match params.session.as_ref() {
+            Some(reference) => self.referenced_session(&principal, reference).await,
+            None => self.session_for(&principal, Access::Read).await,
+        }
+        .map_err(to_error_data)?;
+        let resumed = anchors::resume(&self.state.db, &session, crate::limits::FEED_LIMIT_DEFAULT)
+            .await
+            .map_err(to_error_data)?;
+        Ok(CallToolResult::structured(json!(resumed)))
     }
 
     #[tool(
@@ -875,14 +963,6 @@ fn discard(path: &std::path::Path) {
     }
 }
 
-/// Where an agent is expected to leave the note that orients its successor.
-///
-/// A convention, not a stored document: nothing seeds it, and a resumed agent
-/// that wants what its predecessor left reads the row handoff `session_start`
-/// returns beside this path. It stays here so the bootstrap convention
-/// describes itself rather than living only in a skill file.
-pub(super) const RECOVERY_PATH: &str = "/fs/RECOVERY.md";
-
 /// The handoff note as a listing carries it, with whether it was cut short.
 fn summarise(handoff: Option<&str>) -> (Option<String>, bool) {
     match handoff {
@@ -1514,6 +1594,38 @@ struct SessionStartParams {
     /// adopts an ended session and forks a running one.
     #[serde(default)]
     from: Option<SessionRef>,
+}
+
+/// Arguments for `session_anchor`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionAnchorParams {
+    /// A short name for the phase.
+    phase: String,
+    /// The event summary: what this phase did and where it left off.
+    summary: String,
+    /// What comes next, in order, one to ten steps.
+    next_steps: Vec<String>,
+    /// The project events the summary rests on, up to fifty. Each must exist in
+    /// the same project.
+    #[serde(default)]
+    source_ids: Option<Vec<String>>,
+    /// The session to anchor, which must be the caller's own. Omitted, it is
+    /// this connection's active session.
+    #[serde(default)]
+    session: Option<SessionRef>,
+    /// Scoped per project and per operation: a retry with the same value
+    /// returns the first anchor instead of appending a duplicate.
+    #[serde(default)]
+    idempotency_key: Option<String>,
+}
+
+/// Arguments for `session_resume`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SessionResumeParams {
+    /// The session to read, by session_id or by agent and name. Omitted, it is
+    /// this connection's active session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// Arguments for `session_end`.

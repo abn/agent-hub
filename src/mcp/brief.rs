@@ -23,11 +23,12 @@ use crate::limits::{
 };
 use crate::policy::{self, Access};
 use crate::principal::Principal;
+use crate::store::anchors;
 use crate::store::events::{self, BriefFilter, Event};
 use crate::store::sessions::{self, Session, SessionQuery};
 
-use super::brain::RECOVERY_PATH;
 use super::{HubServer, to_error_data};
+use crate::brain::RECOVERY_PATH;
 
 #[tool_router(router = brief_router, vis = "pub")]
 impl HubServer {
@@ -86,12 +87,22 @@ impl HubServer {
             .await
             .map_err(to_error_data)?;
 
+        let previous_view = match previous.as_ref() {
+            Some(session) => Some(previous_entry(
+                session,
+                anchors::latest_anchor_view(&self.state.db, &session.id)
+                    .await
+                    .map_err(to_error_data)?,
+            )),
+            None => None,
+        };
+
         Ok(CallToolResult::structured(json!({
             "project_id": project_id,
             "agent": principal.actor,
             "since": { "event_id": since, "basis": basis },
             "answers": answers,
-            "previous_session": previous.as_ref().map(previous_entry),
+            "previous_session": previous_view,
             "events": events,
             "stale_pages": stale_pages,
         })))
@@ -128,7 +139,7 @@ async fn previous_session(
         .find(|session| active.as_deref() != Some(session.id.as_str())))
 }
 
-fn previous_entry(session: &Session) -> Value {
+fn previous_entry(session: &Session, anchor: Option<anchors::Anchor>) -> Value {
     json!({
         "session_id": session.id,
         "session_name": session.session_name,
@@ -136,6 +147,7 @@ fn previous_entry(session: &Session) -> Value {
         "last_activity": session.last_activity,
         "handoff": session.handoff,
         "recovery_path": RECOVERY_PATH,
+        "anchor": anchor,
     })
 }
 

@@ -810,3 +810,317 @@ async fn replay_for_a_session_returns_its_audit() {
     assert_eq!(body["session_id"], session.id);
     assert!(body["events"].is_array());
 }
+
+#[tokio::test]
+async fn resume_with_no_anchor_returns_null_anchor_and_empty_events() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/resume", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert!(body["anchor"].is_null());
+    assert_eq!(body["events"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn resume_after_an_anchor_returns_anchor_and_later_events() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let source_id = agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "source work".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .expect("source");
+
+    let anchor_id = agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "anchor".to_string(),
+            summary: "checkpoint".to_string(),
+            payload: Some(serde_json::json!({
+                "phase": "impl",
+                "next_steps": ["ship"],
+                "source_ids": [source_id],
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .expect("anchor");
+
+    agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "signal".to_string(),
+            summary: "after work".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .expect("later");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/resume", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["anchor"]["id"], anchor_id);
+    assert_eq!(body["anchor"]["sources"][0]["id"], source_id);
+    assert_eq!(body["anchor"]["sources"][0]["found"], true);
+    let events = body["events"].as_array().expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["summary"], "after work");
+}
+
+#[tokio::test]
+async fn a_human_score_route_writes_a_score_citing_the_anchor() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let anchor_id = agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "anchor".to_string(),
+            summary: "checkpoint".to_string(),
+            payload: Some(serde_json::json!({
+                "phase": "impl",
+                "next_steps": ["ship"],
+                "source_ids": [],
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .expect("anchor");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(common::http::request(
+            "POST",
+            &format!("/api/v1/sessions/{}/scores", session.id),
+            Some("Bearer token"),
+            Some(serde_json::json!({
+                "slice": [anchor_id],
+                "score": 4,
+                "rationale": "good",
+                "idempotency_key": null,
+            })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["score"], 4);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "GET",
+            &format!("/api/v1/sessions/{}/resume", session.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    let scores = body["scores"].as_array().expect("scores");
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores[0]["score"], 4);
+}
+
+#[tokio::test]
+async fn a_score_naming_an_anchor_from_another_session_is_refused() {
+    let state = state().await;
+    let session_a = sessions::start(&state.db, "proj", "nightly-a", "agent-one")
+        .await
+        .expect("start a");
+    let session_b = sessions::start(&state.db, "proj", "nightly-b", "agent-two")
+        .await
+        .expect("start b");
+
+    let anchor_b = agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-two",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "anchor".to_string(),
+            summary: "checkpoint".to_string(),
+            payload: Some(serde_json::json!({
+                "phase": "impl",
+                "next_steps": ["ship"],
+                "source_ids": [],
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session_b.id.clone()),
+        },
+    )
+    .await
+    .expect("anchor");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(common::http::request(
+            "POST",
+            &format!("/api/v1/sessions/{}/scores", session_a.id),
+            Some("Bearer token"),
+            Some(serde_json::json!({
+                "slice": [anchor_b],
+                "score": 4,
+                "rationale": "good",
+                "idempotency_key": null,
+            })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "invalid_argument");
+}
+
+#[tokio::test]
+async fn a_score_with_zero_or_blank_rationale_is_refused() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+
+    let anchor_id = agent_hub::store::events::append(
+        &state.db,
+        0,
+        "agent-one",
+        None,
+        agent_hub::store::events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "anchor".to_string(),
+            summary: "checkpoint".to_string(),
+            payload: Some(serde_json::json!({
+                "phase": "impl",
+                "next_steps": ["ship"],
+                "source_ids": [],
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: Some(session.id.clone()),
+        },
+    )
+    .await
+    .expect("anchor");
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(common::http::request(
+            "POST",
+            &format!("/api/v1/sessions/{}/scores", session.id),
+            Some("Bearer token"),
+            Some(serde_json::json!({
+                "slice": [anchor_id],
+                "score": 0,
+                "rationale": "x",
+                "idempotency_key": null,
+            })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(common::http::request(
+            "POST",
+            &format!("/api/v1/sessions/{}/scores", session.id),
+            Some("Bearer token"),
+            Some(serde_json::json!({
+                "slice": [anchor_id],
+                "score": 4,
+                "rationale": "   ",
+                "idempotency_key": null,
+            })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_score_with_an_agent_token_is_refused() {
+    let state = state().await;
+    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+        .await
+        .expect("start");
+    let _ = agent_hub::store::identity::create_agent(&state.db, "worker", "Worker").await;
+    let issued = agent_hub::store::identity::issue_token(&state.db, "worker")
+        .await
+        .expect("issue token");
+    let bearer = format!("Bearer {}", issued.token);
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(common::http::json_request(
+            "POST",
+            &format!("/api/v1/sessions/{}/scores", session.id),
+            Some(&bearer),
+            r#"{"slice":[],"score":4,"rationale":"x"}"#,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let problem = problem_body(response).await;
+    assert_eq!(problem["code"], "unauthenticated");
+}
