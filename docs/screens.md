@@ -80,7 +80,7 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/feed-desktop-dark.png">
-  <img src="assets/screens/feed-desktop-light.png" alt="A project feed, day-grouped with kind badges.">
+  <img src="assets/screens/feed-desktop-light.png" alt="A project feed, day-grouped, with anchor and score rows among its kind badges.">
 </picture>
 
 ### Project feed, phone
@@ -110,7 +110,7 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/session-detail-desktop-dark.png">
-  <img src="assets/screens/session-detail-desktop-light.png" alt="The session detail: the brain tree, the handoff note and the lineage.">
+  <img src="assets/screens/session-detail-desktop-light.png" alt="The session detail: the anchor card, the brain tree, the handoff note and the lineage.">
 </picture>
 
 ### Session detail, phone

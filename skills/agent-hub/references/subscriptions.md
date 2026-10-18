@@ -6,9 +6,10 @@ you asked for on the next call you make anyway.
 
 `notify_subscribe` takes `kinds`, a comma-separated list, and an optional
 `project_id`. The kinds are `signal`, `finished`, `approval`, `question`,
-`answer`, and `artifact`. An empty list or a kind outside that set is refused,
-and the refusal names the kinds you may use. Leaving `project_id` out covers
-every project you may read; naming one covers that project alone.
+`answer`, `artifact`, `anchor`, and `score`. An empty list or a kind outside
+that set is refused, and the refusal names the kinds you may use. Leaving
+`project_id` out covers every project you may read; naming one covers that
+project alone.
 
 Two optional filters narrow what drains: `actor` reports only events authored
 by that agent, and `exclude_self` drops your own events at drain time. Both

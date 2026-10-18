@@ -47,8 +47,11 @@ value the token file does not carry is a design question, not a local decision.
   danger tone reserved for deletion.
 - **Event kinds.** Each of the six families has a colour and a background
   partner, used only inside the glyph badge or as a two pixel accent, never as
-  body text. An answer borrows the question tone: it is the reply on that
-  thread, not a family of its own. A seventh pair, an olive, is the knowledge
+  body text. A kind borrows a tone where it has no family of its own: an answer
+  borrows the question tone, since it is the reply on that thread; an anchor
+  borrows the session tone, since a phase boundary sits inside a session's life;
+  and a score borrows the action tone the approval kind carries for a decision.
+  A seventh pair, an olive, is the knowledge
   tone, drawn only by the Storage breakdown's knowledge segment and legend, so
   a byte count never borrows the question tone, which means "an agent is asking
   you".
@@ -108,8 +111,9 @@ unused.
 
 Every event kind draws its own mark inside the badge: a dot for a signal, a
 check for finished work, a question mark, an exclamation mark for an approval,
-a document for an artifact, a half disc for a session, and a reply arrow for an
-answer. The badge itself is hidden from assistive technology, and the row
+a document for an artifact, a half disc for a session, a bookmark for an anchor,
+a star for a score, and a reply arrow for an answer. The badge itself is hidden
+from assistive technology, and the row
 carries a visually hidden word for the kind instead, once, so the kind survives
 both a reader who cannot separate the tints and a reader who hears the page.
 
@@ -311,7 +315,22 @@ with amber taking priority when both exist.
 The sessions index groups sessions into active and ended, each row carrying the
 middle-truncated session id and its working name on the title line, a state dot
 and its status, the owner, the time and a right-column mono size. The session
-detail draws the brain tree in the stage: a `kv` key is read in the aside, named
+detail draws the brain tree in the stage, under an anchor card. The card opens
+with the section label Anchor and then the owner's last phase boundary: the
+phase as a value pill, the summary capped at 640, an ordered list of next
+steps, the sources it rests on, and the owner and time. A found source opens the
+event in the project's feed; a source that no longer resolves keeps its mono id
+and the word "missing" rather than being dropped. The latest score reads
+"Score 4/5" with its rationale. A session with no anchor says so in one line and
+offers no score control. **Score this run** appears only with an anchor and
+opens one dialog: a 1 to 5 segmented radio group and a required rationale of up
+to 2000 characters, counted as it is written. A refused score stays in the
+dialog with the hub's reason. The stage control row carries a Resume/Brain link
+pair for the selected session, `aria-current` on the view in use; `?resume=1`
+replaces the tree with the events after the anchor, oldest first, each a row
+that opens the event in the project's feed, with "No events since this anchor."
+when there are none and a footnote naming the brain when the list is cut short.
+A `kv` key is read in the aside, named
 in mono with the copy glyph, and on a coarse pointer the same value opens as one
 bottom sheet opened by the tree leaf. An `fs` file opens in the stage rendered
 by the same parser as an artifact, read-only, with a back control and a mono
@@ -323,12 +342,12 @@ that owns it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/session-detail-desktop-dark.png">
-  <img src="../assets/screens/session-detail-desktop-light.png" alt="The session detail at desktop width: the brain tree, the handoff note and the lineage.">
+  <img src="../assets/screens/session-detail-desktop-light.png" alt="The session detail at desktop width: the anchor card, the brain tree, the handoff note and the lineage.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/session-detail-phone-dark.png">
-  <img src="../assets/screens/session-detail-phone-light.png" alt="The session detail at phone width: the brain tree, the handoff note and the lineage.">
+  <img src="../assets/screens/session-detail-phone-light.png" alt="The session detail at phone width: the anchor card, the brain tree, the handoff note and the lineage.">
 </picture>
 
 ### Artifacts

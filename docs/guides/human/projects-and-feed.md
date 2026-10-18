@@ -51,12 +51,14 @@ The feed is what happened in one project, newest first and grouped by day. Today
 and Yesterday are open; older days sit behind an **Earlier** disclosure that
 carries its own count and pages back.
 
-Events are one of seven kind families: signal, finished, question, answer,
-approval, artifact, and session. Filter by kind with the chips in the row: All,
-Questions, Approvals, Finished, each with its count. Kinds with no events are
-hidden. Two artifact publishes from one agent inside two minutes collapse into
-one row, "published N artifacts". An answer to a question or approval renders under
-that item's row rather than as its own row, so a thread reads as one
+Events are one of the kind families: signal, finished, question, answer,
+approval, artifact, session, idea, anchor, and score. Filter by kind with the chips in
+the row: All, Questions, Approvals, Finished, Signals, Anchors, Scores, each
+with its count. Kinds with no events are hidden. An anchor and a score draw as their own
+rows, since each is a record in its own right. Two artifact publishes from one
+agent inside two minutes collapse into one row, "published N artifacts". An
+answer to a question or approval renders under that item's row rather than as
+its own row, so a thread reads as one
 conversation; a reply whose root sits beyond the loaded page still renders as
 its own row so nothing is lost. An artifact row links to that artifact in the
 project's Artifacts stage; rows with no destination of their own stay

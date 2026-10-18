@@ -9,6 +9,12 @@ value as `question_id`. `signal_append` accepts `signal`, `finished`, `approval`
 needs-action flag follows the kind and cannot be set by a client. An idea
 lands in the inbox for triage and carries no question or decision.
 
+`anchor` and `score` are ordinary feed events too, session-scoped and pruned
+with the session. `signal_append` refuses both: `session_anchor` writes an
+anchor at a phase boundary and `session_resume` reads it back with the events
+after it, and a `score` is written only by the human. Both page, search and
+subscribe like any other event.
+
 An inbox item is `unread` for finished work, `action` while it waits on the
 human, and `resolved` once answered or decided. The `waiting` status is
 reserved. `inbox_read` returns `event_id`, `project_id`, `project_display_name`

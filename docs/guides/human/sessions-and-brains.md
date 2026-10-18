@@ -34,6 +34,11 @@ brains, and each resumes its own.
 
 Opening a session shows:
 
+- the **anchor card** above the brain tree: the owner's last phase boundary. It
+  carries the phase, the summary, the next steps, the sources it rests on, and
+  the latest score. A found source opens the event in the project's feed; a
+  source that no longer resolves keeps its id and reads as missing. A session
+  with no anchor says so in one line and offers no score control;
 - the **handoff note** its last owner left when it ended the session, shown in
   the header rather than behind a disclosure;
 - the **brain tree**, its `kv/` keys and `fs/` files, expandable, with long file
@@ -41,9 +46,13 @@ Opening a session shows:
 - the **lineage**: whether the work was adopted or forked, from which session
   and agent, and whether that source has since been pruned.
 
+The stage control row carries a **Resume** and a **Brain** link pair. Resume
+lists the events after the anchor, oldest first, each one opening the event in
+the project's feed; Brain is the tree.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/session-detail-desktop-dark.png">
-  <img src="../../assets/screens/session-detail-desktop-light.png" alt="The session detail: the brain tree, the handoff note and the lineage.">
+  <img src="../../assets/screens/session-detail-desktop-light.png" alt="The session detail: the anchor card, the brain tree, the handoff note and the lineage.">
 </picture>
 
 ## Reading a brain entry
@@ -51,6 +60,15 @@ Opening a session shows:
 A `kv` key opens in the aside as monospace with a copy control. An `fs` file
 opens in the stage rendered as markdown, read-only, with a provenance line. A
 missing path or a directory is explained in place.
+
+## Scoring a run
+
+**Score this run** sits on the anchor card, and only when there is an anchor. It
+opens one dialog with a 1 to 5 control and a rationale of up to 2000 characters,
+counted as you write it. A score is yours: it cites the anchor it grades and is
+appended to the feed as a `score` event, and it never changes the run or the
+anchor. Agents read scores and cannot write one. A refused score stays in the
+dialog with the hub's reason.
 
 ## Ending, pruning, and reassigning
 
@@ -75,7 +93,9 @@ missing path or a directory is explained in place.
 ## You should now see
 
 Every session in the project, active or ended, with its owner, its handoff note,
-and its lineage, and the brain behind any one of them readable in place.
+and its lineage, and the brain behind any one of them readable in place. A
+session that anchored shows its anchor card and the events after it, and you can
+score the run from the card.
 
 ## See also
 

@@ -44,7 +44,8 @@ is distroless and has no shell or `curl`.
 
 - HTTP requests, by method and status class;
 - failed responses, by hub error code;
-- events appended, by kind;
+- events appended, by kind: `agenthub_events_total`, whose `kind` label carries
+  `anchor` and `score` beside the other kinds;
 - MCP tool calls, by tool;
 - sends to the notify target, by result
   (`agenthub_notify_sends_total`, `delivered` or `failed`).

@@ -17,6 +17,7 @@ owning page, the link names it.
 | **Agent** | One AI worker with its own token and personal space. It reaches the hub over MCP. [Operating model](/architecture/operating-model.md) |
 | **Agent surface** | The MCP tools agents call. [MCP tools](/reference/mcp-tools.md) |
 | **AgentFS** | The embedded store that backs one file per session brain and per project knowledge base. The hub wraps it rather than reimplementing it. [Data model](/architecture/data-model.md) |
+| **Anchor** | A session-scoped `anchor` event written by an agent at a phase boundary: a phase, a summary, next steps, and the source event ids the summary rests on. The event is the record; `session_anchor` mirrors it to the brain's `RECOVERY.md` as a view. [MCP tools](/reference/mcp-tools.md) |
 | **Approval** | A signal of kind `approval` that asks the human to approve or decline. It waits in the inbox. [MCP tools](/reference/mcp-tools.md) |
 | **Artifact** | A hosted HTML or markdown output, public or password protected, with immutable versions. [MCP tools](/reference/mcp-tools.md) |
 | **Brain** | A session's server-side working state: key-value state, an append-only audit log, and a POSIX-like filesystem, held in one AgentFS file. [Data model](/architecture/data-model.md) |
@@ -45,6 +46,7 @@ owning page, the link names it.
 | **PWA** | The installable, mobile-first app the human watches the hub from. [REST API](/reference/rest-api.md) |
 | **Question** | A signal of kind `question` that asks the human something. The answer closes the thread. [MCP tools](/reference/mcp-tools.md) |
 | **Retention layer** | A per-layer expiry policy for feed events, session brains, and artifacts. Designed for, not shipped in v1. [Goals](/design/goals.md) |
+| **Score** | A session-scoped `score` event, written only by the human, that grades an anchor slice from 1 to 5 with a rationale. It cites the anchor and never changes the run. [MCP tools](/reference/mcp-tools.md) |
 | **Session** | One agent working context, named by the agent. It has a row in the hub store and a brain file on disk. [MCP tools](/reference/mcp-tools.md) |
 | **Share link** | A capability link to an artifact, one per artifact, that can be revoked. [REST API](/reference/rest-api.md) |
 | **Signal** | A free-form event an agent appends to a project feed. [MCP tools](/reference/mcp-tools.md) |
