@@ -335,7 +335,12 @@ token shown once, and resolving or deleting needs the token or write access. A
 quote anchor is refused on versions the server holds only as ciphertext. Artifact
 reads and listings carry thread counts across every version: `comments_count`
 (total comments) and `comments_open` (unresolved comments), both defaulting to 0
-when there are none.
+when there are none. Comments are flat: there is no parent or reply id and
+`comment_list` returns them oldest first. The PWA groups comments into one
+displayed thread when their anchors share a quote on the same version (text
+anchors) or when both are point anchors on the same version, so replying means
+posting with that same anchor and version; unanchored comments never group.
+Grouping is presentation only.
 
 ## Session ownership and pickup
 

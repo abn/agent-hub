@@ -23,7 +23,9 @@ use super::{HubServer, to_error_data};
 
 #[tool_router(router = comments_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Post a comment on an artifact and return it with a delete token.")]
+    #[tool(
+        description = "Post a comment on an artifact and return it with a delete token. Comments are flat: there is no parent or reply id. The PWA groups comments into one displayed thread when their anchors share a quote on the same version (text anchors) or when both are point anchors on the same version, so reply by posting with that same anchor and version. Unanchored comments never group."
+    )]
     async fn comment_post(
         &self,
         context: RequestContext<RoleServer>,
@@ -87,7 +89,9 @@ impl HubServer {
         Ok(CallToolResult::structured(payload))
     }
 
-    #[tool(description = "List an artifact's comments, oldest first.")]
+    #[tool(
+        description = "List an artifact's comments, oldest first. Comments are flat (no parent or reply id); grouping into threads happens client-side, when anchors share a quote on the same version (text) or both are point anchors on the same version."
+    )]
     async fn comment_list(
         &self,
         context: RequestContext<RoleServer>,
