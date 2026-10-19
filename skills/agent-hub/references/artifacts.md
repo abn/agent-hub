@@ -31,6 +31,14 @@ Comment with `comment_post` (a point or quote anchor is optional), read
 with `comment_list`, and resolve or delete with the returned delete token
 or write access. Quotes are refused on protected versions.
 
+Comments are flat: there is no parent or reply id, and `comment_list` returns
+them oldest first. The PWA groups comments into one displayed thread when their
+anchors share a quote on the same version (text anchors) or when both are point
+anchors on the same version; a reply therefore reuses that same anchor and
+version. Unanchored
+comments never group and each stands alone. Grouping is a read-side
+presentation; the store and the tools stay flat.
+
 A public artifact is served as a page at `{{base_url}}/artifacts/<artifact_id>`
 with `?version=N` selecting a snapshot, and rendered in the PWA. Markdown
 artifacts are rendered in the browser by the viewer, with raw HTML in the

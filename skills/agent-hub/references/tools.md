@@ -91,6 +91,10 @@ artifact_list(project_id, session?)
 artifact_delete(artifact_id)
 comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
 comment_list(artifact_id)
+  Comments are flat (no parent or reply id). The PWA groups comments into one
+  displayed thread when their anchors share a quote on the same version (text
+  anchors) or when both are point anchors on the same version, so reply by
+  posting with that same anchor and version. Unanchored comments never group.
 comment_resolve(artifact_id, comment_id, done, delete_token?)
 comment_delete(artifact_id, comment_id, delete_token?)
 ```
