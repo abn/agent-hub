@@ -15,7 +15,7 @@ use super::{HubServer, to_error_data};
 #[tool_router(router = identity_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Report the calling identity, its personal space, whether the caller is the admin, and the URL of the agent guide. The discovery call: it proves the token resolves and points an agent at the guide."
+        description = "Report the calling identity (the `actor` events carry, and the `agent` whose token authenticated the call), its personal space, whether the caller is the admin, and the URL of the agent guide. The discovery call: it proves the token resolves and points an agent at the guide."
     )]
     async fn whoami(
         &self,
@@ -31,6 +31,7 @@ impl HubServer {
         };
         Ok(CallToolResult::structured(json!({
             "actor": principal.actor,
+            "agent": principal.agent_id,
             "admin": principal.is_admin,
             "personal_project": personal_project,
             // The guide is served at the hub origin, so an agent learns it

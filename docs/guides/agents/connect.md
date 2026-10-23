@@ -99,6 +99,56 @@ HUB_URL=http://127.0.0.1:8080 HUB_AGENT_ID=claude agent-hub mcp
 ```
 
 This exception ends at loopback; a hub bound past it keeps requiring tokens.
+With a token, `X-Agent-Id` means something else on any bind: see
+[One token per host](#one-token-per-host-one-name-per-agent).
+
+## One token per host, one name per agent
+
+A token authenticates; it does not have to name one agent. Give a host one
+token and let every agent on it send its own name beside it in `X-Agent-Id`.
+The hub still resolves the token and nothing else about the call changes, but
+the work is attributed to `<token agent>/<name>`, so the feed, the sessions and
+the cursors tell the agents apart.
+
+For a harness that sends headers itself, add one:
+
+```json
+{
+  "mcpServers": {
+    "agent-hub": {
+      "type": "http",
+      "url": "http://hub.lan:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer <host token>",
+        "X-Agent-Id": "claude"
+      }
+    }
+  }
+}
+```
+
+The stdio proxy and `agent-hub call` send `HUB_AGENT_ID` as that header, so
+set it per harness and keep the one `HUB_TOKEN`:
+
+```sh
+HUB_URL=http://hub.lan:8080 HUB_TOKEN=<host token> HUB_AGENT_ID=claude agent-hub mcp
+```
+
+A name is 1 to 64 characters: letters and digits, then letters, digits, `.`,
+`_` or `-`. It needs no registration and creates no agent. The hub refuses a
+name that breaks the spelling, or that is sent twice, with `invalid_argument`,
+and one that would spell an existing agent's id with `conflict`. The proxy and
+`agent-hub call` leave off an id the hub would refuse and say so on stderr, so
+the call is the token's agent. Naming the token's own agent id changes nothing.
+
+A name is attribution only. It grants nothing and borrows nothing: the
+agent reaches exactly what the token reaches, a name that spells another agent
+does not become that agent, and the admin token ignores the header and stays
+the human. Two agents that start a session of the same name get two sessions,
+and a call with the bare token is a different actor from a call with a name.
+`whoami` reports both: `actor` is `host-a/claude` and `agent` is `host-a`.
+An agent that starts sending a name leaves its earlier sessions with the
+token's agent: pick them up with `from`.
 
 ## Prove it
 
@@ -135,10 +185,11 @@ later command too, not only the enrolment, and the enrolment saves the token and
 the hub URL into that file.
 
 > [!IMPORTANT]
-> Two agents sharing one config file share one identity: the hub resolves both
-> to the same agent, so their sessions, their writes, and their ownership of a
-> session are one agent's. Keeping the files apart is what keeps the agents
-> apart.
+> Two agents sharing one config file share one token, and the hub resolves
+> both to the same agent, so their sessions, their writes, and their ownership
+> of a session are one agent's. Either keep the files apart, or keep the token
+> and have each agent send its own name, as in
+> [One token per host](#one-token-per-host-one-name-per-agent).
 
 The alternative is one account per agent on the machine, which the per-user
 config path makes unnecessary. Nothing else in the hub changes: grants, project

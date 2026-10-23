@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
-use crate::http::auth::bearer_token;
+use crate::http::auth::{agent_principal, bearer_token};
 use crate::http::problem::{Problem, ProblemPath, json_body};
 use crate::store::projects::{self, Project};
 
@@ -34,11 +34,7 @@ pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ProjectList>, Problem> {
-    let principal = state
-        .auth
-        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = agent_principal(&state, &headers).await?;
 
     let projects = projects::list_visible(&state.db, &state.config.active_since(), &principal)
         .await
@@ -52,11 +48,7 @@ pub async fn create(
     headers: HeaderMap,
     body: std::result::Result<Json<NewProject>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<Project>, Problem> {
-    let _principal = state
-        .auth
-        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let _principal = agent_principal(&state, &headers).await?;
 
     let payload = json_body(body, "project body must be JSON with id and display_name")?;
 
@@ -94,11 +86,7 @@ pub async fn get(
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<Project>, Problem> {
-    let principal = state
-        .auth
-        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = agent_principal(&state, &headers).await?;
 
     let project = projects::get(&state.db, &id)
         .await
@@ -146,11 +134,7 @@ pub async fn update(
     headers: HeaderMap,
     body: std::result::Result<Json<ProjectPatch>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<Project>, Problem> {
-    let principal = state
-        .auth
-        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = agent_principal(&state, &headers).await?;
 
     let payload = json_body(body, "project body must be JSON with display_name")?;
 
@@ -239,11 +223,7 @@ pub async fn stats(
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<projects::ProjectStats>, Problem> {
-    let principal = state
-        .auth
-        .resolve_agent(&state.db, bearer_token(&headers).as_deref())
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = agent_principal(&state, &headers).await?;
 
     let project = projects::get(&state.db, &id)
         .await

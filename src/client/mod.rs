@@ -135,17 +135,36 @@ pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient,
     })?;
     let endpoint = format!("{}/mcp", url.trim_end_matches('/'));
     let mut transport_config = StreamableHttpClientTransportConfig::with_uri(endpoint.as_str());
+    // The configured agent id travels as `X-Agent-Id`. Without a token a
+    // loopback hub reads it as the agent's identity. Beside a token it names a
+    // sub-identity of the token's agent, which the hub holds to a stricter
+    // spelling. An id it would refuse is left off, with a warning, so a
+    // configuration that worked before keeps working as the token's agent.
+    let declared = config
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .filter(|id| {
+            let sendable = config.token.is_none() || crate::principal::is_declared_name(id);
+            if !sendable {
+                eprintln!(
+                    "agent-hub: HUB_AGENT_ID '{id}' is not a valid name to declare beside a token, \
+                     so calls are made as the token's agent"
+                );
+            }
+            sendable
+        });
     if let Some(token) = config.token.clone() {
         transport_config = transport_config.auth_header(token);
-    } else if let Some(agent_id) = config.agent_id.clone().filter(|id| !id.trim().is_empty()) {
-        // On a loopback hub the client may connect without a token; forward
-        // the configured agent id so the hub can resolve the identity.
-        let name = axum::http::HeaderName::from_static("x-agent-id");
-        if let Ok(value) = axum::http::HeaderValue::from_str(agent_id.trim()) {
-            let mut headers = std::collections::HashMap::new();
-            headers.insert(name, value);
-            transport_config = transport_config.custom_headers(headers);
-        }
+    }
+    if let Some(agent_id) = declared
+        && let Ok(value) = axum::http::HeaderValue::from_str(agent_id)
+    {
+        let name = axum::http::HeaderName::from_static(crate::principal::AGENT_ID_HEADER);
+        let mut headers = std::collections::HashMap::new();
+        headers.insert(name, value);
+        transport_config = transport_config.custom_headers(headers);
     }
     let transport = StreamableHttpClientTransport::from_config(transport_config);
 

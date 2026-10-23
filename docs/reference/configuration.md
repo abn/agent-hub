@@ -122,7 +122,7 @@ directory, and checks again with symlinks resolved before each backup.
 |---|---|---|---|
 | `url` | `HUB_URL` | unset | Base URL of a running hub; with none the proxy serves the local data directory standalone |
 | `token` | `HUB_TOKEN` | unset | Bearer token the hub resolves to an agent |
-| `agent_id` | `HUB_AGENT_ID` | unset | Advisory agent label; the hub derives the actor from the token |
+| `agent_id` | `HUB_AGENT_ID` | unset | The name the client declares in `X-Agent-Id`. Beside a token it is a sub-identity of the token's agent, for attribution only; on a loopback hub with no token it is the agent's identity |
 | `project` | `HUB_PROJECT` | unset | Project the knowledge-base shorthands act on when no flag names one |
 | `timeout` | `HUB_TIMEOUT` | `120` | Seconds one call may take, handshake to answer; a number above zero, fractional allowed (for example `2.5`) |
 

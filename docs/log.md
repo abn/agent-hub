@@ -4,6 +4,19 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-23
+
+### A name declared beside a token is attribution only
+
+* **Creation**: Added [A name declared beside a token is attribution
+  only](adr/0036-declared-names-beside-a-token.md). A request with an agent
+  token and `X-Agent-Id` acts as `<agent>/<name>`: the actor, session owner and
+  cursor key change, authorization does not, and the admin token ignores the
+  header.
+* **Update**: [Connect a harness](guides/agents/connect.md) gains the one token
+  per host section, and the operating model, configuration and MCP tools
+  references and the served bootstrap describe the header beside a token.
+
 ## 2026-10-18
 
 ### Session handoffs become anchors, and a run can be scored

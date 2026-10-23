@@ -663,6 +663,29 @@ pub fn http_router(state: AppState) -> axum::Router {
         .layer(axum::middleware::from_fn_with_state(state, require_bearer))
 }
 
+/// The hub's error object as a response, with the status its code carries.
+///
+/// The status follows the error's own code, not a fixed 401: a token that
+/// resolves but whose touch write hits a full disk is a 503 the caller should
+/// retry, and calling it a bad token tells an agent to do the one wrong thing.
+/// The body's code is the same vocabulary, so the status and the body stay in
+/// sync.
+fn error_response(err: &crate::error::Error) -> Response {
+    crate::metrics::record_error(err.code());
+    (
+        crate::http::problem::status_for(err.code()),
+        axum::Json(json!({
+            "error": {
+                "code": err.code().as_str(),
+                "message": err.to_string(),
+                "retryable": err.retryable(),
+                "details": {},
+            }
+        })),
+    )
+        .into_response()
+}
+
 /// Reject requests without a valid bearer token and pass the principal along.
 async fn require_bearer(
     State(state): State<AppState>,
@@ -683,18 +706,20 @@ async fn require_bearer(
     // applies past loopback, so a networked hub keeps requiring a token.
     // Local identity without a token is available only on loopback when no admin
     // token is configured, so a hub that pins an admin token keeps requiring
-    // agent tokens too.
+    // agent tokens too. A caller that does present a token is resolved below
+    // exactly as on any bind, and the header then names a sub-identity of the
+    // token's agent rather than an agent.
     if token.is_none() && state.config.bind.ip().is_loopback() && state.config.admin_token.is_none()
     {
         let declared = request
             .headers()
-            .get("x-agent-id")
+            .get(crate::principal::AGENT_ID_HEADER)
             .and_then(|value| value.to_str().ok())
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("loopback")
             .to_string();
-        match crate::store::identity::ensure_local_agent(&state.db, &declared).await {
+        return match crate::store::identity::ensure_local_agent(&state.db, &declared).await {
             Ok(agent_id) => {
                 let principal = crate::principal::Principal {
                     actor: agent_id.clone(),
@@ -703,50 +728,21 @@ async fn require_bearer(
                     is_pending: false,
                 };
                 request.extensions_mut().insert(principal);
-                return next.run(request).await;
+                next.run(request).await
             }
-            Err(err) => {
-                crate::metrics::record_error(err.code());
-                return (
-                    crate::http::problem::status_for(err.code()),
-                    axum::Json(serde_json::json!({
-                        "error": {
-                            "code": err.code().as_str(),
-                            "message": err.to_string(),
-                            "retryable": err.retryable(),
-                            "details": {},
-                        }
-                    })),
-                )
-                    .into_response();
-            }
-        }
+            Err(err) => error_response(&err),
+        };
     }
 
-    match state.auth.resolve_agent(&state.db, token.as_deref()).await {
+    match state
+        .auth
+        .resolve_agent_as(&state.db, token.as_deref(), request.headers())
+        .await
+    {
         Ok(principal) => {
             request.extensions_mut().insert(principal);
             next.run(request).await
         }
-        // The status follows the error's own code, not a fixed 401: a token
-        // that resolves but whose touch write hits a full disk is a 503 the
-        // caller should retry, and calling it a bad token tells an agent to do
-        // the one wrong thing. The body's code is the same vocabulary, so the
-        // status and the body stay in sync.
-        Err(err) => {
-            crate::metrics::record_error(err.code());
-            (
-                crate::http::problem::status_for(err.code()),
-                axum::Json(json!({
-                    "error": {
-                        "code": err.code().as_str(),
-                        "message": err.to_string(),
-                        "retryable": err.retryable(),
-                        "details": {},
-                    }
-                })),
-            )
-                .into_response()
-        }
+        Err(err) => error_response(&err),
     }
 }

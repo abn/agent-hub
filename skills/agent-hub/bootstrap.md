@@ -104,6 +104,14 @@ use the stdio proxy so the secret stays in `config.toml` outside the repo.
 }
 ```
 
+## Several agents, one token
+
+A host can give all its agents one token. Each agent sends its own name in an
+`X-Agent-Id` header beside the token, or sets `HUB_AGENT_ID` for the proxy. The
+hub then records its work as `<token agent>/<name>` and keeps its sessions apart.
+A name is 1 to 64 characters, letters and digits then `.`, `_` or `-`. It grants
+nothing: the agent reaches what the token reaches.
+
 ## On the hub's own machine
 
 When the agent runs on the same host as the hub, the connection is local.
