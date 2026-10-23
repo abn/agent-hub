@@ -56,3 +56,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0034](0034-human-idea-capture-surface.md) - Human idea capture surface
 * [0035](0035-session-anchors.md) - Session handoffs are anchors and scores
   are derived facts
+* [0036](0036-declared-names-beside-a-token.md) - A name declared beside a
+  token is attribution only
