@@ -39,6 +39,36 @@ fn one_call_prints_the_tools_json_and_exits_zero() {
     assert_eq!(result["actor"], AGENT, "the hub answered: {result}");
 }
 
+/// `HUB_AGENT_ID` beside a token declares the caller's name to the hub, which
+/// records it as a sub-identity of the token's agent. A spelling the hub would
+/// refuse is left off, so a configuration that worked before keeps working.
+#[test]
+fn the_configured_agent_id_is_declared_beside_the_token() {
+    let hub = Hub::start("call-declared");
+    let token = ("HUB_TOKEN", hub.agent_token.clone());
+
+    let actor = |agent_id: &str| {
+        let output = run_with(
+            &hub,
+            &["call", "whoami"],
+            &[token.clone(), ("HUB_AGENT_ID", agent_id.to_string())],
+        );
+        assert_eq!(output.status.code(), Some(0), "{agent_id}: {output:?}");
+        stdout_json(&output)["actor"]
+            .as_str()
+            .expect("actor")
+            .to_string()
+    };
+
+    assert_eq!(actor("claude"), format!("{AGENT}/claude"));
+    assert_eq!(actor(AGENT), AGENT, "the token's own name adds nothing");
+    assert_eq!(
+        actor("not a valid name"),
+        AGENT,
+        "an id the hub would refuse is not sent"
+    );
+}
+
 #[test]
 fn arguments_come_from_the_command_line() {
     let hub = Hub::start("call-args");

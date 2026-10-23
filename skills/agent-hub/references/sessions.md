@@ -110,12 +110,15 @@ Call `session_start` again: your own name gives you a fresh session, and
 `from` gives you a copy of where the work now stands.
 
 The owner of a session is the identity the hub saw when it was started: the
-token's agent over HTTP or through the stdio proxy, and `HUB_AGENT_ID`
+token's agent over HTTP or through the stdio proxy, or `<agent>/<name>` when the
+call declared a name beside the token, and `HUB_AGENT_ID`
 (`local` when unset) for a standalone `agent-hub mcp` that opens the data
 directory itself. Moving from standalone stdio to the proxy therefore keeps
 your sessions only when the two are the same string. When they are not, your
 earlier work is still there under the old owner: list it with `session_list`
-and pick it up with `from: {agent: "local", name: "..."}`.
+and pick it up with `from: {agent: "local", name: "..."}`. The same holds when
+you start sending a name beside the token: earlier sessions stay with the
+token's agent, and `from: {agent: "<token agent>", name: "..."}` picks one up.
 
 Leave the note before you stop: `session_end(session_id, handoff: "...")` keeps
 up to 4096 characters on the session and in the human's feed, and whoever picks

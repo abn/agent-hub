@@ -82,6 +82,14 @@ route being admin-only is about which surface owns it, not a claim that agents
 may not touch projects; agents reach projects over MCP, and they may create and
 list the ones they can see over REST as well.
 
+## Declared names
+
+Several agents may share one token. Each can send a name in `X-Agent-Id`, and
+the hub then attributes its work to `<token agent>/<name>`. The name never
+decides what a caller may reach: the token's agent does, so a name grants
+nothing and switches no agent. The admin token ignores it. See
+[the decision](/adr/0036-declared-names-beside-a-token.md).
+
 ## Loopback
 
 On a loopback bind the hub may resolve a principal without a token: an agent

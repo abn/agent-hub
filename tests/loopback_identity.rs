@@ -127,3 +127,93 @@ fn loopback_defaults_identity_and_opens_the_control_surface() {
         home.raw
     );
 }
+
+/// A token presented on a loopback hub is verified like on any bind, and the
+/// header beside it names a sub-identity of the token's agent. It is not the
+/// tokenless path: it creates no agent.
+#[tokio::test]
+async fn loopback_with_a_token_reads_the_header_as_attribution_only() {
+    let data_dir = TempDir::new("loopback-token-and-header");
+    let db = common::store::open(data_dir.path()).await;
+    agent_hub::store::identity::create_agent(&db, "host-a", "Host A")
+        .await
+        .expect("create agent");
+    let token = agent_hub::store::identity::issue_token(&db, "host-a")
+        .await
+        .expect("issue token")
+        .token;
+    drop(db);
+    let (_hub, port) = serve_loopback(data_dir.path());
+
+    let whoami = |headers: &[(&str, &str)], session: &str| {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "whoami", "arguments": {}},
+        })
+        .to_string();
+        let mut all = vec![
+            ("Accept", "application/json, text/event-stream"),
+            ("mcp-session-id", session),
+            ("mcp-protocol-version", PROTO),
+        ];
+        all.extend_from_slice(headers);
+        send(port, "POST", "/mcp", &all, Some(&body))
+    };
+
+    let bearer = format!("Bearer {token}");
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": PROTO,
+            "capabilities": {},
+            "clientInfo": {"name": "loopback-test", "version": "0.0.0"},
+        },
+    })
+    .to_string();
+    let response = send(
+        port,
+        "POST",
+        "/mcp",
+        &[
+            ("Accept", "application/json, text/event-stream"),
+            ("Authorization", &bearer),
+            ("X-Agent-Id", "claude"),
+        ],
+        Some(&init),
+    );
+    assert_eq!(response.status, 200, "initialize: {}", response.raw);
+    let session = response.header("mcp-session-id").expect("session id");
+
+    let named = whoami(
+        &[("Authorization", &bearer), ("X-Agent-Id", "claude")],
+        &session,
+    );
+    assert!(
+        named.raw.contains("\"actor\":\"host-a/claude\""),
+        "the declared name is a sub-identity of the token's agent: {}",
+        named.raw
+    );
+
+    // The tokenless path would have created an agent named by the header.
+    let agents = send(port, "GET", "/api/v1/agents", &[], None);
+    assert_eq!(agents.status, 200, "{}", agents.raw);
+    assert!(
+        !agents.raw.contains("\"claude\"") && !agents.raw.contains("host-a/claude"),
+        "a name beside a token registers no agent: {}",
+        agents.raw
+    );
+
+    // A bad token is refused on loopback however well the name is spelt.
+    let refused = whoami(
+        &[
+            ("Authorization", "Bearer not-a-token"),
+            ("X-Agent-Id", "host-a"),
+        ],
+        &session,
+    );
+    assert_eq!(refused.status, 401, "{}", refused.raw);
+}

@@ -899,3 +899,90 @@ async fn an_agent_tightening_a_project_leaves_a_signal() {
         "the admin's own change leaves no signal"
     );
 }
+
+/// A name declared beside an agent token reaches the REST routes an agent can
+/// use the same way it reaches MCP: it is the actor, and it grants nothing.
+#[tokio::test]
+async fn a_declared_name_attributes_a_rest_change_and_grants_nothing() {
+    let state = state().await;
+    let token = {
+        agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+            .await
+            .expect("create agent");
+        agent_hub::store::identity::create_agent(&state.db, "agent-two", "Agent Two")
+            .await
+            .expect("create agent");
+        agent_hub::store::identity::issue_token(&state.db, "agent-one")
+            .await
+            .expect("issue token")
+            .token
+    };
+    let auth = format!("Bearer {token}");
+    let as_name = |name: &str, mut request: axum::http::Request<axum::body::Body>| {
+        request
+            .headers_mut()
+            .insert("x-agent-id", name.parse().expect("header value"));
+        request
+    };
+
+    projects::create(&state.db, "open-work", "Open Work")
+        .await
+        .expect("create project");
+    let response = router(state.clone())
+        .oneshot(as_name(
+            "claude",
+            request(
+                "PATCH",
+                "/api/v1/projects/open-work",
+                Some(&auth),
+                Some(serde_json::json!({ "confidential": true })),
+            ),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let conn = state.db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT actor, summary FROM events WHERE project_id = 'open-work' AND kind = 'signal'",
+            (),
+        )
+        .await
+        .expect("query");
+    let row = rows.next().await.expect("row").expect("a signal row");
+    assert_eq!(row.get::<String>(0).expect("actor"), "agent-one/claude");
+    assert_eq!(
+        row.get::<String>(1).expect("summary"),
+        "agent-one/claude made Open Work confidential"
+    );
+
+    // The project is confidential now and agent-two holds the grant. Naming
+    // agent-two beside agent-one's token borrows nothing of it.
+    agent_hub::store::identity::add_grant(&state.db, "agent-two", "open-work")
+        .await
+        .expect("grant");
+    let read = router(state.clone())
+        .oneshot(as_name(
+            "agent-two",
+            request("GET", "/api/v1/projects/open-work", Some(&auth), None),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(
+        read.status(),
+        StatusCode::NOT_FOUND,
+        "naming the agent that holds a grant borrows nothing of it"
+    );
+
+    // A name the hub would not accept is refused, not dropped.
+    let refused = router(state.clone())
+        .oneshot(as_name(
+            "not valid",
+            request("GET", "/api/v1/projects", Some(&auth), None),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(refused).await["code"], "invalid_argument");
+}

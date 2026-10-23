@@ -101,7 +101,7 @@ identity.
 | `brain_history` | List one project knowledge base page's versions, newest first, deleted pages included. `brain_get` with `version` reads one. |
 | `brain_revert` | Write an earlier version of a project knowledge base page back as a new write, restoring a deleted page the same way. |
 | `search` | Search feed events, artifacts, session brains, and knowledge base pages, scoped to a project, a session, or global. |
-| `whoami` | Report the calling identity, its personal space, and the URL of the agent guide. |
+| `whoami` | Report the calling identity (`actor`, and `agent`, the agent the call resolved to, null for the admin), its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
 
 ## Resources
@@ -302,8 +302,11 @@ wants to branch. The answer records no separate marker for a pick.
 
 Every HTTP call carries a bearer token bound to a stable identity, and the server
 sets the `actor`; a request cannot forge it. A proxy and a one-shot call are HTTP
-calls, so they are the token's identity, and `HUB_AGENT_ID` is advisory there:
-only the embedded standalone stdio mode carries no token, acts as the human
+calls, so they are the token's identity. `HUB_AGENT_ID` adds a name beside the
+token: the call is then the sub-identity `<agent>/<name>`, which is the `actor`
+on what it writes and the owner of its sessions, and which reaches exactly what
+the token reaches. [Connect a harness](/guides/agents/connect.md) has the
+spelling. Only the embedded standalone stdio mode carries no token, acts as the human
 admin, and takes its actor label from `HUB_AGENT_ID`. A token reaches every
 ordinary project and its own personal space; confidential projects require
 explicit grants, and a grant is access or no access, with no levels. Global reads
