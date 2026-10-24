@@ -4,6 +4,17 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.7.0...agent-hub-v1.8.0) (2026-10-24)
+
+
+### Features
+
+* **artifacts:** squash artifact versions ([1130ceb](https://github.com/abn/agent-hub/commit/1130ceb60625d92df6d29df643ed72848e660dde))
+* **ideas:** allow ideas to be resolved, cleared, and replied to as threads ([1195a6b](https://github.com/abn/agent-hub/commit/1195a6b396c26807a736e0a822bb509439eea8be))
+* **identity:** attribute a name declared beside a token ([a752a35](https://github.com/abn/agent-hub/commit/a752a35e2ad960df87b575dc38326854155fc511))
+* **sessions:** anchor a run and score it ([e727075](https://github.com/abn/agent-hub/commit/e727075249aa0d03612be0466d5df9801ebb9f06))
+* **web:** read the anchor and score a run ([b5a6ec1](https://github.com/abn/agent-hub/commit/b5a6ec1fa956f3c7cfc65495e69cfc4699b6befd))
+
 ## [1.7.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.6.0...agent-hub-v1.7.0) (2026-10-18)
 
 
