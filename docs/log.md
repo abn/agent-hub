@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-24
+
+### Artifact versions can be squashed
+
+* **Change**: an artifact's history can be collapsed from the version sheet or
+  the stage's overflow menu: every version before the one being viewed is
+  removed, after confirmation, while that version and everything after it stay.
+  The removal is exposed as `POST /api/v1/artifacts/{id}/squash`,
+  `DELETE /api/v1/artifacts/{id}/versions`, the MCP `artifact_squash` tool, and
+  the PWA's Squash action.
+
 ## 2026-10-23
 
 ### A name declared beside a token is attribution only

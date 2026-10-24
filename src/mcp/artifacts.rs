@@ -253,6 +253,46 @@ impl HubServer {
         Ok(CallToolResult::structured(json!({ "versions": versions })))
     }
 
+    #[tool(
+        description = "Squash an artifact's versions: remove every version before the named one, keeping it and everything after it."
+    )]
+    async fn artifact_squash(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<ArtifactSquashParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let project_id = artifacts::project_id(&self.state.db, &params.artifact_id)
+            .await
+            .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
+        policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
+            .await
+            .map_err(to_error_data)?;
+        let target = params.version.unwrap_or(0);
+        let target = if target < 1 {
+            artifacts::metadata(&self.state.db, &params.artifact_id)
+                .await
+                .map_err(to_error_data)?
+                .version
+        } else {
+            target
+        };
+        let removed = artifacts::squash_versions(
+            &self.state.db,
+            &self.state.data_dir,
+            &params.artifact_id,
+            target,
+        )
+        .await
+        .map_err(to_error_data)?;
+        self.state.notify();
+        Ok(CallToolResult::structured(json!({
+            "artifact_id": params.artifact_id,
+            "version": target,
+            "versions_squashed": removed,
+        })))
+    }
+
     #[tool(description = "Delete an artifact and its history.")]
     async fn artifact_delete(
         &self,
@@ -408,6 +448,14 @@ struct ArtifactVersionsParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactDeleteParams {
     artifact_id: String,
+}
+
+/// Arguments for `artifact_squash`.
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ArtifactSquashParams {
+    artifact_id: String,
+    #[serde(default)]
+    version: Option<i64>,
 }
 
 /// Arguments for `artifact_list`.

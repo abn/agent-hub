@@ -216,7 +216,11 @@ export async function artifactStage(id, projectId, version = null) {
       <div class="proj-overflow-menu" role="menu" hidden>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-start-thread">Start a thread</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-comments">Comments</button>
-        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}">Copy raw</button>
+        <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}">Copy raw</button>${
+          shown > 1
+            ? `\n        <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-squash" data-id="${esc(id)}" data-version="${shown}">Squash</button>`
+            : ""
+        }
         <button type="button" role="menuitem" class="proj-menu-item" data-action="copy-path" data-path="${esc(stagePath)}">Copy path</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-copy-link">Copy link</button>
         <button type="button" role="menuitem" class="proj-menu-item" data-action="stage-share">Share</button>
@@ -409,6 +413,7 @@ export function wireArtifactStage(root, id, info) {
         toast("Link copied");
       },
       "stage-share": () => share?.openSheet(),
+      "stage-squash": () => squashArtifactVersions(id, info.version),
       "stage-open-in-browser": () => {
         const frame = root.querySelector("#hub-frame");
         if (frame) window.open(frame.src, "_blank");
@@ -628,6 +633,27 @@ export function toggleVersionMenu(button) {
   }
 }
 
+// Squash every version before the one being viewed into it, after confirmation.
+export async function squashArtifactVersions(id, version) {
+  const confirmed = await confirmAction({
+    title: "Squash versions?",
+    body: `All versions before v${version} are removed and cannot be read again. Version ${version} stays.`,
+    safe: "Cancel",
+    danger: "Squash",
+    tone: "danger",
+    commit: async () => {
+      await api(`/api/v1/artifacts/${encodeURIComponent(id)}/squash`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version }),
+      });
+    },
+  });
+  if (!confirmed) return;
+  toast("Versions squashed");
+  render();
+}
+
 // A version is read in the stage it was picked from. The pick replaces the
 // address rather than adding to it, so Back still leaves the artifact.
 export function pickVersion(id, version) {
@@ -698,6 +724,17 @@ function buildVersionSheet(id, versions, shown, projectId) {
   const footer = document.createElement("div");
   footer.className = "hub-version-sheet-footer";
   footer.textContent = "Versions are whole saves. Nothing is compared - the hub keeps no diff.";
+  const hasPrior = versions.some((v) => v.version < shown);
+  if (hasPrior) {
+    const squash = document.createElement("button");
+    squash.type = "button";
+    squash.className = "danger hub-version-squash";
+    squash.dataset.action = "version-squash";
+    squash.dataset.id = id;
+    squash.dataset.version = String(shown);
+    squash.textContent = "Squash";
+    footer.appendChild(squash);
+  }
 
   sheet.append(handle, head, list, footer);
 

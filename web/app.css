@@ -1339,6 +1339,9 @@ html.has-dialog { overflow: hidden; }
 }
 .dialog-count[hidden], .dialog-error[hidden] { display: none; }
 .dialog-actions { display: flex; gap: var(--s-2); justify-content: flex-end; flex-wrap: wrap; }
+/* A long commit label wraps inside the dialog rather than running past its
+   edge on a phone. */
+.dialog-actions .dialog-commit { white-space: normal; }
 .dialog-note { margin: 0; font-size: var(--t-12); color: var(--ink-3); }
 /* Danger fills only here: on the screens it stays an outline. */
 .dialog-commit.danger {
@@ -4537,6 +4540,10 @@ a.session-back {
 }
 
 .hub-version-sheet-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
   padding: var(--s-3) var(--s-4);
   font-size: var(--t-12);
   color: var(--ink-2);
@@ -4544,6 +4551,21 @@ a.session-back {
   border-top: 1px solid var(--line);
   background: var(--surface-2);
   flex: none;
+}
+
+.hub-version-menu .hub-version-squash {
+  display: inline-flex;
+  width: fit-content;
+  height: var(--ctl);
+  min-height: var(--ctl);
+  padding: 0 var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-1);
+  color: var(--danger);
+  font-size: var(--t-13);
+  font-weight: 600;
+  text-align: center;
 }
 
 /* component: share-sheet */

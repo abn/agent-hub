@@ -1650,3 +1650,84 @@ async fn an_update_keeps_the_publishing_session_lineage() {
         "the stored row keeps the publishing session too"
     );
 }
+
+#[tokio::test]
+async fn squash_versions_keeps_the_target_and_later_versions() {
+    let dir = TempDir::new("artifact-squash");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"second",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("second version");
+    artifacts::update(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"third",
+        EnvelopeUpdate::Keep,
+        UpdateOptions::default(),
+        None,
+    )
+    .await
+    .expect("third version");
+
+    let removed = artifacts::squash_versions(&db, &dir, &artifact.id, 2)
+        .await
+        .expect("squash");
+    assert_eq!(removed, 1, "only the version before the target goes");
+
+    let versions = artifacts::list_versions(&db, &artifact.id)
+        .await
+        .expect("versions");
+    let listed: Vec<i64> = versions.iter().map(|version| version.version).collect();
+    assert_eq!(listed, vec![2, 3], "the target and later versions stay");
+
+    assert!(
+        artifacts::get_at_version(&db, &dir, &artifact.id, 1)
+            .await
+            .is_err(),
+        "the removed version no longer reads back"
+    );
+    let (_, bytes) = artifacts::get_at_version(&db, &dir, &artifact.id, 2)
+        .await
+        .expect("target version");
+    assert_eq!(bytes, b"second");
+}
+
+#[tokio::test]
+async fn squash_versions_refuses_a_live_version() {
+    let dir = TempDir::new("artifact-squash-live");
+    let db = open(&dir).await;
+    let artifact = artifacts::publish(&db, &dir, public("Report", b"first"), None)
+        .await
+        .expect("publish");
+    let live = artifacts::draft(
+        &db,
+        &dir,
+        "agent-one",
+        &artifact.id,
+        b"live",
+        EnvelopeUpdate::Keep,
+        Default::default(),
+    )
+    .await
+    .expect("draft");
+    let live_version = live.live_version.expect("a live version");
+
+    let error = artifacts::squash_versions(&db, &dir, &artifact.id, live_version)
+        .await
+        .expect_err("a live version cannot be squashed into");
+    assert_eq!(error.code(), ErrorCode::InvalidArgument);
+}
