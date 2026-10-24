@@ -219,6 +219,12 @@ function trays(item) {
       <button type="button" class="action" data-action="inbox-tray-answer" data-id="${id}"${optionsAttr(item.payload)}>Reply</button>
     </div>`;
   }
+  if (item.kind === "idea") {
+    return `<div class="swipe-tray swipe-tray-actions" hidden>
+      <button type="button" data-action="inbox-tray-clear" data-id="${id}" data-summary="${esc(item.summary)}">Clear</button>
+      <button type="button" class="action" data-action="inbox-tray-resolve" data-id="${id}" data-summary="${esc(item.summary)}">Resolve</button>
+    </div>`;
+  }
   return "";
 }
 
@@ -355,6 +361,12 @@ function detail(item, state) {
     </div>`;
   } else if (waits(item) && item.kind === "question") {
     answers = `<div class="inbox-reply" data-id="${id}"${optionsAttr(item.payload)}></div>`;
+  } else if (waits(item) && item.kind === "idea") {
+    answers = `<div class="inbox-answers">
+      <button type="button" class="action" data-action="inbox-detail-resolve" data-id="${id}" data-summary="${esc(item.summary)}">Resolve</button>
+      <button type="button" data-action="inbox-detail-clear" data-id="${id}" data-summary="${esc(item.summary)}">Clear</button>
+    </div>
+    <div class="inbox-reply" data-id="${id}" data-kind="idea"></div>`;
   }
   return `<article class="inbox-detail" aria-labelledby="inbox-detail-title">
     <a class="inbox-back" href="${back}"><span class="inbox-back-arrow" aria-hidden="true">&larr; </span><span class="inbox-back-label">Back to inbox</span><span class="inbox-close-label">Close</span></a>
@@ -381,13 +393,20 @@ function detail(item, state) {
 function mountReply(state) {
   const slot = main.querySelector(".inbox-reply");
   if (!slot) return;
+  const isIdea = slot.dataset.kind === "idea";
   const reply = composer({
-    label: "Your answer",
+    label: isIdea ? "Add an addendum" : "Your answer",
     options: optionsFrom(slot.dataset.options),
     send: async (body) => {
-      await sendAnswer(slot.dataset.id, body);
-      await leave(state);
-      toast("Answer sent, recorded on the feed.");
+      if (isIdea) {
+        await sendIdeaReply(slot.dataset.id, body);
+        await leave(state);
+        toast("Addendum logged on the idea's thread.");
+      } else {
+        await sendAnswer(slot.dataset.id, body);
+        await leave(state);
+        toast("Answer sent, recorded on the feed.");
+      }
     },
   });
   slot.appendChild(reply.element);
@@ -626,6 +645,20 @@ const sendAnswer = (id, body) =>
     body: JSON.stringify({ body }),
   });
 
+const sendIdeaReply = (id, summary) =>
+  api(`/api/v1/ideas/${encodeURIComponent(id)}/reply`, {
+    method: "POST",
+    body: JSON.stringify({ summary }),
+  });
+
+async function actOnIdea(id, status, summary) {
+  await api(`/api/v1/ideas/${encodeURIComponent(id)}/${status === "cleared" ? "clear" : "resolve"}`, {
+    method: "POST",
+  });
+  await render();
+  toast(`${status === "cleared" ? "Cleared" : "Resolved"} "${summary || id}".`);
+}
+
 // Reply opens a composer under the row it belongs to, so the question stays
 // readable while the answer is written and a failed send keeps the words.
 // Pressing Reply again on an open composer moves back into it rather than
@@ -857,6 +890,10 @@ main.addEventListener("click", (event) => {
     // the button that was pressed opens the composer under the row it belongs to.
     conceal();
     work = answer(id, button);
+  } else if (action === "inbox-tray-resolve" || action === "inbox-detail-resolve") {
+    work = actOnIdea(id, "resolved", summary);
+  } else if (action === "inbox-tray-clear" || action === "inbox-detail-clear") {
+    work = actOnIdea(id, "cleared", summary);
   }
   if (work) work.catch(failed);
 });

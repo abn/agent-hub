@@ -384,7 +384,11 @@ function dayGroups(groups, baseline, selectedId = "") {
   const loaded = groups.flatMap((group) => collapseDayEvents(group.events));
   const repliesByRoot = new Map();
   for (const item of loaded) {
-    if (item.kind === "answer" && item.thread_id && item.thread_id !== item.id) {
+    if (
+      (item.kind === "answer" || item.kind === "idea") &&
+      item.thread_id &&
+      item.thread_id !== item.id
+    ) {
       const key = item.thread_id;
       if (!repliesByRoot.has(key)) repliesByRoot.set(key, []);
       repliesByRoot.get(key).push(item);
@@ -392,7 +396,18 @@ function dayGroups(groups, baseline, selectedId = "") {
   }
   // A root that is actually present on the loaded page owns its replies; any
   // answer whose root is not on the loaded page falls back to its own row.
-  const rootIds = new Set(loaded.filter((item) => item.kind !== "answer").map((item) => item.id));
+  const rootIds = new Set(
+    loaded
+      .filter(
+        (item) =>
+          !(
+            (item.kind === "answer" || item.kind === "idea") &&
+            item.thread_id &&
+            item.thread_id !== item.id
+          ),
+      )
+      .map((item) => item.id),
+  );
   return groups
     .map((group) => {
       const events = collapseDayEvents(group.events);
@@ -401,14 +416,22 @@ function dayGroups(groups, baseline, selectedId = "") {
           ? repliesByRoot.get(id).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
           : [];
       const visible = events
-        .filter((item) => item.kind !== "answer")
+        .filter(
+          (item) =>
+            !(
+              (item.kind === "answer" || item.kind === "idea") &&
+              item.thread_id &&
+              item.thread_id !== item.id
+            ),
+        )
         .map((item) =>
           item.collapsed
             ? collapsedArtifactRow(item, baseline)
             : feedRow(item, baseline, item.id === selectedId, repliesFor(item.id)),
         );
       const fallback = events
-        .filter((item) => item.kind === "answer")
+        .filter((item) => item.kind === "answer" || item.kind === "idea")
+        .filter((item) => item.thread_id && item.thread_id !== item.id)
         .filter((item) => !rootIds.has(item.thread_id))
         .map((item) => feedRow(item, baseline, item.id === selectedId));
       const rows = visible.concat(fallback);
