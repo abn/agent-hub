@@ -426,11 +426,12 @@ async fn append_in_tx_capped(
 
     let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
-    let thread_id = if event.kind == "question" {
-        Some(id.clone())
-    } else {
-        event.thread_id.clone()
-    };
+    let thread_id =
+        if (event.kind == "question" || event.kind == "idea") && event.thread_id.is_none() {
+            Some(id.clone())
+        } else {
+            event.thread_id.clone()
+        };
 
     tx.execute(
         "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at, session_id)

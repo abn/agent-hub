@@ -10,6 +10,7 @@ pub mod artifacts;
 pub mod comments;
 pub mod events;
 pub mod home;
+pub mod ideas;
 pub mod idempotency;
 pub mod identity;
 pub mod inbox;

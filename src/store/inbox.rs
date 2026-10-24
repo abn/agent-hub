@@ -9,7 +9,7 @@ use turso::{Connection, Database, Row, Value};
 use crate::error::{Error, Result};
 
 /// Inbox statuses.
-pub const STATUSES: &[&str] = &["unread", "read", "action", "waiting", "resolved"];
+pub const STATUSES: &[&str] = &["unread", "read", "action", "waiting", "resolved", "cleared"];
 
 /// One inbox entry, joined with its event.
 #[derive(Debug, Clone, Serialize)]
@@ -663,6 +663,11 @@ pub async fn mark_all_read(db: &Database, project_id: Option<&str>) -> Result<i6
 pub async fn set_status(db: &Database, event_id: &str, status: &str) -> Result<()> {
     let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
+    if status_in_tx(&conn, event_id).await?.is_none() {
+        return Err(Error::NotFound(format!(
+            "event {event_id} has no inbox entry to update"
+        )));
+    }
     set_status_in_tx(&conn, event_id, status).await
 }
 
