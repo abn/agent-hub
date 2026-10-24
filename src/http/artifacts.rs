@@ -201,6 +201,44 @@ pub struct DestroyResult {
     pub ok: bool,
 }
 
+/// Request body for squashing an artifact's versions.
+#[derive(Debug, Default, Deserialize)]
+pub struct SquashBody {
+    /// The version to keep as the first of the remaining history. Every
+    /// version before it is removed. Omitted, the artifact's current version.
+    #[serde(default)]
+    pub version: Option<i64>,
+    /// Alias for `version`.
+    #[serde(default)]
+    pub target_version: Option<i64>,
+    #[serde(default)]
+    pub to: Option<i64>,
+    #[serde(default)]
+    pub through: Option<i64>,
+    #[serde(default)]
+    pub before: Option<i64>,
+    #[serde(default)]
+    pub keep: Option<i64>,
+}
+
+/// Query parameters for squashing an artifact's versions.
+#[derive(Debug, Default, Deserialize)]
+pub struct SquashQuery {
+    #[serde(default)]
+    pub version: Option<i64>,
+    #[serde(default)]
+    pub target_version: Option<i64>,
+    #[serde(default)]
+    pub to: Option<i64>,
+    /// Squash every version before this one (the target is this number).
+    #[serde(default)]
+    pub before: Option<i64>,
+    #[serde(default)]
+    pub through: Option<i64>,
+    #[serde(default)]
+    pub keep: Option<i64>,
+}
+
 /// `GET /api/v1/artifacts/{id}`
 ///
 /// Admin-only. Returns the content for the in-app viewer and decryptor.
@@ -270,6 +308,92 @@ pub async fn versions(
         .map_err(|err| Problem::from_error(&err))?;
 
     Ok(Json(VersionList { versions }))
+}
+
+/// Resolve which version an HTTP squash request targets, falling back to the
+/// artifact's current version when none is named.
+async fn squash_target(
+    state: &AppState,
+    artifact_id: &str,
+    requested: Option<i64>,
+) -> std::result::Result<i64, Problem> {
+    if let Some(version) = requested {
+        return Ok(version);
+    }
+    let artifact = artifact_store::metadata(&state.db, artifact_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    Ok(artifact.version)
+}
+
+async fn squash_versions_for(
+    state: &AppState,
+    artifact_id: &str,
+    headers: &HeaderMap,
+    requested: Option<i64>,
+) -> std::result::Result<Json<Value>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+    let target = squash_target(state, artifact_id, requested).await?;
+    let removed = artifact_store::squash_versions(&state.db, &state.data_dir, artifact_id, target)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    state.notify();
+    Ok(Json(json!({
+        "ok": true,
+        "artifact_id": artifact_id,
+        "version": target,
+        "versions_squashed": removed,
+    })))
+}
+
+/// `POST /api/v1/artifacts/{id}/squash`
+pub async fn squash_versions_post(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<SquashBody>, JsonRejection>,
+) -> std::result::Result<Json<Value>, Problem> {
+    let payload = match body {
+        Ok(Json(payload)) => payload,
+        Err(_) => SquashBody::default(),
+    };
+    let requested = payload
+        .version
+        .or(payload.target_version)
+        .or(payload.to)
+        .or(payload.through)
+        .or(payload.before)
+        .or(payload.keep);
+    squash_versions_for(&state, &artifact_id, &headers, requested).await
+}
+
+/// `DELETE /api/v1/artifacts/{id}/versions?version=N`
+pub async fn squash_versions_delete(
+    State(state): State<AppState>,
+    ProblemPath(artifact_id): ProblemPath<String>,
+    ProblemQuery(query): ProblemQuery<SquashQuery>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, Problem> {
+    let requested = query
+        .version
+        .or(query.target_version)
+        .or(query.to)
+        .or(query.through)
+        .or(query.before)
+        .or(query.keep);
+    squash_versions_for(&state, &artifact_id, &headers, requested).await
+}
+
+/// `DELETE /api/v1/artifacts/{id}/versions/{version}`
+pub async fn squash_versions_path(
+    State(state): State<AppState>,
+    ProblemPath((artifact_id, version)): ProblemPath<(String, i64)>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<Value>, Problem> {
+    squash_versions_for(&state, &artifact_id, &headers, Some(version)).await
 }
 
 /// The comment to post on an artifact.

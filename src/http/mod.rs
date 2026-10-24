@@ -96,7 +96,22 @@ pub fn router(state: AppState) -> Router {
                 .delete(artifacts::share_revoke)
                 .get(artifacts::share_get),
         )
-        .route("/api/v1/artifacts/{id}/versions", get(artifacts::versions))
+        .route(
+            "/api/v1/artifacts/{id}/versions",
+            get(artifacts::versions).delete(artifacts::squash_versions_delete),
+        )
+        .route(
+            "/api/v1/artifacts/{id}/versions/{version}",
+            delete(artifacts::squash_versions_path),
+        )
+        .route(
+            "/api/v1/artifacts/{id}/squash",
+            post(artifacts::squash_versions_post),
+        )
+        .route(
+            "/api/v1/artifacts/{id}/versions/squash",
+            post(artifacts::squash_versions_post),
+        )
         .route("/api/v1/artifacts/{id}/live", get(artifacts::live))
         .route(
             "/api/v1/artifacts/{id}/viewer-pass",

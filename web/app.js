@@ -15,7 +15,7 @@ import {
 } from "./agents.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
-import { artifactRoute, pickVersion, toggleVersionMenu } from "./artifacts.mjs";
+import { artifactRoute, pickVersion, squashArtifactVersions, toggleVersionMenu } from "./artifacts.mjs";
 import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
 import { toggleKind } from "./feed.mjs";
@@ -140,6 +140,7 @@ main.addEventListener("click", (event) => {
   if (action === "wiki-instruction") wikiInstruction(button);
   if (action === "version-toggle") toggleVersionMenu(button);
   if (action === "version-pick") pickVersion(id, button.dataset.version);
+  if (action === "version-squash") acted(button, squashArtifactVersions(id, Number(button.dataset.version)));
   if (action === "aside-toggle") {
     const panes = main.querySelector(".panes");
     if (panes) {

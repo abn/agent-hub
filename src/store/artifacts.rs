@@ -1311,6 +1311,104 @@ pub async fn read_blob(data_dir: &Path, artifact: &Artifact) -> Result<Vec<u8>> 
     blob::read(data_dir, &artifact.path)
 }
 
+/// Squash every version older than `version` into it: the prior version rows
+/// and their blobs are removed, so the history starts at `version`. The row
+/// and blob for `version` itself are kept, and the artifact's current pointer
+/// is left alone. A target that does not exist is not found; a target with
+/// nothing before it removes nothing.
+pub async fn squash_versions(
+    db: &Database,
+    data_dir: &Path,
+    artifact_id: &str,
+    version: i64,
+) -> Result<usize> {
+    if version < 1 {
+        return Err(Error::InvalidArgument(format!(
+            "artifact version must be 1 or more, got {version}"
+        )));
+    }
+    let tx = super::begin_write(db).await?;
+    let existing = row_on(&tx, artifact_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("artifact {artifact_id} not found")))?;
+    // A live version is not settled history: squashing into it would collapse
+    // sealed versions while the work in progress is still being written. Refuse
+    // rather than leave `current_ver` pointing at a row that no longer exists.
+    if existing.live_version == Some(version) || version > existing.version {
+        return Err(Error::InvalidArgument(format!(
+            "artifact {artifact_id} version {version} is live; seal it before squashing"
+        )));
+    }
+    // The target version must be one the artifact actually holds.
+    let mut target_rows = tx
+        .query(
+            "SELECT 1 FROM artifact_versions WHERE artifact_id = ?1 AND version = ?2",
+            vec![
+                Value::Text(artifact_id.to_string()),
+                Value::Integer(version),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    if target_rows.next().await.map_err(engine)?.is_none() {
+        return Err(Error::NotFound(format!(
+            "artifact {artifact_id} has no version {version}"
+        )));
+    }
+
+    // Collect the blobs the prior versions occupy, so they can be removed
+    // once the rows are gone.
+    let mut rows = tx
+        .query(
+            "SELECT path FROM artifact_versions WHERE artifact_id = ?1 AND version < ?2",
+            vec![
+                Value::Text(artifact_id.to_string()),
+                Value::Integer(version),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    let mut paths: Vec<String> = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        if let Ok(Value::Text(path)) = row.get_value(0) {
+            paths.push(path);
+        }
+    }
+    let removed = paths.len();
+
+    tx.execute(
+        "DELETE FROM artifact_versions WHERE artifact_id = ?1 AND version < ?2",
+        vec![
+            Value::Text(artifact_id.to_string()),
+            Value::Integer(version),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    // Shares pinned to a removed version can no longer be served.
+    tx.execute(
+        "DELETE FROM artifact_shares WHERE artifact_id = ?1 AND version < ?2",
+        vec![
+            Value::Text(artifact_id.to_string()),
+            Value::Integer(version),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+
+    tx.commit().await.map_err(engine)?;
+
+    // The rows are gone, so the blobs can follow. Held to the commit so a
+    // backup never pairs a row with a removed file.
+    let removing = super::hold_removals().await;
+    for path in paths {
+        let _ = blob::remove(data_dir, &path);
+    }
+    drop(removing);
+
+    Ok(removed)
+}
+
 /// List a project's artifacts, optionally filtered by session, most recently updated first.
 pub async fn list_with_session(
     db: &Database,
