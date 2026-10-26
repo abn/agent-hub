@@ -4,6 +4,23 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-26
+
+### Feed events can be dismissed
+
+* **Addition**: A project feed can hide events it has read or no longer needs.
+  **Select items** builds a selection and dismisses it together; **Dismiss
+  read** takes every human event at or below the project's cursor; a left swipe
+  on a phone uncovers Dismiss under the row.
+* **Update**: [Projects and the feed](/guides/human/projects-and-feed.md) tells
+  the reader what leaves their view, and
+  [REST API](/reference/rest-api.md) documents the two routes.
+  [Human interface](/design/human-interface.md) records the project menu's two
+  verbs, the selection row, the phone tools-row swap and the swipe.
+* **Context**: A dismissal is the human's read state, not a deletion. The
+  event, its inbox row, its search document and its payload stay, so an agent's
+  `feed_read` and search still reach it.
+
 ## 2026-10-24
 
 ### Artifact versions can be squashed

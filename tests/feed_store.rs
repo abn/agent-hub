@@ -789,3 +789,278 @@ async fn agent_cursor_reads_and_advances_per_project_and_agent() {
         "an empty id must not create a cursor row"
     );
 }
+
+#[tokio::test]
+async fn a_dismissal_hides_the_event_from_the_human_and_not_from_an_agent() {
+    let db = open().await;
+    let _ = agent_hub::store::projects::create(&db, "other", "Other Project")
+        .await
+        .expect("create other");
+    let kept = append(&db, 0, "agent-one", None, event("kept"))
+        .await
+        .expect("append kept");
+    let gone = append(&db, 0, "agent-one", None, event("gone"))
+        .await
+        .expect("append gone");
+
+    let dismissed = events::dismiss(&db, "proj", std::slice::from_ref(&gone))
+        .await
+        .expect("dismiss");
+    assert_eq!(dismissed.dismissed, 1);
+
+    let human = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            hide_dismissed: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read the human feed")
+    .events;
+    assert_eq!(
+        human
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![kept.as_str()]
+    );
+
+    // The event is hidden, not deleted: an agent's read still carries it, and
+    // so does its inbox row's event id.
+    let agent = read_feed(&db, "proj", &FeedQuery::default())
+        .await
+        .expect("read the agent feed")
+        .events;
+    assert_eq!(agent.len(), 2);
+    assert!(agent.iter().any(|event| event.id == gone));
+
+    // Dismissing again, and naming another project's event, count nothing.
+    let again = events::dismiss(&db, "proj", std::slice::from_ref(&gone))
+        .await
+        .expect("dismiss again");
+    assert_eq!(again.dismissed, 0);
+    let elsewhere = append(
+        &db,
+        0,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "other".to_string(),
+            ..event("elsewhere")
+        },
+    )
+    .await
+    .expect("append elsewhere");
+    let crossed = events::dismiss(&db, "proj", std::slice::from_ref(&elsewhere))
+        .await
+        .expect("dismiss across projects");
+    assert_eq!(crossed.dismissed, 0);
+    let still_there = read_feed(
+        &db,
+        "other",
+        &FeedQuery {
+            hide_dismissed: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read the other project")
+    .events;
+    assert_eq!(still_there.len(), 1);
+}
+
+#[tokio::test]
+async fn dismiss_read_takes_what_is_above_and_below_the_cursor_by_its_rule() {
+    let db = open().await;
+    // No cursor means nothing has been read, so a bulk dismissal takes nothing.
+    let nothing = events::dismiss_read(&db, "proj").await.expect("dismiss");
+    assert_eq!(nothing.dismissed, 0);
+
+    let _first = append(&db, 0, "agent-one", None, event("one"))
+        .await
+        .expect("one");
+    let second = append(&db, 0, "agent-one", None, event("two"))
+        .await
+        .expect("two");
+    append(&db, 0, "agent-one", None, event("three"))
+        .await
+        .expect("three");
+    events::mark_seen(&db, "proj", &second)
+        .await
+        .expect("mark seen");
+
+    let read = events::dismiss_read(&db, "proj")
+        .await
+        .expect("dismiss read");
+    assert_eq!(read.dismissed, 2, "the cursor covers the first two events");
+
+    let human = read_feed(
+        &db,
+        "proj",
+        &FeedQuery {
+            hide_dismissed: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read the human feed")
+    .events;
+    assert_eq!(human.len(), 1);
+    assert_eq!(human[0].summary, "three");
+
+    // The hub's own audit trail is not dismissed by a bulk call, even when it
+    // sits below the cursor.
+    let _audit = append(
+        &db,
+        0,
+        "agent-one",
+        None,
+        NewEvent {
+            kind: "system".to_string(),
+            summary: "pruned a session".to_string(),
+            payload: None,
+            ..event("audit")
+        },
+    )
+    .await
+    .expect("append the audit event");
+    let third = append(&db, 0, "agent-one", None, event("four"))
+        .await
+        .expect("four");
+    events::mark_seen(&db, "proj", &third)
+        .await
+        .expect("mark seen again");
+    let later = events::dismiss_read(&db, "proj")
+        .await
+        .expect("dismiss read");
+    assert_eq!(
+        later.dismissed, 2,
+        "the third event and the fourth are human events below the cursor, the audit event is not"
+    );
+}
+
+#[tokio::test]
+async fn home_recent_and_the_unseen_count_leave_out_dismissed_events() {
+    let db = open().await;
+    let _ = agent_hub::store::projects::create(&db, "other", "Other Project")
+        .await
+        .expect("create other");
+    let seen = append(&db, 0, "agent-one", None, event("seen"))
+        .await
+        .expect("append seen");
+    events::mark_seen(&db, "proj", &seen)
+        .await
+        .expect("mark seen");
+    let unseen = append(&db, 0, "agent-one", None, event("unseen"))
+        .await
+        .expect("append unseen");
+    let elsewhere = append(
+        &db,
+        0,
+        "agent-one",
+        None,
+        NewEvent {
+            project_id: "other".to_string(),
+            ..event("elsewhere")
+        },
+    )
+    .await
+    .expect("append elsewhere");
+
+    events::dismiss(&db, "proj", std::slice::from_ref(&unseen))
+        .await
+        .expect("dismiss unseen");
+    events::dismiss(&db, "other", std::slice::from_ref(&elsewhere))
+        .await
+        .expect("dismiss elsewhere");
+
+    assert_eq!(
+        events::unseen_count(&db, "proj").await.expect("count"),
+        0,
+        "a dismissed event is not a dot on the project"
+    );
+    let recent = events::recent(&db, 10).await.expect("recent");
+    assert_eq!(
+        recent
+            .iter()
+            .map(|event| event.summary.as_str())
+            .collect::<Vec<_>>(),
+        vec!["seen"]
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_project_takes_its_dismissals_with_it() {
+    let dir = common::temp::TempDir::new("feed-dismiss-delete");
+    let db = common::store::open(dir.path()).await;
+    let _ = agent_hub::store::projects::create(&db, "proj", "Doomed")
+        .await
+        .expect("create project");
+    let gone = append(&db, 0, "agent-one", None, event("gone"))
+        .await
+        .expect("append");
+    events::dismiss(&db, "proj", std::slice::from_ref(&gone))
+        .await
+        .expect("dismiss");
+
+    agent_hub::store::projects::delete(&db, dir.path(), "proj")
+        .await
+        .expect("delete project");
+
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM feed_dismissals", ())
+        .await
+        .expect("count dismissals");
+    let row = rows.next().await.expect("row").expect("a row");
+    assert_eq!(
+        row.get_value(0).expect("count"),
+        turso::Value::Integer(0),
+        "a deleted project leaves no dismissal behind"
+    );
+}
+
+#[tokio::test]
+async fn dismiss_read_takes_a_long_history_in_batches() {
+    let db = open().await;
+    let conn = db.connect().expect("connect");
+    // More events than one batch holds, written in one statement so the test
+    // spends its time on the dismissal rather than on 5001 commits.
+    let mut sql = String::from(
+        "INSERT INTO events(id, project_id, kind, actor, summary, created_at) VALUES ",
+    );
+    for index in 1..=agent_hub::limits::FEED_DISMISS_BATCH + 1 {
+        if index > 1 {
+            sql.push(',');
+        }
+        sql.push_str(&format!(
+            "('e{index:06}','proj','signal','agent-one','event','2026-01-01T00:00:00Z')"
+        ));
+    }
+    conn.execute(&sql, ()).await.expect("seed the feed");
+    conn.execute(
+        "INSERT INTO project_feed_cursors(project_id, last_seen_event_id, updated_at)
+         VALUES ('proj', 'e999999', '2026-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("set the cursor");
+
+    let dismissed = events::dismiss_read(&db, "proj")
+        .await
+        .expect("dismiss the read page");
+    assert_eq!(
+        dismissed.dismissed,
+        agent_hub::limits::FEED_DISMISS_BATCH + 1
+    );
+    assert_eq!(
+        events::dismiss_read(&db, "proj")
+            .await
+            .expect("dismiss again")
+            .dismissed,
+        0,
+        "a second call has nothing left and does not loop"
+    );
+}

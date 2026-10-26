@@ -939,6 +939,8 @@ pub(crate) async fn refuse_enrolment_in_tx(tx: &crate::store::WriteTx, id: &str)
     .await
     .map_err(engine)?;
 
+    crate::store::events::forget_dismissals_in_tx(tx, &personal_project_id).await?;
+
     tx.execute(
         "DELETE FROM events WHERE project_id = ?1",
         vec![Value::Text(personal_project_id.clone())],

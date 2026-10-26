@@ -87,6 +87,25 @@ forward, and it never moves back.
 > not the filter. The app only advances it after an unfiltered page has been
 > shown in a visible tab.
 
+## Dismissing events
+
+The project's overflow menu carries **Select items** and **Dismiss read**; it
+sits in the project header, and in the phone's tools row. Select items turns the
+control row into a count with **Dismiss** and **Cancel**, and each row draws a
+checkbox in place of its kind badge. A press anywhere on a row picks it, so
+several events can go together. A left swipe on a phone row uncovers its own
+Dismiss action.
+
+Dismissing hides an event from this project's feed, the cross-project feed,
+Home's recent list, and the unread count. It does not delete it: the id, the
+inbox entry, the search hit and the payload stay, and an agent reading the feed
+through MCP still gets it. Bulk dismissal and Dismiss read ask for confirmation
+first. Dismiss read takes every event at or below the feed's read cursor, which
+is a high-water mark: opening the feed marks the newest event seen, so it also
+hides older events below the fold that were never on screen. Events written
+after the page opened stay. There is no undo control, so an event you want back
+has to be written again by the agent that produced it.
+
 ## Acting from the feed
 
 A question or an approval waits on you. Its row carries the words "Waiting on

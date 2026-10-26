@@ -105,6 +105,21 @@ pub const DEADLINE_SECS_MAX: u64 = 30 * 24 * 60 * 60;
 /// Maximum feed page size.
 pub const FEED_LIMIT_MAX: i64 = 500;
 
+/// Most events one dismissal call may name.
+///
+/// A dismiss gesture carries either a selection or a whole page, and both are
+/// far under this; the cap only stops a caller turning the route into a bulk
+/// hide of the feed in one request.
+pub const FEED_DISMISS_MAX: usize = 500;
+
+/// Most events one read-cursor dismissal writes in a single transaction.
+///
+/// The write turn is process-wide, so a project with a long history is taken
+/// in batches rather than in one statement that holds every other writer for
+/// its duration. The call still hides every event at or below the cursor; only
+/// the work is split.
+pub const FEED_DISMISS_BATCH: i64 = 5_000;
+
 /// Maximum session listing page size, and its default.
 ///
 /// Its own pair rather than the feed's, so two unrelated page sizes are not

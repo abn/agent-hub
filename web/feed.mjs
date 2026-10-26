@@ -3,8 +3,10 @@
 // and what landed since the reader last looked carries the unread mark.
 
 import { api } from "./api.mjs";
+import { confirmAction } from "./dialog.mjs";
 import { actionFor, esc, glyph, isOpen, main, waitingMarks, when } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
+import { registerPane } from "./keys.mjs";
 import { focusAfterRender, render } from "./router.mjs";
 import { byDay } from "./time.mjs";
 import { toast } from "./toast.mjs";
@@ -24,6 +26,12 @@ const ALL = "all";
 // One page of the feed. Older pages are asked for with the hub's own cursor.
 const PAGE = 100;
 const RECENT = ["Today", "Yesterday"];
+// The width of the Dismiss action a left swipe uncovers, and how far a drag has
+// to move before it counts as along one axis rather than a tap.
+const ACTION_WIDTH = 88;
+const SLOP = 8;
+// The most ids one dismissal request may carry, matching FEED_DISMISS_MAX.
+const DISMISS_MAX = 500;
 
 // The kind filters are per project, so switching projects does not carry a
 // filter across. They are view state, not a saved preference.
@@ -40,6 +48,39 @@ export function setFeedSelection(id) {
 // it stood on arrival: the hub's cursor moves as soon as the feed is seen, and
 // marking against the moving one would wipe the dots on the next repaint.
 const visits = new Map();
+
+// Selection mode: the events picked in the loaded page, and the project they
+// belong to. It is view state, held here rather than in the address, because a
+// pick is a step towards one action rather than a place the reader can return
+// to. Leaving the screen ends it.
+const picking = { active: false, project: "", ids: new Set(), opener: null };
+
+function endPicking({ focus = false } = {}) {
+  const opener = picking.opener;
+  picking.active = false;
+  picking.project = "";
+  picking.ids.clear();
+  picking.opener = null;
+  const shell = main.querySelector(".shell[data-segment]");
+  shell?.classList.remove("is-picking");
+  for (const row of main.querySelectorAll(".shell-controls, .project-tools-mobile")) {
+    row.classList.remove("is-picking", "mobile-filter-open");
+  }
+  for (const bar of main.querySelectorAll(".feed-select-bar")) bar.hidden = true;
+  for (const box of main.querySelectorAll(".feed-pick")) box.checked = false;
+  for (const row of main.querySelectorAll(".feed-row.picked")) row.classList.remove("picked");
+  concealSwipe();
+  if (!focus) return;
+  const target =
+    opener && opener.isConnected && opener.getClientRects().length
+      ? opener
+      : [...main.querySelectorAll(".proj-overflow-btn")].find((button) => button.getClientRects().length);
+  target?.focus({ preventScroll: true });
+}
+
+window.addEventListener("hashchange", () => {
+  if (picking.active && feedProject(location.hash) !== picking.project) endPicking();
+});
 
 function feedProject(hash) {
   const parts = (hash.replace(/^#/, "").split("?")[0] || "").split("/");
@@ -98,6 +139,17 @@ export function kindChips(active, counts = {}) {
     .join("");
   const asideToggle = `<button type="button" class="aside-toggle" data-action="aside-toggle" aria-expanded="false" aria-label="Toggle details">Details</button>`;
   return `<div class="feed-chips" role="group" aria-label="Filter by kind">${chip(ALL, "All", total, active.size === 0)}${chips}<span class="feed-chips-spacer"></span>${asideToggle}</div>`;
+}
+
+// The row that replaces the filter's row while the reader is picking: the count
+// they built, the verb that spends it, and the way out. The frame holds: it is
+// the same control row, not a new band over the list.
+export function feedSelectBar() {
+  return `<div class="feed-select-bar" hidden>
+    <span class="feed-select-count" role="status" aria-live="polite">0 selected</span>
+    <button type="button" class="btn-outline" data-action="feed-dismiss-picked" disabled>Dismiss</button>
+    <button type="button" class="btn-outline" data-action="feed-select-cancel">Cancel</button>
+  </div>`;
 }
 
 // The dot is a colour and a shape, so the word sits beside it for a reader
@@ -319,12 +371,39 @@ function metaLine(actor, ts, pill = "") {
   return `<div class="meta">${pill}<span class="meta-actor">${esc(actor)}</span><span aria-hidden="true">·</span>${when(ts)}</div>`;
 }
 
+// The kind glyph gives way to the checkbox while the reader is picking, in the
+// same slot so the title's left edge does not move. The box carries every event
+// id the row stands for: a collapsed artifact row stands for its whole cluster.
+function pickBox(ids, label) {
+  return `<label class="feed-pick-wrap"><input type="checkbox" class="feed-pick" data-ids="${esc(ids)}" aria-label="Select ${esc(label)}"></label>`;
+}
+
+// The action a left swipe uncovers. It sits under the row and stays out of the
+// tab ring and the accessibility tree until the swipe shows it; on a fine
+// pointer the same verb is reached through Select items.
+function dismissTray() {
+  return `<div class="swipe-tray swipe-tray-actions swipe-tray-dismiss" hidden>
+    <button type="button" class="action" data-action="feed-dismiss">Dismiss</button>
+  </div>`;
+}
+
+// A row and the tray under it. Every feed row is dismissible, including the
+// collapsed artifact row, so the item is what the gesture and the pick act on.
+function feedItem(project, ids, rowHTML) {
+  return `<div class="feed-item" data-id="${esc(String(ids).split(" ")[0])}" data-ids="${esc(ids)}" data-project="${esc(project)}">
+    ${dismissTray()}
+    ${rowHTML}
+  </div>`;
+}
+
 function collapsedArtifactRow(item, baseline) {
   const unread = item.events.some((e) => e.id > baseline);
   const project = item.project_id || "";
   const href = `#/projects/${encodeURIComponent(project)}/artifacts`;
   const title = `<a class="title feed-link" href="${esc(href)}">published ${item.count} artifacts</a>`;
-  return `<div class="row feed-row${unread ? " unread" : ""}">
+  const ids = item.events.map((event) => event.id).join(" ");
+  const row = `<div class="row feed-row${unread ? " unread" : ""}">
+    ${pickBox(ids, `published ${item.count} artifacts`)}
     ${glyph("artifact")}
     <div class="grow" data-id="${esc(item.id)}">
       ${title}
@@ -332,6 +411,7 @@ function collapsedArtifactRow(item, baseline) {
     </div>
     ${unread ? UNREAD : ""}
   </div>`;
+  return feedItem(project, ids, row);
 }
 
 // The feed's own row. Event ids sort by age, which is how the hub compares
@@ -366,7 +446,8 @@ function feedRow(event, baseline, selected = false, replies = []) {
   // Waiting outranks unread, so a waiting row ends in the action dot alone.
   const waiting = isOpen(event) ? waitingMarks(event.id) : null;
   const title = `<a class="title feed-link" href="${esc(href)}"${waiting ? waiting.described : ""}>${esc(summaryText)}</a>`;
-  return `<div class="row feed-row${unread ? " unread" : ""}${waiting ? " is-waiting" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
+  const row = `<div class="row feed-row${unread ? " unread" : ""}${waiting ? " is-waiting" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
+    ${pickBox(event.id, summaryText)}
     ${glyph(event.kind)}
     <div class="grow">
       ${title}
@@ -376,6 +457,7 @@ function feedRow(event, baseline, selected = false, replies = []) {
     </div>
     ${waiting ? waiting.dot : unread ? UNREAD : ""}
   </div>`;
+  return feedItem(project, event.id, row);
 }
 
 function dayGroups(groups, baseline, selectedId = "") {
@@ -776,6 +858,227 @@ export function toggleKind(kind, projectId) {
   render();
 }
 
+// Put the boxes and the count back in step with the picks held in memory. The
+// rows are repainted for the fold and for a stream update, and a selection that
+// survives a repaint is what lets a reader pick across it.
+function syncPicks() {
+  for (const item of main.querySelectorAll(".feed-item")) {
+    const box = item.querySelector(".feed-pick");
+    if (!box) continue;
+    const ids = (box.dataset.ids || "").split(" ").filter(Boolean);
+    const checked = ids.length > 0 && ids.every((id) => picking.ids.has(id));
+    box.checked = checked;
+    item.querySelector(".feed-row")?.classList.toggle("picked", checked);
+  }
+  for (const bar of main.querySelectorAll(".feed-select-bar")) {
+    const said = bar.querySelector(".feed-select-count");
+    if (said) said.textContent = picking.ids.size === 1 ? "1 selected" : `${picking.ids.size} selected`;
+    const go = bar.querySelector('[data-action="feed-dismiss-picked"]');
+    if (go) go.disabled = picking.ids.size === 0;
+  }
+}
+
+// Selection mode after a repaint: the router redraws the control row, so the
+// state that hid the filter and showed the bar has to be put back.
+export function resumePicking() {
+  if (!picking.active) return;
+  const shell = main.querySelector(".shell[data-segment]");
+  shell?.classList.add("is-picking");
+  // A phone's bar lives in its one tools row; a desktop's sits in the index
+  // control row. Both are painted, and the one the width draws is the one the
+  // reader sees.
+  for (const row of main.querySelectorAll(".shell-controls, .project-tools-mobile")) {
+    // A phone keeps the filter panel behind its glyph; picking is a mode, and
+    // it must not leave that panel's second bar on screen with the tools row.
+    row.classList.remove("mobile-filter-open");
+    row.classList.add("is-picking");
+  }
+  for (const bar of main.querySelectorAll(".feed-select-bar")) bar.hidden = false;
+  syncPicks();
+}
+
+function startPicking(projectId, opener = null) {
+  concealSwipe();
+  picking.active = true;
+  picking.project = projectId;
+  picking.ids.clear();
+  picking.opener = opener?.closest(".proj-overflow-wrap")?.querySelector(".proj-overflow-btn") || null;
+  resumePicking();
+  requestAnimationFrame(() => {
+    const first = main.querySelector(".feed-pick");
+    const target = first || main.querySelector(".feed-select-bar button");
+    target?.focus({ preventScroll: true });
+  });
+}
+
+function applyPick(item, on) {
+  const box = item.querySelector(".feed-pick");
+  const ids = (box?.dataset.ids || "").split(" ").filter(Boolean);
+  for (const id of ids) {
+    if (on) picking.ids.add(id);
+    else picking.ids.delete(id);
+  }
+  syncPicks();
+}
+
+async function dismissEvents(projectId, ids) {
+  // A collapsed artifact row can stand for more events than one request may
+  // name, so the ids go in server-sized batches and the count is summed.
+  let dismissed = 0;
+  for (let at = 0; at < ids.length; at += DISMISS_MAX) {
+    const answer = await api(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/feed/dismiss`,
+      { method: "POST", body: JSON.stringify({ event_ids: ids.slice(at, at + DISMISS_MAX) }) },
+    );
+    dismissed += answer.dismissed;
+  }
+  await render();
+  if (!dismissed) toast("Already dismissed.");
+  else toast(dismissed === 1 ? "Dismissed 1 event." : `Dismissed ${dismissed} events.`);
+}
+
+async function dismissPicked(projectId) {
+  const ids = [...picking.ids];
+  if (!ids.length) return;
+  const noun = ids.length === 1 ? "event" : "events";
+  const confirmed = await confirmAction({
+    title: `Dismiss ${ids.length} ${noun}?`,
+    body: "They leave this project's feed. Agents still read them, and the inbox and search keep them.",
+    safe: "Keep",
+    tone: "primary",
+    danger: "Dismiss",
+  });
+  if (!confirmed) return;
+  endPicking();
+  await dismissEvents(projectId, ids);
+}
+
+async function dismissRead(projectId) {
+  const confirmed = await confirmAction({
+    title: "Dismiss read events?",
+    body: "Every event the feed has marked seen leaves it, including the ones below the fold. Events written after this page was opened stay.",
+    safe: "Keep",
+    tone: "primary",
+    danger: "Dismiss read",
+  });
+  if (!confirmed) return;
+  const { dismissed } = await api(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/feed/dismiss-read`,
+    { method: "POST" },
+  );
+  await render();
+  if (!dismissed) toast("Nothing read to dismiss.");
+  else toast(dismissed === 1 ? "Dismissed 1 read event." : `Dismissed ${dismissed} read events.`);
+}
+
+// Swipes and the pull. Touch and pen only: a mouse drag selects text, and a
+// mouse reaches Dismiss through Select items.
+let feedDrag = null;
+let feedRevealed = null;
+let feedUnregister = null;
+
+// A swipe that began on the row's title ends on it too, and the browser may
+// call that a click. The row was swiped, not opened.
+let feedSwiped = false;
+main.addEventListener(
+  "click",
+  (event) => {
+    if (!feedSwiped || !event.target.closest(".feed-row")) return;
+    event.preventDefault();
+    event.stopPropagation();
+  },
+  true,
+);
+
+const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function concealSwipe() {
+  if (!feedRevealed) return;
+  const item = feedRevealed;
+  feedRevealed = null;
+  if (feedUnregister) feedUnregister();
+  feedUnregister = null;
+  delete item.dataset.revealed;
+  settleSwipe(item);
+}
+
+// Put a row back where its state says it rests, and hide the tray nothing is
+// showing.
+function settleSwipe(item) {
+  const row = item.querySelector(".feed-row");
+  const open = item.dataset.revealed === "dismiss";
+  const tray = item.querySelector(".swipe-tray-dismiss");
+  if (row) row.style.transform = open && tray ? `translateX(${-ACTION_WIDTH}px)` : "";
+  if (tray) tray.hidden = !open;
+}
+
+function revealSwipe(item) {
+  concealSwipe();
+  item.dataset.revealed = "dismiss";
+  feedRevealed = item;
+  feedUnregister = registerPane(concealSwipe);
+  settleSwipe(item);
+}
+
+main.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "mouse" || !event.isPrimary || picking.active) return;
+  if (!feedProject(location.hash)) return;
+  const item = event.target.closest(".feed-item");
+  if (feedRevealed && feedRevealed !== item) concealSwipe();
+  if (event.target.closest("button, input, textarea, summary")) return;
+  feedDrag = {
+    id: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    dx: 0,
+    dy: 0,
+    axis: "",
+    item,
+    from: item && item === feedRevealed ? -ACTION_WIDTH : 0,
+    still: still(),
+  };
+});
+
+window.addEventListener("pointermove", (event) => {
+  if (!feedDrag || event.pointerId !== feedDrag.id) return;
+  feedDrag.dx = event.clientX - feedDrag.x;
+  feedDrag.dy = event.clientY - feedDrag.y;
+  if (!feedDrag.axis) {
+    if (Math.abs(feedDrag.dx) < SLOP && Math.abs(feedDrag.dy) < SLOP) return;
+    feedDrag.axis = Math.abs(feedDrag.dx) > Math.abs(feedDrag.dy) ? "x" : "y";
+  }
+  if (feedDrag.axis !== "x") return;
+  const { item } = feedDrag;
+  if (!item) return;
+  const row = item.querySelector(".feed-row");
+  const tray = item.querySelector(".swipe-tray-dismiss");
+  const offset = Math.min(0, Math.max(feedDrag.from + feedDrag.dx, -ACTION_WIDTH));
+  if (tray) tray.hidden = offset === 0;
+  if (!feedDrag.still && row) row.style.transform = offset ? `translateX(${offset}px)` : "";
+});
+
+function releaseSwipe(event) {
+  if (!feedDrag || event.pointerId !== feedDrag.id) return;
+  const { item, axis, dx, from } = feedDrag;
+  const cancelled = event.type === "pointercancel";
+  feedDrag = null;
+  // A tap on a row whose action is showing puts it away.
+  if (!axis && item && item === feedRevealed) {
+    concealSwipe();
+    return;
+  }
+  if (axis !== "x" || !item) return;
+  feedSwiped = true;
+  setTimeout(() => (feedSwiped = false), 50);
+  // Past half of the action the tray opens; a swipe back the same way shuts it.
+  const offset = from + dx;
+  if (!cancelled && offset <= -ACTION_WIDTH / 2) revealSwipe(item);
+  else if (item === feedRevealed) concealSwipe();
+  else settleSwipe(item);
+}
+window.addEventListener("pointerup", releaseSwipe);
+window.addEventListener("pointercancel", releaseSwipe);
+
 // The fold is replaced whole, as a child of the screen region, so the keyboard
 // map sees the rows change the way it sees any repaint. Focus goes back onto
 // the control that was pressed, or the disclosure once that control is gone.
@@ -799,6 +1102,7 @@ function repaintFold(projectId, visit, action) {
   fold.insertAdjacentHTML("afterend", foldHTML(projectId, visit));
   const next = fold.nextElementSibling;
   fold.remove();
+  syncPicks();
   // The fold is gone once everything was recent and nothing older is left, so
   // focus goes to the last row that was just drawn rather than nowhere.
   const control =
@@ -914,14 +1218,55 @@ async function copySetup(button) {
 }
 
 // The feed's own controls. The shared handler routes the actions other screens
-// own; these three exist only here.
+// own; these exist only here.
 main.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const { action } = button.dataset;
   const fold = button.closest(".feed-fold");
   const failed = (error) => toast(`Nothing changed: ${error.message}`);
-  if (action === "feed-earlier" && fold) toggleFold(button, fold.dataset.project).catch(failed);
-  if (action === "feed-older" && fold) showOlder(fold.dataset.project).catch(failed);
+  const partly = (error) => toast(`Some of it may not have been saved: ${error.message}`);
+  let work = null;
+  if (action === "feed-earlier" && fold) work = toggleFold(button, fold.dataset.project);
+  if (action === "feed-older" && fold) work = showOlder(fold.dataset.project);
   if (action === "feed-copy-setup") copySetup(button);
+  if (action === "feed-select") startPicking(button.dataset.project || "", button);
+  if (action === "feed-dismiss-read") work = dismissRead(button.dataset.project || "");
+  if (action === "feed-select-cancel") endPicking({ focus: true });
+  if (action === "feed-dismiss-picked") work = dismissPicked(picking.project);
+  if (action === "feed-dismiss") {
+    const item = button.closest(".feed-item");
+    const ids = (item?.dataset.ids || "").split(" ").filter(Boolean);
+    const project = item?.dataset.project || "";
+    concealSwipe();
+    if (ids.length && project) work = dismissEvents(project, ids);
+  }
+  const partial =
+    action === "feed-dismiss-picked" || action === "feed-dismiss" || action === "feed-dismiss-read";
+  if (work) work.catch(partial ? partly : failed);
+});
+
+// While picking, the row is a checkbox and not a door: a press anywhere on it
+// turns the pick on or off, and the link the row carries does not navigate.
+main.addEventListener(
+  "click",
+  (event) => {
+    if (!picking.active) return;
+    const item = event.target.closest(".feed-item");
+    if (!item) return;
+    const box = item.querySelector(".feed-pick");
+    if (!box || event.target === box) return;
+    event.preventDefault();
+    event.stopPropagation();
+    box.checked = !box.checked;
+    applyPick(item, box.checked);
+  },
+  true,
+);
+
+main.addEventListener("change", (event) => {
+  if (!picking.active) return;
+  const box = event.target.closest?.(".feed-pick");
+  const item = box?.closest(".feed-item");
+  if (box && item) applyPick(item, box.checked);
 });

@@ -69,6 +69,10 @@ pub struct FeedQuery {
     /// than a filter: it defaults to false, so a query that leaves it unset
     /// never sees the audit trail, whatever kinds it names.
     pub include_audit: bool,
+    /// Leave the events the human dismissed out of the page. The human
+    /// surfaces set it; an agent's read leaves it false, because a dismissal
+    /// is the human's view of the feed and not a deletion.
+    pub hide_dismissed: bool,
 }
 
 impl Default for FeedQuery {
@@ -80,6 +84,7 @@ impl Default for FeedQuery {
             kinds: None,
             session_id: None,
             include_audit: false,
+            hide_dismissed: false,
         }
     }
 }
@@ -597,6 +602,156 @@ pub(crate) async fn forget_cursor_in_tx(
     Ok(())
 }
 
+/// What a dismissal call did.
+#[derive(Debug, Clone, Serialize)]
+pub struct Dismissed {
+    /// The events this call newly dismissed. An event already dismissed, an
+    /// event of another project, and an id that names nothing are all left
+    /// out rather than counted again.
+    pub dismissed: i64,
+}
+
+/// Dismiss named events from one project's human feed.
+///
+/// A dismissal is read state, not deletion: the event keeps its id, its inbox
+/// row, and its search document, so an agent still reads it. The events are
+/// checked against the project in the same transaction as the insert, so an
+/// id from another project can never be dismissed here, and the hub's own
+/// audit trail is left alone.
+pub async fn dismiss(db: &Database, project_id: &str, event_ids: &[String]) -> Result<Dismissed> {
+    let tx = super::begin_write(db).await?;
+    let now = crate::store::now_rfc3339();
+    let mut dismissed = 0;
+    for event_id in event_ids {
+        dismissed += tx
+            .execute(
+                "INSERT OR IGNORE INTO feed_dismissals(event_id, project_id, dismissed_at)
+                 SELECT id, project_id, ?3 FROM events
+                  WHERE id = ?1 AND project_id = ?2 AND kind <> 'system'",
+                vec![
+                    Value::Text(event_id.clone()),
+                    Value::Text(project_id.to_string()),
+                    Value::Text(now.clone()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+    }
+    tx.commit().await.map_err(engine)?;
+    Ok(Dismissed {
+        dismissed: dismissed as i64,
+    })
+}
+
+/// Dismiss every event at or below the project's read cursor.
+///
+/// That is what "read" means on a feed: the cursor is a high-water mark, so
+/// every event at or under it counts as seen, whether or not it was on screen.
+/// A project with no cursor has read nothing, so the call dismisses nothing.
+/// The hub's own audit trail is left alone: it is read by kind on purpose, and
+/// a bulk dismissal must not quietly hide it. A long history is written in
+/// batches, so the process-wide write turn is released between them.
+pub async fn dismiss_read(db: &Database, project_id: &str) -> Result<Dismissed> {
+    let Some(cursor) = last_seen(db, project_id).await? else {
+        return Ok(Dismissed { dismissed: 0 });
+    };
+    let now = crate::store::now_rfc3339();
+    let mut total = 0;
+    // The seek moves with the batch, so a long history is read once rather
+    // than walked again for every batch.
+    let mut after = String::new();
+    loop {
+        let tx = super::begin_write(db).await?;
+        let ids = {
+            let mut rows = tx
+                .query(
+                    "SELECT e.id FROM events e
+                      WHERE e.project_id = ?1 AND e.id > ?2 AND e.id <= ?3
+                        AND e.kind <> 'system'
+                        AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)
+                      ORDER BY e.id ASC LIMIT ?4",
+                    vec![
+                        Value::Text(project_id.to_string()),
+                        Value::Text(after.clone()),
+                        Value::Text(cursor.clone()),
+                        Value::Integer(crate::limits::FEED_DISMISS_BATCH),
+                    ],
+                )
+                .await
+                .map_err(engine)?;
+            let mut ids = Vec::new();
+            while let Some(row) = rows.next().await.map_err(engine)? {
+                ids.push(required_text(&row, 0)?);
+            }
+            ids
+        };
+        if ids.is_empty() {
+            tx.commit().await.map_err(engine)?;
+            break;
+        }
+        after = ids.last().cloned().unwrap_or_default();
+        let placeholders = ids
+            .iter()
+            .map(|_| "(?, ?, ?)")
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut params = Vec::with_capacity(ids.len() * 3);
+        for id in &ids {
+            params.push(Value::Text(id.clone()));
+            params.push(Value::Text(project_id.to_string()));
+            params.push(Value::Text(now.clone()));
+        }
+        let inserted = tx
+            .execute(
+                &format!(
+                    "INSERT OR IGNORE INTO feed_dismissals(event_id, project_id, dismissed_at)
+                     VALUES {placeholders}"
+                ),
+                params,
+            )
+            .await
+            .map_err(engine)?;
+        total += inserted as i64;
+        let full = ids.len() as i64 == crate::limits::FEED_DISMISS_BATCH;
+        tx.commit().await.map_err(engine)?;
+        if !full {
+            break;
+        }
+    }
+    Ok(Dismissed { dismissed: total })
+}
+
+/// Forget a project's dismissals inside a caller's transaction, so a deleted
+/// project takes them along with everything else scoped to it.
+pub(crate) async fn forget_dismissals_in_tx(
+    tx: &crate::store::WriteTx,
+    project_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM feed_dismissals WHERE project_id = ?1",
+        vec![Value::Text(project_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
+/// Forget one session's dismissals inside a caller's transaction, as prune
+/// removes the session lifecycle events they point at.
+pub(crate) async fn forget_session_dismissals_in_tx(
+    tx: &crate::store::WriteTx,
+    session_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM feed_dismissals WHERE event_id IN
+         (SELECT id FROM events WHERE kind = 'session' AND session_id = ?1)",
+        vec![Value::Text(session_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
 /// An agent's own read position in one project's feed.
 ///
 /// This is the durable, server-side cursor `feed_read` falls back to when the
@@ -714,7 +869,8 @@ pub(crate) async fn forget_agent_cursors_in_tx(
 /// project and by id and touches only the events above the cursor. A project
 /// with no cursor passes the empty string, which sorts below every id.
 pub const UNSEEN_COUNT_SQL: &str = "SELECT COUNT(*) FROM events e
-     WHERE e.project_id = ?1 AND e.id > ?2 AND e.kind <> 'system'";
+     WHERE e.project_id = ?1 AND e.id > ?2 AND e.kind <> 'system'
+       AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)";
 
 /// How many events one project holds above its cursor.
 pub async fn unseen_count(db: &Database, project_id: &str) -> Result<i64> {
@@ -950,14 +1106,18 @@ pub fn human_kinds() -> Vec<String> {
 }
 
 /// Read the most recent human-visible events across every project, newest
-/// first.
+/// first. Events the human dismissed are left out: Home carries the same calm
+/// view as the feed, not everything the store holds.
 pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
     let conn = super::connect(db)?;
     let limit = limit.clamp(1, FEED_LIMIT_MAX);
     let mut rows = conn
         .query(
             "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
-             FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.kind <> 'system' ORDER BY e.id DESC LIMIT ?1",
+             FROM events e LEFT JOIN inbox i ON i.event_id = e.id
+             WHERE e.kind <> 'system'
+               AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)
+             ORDER BY e.id DESC LIMIT ?1",
             vec![Value::Integer(limit)],
         )
         .await
@@ -1025,6 +1185,11 @@ pub async fn read_feed_scoped(
     if !query.include_audit {
         params.push(Value::Text(AUDIT_KIND.to_string()));
         sql.push_str(&format!(" AND e.kind <> ?{}", params.len()));
+    }
+    if query.hide_dismissed {
+        // A dismissal is the human's read state: the event stays for every
+        // agent read, and only this page leaves it out.
+        sql.push_str(" AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)");
     }
     if let Some(since) = &query.since {
         params.push(Value::Text(since.clone()));

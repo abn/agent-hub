@@ -33,6 +33,8 @@ DELETE /api/v1/projects/:id
 GET    /api/v1/projects/:id/stats
 GET    /api/v1/projects/:id/feed
 POST   /api/v1/projects/:id/feed/seen
+POST   /api/v1/projects/:id/feed/dismiss
+POST   /api/v1/projects/:id/feed/dismiss-read
 POST   /api/v1/projects/:id/ideas
 GET    /api/v1/projects/:id/artifacts
 GET    /api/v1/projects/:id/kb/...      the routes in Knowledge base pages
@@ -213,6 +215,8 @@ from a proxy, and a number that cannot be measured is absent rather than zero.
 | `GET /api/v1/projects` and `GET /api/v1/projects/:id` | each project with its `id`, `display_name`, `owner_agent`, `created_at` and `unseen_events` |
 | `GET /api/v1/projects/:id/feed` | `events`, `next_since`, `next_before`, and `last_seen`, the newest event the human has seen, so a client draws the unread dot on an event whose id is above it |
 | `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move |
+| `POST /api/v1/projects/:id/feed/dismiss` | takes `event_ids`, up to 500 of them, and answers `dismissed`, how many the call newly hid. An id already dismissed, an id of another project and an id that names nothing are left out rather than refused |
+| `POST /api/v1/projects/:id/feed/dismiss-read` | `dismissed`, how many human events at or below the project's read cursor were newly hidden. A project with no cursor dismisses nothing, and the hub's own audit trail is left alone |
 | `POST /api/v1/projects/:id/ideas` | `id`, the event id of the idea; the idea is appended as a needs-action signal and surfaces in the inbox for triage |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `events_shared_bytes`, `prunable`, and a row per project with its `project_display_name`, its `events_bytes`, `session_bytes`, `artifact_bytes` and `kb_bytes`, its prunable sessions and bytes, and its optional `last_write` timestamp. Every project has a row, one that holds nothing with zeros, so a project a prune has just emptied keeps its row |
 | `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages`, `agents_active`, `threads`, `agents_written`, and `disk_bytes` for the project header, its tab labels, and the deletion manifest |
@@ -294,6 +298,20 @@ above each cursor rides on the project listing and on Home, so a tab row and a
 Home row draw the same dot without a request of their own, and it counts only
 projects the listing returns. Upgrading an existing hub seeds every cursor at
 that project's newest event, so nothing is lit by the upgrade itself.
+
+A dismissal is the human's view, not a deletion. The declared events leave the
+project feed, the cross-project feed, Home's recent list and the unseen count,
+so the reader who dismissed them does not meet them again. Their ids, inbox
+rows, search documents and payloads stay, and an agent's `feed_read` and search
+still reach them. A dismissal is scoped to the project that declared it, and a
+bulk call takes every event at or below that project's cursor, never the hub's
+audit trail. The cursor is a high-water mark, so opening a feed marks the newest
+event seen and a bulk dismissal also hides older events below the fold that were
+never on screen. A very long history is written in bounded batches, so the call
+holds the hub's write turn for one batch at a time; the response counts every
+event it hid. A call that fails partway may already have committed the batches
+before the failure; the operation is idempotent, so repeating it finishes the
+rest.
 
 ## Projects and pruning
 

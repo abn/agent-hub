@@ -292,3 +292,179 @@ async fn feed_query_decoding_handles_repeated_kinds_and_percent_decoding() {
     let body = json_body(res).await;
     assert_eq!(body["events"].as_array().expect("events").len(), 1);
 }
+
+#[tokio::test]
+async fn a_dismissed_event_leaves_the_human_feed_and_the_global_feed() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    append(&state.db, 0, "agent", None, event("kept"))
+        .await
+        .expect("append kept");
+    let gone = append(&state.db, 0, "agent", None, event("gone"))
+        .await
+        .expect("append gone");
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_ids": [gone] })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["dismissed"], 1);
+
+    let summaries = |page: &Value| -> Vec<String> {
+        page["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .map(|event| event["summary"].as_str().expect("summary").to_string())
+            .collect()
+    };
+    let project = read_feed_page(&state).await;
+    assert_eq!(summaries(&project), vec!["kept".to_string()]);
+
+    let response = router(state.clone())
+        .oneshot(get("/api/v1/feed", Some("Bearer token")))
+        .await
+        .expect("request");
+    let global = json_body(response).await;
+    assert_eq!(
+        summaries(&global),
+        vec!["kept".to_string()],
+        "the cross-project feed hides the dismissal too"
+    );
+    // The human route hides it even when kinds are named; the store and MCP
+    // checks cover the agent's read, which still carries it.
+    let response = router(state.clone())
+        .oneshot(get(
+            "/api/v1/projects/proj/feed?kinds=signal&limit=10",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    let page = json_body(response).await;
+    assert_eq!(
+        page["events"].as_array().expect("events").len(),
+        1,
+        "the explicit read still hides it: the route is the human's"
+    );
+}
+
+#[tokio::test]
+async fn dismiss_read_takes_the_cursor_and_nothing_until_there_is_one() {
+    let state = state().await;
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    let first = append(&state.db, 0, "agent", None, event("first"))
+        .await
+        .expect("append first");
+    append(&state.db, 0, "agent", None, event("second"))
+        .await
+        .expect("append second");
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss-read",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(response).await["dismissed"],
+        0,
+        "a feed nobody has read has nothing to take"
+    );
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/seen",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_id": first })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss-read",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    assert_eq!(json_body(response).await["dismissed"], 1);
+    assert_eq!(
+        read_feed_page(&state).await["events"]
+            .as_array()
+            .expect("events")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn dismissing_needs_a_token_a_project_and_a_sensible_list() {
+    let state = state().await;
+    let denied = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss",
+            None,
+            Some(serde_json::json!({ "event_ids": ["x"] })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let missing = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/no-such-project/feed/dismiss",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_ids": ["x"] })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    agent_hub::store::projects::create(&state.db, "proj", "Proj")
+        .await
+        .expect("create project");
+    let empty = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_ids": [] })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(empty).await["code"], "invalid_argument");
+
+    let too_many = (0..agent_hub::limits::FEED_DISMISS_MAX + 1)
+        .map(|n| format!("event-{n}"))
+        .collect::<Vec<_>>();
+    let over = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_ids": too_many })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(over.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(problem_body(over).await["code"], "invalid_argument");
+
+    let read_denied = router(state.clone())
+        .oneshot(post("/api/v1/projects/proj/feed/dismiss-read", None, None))
+        .await
+        .expect("request");
+    assert_eq!(read_denied.status(), StatusCode::UNAUTHORIZED);
+}

@@ -17,11 +17,11 @@ the build is held to and records where the build deviates from the designer's
 handoff and why. This page records the system and the shipped behaviour.
 
 > [!NOTE]
-> The installable PWA shell, its screens, and the rules below ship. Three
+> The installable PWA shell, its screens, and the rules below ship. Two
 > gestures are intended design rather than shipped behaviour: the edge swipe
-> back, the tab swipe, and swipes on feed rows. Offline reading for the
-> knowledge base is also to be evaluated: what is cached today is the app shell
-> and its assets, not page content.
+> back and the tab swipe. Offline reading for the knowledge base is also to be
+> evaluated: what is cached today is the app shell and its assets, not page
+> content.
 
 ## Tokens
 
@@ -304,6 +304,19 @@ full at the default width. An event opens in the stage with a "Points at" card
 carrying the reader to the artifact or session it is about. A project with
 items waiting draws an amber badge and one with unread items an accent badge,
 with amber taking priority when both exist.
+
+The control row carries the filter, the Group menu and Capture idea. The
+project's overflow carries the feed's own verbs: **Select items** and **Dismiss
+read**. Select items swaps the control row for the count, Dismiss and Cancel,
+and each row draws a box in the kind glyph's slot, so the title's left edge
+holds; a press anywhere on a row picks it. Dismiss read takes every event at or
+below the read cursor, including the ones below the fold. The same overflow
+carries the two verbs on a phone, where the selection replaces the one tools
+row, rather than adding a band over the list. A left swipe uncovers a Dismiss
+action under the row. A dismissal is the human's
+view, not a deletion: the event leaves the project feed, the cross-project feed,
+Home's recent list and the unseen count, while its id, inbox row, search
+document and payload stay, so an agent still reads it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/projects-desktop-dark.png">
@@ -617,9 +630,11 @@ fix rather than repeating the refusal.
 - A swipe is first-class on mobile, never destructive, and always has a tap
   equivalent. The swipe-down toast dismiss ships, with a dismiss control and
   Esc beside it. An Inbox row's swipe right marks it read or unread and its
-  swipe left uncovers the row's actions without deciding anything. The edge
-  swipe back, the tab swipe and swipes on feed rows are intended design, not
-  yet shipped.
+  swipe left uncovers the row's actions without deciding anything. A feed row's
+  swipe left uncovers Dismiss, which hides the event from the human's feed and
+  deletes nothing. Dismissing several at once, or every read event at once, asks
+  in a dialog first. The edge swipe back and the tab swipe are intended design,
+  not yet shipped.
 - A waiting row keeps its title line for the subject in every index: it ends in
   the action dot, its title is drawn at 600, and the title takes the words
   "Waiting on you" as its accessible description, hidden from browse mode so a

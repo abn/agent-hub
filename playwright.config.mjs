@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels|anchors)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels|anchors|feed-dismiss)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -176,5 +176,13 @@ export default defineConfig({
       use: { viewport: { width: 1024, height: 800 } },
       testMatch: /prefix\.spec\.mjs/,
     },
+    // Dismissal writes the human's view of a feed, so its checks get their own
+    // hub per width: a dismissal made by the selection check must not be the
+    // feed the swipe check starts from.
+    ...Object.entries(WIDTHS).map(([name, viewport]) => ({
+      name: `dismiss-${name}`,
+      use: { viewport, hasTouch: name === "phone" },
+      testMatch: /feed-dismiss\.spec\.mjs/,
+    })),
   ],
 });

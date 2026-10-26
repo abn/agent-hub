@@ -333,6 +333,7 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     )
     .await
     .map_err(engine)?;
+    crate::store::events::forget_session_dismissals_in_tx(&tx, session_id).await?;
     tx.execute(
         "DELETE FROM events WHERE kind = 'session' AND session_id = ?1",
         vec![Value::Text(session_id.to_string())],

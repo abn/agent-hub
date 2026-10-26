@@ -2,6 +2,7 @@
 //! grants.
 
 use agent_hub::error::ErrorCode;
+use agent_hub::store::events::{self, NewEvent, append};
 use agent_hub::store::{identity, projects};
 
 mod common;
@@ -357,6 +358,59 @@ async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
     )
     .await;
     assert_eq!(docs_after, 0, "the search rows go with the events");
+}
+
+/// A refused enrolment wipes its personal space, and a dismissal the human
+/// made in that space goes with the events rather than outliving them.
+#[tokio::test]
+async fn refusing_an_enrolment_sweeps_its_space_dismissals() {
+    let db = fresh("identity-refuse-dismiss").await;
+    let (agent, _token) =
+        identity::enrol_agent(&db, "waiter", "Waiter", "10.0.0.9", "please let me in", 20)
+            .await
+            .expect("enrol");
+    let event = append(
+        &db,
+        0,
+        "waiter",
+        None,
+        NewEvent {
+            project_id: agent.personal_project_id.clone(),
+            kind: "signal".to_string(),
+            summary: "a note in the personal space".to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append");
+    events::dismiss(
+        &db,
+        &agent.personal_project_id,
+        std::slice::from_ref(&event),
+    )
+    .await
+    .expect("dismiss");
+
+    identity::refuse_enrolment(&db, "waiter")
+        .await
+        .expect("refuse");
+
+    let conn = db.connect().expect("connect");
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM feed_dismissals", ())
+        .await
+        .expect("count");
+    let left = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("a count row")
+        .get::<i64>(0)
+        .expect("count");
+    assert_eq!(left, 0, "the refused space leaves no dismissal behind");
 }
 
 /// The agent list reports whether a live token exists, which is the state the

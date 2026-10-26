@@ -525,13 +525,14 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
     }
 
     let tx = super::begin_write(db).await?;
-    // Inbox and search rows hang off events, so they go first.
+    // Inbox and dismissal rows hang off events, so they go first.
     tx.execute(
         "DELETE FROM inbox WHERE event_id IN (SELECT id FROM events WHERE project_id = ?1)",
         vec![Value::Text(id.to_string())],
     )
     .await
     .map_err(engine)?;
+    crate::store::events::forget_dismissals_in_tx(&tx, id).await?;
     tx.execute(
         "DELETE FROM events WHERE project_id = ?1",
         vec![Value::Text(id.to_string())],
