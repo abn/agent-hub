@@ -2473,15 +2473,17 @@ button.empty-link {
    to the edge of the screen, as the design draws it; from the desktop width up
    it keeps the card the other lists use. */
 .feed-day { padding: 0; }
-.feed-day .row:first-child { border-radius: var(--r-2) var(--r-2) 0 0; }
-.feed-day .row:last-child { border-radius: 0 0 var(--r-2) var(--r-2); }
-.feed-day .row:only-child { border-radius: var(--r-2); }
+.feed-day .feed-item:first-child .row { border-radius: var(--r-2) var(--r-2) 0 0; }
+.feed-day .feed-item:last-child .row { border-radius: 0 0 var(--r-2) var(--r-2); }
+.feed-day .feed-item:only-child .row { border-radius: var(--r-2); }
 @media (max-width: 719px) {
   .feed-day {
     margin-left: calc(-1 * var(--s-4)); margin-right: calc(-1 * var(--s-4));
     border-left: 0; border-right: 0; border-radius: 0; box-shadow: none;
   }
-  .feed-day .row:first-child, .feed-day .row:last-child, .feed-day .row:only-child { border-radius: 0; }
+  .feed-day .feed-item:first-child .row,
+  .feed-day .feed-item:last-child .row,
+  .feed-day .feed-item:only-child .row { border-radius: 0; }
 }
 /* Seen is quiet and unseen is ink: the weight and the dot say it, and the word
    beside the dot says it to a reader who has neither. */
@@ -2716,6 +2718,83 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .feed-row .feed-link::after { content: ""; position: absolute; inset: 0; }
 .feed-row .action, .feed-row .ts { position: relative; z-index: 1; }
 .feed-row:focus-visible, .feed-row:has(.feed-link:focus-visible) { position: relative; z-index: 1; }
+
+/* A feed row is a swipe target: the item holds the row and the Dismiss tray
+   under it, so the row slides off the tray rather than carrying it along. */
+.feed-item { position: relative; overflow: hidden; }
+.feed-item .row { border-bottom: 1px solid var(--line); }
+.feed-item:last-child .row { border-bottom: 0; }
+.feed-row { touch-action: pan-y; }
+/* The item clips what leaves it, so the ring is drawn inside the row. */
+.feed-row:focus-visible, .feed-row:has(.feed-link:focus-visible) {
+  outline-offset: -2px;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Picking swaps the kind glyph for a box in the same slot, so the row's title
+   keeps its left edge and the rows keep their height. */
+.feed-pick-wrap {
+  position: relative;
+  z-index: 1;
+  display: none;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.is-picking .feed-pick-wrap { display: flex; }
+.is-picking .feed-row .glyph { display: none; }
+.feed-pick {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* Under a coarse pointer the label keeps the 24px column and answers to the
+   full 44px tap through its own hit area. */
+@media (pointer: coarse) {
+  .feed-pick-wrap::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+  .feed-pick { width: 20px; height: 20px; }
+}
+.feed-row.picked { background: var(--accent-bg); }
+
+/* Picking replaces the filter row with the count, the verb and the way out.
+   It is the same band, so the list below it does not move. */
+.shell-controls.is-picking .shell-filter,
+.shell-controls.is-picking .shell-group,
+.shell-controls.is-picking > .primary {
+  display: none;
+}
+.feed-select-bar {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.feed-select-bar[hidden] { display: none; }
+.feed-select-count {
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-13);
+  font-weight: 600;
+  color: var(--ink);
+}
 
 /* Inbox: resolved earlier and snooze */
 .inbox-snooze-bar {
@@ -7553,10 +7632,10 @@ dialog.dialog-project-delete {
   border-radius: 0;
   box-shadow: none;
 }
-.shell-index .feed-day .row,
-.shell-index .feed-day .row:first-child,
-.shell-index .feed-day .row:last-child,
-.shell-index .feed-day .row:only-child {
+.shell-index .feed-day .feed-item .row,
+.shell-index .feed-day .feed-item:first-child .row,
+.shell-index .feed-day .feed-item:last-child .row,
+.shell-index .feed-day .feed-item:only-child .row {
   border-radius: 0;
 }
 .shell-index .row {
@@ -7565,6 +7644,10 @@ dialog.dialog-project-delete {
   border-bottom: 1px solid var(--line);
 }
 .shell-index .row:last-child { border-bottom: 0; }
+/* Every feed row is the last child of its own item, so the row separator has
+   to be stated on the item rather than left to `.row:last-child`. */
+.shell-index .feed-item .row { border-bottom: 1px solid var(--line); }
+.shell-index .feed-item:last-child .row { border-bottom: 0; }
 .shell-index .inbox-label,
 .shell-index .shell-group-label,
 .shell-index .hub-group-header,

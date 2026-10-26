@@ -15,9 +15,11 @@ import {
   feedCounts,
   feedEvent,
   feedSection,
+  feedSelectBar,
   feedVisit,
   formatEventSummary,
   kindMenu,
+  resumePicking,
   setFeedSelection,
 } from "./feed.mjs";
 import { count, usedOfCapacity } from "./home.mjs";
@@ -107,8 +109,15 @@ export function projectLockBadge(project) {
 // project header carries Project settings, Copy path and Delete project; the
 // project's own settings screen passes lock-only and gets the confidential
 // control instead. An operator may lock or unlock from there.
-export function projectOverflow(project, { lock = true, full = true, newPage = false } = {}) {
+export function projectOverflow(project, { lock = true, full = true, newPage = false, feed = false } = {}) {
   const name = project.display_name || project.id;
+  // On a phone the tools row has no room for a second overflow, so the feed's
+  // two verbs ride in this one, above the project's own controls.
+  const feedItems = feed
+    ? `<button type="button" role="menuitem" class="proj-menu-item" data-action="feed-select" data-project="${esc(project.id)}">Select items</button>
+      <button type="button" role="menuitem" class="proj-menu-item" data-action="feed-dismiss-read" data-project="${esc(project.id)}">Dismiss read</button>
+      <div class="proj-menu-divider" role="separator"></div>`
+    : "";
   const lockItem = !lock
     ? ""
     : project.confidential
@@ -128,6 +137,7 @@ export function projectOverflow(project, { lock = true, full = true, newPage = f
   return `<span class="proj-overflow-wrap">
     <button type="button" class="proj-overflow-btn" aria-label="Project actions" aria-haspopup="menu" aria-expanded="false">${glyphSvg("overflow", { size: 20 })}</button>
     <div class="proj-overflow-menu" role="menu" hidden>
+      ${feedItems}
       ${newPageItem}
       ${lockItem}
       ${extras}
@@ -171,6 +181,14 @@ const PROJECT_MOBILE_STYLE = `<style>
     padding: 0 16px;
     gap: 8px;
     min-width: 0;
+  }
+  /* Picking spends the one tools row on the selection, so the phone keeps its
+     single 44px band rather than growing a second one over the list. */
+  .project-tools-mobile.is-picking > :not(.feed-select-bar) {
+    display: none !important;
+  }
+  .project-tools-mobile.is-picking > .feed-select-bar {
+    flex: 1 1 auto;
   }
   /* The switcher takes what is left and scrolls sideways rather than squeezing
      its tabs into collisions; the tabs keep their drawn width. The 44px tools
@@ -282,7 +300,8 @@ function projectToolsMobile(id, segment, stats, project) {
     <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
       ${filterGlyph}
     </button>
-    ${projectOverflow(project, { lock: false, newPage: segment === "wiki" })}
+    ${projectOverflow(project, { lock: false, newPage: segment === "wiki", feed: segment === "feed" })}
+    ${segment === "feed" ? feedSelectBar() : ""}
   </div>`;
 }
 
@@ -497,19 +516,33 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const indexBody = await feedSection(id, stats, { chips: false });
   const held = feedVisit(id);
   const group = kindMenu(activeKinds(id), feedCounts(id));
-  const event = feedEvent(id, selected) || held?.events?.[0] || null;
-  const title = event ? formatEventSummary(event) : "Feed";
+  // An address that names an event the page does not hold says so rather than
+  // opening the newest row under the old id. A dismissed event is one way an
+  // id can be missing; an event older than the loaded page is another.
+  const event = selected ? feedEvent(id, selected) : held?.events?.[0] || null;
+  const missing = Boolean(selected) && !event;
+  const filtered = activeKinds(id).size > 0;
+  const title = missing ? "Event not in the feed" : event ? formatEventSummary(event) : "Feed";
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
+  // The overflow carries the feed's own verbs; the bar replaces the filter row
+  // while the reader is picking, so both share the one control row.
+  const right = `<button type="button" class="primary" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>${feedSelectBar()}`;
   return shellHTML({
     segment,
-    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
-    indexControls: shellIndexControls("Filter events", group, `<button type="button" class="primary" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>`),
+    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false, feed: true })}</div>`,
+    indexControls: shellIndexControls("Filter events", group, right),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
     stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(
       event ? `${id} / feed / ${event.kind}` : id,
     )}</span></div>`,
-    stageBody: eventStage(event, id),
+    stageBody: missing
+      ? `<div class="shell-pad"><p class="empty">${
+          filtered
+            ? "This event is not in the filtered feed. Clear the kind filter to see it."
+            : "This event is not in the feed. It may have been dismissed, or it is older than the rows this page has loaded."
+        }</p></div>`
+      : eventStage(event, id),
     hasSelection: Boolean(selected),
   });
 }
@@ -773,6 +806,7 @@ export async function projectScreen(params, gen, path) {
 
   paint(gen, shell);
   installShellLayout(main);
+  if (segment === "feed") resumePicking();
   if (artifactInfo) wireArtifactStage(main, artifactId, artifactInfo);
   if (sessionSelected) wireSessionDetail(main, id, sessionSelected.id);
   if (segment === "wiki") wireWikiComments(main);

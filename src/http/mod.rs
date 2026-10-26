@@ -152,6 +152,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/ideas/{id}/reply", post(ideas::reply))
         .route("/api/v1/projects/{id}/feed", get(feed::read))
         .route("/api/v1/projects/{id}/feed/seen", post(feed::seen))
+        .route("/api/v1/projects/{id}/feed/dismiss", post(feed::dismiss))
+        .route(
+            "/api/v1/projects/{id}/feed/dismiss-read",
+            post(feed::dismiss_read),
+        )
         .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
         .route("/api/v1/projects/{id}/kb/pages", get(kb::pages))
         .route(

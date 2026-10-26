@@ -114,6 +114,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 25,
         ddl: V25,
     },
+    Migration {
+        version: 26,
+        ddl: V26,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -661,4 +665,24 @@ CREATE INDEX IF NOT EXISTS inbox_deadline ON inbox(expires_at);
 const V25: &str = r#"
 ALTER TABLE notify_subscriptions ADD COLUMN actor_filter TEXT;
 ALTER TABLE notify_subscriptions ADD COLUMN exclude_self INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// Version 26: feed events the human dismissed from a project's feed.
+///
+/// A dismissal is the human's read state, not a deletion: the event, its
+/// inbox row, its search document, and its id all stay, so an agent's feed and
+/// search still reach it. A dismissed event is left out of the human feed, the
+/// unseen count, and Home's recent list. The reference to `events` documents
+/// the relation; foreign keys are not enforced in this schema, so prune and
+/// project delete sweep the rows rather than the engine. The project index
+/// serves the project-scoped sweep a delete or a refused enrolment runs, and
+/// the timestamp is the retention layer's.
+const V26: &str = r#"
+CREATE TABLE IF NOT EXISTS feed_dismissals(
+  event_id TEXT PRIMARY KEY REFERENCES events(id),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  dismissed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feed_dismissals_project
+  ON feed_dismissals(project_id, dismissed_at);
 "#;

@@ -522,6 +522,18 @@ Agents and access, Connect, and the knowledge base.
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
   about.
+  The control row carries the filter, the Group menu and Capture idea. The
+  project's overflow carries the feed's own verbs: **Select items** and
+  **Dismiss read**. Select items replaces the control row with the count,
+  Dismiss and Cancel, and each row draws a box in the kind glyph's slot, so the
+  title's left edge holds; a press anywhere on the row picks it. Dismiss read
+  takes every event at or below the read cursor, including the ones below the
+  fold. The same overflow carries the two verbs on a phone, where the selection
+  replaces the one tools row, rather than adding a band over the list. A left
+  swipe uncovers a Dismiss action under the row. A dismissal is the human's view, not a
+  deletion: the event leaves the project feed, the cross-project feed, Home's
+  recent list and the unseen count, while its id, inbox row, search document and
+  payload stay, so an agent still reads it.
 - **Artifact viewer.** The Artifacts shell with the artifact selected: the
   stage renders the document, and its control row carries the path, Copy path,
   the version control and Copy raw. A version picked there is read in the same
@@ -601,7 +613,8 @@ Agents and access, Connect, and the knowledge base.
 - Read is explicit: opening an item, a swipe right, or the row's own control.
   Never scroll-past.
 - A swipe is first-class on mobile, never destructive, and always has a tap
-  equivalent.
+  equivalent. A feed row's swipe left uncovers Dismiss, which hides the event
+  and deletes nothing. Bulk dismissal and Dismiss read ask in a dialog first.
 - Prune is confirmed in a dialog, reversible for 30s in a toast, then
   committed. The dialog opens with the safe action focused.
 - End session is not prune. Ending stops something live and cannot be undone,

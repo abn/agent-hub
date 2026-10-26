@@ -10,7 +10,7 @@ use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, json_body};
-use crate::limits::FEED_LIMIT_DEFAULT;
+use crate::limits::{FEED_DISMISS_MAX, FEED_LIMIT_DEFAULT};
 use crate::store::events::{self, Event, FeedQuery, read_feed};
 
 /// A page of the feed plus the cursors to continue in either direction.
@@ -32,6 +32,14 @@ pub struct FeedPage {
 pub struct SeenBody {
     /// The newest event on the page the human just read.
     pub event_id: String,
+}
+
+/// The events one dismissal call names.
+#[derive(Debug, Deserialize)]
+pub struct DismissBody {
+    /// The events to take out of this project's feed.
+    #[serde(default)]
+    pub event_ids: Vec<String>,
 }
 
 /// `GET /api/v1/projects/{id}/feed`
@@ -127,15 +135,7 @@ pub async fn seen(
 
     let payload = json_body(body, "body must be JSON with an event_id field")?;
 
-    if crate::store::projects::get(&state.db, &project_id)
-        .await
-        .map_err(|err| Problem::from_error(&err))?
-        .is_none()
-    {
-        return Err(Problem::from_error(&Error::NotFound(format!(
-            "project {project_id} not found"
-        ))));
-    }
+    ensure_project(&state, &project_id).await?;
 
     let seen = events::mark_seen(&state.db, &project_id, &payload.event_id)
         .await
@@ -145,6 +145,90 @@ pub async fn seen(
         state.notify();
     }
     Ok(Json(seen))
+}
+
+/// `POST /api/v1/projects/{id}/feed/dismiss`
+///
+/// A valid bearer token is required. The events are taken out of the human
+/// feed, not deleted: an agent still reads them, and the inbox and search are
+/// untouched. An event already dismissed, an event of another project, and an
+/// id that names nothing are left out of the count rather than refused, so a
+/// stale page can be dismissed safely. An unknown project is a 404.
+pub async fn dismiss(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+    body: std::result::Result<Json<DismissBody>, JsonRejection>,
+) -> std::result::Result<Json<events::Dismissed>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    let payload = json_body(body, "body must be JSON with an event_ids field")?;
+    if payload.event_ids.is_empty() {
+        return Err(Problem::from_error(&Error::InvalidArgument(
+            "event_ids must name at least one event".to_string(),
+        )));
+    }
+    if payload.event_ids.len() > FEED_DISMISS_MAX {
+        return Err(Problem::from_error(&Error::InvalidArgument(format!(
+            "at most {FEED_DISMISS_MAX} events can be dismissed at once"
+        ))));
+    }
+
+    ensure_project(&state, &project_id).await?;
+
+    let dismissed = events::dismiss(&state.db, &project_id, &payload.event_ids)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    if dismissed.dismissed > 0 {
+        state.notify();
+    }
+    Ok(Json(dismissed))
+}
+
+/// `POST /api/v1/projects/{id}/feed/dismiss-read`
+///
+/// A valid bearer token is required. Every event at or below the project's
+/// read cursor leaves the human feed, which is what "dismiss read" means. A
+/// project with no cursor has read nothing, and the hub's audit trail is left
+/// alone. An unknown project is a 404.
+pub async fn dismiss_read(
+    State(state): State<AppState>,
+    ProblemPath(project_id): ProblemPath<String>,
+    headers: HeaderMap,
+) -> std::result::Result<Json<events::Dismissed>, Problem> {
+    state
+        .auth
+        .require_admin(bearer_token(&headers).as_deref())
+        .map_err(|err| Problem::from_error(&err))?;
+
+    ensure_project(&state, &project_id).await?;
+
+    let dismissed = events::dismiss_read(&state.db, &project_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+
+    if dismissed.dismissed > 0 {
+        state.notify();
+    }
+    Ok(Json(dismissed))
+}
+
+/// Refuse a feed write for a project that does not exist.
+async fn ensure_project(state: &AppState, project_id: &str) -> std::result::Result<(), Problem> {
+    if crate::store::projects::get(&state.db, project_id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .is_none()
+    {
+        return Err(Problem::from_error(&Error::NotFound(format!(
+            "project {project_id} not found"
+        ))));
+    }
+    Ok(())
 }
 
 // Query parsing uses form_urlencoded to handle repeated keys and standard decoding.
@@ -189,5 +273,8 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         session_id,
         // The route is admin-only, and the audit screen reads the trail here.
         include_audit: true,
+        // These are the human's surfaces: what the human dismissed stays out.
+        // An agent's read builds its own query and still sees every event.
+        hide_dismissed: true,
     })
 }
