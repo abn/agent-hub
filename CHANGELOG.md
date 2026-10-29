@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.8.0...agent-hub-v1.9.0) (2026-10-29)
+
+
+### Bug Fixes
+
+* **feed:** render an event body as markdown ([61dd6c4](https://github.com/abn/agent-hub/commit/61dd6c41ccc97f9e072e6682287f60cd3cac9fea))
+
 ## [1.8.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.7.0...agent-hub-v1.8.0) (2026-10-26)
 
 
