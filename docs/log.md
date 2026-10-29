@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-10-29
+
+### A feed event's body renders as markdown
+
+* **Fix**: Opening a project feed event now renders its body as markdown. A
+  signal's report shows its headings, tables and code instead of the syntax an
+  agent wrote it in. A table wider than the stage scrolls inside its own region
+  and stays reachable by keyboard.
+* **Update**: [Projects and the feed](/guides/human/projects-and-feed.md) says
+  how an event body is read.
+
 ## 2026-10-26
 
 ### Feed events can be dismissed
