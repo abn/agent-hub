@@ -770,6 +770,9 @@ function sanitizeNode(parent) {
         node.remove();
         continue;
       }
+      // A markdown table or fenced block can be wider than the prose column,
+      // so its scroll region has to be reachable by keyboard as well.
+      if (tag === "pre" || tag === "table") node.setAttribute("tabindex", "0");
       sanitizeNode(node);
     } else if (node.nodeType === 8) {
       node.remove();

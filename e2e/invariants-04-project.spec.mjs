@@ -8,6 +8,7 @@
 // person to look at. It asserted nothing, so ADR 0023 has no tool for it: a
 // visual check is a `toHaveScreenshot` baseline, and this was a capture.
 
+import AxeBuilder from "@axe-core/playwright";
 import { api, expect, goto, newSession, oneOffQuestion, settle, structured, test, toolCall } from "./invariants.mjs";
 
 const projectRoute = (hub, segment) => `#/projects/${encodeURIComponent(hub.projectId)}/${segment}`;
@@ -154,6 +155,99 @@ test.describe("project tools and sessions", () => {
     await expect(aside).toHaveCount(1);
     expect(await aside.getAttribute("hidden"), "the aside is hidden for a directory path").toBeNull();
     await expect(aside, "the aside does not state the directory in words").toContainText(/directory|folder/i);
+  });
+});
+
+test.describe("feed stage", () => {
+  test("an opened event body renders as markdown, and its wide table scrolls", async ({ hub, page }) => {
+    const summary = "Markdown signal";
+    const body = [
+      "# Roundhouse: attention list",
+      "",
+      "## Stream hygiene",
+      "",
+      "### Owner asks",
+      "",
+      "| What | State | Owner | Age | Where | Note |",
+      "|---|---|---|---|---|---|",
+      "| BL-204 | Landed | hub | 1d | main | clean |",
+      "",
+      "`empty_after_thinking` is moot.",
+      "",
+      "```js",
+      "const state = 'clean';",
+      "```",
+    ].join("\n");
+    const session = await newSession(hub);
+    await toolCall(hub, session, "signal_append", {
+      project_id: hub.projectId,
+      kind: "signal",
+      summary,
+      payload: { body },
+    });
+    const feed = (
+      await api(hub, "GET", `/api/v1/projects/${encodeURIComponent(hub.projectId)}/feed?limit=20`)
+    ).json();
+    const event = feed.events.find((candidate) => candidate.summary === summary);
+    expect(event, "the signal never reached the feed").toBeTruthy();
+
+    await goto(page, `${projectRoute(hub, "feed")}?event=${encodeURIComponent(event.id)}`, summary);
+    const stage = page.locator(".feed-stage-body");
+    await expect(stage.getByRole("heading", { name: "Roundhouse: attention list", level: 1 })).toBeVisible();
+    await expect(stage.getByRole("heading", { name: "Stream hygiene", level: 2 })).toBeVisible();
+    await expect(stage.getByRole("heading", { name: "Owner asks", level: 3 })).toBeVisible();
+    await expect(stage.getByRole("cell", { name: "Landed" })).toBeVisible();
+    await expect(stage.locator(":not(pre) > code")).toHaveText("empty_after_thinking");
+    await expect(stage.locator("pre code")).toContainText("const state = 'clean';");
+    await expect(stage, "the event body still holds its markdown syntax").not.toContainText("|---|");
+
+    // The table is wider than the stage at both widths, so it scrolls inside
+    // its own region rather than squeezing its cells or the page sideways.
+    const table = stage.locator("table");
+    const scrollsInPlace = async () => {
+      expect(
+        await table.evaluate((el) => el.scrollWidth > el.clientWidth + 1),
+        "the wide table is not a horizontal scroll region",
+      ).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        "the wide table takes the page sideways",
+      ).toBe(true);
+    };
+    await scrollsInPlace();
+
+    // The first column stays put as the table scrolls under it.
+    const sticky = await table.evaluate((el) => {
+      const cell = el.querySelector("th");
+      el.scrollLeft = el.scrollWidth;
+      return {
+        position: window.getComputedStyle(cell).position,
+        offset: Math.round(cell.getBoundingClientRect().left - el.getBoundingClientRect().left),
+      };
+    });
+    expect(sticky.position, "the wide table's first column does not stick").toBe("sticky");
+    expect(Math.abs(sticky.offset), "the sticky first column left its edge").toBeLessThanOrEqual(1);
+
+    // A body heading sits under the 22px stage title, and the smallest one
+    // stays on the 12px floor rather than shrinking to a browser default.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await scrollsInPlace();
+    const sizes = await stage.evaluate((el) =>
+      ["h1", "h2", "h3"].map((tag) => window.getComputedStyle(el.querySelector(tag)).fontSize),
+    );
+    expect(sizes, "the body headings left the prose scale").toEqual(["17px", "15px", "13px"]);
+
+    // Both scroll regions are focusable, so a keyboard reader can reach them.
+    await table.evaluate((el) => { el.scrollLeft = 0; });
+    const { violations } = await new AxeBuilder({ page })
+      .include(".feed-stage-body")
+      .withTags(["wcag2a", "wcag2aa"])
+      .analyze();
+    expect(
+      violations.map((violation) => violation.id),
+      "the rendered body has an accessibility violation",
+    ).toEqual([]);
+    await page.setViewportSize({ width: 390, height: 844 });
   });
 });
 

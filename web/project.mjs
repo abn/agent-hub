@@ -542,7 +542,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
             ? "This event is not in the filtered feed. Clear the kind filter to see it."
             : "This event is not in the feed. It may have been dismissed, or it is older than the rows this page has loaded."
         }</p></div>`
-      : eventStage(event, id),
+      : await eventStage(event, id),
     hasSelection: Boolean(selected),
   });
 }

@@ -8,6 +8,7 @@ import { actionFor, esc, glyph, isOpen, main, waitingMarks, when } from "./dom.m
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerPane } from "./keys.mjs";
 import { focusAfterRender, render } from "./router.mjs";
+import { renderMarkdown } from "./sessions.mjs";
 import { byDay } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -748,7 +749,11 @@ function scoreDetail(event, projectId) {
 // still waits on the reader, its words, the verbs it offers, and a card naming
 // the thing it is about. The feed stops being a wall you scroll and becomes a
 // list you open, which is what the artifact view already was.
-export function eventStage(event, projectId) {
+//
+// An event body is markdown. An agent writes its report there, and rendering it
+// is what turns the headings, tables and code into the document the agent
+// wrote rather than the syntax it wrote it in.
+export async function eventStage(event, projectId) {
   if (!event) {
     return `<div class="shell-prose"><p class="empty">Select an event from the list.</p></div>`;
   }
@@ -782,6 +787,7 @@ export function eventStage(event, projectId) {
   // short subject keeps the title it always had.
   const { subject, message } = subjectAndMessage(formatEventSummary(event));
   const body = typeof event.payload?.body === "string" ? event.payload.body.trim() : "";
+  const renderedBody = body ? await renderMarkdown(body) : "";
   const detail =
     event.kind === "anchor"
       ? anchorDetail(event, projectId)
@@ -809,7 +815,7 @@ export function eventStage(event, projectId) {
       <h2 class="feed-stage-title">${esc(subject)}</h2>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
       ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
-      ${body ? `<p class="feed-stage-body">${esc(body)}</p>` : ""}
+      ${renderedBody ? `<div class="feed-stage-body">${renderedBody}</div>` : ""}
       ${detail}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}

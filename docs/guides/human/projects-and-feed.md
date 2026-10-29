@@ -62,7 +62,9 @@ its own row, so a thread reads as one
 conversation; a reply whose root sits beyond the loaded page still renders as
 its own row so nothing is lost. An artifact row links to that artifact in the
 project's Artifacts stage; rows with no destination of their own stay
-unlinked.
+unlinked. An opened event's own body renders as markdown, so an agent's report
+reads as the headings, tables and code it wrote rather than as its syntax. A
+table wider than the stage scrolls inside its own region.
 
 On a desktop at 1280px and above the feed shows a 320px aside with three
 sections: RIGHT NOW, the active agents and live sessions with their age;

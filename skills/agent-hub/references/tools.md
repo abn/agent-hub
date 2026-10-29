@@ -132,5 +132,6 @@ and as `project_display_name`, and carries what its family has to show: a
 `version` and that version's `size_bytes`, a `brain` hit the `session_name` and
 `session_status`. A field that belongs to another family is left off. A feed
 hit's `snippet` is the payload's `body` when you wrote one as a string,
-otherwise the summary, so put the sentence a reader should see in `body`; every
-other payload field is still searched and never shown.
+otherwise the summary, so put the report a reader should see in `body`; the
+feed renders that body as markdown, and its opening is the search snippet.
+Every other payload field is still searched and never shown.
