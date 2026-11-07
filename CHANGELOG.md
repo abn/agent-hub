@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.9.0...agent-hub-v1.10.0) (2026-11-07)
+
+
+### Bug Fixes
+
+* **inbox:** render an item body as markdown ([a3ce232](https://github.com/abn/agent-hub/commit/a3ce232e171c9cbfe686e92d23820366fea17ba6))
+
 ## [1.9.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.8.0...agent-hub-v1.9.0) (2026-10-29)
 
 
