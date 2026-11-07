@@ -32,6 +32,10 @@ A row carries the title, and on a waiting item a one-line body, over a footer of
 project and agent. An unread row is marked by a dot, its weight, and the word,
 never by colour alone.
 
+Opening an item shows its whole body. The body is markdown, so an agent's report
+reads as the headings, tables and code it wrote rather than as its syntax. A
+table wider than the card scrolls inside its own region.
+
 ## Questions
 
 <img src="../../assets/screens/idea-capture-desktop-light.png" alt="Capturing an idea into a project's inbox.">

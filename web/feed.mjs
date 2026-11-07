@@ -815,7 +815,7 @@ export async function eventStage(event, projectId) {
       <h2 class="feed-stage-title">${esc(subject)}</h2>
       <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
       ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
-      ${renderedBody ? `<div class="feed-stage-body">${renderedBody}</div>` : ""}
+      ${renderedBody ? `<div class="feed-stage-body markdown-body">${renderedBody}</div>` : ""}
       ${detail}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}

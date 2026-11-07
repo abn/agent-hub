@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-07
+
+### An inbox item's body renders as markdown
+
+* **Fix**: Opening an inbox item now renders its body as markdown, through the
+  same renderer the feed stage uses. A report's headings, tables and code read
+  as written instead of as their syntax, and a table wider than the card
+  scrolls inside its own region.
+* **Update**: [Inbox and questions](/guides/human/inbox-and-questions.md) says
+  how an opened item's body is read.
+
 ## 2026-10-29
 
 ### A feed event's body renders as markdown

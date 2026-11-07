@@ -106,9 +106,10 @@ SEARCH_HOSTILE_QUERIES = [
 INBOX_READ_SUMMARY = "Weekly digest is ready"
 INBOX_SWIPE_SUMMARY = "Backup verified on the second disk"
 INBOX_DECLINE_SUMMARY = 'Drop the <i id="pwned-inbox-title">staging</i> database'
-# A body an agent wrote. It reaches a row, a detail card and a dialog, and has
-# to stay text in each.
-INBOX_BODY = 'The copy is stale. <img id="pwned-inbox-body" src="x"> Nothing reads from it.'
+# A body an agent wrote. The inbox row shows it as escaped text; the detail
+# card renders it as sanitized markdown, so the unsafe image source is dropped
+# and the element with it.
+INBOX_BODY = 'The copy is stale. <img id="pwned-inbox-body" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="> Nothing reads from it.'
 INBOX_QUESTION_SUBJECT = "Keep the old export format?"
 
 # A protected artifact, so the password gate can be driven for real. The

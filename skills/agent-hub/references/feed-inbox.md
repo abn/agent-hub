@@ -1,14 +1,16 @@
 # Feed, inbox, and questions
 
 A `signal` is a plain note. A report goes in its `payload.body`, which the feed
-renders as markdown. `finished` work lands in the inbox as unread. An
-`approval` and a `question` wait on the human and land in the inbox as action
-items. An `idea` is a human-captured note that lands in the inbox for triage;
-it carries no question or decision and is cleared by being read or snoozed. `question_post` roots its own thread and returns `event_id`,
+stage and an opened inbox item render as markdown. `finished` work lands in the
+inbox as unread. An `approval` and a `question` wait on the human and land in
+the inbox as action items. An `idea` is a human-captured note that lands in the
+inbox for triage; it carries no question or decision and is cleared by being
+read or snoozed. `question_post` roots its own thread and returns `event_id`,
 `question_id`, and `thread_id`, all the same value; `answer_post` takes that
-value as `question_id`. `signal_append` accepts `signal`, `finished`, `approval`, and `idea`; the
-needs-action flag follows the kind and cannot be set by a client. An idea
-lands in the inbox for triage and carries no question or decision.
+value as `question_id`. `signal_append` accepts `signal`, `finished`,
+`approval`, and `idea`; the needs-action flag follows the kind and cannot be set
+by a client. An idea lands in the inbox for triage and carries no question or
+decision.
 
 `anchor` and `score` are ordinary feed events too, session-scoped and pruned
 with the session. `signal_append` refuses both: `session_anchor` writes an

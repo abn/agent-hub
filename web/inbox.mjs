@@ -11,6 +11,7 @@ import { glyphSvg } from "./glyphs.mjs";
 import { registerPane, registerScreen } from "./keys.mjs";
 import { expiredWords, subjectAndMessage } from "./feed.mjs";
 import { render } from "./router.mjs";
+import { renderMarkdown } from "./sessions.mjs";
 import { installShellLayout, shellHTML, shellIndexControls, shellStageHead } from "./shell-layout.mjs";
 import { deadlineWords, fullStamp, relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
@@ -338,11 +339,14 @@ function drawSync(note) {
   if (!syncTimer) syncTimer = setInterval(() => drawSync(), 15000);
 }
 
-// The medium card: the whole of one item, with its answers at full size.
-function detail(item, state) {
+// The medium card: the whole of one item, with its answers at full size. An
+// item's body is markdown, so it renders through the same renderer as a feed
+// event's body rather than showing the syntax the agent wrote it in.
+async function detail(item, state) {
   const back = esc(address({ ...state, open: "" }));
   const id = esc(item.event_id);
   const body = bodyOf(item);
+  const renderedBody = body ? await renderMarkdown(body) : "";
   const isResolved = item.status === "resolved";
   const outcome = isResolved ? outcomeOf(item) : "";
   const note = isResolved ? noteOf(item) : "";
@@ -382,7 +386,7 @@ function detail(item, state) {
     ${deadline ? `<p class="inbox-detail-deadline">${esc(deadline)}</p>` : ""}
     ${message ? `<p class="inbox-detail-message">${esc(message)}</p>` : ""}
     ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}</div>` : ""}
-    ${body ? `<p class="inbox-detail-body">${esc(body)}</p>` : ""}
+    ${body ? `<div class="inbox-detail-body markdown-body">${renderedBody}</div>` : ""}
     ${note ? `<div class="inbox-detail-resolved-note"><strong>${outcome === "Approved" || outcome === "Declined" ? "Decision note" : "Answer"}:</strong> ${esc(note)}</div>` : ""}
     ${answers}
     ${waits(item) ? `<div class="inbox-detail-snooze-wrap">${isSnoozed(item.event_id) ? bringBackButton(item) : snoozeButton(item)}</div>` : ""}
@@ -602,7 +606,7 @@ export async function inbox(gen) {
       opened ? `${projectName(opened)} / inbox / ${opened.kind}` : "no item selected",
     )}</span></div>`,
     stageBody: opened
-      ? detail(opened, state)
+      ? await detail(opened, state)
       : sections
         ? `<div class="shell-pad"><p class="empty">Select an item from the list.</p></div>`
         : `<div class="shell-pad">${emptyStateHTML(
