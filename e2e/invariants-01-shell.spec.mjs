@@ -27,6 +27,8 @@ import {
   test,
 } from "./invariants.mjs";
 
+import AxeBuilder from "@axe-core/playwright";
+
 test.describe("hidden means hidden", () => {
   // Anything carrying the hidden attribute and still occupying the screen is a
   // defect on every screen: an author `display` beat the browser's own rule.
@@ -573,6 +575,102 @@ test.describe("summary and message", () => {
       ).toBe(true);
       expect(message.missing, `${label}: a short subject was split into a message paragraph`).toBeTruthy();
     }
+    if (previous) await page.setViewportSize(previous);
+  });
+});
+
+test.describe("inbox detail", () => {
+  // A question's body is markdown too. The inbox is where a long report is
+  // read, so its card renders the headings, table and code an agent wrote
+  // rather than the syntax it wrote them in.
+  test("an opened item body renders as markdown, and its wide table scrolls", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    const subject = "Markdown question";
+    const body = [
+      "# Roundhouse: attention list",
+      "",
+      "## Stream hygiene",
+      "",
+      "### Owner asks",
+      "",
+      "| What | State | Owner | Age | Where | Note |",
+      "|---|---|---|---|---|---|",
+      "| Row 4 | Landed | hub | 1d | main | clean |",
+      "",
+      "`empty_after_thinking` is moot.",
+      "",
+      "```js",
+      "const state = 'clean';",
+      "```",
+      "",
+      '<script id="pwned-inbox-markdown">window.__pwned = 1</script>',
+    ].join("\n");
+    const eventId = await oneOffQuestion(hub, hub.projectId, subject, { body });
+    expect(eventId, "the question never reached the inbox").toBeTruthy();
+
+    await goto(page, `#/inbox?open=${encodeURIComponent(eventId)}`, "Inbox");
+    expect(
+      await settle(page, '!!document.querySelector(".inbox-detail-body")'),
+      "the item body did not open",
+    ).toBe(true);
+    const card = page.locator(".inbox-detail-body");
+    await expect(card.getByRole("heading", { name: "Roundhouse: attention list", level: 1 })).toBeVisible();
+    await expect(card.getByRole("heading", { name: "Stream hygiene", level: 2 })).toBeVisible();
+    await expect(card.getByRole("heading", { name: "Owner asks", level: 3 })).toBeVisible();
+    await expect(card.getByRole("cell", { name: "Landed" })).toBeVisible();
+    await expect(card.locator(":not(pre) > code")).toHaveText("empty_after_thinking");
+    await expect(card.locator("pre code")).toContainText("const state = 'clean';");
+    await expect(card, "the item body still holds its markdown syntax").not.toContainText("|---|");
+    expect(
+      await card.locator("#pwned-inbox-markdown, script").count(),
+      "the item body kept an executable element",
+    ).toBe(0);
+
+    // The table is wider than the card at both widths, so it scrolls inside
+    // its own region rather than squeezing its cells or the page sideways.
+    const table = card.locator("table");
+    const scrollsInPlace = async () => {
+      expect(
+        await table.evaluate((el) => el.scrollWidth > el.clientWidth + 1),
+        "the wide table is not a horizontal scroll region",
+      ).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+        "the wide table takes the page sideways",
+      ).toBe(true);
+    };
+    await scrollsInPlace();
+
+    // The first column stays put as the table scrolls under it.
+    const sticky = await table.evaluate((el) => {
+      const cell = el.querySelector("th");
+      el.scrollLeft = el.scrollWidth;
+      return {
+        position: window.getComputedStyle(cell).position,
+        offset: Math.round(cell.getBoundingClientRect().left - el.getBoundingClientRect().left),
+      };
+    });
+    expect(sticky.position, "the wide table's first column does not stick").toBe("sticky");
+    expect(Math.abs(sticky.offset), "the sticky first column left its edge").toBeLessThanOrEqual(1);
+
+    // A body heading sits under the item title, and the smallest one stays on
+    // the 12px floor rather than shrinking to a browser default.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await scrollsInPlace();
+    const sizes = await card.evaluate((el) =>
+      ["h1", "h2", "h3"].map((tag) => window.getComputedStyle(el.querySelector(tag)).fontSize),
+    );
+    expect(sizes, "the body headings left the prose scale").toEqual(["17px", "15px", "13px"]);
+
+    await table.evaluate((el) => { el.scrollLeft = 0; });
+    const { violations } = await new AxeBuilder({ page })
+      .include(".inbox-detail-body")
+      .withTags(["wcag2a", "wcag2aa"])
+      .analyze();
+    expect(
+      violations.map((violation) => violation.id),
+      "the rendered body has an accessibility violation",
+    ).toEqual([]);
     if (previous) await page.setViewportSize(previous);
   });
 });
