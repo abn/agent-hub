@@ -295,26 +295,25 @@ test.describe("artifacts", () => {
   });
 });
 
-test.describe("inbox and search on a phone", () => {
-  test("the inbox tools row, flat rows, and the unread mark", async ({ hub, page }) => {
+test.describe("Now and search on a phone", () => {
+  test("Now's tools row, flat rows, and what is new since you looked", async ({ hub, page }) => {
     const session = await newSession(hub);
-    await toolCall(hub, session, "signal_append", {
-      project_id: hub.projectId,
-      kind: "finished",
-      summary: "phone unread row check",
-    });
-    await goto(page, "#/inbox", "Inbox");
+    const summary = "phone unread row check";
+    await toolCall(hub, session, "signal_append", { project_id: hub.projectId, kind: "finished", summary });
+    await goto(page, "#/home", "Now");
     const tools = page.locator(".shell-controls");
-    await expect(tools.locator("[data-index-filter]")).toHaveCount(1);
-    await expect(tools.locator('.chip:has-text("Unread")')).toHaveCount(1);
-    expect(await tools.locator(".inbox-sync").count(), "the inbox tools row carries a sync line").toBe(0);
-    expect(await page.locator(".inbox-rows.card, .inbox-group.card, .shell-index .card").count(), "the inbox list is a boxed card").toBe(0);
+    await expect(tools.getByRole("button", { name: /^(All|Needs you \d+|Since you looked \d+)$/ })).toHaveCount(3);
+    expect(await tools.locator("[data-index-filter]").count(), "Now's tools row carries a filter field").toBe(0);
+    expect(await page.locator(".now .card").count(), "a list on Now is a boxed card").toBe(0);
 
-    const unread = page.locator(".inbox-row.is-unread").first();
-    await expect(unread, "no unread row was found in the inbox").toBeVisible();
-    await expect(unread.locator(".dot-unread"), "the unread row has no unread dot").toHaveCount(1);
-    const weight = await unread.locator(".title").evaluate((el) => window.getComputedStyle(el).fontWeight);
-    expect(["600", "bold"], `the unread title weight is ${weight}`).toContain(weight);
+    // Unread finished work is new since the reader looked: it sits in that
+    // tier, under its project, and its receipt says it is unread.
+    const tier = page.locator("section", { has: page.getByRole("heading", { name: /^Since you looked/ }) });
+    const row = tier.locator(".now-row", { hasText: summary });
+    await expect(row, "the unread report is not in the since-you-looked tier").toBeVisible();
+    await expect(row.locator(".now-rc")).toContainText("unread");
+    const weight = await row.locator(".now-s b").evaluate((el) => window.getComputedStyle(el).fontWeight);
+    expect(["600", "bold"], `the new row's agent weight is ${weight}`).toContain(weight);
   });
 
   test("the search scope chips, the hit mark, and flat rows", async ({ hub, page }) => {
@@ -478,7 +477,7 @@ test.describe("inbox and search on a phone", () => {
     const question = await oneOffQuestion(hub, hub.projectId, "gutter check question");
     expect(question, "the gutter probe question never reached the inbox").toBeTruthy();
     try {
-      await goto(page, `#/inbox?open=${encodeURIComponent(question)}`, "Inbox");
+      await goto(page, `#/inbox?open=${encodeURIComponent(question)}`);
       await expect(page.locator(".inbox-detail #inbox-detail-title")).toBeVisible({ timeout: 8000 });
       const probes = await page.evaluate(() => {
         const textX = (el) => {
@@ -505,7 +504,7 @@ test.describe("inbox and search on a phone", () => {
       }
     } finally {
       await api(hub, "POST", `/api/v1/questions/${question}/answer`, { body: "answered by the check" }).catch(() => {});
-      await goto(page, "#/inbox", "Inbox");
+      await goto(page, "#/inbox", "Now");
     }
   });
 });

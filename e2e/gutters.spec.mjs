@@ -25,10 +25,11 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 // own title is not among them: it starts at the gutter plus the row's fixed
 // glyph column, which is the row's own layout.
 const ON_THE_GUTTER =
-  ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .home-greeting, .home-summary, .home-section-title, .audit-row, .tree-pane-footnote, .brain-header-line, .session-actions-footer, .inbox-snooze-bar button, .search-stage-path, .pset-sub, .settings-helper-line, .wiki-editor-label, .wiki-comment-body";
+  ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .tree-pane-footnote, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .settings-helper-line, .wiki-editor-label, .wiki-comment-body";
 
-// Content that sits inside a row rather than on it.
-const NESTED = "[data-depth], blockquote, .wiki-tree-row, .wiki-row, .tree-item, .search-preview-article, .shell-head, .home-greeting";
+// Content that sits inside a row rather than on it, and Now's margin, which is
+// ruled off by its own hairline and carries its own gutter.
+const NESTED = "[data-depth], blockquote, .wiki-tree-row, .wiki-row, .tree-item, .search-preview-article, .shell-head, .now-mar";
 
 // The row's fixed glyph column, which the text after a leading glyph starts
 // after. DESIGN.md fixes it at 20px in an index and 28px on the mobile feed.

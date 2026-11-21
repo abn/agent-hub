@@ -50,12 +50,13 @@ agents yet.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-desktop-dark.png">
-  <img src="../assets/screens/home-desktop-light.png" alt="Home, the surface the hub serves once agents report in.">
+  <img src="../assets/screens/home-desktop-light.png" alt="Now, the surface the hub serves once agents report in.">
 </picture>
 
 ## You should now see
 
-Home, a Projects list with nothing in it yet, and an empty inbox. Nothing is
+Now saying plainly that nothing waits on you, and a Projects list with nothing
+in it yet. Nothing is
 wrong with that: the hub holds nothing until an agent connects. The next step is
 [Connect your first agent](/start/connect-first-agent.md).
 

@@ -14,8 +14,10 @@ use crate::store::home::{self as home_store, Home};
 use crate::store::inbox::{self as inbox_store, InboxItem};
 use crate::store::questions as question_store;
 
-/// How many recent events the home summary carries.
-const HOME_RECENT_LIMIT: i64 = 10;
+/// How many recent events the home summary carries. Home reads what is new
+/// since the reader looked and the quiet rest out of these, and says how many
+/// more a project holds when its unseen count is larger than what is shown.
+const HOME_RECENT_LIMIT: i64 = 50;
 
 /// The optional filters for an inbox listing.
 #[derive(Debug, Deserialize)]

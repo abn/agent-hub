@@ -284,7 +284,7 @@ export function dayOf(ts, now) {
 }
 
 // Group events into day buckets, newest day first, preserving order inside a
-// day. The feed and Home both use this, so their shape stays identical.
+// day. Every list that groups by day uses this, so their days read alike.
 export function byDay(events) {
   const now = new Date();
   const groups = [];

@@ -12,8 +12,9 @@ import { test } from "./app.mjs";
 // data, so a screen that failed to load is not audited as whatever was on the
 // page before it.
 const screens = (hub) => [
-  ["home", "#/home", "main .home .home-summary"],
-  ["inbox", "#/inbox", "main .shell-index .inbox-item"],
+  ["now", "#/home", "main .now .now-ask"],
+  ["now, needs you", "#/inbox", "main .now .now-ask"],
+  ["inbox item", `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "main .inbox-detail .item-title"],
   ["projects", "#/projects", "main .projects-screen .project-row"],
   ["feed", `#/projects/${hub.projectId}/feed`, "main .shell-index .feed-day .feed-row"],
   ["sessions", `#/projects/${hub.projectId}/sessions`, "main .session-row"],

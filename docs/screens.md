@@ -14,36 +14,36 @@ The captures are a committed artifact: the `capture-wiki-screenshots` skill
 refreshes them when a screen changes, and each is looked at before it lands.
 The pages under [Guides](/guides/index.md) explain what each screen does.
 
-## Home and the shell
+## Now and the shell
 
-### Home, desktop
+### Now, desktop
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/home-desktop-dark.png">
-  <img src="assets/screens/home-desktop-light.png" alt="Home: what waits on you, the newest events across projects, and storage at a glance.">
+  <img src="assets/screens/home-desktop-light.png" alt="Now: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
 </picture>
 
-### Home, phone
+### Now, phone
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/home-phone-dark.png">
-  <img src="assets/screens/home-phone-light.png" alt="Home: what waits on you, the newest events across projects, and storage at a glance.">
+  <img src="assets/screens/home-phone-light.png" alt="Now on a phone: the same stream in one column.">
 </picture>
 
-## The inbox
+## What needs you
 
-### Inbox, desktop
+### Needs you, desktop
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-desktop-dark.png">
-  <img src="assets/screens/inbox-desktop-light.png" alt="The global inbox, grouped into waiting, unread and earlier.">
+  <img src="assets/screens/inbox-desktop-light.png" alt="Now showing only what needs you, the address the Inbox had.">
 </picture>
 
-### Inbox, phone
+### Needs you, phone
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-phone-dark.png">
-  <img src="assets/screens/inbox-phone-light.png" alt="The global inbox, grouped into waiting, unread and earlier.">
+  <img src="assets/screens/inbox-phone-light.png" alt="Now showing only what needs you, on a phone.">
 </picture>
 
 ### An open inbox item, desktop

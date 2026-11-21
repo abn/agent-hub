@@ -95,7 +95,7 @@ any access rule.
   aside on a fine pointer, one sheet on a coarse pointer. No code path mounts
   both, and there is no comment modal on the desktop.
 - **An aside exists only where something is read against the stage** (anchored
-  comments, a brain `kv` value). Correspondence, a feed or inbox thread, is the
+  comments, a brain `kv` value, the receipts beside a row on Now). Correspondence, a feed or inbox thread, is the
   stage. An index exists only where items are opened one at a time; Settings
   has none.
 - **A copy control is a glyph on the row that owns the string**, never a text

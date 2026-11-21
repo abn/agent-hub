@@ -66,7 +66,7 @@ const ALLOWED = [
   // A screen body's own bottom inset, so the last row clears the tab bar.
   { property: /^padding(-bottom)?$/, family: "main", note: "a screen body's bottom inset" },
   { property: /^padding/, family: ".shell-pad", note: "the shell body's own padding" },
-  { property: /^padding/, family: ".home-pad", note: "Home's own padding" },
+  { property: /^padding/, family: ".now-pad", note: "Now's own padding" },
   { property: /^padding/, family: ".settings-pad", note: "the settings body's own padding" },
   { property: /^padding/, family: ".more-screen", note: "More's own padding" },
   { property: /^padding/, family: ".settings", note: "the settings form's own padding" },

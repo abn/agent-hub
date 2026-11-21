@@ -49,8 +49,8 @@ test.describe("hidden means hidden", () => {
 });
 
 test.describe("request counts", () => {
-  // Home holds the payload the badge wants, so it is one request, not two.
-  test("Home asks for its payload once", async ({ hub, page }) => {
+  // Now holds the payload the badge wants, so it is one request, not two.
+  test("Now asks for its payload once", async ({ hub, page }) => {
     await page.goto(`${hub.baseUrl}/`);
     let homeRequests = 0;
     page.on("request", (request) => {
@@ -59,12 +59,12 @@ test.describe("request counts", () => {
     await goto(page, "#/storage", "Storage");
     homeRequests = 0;
     await goto(page, "#/home");
-    await expect(page.locator(".home-pad").first()).toBeVisible();
-    expect(homeRequests, "painting Home asked for it more than once").toBe(1);
+    await expect(page.locator(".now .now-sum")).toBeVisible();
+    expect(homeRequests, "painting Now asked for it more than once").toBe(1);
   });
 
-  // Nothing waiting and nothing new is the quiet state, not an empty list.
-  test("a quiet Home is one request and its own shape", async ({ hub, page }) => {
+  // Nothing waiting and nothing new says so plainly and folds what was seen.
+  test("a quiet Now is one request and its own shape", async ({ hub, page }) => {
     await page.goto(`${hub.baseUrl}/`);
     const seen = [homeEvent(1, 12), homeEvent(2, 40)];
     const payload = quietHomePayload({ recent: seen, last_event_at: seen[0].created_at });
@@ -81,8 +81,12 @@ test.describe("request counts", () => {
         }
       });
       await goto(page, "#/home");
-      await expect(page.locator(".home-pad").first()).toBeVisible();
-      expect(calls, "painting a quiet Home made more than the one request").toEqual(["GET /api/v1/home"]);
+      await expect(page.locator(".now .now-sum")).toHaveText(/^Nothing waits on you\. Nothing is new since you looked\./);
+      await expect(page.getByRole("heading", { name: /^Quiet · 2$/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
+      await expect(page.getByRole("heading", { name: /Needs you|Since you looked/ })).toHaveCount(0);
+      await expect(page.getByText("That is everything.", { exact: true })).toBeVisible();
+      expect(calls, "painting a quiet Now made more than the one request").toEqual(["GET /api/v1/home"]);
     } finally {
       await page.unroute(home).catch(() => {});
     }
@@ -113,7 +117,7 @@ test.describe("request counts", () => {
 
 test.describe("text stays text", () => {
   // One shared helper escapes every screen, so its loss must not pass quietly.
-  test("an agent's markup reaches Home as text", async ({ hub, page }) => {
+  test("an agent's markup reaches Now as text", async ({ hub, page }) => {
     await page.goto(`${hub.baseUrl}/`);
     await goto(page, "#/storage", "Storage");
     await goto(page, "#/home");
@@ -129,14 +133,14 @@ test.describe("text stays text", () => {
     const subject = "escape check question";
     const item = await oneOffQuestion(hub, hub.projectId, subject);
     expect(item, "the seeded question never reached the inbox").toBeTruthy();
-    const row = `main .inbox-item[data-id="${item}"]`;
+    const row = page.locator("main .now-ask", { hasText: subject });
     const field = "main textarea, main .composer-field";
     const draft = "half an answer";
     try {
       await goto(page, "#/settings", "Settings");
-      await goto(page, "#/inbox", "Inbox");
-      await expect(page.locator(row)).toBeVisible();
-      await page.locator(`${row} a`).click();
+      await goto(page, "#/inbox", "Now");
+      await expect(row).toBeVisible();
+      await row.getByRole("link", { name: "Read" }).click();
       await expect(page.locator(field).first()).toBeVisible();
       await page.locator(field).first().fill(draft);
       await page.locator(field).first().press("Escape");
@@ -149,7 +153,7 @@ test.describe("text stays text", () => {
       await expect(page.locator(field)).toHaveCount(0);
     } finally {
       await api(hub, "POST", `/api/v1/questions/${item}/answer`, { body: "closed by the check" }).catch(() => {});
-      await goto(page, "#/inbox", "Inbox");
+      await goto(page, "#/inbox", "Now");
     }
   });
 
@@ -259,18 +263,16 @@ test.describe("races", () => {
     await page.evaluate(() => {
       location.hash = "#/nonexistent-route-xyz";
     });
-    // The desktop Home header names the screen ("Home"); on a phone it is the
-    // greeting. Either is the Home screen, so the fallback accepts both.
-    await expect(page.locator(".home-pad")).toBeVisible({ timeout: 8000 });
-    await goto(page, "#/inbox", "Inbox");
+    await expect(page.locator(".now .now-sum")).toBeVisible({ timeout: 8000 });
+    await goto(page, "#/inbox", "Now");
     await goto(page, "#/storage", "Storage");
     await page.goBack();
     expect(
       await settle(
         page,
-        "location.hash.startsWith('#/inbox') && document.querySelector('main h1')?.textContent === 'Inbox'",
+        "location.hash.startsWith('#/inbox') && document.querySelector('main h1')?.textContent === 'Now'",
       ),
-      "router history Back did not return to Inbox",
+      "router history Back did not return to the Inbox address",
     ).toBe(true);
     await page.goForward();
     expect(
@@ -295,7 +297,10 @@ test.describe("races", () => {
     const base = `/api/v1/projects/${encodeURIComponent(project)}`;
     const holds = {
       home: [["home", "#/home", "/api/v1/home"]],
-      inbox: [["inbox", "#/inbox", "/api/v1/inbox?status=action"]],
+      inbox: [
+        ["now showing what needs you", "#/inbox", "/api/v1/home"],
+        ["inbox item", `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "/api/v1/inbox?status=action"],
+      ],
       projects: [
         ["project feed", `${at}/feed`, `${base}/feed?`],
         ["project artifacts", `${at}/artifacts`, `${base}/artifacts`],
@@ -608,7 +613,7 @@ test.describe("inbox detail", () => {
     const eventId = await oneOffQuestion(hub, hub.projectId, subject, { body });
     expect(eventId, "the question never reached the inbox").toBeTruthy();
 
-    await goto(page, `#/inbox?open=${encodeURIComponent(eventId)}`, "Inbox");
+    await goto(page, `#/inbox?open=${encodeURIComponent(eventId)}`);
     expect(
       await settle(page, '!!document.querySelector(".inbox-detail-body")'),
       "the item body did not open",

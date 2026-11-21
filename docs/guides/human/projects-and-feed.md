@@ -80,7 +80,7 @@ encryption badges.
 ## What is unread
 
 Each project carries one cursor, the newest event you have seen. Every event
-above it is unseen, and the count rides on the projects list and Home, so both
+above it is unseen, and the count rides on the projects list and Now, so both
 draw the same dot without a request. Opening the feed is what moves the cursor
 forward, and it never moves back.
 
@@ -99,7 +99,7 @@ several events can go together. A left swipe on a phone row uncovers its own
 Dismiss action.
 
 Dismissing hides an event from this project's feed, the cross-project feed,
-Home's recent list, and the unread count. It does not delete it: the id, the
+Now's stream, and the unread count. It does not delete it: the id, the
 inbox entry, the search hit and the payload stay, and an agent reading the feed
 through MCP still gets it. Bulk dismissal and Dismiss read ask for confirmation
 first. Dismiss read takes every event at or below the feed's read cursor, which
@@ -113,8 +113,8 @@ has to be written again by the agent that produced it.
 A question or an approval waits on you. Its row carries the words "Waiting on
 you" and an inline **Reply** or **Approve** control, so you can act without
 leaving the feed. That is the same item that appears in
-[Inbox and questions](/guides/human/inbox-and-questions.md): the inbox is the
-queue across every project, and the feed is the project's own record of it.
+[Inbox and questions](/guides/human/inbox-and-questions.md): Now holds what
+waits across every project, and the feed is the project's own record of it.
 
 ## Creating and setting a project
 

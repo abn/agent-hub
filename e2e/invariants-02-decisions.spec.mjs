@@ -157,15 +157,10 @@ test.describe("one decision", () => {
   test("a second press decides nothing twice", async ({ hub, page }) => {
     const eventId = await oneOffEvent(hub, hub.projectId, "approval", "double decision check");
     await goto(page, "#/settings", "Settings");
-    await goto(page, "#/inbox", "Inbox");
-    const row = `main .inbox-item[data-id="${eventId}"]`;
-    expect(await settle(page, `!!document.querySelector('${row}')`), "the seeded approval is not in the inbox").toBe(
-      true,
-    );
-    // The row opens the item; the verbs live on the stage.
-    await page.click(`${row} .title a`);
-    const approve = `main [data-action="inbox-detail-approve"][data-id="${eventId}"]`;
-    expect(await settle(page, `!!document.querySelector('${approve}')`), "the opened approval offers no decision").toBe(
+    await goto(page, "#/inbox", "Now");
+    // The ask carries its verbs at the end of its own line on Now.
+    const approve = `main .now-ask [data-now="approve"][data-id="${eventId}"]`;
+    expect(await settle(page, `!!document.querySelector('${approve}')`), "the seeded approval offers no decision on Now").toBe(
       true,
     );
     let sent = 0;
@@ -201,7 +196,7 @@ test.describe("one decision", () => {
       release();
       await page.unroute(decision).catch(() => {});
       await api(hub, "POST", `/api/v1/approvals/${eventId}/decision`, { decision: "approve" }).catch(() => {});
-      await goto(page, "#/inbox", "Inbox");
+      await goto(page, "#/inbox", "Now");
     }
     expect(sent, "two presses sent more than one decision").toBe(1);
     const said = await page.evaluate(() =>
@@ -214,7 +209,7 @@ test.describe("one decision", () => {
   // A question that suggests answers offers each as a control on its card,
   // beside the composer, and the keyboard reaches them.
   test("a seeded question offers its quick answers on the card", async ({ hub, page }) => {
-    await goto(page, `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "Inbox");
+    await goto(page, `#/inbox?open=${encodeURIComponent(hub.questionId)}`);
     const group = page.getByRole("group", { name: "Quick answers" });
     await expect(group).toBeVisible();
     // A quick answer is a button at the pointer's size: the form size on a
@@ -253,7 +248,7 @@ test.describe("one decision", () => {
       await route.continue().catch(() => {});
     });
     try {
-      await goto(page, `#/inbox?open=${encodeURIComponent(id)}`, "Inbox");
+      await goto(page, `#/inbox?open=${encodeURIComponent(id)}`);
       const group = page.getByRole("group", { name: "Quick answers" });
       const drop = group.getByRole("button", { name: "Drop it", exact: true });
       await drop.click();
@@ -284,7 +279,7 @@ test.describe("one decision", () => {
     expect(id, "the late quick answer question never reached the inbox").toBeTruthy();
     // The refusal is what this check drives, so the hub's 409 is not a defect.
     watch.ignore(`/api/v1/questions/${id}/answer`);
-    await goto(page, `#/inbox?open=${encodeURIComponent(id)}`, "Inbox");
+    await goto(page, `#/inbox?open=${encodeURIComponent(id)}`);
     const yes = page.getByRole("group", { name: "Quick answers" }).getByRole("button", { name: "Yes", exact: true });
     await expect(yes).toBeVisible();
     await api(hub, "POST", `/api/v1/questions/${id}/answer`, { body: "No" });
@@ -300,8 +295,8 @@ test.describe("one decision", () => {
   // is the only way back, so a toast moves focus there, but not while the
   // reader is writing.
   test("a toast leaves a writer alone", async ({ hub, page }) => {
-    await goto(page, "#/inbox", "Inbox");
-    const question = page.locator('.shell-index .inbox-row:has(.glyph[data-kind="question"]) .title a').first();
+    await goto(page, "#/inbox", "Now");
+    const question = page.locator('.now-ask:has(.glyph[data-kind="question"])').first().getByRole("link", { name: "Read" });
     await expect(question).toBeVisible();
     await question.click();
     const field = page.locator(".composer-field, textarea").first();

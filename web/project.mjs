@@ -7,7 +7,7 @@
 import { api } from "./api.mjs";
 import { artifactGroupMenu, artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmAction, confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
-import { esc, main, paint, stale } from "./dom.mjs";
+import { count, esc, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import {
   activeKinds,
@@ -22,7 +22,6 @@ import {
   resumePicking,
   setFeedSelection,
 } from "./feed.mjs";
-import { count, usedOfCapacity } from "./home.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
 import { pickProject, projectsIndexScreen } from "./projects.mjs";

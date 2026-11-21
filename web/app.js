@@ -31,8 +31,8 @@ import {
   wikiSave,
   wikiVersionsEarlier,
 } from "./wiki.mjs";
-import { home } from "./home.mjs";
 import { answer, approve, inbox } from "./inbox.mjs";
+import { now } from "./now.mjs";
 import "./offline-queue.mjs";
 import { installKeys } from "./keys.mjs";
 import { moreScreen } from "./more.mjs";
@@ -62,8 +62,10 @@ const toFirstProject = (segment, gen) => async () => {
 };
 
 setScreens({
-  home: (params, gen) => home(gen),
-  inbox: (params, gen) => inbox(gen),
+  home: (params, gen) => now(gen),
+  // The Inbox's address opens Now showing what needs the reader, so an old
+  // link and the badge land on the same asks; an item's own address opens it.
+  inbox: (params, gen) => (params.get("open") ? inbox(gen) : now(gen)),
   projects: (params, gen, path) =>
     path.split("/")[3] === "settings" ? projectSettingsScreen(gen, path) : projectScreen(params, gen, path),
   feed: (params, gen) => {

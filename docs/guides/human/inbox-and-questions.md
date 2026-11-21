@@ -8,29 +8,35 @@ status: stable
 
 # Inbox and questions
 
-The inbox is one queue for the whole fleet: finished work, questions, approvals,
-and enrolment requests, gathered from every project. This page is how you work
-it. Questions and approvals also appear on their project's feed, but the inbox
-is where the queue lives.
+What waits on you lives on **Now**, the first screen: one stream for the whole
+fleet, with the questions, approvals, ideas and enrolment requests that need
+you at the top, gathered from every project. This page is how you work it. The
+Inbox's address, `#/inbox`, opens Now showing only what needs you, so an old
+link and a notification land on the same asks. Questions and approvals also
+appear on their project's feed.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/inbox-desktop-dark.png">
-  <img src="../../assets/screens/inbox-desktop-light.png" alt="The global inbox, grouped into waiting, unread and earlier.">
+  <img src="../../assets/screens/inbox-desktop-light.png" alt="Now showing what needs you, each ask with its verbs at the end of its line.">
 </picture>
 
-## The groups
+## The tiers
 
-The inbox is grouped:
+Now opens with one sentence that says who needs you and for what, and then
+reads in three tiers:
 
-- **Waiting on you**, with its count, open items grouped by actor, so an agent
-  that leaves many items is one block rather than a run of rows.
-- **Snoozed**, when you defer an item.
-- **Unread**, with its count, for finished work and notices.
-- **Earlier**, read and resolved items, folded on the desktop with a count.
+- **Needs you**, with its count. Each ask is a sentence, the agent first and
+  then what it wants, with its verbs at the end of the line and Read to open
+  it. The selected row fills its primary verb; on a keyboard it also shows the
+  keys it answers to. Once you answer, the selection moves to the next ask.
+- **Since you looked**, grouped by project: what is new above each project's
+  read cursor, and finished work you have not read. **Mark seen** marks all of
+  it read.
+- **Quiet**, the rest of the recent events, folded behind **Show**.
 
-A row carries the title, and on a waiting item a one-line body, over a footer of
-project and agent. An unread row is marked by a dot, its weight, and the word,
-never by colour alone.
+Beside each ask, on a wide screen, a margin holds its receipts level with it:
+the event id, the session it was asked in, the artifact it points at, and its
+deadline. On a phone they are one line under the ask.
 
 Opening an item shows its whole body. The body is markdown, so an agent's report
 reads as the headings, tables and code it wrote rather than as its syntax. A
@@ -40,11 +46,12 @@ table wider than the card scrolls inside its own region.
 
 <img src="../../assets/screens/idea-capture-desktop-light.png" alt="Capturing an idea into a project's inbox.">
 
-A question asks you something and lands as an action item. Open it to read the
-whole thing, as a card with a composer held open. A question may suggest
-answers, shown as one-tap buttons above the composer, and you can always write
-your own reply instead. Pressing a suggested answer sends it as the reply body,
-with no confirmation. The answer lands on the question's thread and closes it.
+A question asks you something and lands as an action item. A question may
+suggest answers: they are buttons at the end of its line on Now, and above the
+composer when you open it. Pressing one sends it as the reply body, with no
+confirmation. **Reply** opens a composer under the row, and you can always
+write your own answer instead. The answer lands on the question's thread and
+closes it.
 
 If you answer while offline, the reply is queued in the browser and sent when
 the connection returns; the queue survives a reload and is flushed in the
@@ -52,8 +59,9 @@ order it was written. The item stays open until the hub confirms it.
 
 ## Approvals
 
-An approval asks you to approve or decline something, and the decision is asked
-for in a dialog. The dialog carries an optional field, **Add guidance with your
+An approval asks you to approve or decline something. **Approve** and
+**Decline** sit at the end of its line on Now and on its card, and the decision
+is asked for in a dialog. The dialog carries an optional field, **Add guidance with your
 decision**, whose text is sent with the decision. From nine tenths of the 2000
 character limit a count shows under the field. A note the hub refuses as too
 long is reported beside the field and nothing is decided. The safe action is
@@ -61,38 +69,40 @@ focused first.
 
 ## Deadlines
 
-An agent that cannot wait gives an item a deadline. Its row and its card say
-what the deadline will do, in words with the time left: "Declines itself in 3h",
+An agent that cannot wait gives an item a deadline. Its receipts on Now and its
+card say what the deadline will do, in words with the time left: "Declines itself in 3h",
 "Approves itself in 20m", "Closes in 2d". If nobody acts by then, the hub
 resolves the item itself: an approval takes the outcome the agent named, which
 defaults to declined, and a question closes unanswered. You can still act any
 time before the deadline, and the first resolution wins.
 
-An item the hub resolved at its deadline reads "Approved at deadline", "Declined
-at deadline", or "Closed unanswered" under Earlier, and names the hub as its
-actor. A decision sent after the deadline is refused, because the item has
+An ask whose deadline is more than a day off can wait: it stays in Needs you,
+under the rest, with a clock glyph in place of its kind, and it is not counted.
+An item the hub resolved at its deadline reads "Approved at deadline",
+"Declined at deadline", or "Closed unanswered" on its card, and names the hub
+as its actor. A decision sent after the deadline is refused, because the item has
 already resolved.
 
 ## Read, unread, and snooze
 
-Read is explicit: you mark a row read by opening it, with a swipe right, or with
-the row's own control, and **Mark all read** clears the list. Nothing is read by
-scrolling past it. Marking one item read or unread offers an undo. The header
-carries **Unread only**, and a last-synced line with a **Refresh** control
-reloads the list.
+Read is explicit: an item is read when you open it, and **Mark seen** on Now
+marks everything since you looked read, moving each project's read cursor and
+marking finished work read. Nothing is read by scrolling past it.
 
 > [!NOTE]
 > Marking an approval read never takes it out of what waits on you. A read route
 > moves an entry between unread and read and nothing else.
 
-A waiting item can be snoozed for one hour. A snoozed item leaves Waiting on you
-and appears under Snoozed with a control to bring it back; it returns on its own
-when the hour ends, and the action is immediately undoable from the toast.
+An ask can be snoozed for one hour, with `s` on Now or **Snooze 1h** on its
+card. A snoozed ask moves to the can-wait end of Needs you, with **Bring back**
+in place of its snooze, and it is no longer counted; it returns on its own when
+the hour ends, and the toast offers an undo. A snooze is remembered on this
+device only.
 
 ## Enrolment requests
 
-A new agent's self-enrolment arrives as an item titled "Pending enrolment" with
-the reason the agent gave. Deciding it admits or refuses the agent in the same
+A new agent's self-enrolment arrives as an approval, and its card reads
+"Pending enrolment" with the reason the agent gave. Deciding it admits or refuses the agent in the same
 step. Until then the agent's reads answer `unauthenticated`, which is its
 waiting state rather than a refusal. See
 [Connect your first agent](/start/connect-first-agent.md).
@@ -105,10 +115,10 @@ waiting state rather than a refusal. See
 
 ## On a phone
 
-On a phone the inbox keeps its groups in one column, and opening a row shows the
-whole item in the stage, with "Back to inbox" to leave it. A swipe right marks a
-row read or unread, a swipe left uncovers a waiting row's actions without
-deciding anything, and a pull down refreshes. Every swipe has a tap equivalent.
+On a phone Now is the same stream in one column under the phone's header and
+its tools row, which holds the three chips, and the Now tab carries the count
+of what needs you. Opening an item shows the whole item in the stage, with
+"Back to Now" to leave it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/inbox-item-desktop-dark.png">
@@ -117,8 +127,8 @@ deciding anything, and a pull down refreshes. Every swipe has a tap equivalent.
 
 ## You should now see
 
-One queue with nothing waiting, or the items that need a decision at the top,
-each with its own way to answer. The routes behind the queue are in
+One stream that says plainly when nothing waits, or the asks that need a
+decision at the top, each with its own way to answer. The routes behind the queue are in
 [REST API](/reference/rest-api.md).
 
 ## See also

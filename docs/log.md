@@ -6,6 +6,24 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### Home and the Inbox become Now
+
+* **Update**: [Human interface](/design/human-interface.md) describes Now, the
+  one stream that replaces Home and the Inbox: a written opening line, what
+  needs you as sentences with their verbs inline, each ask's receipts in a
+  margin beside it, what changed since you looked grouped by project, and the
+  quiet rest folded. The Inbox's address opens Now showing what needs you, an
+  item keeps its own address, and the phone's tab bar is Now, Projects, Search
+  and More.
+* **Update**: [Inbox and questions](/guides/human/inbox-and-questions.md) is
+  rewritten for Now: answering in place, snoozing to the can-wait end of the
+  tier, and Mark seen in place of Mark all read.
+* **Update**: [REST API](/reference/rest-api.md): an inbox entry carries the
+  `session_id` it was posted in, and the Home response carries the newest
+  hundred waiting items and the newest fifty events.
+* **Update**: [MCP tools](/reference/mcp-tools.md): an `inbox_read` item
+  carries the `session_id` it was posted in.
+
 ### The interface moves to lichen slate, copper and IBM Plex
 
 * **Update**: [Human interface](/design/human-interface.md) describes the new

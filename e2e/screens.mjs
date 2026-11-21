@@ -38,8 +38,8 @@ export function screenRoutes(hub, wiki) {
   const at = `#/projects/${project}`;
   const page = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
   return {
-    home: [["Home", "#/home", "main .home"]],
-    inbox: [["Inbox", "#/inbox", "main .shell-index .inbox-item"]],
+    home: [["Now", "#/home", "main .now .now-sum"]],
+    inbox: [["Now, needs you", "#/inbox", "main .now .now-ask"]],
     projects: [
       ["Projects", "#/projects", "main .projects-screen .project-row"],
       ["Feed", `${at}/feed`, "main .shell-index .feed-row"],

@@ -1,16 +1,16 @@
 // A waiting row in an index keeps the whole title line for its subject. The
 // waiting state is the action dot at the row's end and the title's weight,
 // the title is described by the words, and the "Waiting on you" pill sits on
-// the meta line under the subject rather than beside it. The inbox groups its
-// waiting rows under those words, so only a snoozed row there carries a pill.
+// the meta line under the subject rather than beside it. The feed is the index
+// that holds waiting rows; Now says what waits in sentences, not index rows.
 //
 // The type is pinned to Cantarell (see pinned-font.mjs), because a character
 // count and a screenshot are only comparable between hosts that set the same
 // face. The floors are measured under that pin, not guessed, and count the
 // subject only, after the "asked: " the feed sets before a question. At the
 // 300px default index on a desktop the check's subject shows 18 characters in
-// the feed and 26 in the inbox, where the pill beside it in the feed left 1 to
-// 5. On a phone it shows 31 and 38, where the feed showed 13 to 18. The floors
+// the feed, where the pill beside it left 1 to 5. On a phone it shows 31, where
+// it showed 13 to 18. The floors
 // sit a little under the measured counts, so a face that sets a pixel wider
 // does not fail the check and the old layout always does.
 
@@ -75,7 +75,7 @@ async function expectPillOnMetaLine(row, link, what) {
   expect(boxes.length, `${what}: the row draws no waiting pill`).toBe(1);
   const [drawn] = boxes;
   const title = await link.boundingBox();
-  const stamp = await row.locator(".meta time, .inbox-foot time").boundingBox();
+  const stamp = await row.locator(".meta time").boundingBox();
   expect.soft(drawn.y, `${what}: the pill is on the title line`).toBeGreaterThanOrEqual(title.y + title.height - 0.5);
   const middle = drawn.y + drawn.height / 2;
   expect.soft(
@@ -103,10 +103,7 @@ async function openIndex(page, hub, route) {
   return { index, link, row: index.locator(".row").filter({ has: named }) };
 }
 
-const routes = (hub) => [
-  ["feed", `#/projects/${encodeURIComponent(hub.projectId)}/feed`],
-  ["inbox", "#/inbox"],
-];
+const routes = (hub) => [["feed", `#/projects/${encodeURIComponent(hub.projectId)}/feed`]];
 
 test.use(pinnedFontOptions);
 
@@ -131,28 +128,8 @@ test.describe("a waiting row in an index", () => {
           "Waiting on you",
         );
         expect.soft(shown, `${what}: the title line shows ${shown} characters of the subject`).toBeGreaterThanOrEqual(floor);
-        if (screen === "inbox") {
-          expect.soft((await drawnPill(row)).length, `${what}: the row repeats its group's words in a pill`).toBe(0);
-          continue;
-        }
         await expectPillOnMetaLine(row, link, what);
       }
-    }
-  });
-
-  test("a snoozed waiting row carries the pill on its meta line", async ({ hub, page }) => {
-    const held = (await api(hub, "GET", "/api/v1/inbox?status=action&limit=500")).json();
-    const item = held.items.find((entry) => entry.summary === SUBJECT);
-    expect(item, "the waiting question is not in the inbox").toBeTruthy();
-    await page.goto(`${hub.baseUrl}/`);
-    await page.evaluate((id) => localStorage.setItem("hub.snooze", JSON.stringify({ [id]: Date.now() + 3_600_000 })), item.event_id);
-    try {
-      const { link, row } = await openIndex(page, hub, "#/inbox");
-      await expect(page.getByRole("button", { name: "Bring back" }).first(), "the row was not snoozed").toBeVisible();
-      await expect(link, "the snoozed title does not say the row is waiting").toHaveAccessibleDescription("Waiting on you");
-      await expectPillOnMetaLine(row, link, "the snoozed row");
-    } finally {
-      await page.evaluate(() => localStorage.removeItem("hub.snooze"));
     }
   });
 
@@ -173,7 +150,7 @@ test.describe("a waiting row in an index", () => {
       ["the waiting row", row],
       ["a row with nothing waiting", quiet],
     ]) {
-      const stamp = held.locator(".meta time, .inbox-foot time");
+      const stamp = held.locator(".meta time");
       await expect(stamp, `${which} shows no time`).toBeVisible();
       const fits = await held.evaluate((el, long) => {
         const time = el.querySelector("time");
@@ -213,7 +190,7 @@ test.describe("a waiting row in an index", () => {
         await page.mouse.move(0, 0);
         await expect(row).toHaveScreenshot(`${screen}-waiting-row-${scheme}.png`, {
           ...SCREENSHOT,
-          mask: [row.locator(".meta time, .inbox-foot time")],
+          mask: [row.locator(".meta time")],
         });
       }
     }

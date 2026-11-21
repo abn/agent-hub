@@ -223,11 +223,10 @@ def seed_versioned_artifact(port: int, project_id: str) -> str:
     return artifact_id
 
 
-# What the Home checks seed for themselves, late in a run: an approval whose
-# summary carries markup, so the waiting card is shown to keep it as text, and
-# a finished event for the newest list. Not part of the main seed, because
-# Home carries the newest ten events and the screens before it assert on the
-# ten the hub was seeded with.
+# What the Now checks seed for themselves, late in a run: an approval whose
+# summary carries markup, so its ask is shown to keep it as text, and a
+# finished event for the since tier. Not part of the main seed, because the
+# screens before them assert on what the hub was seeded with.
 HOME_WAITING_SUMMARY = 'cut over <i id="home-pwned">now</i> to the new pool'
 HOME_NEWEST_SUMMARY = "pool scrub finished clean"
 
