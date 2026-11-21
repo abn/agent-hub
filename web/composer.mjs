@@ -141,6 +141,7 @@ export function composer({
     fit();
   }
 
+  /** @param {HTMLElement} [target] */
   function fail(message, target = field) {
     error.hidden = false;
     error.textContent = message;
@@ -160,6 +161,7 @@ export function composer({
     form.setAttribute("aria-busy", String(state));
   }
 
+  /** @param {HTMLElement} [from] */
   async function submit(body, from = field) {
     if (sending) return;
     error.hidden = true;

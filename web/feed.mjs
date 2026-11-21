@@ -68,8 +68,8 @@ function endPicking({ focus = false } = {}) {
   for (const row of main.querySelectorAll(".shell-controls, .project-tools-mobile")) {
     row.classList.remove("is-picking", "mobile-filter-open");
   }
-  for (const bar of main.querySelectorAll(".feed-select-bar")) bar.hidden = true;
-  for (const box of main.querySelectorAll(".feed-pick")) box.checked = false;
+  for (const bar of main.querySelectorAll(".feed-select-bar")) /** @type {HTMLElement} */ (bar).hidden = true;
+  for (const box of main.querySelectorAll(".feed-pick")) /** @type {HTMLInputElement} */ (box).checked = false;
   for (const row of main.querySelectorAll(".feed-row.picked")) row.classList.remove("picked");
   concealSwipe();
   if (!focus) return;
@@ -886,15 +886,15 @@ function syncPicks() {
   for (const item of main.querySelectorAll(".feed-item")) {
     const box = item.querySelector(".feed-pick");
     if (!box) continue;
-    const ids = (box.dataset.ids || "").split(" ").filter(Boolean);
+    const ids = (/** @type {HTMLElement} */ (box).dataset.ids || "").split(" ").filter(Boolean);
     const checked = ids.length > 0 && ids.every((id) => picking.ids.has(id));
-    box.checked = checked;
+    /** @type {HTMLInputElement} */ (box).checked = checked;
     item.querySelector(".feed-row")?.classList.toggle("picked", checked);
   }
   for (const bar of main.querySelectorAll(".feed-select-bar")) {
     const said = bar.querySelector(".feed-select-count");
     if (said) said.textContent = picking.ids.size === 1 ? "1 selected" : `${picking.ids.size} selected`;
-    const go = bar.querySelector('[data-action="feed-dismiss-picked"]');
+    const go = /** @type {HTMLInputElement | HTMLButtonElement} */ (bar.querySelector('[data-action="feed-dismiss-picked"]'));
     if (go) go.disabled = picking.ids.size === 0;
   }
 }
@@ -914,7 +914,7 @@ export function resumePicking() {
     row.classList.remove("mobile-filter-open");
     row.classList.add("is-picking");
   }
-  for (const bar of main.querySelectorAll(".feed-select-bar")) bar.hidden = false;
+  for (const bar of main.querySelectorAll(".feed-select-bar")) /** @type {HTMLElement} */ (bar).hidden = false;
   syncPicks();
 }
 
@@ -927,7 +927,7 @@ function startPicking(projectId, opener = null) {
   resumePicking();
   requestAnimationFrame(() => {
     const first = main.querySelector(".feed-pick");
-    const target = first || main.querySelector(".feed-select-bar button");
+    const target = /** @type {HTMLElement} */ (first || main.querySelector(".feed-select-bar button"));
     target?.focus({ preventScroll: true });
   });
 }
@@ -1004,7 +1004,7 @@ let feedSwiped = false;
 main.addEventListener(
   "click",
   (event) => {
-    if (!feedSwiped || !event.target.closest(".feed-row")) return;
+    if (!feedSwiped || !/** @type {HTMLElement} */ (event.target).closest(".feed-row")) return;
     event.preventDefault();
     event.stopPropagation();
   },
@@ -1044,9 +1044,9 @@ function revealSwipe(item) {
 main.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "mouse" || !event.isPrimary || picking.active) return;
   if (!feedProject(location.hash)) return;
-  const item = event.target.closest(".feed-item");
+  const item = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest(".feed-item"));
   if (feedRevealed && feedRevealed !== item) concealSwipe();
-  if (event.target.closest("button, input, textarea, summary")) return;
+  if (/** @type {HTMLElement} */ (event.target).closest("button, input, textarea, summary")) return;
   feedDrag = {
     id: event.pointerId,
     x: event.clientX,
@@ -1104,7 +1104,7 @@ window.addEventListener("pointercancel", releaseSwipe);
 // map sees the rows change the way it sees any repaint. Focus goes back onto
 // the control that was pressed, or the disclosure once that control is gone.
 function repaintFold(projectId, visit, action) {
-  const fold = main.querySelector(".feed-fold");
+  const fold = /** @type {HTMLElement} */ (main.querySelector(".feed-fold"));
   if (!fold || fold.dataset.project !== projectId) return;
   // A later page can hold more of today and yesterday, when those days are
   // longer than one page. Those rows belong above the fold, so the recent days
@@ -1132,7 +1132,7 @@ function repaintFold(projectId, visit, action) {
     [...main.querySelectorAll(".feed-row")].pop() ||
     main;
   if (!control.hasAttribute("tabindex")) control.setAttribute("tabindex", "-1");
-  control.focus({ preventScroll: true });
+  /** @type {HTMLElement} */ (control).focus({ preventScroll: true });
 }
 
 async function loadOlder(projectId, visit) {
@@ -1241,10 +1241,10 @@ async function copySetup(button) {
 // The feed's own controls. The shared handler routes the actions other screens
 // own; these exist only here.
 main.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-action]");
+  const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-action]"));
   if (!button) return;
   const { action } = button.dataset;
-  const fold = button.closest(".feed-fold");
+  const fold = /** @type {HTMLElement} */ (button.closest(".feed-fold"));
   const failed = (error) => toast(`Nothing changed: ${error.message}`);
   const partly = (error) => toast(`Some of it may not have been saved: ${error.message}`);
   let work = null;
@@ -1256,7 +1256,7 @@ main.addEventListener("click", (event) => {
   if (action === "feed-select-cancel") endPicking({ focus: true });
   if (action === "feed-dismiss-picked") work = dismissPicked(picking.project);
   if (action === "feed-dismiss") {
-    const item = button.closest(".feed-item");
+    const item = /** @type {HTMLElement} */ (button.closest(".feed-item"));
     const ids = (item?.dataset.ids || "").split(" ").filter(Boolean);
     const project = item?.dataset.project || "";
     concealSwipe();
@@ -1273,9 +1273,9 @@ main.addEventListener(
   "click",
   (event) => {
     if (!picking.active) return;
-    const item = event.target.closest(".feed-item");
+    const item = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest(".feed-item"));
     if (!item) return;
-    const box = item.querySelector(".feed-pick");
+    const box = /** @type {HTMLInputElement} */ (item.querySelector(".feed-pick"));
     if (!box || event.target === box) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1287,7 +1287,7 @@ main.addEventListener(
 
 main.addEventListener("change", (event) => {
   if (!picking.active) return;
-  const box = event.target.closest?.(".feed-pick");
+  const box = /** @type {HTMLInputElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".feed-pick"));
   const item = box?.closest(".feed-item");
   if (box && item) applyPick(item, box.checked);
 });

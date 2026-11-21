@@ -214,7 +214,7 @@ function returnSessionFocus(id) {
   requestAnimationFrame(() => {
     const link = document.querySelector(`.session-row a[href*="id=${CSS.escape(id)}"]`);
     const row = link ? link.closest(".session-row") : null;
-    const target = row || link;
+    const target = /** @type {HTMLElement} */ (row || link);
     if (target) {
       if (target.tabIndex < 0) target.tabIndex = 0;
       target.focus();
@@ -224,13 +224,13 @@ function returnSessionFocus(id) {
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
-    const newBtn = event.target.closest?.('[data-action="new-project"]');
+    const newBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="new-project"]'));
     if (newBtn) {
       event.preventDefault();
       openCreateProjectDialog();
       return;
     }
-    const filterToggle = event.target.closest?.('[data-action="project-filter-toggle"]');
+    const filterToggle = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="project-filter-toggle"]'));
     if (filterToggle) {
       const controls = document.querySelector(".shell-index .shell-controls:not(.project-tools-mobile)");
       if (controls) {
@@ -238,14 +238,14 @@ if (typeof document !== "undefined") {
       }
       return;
     }
-    const captureBtn = event.target.closest?.('[data-action="capture-idea"]');
+    const captureBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="capture-idea"]'));
     if (captureBtn) {
       event.preventDefault();
       const projectId = captureBtn.dataset.project;
       captureIdea(projectId, captureBtn);
       return;
     }
-    const link = event.target.closest?.(".session-link, .session-row a");
+    const link = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".session-link, .session-row a"));
     if (link) {
       const href = link.getAttribute("href") || "";
       const match = href.match(/[?&]id=([^&]+)/);
@@ -253,10 +253,10 @@ if (typeof document !== "undefined") {
         lastOpenSession = decodeURIComponent(match[1]);
       }
     }
-    if (!event.target.closest(".proj-overflow-wrap")) {
+    if (!/** @type {HTMLElement} */ (event.target).closest(".proj-overflow-wrap")) {
       const menus = document.querySelectorAll(".proj-overflow-menu:not([hidden])");
       for (const m of menus) {
-        m.hidden = true;
+        /** @type {HTMLElement} */ (m).hidden = true;
         const b = m.closest(".proj-overflow-wrap")?.querySelector(".proj-overflow-btn");
         if (b) b.setAttribute("aria-expanded", "false");
       }
@@ -268,8 +268,8 @@ export function wireProjectHeader(project, stats, footprint) {
   // The overflow is drawn in both the desktop section header and the phone
   // tools row, so every instance is wired; each owns its own menu.
   for (const wrap of main.querySelectorAll(".proj-overflow-wrap")) {
-    const btn = wrap.querySelector(".proj-overflow-btn");
-    const menu = wrap.querySelector(".proj-overflow-menu");
+    const btn = /** @type {HTMLElement} */ (wrap.querySelector(".proj-overflow-btn"));
+    const menu = /** @type {HTMLElement} */ (wrap.querySelector(".proj-overflow-menu"));
     if (!btn || !menu) continue;
 
     const close = () => {
@@ -283,13 +283,13 @@ export function wireProjectHeader(project, stats, footprint) {
       menu.hidden = !open;
       btn.setAttribute("aria-expanded", open ? "true" : "false");
       if (open) {
-        const first = menu.querySelector("button, a");
+        const first = /** @type {HTMLElement} */ (menu.querySelector("button, a"));
         if (first) first.focus();
       }
     });
 
     menu.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
+      if (/** @type {KeyboardEvent} */ (e).key === "Escape") {
         e.stopPropagation();
         close();
         btn.focus();
@@ -300,7 +300,7 @@ export function wireProjectHeader(project, stats, footprint) {
     // closes the menu it was chosen from; the delegated handler on `main` runs
     // as usual because nothing here stops the event.
     menu.addEventListener("click", (e) => {
-      if (e.target.closest(".proj-menu-item")) close();
+      if (/** @type {HTMLElement} */ (e.target).closest(".proj-menu-item")) close();
     });
 
     const setConfidential = (next, title, body, commitLabel) => async (e) => {

@@ -119,6 +119,7 @@ export async function flushQueue() {
 async function tryRegisterSync() {
   try {
     if (!("serviceWorker" in navigator)) return;
+    /** @type {ServiceWorkerRegistration & { sync?: { register(tag: string): Promise<void> } }} */
     const reg = await navigator.serviceWorker.ready;
     if (reg && reg.sync && typeof reg.sync.register === "function") {
       await reg.sync.register(SYNC_TAG);

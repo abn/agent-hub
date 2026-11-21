@@ -186,11 +186,11 @@ export async function projectSettingsScreen(gen, path) {
   document.title = "Project settings · Agent Hub";
   wireProjectHeader(saved, null, "");
 
-  const form = main.querySelector(".pset");
-  const name = form.elements.display_name;
+  const form = /** @type {HTMLFormElement} */ (main.querySelector(".pset"));
+  const name = /** @type {HTMLInputElement} */ (form.elements.namedItem("display_name"));
   const nameError = form.querySelector("#pset-name-error");
-  const problem = form.querySelector(".pset-problem");
-  const save = form.querySelector('button[type="submit"]');
+  const problem = /** @type {HTMLElement} */ (form.querySelector(".pset-problem"));
+  const save = /** @type {HTMLInputElement | HTMLButtonElement} */ (form.querySelector('button[type="submit"]'));
 
   const created = localDate(saved.created_at);
   main.querySelector(".pset-sub").textContent = created ? `${saved.id} · created ${created}` : saved.id;

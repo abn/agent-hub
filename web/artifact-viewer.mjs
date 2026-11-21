@@ -431,7 +431,7 @@ function init() {
     // its stage's left edge, so the framed page drops its own copy of both.
     document.documentElement.classList.add("in-app");
     if (toggle) toggle.hidden = true;
-    const header = document.querySelector("body > header");
+    const header = /** @type {HTMLElement} */ (document.querySelector("body > header"));
     if (header) header.style.display = "none";
   }
   if (toggle) {
@@ -462,17 +462,17 @@ function init() {
       return;
     }
     if (event.data && typeof event.data === "object" && event.data.type && event.data.type.startsWith("hub:")) {
-      if (event.source === state.frame?.contentWindow) {
+      if (event.source === /** @type {HTMLIFrameElement} */ (state.frame)?.contentWindow) {
         if (window.parent && window.parent !== window) {
           window.parent.postMessage(event.data, "*");
         }
       } else if (event.source === window.parent) {
-        if (state.frame?.contentWindow) {
-          state.frame.contentWindow.postMessage(event.data, "*");
+        if (/** @type {HTMLIFrameElement} */ (state.frame)?.contentWindow) {
+          /** @type {HTMLIFrameElement} */ (state.frame).contentWindow.postMessage(event.data, "*");
         }
       }
     }
-    if (!state.frame || event.source !== state.frame.contentWindow) return;
+    if (!state.frame || event.source !== /** @type {HTMLIFrameElement} */ (state.frame).contentWindow) return;
     const height = event.data && event.data.hubFrameHeight;
     if (typeof height !== "number" || !isFinite(height)) return;
     const clamped = Math.min(Math.max(Math.round(height), 120), 12000);
@@ -492,7 +492,7 @@ function init() {
   reportHeight();
 
   const pickerWrap = document.getElementById("hub-picker-wrap");
-  const picker = document.getElementById("hub-version-select");
+  const picker = /** @type {HTMLInputElement} */ (document.getElementById("hub-version-select"));
   if (pickerWrap && picker) {
     picker.addEventListener("change", () => {
       // Rebuilt from this page's own query rather than from the path alone:
@@ -509,12 +509,12 @@ function init() {
   }
 
   const form = document.getElementById("hub-unlock-form");
-  const password = document.getElementById("hub-password");
+  const password = /** @type {HTMLInputElement} */ (document.getElementById("hub-password"));
   const errorLine = document.getElementById("hub-unlock-error");
   const forget = document.getElementById("hub-forget");
   const forgetNote = document.getElementById("hub-forget-note");
   const passwords = passwordStore();
-  let remember = document.getElementById("hub-remember");
+  let remember = /** @type {HTMLInputElement} */ (document.getElementById("hub-remember"));
   // An option that cannot work is not offered: where the store throws, the
   // checkbox leaves the page rather than sitting there doing nothing.
   if (remember && !storageWorks()) {
@@ -525,7 +525,7 @@ function init() {
   // wrong character is indistinguishable from a right one until the whole
   // thing is refused. Revealing it is the reader's own call on their own
   // screen.
-  const showPassword = document.getElementById("hub-show-password");
+  const showPassword = /** @type {HTMLInputElement} */ (document.getElementById("hub-show-password"));
   if (showPassword && password) {
     showPassword.addEventListener("change", () => {
       password.type = showPassword.checked ? "text" : "password";
@@ -559,7 +559,7 @@ function init() {
       // locally, so connect-src stays closed.
       state.unlocked = await decrypt(secret, envelope, ciphertext);
       form.hidden = true;
-      const copy = form.closest(".hub-gate")?.querySelector(".hub-gate-copy");
+      const copy = /** @type {HTMLElement} */ (form.closest(".hub-gate")?.querySelector(".hub-gate-copy"));
       if (copy) copy.hidden = true;
       renderForTheme(state, state.theme);
       return "ok";

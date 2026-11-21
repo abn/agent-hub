@@ -220,7 +220,7 @@ function install() {
     }
   }).observe(document.body, { childList: true, subtree: true });
   document.addEventListener("click", (event) => {
-    const element = event.target.closest?.(SELECTOR);
+    const element = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(SELECTOR));
     if (element) toggle(element);
   });
   document.addEventListener("visibilitychange", () => {

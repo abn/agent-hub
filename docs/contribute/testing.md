@@ -68,11 +68,10 @@ justified it.
 ## The type gate
 
 `make web/types` type-checks the client sources with `tsc --noEmit` over
-`checkJs`. It is not in `make check` yet: it lists the errors the JSDoc phase
-has to clear, and a target that cannot pass is not a gate. As of 2026-10-05 it
-reports 273 errors over 31 files. Most are one class, a DOM property read off an
-element a `querySelector` returned, which wants a JSDoc type on the lookup
-rather than a cast at every use. It joins the gate when that count reaches zero.
+`checkJs`, and `make gate` runs it, so a type error fails the gate. A DOM
+property read off an element a `querySelector` or `closest` returned wants a
+JSDoc cast to the element type at the lookup, and the globals the pages add to
+`window` are declared in `types/globals.d.ts`.
 
 ## Browser behaviour
 

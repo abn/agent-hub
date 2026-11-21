@@ -232,7 +232,7 @@ export function confirmAction({
     const edge = event.shiftKey ? ring[0] : ring[ring.length - 1];
     if (document.activeElement !== edge) return;
     event.preventDefault();
-    (event.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+    /** @type {HTMLElement} */ ((event.shiftKey ? ring[ring.length - 1] : ring[0])).focus();
   });
 
   // Esc is Keep, which would throw a written note away without a word, so
@@ -333,6 +333,7 @@ export function suggestSlug(slug) {
   return `${slug || "project"}-2`;
 }
 
+/** @param {{ onCreated?: Function }} [options] */
 export function openCreateProjectDialog({ onCreated } = {}) {
   if (openDialog || document.querySelector("dialog[open]")) return Promise.resolve(null);
 
@@ -377,14 +378,14 @@ export function openCreateProjectDialog({ onCreated } = {}) {
   `;
 
   const form = dialog.querySelector("form");
-  const nameInput = dialog.querySelector("#project-create-name");
+  const nameInput = /** @type {HTMLInputElement} */ (dialog.querySelector("#project-create-name"));
   const slugRow = dialog.querySelector(".project-create-slug-row");
-  const slugPath = dialog.querySelector(".project-create-slug-path");
+  const slugPath = /** @type {HTMLElement} */ (dialog.querySelector(".project-create-slug-path"));
   const slugVal = dialog.querySelector(".project-create-slug-val");
-  const slugInput = dialog.querySelector("#project-create-slug-input");
-  const takenText = dialog.querySelector(".project-create-taken-text");
-  const editBtn = dialog.querySelector(".project-create-edit-btn");
-  const errorEl = dialog.querySelector(".project-create-error");
+  const slugInput = /** @type {HTMLInputElement} */ (dialog.querySelector("#project-create-slug-input"));
+  const takenText = /** @type {HTMLElement} */ (dialog.querySelector(".project-create-taken-text"));
+  const editBtn = /** @type {HTMLElement} */ (dialog.querySelector(".project-create-edit-btn"));
+  const errorEl = /** @type {HTMLElement} */ (dialog.querySelector(".project-create-error"));
   const submitBtn = dialog.querySelector(".project-create-submit");
 
   let slugEdited = false;
@@ -441,7 +442,7 @@ export function openCreateProjectDialog({ onCreated } = {}) {
   });
 
   slugRow.addEventListener("click", (e) => {
-    const suggestBtn = e.target.closest?.('[data-action="use-suggest"], .project-create-suggest-btn');
+    const suggestBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (e.target).closest?.('[data-action="use-suggest"], .project-create-suggest-btn'));
     if (suggestBtn && takenSuggestion) {
       e.preventDefault();
       currentSlug = takenSuggestion;
@@ -515,7 +516,7 @@ export function openCreateProjectDialog({ onCreated } = {}) {
       const edge = e.shiftKey ? ring[0] : ring[ring.length - 1];
       if (document.activeElement !== edge) return;
       e.preventDefault();
-      (e.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+      /** @type {HTMLElement} */ ((e.shiftKey ? ring[ring.length - 1] : ring[0])).focus();
     }
   });
 

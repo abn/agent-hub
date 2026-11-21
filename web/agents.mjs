@@ -413,7 +413,7 @@ function wireRowMenus() {
   const closeAll = (except) => {
     for (const menu of document.querySelectorAll(".agent-row-menu [role='menu']:not([hidden])")) {
       if (menu === except) continue;
-      menu.hidden = true;
+      /** @type {HTMLElement} */ (menu).hidden = true;
       menu
         .closest(".agent-row-menu")
         ?.querySelector("[aria-haspopup='menu']")
@@ -421,9 +421,9 @@ function wireRowMenus() {
     }
   };
   document.addEventListener("click", (event) => {
-    const toggle = event.target.closest?.("[data-action='agent-project-menu']");
+    const toggle = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.("[data-action='agent-project-menu']"));
     if (toggle) {
-      const menu = toggle.closest(".agent-row-menu")?.querySelector("[role='menu']");
+      const menu = /** @type {HTMLElement} */ (toggle.closest(".agent-row-menu")?.querySelector("[role='menu']"));
       const open = !!menu?.hidden;
       closeAll(menu);
       if (menu) {
@@ -438,8 +438,8 @@ function wireRowMenus() {
       }
       return;
     }
-    if (!event.target.closest?.(".agent-row-menu")) closeAll();
-    else closeAll(event.target.closest(".agent-row-menu")?.querySelector("[role='menu']"));
+    if (!/** @type {HTMLElement} */ (event.target).closest?.(".agent-row-menu")) closeAll();
+    else closeAll(/** @type {HTMLElement} */ (event.target).closest(".agent-row-menu")?.querySelector("[role='menu']"));
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeAll();
@@ -447,21 +447,21 @@ function wireRowMenus() {
 }
 
 function setupAgentsEvents() {
-  const root = main.querySelector(".shell[data-segment='access']") || main.querySelector(".access-screen") || main;
+  const root = /** @type {HTMLElement} */ (main.querySelector(".shell[data-segment='access']") || main.querySelector(".access-screen") || main);
   if (!root || root.dataset.agentsEventsBound === "on") return;
   root.dataset.agentsEventsBound = "on";
   wireRowMenus();
 
   root.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+    if (/** @type {KeyboardEvent} */ (event).key === "Enter") {
       const row = document.activeElement?.closest(".agent-index-row");
       if (row) {
         requestAnimationFrame(() => {
-          const reissueBtn = main.querySelector('.shell-stage [data-action="agent-token"]') || main.querySelector('.shell-stage');
+          const reissueBtn = /** @type {HTMLElement} */ (main.querySelector('.shell-stage [data-action="agent-token"]') || main.querySelector('.shell-stage'));
           if (reissueBtn) reissueBtn.focus();
         });
       }
-    } else if (event.key === "Escape") {
+    } else if (/** @type {KeyboardEvent} */ (event).key === "Escape") {
       if (desktopState && desktopState.isCreating) {
         event.preventDefault();
         desktopState.isCreating = false;
@@ -477,19 +477,19 @@ function setupAgentsEvents() {
         const target = desktopState.previousSelected
           ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
           : main.querySelector(".agent-index-row");
-        target?.focus();
+        /** @type {HTMLElement} */ (target)?.focus();
         return;
       }
       if (document.activeElement?.closest(".shell-stage")) {
         event.preventDefault();
-        const selected = main.querySelector('.agent-index-row[aria-current="true"]') || main.querySelector('.agent-index-row');
+        const selected = /** @type {HTMLElement} */ (main.querySelector('.agent-index-row[aria-current="true"]') || main.querySelector('.agent-index-row'));
         if (selected) selected.focus();
       }
     }
   });
 
   root.addEventListener("click", (event) => {
-    const grantBtn = event.target.closest("[data-action='agent-grant-open']");
+    const grantBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='agent-grant-open']"));
     if (grantBtn && desktopState) {
       event.preventDefault();
       openGrantPicker(
@@ -500,7 +500,7 @@ function setupAgentsEvents() {
       );
       return;
     }
-    const toggleBtn = event.target.closest("[data-action='toggle-add-agent']");
+    const toggleBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='toggle-add-agent']"));
     if (toggleBtn) {
       event.preventDefault();
       if (desktopState && window.matchMedia("(min-width: 720px)").matches) {
@@ -525,7 +525,7 @@ function setupAgentsEvents() {
           const target = desktopState.previousSelected
             ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
             : main.querySelector(".agent-index-row");
-          target?.focus();
+          /** @type {HTMLElement} */ (target)?.focus();
         }
         return;
       }
@@ -539,7 +539,7 @@ function setupAgentsEvents() {
       return;
     }
 
-    const cancelBtn = event.target.closest("[data-action='agent-cancel-create']");
+    const cancelBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='agent-cancel-create']"));
     if (cancelBtn && desktopState) {
       event.preventDefault();
       desktopState.isCreating = false;
@@ -555,20 +555,20 @@ function setupAgentsEvents() {
       const target = desktopState.previousSelected
         ? main.querySelector(`.agent-index-row[href*="${encodeURIComponent(desktopState.previousSelected)}"]`)
         : main.querySelector(".agent-index-row");
-      target?.focus();
+      /** @type {HTMLElement} */ (target)?.focus();
       return;
     }
   });
 
   root.addEventListener("submit", async (event) => {
-    const form = event.target.closest("[data-action='desktop-agent-create']");
+    const form = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='desktop-agent-create']"));
     if (!form) return;
     event.preventDefault();
 
-    const idInput = form.querySelector("#stage-agent-id");
-    const nameInput = form.querySelector("#stage-agent-name");
-    const idError = form.querySelector("#stage-agent-id-error");
-    const nameError = form.querySelector("#stage-agent-name-error");
+    const idInput = /** @type {HTMLInputElement} */ (form.querySelector("#stage-agent-id"));
+    const nameInput = /** @type {HTMLInputElement} */ (form.querySelector("#stage-agent-name"));
+    const idError = /** @type {HTMLElement} */ (form.querySelector("#stage-agent-id-error"));
+    const nameError = /** @type {HTMLElement} */ (form.querySelector("#stage-agent-name-error"));
 
     if (idError) idError.style.display = "none";
     if (nameError) nameError.style.display = "none";
@@ -874,7 +874,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
         value.textContent = visible;
         commit.disabled = false;
         paintState(2);
-        valueRow.querySelector(".reveal-copy")?.focus();
+        /** @type {HTMLElement} */ (valueRow.querySelector(".reveal-copy"))?.focus();
       } catch (error) {
         commit.disabled = false;
         note.textContent = error.message;
@@ -899,7 +899,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
   document.body.appendChild(el);
   document.documentElement.classList.add("has-dialog");
   el.showModal();
-  if (visible) valueRow.querySelector(".reveal-copy")?.focus();
+  if (visible) /** @type {HTMLElement} */ (valueRow.querySelector(".reveal-copy"))?.focus();
   else safe.focus();
 
   el.addEventListener(
@@ -1040,7 +1040,7 @@ function openGrantPicker(agentId, agentName, projects, grants) {
     const edge = event.shiftKey ? ring[0] : ring[ring.length - 1];
     if (document.activeElement !== edge) return;
     event.preventDefault();
-    (event.shiftKey ? ring[ring.length - 1] : ring[0]).focus();
+    /** @type {HTMLElement} */ ((event.shiftKey ? ring[ring.length - 1] : ring[0])).focus();
   });
 
   el.appendChild(form);

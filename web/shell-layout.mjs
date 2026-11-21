@@ -70,7 +70,7 @@ function apply(shell, pane, width, other) {
 // contributes nothing, so opening the aside does not shrink the index.
 function otherWidth(shell, pane) {
   const other = pane === "index" ? "aside" : "index";
-  const el = shell.querySelector(`.shell-${other}`);
+  const el = /** @type {HTMLElement} */ (shell.querySelector(`.shell-${other}`));
   if (!el || el.hidden) return 0;
   return el.getBoundingClientRect().width;
 }
@@ -182,6 +182,20 @@ const BACK_CHEVRON = `<svg aria-hidden="true" width="20" height="20" viewBox="0 
 // The reserved chrome is the rule, so the shell draws both rows whether or not
 // a screen has anything for the second one. On a phone the shell shows one
 // zone at a time: the index, or the stage with a way back to the list.
+/**
+ * @param {{
+ *   segment?: string,
+ *   indexHead?: string,
+ *   indexControls?: string,
+ *   indexBody?: string,
+ *   stageHead: string,
+ *   stageControls: string,
+ *   stageBody: string,
+ *   aside?: string,
+ *   hasSelection?: boolean,
+ *   noIndex?: boolean,
+ * }} parts
+ */
 export function shellHTML({
   segment,
   indexHead,
@@ -337,7 +351,7 @@ export function installGroupMenu(shell) {
   if (!wrap || wrap.dataset.wired === "on") return;
   wrap.dataset.wired = "on";
   const toggle = wrap.querySelector("[data-group-toggle]");
-  const menu = wrap.querySelector("[data-group-menu]");
+  const menu = /** @type {HTMLElement} */ (wrap.querySelector("[data-group-menu]"));
   if (!toggle || !menu) return;
 
   toggle.addEventListener("click", (event) => {
@@ -353,7 +367,7 @@ export function installGroupMenu(shell) {
     if (open) menu.querySelector("button")?.focus();
   });
   menu.addEventListener("click", (event) => {
-    if (!event.target.closest("button")) return;
+    if (!/** @type {HTMLElement} */ (event.target).closest("button")) return;
     menu.hidden = true;
     toggle.setAttribute("aria-expanded", "false");
   });
@@ -362,14 +376,14 @@ export function installGroupMenu(shell) {
 function closeGroupMenus(except) {
   for (const menu of document.querySelectorAll("[data-group-menu]:not([hidden])")) {
     if (menu === except) continue;
-    menu.hidden = true;
+    /** @type {HTMLElement} */ (menu).hidden = true;
     menu.closest(".shell-group")?.querySelector("[data-group-toggle]")?.setAttribute("aria-expanded", "false");
   }
 }
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
-    const inside = event.target.closest?.(".shell-group, [data-group-menu]");
+    const inside = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".shell-group, [data-group-menu]"));
     closeGroupMenus(inside ? inside.querySelector?.("[data-group-menu]") : null);
   });
   document.addEventListener("keydown", (event) => {
@@ -386,7 +400,7 @@ export function resetScrollCollapse() {
   if (typeof document !== "undefined") {
     document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
       el.classList.remove("is-compressed");
-      delete el.dataset.compressed;
+      delete /** @type {HTMLElement} */ (el).dataset.compressed;
     });
   }
 }
@@ -404,13 +418,13 @@ export function installScrollCollapse() {
       isCompressed = true;
       document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
         el.classList.add("is-compressed");
-        el.dataset.compressed = "true";
+        /** @type {HTMLElement} */ (el).dataset.compressed = "true";
       });
     } else if (isCompressed && scrollTop < 8) {
       isCompressed = false;
       document.querySelectorAll(".shell-head, .shell-controls, .shell").forEach((el) => {
         el.classList.remove("is-compressed");
-        delete el.dataset.compressed;
+        delete /** @type {HTMLElement} */ (el).dataset.compressed;
       });
     }
   };
@@ -429,6 +443,7 @@ export function installScrollCollapse() {
   }
 }
 
+/** @param {ParentNode} [root] */
 export function installShellLayout(root = document) {
   installScrollCollapse();
   for (const shell of root.querySelectorAll(".shell")) {

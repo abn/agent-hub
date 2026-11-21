@@ -431,7 +431,7 @@ function setupDesktopSettingsEvents() {
 
   root.addEventListener("click", async (event) => {
     // Theme segment click
-    const themeBtn = event.target.closest("button[data-theme-val]");
+    const themeBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-theme-val]"));
     if (themeBtn) {
       event.preventDefault();
       const val = themeBtn.dataset.themeVal;
@@ -440,14 +440,14 @@ function setupDesktopSettingsEvents() {
       const group = themeBtn.closest(".settings-segmented");
       if (group) {
         group.querySelectorAll("button[data-theme-val]").forEach((b) => {
-          b.setAttribute("aria-pressed", b.dataset.themeVal === val ? "true" : "false");
+          b.setAttribute("aria-pressed", /** @type {HTMLElement} */ (b).dataset.themeVal === val ? "true" : "false");
         });
       }
       return;
     }
 
     // Compact rows switch
-    const densityBtn = event.target.closest("[data-action='toggle-density']");
+    const densityBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='toggle-density']"));
     if (densityBtn) {
       event.preventDefault();
       const next = (prefs.density || "comfortable") === "compact" ? "comfortable" : "compact";
@@ -461,7 +461,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Shortcuts toggle
-    const shortcutsBtn = event.target.closest("#shortcuts, [data-action='toggle-shortcuts']");
+    const shortcutsBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("#shortcuts, [data-action='toggle-shortcuts']"));
     if (shortcutsBtn) {
       event.preventDefault();
       const next = prefs.shortcuts === "on" ? "off" : "on";
@@ -473,7 +473,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Alerts master toggle
-    const masterBtn = event.target.closest(
+    const masterBtn = /** @type {HTMLElement} */ (event.target).closest(
       "#alerts-master, [data-action='toggle-alerts-switch'], [data-action='toggle-alert-master']",
     );
     if (masterBtn) {
@@ -488,7 +488,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Turn on notifications
-    const enableBtn = event.target.closest("[data-action='notification-enable']");
+    const enableBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='notification-enable']"));
     if (enableBtn) {
       event.preventDefault();
       await enableNotifications();
@@ -496,7 +496,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Check alerts button
-    const checkBtn = event.target.closest("[data-action='check-alerts']");
+    const checkBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='check-alerts']"));
     if (checkBtn) {
       event.preventDefault();
       render();
@@ -504,7 +504,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Copy path control on the reserved control row
-    const copyPathBtn = event.target.closest("[data-action='copy-path']");
+    const copyPathBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='copy-path']"));
     if (copyPathBtn) {
       event.preventDefault();
       const fullPath = copyPathBtn.dataset.path || "";
@@ -525,7 +525,7 @@ function setupDesktopSettingsEvents() {
     }
 
     // Sign out button
-    const signoutBtn = event.target.closest("[data-action='signout']");
+    const signoutBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='signout']"));
     if (signoutBtn) {
       event.preventDefault();
       await signOut();
@@ -540,7 +540,7 @@ function setupSettingsEvents() {
 
   root.addEventListener("click", async (event) => {
     // Theme segment click
-    const themeBtn = event.target.closest("button[data-theme-val]");
+    const themeBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-theme-val]"));
     if (themeBtn) {
       event.preventDefault();
       const val = themeBtn.dataset.themeVal;
@@ -549,7 +549,7 @@ function setupSettingsEvents() {
       const group = themeBtn.closest("[role='radiogroup'], .settings-segmented");
       if (group) {
         group.querySelectorAll("button[data-theme-val]").forEach((b) => {
-          const match = b.dataset.themeVal === val;
+          const match = /** @type {HTMLElement} */ (b).dataset.themeVal === val;
           b.setAttribute("aria-checked", match ? "true" : "false");
         });
       }
@@ -557,7 +557,7 @@ function setupSettingsEvents() {
     }
 
     // Copy path click
-    const copyPathBtn = event.target.closest("[data-action='copy-path']");
+    const copyPathBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='copy-path']"));
     if (copyPathBtn) {
       event.preventDefault();
       const fullPath = copyPathBtn.dataset.path || "";
@@ -578,7 +578,7 @@ function setupSettingsEvents() {
     }
 
     // Compact rows switch
-    const densityBtn = event.target.closest("[data-action='toggle-density']");
+    const densityBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='toggle-density']"));
     if (densityBtn) {
       event.preventDefault();
       const next = (prefs.density || "comfortable") === "compact" ? "comfortable" : "compact";
@@ -592,7 +592,7 @@ function setupSettingsEvents() {
     }
 
     // Shortcuts toggle
-    const shortcutsBtn = event.target.closest("#shortcuts, [data-action='toggle-shortcuts']");
+    const shortcutsBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("#shortcuts, [data-action='toggle-shortcuts']"));
     if (shortcutsBtn) {
       event.preventDefault();
       const next = prefs.shortcuts === "on" ? "off" : "on";
@@ -604,7 +604,7 @@ function setupSettingsEvents() {
     }
 
     // Alerts master toggle
-    const masterBtn = event.target.closest(
+    const masterBtn = /** @type {HTMLElement} */ (event.target).closest(
       "#alerts-master, [data-action='toggle-alerts-switch'], [data-action='toggle-alert-master']",
     );
     if (masterBtn) {
@@ -645,7 +645,7 @@ function setupSettingsEvents() {
     }
 
     // Alerts kind toggle
-    const kindBtn = event.target.closest("[data-action='toggle-alert-kind']");
+    const kindBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='toggle-alert-kind']"));
     if (kindBtn) {
       event.preventDefault();
       const kind = kindBtn.dataset.kind;
@@ -659,7 +659,7 @@ function setupSettingsEvents() {
     }
 
     // Check alerts button
-    const checkBtn = event.target.closest("[data-action='check-alerts']");
+    const checkBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='check-alerts']"));
     if (checkBtn) {
       event.preventDefault();
       render();
@@ -667,7 +667,7 @@ function setupSettingsEvents() {
     }
 
     // Sign out button
-    const signoutBtn = event.target.closest("[data-action='signout']");
+    const signoutBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='signout']"));
     if (signoutBtn) {
       event.preventDefault();
       await signOut();

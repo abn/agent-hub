@@ -895,21 +895,21 @@ if (typeof document !== "undefined") {
     if (event.key !== "Escape") return;
     const menu = document.querySelector(".session-reassign-menu:not([hidden])");
     if (menu) {
-      const trigger = menu.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]');
+      const trigger = /** @type {HTMLElement} */ (menu.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]'));
       trigger?.setAttribute("aria-expanded", "false");
-      menu.hidden = true;
+      /** @type {HTMLElement} */ (menu).hidden = true;
       trigger?.focus();
       return;
     }
-    const sheet = document.querySelector(".kv-sheet:not([hidden])");
+    const sheet = /** @type {HTMLElement} */ (document.querySelector(".kv-sheet:not([hidden])"));
     if (!sheet) return;
     sheet.hidden = true;
-    const backdrop = document.querySelector(".kv-sheet-backdrop");
+    const backdrop = /** @type {HTMLElement} */ (document.querySelector(".kv-sheet-backdrop"));
     if (backdrop) backdrop.hidden = true;
   });
 
   document.addEventListener("click", async (event) => {
-    const copyBtn = event.target.closest?.('[data-action="copy-id"], .session-copy-id');
+    const copyBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="copy-id"], .session-copy-id'));
     if (copyBtn) {
       const id = copyBtn.dataset.id || copyBtn.getAttribute("title");
       if (id) {
@@ -930,19 +930,19 @@ if (typeof document !== "undefined") {
       return;
     }
 
-    const reassignOpen = event.target.closest?.('[data-action="reassign-open"]');
+    const reassignOpen = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="reassign-open"]'));
     if (reassignOpen) {
       await openReassignMenu(reassignOpen);
       return;
     }
 
-    const reassignTo = event.target.closest?.('[data-action="reassign"]');
+    const reassignTo = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="reassign"]'));
     if (reassignTo) {
-      const menu = reassignTo.closest(".session-reassign-menu");
+      const menu = /** @type {HTMLElement} */ (reassignTo.closest(".session-reassign-menu"));
       if (menu) menu.hidden = true;
       const opener = reassignTo.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]');
       opener?.setAttribute("aria-expanded", "false");
-      await reassignSession(reassignTo.dataset.id, reassignTo.dataset.agent, reassignTo.dataset.from);
+      await reassignSession(/** @type {HTMLElement} */ (reassignTo).dataset.id, /** @type {HTMLElement} */ (reassignTo).dataset.agent, /** @type {HTMLElement} */ (reassignTo).dataset.from);
       return;
     }
 
@@ -951,17 +951,17 @@ if (typeof document !== "undefined") {
     if (openMenu) {
       const trigger = openMenu.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]');
       trigger?.setAttribute("aria-expanded", "false");
-      openMenu.hidden = true;
+      /** @type {HTMLElement} */ (openMenu).hidden = true;
     }
 
-    const pruneAllBtn = event.target.closest?.('[data-action="prune-all"]');
+    const pruneAllBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="prune-all"]'));
     if (pruneAllBtn) {
       const project = pruneAllBtn.dataset.project;
       await pruneAllEnded(project);
       return;
     }
 
-    const copyFileBtn = event.target.closest?.('[data-action="copy-file-path"]');
+    const copyFileBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="copy-file-path"]'));
     if (copyFileBtn) {
       const path = copyFileBtn.dataset.path;
       if (path) {
@@ -973,7 +973,7 @@ if (typeof document !== "undefined") {
       return;
     }
 
-    const copyKvBtn = event.target.closest?.('[data-action="copy-kv-value"]');
+    const copyKvBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="copy-kv-value"]'));
     if (copyKvBtn) {
       const val = copyKvBtn.dataset.value;
       if (val != null) {
@@ -988,14 +988,14 @@ if (typeof document !== "undefined") {
     // The coarse-pointer kv sheet closes on its backdrop or its own close
     // control, and either way the reader stays on the sessions screen with the
     // tree behind it.
-    const closeKv = event.target.closest?.('[data-action="kv-sheet-close"]');
+    const closeKv = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="kv-sheet-close"]'));
     if (closeKv) {
-      const sheet = document.querySelector(".kv-sheet");
+      const sheet = /** @type {HTMLElement} */ (document.querySelector(".kv-sheet"));
       if (sheet) {
         sheet.hidden = true;
         sheet.setAttribute("aria-hidden", "true");
       }
-      const backdrop = document.querySelector(".kv-sheet-backdrop");
+      const backdrop = /** @type {HTMLElement} */ (document.querySelector(".kv-sheet-backdrop"));
       if (backdrop) backdrop.hidden = true;
       return;
     }
