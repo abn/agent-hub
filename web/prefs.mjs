@@ -52,7 +52,7 @@ export function applyPrefs() {
   document.documentElement.dataset.theme = resolved;
   document.documentElement.dataset.density = prefs.density;
   document.querySelector('meta[name="theme-color"]').content =
-    resolved === "dark" ? "#141311" : "#F5F3EE";
+    resolved === "dark" ? "#111513" : "#F3F5F2";
 }
 
 // Following the system means following it while the app is open, not only at

@@ -20,14 +20,14 @@ function injectStyles() {
   var style = document.createElement("style");
   style.id = "hub-comment-styles";
   style.textContent =
-    '.hub-comment-highlight{background:#E6ECF7;box-shadow:inset 0 -2px 0 #2F5FA8;border-radius:2px;color:#1D1C19;cursor:pointer}' +
-    '.hub-comment-highlight:focus,.hub-comment-highlight:hover,.hub-comment-highlight.active{box-shadow:inset 0 -2px 0 #2F5FA8,0 0 0 3px #E6ECF7;outline:none}' +
-    '.hub-point-pin{position:absolute;left:4px;width:16px;height:16px;color:#2F5FA8;cursor:pointer}' +
-    '.hub-selection-callout{position:absolute;min-height:44px;min-width:88px;padding:0 16px;background:#FFFFFF;color:#1D1C19;border:1px solid #CFC9BE;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);font:600 13px/1 system-ui,sans-serif;display:flex;align-items:center;justify-content:center;z-index:1000;cursor:pointer}' +
-    'html[data-theme="dark"] .hub-comment-highlight{background:#223052;box-shadow:inset 0 -2px 0 #8AAAE8;color:#ECE8E0}' +
-    'html[data-theme="dark"] .hub-comment-highlight:focus,html[data-theme="dark"] .hub-comment-highlight:hover,html[data-theme="dark"] .hub-comment-highlight.active{box-shadow:inset 0 -2px 0 #8AAAE8,0 0 0 3px #223052}' +
-    'html[data-theme="dark"] .hub-point-pin{color:#8AAAE8}' +
-    'html[data-theme="dark"] .hub-selection-callout{background:#1D1C19;color:#ECE8E0;border-color:#44403A}';
+    '.hub-comment-highlight{background:#F1E4D8;box-shadow:inset 0 -2px 0 #84461D;border-radius:2px;color:#151B17;cursor:pointer}' +
+    '.hub-comment-highlight:focus,.hub-comment-highlight:hover,.hub-comment-highlight.active{box-shadow:inset 0 -2px 0 #84461D,0 0 0 3px #F1E4D8;outline:none}' +
+    '.hub-point-pin{position:absolute;left:4px;width:16px;height:16px;color:#84461D;cursor:pointer}' +
+    '.hub-selection-callout{position:absolute;min-height:44px;min-width:88px;padding:0 16px;background:#FBFCFA;color:#151B17;border:1px solid #66726A;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.15);font:600 13px/1 system-ui,sans-serif;display:flex;align-items:center;justify-content:center;z-index:1000;cursor:pointer}' +
+    'html[data-theme="dark"] .hub-comment-highlight{background:#2E241C;box-shadow:inset 0 -2px 0 #E3A06F;color:#E4EAE5}' +
+    'html[data-theme="dark"] .hub-comment-highlight:focus,html[data-theme="dark"] .hub-comment-highlight:hover,html[data-theme="dark"] .hub-comment-highlight.active{box-shadow:inset 0 -2px 0 #E3A06F,0 0 0 3px #2E241C}' +
+    'html[data-theme="dark"] .hub-point-pin{color:#E3A06F}' +
+    'html[data-theme="dark"] .hub-selection-callout{background:#161B18;color:#E4EAE5;border-color:#7A867E}';
   (document.head || document.documentElement).appendChild(style);
 }
 

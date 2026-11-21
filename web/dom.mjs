@@ -38,10 +38,10 @@ export function esc(value) {
 // what this returns still goes through `esc` or `textContent`.
 export const projectName = (row) => row.project_display_name || row.project_id;
 
-// The kind badge, from the design foundation: a 14px line glyph inside a 24px
-// tinted circle, or a typographic mark where the design uses one. A shape per
-// kind, because the tint alone is not a difference a reader can be asked to
-// see, and the drawn mark is not a difference a reader can be asked to hear.
+// The kind badge: a 14px line glyph in a 24px box, or a typographic mark where
+// the design uses one. Kinds are not tinted, so the shape is the whole of the
+// difference a reader sees, and the drawn mark is not a difference a reader can
+// be asked to hear.
 const mark = (d, filled) =>
   `<svg width="14" height="14" viewBox="0 0 24 24" fill="${filled ? "currentColor" : "none"}"` +
   ` stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"` +
@@ -53,7 +53,8 @@ const mark = (d, filled) =>
 // own path strings. SVG reads it as the same path, and it keeps the data clear
 // of the identifier pattern the commit hooks reject.
 const MARKS = {
-  signal: mark("M 12 12h.01"),
+  // A filled dot: without a disc behind it, a stroked point is too small to see.
+  signal: mark("M 9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0z", true),
   idea: mark("M 9 18h6 M 10 22h4 M 12 2a7 7 0 0 0-4 12.7c.9.7 1.5 1.8 1.5 3h5c0-1.2.6-2.3 1.5-3A7 7 0 0 0 12 2z"),
   finished: mark("M 5 12l5 5L20 7"),
   question: "?",

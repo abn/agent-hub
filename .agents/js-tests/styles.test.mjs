@@ -94,22 +94,20 @@ describe("colours come from tokens", () => {
   // token there. A value the token file does not carry is a design question,
   // not a local decision."
   //
-  // Two literals are design decisions rather than local ones, and both are
-  // named here so that they are held rather than assumed:
+  // One literal is a design decision rather than a local one, and it is
+  // named here so that it is held rather than assumed:
   //
   // - a scrim is a fixed dim over content the hub does not draw, so it has no
-  //   token to point at. It is `rgba(20, 19, 17, 0.4)`, the shell's own black
+  //   token to point at. It is `rgba(21, 27, 23, 0.4)`, the shell's own ink
   //   at 40%, and it is a value rather than a colour of the palette.
-  // - `#fff` is the ink a control fills with, and the token file's `--surface`
-  //   is that same `#FFFFFF`, so the literal is a copy the file already holds.
   //
   // Anything else that draws a colour names a token. This is the rule the old
   // `APP_CSS.contains("var(--")` could not express: that the stylesheet uses
   // tokens somewhere is not the same as that every colour it draws is one.
-  const ALLOWED_LITERALS = new Set(["#FFFFFF"]);
+  const ALLOWED_LITERALS = new Set();
 
   it("draws no colour in app.css but a token, a scrim, or a declared value", () => {
-    const isScrim = (value) => /^rgba\(\s*(?:20,\s*19,\s*17|0,\s*0,\s*0),\s*0?\.4\s*\)$/i.test(value);
+    const isScrim = (value) => /^rgba\(\s*(?:21,\s*27,\s*23|0,\s*0,\s*0),\s*0?\.4\s*\)$/i.test(value);
     const offenders = [];
     for (const decl of declarations(APP)) {
       if (!COLOUR_PROPERTIES.has(decl.property)) continue;
@@ -462,6 +460,7 @@ const LIGHT_TOKENS = [
   "--bg",
   "--surface",
   "--surface-2",
+  "--raised",
   "--line",
   "--line-strong",
   "--ink",
@@ -535,6 +534,13 @@ const TEXT_PAIRS = [
   ["--ink-2", "--surface-2"],
   ["--ink-3", "--bg"],
   ["--ink-3", "--surface"],
+  ["--ink-3", "--surface-2"],
+  // A field, a sheet, a dialog and a menu stand on the raised ground.
+  ["--ink", "--raised"],
+  ["--ink-2", "--raised"],
+  ["--ink-3", "--raised"],
+  ["--accent", "--raised"],
+  ["--danger", "--raised"],
   ["--ink-inverse", "--ink"],
   ["--ink-inverse", "--accent"],
   ["--ink-inverse", "--action"],
@@ -558,15 +564,19 @@ const TEXT_PAIRS = [
 const DISABLED_PAIRS = [["--ink-3", "--surface-2"]];
 // The artifact version sheet's selected row and a wiki diff's added line stand
 // on --accent-bg, and a wiki diff's removed line on --danger-bg, grounds the
-// table above does not name.
+// table above does not name. An anchored passage and a search hit stand on the
+// copper wash, --action-bg.
 const TINTED_ROW_PAIRS = [
   ["--ink-2", "--accent-bg"],
   ["--ink", "--accent-bg"],
+  ["--ink-3", "--accent-bg"],
   ["--ink", "--danger-bg"],
+  ["--ink", "--action-bg"],
+  ["--ink-2", "--action-bg"],
 ];
 // The surfaces a bare text field sits on. Its border is the only thing that
 // says a control is there, so WCAG 1.4.11 asks 3:1 of it.
-const FIELD_SURFACES = ["--surface", "--bg"];
+const FIELD_SURFACES = ["--surface", "--bg", "--raised", "--surface-2"];
 // Two kind badges carry a typographic mark rather than a drawn path. A mark is
 // text, so those two meet the text minimum while the drawn glyphs meet the
 // non-text one.
@@ -1007,8 +1017,8 @@ const VIEWER_ROLES = [
     "--ink",
     "dark headings",
   ],
-  ["a", "color", "light", "--accent", "light link"],
-  ['html[data-theme="dark"] a', "color", "dark", "--accent", "dark link"],
+  ["a", "color", "light", "--ink", "light link"],
+  ['html[data-theme="dark"] a', "color", "dark", "--ink", "dark link"],
   ["pre", "background", "light", "--surface-2", "light pre background"],
   ["pre", "border", "light", "--line", "light pre border"],
   ['html[data-theme="dark"] pre', "background", "dark", "--surface-2", "dark pre background"],

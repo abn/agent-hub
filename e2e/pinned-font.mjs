@@ -1,15 +1,15 @@
 // One sans face and one mono face for a check whose numbers or pixels depend
 // on how text sets.
 //
-// The design's stack resolves to whatever the host has: Cantarell on the CI
-// runner, Inter or DejaVu on a developer's machine. A screenshot baseline or a
-// character count made on one is wrong on the other, so a check that holds
-// either pins the stack to Cantarell from the dev-only `@fontsource/cantarell`
-// package, the face CI already renders, and the mono stack to DejaVu Sans Mono
-// from the dev-only `@fontsource/dejavu-mono` package. Nothing here reaches
-// the shipped binary: the fonts are read from `node_modules` and answered by
-// the test's own route under the page's origin, because the app's policy
-// allows a font only from 'self', so a data URL would be refused.
+// The shell ships IBM Plex and serves it itself, so every host sets the same
+// face. The checks that hold a character count or a screenshot baseline are
+// measured under this pin, so it holds those floors and baselines steady: it
+// pins the sans stack to Cantarell from the dev-only `@fontsource/cantarell`
+// package and the mono stack to DejaVu Sans Mono from the dev-only
+// `@fontsource/dejavu-mono` package. Nothing here reaches the shipped binary:
+// the fonts are read from `node_modules` and answered by the test's own route
+// under the page's origin, because the app's policy allows a font only from
+// 'self', so a data URL would be refused.
 //
 // Each package carries 400 and 700 only, so the 500 and 600 the design uses set
 // in the nearer of the two by the browser's own matching, the same way on

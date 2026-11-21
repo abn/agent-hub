@@ -4,6 +4,20 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-21
+
+### The interface moves to lichen slate, copper and IBM Plex
+
+* **Update**: [Human interface](/design/human-interface.md) describes the new
+  foundation. The palette is lichen slate neutrals with one copper signal,
+  which marks only what waits on the reader, the focus ring and the primary
+  action; links and unread marks are ink, and event kinds are told apart by
+  glyph and word rather than tint. Panes and rows stand on one canvas and are
+  separated by hairlines, and radii are 2px and 4px.
+* **Update**: The hub ships IBM Plex Sans and IBM Plex Mono and serves them
+  itself, with the SIL Open Font License beside them, in place of the system
+  font stacks. The mark's nodes are copper on the lichen ground.
+
 ## 2026-11-07
 
 ### An inbox item's body renders as markdown

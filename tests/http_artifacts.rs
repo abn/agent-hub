@@ -47,7 +47,7 @@ fn get_with_host(uri: &str, host: &str) -> Request<Body> {
 }
 
 /// The exact host shell policy from the viewer contract.
-const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The exact frame policy from the viewer contract for one origin. It
 /// carries no `frame-ancestors`: the designed viewer nests it inside the

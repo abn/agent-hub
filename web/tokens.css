@@ -1,47 +1,90 @@
 /* Agent Hub design tokens. Mirrors the API vocabulary: feed, inbox, session,
-   brain, artifact. Reused from the design foundation. */
+   brain, artifact. Lichen slate neutrals carry the interface; copper is the one
+   signal and means only "needs you", focus and the primary action. */
+
+/* IBM Plex, Latin subset, served from the hub itself. The faces are the OFL
+   files in vendor/fonts, and a host that cannot load them sets the system
+   stack after them. */
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("vendor/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root, [data-theme="light"] {
-  --font-sans: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --bg: #F5F3EE;
-  --surface: #FFFFFF;
-  --surface-2: #EDEAE3;
-  --line: #E4E0D8;
-  --line-strong: #CFC9BE;
-  --ink: #1D1C19;
-  --ink-2: #5C584F;
-  --ink-3: #6F6A61;
-  --ink-inverse: #F5F3EE;
+  /* The canvas is the only surface: a pane, a row and a card stand on it and
+     are told apart by hairlines, not fills. --surface keeps its name for the
+     rules that paint it and resolves to the canvas. */
+  --bg: #F3F5F2;
+  --surface: #F3F5F2;
+  /* Sunken: hover, the selected row, code. */
+  --surface-2: #E8ECE7;
+  /* Raised: a field, a sheet, a dialog, a menu. */
+  --raised: #FBFCFA;
+  --line: #D3DAD2;
+  /* The control border, at the 3:1 non-text floor on every ground. */
+  --line-strong: #66726A;
+  --ink: #151B17;
+  --ink-2: #3B4640;
+  --ink-3: #56625A;
+  --ink-inverse: #F3F5F2;
 
-  --accent: #2F5FA8;
-  --accent-bg: #E6ECF7;
-  /* The foundation's #9A5E0C reads 4.39:1 on --surface-2 and 4.47:1 on
-     --action-bg, so the light action tone is one step darker here. */
-  --action: #95590B;
-  --action-bg: #F7EBD5;
-  --ok: #2E7D4F;
-  --ok-bg: #E2F1E7;
-  --danger: #9E3B2B;
-  --danger-bg: #F6E3DF;
+  /* Copper. --accent and --action are one colour: needs you, focus and the
+     primary action. A link is ink. */
+  --accent: #84461D;
+  /* A selected row stands on the sunken ground, with the copper edge. */
+  --accent-bg: #E8ECE7;
+  --action: #84461D;
+  /* The copper wash: an anchored passage, a search hit, the waiting pill. */
+  --action-bg: #F1E4D8;
+  --ok: #2C6A3D;
+  --ok-bg: #DFEBE1;
+  /* Deletion only. */
+  --danger: #A3154A;
+  --danger-bg: #F7E3EA;
 
-  --k-signal: #6F6A61;    --k-signal-bg: #EDEAE3;
-  --k-finished: #2E7D4F;  --k-finished-bg: #E2F1E7;
-  --k-question: #2F5FA8;  --k-question-bg: #E6ECF7;
-  /* The approval kind is the action tone: the Approve fill and the badge that
-     asks for it are one colour. */
-  --k-approval: #95590B;  --k-approval-bg: #F7EBD5;
-  --k-artifact: #6E4B92;  --k-artifact-bg: #EEE6F5;
-  --k-session: #23706E;   --k-session-bg: #DFF0EF;
-  /* Storage only: a byte count must not borrow the question tone, which means
-     "an agent is asking you". */
+  /* Kinds are not tinted. A kind is its glyph and its word, so every pair is
+     ink on the sunken ground. */
+  --k-signal: #3B4640;    --k-signal-bg: #E8ECE7;
+  --k-finished: #3B4640;  --k-finished-bg: #E8ECE7;
+  --k-question: #3B4640;  --k-question-bg: #E8ECE7;
+  --k-approval: #3B4640;  --k-approval-bg: #E8ECE7;
+  --k-artifact: #3B4640;  --k-artifact-bg: #E8ECE7;
+  --k-session: #3B4640;   --k-session-bg: #E8ECE7;
+  /* Storage only: the knowledge segment of the storage bar, the one hue there
+     beside the three ink steps the other segments take. */
   --k-knowledge: #5E6A1F; --k-knowledge-bg: #EEF0DC;
 
   --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
-  --shadow-1: 0 1px 2px rgba(29,28,25,.06);
-  --shadow-2: 0 8px 24px rgba(29,28,25,.12);
+  /* Hairlines, not boxes: nothing on the canvas casts a shadow. Only what
+     floats over it, a menu, a sheet, a dialog, keeps one. */
+  --shadow-1: none;
+  --shadow-2: 0 8px 24px rgba(21,27,23,.14);
 
-  --r-1: 6px; --r-2: 12px; --r-pill: 999px;
+  --r-1: 2px; --r-2: 4px; --r-pill: 999px;
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
   --row-y: 12px;
   /* Control sizes. A band or a row draws a control at --ctl, a glyph inside a
@@ -52,30 +95,31 @@
   --t-12: 12px; --t-13: 13px; --t-15: 15px; --t-17: 17px; --t-22: 22px; --t-28: 28px;
 }
 [data-theme="dark"] {
-  --bg: #141311;
-  --surface: #1D1C19;
-  --surface-2: #26241F;
-  --line: #2F2C26;
-  --line-strong: #44403A;
-  --ink: #ECE8E0;
-  --ink-2: #B3ADA2;
-  --ink-3: #948E83;
-  --ink-inverse: #141311;
+  --bg: #111513;
+  --surface: #111513;
+  --surface-2: #1A1F1C;
+  --raised: #161B18;
+  --line: #29312C;
+  --line-strong: #7A867E;
+  --ink: #E4EAE5;
+  --ink-2: #B5BFB8;
+  --ink-3: #8E9991;
+  --ink-inverse: #111513;
 
-  --accent: #8AAAE8;  --accent-bg: #223052;
-  --action: #DDA44E;  --action-bg: #3A2C14;
-  --ok: #6FC08C;      --ok-bg: #1C3627;
-  --danger: #E08373;  --danger-bg: #43221D;
+  --accent: #E3A06F;  --accent-bg: #1A1F1C;
+  --action: #E3A06F;  --action-bg: #2E241C;
+  --ok: #7DC490;      --ok-bg: #16261B;
+  --danger: #FF7099;  --danger-bg: #3A1824;
 
-  --k-signal: #948E83;   --k-signal-bg: #26241F;
-  --k-finished: #6FC08C; --k-finished-bg: #1C3627;
-  --k-question: #8AAAE8; --k-question-bg: #223052;
-  --k-approval: #DDA44E; --k-approval-bg: #3A2C14;
-  --k-artifact: #B893D9; --k-artifact-bg: #32263F;
-  --k-session: #63B8B4;  --k-session-bg: #173432;
+  --k-signal: #B5BFB8;   --k-signal-bg: #1A1F1C;
+  --k-finished: #B5BFB8; --k-finished-bg: #1A1F1C;
+  --k-question: #B5BFB8; --k-question-bg: #1A1F1C;
+  --k-approval: #B5BFB8; --k-approval-bg: #1A1F1C;
+  --k-artifact: #B5BFB8; --k-artifact-bg: #1A1F1C;
+  --k-session: #B5BFB8;  --k-session-bg: #1A1F1C;
   --k-knowledge: #B5C26A; --k-knowledge-bg: #2C3016;
 
-  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-1: none;
   --shadow-2: 0 8px 24px rgba(0,0,0,.5);
 }
 [data-density="compact"] { --row-y: 8px; }
@@ -89,8 +133,16 @@ body {
   font-size: var(--t-15);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-a { color: var(--accent); }
+/* A link is ink with a quiet underline that darkens on hover. Copper is kept
+   for what needs the reader. */
+a {
+  color: var(--ink);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+a:hover { text-decoration-color: currentColor; }
 /* The designed ring is the shadow. The outline under it is transparent, so it
    changes nothing here and is the only part left for a browser in forced
    colours, which drops shadows outright and then colours the outline in. */
@@ -110,7 +162,7 @@ a { color: var(--accent); }
 .skip-link {
   position: absolute; left: var(--s-3); top: -48px; z-index: 10;
   display: inline-flex; align-items: center; min-height: 44px;
-  background: var(--surface); color: var(--ink); padding: var(--s-2) var(--s-3);
+  background: var(--raised); color: var(--ink); padding: var(--s-2) var(--s-3);
   border: 1px solid var(--line-strong); border-radius: var(--r-1);
 }
 .skip-link:focus { top: var(--s-3); }

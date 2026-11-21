@@ -313,6 +313,84 @@ async fn serves_every_shell_asset_with_a_policy() {
     );
 }
 
+/// The shell sets in IBM Plex, which the hub serves itself: the faces load from
+/// 'self' under the shell's policy, as woff2, cacheable, and the licence they
+/// ship under is served beside them.
+#[tokio::test]
+async fn serves_the_shipped_fonts_and_their_licence() {
+    let state = state().await;
+    let app = router(state.clone());
+    let tokens = text(
+        app.oneshot(get("/tokens.css", None))
+            .await
+            .expect("request"),
+    )
+    .await;
+    let faces: Vec<&str> = tokens
+        .split("url(\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    assert_eq!(faces.len(), 5, "tokens.css names the five shipped faces");
+    for face in faces {
+        let app = router(state.clone());
+        let response = app
+            .oneshot(get(&format!("/{face}"), None))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::OK, "{face} is served");
+        let header_of = |name| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            header_of(header::CONTENT_TYPE).as_deref(),
+            Some("font/woff2"),
+            "{face}"
+        );
+        // A face sits at an unversioned path, so it is cached the way the
+        // other shell assets are: by the worker's versioned cache, which turns
+        // over with the shell, and never pinned by the browser past an upgrade.
+        assert!(
+            !header_of(header::CACHE_CONTROL).is_some_and(|value| value.contains("max-age=")),
+            "{face} carries no max-age"
+        );
+        assert_eq!(
+            header_of(header::ACCESS_CONTROL_ALLOW_ORIGIN).as_deref(),
+            Some("*"),
+            "{face} loads into the artifact host page, which fetches fonts with CORS"
+        );
+        let bytes = body_bytes(response).await;
+        assert_eq!(&bytes[..4], b"wOF2", "{face} is a woff2 file");
+    }
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(get("/vendor/fonts/OFL.txt", None))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let licence = text(response).await;
+    assert!(licence.contains("SIL OPEN FONT LICENSE Version 1.1"));
+    assert!(licence.contains("IBM Corp."));
+
+    let app = router(state.clone());
+    let response = app.oneshot(get("/", None)).await.expect("request");
+    let policy = response
+        .headers()
+        .get("content-security-policy")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !policy.contains("font-src") && policy.contains("default-src 'self'"),
+        "the shell's policy admits a font from 'self': {policy}"
+    );
+}
+
 /// Two hubs installed from the same browser are two icons with one name
 /// unless the node says which is which. The name is what a launcher shows, so
 /// it carries the node; `id` deliberately does not exist here, because it
@@ -419,7 +497,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 48] = [
+const SHELL_PATHS: [&str; 54] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -466,6 +544,12 @@ const SHELL_PATHS: [&str; 48] = [
     "/crypto.mjs",
     "/vendor/marked.js",
     "/vendor/mermaid.runtime.js",
+    "/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2",
+    "/vendor/fonts/ibm-plex-sans-latin-500-normal.woff2",
+    "/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
+    "/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2",
+    "/vendor/fonts/ibm-plex-mono-latin-500-normal.woff2",
+    "/vendor/fonts/OFL.txt",
     "/artifact-viewer.mjs",
     "/frame-loader.js",
 ];
@@ -1025,16 +1109,16 @@ fn viewer_module_renders_unlocks_and_themes() {
         "unlocking hangs off the button, which the sandboxed frame allows"
     );
     for value in [
-        "#F5F3EE",
-        "#141311",
-        "#1D1C19",
-        "#ECE8E0",
-        "#5C584F",
-        "#B3ADA2",
-        "#EDEAE3",
-        "#26241F",
-        "#E4E0D8",
-        "#2F2C26",
+        "#F3F5F2",
+        "#111513",
+        "#151B17",
+        "#E4EAE5",
+        "#3B4640",
+        "#B5BFB8",
+        "#E8ECE7",
+        "#1A1F1C",
+        "#D3DAD2",
+        "#29312C",
         "max-width:640px",
     ] {
         assert!(
@@ -2441,7 +2525,8 @@ fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
         "C12: feed group headers and Earlier in shell-index must take the 16px inset"
     );
 
-    // C13: Feed index last row has rounded corners removed; artifacts titles are --ink 600 no underline; selected row has no blue left bar
+    // C13: Feed index last row has rounded corners removed; artifacts titles are --ink 600 no underline.
+    // The selected row's copper edge is the design's pointer, held in DESIGN.md.
     assert!(
         APP_CSS.contains(".shell-index .feed-day .row") || APP_CSS.contains(".shell-index .row"),
         "C13: feed index rows run edge to edge"
@@ -2450,10 +2535,6 @@ fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
         APP_CSS.contains(".shell-index .artifact-row .title")
             || APP_CSS.contains(".shell-index .artifact-row a.title"),
         "C13: artifacts index titles are styled without underline in --ink 600"
-    );
-    assert!(
-        !APP_CSS.contains(".row.selected { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }"),
-        "C13: selected row must not carry a saturated blue left bar"
     );
 
     // C14: Date chip uses neutral style, not --action

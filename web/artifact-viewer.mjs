@@ -140,41 +140,43 @@ function frameLoader() {
 // cannot load the file, so the frame carries the values inline. Body copy
 // follows the foundation prose scale: 15px/1.6 ink-2, headings ink, 640px
 // measure. The static check fails on any colour here that tokens.css does not
-// declare, so the mirror cannot drift into a second palette.
+// declare, so the mirror cannot drift into a second palette. The frame cannot
+// load the shell's fonts either, so it names Plex for a host that has it
+// installed and sets the system stack everywhere else.
 function frameStyle() {
   return (
     `<style>` +
-    `html[data-theme="light"]{color-scheme:light;background:#F5F3EE;color:#1D1C19}` +
-    `html[data-theme="dark"]{color-scheme:dark;background:#141311;color:#ECE8E0}` +
-    `body{font-family:"Avenir Next","Seravek","Segoe UI Variable Text","Segoe UI",Ubuntu,Cantarell,system-ui,sans-serif;` +
-    `font-size:15px;line-height:1.6;color:#5C584F;max-width:640px;margin:0 auto;padding:18px 1.25rem 4rem}` +
-    `html[data-theme="dark"] body{color:#B3ADA2}` +
+    `html[data-theme="light"]{color-scheme:light;background:#F3F5F2;color:#151B17}` +
+    `html[data-theme="dark"]{color-scheme:dark;background:#111513;color:#E4EAE5}` +
+    `body{font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Ubuntu,Cantarell,sans-serif;` +
+    `font-size:15px;line-height:1.6;color:#3B4640;max-width:640px;margin:0 auto;padding:18px 1.25rem 4rem}` +
+    `html[data-theme="dark"] body{color:#B5BFB8}` +
     `h1{font-size:24px;font-weight:600;letter-spacing:-.01em;margin:0 0 16px}` +
-    `h1,h2,h3{color:#1D1C19;line-height:1.1;text-wrap:balance}` +
-    `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#ECE8E0}` +
-    `a{color:#2F5FA8}` +
-    `html[data-theme="dark"] a{color:#8AAAE8}` +
-    `pre{background:#EDEAE3;border:1px solid #E4E0D8;border-radius:6px;padding:.75rem 1rem;overflow:auto}` +
-    `html[data-theme="dark"] pre{background:#26241F;border-color:#2F2C26}` +
-    `code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}` +
-    `:not(pre)>code{background:#EDEAE3;border:1px solid #E4E0D8;border-radius:4px;padding:.1em .35em}` +
-    `html[data-theme="dark"] :not(pre)>code{background:#26241F;border-color:#2F2C26}` +
+    `h1,h2,h3{color:#151B17;line-height:1.1;text-wrap:balance}` +
+    `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#E4EAE5}` +
+    `a{color:#151B17;text-underline-offset:3px}` +
+    `html[data-theme="dark"] a{color:#E4EAE5}` +
+    `pre{background:#E8ECE7;border:1px solid #D3DAD2;border-radius:4px;padding:.75rem 1rem;overflow:auto}` +
+    `html[data-theme="dark"] pre{background:#1A1F1C;border-color:#29312C}` +
+    `code{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}` +
+    `:not(pre)>code{background:#E8ECE7;border:1px solid #D3DAD2;border-radius:2px;padding:.1em .35em}` +
+    `html[data-theme="dark"] :not(pre)>code{background:#1A1F1C;border-color:#29312C}` +
     `table{border-collapse:collapse;display:block;overflow-x:auto}` +
-    `th,td{border:1px solid #E4E0D8;padding:.4rem .7rem;text-align:left}` +
-    `html[data-theme="dark"] th,html[data-theme="dark"] td{border-color:#2F2C26}` +
-    `blockquote{margin:0;padding-left:1rem;border-left:3px solid #E4E0D8;color:#6F6A61}` +
-    `html[data-theme="dark"] blockquote{border-color:#2F2C26;color:#948E83}` +
-    `.hub-callout{background:#EDEAE3;border-left:.25rem solid #CFC9BE;border-radius:6px;` +
+    `th,td{border:1px solid #D3DAD2;padding:.4rem .7rem;text-align:left}` +
+    `html[data-theme="dark"] th,html[data-theme="dark"] td{border-color:#29312C}` +
+    `blockquote{margin:0;padding-left:1rem;border-left:3px solid #D3DAD2;color:#56625A}` +
+    `html[data-theme="dark"] blockquote{border-color:#29312C;color:#8E9991}` +
+    `.hub-callout{background:#E8ECE7;border-left:.25rem solid #66726A;border-radius:4px;` +
     `padding:.75rem 1rem;margin:1rem 0}` +
-    `html[data-theme="dark"] .hub-callout{background:#26241F;border-color:#44403A}` +
-    `.hub-callout.note{border-color:#2F5FA8}` +
-    `html[data-theme="dark"] .hub-callout.note{border-color:#8AAAE8}` +
-    `.hub-callout.tip{border-color:#2E7D4F}` +
-    `html[data-theme="dark"] .hub-callout.tip{border-color:#6FC08C}` +
-    `.hub-callout.warning{border-color:#95590B}` +
-    `html[data-theme="dark"] .hub-callout.warning{border-color:#DDA44E}` +
-    `.hub-callout.caution{border-color:#9E3B2B}` +
-    `html[data-theme="dark"] .hub-callout.caution{border-color:#E08373}` +
+    `html[data-theme="dark"] .hub-callout{background:#1A1F1C;border-color:#7A867E}` +
+    `.hub-callout.note{border-color:#84461D}` +
+    `html[data-theme="dark"] .hub-callout.note{border-color:#E3A06F}` +
+    `.hub-callout.tip{border-color:#2C6A3D}` +
+    `html[data-theme="dark"] .hub-callout.tip{border-color:#7DC490}` +
+    `.hub-callout.warning{border-color:#84461D}` +
+    `html[data-theme="dark"] .hub-callout.warning{border-color:#E3A06F}` +
+    `.hub-callout.caution{border-color:#A3154A}` +
+    `html[data-theme="dark"] .hub-callout.caution{border-color:#FF7099}` +
     `body.has-comments{line-height:1.7}` +
     `</style>`
   );
