@@ -38,9 +38,28 @@ Beside each ask, on a wide screen, a margin holds its receipts level with it:
 the event id, the session it was asked in, the artifact it points at, and its
 deadline. On a phone they are one line under the ask.
 
-Opening an item shows its whole body. The body is markdown, so an agent's report
-reads as the headings, tables and code it wrote rather than as its syntax. A
-table wider than the card scrolls inside its own region.
+## An opened item
+
+**Read** opens an item at full size. Its header says where it sits among what
+needs you, such as "2 of 7 need you", and the arrows beside it, or `k` and `j`,
+open the previous and next ask without going back to Now. Esc or **Now** leaves.
+
+The body is markdown, so an agent's report reads as the headings, tables and
+code it wrote rather than as its syntax. A table wider than the card scrolls
+inside its own region, and a code block has a copy control on the row above
+it, so a command is copied whole.
+
+Under the body is your answer: an approval's **Approve** and **Decline**, an
+idea's **Resolve** and **Clear**, or a question's suggested answers, numbered
+so `1`, `2` and so on press them, above its reply field. **Snooze 1h** is there
+too. One line says which item opens after you answer, and it does: answering,
+deciding or snoozing takes you straight to it, or back to Now when nothing else
+waits. Below that, the thread lists the ask and every reply on it.
+
+On a wide screen the margin beside the item holds its receipts (the event, the
+session it was asked in with its event count, the artifact, commit or brain
+key it names, when it was asked and what happens if you stay silent) and the
+other asks from the same session or project.
 
 ## Questions
 
@@ -117,8 +136,11 @@ waiting state rather than a refusal. See
 
 On a phone Now is the same stream in one column under the phone's header and
 its tools row, which holds the three chips, and the Now tab carries the count
-of what needs you. Opening an item shows the whole item in the stage, with
-"Back to Now" to leave it.
+of what needs you. Opening an item shows it as a sheet over the tab bar, with
+its receipts under the title and the close control in the top left. The
+answer sits in one bar at the bottom: the deadline and **Snooze 1h**, then
+**Approve** and **Decline**, or **Reply** for a question, which takes you to
+its reply field and suggested answers.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/inbox-item-desktop-dark.png">

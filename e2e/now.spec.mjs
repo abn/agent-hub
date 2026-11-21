@@ -71,8 +71,14 @@ test.describe("Now", () => {
       await first.click({ position: { x: 2, y: 2 } });
       await page.keyboard.press("s");
     } else {
-      await first.getByRole("link", { name: "Read" }).click();
-      await page.getByRole("button", { name: "Snooze 1h" }).click();
+      // Snoozed from the item, the next ask opens; the reader closes it to
+      // come back to Now.
+      const read = first.getByRole("link", { name: "Read" });
+      const opened = (await read.getAttribute("href")).split("open=")[1];
+      await read.click();
+      await page.getByRole("group", { name: "Answer" }).getByRole("button", { name: "Snooze 1h" }).click();
+      await expect(page).not.toHaveURL(new RegExp(`open=${opened}$`));
+      await page.getByRole("link", { name: "Close, back to Now" }).click();
       await expect(page.getByRole("heading", { level: 1, name: "Now" })).toBeVisible();
     }
     try {

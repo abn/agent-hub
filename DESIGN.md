@@ -217,10 +217,10 @@ bottom rather than a list of items opened one by one. Each is rail and stage,
 with no aside toggle.
 
 An aside exists only where something is read against the stage: anchored
-comments on an artifact, a `kv` key beside the brain tree, and the receipts
-beside each row on Now. Correspondence, which is a feed thread or an inbox
-item's, is the stage, not a panel. The aside toggle is absent, not disabled, on
-feed, Now, an inbox item and settings.
+comments on an artifact, a `kv` key beside the brain tree, the receipts beside
+each row on Now, and the receipts beside an opened item. Correspondence, which
+is a feed thread or an inbox item's, is the stage, not a panel. The aside
+toggle is absent, not disabled, on feed, Now, an inbox item and settings.
 
 **Now's margin is a ledger, not a pane.** On a stage at least 940 wide, every
 row on Now carries its receipts in a 300 margin beside the 680 column, level
@@ -233,7 +233,21 @@ fourth zone: it has no header, no control row, no splitter and no toggle, and
 it scrolls with the stream. One hairline rules it off for the length of the
 stream. Below 940, and on a phone, the same receipts are one mono line under
 the row's sentence, and an ask's kind line is dropped there because the glyph
-and the sentence already say it.
+and the sentence already say it. Each margin cell takes its row's height, so a
+receipt starts level with its row's top and the hairlines under the two meet,
+and its first line holds the sentence's 24px line so the two first lines share
+a middle.
+
+**An opened item's margin is the same ledger.** On a stage at least 940 wide an
+opened item is a 640 column with a 300 margin beside it, ruled off by one
+hairline, carrying two blocks under section labels: Receipts (the event, the
+session it was asked in by name with its event count, the artifact and commit
+its payload names, the brain key it points at, when it was asked, and what
+happens if the reader stays silent) and Related (the other asks from the same
+session, then the same project, and the artifact it links). Below 940, and on a
+phone, the receipts move under the title as a compact two-column list between
+hairlines, and Related follows the thread. It has no header, no control row,
+no splitter and no toggle, like Now's.
 
 ### Content travels, chrome does not
 
@@ -295,6 +309,18 @@ reader's place is kept by the browser's own scroll anchoring.
   header states. A phone reader's place is their scroll position, so the phone
   reserves no band. Now has no exception: its header is the same 76/52 bar,
   titled Now, and its tools row holds the tier chips.
+- **An opened item is a sheet on a phone.** It covers the tab bar, draws a
+  grabber over the header, holds its close control in the 48px leading slot,
+  and keeps the header at its 52px compact state whatever the scroll, titled
+  with where the item sits ("1 of 7 need you") at 15/500 in `--ink-2`. It has
+  no tools row: previous, next and the keys are a desktop's. One thumb bar is
+  fixed to the bottom: the deadline line with Snooze 1h at its end, and under
+  it the primary verbs at 52px, sharing the bar's width (Decline and Approve,
+  Clear and Resolve, or a question's Reply, which takes the reader to the
+  composer). The 52px band is
+  the bar's own, so its buttons are not taller than the band that holds them.
+  The item's body runs on past the bar by the bar's height and a gutter, so the
+  last of the item is never under it.
 - One gutter per pane, and every heading, label and row a screen writes
   starts on it. A pane hands the gutter to the rows inside it, so the pane
   carries it and the rows sit on it rather than each declaring a padding of
@@ -559,6 +585,9 @@ structure, not to line length.
   which is the one-answer guarantee; a refusal is said in the composer and the
   options come back. The composer's placeholder, "Or type a reply", reads
   under them as the free-text path.
+  On an opened item each quick answer names its number key, 1 to 9, on the
+  button, hidden from assistive technology so the button is named by the
+  answer alone; a row's composer on Now and the feed stage names none.
 - **Copy control.** A control whose whole job is to put a string on the
   clipboard is a `--ctl`, 32px, icon button with a `--tap` hit area under a
   coarse pointer, sitting on the row that owns the string. Never a text
@@ -625,22 +654,54 @@ register, Agents and access, Connect, and the knowledge base.
     handoff shows only Open, so a snoozed or far-off ask is still answered in
     place.
 - **Inbox item.** `#/inbox?open=<id>` opens one item at full size in a stage
-  with no index, the back control returning to Now. The stage is the item:
-  pill, title, body, its buttons, its thread. A question's buttons are its
-  quick answers, when it suggests any, above its composer; a row's Reply opens
-  the same composer, quick answers and all. The thread is in the stage, not a
-  panel. Snoozing an item for an hour moves it to the can-wait end of Now's
-  first tier and is remembered per device, not on the hub: a second device
-  still shows it as needing the reader.
-  An item the asking agent gave a deadline says what the deadline will do, in
-  its receipts on Now and on its card under the title, as one line in
-  `--ink-2`: "Declines itself in 3h", "Approves itself in 20m", "Closes in 2d".
-  An item the hub resolved at its deadline reads "Expired: declined itself, no
-  one decided in time" in the same place, and its outcome pill says "Declined
-  at deadline" rather than "Declined", so a reader never takes the hub's call
-  for their own. The words carry it: no tint and no countdown that ticks; the
-  clock glyph beside them on Now only repeats them. The project feed titles
-  that resolution "expired:" and carries the same line as its note.
+  with no index, read around its answer. The header says where the item sits
+  among the asks, "2 of 7 need you" or "1 of 1 can wait", over its project and
+  kind, with previous and next on the right that walk the asks in Now's order;
+  the control row carries the way back to Now (Esc) and, on a fine pointer, the
+  `k` and `j` hints. An item outside that order, one already answered, is
+  titled by its outcome.
+  - **The body.** A kind line (the kind's glyph and word, the state in copper
+    while it waits on the reader, "Waiting on you", and the deadline in words
+    with the clock glyph), the title at 28 on a stage of 940 or more and 22
+    below it, then a byline: the agent in 600, the project, the asked time and
+    how long ago. The agent's body is markdown through the same sanitising
+    renderer as a feed event's. A code block gets a row of its own above it with
+    its language and the copy glyph, so a literal command is lifted out whole
+    and nothing floats over the code.
+  - **The answer block.** Under a darker rule: an approval's Approve (`a`),
+    Decline (`d`) and Snooze 1h (`s`); an idea's Resolve (`e`), Clear and
+    Snooze 1h; a question's composer with its quick answers numbered, and
+    Snooze 1h at the end of the line under it. Then one line names what opens
+    once this is answered: "After you answer, the next item opens: Keep the old
+    CSV export?", or "you go back to Now" when nothing else waits. Answering,
+    deciding, resolving, clearing and snoozing all open that item, replacing
+    the address so Back does not return to something answered. Approve and
+    Decline still ask in the decision dialog. Adding to an idea keeps it open.
+  - **The thread.** When the item has replies, the ask and each reply on the
+    shared row anatomy: the kind glyph, the agent in 600 and what it said, the
+    mono time on the right. The replies are the events whose thread is the
+    item's, read forward from it on the project's feed.
+  - Snoozing an item for an hour moves it to the can-wait end of Now's first
+    tier and is remembered per device, not on the hub: a second device still
+    shows it as needing the reader.
+  - An item the asking agent gave a deadline says what the deadline will do, in
+    its receipts on Now and on its card, as one line in `--ink-2`: "Declines
+    itself in 3h", "Approves itself in 20m", "Closes in 2d". An item the hub
+    resolved at its deadline reads "Expired: declined itself, no one decided in
+    time" in the same place, and its outcome says "Declined at deadline" rather
+    than "Declined", so a reader never takes the hub's call for their own. The
+    words carry it: no tint and no countdown that ticks; the clock glyph beside
+    them only repeats them. The project feed titles that resolution "expired:"
+    and carries the same line as its note.
+  - **Deviation: no Hold, no reply on an approval, and an icon send.** The
+    handoff gives an approval Approve, Hold and Snooze with a reply field for a
+    condition, and a text Send with its key. The hub's approval takes a decision
+    and a note, not a held state or a free reply, so the build offers Approve,
+    Decline and Snooze, and the note is written in the decision dialog. The
+    reply field is the one composer, whose send is the icon button and whose
+    line under the field names the key. The header has no overflow menu,
+    because the item has no verb beyond the ones on screen, and its title and
+    meta stack as every pane header's do.
 - **Project.** The index header carries Feed, Artifacts, Sessions as a
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
@@ -751,8 +812,12 @@ register, Agents and access, Connect, and the knowledge base.
   Esc closes what is on top, and the arrows move a focused splitter. On Now,
   `1` to `9` press an ask's numbered verbs, `e` marks an idea done, `s` snoozes
   an ask or brings it back, `q` shows or hides the quiet tier and `E` marks
-  everything seen. A row's control names the keys that press it, so the map
-  reads them off the row. Dialogs trap focus.
+  everything seen. On an opened item, `j` and `k` open the next and previous
+  ask, `a` and `d` approve and decline, `e` resolves an idea, `s` snoozes,
+  `1` to `9` press a question's quick answers, `r` goes to the reply field and
+  Esc goes back to Now. A row's control names the keys that press it, so the
+  map reads them off the row, and a screen's own control names its key in
+  `data-screen-key`. Dialogs trap focus.
 - Time is short on a row and whole on request. No timestamp is a tab stop of
   its own; a list of them would be the whole ring.
 - Motion is never decorative. Reveals and underlines take at most 150ms,

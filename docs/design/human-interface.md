@@ -139,7 +139,7 @@ An index exists only where items are opened one at a time, so Settings and Now
 have no index: a short form is not a list, and Now is a stream read top to
 bottom. An aside exists only where something is read against the stage, which
 is anchored comments on an artifact, a brain `kv` key, and the receipts beside
-each row on Now. Correspondence, a feed thread or an inbox item's, is the
+each row on Now and beside an opened item. Correspondence, a feed thread or an inbox item's, is the
 stage, not a panel, and the aside toggle is absent, not disabled, on feed, Now,
 an inbox item and settings.
 
@@ -287,19 +287,42 @@ three chips, All, Needs you and Since you looked, each with its count.
 
 ### Inbox item
 
-An item's own address opens it at full size, in a stage with no index and a
-back control to Now. The stage is the whole item: pill, title, body, its
-buttons and its thread. A question's quick answers sit above its composer when
-it suggests any, and a row's Reply on Now opens the same composer. An item the
-asking agent gave a deadline says what the deadline will do, in words with the
-time left, never a ticking countdown; an item the hub resolved at its deadline
-reads as expired, apart from a human decision, so a reader never takes the
-hub's call for their own. Snoozing an item for an hour moves it to the
-can-wait end of Now's first tier, on this device only.
+An item's own address opens it at full size, in a stage with no index, read
+around its answer. The header says where it sits among the asks ("2 of 7 need
+you") with previous and next beside it, walking the asks in Now's order by
+control or by `k` and `j`; the control row leads back to Now, as Esc does. The
+item reads top to bottom: its kind, its state and its deadline in words, the
+title, a byline naming the agent, the project and when it asked, the agent's
+body as markdown, then the answer block and the thread.
+
+The answer block holds the verbs with their keys (Approve `a`, Decline `d`,
+Snooze 1h `s` for an approval; a question's quick answers numbered 1, 2 and so
+on above its composer) and one line naming the item that opens once this one
+is answered. Answering, deciding or snoozing opens it, so a reader works
+through what needs them without going back to Now. A code block in the body
+carries the copy glyph on a row of its own above it. The thread lists the ask
+and the replies on it, each a glyph, the agent and what it said, and the time.
+
+On a wide stage a margin beside the item holds its receipts (the event, the
+session by name with its event count, the artifact, commit and brain key its
+payload names, when it was asked and what happens if nobody answers) and a
+Related list: the other asks from the same session or project and the artifact
+it links. On a narrow stage the receipts sit under the title instead.
+
+On a phone the item is a sheet over the tab bar, with a grabber, a close
+control and the receipts under the title. One thumb bar is fixed to the bottom:
+the deadline line with Snooze 1h, and under it the primary verbs at 52px. The
+item scrolls on past the bar, so nothing is hidden under it.
+
+An item the asking agent gave a deadline says what the deadline will do, in
+words with the time left, never a ticking countdown; an item the hub resolved
+at its deadline reads as expired, apart from a human decision, so a reader
+never takes the hub's call for their own. Snoozing an item for an hour moves it
+to the can-wait end of Now's first tier, on this device only.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/inbox-item-phone-dark.png">
-  <img src="../assets/screens/inbox-item-phone-light.png" alt="An open inbox item at phone width, with the whole item in the stage.">
+  <img src="../assets/screens/inbox-item-phone-light.png" alt="An open inbox item at phone width: a sheet with the receipts under the title and the thumb bar at the bottom.">
 </picture>
 
 ### Project

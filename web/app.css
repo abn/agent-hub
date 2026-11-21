@@ -196,9 +196,6 @@ h3.group {
   white-space: nowrap; flex: none;
 }
 .pill-status .pill-dot { width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--action); }
-/* A value pill that marks a state rather than an alert: neutral surface, so it
-   does not compete with the "Waiting on you" pill beside it. */
-.pill-enrol { background: var(--surface-2); color: var(--ink-2); }
 /* component: chips */
 /* The design draws a chip at 32px, which is under the tap target, so the
    drawn box stays 32px and a coarse pointer gets the shared hit area. */
@@ -1472,7 +1469,7 @@ html.has-dialog { overflow: hidden; }
    answer. */
 .composer-options { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0 0 var(--s-2); }
 .composer-option {
-  max-width: 100%; padding: var(--s-2) var(--s-4);
+  padding: var(--s-2) var(--s-4);
   white-space: normal; overflow-wrap: anywhere; text-align: left; line-height: 1.3;
 }
 .composer-error { margin: var(--s-1) 0 0; color: var(--danger); font-size: var(--t-13); }
@@ -2455,52 +2452,193 @@ button.empty-link {
 }
 /* end component: feed */
 /* component: inbox */
-/* One item at full size, opened from Now. The quiet verb is a text button at
-   the form size whose target is 44px. */
-.inbox-quiet { position: relative; font-size: var(--t-13); }
-button.inbox-quiet {
-  min-height: 36px; padding: 0 var(--s-2); border-color: transparent;
-  background: transparent; color: var(--ink-2);
-}
-.inbox-time { flex: none; font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); white-space: nowrap; }
-/* A deadline the asking agent set, said in words under the title: what it will
-   do, or what it did. Text, never a tint, carries it. */
-.inbox-detail-deadline { margin: var(--s-2) 0 0; font-size: var(--t-13); color: var(--ink-2); }
-.inbox-project { font-weight: 600; color: var(--ink-2); }
+/* One item at full size, opened from Now: a 640 column read around its answer,
+   and beside it on a wide stage a 300 margin with its receipts and what is
+   related. On a phone it is a sheet: a grabber and a close control, the
+   receipts under the title, and one thumb bar fixed to the bottom. */
+.item-pad { padding: 0 var(--s-4) var(--s-6); }
+.item { container: item / inline-size; max-width: calc(640px + 300px + 2 * var(--s-6)); }
+.item p { margin: 0; }
+.item-main { display: flex; flex-direction: column; gap: 0; max-width: 640px; padding: var(--s-6) 0 0; }
+.item-kindline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-4); font-size: var(--t-13); color: var(--ink-3); }
+.item-kind { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--ink-2); font-weight: 500; }
+.item-kind .glyph { width: 20px; height: 20px; }
+.item-state { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--ink-2); font-weight: 500; }
+.item-state svg { color: var(--ink-3); }
+.item-state.is-wait { color: var(--accent); }
+.item-dot { width: 6px; height: 6px; border-radius: var(--r-pill); background: currentColor; }
+.item-due { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--ink-2); }
+.item-due svg { color: var(--ink-3); }
+.item-main .item-title { margin: var(--s-3) 0 var(--s-1); font-size: var(--t-22); line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.item-from { font-size: var(--t-13); color: var(--ink-3); }
+.item-from b { color: var(--ink-2); font-weight: 600; }
+.item-time { font-family: var(--font-mono); font-size: var(--t-12); color: inherit; white-space: nowrap; }
+.item-from .item-time { font-family: var(--font-sans); font-size: var(--t-13); }
+.item-mono { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-2); }
+.item-quiet { color: var(--ink-3); }
+.item-ref { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; overflow-wrap: anywhere; }
 
-/* The medium card: one item at full size. The stage body carries no padding,
-   so the card holds the pane's own 16px gutter itself. Without it the card's
-   back link, title, meta and snooze sat at the pane's x 0 while the breadcrumb
-   and header title above them sat on the 16px. */
-.inbox-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-4) var(--s-4) var(--s-6);
-  box-sizing: border-box;
+/* The receipts under the title, on a narrow stage: a compact two-column list
+   between hairlines. */
+.item-rstrip {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-1) var(--s-3);
+  margin: var(--s-3) 0 0; padding: var(--s-2) 0;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: var(--t-13);
 }
-/* The header's back control does this job on a desktop, so the card's own
-   back link is the phone's. */
-.inbox-back { display: inline-flex; align-items: center; align-self: flex-start; min-height: 44px; font-size: var(--t-13); font-weight: 500; text-decoration: none; }
-.inbox-detail-head { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
-.inbox-detail-meta { margin-left: auto; font-size: var(--t-12); color: var(--ink-3); }
-/* The status pill and the meta share one line until the phone cannot hold
-   both; there the meta drops to its own line rather than crowding the pill. */
-@media (max-width: 480px) {
-  .inbox-detail-meta { flex-basis: 100%; margin-left: 0; }
-}
-/* An item's body is markdown, so the block holds the card's body scale and
-   hands the document to the shared markdown body rules. */
-.inbox-detail-body { margin: 0; font-size: var(--t-15); line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
+.item-rstrip dt { color: var(--ink-3); }
+.item-rstrip dd { margin: 0; min-width: 0; color: var(--ink); }
+
+/* The agent's words. */
+.item-main .inbox-detail-message,
+.item-main .inbox-detail-body,
+.item-main .inbox-detail-reason,
+.item-main .inbox-detail-resolved-note { margin-top: var(--s-5); }
+.inbox-detail-body { font-size: var(--t-15); line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.inbox-detail-body p, .inbox-detail-body ul, .inbox-detail-body ol { margin: 0 0 var(--s-4); }
 /* The message of a summary too long to be a subject. Body prose, not a second
    heading: a finished event's report reads at body weight beside its subject,
    the way the feed stage reads the same words. */
-.inbox-detail-message { margin: 0; font-size: var(--t-15); font-weight: 400; line-height: 1.55; color: var(--ink-2); overflow-wrap: anywhere; }
-.inbox-detail .item-title { overflow-wrap: anywhere; }
-.inbox-answers { display: flex; gap: var(--s-2); flex-wrap: wrap; }
-.inbox-answers button { min-height: 44px; }
-.inbox-answers button.action { font-weight: 600; }
+.inbox-detail-message { font-size: var(--t-15); font-weight: 400; line-height: 1.6; color: var(--ink-2); overflow-wrap: anywhere; }
+/* A literal command is lifted out whole: its own row above the block carries
+   the copy glyph, so nothing floats over the code. */
+.item-code-row { display: flex; align-items: center; justify-content: space-between; margin: var(--s-3) 0 0; padding: 0 0 0 var(--s-3); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--r-1) var(--r-1) 0 0; background: var(--surface-2); }
+.item-code-row + pre { margin-top: 0; border-radius: 0 0 var(--r-1) var(--r-1); }
+.item-code-lang { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
+.item-copy { border: 0; color: var(--ink-2); }
+.item-copy.is-copied { color: var(--ok); }
+
+/* The answer block: under a darker rule, the verbs, the reply field, and
+   where answering goes. */
+.item-answer { display: flex; flex-direction: column; gap: var(--s-4); margin-top: var(--s-6); padding-top: var(--s-4); border-top: 1px solid var(--ink-3); }
+.item-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.item-acts button, .item .composer-option { display: inline-flex; align-items: center; gap: var(--s-2); }
+.item-answer button.item-ghost { display: inline-flex; align-items: center; gap: var(--s-2); border-color: transparent; color: var(--ink-2); }
+.item-foot { display: flex; align-items: center; gap: var(--s-3); }
+.item-foot .item-after { flex: 1; min-width: 0; }
+.item-foot .item-ghost { margin-right: calc(-1 * var(--s-4)); }
 .inbox-reply .composer { margin: 0; }
+.item-after { font-size: var(--t-13); color: var(--ink-3); }
+.item-after a { color: var(--ink-2); font-weight: 600; text-decoration: none; }
+.item-after a:hover { text-decoration: underline; text-decoration-color: var(--line-strong); }
+.item kbd { height: 18px; min-width: 18px; background: transparent; border-color: currentColor; border-bottom-width: 1px; color: inherit; opacity: 0.8; }
+
+/* The thread: the ask and its replies on the shared row anatomy. */
+.item-thread { margin-top: var(--s-6); }
+.item-thread > .section-label { display: block; margin: 0; padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); }
+.item-trow { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--s-3); padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+.item-tk { display: flex; justify-content: center; color: var(--ink-2); }
+.item-tk .glyph { width: 20px; height: 24px; }
+.item-ts { font-size: var(--t-15); line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.item-ts b { font-weight: 600; }
+.item-trow > .item-time { line-height: 24px; color: var(--ink-3); text-align: right; }
+
+/* The margin. On a narrow stage it follows the item and keeps only what is
+   related: the receipts are already under the title. */
+.item-mar { min-width: 0; padding: var(--s-6) 0 0; }
+.item-blk-rcpt { display: none; }
+.item-blk + .item-blk { margin-top: var(--s-6); }
+.item-blk > .section-label { display: block; margin: 0 0 var(--s-2); }
+.item-rcpt { display: grid; grid-template-columns: 84px minmax(0, 1fr); margin: 0; font-size: var(--t-13); }
+.item-rcpt dt { padding: var(--s-2) 0; border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.item-rcpt dd { margin: 0; padding: var(--s-2) 0; border-bottom: 1px solid var(--line); min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.item-related { list-style: none; margin: 0; padding: 0; }
+.item-related li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--s-3); align-items: baseline; padding: var(--s-1) 0; font-size: var(--t-13); }
+.item-rel-k { display: flex; align-self: center; color: var(--accent); }
+.item-rel-k.is-later { color: var(--ink-3); }
+.item-rel-k .glyph { width: 20px; height: 20px; }
+.item-rel-a { color: var(--ink); font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
+.item-rel-a:hover { text-decoration: underline; text-decoration-color: var(--line-strong); }
+.item-related .item-time { color: var(--ink-3); }
+.item-rel-s { grid-column: 2 / 4; color: var(--ink-3); }
+/* Under a coarse pointer a receipt row and a related row are a target tall, and
+   each link answers to a target centred on it, so no two hit areas overlap. */
+@media (pointer: coarse) {
+  .item-rstrip { row-gap: 0; }
+  .item-rstrip :is(dt, dd), .item-rcpt :is(dt, dd) { align-content: center; min-height: var(--tap); }
+  .item-related li { min-height: var(--tap); }
+}
+@media (any-pointer: coarse) {
+  .item-ref, .item-rel-a { position: relative; }
+  .item-ref::after, .item-rel-a::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: max(100%, var(--tap)); height: max(100%, var(--tap));
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* A wide stage: the margin opens beside the column, ruled off by a hairline,
+   and the receipts move into it. */
+@container item (min-width: 940px) {
+  .item-grid { display: grid; grid-template-columns: minmax(0, 640px) minmax(240px, 300px); column-gap: calc(2 * var(--s-6)); align-items: start; }
+  .item-main .item-title { font-size: var(--t-28); line-height: 1.25; letter-spacing: -0.015em; }
+  .item-rstrip { display: none; }
+  .item-blk-rcpt { display: block; }
+  .item-mar { align-self: stretch; padding-left: var(--s-5); margin-left: calc(-1 * var(--s-6)); border-left: 1px solid var(--line); }
+}
+
+/* The header's previous and next, and the control row's way back. */
+.item-steps { display: flex; gap: var(--s-1); margin-left: auto; }
+.item-step { display: inline-flex; align-items: center; justify-content: center; position: relative; width: var(--ctl); height: var(--ctl); min-height: var(--ctl); padding: 0; border: 0; border-radius: var(--r-1); color: var(--ink-2); background: transparent; }
+a.item-step:hover { background: var(--surface-2); color: var(--ink); }
+.item-step[disabled] { background: transparent; color: var(--ink-3); opacity: 0.5; }
+.item-back { display: inline-flex; align-items: center; gap: var(--s-2); min-height: var(--ctl); font-size: var(--t-13); font-weight: 500; color: var(--ink-2); text-decoration: none; }
+.item-back:hover { color: var(--ink); }
+.item-hints { margin-left: auto; display: flex; gap: var(--s-4); font-size: var(--t-13); color: var(--ink-3); }
+.item-hints span { display: inline-flex; align-items: center; gap: var(--s-1); }
+.item-controls kbd { height: 18px; min-width: 18px; }
+/* Keys belong to a keyboard: under a coarse pointer, and on a phone's width,
+   none is named. */
+@media (pointer: coarse), (max-width: 719px) {
+  .item kbd, .item-controls kbd, .item-hints { display: none; }
+}
+@media (any-pointer: coarse) {
+  .item-step::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: var(--tap); height: var(--tap); transform: translate(-50%, -50%);
+  }
+  .item-steps { gap: calc(var(--tap) - var(--ctl)); }
+}
+
+/* The thumb bar is the phone's: off on anything wider. */
+.item-thumb { display: none; }
+
+/* The phone's sheet. The tab bar steps aside for it, its header is the
+   compact bar with a grabber over it and the close control in the leading
+   slot, and its tools row holds nothing, so it is not drawn. */
+@media (max-width: 719px) {
+  .app:has(.item-sheet) .tabbar { display: none; }
+  main:has(.item-sheet) { padding-bottom: 0; }
+  .shell:has(.item-sheet) .shell-head.item-head,
+  .shell.is-compressed:has(.item-sheet) .shell-head.item-head { height: 52px; border-bottom: 1px solid var(--line); }
+  .shell-head.item-head::before {
+    content: ""; position: absolute; top: var(--s-1); left: 50%; width: 36px; height: 4px;
+    margin-left: -18px; border-radius: var(--r-1); background: var(--line-strong);
+  }
+  .shell-head.item-head .shell-title .shell-title-line { font-size: var(--t-15); font-weight: 500; color: var(--ink-2); }
+  .shell-head.item-head .shell-title .shell-meta,
+  .item-steps,
+  .shell-controls.item-controls { display: none; }
+  .item-main { padding-top: var(--s-4); }
+  .item-due { display: none; }
+  .item-acts, .item-answer .item-foot button.item-ghost { display: none; }
+  .item-answer { margin-top: var(--s-5); }
+  /* What the bar covers is never the end of the item: the body runs on past
+     it by the bar's own height and a gutter. */
+  .item-pad.has-thumb { padding-bottom: calc(var(--s-2) + 28px + var(--s-1) + 52px + var(--s-3) + var(--s-6) + env(safe-area-inset-bottom, 0px)); }
+  .item-thumb {
+    display: block; position: fixed; inset: auto 0 0 0; z-index: 20;
+    padding: var(--s-2) var(--s-4) calc(var(--s-3) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface); border-top: 1px solid var(--line);
+  }
+  .item-thumb-due { display: flex; align-items: center; gap: var(--s-2); height: 28px; margin: 0 0 var(--s-1); font-size: var(--t-13); color: var(--ink-2); }
+  .item-thumb-due svg { color: var(--ink-3); flex: none; }
+  .item-thumb-due > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-thumb-due button { position: relative; min-height: 28px; height: 28px; padding: 0 var(--s-1); margin-right: calc(-1 * var(--s-1)); border: 0; font-size: var(--t-13); color: var(--ink-2); }
+  .item-thumb-due button::after { content: ""; position: absolute; top: 50%; left: 50%; width: max(100%, var(--tap)); height: var(--tap); transform: translate(-50%, -50%); }
+  .item-thumb-main { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--s-2); }
+  .item-thumb-main:has(> :nth-child(2)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); grid-auto-flow: row; }
+  .item-thumb-main button { height: 52px; min-height: 52px; justify-content: center; border-radius: var(--r-2); font-size: var(--t-15); }
+}
 /* The groups an artifacts index draws its rows in. */
 .inbox-rows {
   margin: 0 calc(-1 * var(--s-4)) var(--s-2);
@@ -2627,20 +2765,8 @@ button.inbox-quiet {
   color: var(--ink);
 }
 
-/* Inbox: an item's outcome and snooze */
-.inbox-detail-snooze-wrap button {
-  min-height: 44px;
-  font-size: var(--t-15);
-}
-
-.pill-outcome {
-  font-size: var(--t-12);
-  font-weight: 500;
-  text-transform: uppercase;
-}
-
+/* Inbox: an item's resolved answer, kept where the thread does not carry it. */
 .inbox-detail-resolved-note {
-  margin: var(--s-3) 0;
   padding: var(--s-2) var(--s-3);
   border-left: 3px solid var(--line-strong);
   background: var(--surface-2);
@@ -2658,10 +2784,6 @@ button.inbox-quiet {
 .inbox-detail-reason strong {
   font-weight: 600;
   color: var(--ink);
-}
-
-.inbox-detail-snooze-wrap {
-  margin-top: var(--s-4);
 }
 
 /* Projects index */
@@ -3655,7 +3777,6 @@ nav a,
 .rail a,
 .tabbar a,
 .seg a,
-.inbox-back,
 .meta a,
 p.meta a,
 a.session-back {
@@ -7217,12 +7338,6 @@ dialog.dialog-project-delete {
 .shell-group-menu button[aria-checked="true"] { font-weight: 600; }
 .shell-menu-n { color: var(--ink-3); }
 
-/* An inbox item's stage owns the head, so the card's own back link is only
-   needed on a phone, where the header's back slot is the leading slot. */
-@media (min-width: 1100px) {
-  .shell-stage .inbox-back { display: none; }
-}
-
 /* Settings is the one screen with no index: rail and stage, a 640px form. */
 .settings-pad { padding: 0 var(--s-4) 48px; }
 .settings-pad .settings { max-width: 640px; }
@@ -7576,7 +7691,10 @@ dialog.dialog-project-delete {
   .now-mar { border-left: 1px solid var(--line); padding-left: var(--s-5); margin-left: calc(-1 * var(--s-6)); }
   .now-sum { font-size: var(--t-22); line-height: 1.42; }
   .now-intro > .now-mar { display: block; padding-top: calc(var(--s-6) + var(--s-2)); }
-  .row.now-row { grid-template-columns: minmax(0, 680px) minmax(240px, 300px); column-gap: calc(2 * var(--s-6)); border-bottom: 0; }
+  /* Both cells take the row's height, so a receipt starts level with its row
+     and the two hairlines under them meet. The first receipt line holds the
+     sentence's 24px line, so their first lines share a middle. */
+  .row.now-row { grid-template-columns: minmax(0, 680px) minmax(240px, 300px); column-gap: calc(2 * var(--s-6)); align-items: stretch; border-bottom: 0; }
   .now-row > .now-main, .now-row > .now-mar { border-bottom: 1px solid var(--line); }
   .now-rc {
     flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: var(--s-1);
@@ -7584,6 +7702,7 @@ dialog.dialog-project-delete {
     font-family: var(--font-sans); font-size: var(--t-13); line-height: 1.45;
   }
   .now-r + .now-r::before { content: none; }
+  .now-rc > .now-r:first-child { min-height: 24px; }
   .now-r-kind { display: inline-flex; color: var(--ink-2); font-weight: 500; }
   .now-row[tabindex="0"], .now-row:hover { background: transparent; box-shadow: none; }
   .now-row[tabindex="0"]::before { content: none; }

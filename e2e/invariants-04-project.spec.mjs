@@ -496,7 +496,7 @@ test.describe("Now and search on a phone", () => {
           if (!el || !el.getClientRects().length) return { sel, missing: true };
           return { sel, x: Math.round(textX(el) * 100) / 100 };
         };
-        return [".inbox-back", "#inbox-detail-title", ".inbox-detail-meta"].map(probe);
+        return [".item-rstrip dt", "#inbox-detail-title", ".inbox-detail-meta"].map(probe);
       });
       for (const probe of probes) {
         expect(probe.missing, `inbox card: ${probe.sel} is not on screen`).toBeFalsy();

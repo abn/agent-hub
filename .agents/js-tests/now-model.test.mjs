@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  askQueue,
   canWait,
   clip,
   endingLine,
@@ -11,11 +12,15 @@ import {
   askSentenceHTML,
   needsYou,
   needsYouCount,
+  queuePlace,
   readSnoozes,
+  relatedAsks,
+  replySentenceHTML,
   sinceAndQuiet,
   sinceOldest,
   snooze,
   summaryHTML,
+  threadReplies,
   unsnooze,
   word,
 } from "../../web/now-model.mjs";
@@ -242,5 +247,85 @@ describe("snoozes", () => {
     const storage = memory();
     storage.setItem("hub.snooze", "{not json");
     expect(readSnoozes(NOW, storage)).toEqual({});
+  });
+});
+
+describe("the opened item's queue", () => {
+  const item = (id, fields = {}) => ({ event_id: id, actor: "a", summary: id, kind: "question", status: "action", project_id: "p", ...fields });
+  const later = new Date(NOW + 3 * 86400e3).toISOString();
+  const items = [
+    item("e1"),
+    item("e3", { expires_at: later }),
+    item("e2", { status: "waiting" }),
+    item("e4", { status: "resolved" }),
+    item("e2"),
+  ];
+
+  it("walks what needs the reader in the hub's order, then what can wait, each once", () => {
+    const queue = askQueue(items, { now: NOW, snoozes: {} });
+    expect(queue.now.map((i) => i.event_id)).toEqual(["e2", "e1"]);
+    expect(queue.later.map((i) => i.event_id)).toEqual(["e3"]);
+    expect(queue.all.map((i) => i.event_id)).toEqual(["e2", "e1", "e3"]);
+  });
+
+  it("says where an item sits, what is either side and what opens after it", () => {
+    const queue = askQueue(items, { now: NOW, snoozes: {} });
+    const first = queuePlace(queue, "e2");
+    expect(first.place).toBe("1 of 2 need you");
+    expect(first.previous).toBeNull();
+    expect(first.next.event_id).toBe("e1");
+    expect(first.after.event_id).toBe("e1");
+    const last = queuePlace(queue, "e3");
+    expect(last.place).toBe("1 of 1 can wait");
+    expect(last.next).toBeNull();
+    expect(last.previous.event_id).toBe("e1");
+    // The last ask answered hands over to the first one still waiting.
+    expect(last.after.event_id).toBe("e2");
+    const outside = queuePlace(queue, "e4");
+    expect(outside).toMatchObject({ place: "", previous: null });
+    expect(outside.next.event_id).toBe("e2");
+  });
+
+  it("hands over to nothing when the item is the only ask", () => {
+    const queue = askQueue([item("e1")], { now: NOW, snoozes: {} });
+    expect(queuePlace(queue, "e1")).toMatchObject({ place: "1 of 1 need you", previous: null, next: null, after: null });
+  });
+
+  it("relates the asks from the same session first, then the same project", () => {
+    const queue = askQueue(
+      [
+        item("e1", { session_id: "s1" }),
+        item("e2", { project_id: "q" }),
+        item("e3"),
+        item("e4", { session_id: "s1" }),
+      ],
+      { now: NOW, snoozes: {} },
+    );
+    const related = relatedAsks(queue.all.find((i) => i.event_id === "e1"), queue);
+    expect(related.map((r) => [r.item.event_id, r.why])).toEqual([
+      ["e4", "session"],
+      ["e3", "project"],
+    ]);
+  });
+});
+
+describe("the opened item's thread", () => {
+  it("keeps the replies to the item, oldest first", () => {
+    const events = [
+      { id: "e9", thread_id: "e1" },
+      { id: "e5", thread_id: "e2" },
+      { id: "e3", thread_id: "e1" },
+      { id: "e1", thread_id: "e1" },
+    ];
+    expect(threadReplies("e1", events).map((e) => e.id)).toEqual(["e3", "e9"]);
+  });
+
+  it("reads an answer's body and escapes what the agent wrote", () => {
+    expect(text(replySentenceHTML({ kind: "answer", actor: "human", summary: "re: x", payload: { body: "Approved" } }))).toBe(
+      "human answered: Approved",
+    );
+    const html = replySentenceHTML({ kind: "signal", actor: "bot", summary: "<i>later</i>" });
+    expect(html).not.toContain("<i>");
+    expect(text(html)).toBe("bot added: <i>later</i>");
   });
 });

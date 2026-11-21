@@ -191,9 +191,10 @@ test.describe("desktop chrome", () => {
             if (rr.width > 0) textX = rr.left;
           }
           if (textX === null) textX = r.left + parseFloat(getComputedStyle(e).paddingLeft || "0");
-          // Now's margin is ruled off by its own hairline and carries its own
-          // gutter, so a label there is measured from the rule.
-          const margin = e.closest(".now-mar");
+          // Now's margin and an opened item's are ruled off by their own
+          // hairline and carry their own gutter, so a label there is measured
+          // from the rule.
+          const margin = e.closest(".now-mar, .item-mar");
           const pane = stage && r.left >= stage.getBoundingClientRect().left ? stage : idx || stage;
           const from = margin
             ? margin.getBoundingClientRect().left + parseFloat(getComputedStyle(margin).borderLeftWidth || "0")
