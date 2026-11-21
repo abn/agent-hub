@@ -53,8 +53,6 @@ const BANNED = [
 const ALLOWED = [
   // A segment of a stacked bar is as wide as its kind's share of the bytes.
   { selector: ".storage-seg, .storage-share-seg", properties: ["width"] },
-  // A Home project row's bar is as wide as its share of the day's events.
-  { selector: ".home-bar > span", properties: ["width"] },
   // A rendered document's frame is as tall as the document reports itself.
   { selector: "iframe", properties: ["height"] },
   // A wiki tree row is indented by the depth of its path.

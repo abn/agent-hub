@@ -72,30 +72,9 @@ export const test = app.extend({
   ],
 });
 
-// The days the Home greeting names, by the same order the browser's own clock
-// uses: Sunday is 0.
-const HOME_DAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-function homePart(now) {
-  if (now.getHours() < 5 || now.getHours() >= 21) return "night";
-  if (now.getHours() < 12) return "morning";
-  return now.getHours() < 17 ? "afternoon" : "evening";
-}
-
-// The greeting Home paints. Before 05:00 the hub still calls it yesterday, so
-// the day name follows the hub's own rule rather than the wall clock's.
+// The title Now paints in its header, at both widths.
 export function homeTitle() {
-  const now = new Date();
-  const day = now.getHours() < 5 ? new Date(now.getTime() - 86_400_000) : now;
-  return `${HOME_DAYS[day.getDay()]} ${homePart(now)}`;
+  return "Now";
 }
 
 // Wait on a condition in the page rather than on a fixed sleep. It returns
@@ -271,7 +250,7 @@ export async function longSummaryEvent(hub, project, summary) {
 }
 
 // One feed event as the Home response carries it, used by the quiet-state
-// check that answers the Home request itself.
+// check that answers Now's request itself.
 export function homeEvent(index, minutes, fields = {}) {
   return {
     id: `01HOME${String(index).padStart(20, "0")}`,
@@ -290,8 +269,8 @@ export function homeEvent(index, minutes, fields = {}) {
 
 // A Home response with nothing waiting and nothing new, plus overrides. The
 // quiet state needs every inbox item read and every feed cursor at its head,
-// which no other check wants done to the seeded hub, so this answers the one
-// Home request instead. The byte figures are the harness's own quiet payload.
+// which no other check wants done to the seeded hub, so this answers Now's one
+// request instead. The byte figures are the harness's own quiet payload.
 export function quietHomePayload(fields = {}) {
   return {
     unread: 0,

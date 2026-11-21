@@ -2,16 +2,19 @@
 // stream raises when work starts waiting while the app is in the background.
 
 import { api } from "./api.mjs";
+import { needsYouCount, readSnoozes } from "./now-model.mjs";
 import { alertsEnabled, prefs } from "./prefs.mjs";
 
 const badge = document.getElementById("tab-badge");
 
-// The badge counts what Home already reads, so a screen that holds that
-// payload hands it over rather than asking for the same thing again.
+// The badge counts what Now reads, so a screen that holds that payload hands
+// it over rather than asking for the same thing again. It is the asks that
+// need the reader now: one that can wait, by its deadline or a snooze on this
+// device, is not counted, the same as Now's own count.
 export async function refreshBadge(known) {
   try {
     const data = known || (await api("/api/v1/home"));
-    const count = data.waiting || 0;
+    const count = needsYouCount(data, { snoozes: readSnoozes() });
     badge.hidden = count === 0;
     badge.textContent = String(count);
     noteWaiting(count);

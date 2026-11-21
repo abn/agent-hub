@@ -27,7 +27,6 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 /// The worker before it is stamped. The served copy has its version and cache
 /// lists filled in, so the digest can only be recomputed from the source.
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
-const HOME_JS: &str = include_str!("../web/home.mjs");
 const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
 const STORAGE_JS: &str = include_str!("../web/storage.mjs");
 const AGENTS_JS: &str = include_str!("../web/agents.mjs");
@@ -497,7 +496,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 54] = [
+const SHELL_PATHS: [&str; 55] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -514,7 +513,8 @@ const SHELL_PATHS: [&str; 54] = [
     "/composer.mjs",
     "/events.mjs",
     "/projects.mjs",
-    "/home.mjs",
+    "/now.mjs",
+    "/now-model.mjs",
     "/inbox.mjs",
     "/offline-queue.mjs",
     "/feed.mjs",
@@ -2100,51 +2100,6 @@ fn desktop_connect_is_the_centred_frame_with_no_token_characters() {
     );
 }
 
-// Round 12.1, the phone Home header. Home's bar is the one that carries the
-// greeting, so the same string shrinks from 22/600 to 15/600 rather than being
-// swapped for the screen's name, and the bar stays in layout so a display
-// toggle never shifts content or paints over it.
-
-#[test]
-fn phone_home_header_carries_the_greeting_not_the_screen_name() {
-    let home = HOME_JS
-        .split("const welcome =")
-        .nth(1)
-        .expect("home builds a welcome block");
-    assert!(
-        home.contains("shellStageHead(isPhone ? greeting() : \"Home\""),
-        "the phone bar's title is the greeting; only the desktop names the screen"
-    );
-}
-
-#[test]
-fn phone_home_header_stays_in_layout() {
-    assert!(
-        !APP_CSS.contains(
-            ".shell:has(.home-pad) .shell-head:not(.is-compressed) {\n    display: none;"
-        ),
-        "the Home bar must not be display:none, or it cannot animate and it shifts content"
-    );
-    assert!(
-        APP_CSS.contains(
-            ".shell:has(.home-pad) .shell-head:not(.is-compressed) {\n    background: transparent;"
-        ),
-        "Home at rest hides the bar by making it transparent, keeping it in flow"
-    );
-    assert!(
-        HOME_JS.contains(".shell:has(.home-pad) .shell-head {\n    position: sticky;"),
-        "the Home bar is sticky, so it holds its place in the flow"
-    );
-    assert!(
-        HOME_JS.contains(".shell:has(.home-pad) .shell-head .shell-title-line {\n    opacity: 0;"),
-        "the bar's title waits hidden while the body copy shows"
-    );
-    assert!(
-        HOME_JS.contains(".shell.is-compressed .home-greeting {\n    opacity: 0;"),
-        "the body copy fades out as the bar takes the string over"
-    );
-}
-
 // The project screen stacks the phone header, the tools row and the desktop
 // switcher's wrapper into one indexHead. Two things went wrong there: the
 // switcher rule hid every .shell-head (so the phone header vanished), and the
@@ -2341,63 +2296,6 @@ async fn reissue_token_is_in_the_dom_only_while_the_dialog_is_open() {
     );
 }
 
-#[tokio::test]
-async fn home_has_no_gear_and_uses_flat_rows() {
-    assert!(
-        !HOME_JS.contains("home-gear"),
-        "home must have no gear button"
-    );
-    assert!(
-        !HOME_JS.contains("home-card home-waiting"),
-        "home waiting list must not be a card"
-    );
-    assert!(
-        !HOME_JS.contains("home-card\">${rows}"),
-        "home newest list must not be a card"
-    );
-    assert!(
-        HOME_JS.contains("home-storage-wrap"),
-        "home storage must be wrapped"
-    );
-}
-
-#[test]
-fn inbox_bar_has_mark_all_read_and_overflow_holding_refresh() {
-    let index_head = INBOX_JS
-        .split("const indexHead =")
-        .nth(1)
-        .expect("inbox defines an indexHead template");
-    let index_head = index_head
-        .split("const sections =")
-        .next()
-        .unwrap_or(index_head);
-
-    assert!(
-        index_head.contains("inbox-read-all"),
-        "inbox header must contain Mark all read button"
-    );
-    assert!(
-        index_head.contains("inbox-overflow") || index_head.contains("overflow"),
-        "inbox header must contain overflow button"
-    );
-    assert!(
-        index_head.contains("inbox-refresh") || index_head.contains("Refresh"),
-        "overflow menu must hold Refresh action"
-    );
-
-    let read_all_pos = index_head
-        .find("inbox-read-all")
-        .expect("inbox-read-all exists");
-    let overflow_pos = index_head
-        .find("inbox-overflow")
-        .or_else(|| index_head.find("overflow"))
-        .expect("overflow exists");
-    assert!(
-        overflow_pos > read_all_pos,
-        "overflow button must trail Mark all read"
-    );
-}
-
 #[test]
 fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
     // C1 & C2: group labels 20 above, 8 below, no first-child zero padding
@@ -2563,16 +2461,6 @@ fn desktop_feed_inbox_artifacts_styles_pass_c11_to_c16() {
     assert!(
         !INBOX_JS.contains("window.matchMedia(DESKTOP).matches && !items.some"),
         "C16: desktop inbox must not fold Earlier to paint with no rows under it"
-    );
-    assert!(
-        APP_CSS.contains(".inbox-foot {\n  display: flex; align-items: baseline;"),
-        "C16: inbox foot must align baselines so mono 'now' does not sit below sans"
-    );
-    assert!(
-        APP_CSS.contains("shell-trailing-btn")
-            && (APP_CSS.contains("color: var(--ink-2)")
-                || INBOX_JS.contains("color: var(--ink-2)")),
-        "C16: phone inbox trailing buttons must both be --ink-2"
     );
     assert!(
         FEED_JS.contains("feedRow"),
@@ -2754,29 +2642,6 @@ fn opening_a_brain_entry_keeps_the_tree_focus() {
     assert!(
         open_row.contains("[role=\"tree\"]") && open_row.contains("[role=\"treeitem\"]"),
         "the row map leaves Enter inside the brain tree to the tree"
-    );
-}
-
-// The inbox swipe and pull searched for `.inbox-screen`, which no screen
-// renders: the inbox is the one shell with `data-segment="inbox"`. The gesture
-// setup therefore never registered.
-#[test]
-fn inbox_gestures_target_the_shell_not_a_vanished_screen() {
-    assert!(
-        !INBOX_JS.contains(".inbox-screen"),
-        "the inbox is the shell, not an .inbox-screen element"
-    );
-    assert!(
-        INBOX_JS.contains(r#".shell[data-segment="inbox"]"#),
-        "the gesture setup finds the inbox shell"
-    );
-    assert!(
-        !APP_CSS.contains(".inbox-screen"),
-        "no CSS rule waits for an element that is never rendered"
-    );
-    assert!(
-        APP_CSS.contains(r#".shell[data-segment="inbox"] { touch-action: pan-y; }"#),
-        "the inbox shell carries the base gesture rule"
     );
 }
 

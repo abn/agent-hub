@@ -1,5 +1,5 @@
-// The one shell: rail, index, stage, aside. Feed, artifacts, sessions and the
-// inbox are the same four zones, so the pane widths, the splitter behaviour and
+// The one shell: rail, index, stage, aside. Feed, artifacts and sessions are
+// the same four zones, so the pane widths, the splitter behaviour and
 // the remembered widths live here rather than in each screen.
 //
 // The index and the aside are resizable; the stage is what is left and never
@@ -270,8 +270,8 @@ export function shellIndexControls(placeholder, group = "", right = "") {
 }
 
 // What a filter judges a group by: the day heading on a feed-style screen, and
-// the block the inbox draws its rows inside.
-const GROUPS = ".day, .hub-group-header, .inbox-group";
+// a group header elsewhere.
+const GROUPS = ".day, .hub-group-header";
 
 // The index filter: a pill field that filters the list in place. It replaces
 // the group headers with one mono count line while a query is live, and
@@ -288,25 +288,11 @@ export function installIndexFilter(shell) {
   body.prepend(count);
 
   const rows = () => [...body.querySelectorAll(".row")];
-  // Whether a node still holds a row the query kept, at any depth. The inbox
-  // wraps its rows in a block inside the group, so a group is asked about
-  // itself before it is asked about what follows it.
+  // Whether a node still holds a row the query kept, at any depth.
   const holds = (node) =>
     node.classList.contains("row") ? !node.hidden : !!node.querySelector(".row:not([hidden])");
-  // The inbox names a group with a heading of its own, drawn beside the block
-  // for a flat group and inside it for a folded one. A heading over an empty
-  // block is the empty group the reader must not be shown, so the two are
-  // decided together.
-  const labelOf = (head) => {
-    if (head.matches(".inbox-label")) return head;
-    const before = head.previousElementSibling;
-    if (before?.matches(".inbox-label")) return before;
-    return head.querySelector(".inbox-label");
-  };
   const setGroup = (head, showing) => {
     head.hidden = !showing;
-    const label = labelOf(head);
-    if (label) label.hidden = !showing;
   };
   const apply = () => {
     const q = field.value.trim().toLowerCase();

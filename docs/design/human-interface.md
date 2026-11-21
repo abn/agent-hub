@@ -118,13 +118,12 @@ both a reader who cannot separate the tints and a reader who hears the page.
 
 ## Layout: the shell
 
-One shell serves the feed, artifacts, sessions and the inbox. Four zones, in
-order:
+One shell serves the feed, artifacts and sessions. Four zones, in order:
 
 | Zone | Width | Present when |
 |---|---|---|
 | Rail | 200, fixed | always |
-| Index | 300 default, 260 to 480, draggable | always, feed and inbox included |
+| Index | 300 default, 260 to 480, draggable | wherever items are opened one at a time |
 | Stage | `1fr`, never under 560 | always |
 | Aside | 320 default, 288 to 440, draggable | only where something is read against the stage |
 
@@ -134,15 +133,15 @@ ordinary projects, drawn from the same listing the register reads and taken
 again when a token is kept or a project is created, renamed or deleted. An
 agent's personal space never appears among them. The project's section switcher
 is a segmented control inside the index header, not a tab strip above the panes:
-it selects what the index lists and never changes the shell. The inbox is the
-same shell with one index and no switcher.
+it selects what the index lists and never changes the shell.
 
-An index exists only where items are opened one at a time, so Settings is the
-one screen with no index: a short form is not a list. An aside exists only
-where something is read against the stage, which is anchored comments on an
-artifact and a brain `kv` key. Correspondence, a feed or inbox thread, is the
-stage, not a panel, and the aside toggle is absent, not disabled, on feed,
-inbox and settings.
+An index exists only where items are opened one at a time, so Settings and Now
+have no index: a short form is not a list, and Now is a stream read top to
+bottom. An aside exists only where something is read against the stage, which
+is anchored comments on an artifact, a brain `kv` key, and the receipts beside
+each row on Now. Correspondence, a feed thread or an inbox item's, is the
+stage, not a panel, and the aside toggle is absent, not disabled, on feed, Now,
+an inbox item and settings.
 
 **The frame does not move, on a desktop.** Every pane reserves a 52px header
 and a 40px control row, in that order, whether or not it has anything to put in
@@ -201,16 +200,16 @@ with hysteresis at 20 and 8; under it sits one sticky 44px tools row holding
 that screen's tools, and nothing when the screen has none. Content starts at y
 120 at rest and y 96 scrolled. The 48px leading slot and the title's left edge
 hold on every screen in both header states, and because a phone reader's place
-is their scroll position, the phone reserves no band. Home is the one exception
-at rest: it has no bar and its greeting is content at x 16, with the bar fading
-in at x 48 once the greeting leaves.
+is their scroll position, the phone reserves no band. Now has the same header,
+titled Now, and its tools row holds its three chips.
 
-The tab bar is five labelled tabs: Home, Inbox, Projects, Search, More. More is
+The tab bar is four labelled tabs: Now, Projects, Search, More. Now carries the
+needs-you badge. More is
 a tab root, not an overlay or a bare hamburger, and it holds Storage, Agents
 and tokens, Settings and the sync line. Pushed screens from More retain More as
 the current tab and offer a back chevron in the 48px leading slot. Lists are
-flat rows, edge to edge under a hairline, with the inbox row as the model; a
-card means "this is a summary", and only Home's storage summary is one.
+flat rows, edge to edge under a hairline, with Now's row as the model; a card
+means "this is a summary", the storage summary is one, and no list is.
 Settings is rows with quiet group labels, no panels and no tools row, and it
 shows the data path once, last two segments, with a copy glyph. Single-key
 shortcuts are absent under a coarse pointer, and no screen prints the hub's
@@ -235,56 +234,68 @@ rather than by its width.
 
 ## Screens
 
-Eight screens share the shell: Home, Inbox, Project (feed, artifacts, sessions
+Eight screens share the shell: Now, an inbox item, Project (feed, artifacts, sessions
 and the knowledge base under one shell), the artifact viewer, session detail,
 Search, Storage and prune, and Settings, with Agents and access on its own
 screen reached from Settings and Connect as the token gate. Each screen's
 design is below; the routes and the fields they carry are in
 [REST API](/reference/rest-api.md).
 
-### Home
+### Now
 
-Home is welcoming at rest: a status strip, a title that is the reader's own day
-and part of day over a summary line, the waiting card, the newest across
-projects, and storage. Below the width the top bar shows at, the node line of
-the design's status strip is drawn in mono. The waiting card holds the queue's
-count, the first three items that wait, each opening its own item, and a link to
-the rest in the Inbox. Home's lists are flat rows and the storage summary is
-the only card, because a card means "this is a summary". When nothing waits,
-nothing is unread and nothing sits above a cursor, the two cards give way to
-the quiet empty state.
+Home and the Inbox are one screen, Now: one stream of what the reader's agents
+did, in three tiers, read top to bottom and painted from one request. The
+Inbox's address opens Now showing only what needs the reader, so an old link,
+the badge and a notification land on the same asks. The control row carries
+three chips, All, Needs you and Since you looked, each with its count.
+
+- **The opening line** is one written sentence, built from the data by
+  templates: "Two agents need you. build-bot wants a decision on “Ship 1.10
+  tonight”, and docs-writer asks “Keep the CSV export?”" It names one ask per
+  agent, two at most, counts the rest, and then says what can wait and what
+  changed since the reader looked. When nothing waits it says so plainly.
+- **Needs you** holds every open question, approval and idea as a sentence,
+  the agent first and then what it wants, with the verbs at the end of the
+  line: Approve and Decline, a question's suggested answers and Reply, an
+  idea's Resolve and Clear, and Read, which opens the item. Only the selected
+  row fills its primary, and it shows its keys under the sentence on a
+  keyboard. Once an ask is answered the selection moves to the next. An ask
+  whose deadline is more than a day off, or that the reader snoozed on this
+  device, can wait: it stays in the tier with a clock glyph, under the rest,
+  and is not counted in the badge.
+- **Receipts** sit beside each row in a margin on a wide stage, level with the
+  row: the event id, the session the ask came from, the artifact it points at
+  and its deadline, each id a link to what it names. On a narrow stage and on a
+  phone they are one mono line under the sentence.
+- **Since you looked** is what is above each project's read cursor, and
+  finished work still unread, grouped by project. Mark seen moves every cursor
+  and marks every unread item read.
+- **Quiet** is the rest of the recent events, folded under its count behind
+  Show.
+- **The end** is one calm line: "That is everything since 18:05. Two answers
+  and the desk is clear."
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-desktop-dark.png">
-  <img src="../assets/screens/home-desktop-light.png" alt="Home at desktop width: the greeting, the waiting-on-you list and the newest events across projects.">
+  <img src="../assets/screens/home-desktop-light.png" alt="Now at desktop width: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
 </picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-phone-dark.png">
-  <img src="../assets/screens/home-phone-light.png" alt="Home at phone width: the greeting over the same lists in one column.">
+  <img src="../assets/screens/home-phone-light.png" alt="Now at phone width: the same stream in one column, each row's receipts under its sentence.">
 </picture>
 
-### Inbox
+### Inbox item
 
-The global queue in groups: WAITING ON YOU with its count, its open items
-grouped by actor; SNOOZED when items are deferred; UNREAD with its count; and
-EARLIER, read and resolved items. A waiting row carries the action dot at the
-row's end and a 600 title, and no pill, because the group names the state; a
-snoozed waiting row carries the pill on its meta line. Waiting outranks unread:
-a waiting row ends in the action dot and not the unread dot. The stage is the
-whole item: pill, title, body, its buttons, its thread, and a card naming what
-it points at. A question's quick answers sit above its composer when it
-suggests any, and a row's Reply opens the same composer. An item the asking
-agent gave a deadline says what the deadline will do on its row and on its
-card, in words with the time left, as one 12px line in the meta tone, never a
-ticking countdown; an item the hub resolved at its deadline reads as expired,
-apart from a human decision, so a reader never takes the hub's call for their
-own.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/inbox-desktop-dark.png">
-  <img src="../assets/screens/inbox-desktop-light.png" alt="The inbox at desktop width, grouped into waiting, unread and earlier.">
-</picture>
+An item's own address opens it at full size, in a stage with no index and a
+back control to Now. The stage is the whole item: pill, title, body, its
+buttons and its thread. A question's quick answers sit above its composer when
+it suggests any, and a row's Reply on Now opens the same composer. An item the
+asking agent gave a deadline says what the deadline will do, in words with the
+time left, never a ticking countdown; an item the hub resolved at its deadline
+reads as expired, apart from a human decision, so a reader never takes the
+hub's call for their own. Snoozing an item for an hour moves it to the
+can-wait end of Now's first tier, on this device only.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/inbox-item-phone-dark.png">
@@ -314,7 +325,7 @@ carries the two verbs on a phone, where the selection replaces the one tools
 row, rather than adding a band over the list. A left swipe uncovers a Dismiss
 action under the row. A dismissal is the human's
 view, not a deletion: the event leaves the project feed, the cross-project feed,
-Home's recent list and the unseen count, while its id, inbox row, search
+Now's stream and the unseen count, while its id, inbox row, search
 document and payload stay, so an agent still reads it.
 
 <picture>
@@ -611,25 +622,23 @@ routes and refusals are in
 A fresh hub opens on Connect, where the token is checked against the hub before
 it is stored and the reader is returned to the route they were on. The Projects
 register is reachable from the rail's PROJECTS header on the desktop and from
-the tab bar on a phone, and a new hub's empty Home carries one call to action,
+the tab bar on a phone, and a new hub's empty Now carries one call to action,
 create a project. Creating an agent issues its token once and reveals it; on a
 phone as well as a desktop the reveal offers the MCP setup for that agent with
 the token embedded, so the two halves are not spliced by hand. A pending
-enrolment reads in the inbox as "Pending enrolment" with the reason the agent
+enrolment reads on Now and in its item as "Pending enrolment" with the reason the agent
 gave, and the Access list marks a pending agent and shows its reason. A hub
 with no admin token configured says so on Connect and points at the startup
 fix rather than repeating the refusal.
 
 ## Interaction rules
 
-- Every verb is reachable in two taps from Home: read, answer, approve, prune.
-- Read is explicit: opening an item, a swipe right, or the row's own control.
-  Never scroll-past. The Inbox header carries Mark all read and an Unread only
-  filter, and marking one item read or unread offers an undo.
+- Every verb is reachable in two taps from Now: read, answer, approve, prune.
+- Read is explicit: opening an item, Mark seen on Now, or a row's own control.
+  Never scroll-past.
 - A swipe is first-class on mobile, never destructive, and always has a tap
   equivalent. The swipe-down toast dismiss ships, with a dismiss control and
-  Esc beside it. An Inbox row's swipe right marks it read or unread and its
-  swipe left uncovers the row's actions without deciding anything. A feed row's
+  Esc beside it. A feed row's
   swipe left uncovers Dismiss, which hides the event from the human's feed and
   deletes nothing. Dismissing several at once, or every read event at once, asks
   in a dialog first. The edge swipe back and the tab swipe are intended design,
@@ -637,13 +646,15 @@ fix rather than repeating the refusal.
 - A waiting row keeps its title line for the subject in every index: it ends in
   the action dot, its title is drawn at 600, and the title takes the words
   "Waiting on you" as its accessible description, hidden from browse mode so a
-  screen reader hears them once. Where a row is not under a WAITING ON YOU
-  heading, in the feed and in the inbox's SNOOZED group, the status pill sits
-  first on the meta line under the subject. On the meta line a long agent name
+  screen reader hears them once. Where a row is not under a waiting heading,
+  in the feed, the status pill sits first on the meta line under the subject. On the meta line a long agent name
   is what gives way, never the time.
 - Keyboard: `/` focuses the list's own filter field when the screen has one and
   otherwise search, `j` and `k` move a selection through the rows of the current
-  screen, Enter opens the selected row, `a` approves, `r` replies,
+  screen, Enter or `o` opens the selected row, `a` approves, `r` replies; on
+  Now `1` to `9` press an ask's numbered verbs, `e` marks an idea done, `s`
+  snoozes an ask or brings it back, `q` shows the quiet tier and `E` marks
+  everything seen,
   Ctrl+Enter (Cmd+Enter on an Apple device) sends from a composer, `c` toggles
   the aside, Esc closes what is on top, and the arrows move a focused splitter.
   The selection is a real focus move, so the ring shows it; painting a list

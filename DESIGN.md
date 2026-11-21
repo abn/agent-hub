@@ -177,18 +177,18 @@ export pipeline. It is not design data and must not ship; `web/glyphs.mjs`
 holds the bare paths and inline markup only.
 
 The build's set carries the twelve except `key` and `link`, neither of which a
-screen draws, and keeps `close` and `send`, which round 15 draws into the set. A
-check holds that no two names draw the same path and that no drawn glyph is
-unused.
+screen draws, and keeps `close`, `send` and `clock`, a face and two hands, which
+marks an ask on Now that can wait. A check holds that no two names draw the same
+path and that no drawn glyph is unused.
 
 ## Layout: the shell
 
-One shell for feed, artifacts, sessions and the inbox. Four zones, in order:
+One shell for feed, artifacts and sessions. Four zones, in order:
 
 | Zone | Width | Present when |
 |---|---|---|
 | Rail | 200, fixed | always |
-| Index | 300 default, 260 to 480, draggable | always, feed and inbox included |
+| Index | 300 default, 260 to 480, draggable | wherever items are opened one at a time |
 | Stage | `1fr`, never under 560 | always |
 | Aside | 320 default, 288 to 440, draggable | only where something is read against the stage |
 
@@ -197,7 +197,7 @@ then a footer. It owes no control row.
 
 The project's section switcher is a segmented control inside the index header,
 not a tab strip above the panes. It selects what the index lists and never
-changes the shell. The inbox is the same shell with one index and no switcher.
+changes the shell.
 
 **Deviation: the switcher drops counts below a 360px index pane.** The handoff's
 rule is that counts drop on a narrow control, measured against the control. The
@@ -211,14 +211,29 @@ room problem. Below the compact threshold the switcher may still scroll at the
 first thing a reader can lose and the last they want back, which is why it goes
 before the padding does.
 
-An index exists only where items are opened one at a time. Settings is the one
-screen with no index: a short form is not a list. It is rail and stage, with no
-aside and no aside toggle.
+An index exists only where items are opened one at a time. Settings and Now
+have no index: a short form is not a list, and Now is a stream read top to
+bottom rather than a list of items opened one by one. Each is rail and stage,
+with no aside toggle.
 
 An aside exists only where something is read against the stage: anchored
-comments on an artifact, and a `kv` key beside the brain tree. Correspondence,
-which is a feed or inbox thread, is the stage, not a panel. The aside toggle is
-absent, not disabled, on feed, inbox and settings.
+comments on an artifact, a `kv` key beside the brain tree, and the receipts
+beside each row on Now. Correspondence, which is a feed thread or an inbox
+item's, is the stage, not a panel. The aside toggle is absent, not disabled, on
+feed, Now, an inbox item and settings.
+
+**Now's margin is a ledger, not a pane.** On a stage at least 940 wide, every
+row on Now carries its receipts in a 300 margin beside the 680 column, level
+with the row: for an ask, what it is and in which project, the event id, the
+session it was asked in, the artifact it points at and its deadline; for an
+event, the event id and, for a publish, the artifact. Each id is a mono link to
+what it names. The margin is read against the row it sits beside, which is the
+one thing an aside is for, so it is held to the aside rule rather than being a
+fourth zone: it has no header, no control row, no splitter and no toggle, and
+it scrolls with the stream. One hairline rules it off for the length of the
+stream. Below 940, and on a phone, the same receipts are one mono line under
+the row's sentence, and an ask's kind line is dropped there because the glyph
+and the sentence already say it.
 
 ### Content travels, chrome does not
 
@@ -228,13 +243,13 @@ are, hold at both widths. The chrome rules, which are the 76/52 collapsing
 header, the 44px tools row, the tab bar and More, are phone-only. The desktop
 keeps RULE 11.1 and 11.3 exactly as built.
 
-The desktop changes this round makes are these. Home's lists are flat rows. The
+The desktop changes this round makes are these. Now's tiers are flat rows. The
 storage summary sits on the canvas between hairlines, not in a card. Settings is
 the round-11 row form and keeps its 40px control row; its THIS HUB group ends
 with Version, a value row that promises nothing. Storage adds a fourth bar
-segment and one helper line, and a zero cell reads a dash. Agents and tokens is a
-list-and-item screen, an index beside a stage, like the inbox. The rail's sync
-line is hidden when healthy.
+segment and one helper line, and a zero cell reads a dash. Agents and tokens is
+a list-and-item screen, an index beside a stage, like a project feed. The rail's
+sync line is hidden when healthy.
 
 **An artifact has one surface.** It is read in its project's Artifacts shell
 with it selected in the stage, beside the index with its row marked. The
@@ -278,18 +293,16 @@ reader's place is kept by the browser's own scroll anchoring.
   starts at y 120 at rest and y 96 scrolled.
 - The 48px leading slot and the title's left edge hold on every screen in both
   header states. A phone reader's place is their scroll position, so the phone
-  reserves no band. Home is the one exception at rest: it has no bar and its
-  greeting is content at x 16, with the bar fading in at x 48 once the greeting
-  leaves.
+  reserves no band. Now has no exception: its header is the same 76/52 bar,
+  titled Now, and its tools row holds the tier chips.
 - One gutter per pane, and every heading, label and row a screen writes
   starts on it. A pane hands the gutter to the rows inside it, so the pane
   carries it and the rows sit on it rather than each declaring a padding of
   its own: the session detail stage's brain tree pane carries 16px and the
   footnote, the header line, the actions footer and the audit line all start
-  there. The phone header's leading slot is 48px in both of its states, and
-  Home's greeting at rest is content at 16 with no bar above it; those two are
-  the named offsets that differ. A browser check reads the offset each pane's
-  rows start at off the rows themselves.
+  there. The phone header's leading slot is 48px in both of its states, which
+  is the one named offset that differs. A browser check reads the offset each
+  pane's rows start at off the rows themselves.
 - Prose is left-aligned in the stage and capped at 640. Panes may change
   width; the reader's place in the prose may not. A pane that stages prose
   carries its own gutter in its own padding, because the stage body carries
@@ -308,11 +321,9 @@ reader's place is kept by the browser's own scroll anchoring.
   the action dot at the row's end and 600 title weight, the same in every
   index. The title takes the words "Waiting on you" as its accessible
   description, and they are hidden from browse mode so a screen reader hears
-  them once. Where a row is not under a WAITING ON YOU heading, in the feed and
-  in the inbox's SNOOZED group, the status pill sits first on the meta line
-  under the subject, hidden from assistive technology for the same reason. The
-  inbox's own waiting rows sit under that heading, so they carry no pill and
-  keep the meta line for the project, the agent and the time. On the meta line
+  them once. Where a row is not under a waiting heading, in the feed, the
+  status pill sits first on the meta line under the subject, hidden from
+  assistive technology for the same reason. On the meta line
   a long agent name is what gives way, never the time. Waiting outranks
   unread: a waiting row ends in the action dot and not the unread dot. Set in
   Cantarell, a waiting feed row at the 300px default index shows 17 to 25
@@ -350,13 +361,14 @@ verb beside a field remains the defect the label rule came from.
 
 ### The phone
 
-- One header and one tools row, sized as above. The tab bar is five labelled
-  tabs: Home, Inbox, Projects, Search, More. More is a tab root, not an
+- One header and one tools row, sized as above. The tab bar is four labelled
+  tabs: Now, Projects, Search, More. Now carries the needs-you badge, the
+  count the Inbox tab carried before the two merged. More is a tab root, not an
   overlay or a bare hamburger, and it holds Storage, Agents and tokens,
   Settings and the sync line.
-- Lists are flat rows, edge to edge under a hairline, with the inbox row as
-  the model. A card means "this is a summary", and only Home's storage summary
-  is one.
+- Lists are flat rows, edge to edge under a hairline, with Now's row as the
+  model. A card means "this is a summary"; the storage summary is one, and no
+  list is.
 - Settings is rows with quiet group labels, no panels and no tools row. It
   shows the data path once, last two segments, with a copy glyph. Single-key
   shortcuts are absent under a coarse pointer.
@@ -450,7 +462,11 @@ structure, not to line length.
   value, not a door, at the 2px radius.
 - **Key hints.** A key is named on a key chip: 12/500 mono in `--ink-2`, 20px
   high, a `--line-strong` border with a 2px foot, on the raised ground. The
-  rail's search key and the shortcut list draw the same chip.
+  rail's search key and the shortcut list draw the same chip. Inside a button
+  on Now the chip takes the button's own ink with a 1px foot, and it is hidden
+  from assistive technology, so a button is named by its word alone. Keys are
+  named only on a fine pointer at a desktop width; under a coarse pointer and
+  on a phone none is.
 - **Buttons.** Sized by the control sizes above, radius 2, `white-space:
   nowrap`, transparent on the canvas. Primary is the copper fill with an
   inverse label, secondary a `--line-strong` outline, Approve the primary,
@@ -478,10 +494,10 @@ structure, not to line length.
   filters ("Filter artifacts"). It filters in place and does not navigate.
   While filtering, the group headers give way to one mono count line.
 - **Composer.** One component, `web/composer.mjs`, is every place a reader
-  writes: a question's card and the composer a row's Reply opens (Inbox, feed
-  stage, Home), an artifact's new comment, its comment list and a thread's
-  reply, and a wiki page's comments. No screen builds a field and a send
-  button of its own.
+  writes: a question's card and the composer a row's Reply opens (an inbox item,
+  the feed stage, Now), an artifact's new comment, its comment list and a
+  thread's reply, and a wiki page's comments. No screen builds a field and a
+  send button of its own.
   - **Field.** A form field at the pointer's size: one line at rest is
     `--ctl-form` on a fine pointer and `--tap` on a coarse one, 15px text on a
     20px line. It grows a line at a time to eight lines and then scrolls, and
@@ -552,32 +568,79 @@ structure, not to line length.
 
 ## Screens
 
-Home, Inbox, Project (feed, artifacts, sessions under one shell), artifact
-viewer, session detail, Search, Storage and prune, Settings, Projects register,
-Agents and access, Connect, and the knowledge base.
+Now, an inbox item, Project (feed, artifacts, sessions under one shell),
+artifact viewer, session detail, Search, Storage and prune, Settings, Projects
+register, Agents and access, Connect, and the knowledge base.
 
-- **Home.** A status strip, a title and summary, the waiting card, the newest
-  across projects, storage.
-- **Inbox.** Same shell, one index. Groups WAITING ON YOU, UNREAD, EARLIER.
-  Waiting rows carry an action dot and a heavier title, and no pill, since the
-  group names the state; a snoozed waiting row carries the pill on its meta
-  line. The stage is the item:
-  pill, title, body, its buttons, its thread, and a card naming what it points
-  at. A question's buttons are its quick answers, when it suggests any, above
-  its composer; a row's Reply opens the same composer, quick answers and all.
-  The thread is in the stage, not a panel. Snoozing a row for an hour moves it
-  to a SNOOZED group and is remembered per device, not on the hub: a second
-  device still shows the row as waiting. The limit is the device's, and the
-  group says so.
-  An item the asking agent gave a deadline says what the deadline will do, on
-  its row under the body and on its card under the title, as one 12px line in
+- **Now.** Home and the Inbox are one screen: one stream in three tiers, read
+  top to bottom, painted from the one Home response. `#/home` is its address;
+  `#/inbox` opens it showing only what needs the reader, so an old link, the
+  badge and a notification land on the same asks. The control row carries
+  three chips, All, Needs you and Since you looked, each with its count,
+  and on a fine pointer the keys on the right.
+  - **The opening line.** One written line at 22/400, 17 on a narrow stage,
+    built from the data by templates, never by a model: Two agents need you.
+    build-bot wants a decision on “Ship 1.10 tonight”, and docs-writer asks
+    “Keep the CSV export?” It names one ask per agent, two at most, and
+    counts the rest ("and three more"); it counts asks apart from agents when
+    one agent asks twice. What follows, in `--ink-3`, says what can wait and
+    what changed since the reader looked. When nothing waits it says so first:
+    "Nothing waits on you." Every value in it is the agent's and is escaped.
+  - **Needs you.** The label is copper. Each ask is one sentence, the agent in
+    600 and then what it wants, with its verbs at the end of the line: an
+    approval's Approve and Decline, a question's suggested answers and Reply,
+    an idea's Resolve and Clear, and Read, which opens the item. Only the
+    selected row fills its primary; every other row's verbs are outlines.
+    While the reader moves with the keyboard, the selected row expands in
+    place with its keys under the sentence; the keys go as soon as the pointer
+    is over the stream, so no row grows or shrinks under a pointer on its way
+    to a button. Approve and
+    Decline ask in the decision dialog, as everywhere; a suggested answer sends
+    at once, as a quick answer does. Once an ask is answered it leaves the
+    tier and the selection moves to the ask now in its place. An ask can wait
+    when its deadline is more than a day off or the reader snoozed it on this
+    device; it stays in the tier, under the rest, with the clock glyph in its
+    kind slot, and it is not counted: the tier's sub-note says "and 1 can
+    wait", and the badge leaves it out.
+  - **Since you looked.** What is above a project's read cursor, and finished
+    work still unread, grouped by project under the project's name in mono.
+    A project whose unseen count is more than the response carries says how
+    many more, linking to its feed. **Mark seen** moves every project's cursor
+    to its newest event and marks every unread item read, the same state the
+    feed and the inbox have always used.
+  - **Quiet.** Everything else the response carries, folded under its count
+    behind **Show**.
+  - **The end.** One line in `--ink-2` with an ok check: "That is everything
+    since 18:05. Two answers and the desk is clear." The time is how far back
+    the since tier reaches; without one it reads "That is everything."
+  - **Empty.** The empty state when nothing has happened at all, and one per
+    chip when that tier is empty, each with a link back to All.
+  - **Deviation: the chips are tiers, not projects, and the margin's head is
+    a count.** The handoff's control row filters by project and its opening
+    margin lists each working session with its age. The build's chips are the
+    three tiers, because the Inbox's address has to land on one of them and
+    the rail already lists the projects, and the margin says how many agents
+    are active, because the Home response carries the count and not the
+    sessions. An ask's row also keeps its verbs when it can wait, where the
+    handoff shows only Open, so a snoozed or far-off ask is still answered in
+    place.
+- **Inbox item.** `#/inbox?open=<id>` opens one item at full size in a stage
+  with no index, the back control returning to Now. The stage is the item:
+  pill, title, body, its buttons, its thread. A question's buttons are its
+  quick answers, when it suggests any, above its composer; a row's Reply opens
+  the same composer, quick answers and all. The thread is in the stage, not a
+  panel. Snoozing an item for an hour moves it to the can-wait end of Now's
+  first tier and is remembered per device, not on the hub: a second device
+  still shows it as needing the reader.
+  An item the asking agent gave a deadline says what the deadline will do, in
+  its receipts on Now and on its card under the title, as one line in
   `--ink-2`: "Declines itself in 3h", "Approves itself in 20m", "Closes in 2d".
   An item the hub resolved at its deadline reads "Expired: declined itself, no
   one decided in time" in the same place, and its outcome pill says "Declined
   at deadline" rather than "Declined", so a reader never takes the hub's call
-  for their own. The words carry it: no tint, no clock glyph, no countdown that
-  ticks. The project feed titles that resolution "expired:" and carries the
-  same line as its note.
+  for their own. The words carry it: no tint and no countdown that ticks; the
+  clock glyph beside them on Now only repeats them. The project feed titles
+  that resolution "expired:" and carries the same line as its note.
 - **Project.** The index header carries Feed, Artifacts, Sessions as a
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
@@ -591,8 +654,8 @@ Agents and access, Connect, and the knowledge base.
   fold. The same overflow carries the two verbs on a phone, where the selection
   replaces the one tools row, rather than adding a band over the list. A left
   swipe uncovers a Dismiss action under the row. A dismissal is the human's view, not a
-  deletion: the event leaves the project feed, the cross-project feed, Home's
-  recent list and the unseen count, while its id, inbox row, search document and
+  deletion: the event leaves the project feed, the cross-project feed, Now's
+  stream and the unseen count, while its id, inbox row, search document and
   payload stay, so an agent still reads it.
 - **Artifact viewer.** The Artifacts shell with the artifact selected: the
   stage renders the document, and its control row carries the path, Copy path,
@@ -669,7 +732,7 @@ Agents and access, Connect, and the knowledge base.
 
 ## Interaction
 
-- Every verb is reachable in two taps from Home: read, answer, approve, prune.
+- Every verb is reachable in two taps from Now: read, answer, approve, prune.
 - Read is explicit: opening an item, a swipe right, or the row's own control.
   Never scroll-past.
 - A swipe is first-class on mobile, never destructive, and always has a tap
@@ -683,10 +746,13 @@ Agents and access, Connect, and the knowledge base.
   fill only inside the dialog; on a screen it stays disabled until the session
   has ended. Danger is reserved for deletion.
 - Keyboard: `/` focuses the filter or search field, `j` and `k` move through
-  index rows, Enter opens, `a` approves, `r` replies, Ctrl+Enter (Cmd+Enter on
-  an Apple device) sends from a composer, `c` toggles the aside,
-  Esc closes what is on top, and the arrows move a focused splitter. Dialogs
-  trap focus.
+  index rows, Enter or `o` opens, `a` approves, `r` replies, Ctrl+Enter
+  (Cmd+Enter on an Apple device) sends from a composer, `c` toggles the aside,
+  Esc closes what is on top, and the arrows move a focused splitter. On Now,
+  `1` to `9` press an ask's numbered verbs, `e` marks an idea done, `s` snoozes
+  an ask or brings it back, `q` shows or hides the quiet tier and `E` marks
+  everything seen. A row's control names the keys that press it, so the map
+  reads them off the row. Dialogs trap focus.
 - Time is short on a row and whole on request. No timestamp is a tab stop of
   its own; a list of them would be the whole ring.
 - Motion is never decorative. Reveals and underlines take at most 150ms,
@@ -807,9 +873,9 @@ header and the pane-title gate are built on that stack; a screen adopts the
 handoff's header when it is redrawn.
 
 **Deviation: control rows may fill a primary.** The handoff fills only the
-focused row's primary action. Screens that predate it still mark a band's main
-verb, such as Capture idea, as the primary, so it fills copper until that
-screen is redrawn.
+focused row's primary action. Now follows it. Screens that predate it still
+mark a band's main verb, such as Capture idea, as the primary, so it fills
+copper until that screen is redrawn.
 A screenshot baseline is a check tagged `@visual`, compared with one shared
 tolerance of 0.2% of the clip's pixels. Made and checked on the same browser,
 it absorbs only nondeterministic sub-pixel noise: a band moved or resized by

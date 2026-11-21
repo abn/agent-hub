@@ -64,7 +64,7 @@ function head(usage) {
   const box = el("div", "proj-head storage-head");
   const back = el("a", "proj-back");
   back.href = "#/home";
-  back.setAttribute("aria-label", "Back to Home");
+  back.setAttribute("aria-label", "Back to Now");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   for (const [name, value] of Object.entries({
     width: "20",

@@ -89,7 +89,7 @@ Three rules for writing one:
   paint is waited out and a missing one fails with a message. A fixed
   `wait_for_timeout` is the thing this phase removed; do not add one back.
 - **Find what a reader reaches by role or label**, the way
-  `getByRole("searchbox", { name: "Filter inbox" })` does, and fall back to a
+  `getByRole("searchbox", { name: "Filter events" })` does, and fall back to a
   class only where the markup has no accessible name to ask for, such as a row's
   position in a group. A locator that names a class is a screen rule, not a
   behavioural gate.
@@ -98,8 +98,8 @@ Three rules for writing one:
   hub's `seed()`, and writes a descriptor the tests read. So the fixture strings
   a check names are the harness's constants, and a project's tests do not move
   another project's data. `workers: 1` keeps a project's own tests in order,
-  which matters because the hub draws Home's unread dots from what is still
-  above the reader's cursor.
+  which matters because the hub draws Now's since-you-looked tier from what is
+  still above the reader's cursor.
 
 The specs are `.spec.mjs`, so `npx playwright test` finds them, and the
 throwaway data directory and the failure artefacts land under `target/tmp`.

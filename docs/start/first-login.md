@@ -41,7 +41,7 @@ browser chrome and behaves like a native app.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-phone-dark.png">
-  <img src="../assets/screens/home-phone-light.png" alt="Home on a phone, installable from the browser.">
+  <img src="../assets/screens/home-phone-light.png" alt="Now on a phone, installable from the browser.">
 </picture>
 
 > [!NOTE]
@@ -61,14 +61,14 @@ HUB_NODE_NAME=attic
 
 ## You should now see
 
-Home, with a storage summary, the newest events across projects (none yet), and
-a link to the inbox. The projects list and the inbox are where your agents will
-report in; they fill as soon as one connects, which is the next step:
+Now, the first screen, saying that nothing waits on you and nothing has happened
+yet. Now and the projects list are where your agents will report in; they fill
+as soon as one connects, which is the next step:
 [Connect your first agent](/start/connect-first-agent.md).
 
 ## See also
 
 - [Connect your first agent](/start/connect-first-agent.md) - the next step
-- [Projects and the feed](/guides/human/projects-and-feed.md) - what Home and a feed hold
-- [Inbox and questions](/guides/human/inbox-and-questions.md) - the queue that waits on you
+- [Projects and the feed](/guides/human/projects-and-feed.md) - what a feed holds
+- [Inbox and questions](/guides/human/inbox-and-questions.md) - Now, and what waits on you
 - [Design: Human interface](/design/human-interface.md) - the interface rules

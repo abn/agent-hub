@@ -52,6 +52,6 @@ export async function open(page, hub, route, segment) {
   await page.goto(`${hub.baseUrl}/${route}`);
   const painted = segment
     ? page.locator(`.shell[data-segment="${segment}"] ${BODY}`)
-    : page.locator(".shell-no-index .home-pad");
+    : page.locator('.shell[data-segment="now"] .now');
   await expect(painted).toBeVisible();
 }

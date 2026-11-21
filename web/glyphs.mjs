@@ -7,6 +7,9 @@ export const GLYPH_PATHS = {
   anchorPin:
     '<path d="M12 21s6-6.2 6-10.2a6 6 0 0 0-12 0C6 14.8 12 21 12 21z"/><circle cx="12" cy="10.5" r="2"/>',
   chevronBack: '<path d="M 15 5l-7 7 7 7"/>',
+  // An ask that can wait: a face and two hands. Now draws it where a row's
+  // kind glyph would be, so a reader sees at once which asks are not urgent.
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M 12 7.5V12l3 2"/>',
   // Two crossing strokes. Close was a word in one place and a down chevron
   // in two others, and a chevron says the sheet goes somewhere rather than
   // away.

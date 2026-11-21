@@ -19,18 +19,12 @@ const createAgent = async (hub, id, name) => {
 };
 
 test.describe("phone frame", () => {
-  test("five tabs, More, the collapsing header, and the tools row", async ({ hub, page }) => {
+  test("four tabs, More, the collapsing header, and the tools row", async ({ hub, page }) => {
     await page.goto(`${hub.baseUrl}/`);
     const tabs = await page.evaluate(() =>
       [...document.querySelectorAll(".tabbar a .tab-label")].map((el) => el.textContent.trim()),
     );
-    expect(tabs, "the tab bar does not have the five expected tabs").toEqual([
-      "Home",
-      "Inbox",
-      "Projects",
-      "Search",
-      "More",
-    ]);
+    expect(tabs, "the tab bar does not have the four expected tabs").toEqual(["Now", "Projects", "Search", "More"]);
 
     await goto(page, "#/more", "More");
     expect(
@@ -66,7 +60,7 @@ test.describe("phone frame", () => {
 
     // Header collapse and hysteresis: 76px at rest, 52px past 20px of scroll,
     // still 52 at 15px, back to 76 below 8px.
-    await goto(page, "#/inbox", "Inbox");
+    await goto(page, "#/home", "Now");
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect.poll(async () => Math.round((await headerHeight(page)) ?? 0)).toBe(76);
     await page.evaluate(() => window.scrollTo(0, 35));
@@ -82,7 +76,7 @@ test.describe("phone frame", () => {
 
     // CHECK 12.A: content y 120 at rest, y 96 after 40px, title glyph at x 48.
     for (const [url, title] of [
-      ["#/inbox", "Inbox"],
+      ["#/home", "Now"],
       ["#/projects", "Projects"],
     ]) {
       await goto(page, url, title);
@@ -111,7 +105,7 @@ test.describe("phone frame", () => {
     // CHECK 12.B: no text in the 44px tools row occupies two lines at 390/360.
     for (const width of [390, 360]) {
       await page.setViewportSize({ width, height: 800 });
-      await goto(page, "#/inbox", "Inbox");
+      await goto(page, "#/home", "Now");
       const wrapped = await page.evaluate(() => {
         const row = document.querySelector(".shell-controls");
         if (!row) return [];
@@ -123,24 +117,15 @@ test.describe("phone frame", () => {
         });
         return bad;
       });
-      expect(wrapped, `the inbox tools row wraps text at ${width}px`).toEqual([]);
+      expect(wrapped, `Now's tools row wraps text at ${width}px`).toEqual([]);
+      const overflow = await page.evaluate(() => {
+        const row = document.querySelector(".shell-controls");
+        return row ? [...row.children].filter((el) => el.getBoundingClientRect().right > window.innerWidth).map((el) => el.textContent.trim()) : [];
+      });
+      expect(overflow, `Now's tools row runs off the screen at ${width}px`).toEqual([]);
     }
     await page.setViewportSize({ width: 390, height: 844 });
 
-    // Home at rest paints no header bar and no title. Being absent is not the
-    // rule; being unpainted is.
-    await goto(page, "#/home", homeTitle());
-    await page.evaluate(() => window.scrollTo(0, 0));
-    const homeBarPainted = await page.evaluate(() => {
-      const h = document.querySelector(".shell:has(.home-pad) .shell-head");
-      if (!h) return false;
-      const cs = window.getComputedStyle(h);
-      const painted = cs.backgroundColor !== "rgba(0, 0, 0, 0)" || cs.borderBottomWidth !== "0px";
-      const title = h.querySelector(".shell-title-line");
-      const titleShown = title ? Number(window.getComputedStyle(title).opacity) > 0.05 : false;
-      return painted || titleShown;
-    });
-    expect(homeBarPainted, "Home at rest paints a header bar or its title").toBe(false);
   });
 });
 
@@ -193,8 +178,12 @@ test.describe("desktop chrome", () => {
           const r = e.getBoundingClientRect();
           if (r.height < 2) continue;
           let textX = null;
+          // A label that leads with its glyph starts where the glyph does.
+          const lead = e.firstElementChild;
+          const first = [...e.childNodes].find((node) => node.nodeType === 1 || node.textContent.trim());
+          const glyphFirst = Boolean(lead) && first === lead && lead.matches("svg, .glyph");
           const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
-          const tn = walker.nextNode();
+          const tn = glyphFirst ? null : walker.nextNode();
           if (tn) {
             const range = document.createRange();
             range.selectNodeContents(tn);
@@ -202,8 +191,16 @@ test.describe("desktop chrome", () => {
             if (rr.width > 0) textX = rr.left;
           }
           if (textX === null) textX = r.left + parseFloat(getComputedStyle(e).paddingLeft || "0");
+          // Now's margin is ruled off by its own hairline and carries its own
+          // gutter, so a label there is measured from the rule.
+          const margin = e.closest(".now-mar");
           const pane = stage && r.left >= stage.getBoundingClientRect().left ? stage : idx || stage;
-          const off = pane ? Math.round(textX - pane.getBoundingClientRect().left) : null;
+          const from = margin
+            ? margin.getBoundingClientRect().left + parseFloat(getComputedStyle(margin).borderLeftWidth || "0")
+            : pane
+              ? pane.getBoundingClientRect().left
+              : null;
+          const off = from === null ? null : Math.round(textX - from);
           labels.push({ text: e.textContent.trim().slice(0, 20), offset: off });
         }
         return {
@@ -249,74 +246,39 @@ test.describe("desktop chrome", () => {
   });
 });
 
-test.describe("phone home", () => {
-  test("at rest, scrolled, and its quiet copy", async ({ hub, page }) => {
+test.describe("phone Now", () => {
+  // Now has no exception to the phone frame: the same 76/52 header titled Now,
+  // the three chips in the sticky tools row, and a stream of flat rows.
+  test("at rest, scrolled, and its opening line", async ({ hub, page }) => {
     await goto(page, "#/home", homeTitle());
     await page.evaluate(() => window.scrollTo(0, 0));
-
-    const homeBarPainted = await page.evaluate(() => {
-      const h = document.querySelector(".shell:has(.home-pad) .shell-head");
-      if (!h) return false;
-      const cs = window.getComputedStyle(h);
-      return (
-        cs.backgroundColor !== "rgba(0, 0, 0, 0)" ||
-        cs.borderBottomWidth !== "0px" ||
-        (h.querySelector(".shell-title-line") ? Number(window.getComputedStyle(h.querySelector(".shell-title-line")).opacity) > 0.05 : false)
-      );
-    });
-    expect(homeBarPainted, "Home at rest paints a header bar or its title").toBe(false);
-    await expect(page.locator(".home-gear"), "Home at rest has a gear button").toHaveCount(0);
-
-    const greetingX = await page.evaluate(() => {
-      const el = document.querySelector(".home-welcome h1, .home-greeting, .home-welcome-title");
-      return el ? Math.round(el.getBoundingClientRect().left) : null;
-    });
-    expect(Math.abs((greetingX ?? -1) - 16), "the Home greeting is not at x=16").toBeLessThanOrEqual(2);
+    await expect.poll(async () => Math.round((await headerHeight(page)) ?? 0)).toBe(76);
+    const title = () =>
+      page.evaluate(() => {
+        const el = document.querySelector(".shell-head .shell-title h1, .shell-head .shell-title .shell-title-line");
+        return el ? { text: el.textContent.trim(), x: Math.round(el.getBoundingClientRect().left) } : null;
+      });
+    const rest = await title();
+    expect(rest?.text, "the Now header does not name the screen").toBe("Now");
+    expect(Math.abs((rest?.x ?? -1) - 48), "the Now title is not at x=48 at rest").toBeLessThanOrEqual(2);
 
     await page.evaluate(() => window.scrollTo(0, 100));
     await expect.poll(async () => Math.round((await headerHeight(page)) ?? 0)).toBe(52);
-    const barTitle = await page.evaluate(
-      () => document.querySelector(".shell-head .shell-title h1, .shell-head .shell-title .shell-title-line")?.textContent?.trim(),
-    );
-    const greeting = await page.evaluate(() => document.querySelector(".home-greeting")?.textContent.trim() ?? null);
-    expect(barTitle, "the Home scrolled header carries no title").toBeTruthy();
-    expect(barTitle === "Home" || (greeting && barTitle !== greeting), "the Home bar is not the greeting").toBe(false);
-    const titleX = await page.evaluate(() => {
-      const el = document.querySelector(".shell-head .shell-title h1, .shell-head .shell-title .shell-title-line");
-      return el ? Math.round(el.getBoundingClientRect().left) : null;
-    });
-    expect(Math.abs((titleX ?? -1) - 48), "the Home scrolled title is not at x=48").toBeLessThanOrEqual(2);
+    const scrolled = await title();
+    expect(Math.abs((scrolled?.x ?? -1) - 48), "the Now scrolled title is not at x=48").toBeLessThanOrEqual(2);
     const toolsPinned = await page.evaluate(() => {
       const row = document.querySelector(".shell-controls");
       if (!row) return false;
       const rect = row.getBoundingClientRect();
-      return Math.abs(rect.top - 52) <= 2 && Math.abs(rect.height - 44) <= 2 && row.querySelectorAll(".chip").length >= 3;
+      return Math.abs(rect.top - 52) <= 2 && Math.abs(rect.height - 44) <= 2 && row.querySelectorAll(".chip").length === 3;
     });
-    expect(toolsPinned, "the Home chips are not pinned in the tools row").toBe(true);
+    expect(toolsPinned, "the Now chips are not pinned in the tools row").toBe(true);
 
     await page.evaluate(() => window.scrollTo(0, 0));
-    const summary = await page.evaluate(
-      () => document.querySelector(".home-status, .home-summary")?.textContent.trim() ?? "",
+    await expect(page.locator(".now .now-sum"), "the opening line is not a sentence about what needs you").toHaveText(
+      /^(\w+ agents? needs? you|Nothing waits on you)/,
     );
-    expect(summary, "the Home summary is not a sentence").toContain("waiting on you");
-    const statLine = await page.evaluate(() => {
-      const text = document.querySelector(".home")?.textContent || "";
-      return /\d+\s+unread\s*·|·\s*\d+\s+unread|0 unread · 0 waiting/i.test(text);
-    });
-    expect(statLine, "Home still renders a bullet stat line").toBe(false);
-
-    const cardAroundEvents = await page.evaluate(
-      () =>
-        document.querySelectorAll(
-          ".home-waiting.card, .home-waiting.home-card, .home-newest .card, .home-newest .home-card, .card .home-row, .home-card .home-row",
-        ).length > 0,
-    );
-    expect(cardAroundEvents, "the Home event list is wrapped in a card").toBe(false);
-    const storageIsCard = await page.evaluate(() => {
-      const st = document.querySelector(".home-storage");
-      return st ? st.classList.contains("card") || st.classList.contains("home-card") : false;
-    });
-    expect(storageIsCard, "the Home storage summary is not a card").toBe(true);
+    expect(await page.locator(".now .card").count(), "a list on Now is wrapped in a card").toBe(0);
   });
 });
 

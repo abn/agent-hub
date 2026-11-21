@@ -1,28 +1,26 @@
 // What the reader can reach with a list, a filter, and one key: the rows a query
-// keeps standing under the groups that hold them, the verbs a and r find beside
-// an inbox row rather than only on it, where / lands when the screen is showing
-// a field and when it is not, and what a filter chip's number counts.
+// keeps standing under the groups that hold them, the verbs a and r find on an
+// ask on Now, where / lands when the screen is showing a field and when it is
+// not, and what a chip's number counts.
 //
 // Nothing here reads geometry or the source text, so a redesign that keeps the
 // behaviour passes. Every wait is a web-first assertion on a rendered value, so
 // a slow paint is waited out and a missing one fails with a message rather than
 // with a timeout.
 //
-// The filter is asked on the inbox and on a project feed together because the
-// two draw their rows differently: the inbox wraps a group's rows in a block
-// inside the group, while the feed sets them beside the day heading. A walk that
-// knows only one of the two hides a group that still holds rows, which is how
-// typing into the inbox filter emptied the list while the count line above it
-// still said what had matched.
+// The filter is asked on a project feed, which sets its rows beside the day
+// heading. A walk that judged a group by its own block hid a group that still
+// held rows, which is how typing into a filter once emptied the list while the
+// count line above it still said what had matched.
 
 import { expect } from "@playwright/test";
 import { BODY, open, test } from "./app.mjs";
 
 // The group headings a filter judges, which is the filter's own list rather than
 // a second one here, so a screen that draws another shape is walked by both.
-const HEADINGS = ".day, .hub-group-header, .inbox-group";
-// The rows the keyboard map moves through, as the inbox registers them.
-const KEY_ROWS = ".inbox-row:not(details:not([open]) .inbox-row)";
+const HEADINGS = ".day, .hub-group-header";
+// The rows the keyboard map moves through, as Now registers them.
+const KEY_ROWS = ".now-row:not(.now-quiet[hidden] .now-row)";
 // The field Search opens on, named by its own label.
 const SEARCH_FIELD = "Search the feed, artifacts and session brains";
 
@@ -52,10 +50,6 @@ const readIndex = (page) =>
         visible: drawn(head),
         rows: headed(head),
       })),
-      labels: [...body.querySelectorAll(".inbox-label")].map((label) => ({
-        key: label.dataset.group || text(label).slice(0, 24),
-        visible: drawn(label),
-      })),
     };
   }, HEADINGS);
 
@@ -80,7 +74,6 @@ async function filterHoldsItsGroups(page, { name, terms, miss, where }) {
   await expect(field).toBeVisible();
   const before = await readIndex(page);
   const groups = page.locator(BODY).locator(HEADINGS);
-  const labels = page.locator(`${BODY} .inbox-label`);
   const count = page.locator(`${BODY} .shell-count`);
 
   for (const term of terms) {
@@ -96,12 +89,6 @@ async function filterHoldsItsGroups(page, { name, terms, miss, where }) {
       if (!group.visible) continue;
       if (want.holding[group.key]) await expect(groups.nth(at)).toBeVisible();
       else await expect(groups.nth(at)).toBeHidden();
-    }
-    for (const [at, heading] of before.labels.entries()) {
-      const holds = want.holding[heading.key];
-      if (holds === undefined || !heading.visible) continue;
-      if (holds) await expect(labels.nth(at)).toBeVisible();
-      else await expect(labels.nth(at)).toBeHidden();
     }
     // The count line gives way to the headings again when the query is cleared.
     await field.fill("");
@@ -171,58 +158,28 @@ async function walkTo(page, needle) {
   for (let step = 0; step < Math.abs(steps); step += 1) {
     await page.keyboard.press(steps >= 0 ? "j" : "k");
   }
-  await expect(page.locator('.inbox-row[tabindex="0"]')).toContainText(needle);
+  await expect(page.locator('.now-row[tabindex="0"]')).toContainText(needle);
   return true;
 }
 
-test.describe("the home filter chips", () => {
-  // The Unread chip keeps the newest rows carrying the unread dot, which is what
-  // sits above a project's cursor. Its number was the hub's own unread queue, so
-  // it read "Unread 3" over seven rows.
-  //
-  // It is asked on a phone because Home is a phone screen, and first in the file
-  // because the hub's cursor moves as soon as a project feed has been read and
-  // the dots go with it. Each project has its own seeded hub, so the desktop's
-  // feed read cannot empty the phone's dots: what this ordering buys is that a
-  // new test reading a feed cannot quietly empty them either.
-  test("the unread chip's number counts the rows it reveals", async ({ hub, page }, testInfo) => {
-    test.skip(testInfo.project.name !== "phone", "this is the phone's Home screen");
+test.describe("the Now chips", () => {
+  // A chip is a filter, so its number counts what it shows: the Needs you chip
+  // counts the asks that need the reader now, and pressing it leaves those and
+  // the ones that can wait, and nothing that merely happened.
+  test("the needs-you chip's number counts the asks it shows", async ({ hub, page }) => {
     await open(page, hub, "#/home", "");
-    // The chips are drawn twice on Home, in the tools row and in the pad, so
-    // the flow copy is the one the row of cards belongs to.
-    const chip = page
-      .locator(".home-chips-flow")
-      .getByRole("button", { name: /^Unread \d+$/ });
+    const chip = page.getByRole("button", { name: /^Needs you \d+$/ });
     await expect(chip).toBeVisible();
     const counted = Number((await chip.textContent()).replace(/\D/g, ""));
-    expect(counted, "Home drew no unread rows, so the chip filters nothing to count").toBeGreaterThan(0);
-    // The dot's own label is what marks a row unread, so the rows are found by
-    // what they say rather than by the class that draws it.
-    const unread = page.locator(".home-row").filter({ has: page.getByText("Unread", { exact: true }) });
-    await expect(unread).toHaveCount(counted);
+    expect(counted, "Now drew no asks, so the chip filters nothing to count").toBeGreaterThan(0);
     await chip.click();
-    await expect(chip).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator(".home-row:visible")).toHaveCount(counted);
+    await expect(page.getByRole("button", { name: /^Needs you \d+$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("heading", { name: /Since you looked/ })).toHaveCount(0);
+    await expect(page.locator(".now-ask:not(.is-later)")).toHaveCount(counted);
   });
 });
 
 test.describe("the list filter", () => {
-  test("leaves the rows it matched under the group that holds them, on the inbox", async ({
-    hub,
-    page,
-  }) => {
-    const { approval, inboxRead, searchMiss } = hub.fixture;
-    // One term in the waiting group and one in the unread group: a filter that
-    // judges a group by what follows it gets one of the two wrong.
-    await open(page, hub, "#/inbox", "inbox");
-    await filterHoldsItsGroups(page, {
-      name: "Filter inbox",
-      terms: [approval.split(" ")[0], inboxRead.split(" ")[1]],
-      miss: searchMiss,
-      where: "inbox",
-    });
-  });
-
   test("leaves the rows it matched under the group that holds them, on a project feed", async (
     { hub, page },
     testInfo,
@@ -245,12 +202,6 @@ test.describe("the list filter", () => {
   // screen, and not only out of the count. `.row`'s own `display` beat the
   // browser's `[hidden]` rule, so the filter's `hidden` flag left the row
   // drawn; `.row[hidden] { display: none }` is what makes these hold.
-  test("takes the rows it did not match off the screen, on the inbox", async ({ hub, page }) => {
-    const { approval } = hub.fixture;
-    await open(page, hub, "#/inbox", "inbox");
-    await queryTakesTheRest(page, { name: "Filter inbox", term: approval.split(" ")[0] });
-  });
-
   test("takes the rows it did not match off the screen, on a project feed", async (
     { hub, page },
     testInfo,
@@ -263,34 +214,35 @@ test.describe("the list filter", () => {
 });
 
 test.describe("the single-key verbs", () => {
-  // An inbox row carries no Approve or Reply of its own: the tray a swipe
-  // uncovers is a sibling of the row, so a key that looked only inside the row
-  // found nothing and did nothing at all, on the one screen whose whole purpose
-  // is deciding and answering.
-  test("a and r reach the verbs the selected row keeps beside it", async ({ hub, page }, testInfo) => {
-    test.skip(testInfo.project.name !== "desktop", "the key map moves a desktop index");
+  // An ask on Now names the keys that press its verbs, so a and r reach the
+  // approval and the reply of the selected ask, and once an ask is answered
+  // the selection moves to the ask that took its place.
+  test("a and r reach the verbs of the selected ask", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the key map moves a desktop stream");
     const { approval, question } = hub.fixture;
-    await open(page, hub, "#/inbox", "inbox");
-    const waiting = page.locator('.inbox-group[data-group="waiting"] .inbox-row');
-    const before = await waiting.count();
+    await open(page, hub, "#/inbox", "");
+    const asks = page.locator(".now-ask");
+    const before = await asks.count();
 
     await expect(walkTo(page, approval), `no row carries ${approval}`).resolves.toBe(true);
+    const at = await asks.evaluateAll((rows, want) => rows.findIndex((row) => row.textContent.includes(want)), approval);
     await page.keyboard.press("a");
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { level: 2 })).toContainText(approval);
     await dialog.getByRole("button", { name: "Approve" }).click();
-    await expect(waiting).toHaveCount(before - 1);
+    await expect(asks).toHaveCount(before - 1);
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    // The ask now in its place is the one selected and focused.
+    await expect(asks.nth(Math.min(at, before - 2))).toBeFocused();
 
     await expect(walkTo(page, question), `no row carries ${question}`).resolves.toBe(true);
     await page.keyboard.press("r");
     const field = page.getByRole("textbox", { name: "Your answer" });
     await expect(field).toBeVisible();
-    // The card answers the row it sits after, not one it swallowed: the tray is
-    // a sibling of the row, and so is the card the tray's button opens.
+    // The composer opens under the ask it answers.
     const card = field.locator("xpath=ancestor::form[1]/preceding-sibling::*[1]");
-    await expect(card).toHaveClass(/^inbox-item\b/);
+    await expect(card).toHaveClass(/\bnow-ask\b/);
     await expect(card).toContainText(question);
     await expect(field).toBeFocused();
   });
@@ -307,18 +259,10 @@ test.describe("the search key", () => {
   ) => {
     test.skip(testInfo.project.name !== "phone", "a desktop shows the filter this key is about");
     const { searchTerm } = hub.fixture;
-    await open(page, hub, "#/inbox", "inbox");
-    // The case that works: a screen showing its filter takes the key, and what
-    // is typed after it lands in that filter.
-    const filter = page.getByRole("searchbox", { name: "Filter inbox" });
-    await page.keyboard.press("/");
-    await expect(filter).toBeFocused();
-    await filter.pressSequentially("release");
-    await expect(filter).toHaveValue("release");
-
-    for (const segment of ["feed", "wiki", "artifacts", "sessions"]) {
-      const where = `phone project ${segment}`;
-      await open(page, hub, `#/projects/${hub.projectId}/${segment}`, segment);
+    for (const segment of ["now", "feed", "wiki", "artifacts", "sessions"]) {
+      const where = segment === "now" ? "phone Now" : `phone project ${segment}`;
+      if (segment === "now") await open(page, hub, "#/home", "");
+      else await open(page, hub, `#/projects/${hub.projectId}/${segment}`, segment);
       await page.keyboard.press("/");
       const search = page.getByRole("textbox", { name: SEARCH_FIELD });
       await expect(page, `${where}: / did not fall through to Search`).toHaveURL(/#\/search/);

@@ -54,8 +54,10 @@ function setCurrent(screen, path = "") {
   // More stays current while they are open.
   const isPushedFromMore =
     screen === "settings" || screen === "storage" || screen === "access" || screen === "agents";
-  const railNav = screen === "artifacts" ? "projects" : screen;
-  const tabNav = screen === "artifacts" ? "projects" : isPushedFromMore ? "more" : screen;
+  // The Inbox's address is Now showing what needs the reader, so it marks Now.
+  const own = screen === "artifacts" ? "projects" : screen === "inbox" ? "home" : screen;
+  const railNav = own;
+  const tabNav = isPushedFromMore ? "more" : own;
 
   document.querySelectorAll(".tabbar a, .rail a").forEach((anchor) => {
     if (anchor.classList.contains("rail-project-item")) {
@@ -83,7 +85,8 @@ function setCurrent(screen, path = "") {
       else anchor.removeAttribute("aria-current");
     }
   });
-  document.title = screen.charAt(0).toUpperCase() + screen.slice(1) + " · Agent Hub";
+  const name = own === "home" ? "now" : screen;
+  document.title = name.charAt(0).toUpperCase() + name.slice(1) + " · Agent Hub";
 }
 
 export async function render() {

@@ -104,8 +104,13 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
-        path: "/home.mjs",
-        body: include_bytes!("../../web/home.mjs"),
+        path: "/now.mjs",
+        body: include_bytes!("../../web/now.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/now-model.mjs",
+        body: include_bytes!("../../web/now-model.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {

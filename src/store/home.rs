@@ -33,9 +33,9 @@ pub struct HomeUnseen {
     pub project_display_name: Option<String>,
 }
 
-/// How many waiting items Home carries. The card shows a few and hands over to
-/// the Inbox; `waiting` holds the size of the whole queue.
-pub const HOME_WAITING_LIMIT: i64 = 5;
+/// How many waiting items Home carries. `waiting` holds the size of the whole
+/// queue, so a longer queue says how much is left.
+pub const HOME_WAITING_LIMIT: i64 = 100;
 
 /// The overview shown on Home.
 ///
@@ -48,7 +48,7 @@ pub struct Home {
     /// Items waiting on a decision.
     pub waiting: i64,
     /// The newest of those items themselves, newest first, at most
-    /// [`HOME_WAITING_LIMIT`] of them, so the card does not depend on a
+    /// [`HOME_WAITING_LIMIT`] of them, so the list does not depend on a
     /// waiting item being among the newest events.
     pub waiting_items: Vec<inbox::InboxItem>,
     /// Agents with a session touched inside the active window.

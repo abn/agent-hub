@@ -57,19 +57,14 @@ const COMPOSERS = [
     },
   },
   {
-    name: "inbox row",
+    name: "Now row",
     label: "Your answer",
     action: "Send",
     empty: "Write a reply to send it.",
     open: async (page, hub) => {
       await page.goto(`${hub.baseUrl}/#/inbox`);
-      // A question row's Reply lives in the tray a swipe uncovers; the press is
-      // what a reader's swipe and tap end in.
-      const reply = page
-        .locator(".shell-index")
-        .getByRole("button", { name: "Reply", exact: true, includeHidden: true })
-        .first();
-      await reply.dispatchEvent("click");
+      // A question's Reply sits at the end of its line on Now.
+      await page.locator(".now-ask").getByRole("button", { name: "Reply", exact: true }).first().click();
     },
   },
   {
@@ -82,18 +77,6 @@ const COMPOSERS = [
         `${hub.baseUrl}/#/projects/${encodeURIComponent(hub.projectId)}/feed?event=${encodeURIComponent(hub.questionId)}`,
       );
       await page.locator(".feed-stage-actions").getByRole("button", { name: "Reply", exact: true }).click();
-    },
-  },
-  {
-    name: "home row",
-    label: "Your answer",
-    action: "Send",
-    empty: "Write a reply to send it.",
-    // A phone's Home lists what waits without the row's own Reply.
-    pointers: ["composer-desktop"],
-    open: async (page, hub) => {
-      await page.goto(`${hub.baseUrl}/#/home`);
-      await page.locator(".home-actions").getByRole("button", { name: "Reply", exact: true }).first().click();
     },
   },
   {

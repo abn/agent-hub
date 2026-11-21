@@ -1,5 +1,5 @@
 // One keyboard map for the whole app: a search key, a roving selection through
-// the rows of the screen you are on, and the two verbs the inbox owns. It
+// the rows of the screen you are on, and the verbs a row's own controls name. It
 // reads the markup the screens already paint rather than asking them to
 // describe themselves, so a screen joins the map by having rows.
 
@@ -9,26 +9,23 @@ import { asideAvailable, toggleAside } from "./shell-layout.mjs";
 
 // What a key does to a row, found in the markup the screens already paint: the
 // row's own link is what Enter follows, and the two verbs are the buttons the
-// delegated click handler already owns.
-//
-// A verb is looked for on the row first and on the block that holds the row
-// second. The inbox keeps Approve and Reply in the tray a swipe uncovers, which
-// is a sibling of the row rather than a child of it, so a row drawn without a
-// verb of its own still has one the key can press.
-const verb = (row, action) =>
-  row.querySelector(`[data-action="${action}"]`) ||
-  row.closest(".inbox-item")?.querySelector(`[data-action="inbox-tray-${action}"]`);
-
+// delegated click handler already owns. A row that names its open link with
+// `data-open` is followed there rather than to its first link.
 const BEHAVIOUR = {
-  open: (row) => row.querySelector("a[href]"),
-  approve: (row) => verb(row, "approve"),
-  reply: (row) => verb(row, "answer"),
+  open: (row) => row.querySelector("a[data-open]") || row.querySelector("a[href]"),
+  approve: (row) => row.querySelector('[data-action="approve"]'),
+  reply: (row) => row.querySelector('[data-action="answer"]'),
 };
+
+// The keys a row's own controls answer to. A control names them in `data-key`
+// ("1 a" is the first choice and the approve key), so the screen that draws the
+// row decides what each key does on it. A control a whole screen owns, such as
+// a tier's fold, names its key in `data-screen-key` instead.
+const ROW_KEYS = /^[1-9aersq]$|^E$/;
 
 // The screens the selection moves through. The other screens are fields and
 // cards rather than a list, so a selection there would have nothing to mean.
 const screens = {
-  inbox: { rows: ".row" },
   feed: { rows: ".row" },
   sessions: { rows: ".row" },
   search: { rows: ".row" },
@@ -42,8 +39,14 @@ const SHORTCUTS = [
   ["j", "Next row"],
   ["k", "Previous row"],
   ["Enter", "Open the selected row"],
+  ["o", "Open the selected row"],
+  ["1 to 9", "Choose an answer on the selected ask"],
   ["a", "Approve the selected row"],
   ["r", "Reply on the selected row"],
+  ["e", "Mark the selected idea done"],
+  ["s", "Snooze the selected ask for an hour, or bring it back"],
+  ["q", "Show or hide the quiet tier on Now"],
+  ["E", "Mark everything since you looked as seen"],
   ["c", "Toggle the comments aside"],
   ["Esc", "Close what is on top"],
   ["?", "This list"],
@@ -177,6 +180,30 @@ function act(verb, event) {
   target.click();
 }
 
+// A key a control on the selected row names, or one a control on the screen
+// names. Whether it pressed anything is the answer, so an unclaimed `a` or `r`
+// still falls through to the verbs above.
+function keyed(event) {
+  const key = CSS.escape(event.key);
+  const row = chosen();
+  const target =
+    row?.querySelector(`[data-key~="${key}"]`) || main.querySelector(`[data-screen-key~="${key}"]`);
+  if (!target) return false;
+  event.preventDefault();
+  target.click();
+  return true;
+}
+
+// `o` opens the selected row wherever focus is inside it, where Enter on a
+// control is that control's own.
+function openKey(event) {
+  const row = chosen();
+  const target = row && BEHAVIOUR.open(row);
+  if (!target) return;
+  event.preventDefault();
+  target.click();
+}
+
 // `c` toggles the aside, which is the stage's own comment control. A screen
 // with no such control has no aside to toggle, so the key does nothing there.
 // Where the layout draws no aside, the control opens the sheet that stands in
@@ -269,6 +296,7 @@ function onKey(event) {
     return;
   }
   if (blocked(event)) return;
+  if (ROW_KEYS.test(event.key) && keyed(event)) return;
   if (event.key === "/") focusSearch(event);
   else if (event.key === "j") {
     event.preventDefault();
@@ -277,6 +305,7 @@ function onKey(event) {
     event.preventDefault();
     move(-1);
   } else if (event.key === "Enter") openRow(event);
+  else if (event.key === "o") openKey(event);
   else if (event.key === "c") toggleAsideKey(event);
   else if (event.key === "a") act("approve", event);
   else if (event.key === "r") act("reply", event);

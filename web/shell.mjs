@@ -176,7 +176,7 @@ async function fillNodeLine() {
 }
 
 // The tab bar's badge is the app's one count. The rail badge mirrors it so
-// the desktop Inbox link reads the same number.
+// the desktop's Now link reads the same number.
 const tabBadge = document.getElementById("tab-badge");
 const topBadge = document.getElementById("top-badge");
 function mirrorBadge() {

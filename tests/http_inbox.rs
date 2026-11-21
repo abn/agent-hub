@@ -141,6 +141,59 @@ async fn inbox_lists_the_items() {
 }
 
 #[tokio::test]
+async fn an_item_names_the_session_it_was_asked_in() {
+    let state = state().await;
+    let asked = questions::post(
+        &state.db,
+        &agent_hub::limits::InboxCaps::disabled(),
+        0,
+        NewQuestion {
+            actor: "agent-one",
+            project_id: "proj",
+            subject: "Ship it?",
+            body: None,
+            context: None,
+            options: None,
+            idempotency_key: None,
+            session_id: Some("s-run-7"),
+            deadline: None,
+        },
+    )
+    .await
+    .expect("post question");
+    let bare = seed_question(&state, "Hold it?").await;
+
+    let body = home(&state).await;
+    let items = body["waiting_items"].as_array().expect("waiting items");
+    let by_id = |id: &str| {
+        items
+            .iter()
+            .find(|item| item["event_id"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is waiting: {body}"))
+    };
+    assert_eq!(by_id(&asked)["session_id"], "s-run-7");
+    assert!(
+        by_id(&bare).get("session_id").is_none(),
+        "an item asked outside a session carries no session"
+    );
+
+    let response = router(state.clone())
+        .oneshot(request("GET", "/api/v1/inbox", Some("Bearer token"), None))
+        .await
+        .expect("request");
+    let listed = json_body(response).await;
+    let item = listed["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["event_id"] == asked.as_str())
+        .cloned()
+        .expect("the question is listed");
+    assert_eq!(item["session_id"], "s-run-7");
+}
+
+#[tokio::test]
 async fn inbox_filters_by_status_and_rejects_an_unknown_one() {
     let state = state().await;
     let question_id = seed_question(&state, "Ship it?").await;
@@ -766,7 +819,7 @@ async fn home_lists_what_waits_even_when_newer_events_have_buried_it() {
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Engine Room").await;
     let approval = seed_approval(&state, "Restart the node?").await;
     let question = seed_question(&state, "Deploy tonight?").await;
-    for n in 0..12 {
+    for n in 0..52 {
         seed_finished(&state, &format!("report {n} done")).await;
     }
 
@@ -778,7 +831,7 @@ async fn home_lists_what_waits_even_when_newer_events_have_buried_it() {
             .expect("recent")
             .iter()
             .all(|event| event["needs_action"] == false),
-        "the newest ten hold nothing that waits: {body}"
+        "the newest fifty hold nothing that waits: {body}"
     );
     let items = body["waiting_items"]
         .as_array()
@@ -817,21 +870,21 @@ async fn home_lists_what_waits_even_when_newer_events_have_buried_it() {
 async fn home_caps_the_waiting_items_and_keeps_the_total_in_the_count() {
     let state = state().await;
     let mut asked = Vec::new();
-    for n in 0..7 {
+    for n in 0..102 {
         asked.push(seed_question(&state, &format!("question {n}?")).await);
     }
     seed_finished(&state, "unread work is not waiting").await;
 
     let body = home(&state).await;
-    assert_eq!(body["waiting"], 7, "the count is the whole queue");
+    assert_eq!(body["waiting"], 102, "the count is the whole queue");
     let ids: Vec<&str> = body["waiting_items"]
         .as_array()
         .unwrap_or_else(|| panic!("the waiting items themselves: {body}"))
         .iter()
         .map(|item| item["event_id"].as_str().expect("event id"))
         .collect();
-    let newest: Vec<&str> = asked.iter().rev().take(5).map(String::as_str).collect();
-    assert_eq!(ids, newest, "the five newest, newest first");
+    let newest: Vec<&str> = asked.iter().rev().take(100).map(String::as_str).collect();
+    assert_eq!(ids, newest, "the hundred newest, newest first");
 }
 
 #[tokio::test]

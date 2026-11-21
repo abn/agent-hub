@@ -40,6 +40,10 @@ pub struct InboxItem {
     /// or `decline` for an approval, `close` for a question.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_expiry: Option<String>,
+    /// The session the item was asked during, when one was in scope, so a
+    /// reader can see which run is waiting on the answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// The outcome of an approval, as its inbox entry shows it.
@@ -285,9 +289,9 @@ async fn list_as(
         "CASE WHEN i.status = 'read' THEN 'unread' ELSE i.status END,
                 e.created_at,
                 CASE WHEN i.status IN ('unread', 'read') THEN e.created_at ELSE i.updated_at END,
-                i.expires_at, i.on_expiry"
+                i.expires_at, i.on_expiry, e.session_id"
     } else {
-        "i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry"
+        "i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry, e.session_id"
     };
     // The answer that decides the entry, when one has: an answer on the entry's
     // own thread in the same project. A cursor counts it, so an answer that
@@ -547,7 +551,8 @@ pub async fn open_items(db: &Database, limit: i64) -> Result<Vec<InboxItem>> {
     let mut rows = conn
         .query(
             "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
-                    i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry
+                    i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry,
+                    e.session_id
              FROM inbox i JOIN events e ON e.id = i.event_id
              WHERE i.status IN ('action', 'waiting')
              ORDER BY e.id DESC LIMIT ?1",
@@ -932,6 +937,7 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         project_display_name: None,
         expires_at: text_at(row, 9)?,
         on_expiry: text_at(row, 10)?,
+        session_id: text_at(row, 11)?,
     })
 }
 

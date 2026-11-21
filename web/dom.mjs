@@ -38,6 +38,9 @@ export function esc(value) {
 // what this returns still goes through `esc` or `textContent`.
 export const projectName = (row) => row.project_display_name || row.project_id;
 
+// A count and its noun: "1 agent", "3 agents".
+export const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 // The kind badge: a 14px line glyph in a 24px box, or a typographic mark where
 // the design uses one. Kinds are not tinted, so the shape is the whole of the
 // difference a reader sees, and the drawn mark is not a difference a reader can
@@ -91,10 +94,14 @@ const NAMES = {
 // `constructor` is a kind nobody drew, not the thing every object carries.
 const own = (table, key) => (Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined);
 
-export const glyph = (kind) =>
-  `<span class="glyph" data-kind="${esc(kind)}" aria-hidden="true">${
-    own(MARKS, kind) || MARKS.signal
-  }</span><span class="sr-only">${esc(own(NAMES, kind) || kind)}</span>`;
+// The kind's word, which the row carries for a reader who gets no glyph.
+export const kindName = (kind) => own(NAMES, kind) || kind;
+
+// The badge alone, for a place whose own words already name the kind.
+export const kindMark = (kind) =>
+  `<span class="glyph" data-kind="${esc(kind)}" aria-hidden="true">${own(MARKS, kind) || MARKS.signal}</span>`;
+
+export const glyph = (kind) => `${kindMark(kind)}<span class="sr-only">${esc(kindName(kind))}</span>`;
 
 // The waiting state on an index row, drawn the same way in every index so the
 // subject keeps the whole title line. The action dot ends the row with the

@@ -11,17 +11,23 @@
 // the app already ships, split into the same two lines, because the design
 // leaves those two empty states undrawn.
 export const EMPTY_COPY = {
-  home: {
-    screen: "home",
-    title: "Quiet night.",
-    body: "Nothing is waiting on you.",
+  now: {
+    screen: "now",
+    title: "The desk is clear.",
+    body: "Nothing waits on you, and nothing has happened yet.",
     link: "Create a project",
   },
-  inbox: {
-    screen: "inbox",
-    title: "Inbox is clear.",
-    body: "Finished work and questions from your agents will land here.",
-    link: "Show read items",
+  needs: {
+    screen: "now",
+    title: "Nothing waits on you.",
+    body: "Questions and approvals from your agents land here.",
+    link: "Show everything",
+  },
+  since: {
+    screen: "now",
+    title: "Nothing is new since you looked.",
+    body: "What your agents finish and publish lands here first.",
+    link: "Show everything",
   },
   feed: {
     screen: "project feed",

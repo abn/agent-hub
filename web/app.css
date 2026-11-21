@@ -41,7 +41,6 @@ main { flex: 1; width: 100%; min-width: 0; margin: 0; padding: var(--s-4) var(--
 .settings-group,
 .settings .card,
 .pset .card,
-.home,
 .inbox-detail {
   max-width: 640px;
   box-sizing: border-box;
@@ -111,11 +110,6 @@ h2.day, .section-label {
 h3.group {
   font-size: var(--t-13); font-weight: 600; color: var(--ink-2);
   margin: var(--s-3) 0 var(--s-1);
-}
-.group-n {
-  display: inline-block; min-width: 20px; padding: 0 var(--s-2); border-radius: var(--r-1);
-  background: var(--surface-2); color: var(--ink-2);
-  font-size: var(--t-12); font-weight: 600; text-align: center;
 }
 
 .card {
@@ -589,9 +583,9 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 /* end component: rail */
 
 /* component: tab bar */
-/* The shell's five destinations: Home · Inbox · Projects · Search · More.
-   60px tall, 1px line top, 5 flex:1 items, 22px glyphs, 12px labels, 3px gap.
-   The unread badge rides on the inbox icon. */
+/* The shell's four destinations: Now · Projects · Search · More.
+   60px tall, 1px line top, 4 flex:1 items, 22px glyphs, 12px labels, 3px gap.
+   The needs-you badge rides on the Now icon. */
 .tabbar a {
   position: relative; flex: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -734,7 +728,6 @@ aside.pane { display: none; }
   .panes.panes-sessions .pane-list {
     --index-w: 340px;
   }
-  .panes.panes-inbox .pane-list,
   .panes.panes-search .pane-list {
     --index-w: 420px;
   }
@@ -2088,100 +2081,6 @@ button.empty-link {
   }
 }
 /* end component: storage */
-/* component: home */
-/* The day at a glance: the title and its summary line, the waiting card, the
-   newest events across projects, and the storage card, 20px apart as the
-   design stacks them. */
-.home { display: flex; flex-direction: column; gap: var(--s-5); width: 100%; margin-left: 0; margin-right: auto; }
-.home h1 { line-height: 1.15; margin: 0; }
-/* The status strip's node line, right-aligned over the title as the design
-   draws it. From the width the top bar shows at, the top bar says it. */
-.home-node { margin: 0 0 var(--s-2); text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
-@media (min-width: 720px) {
-  .home-node { display: none; }
-}
-.home-summary { margin: var(--s-1) 0 0; font-size: var(--t-15); color: var(--ink-2); }
-/* A card here holds rows edge to edge, so it carries no padding of its own.
-   It does not clip, because a focused row draws its ring outside its box; the
-   rows go transparent instead so the rounded corners stay the card's. */
-.home-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2);
-}
-.home-card .row { background: transparent; }
-.home h2 {
-  margin: 0; font-size: var(--t-13); font-weight: 600; line-height: 1.3; color: var(--ink-2);
-}
-.home-newest h2 { padding-bottom: var(--s-2); }
-/* Waiting is the action tone, one step louder than the rest and never alarm.
-   The design draws this header 37px tall; it is 44px here so the Inbox link in
-   it is a full target. */
-.home-waiting h2 { color: var(--action); }
-.home-card-head {
-  display: flex; align-items: center; min-height: 44px; padding: 0 var(--s-4);
-  border-bottom: 1px solid var(--line);
-}
-.home-more {
-  margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-1); min-height: 44px;
-  font-size: var(--t-13); font-weight: 500; color: var(--ink); text-decoration: none;
-}
-.home-rest {
-  display: flex; align-items: center; min-height: 44px; padding: 0 var(--s-4);
-  font-size: var(--t-13); font-weight: 500; color: var(--ink); text-decoration: none;
-}
-/* The title is the row's link and its hit area is the whole row. The time
-   sits above that area, so pressing it still shows the full stamp. */
-.home-row { position: relative; }
-.home-waiting .home-row { align-items: center; }
-.home-row .home-link { display: block; color: inherit; text-decoration: none; }
-.home-link::after { content: ""; position: absolute; inset: 0; }
-.home-waiting .home-link { font-weight: 600; }
-/* A row the reader has already seen steps back: regular weight, second ink. */
-.home-newest .home-row:not(.unread) .home-link { font-weight: 400; color: var(--ink-2); }
-.home-meta { margin-top: var(--s-1); font-size: var(--t-12); color: var(--ink-3); overflow-wrap: anywhere; }
-.home-row .ts { z-index: 1; }
-.home-row .dot-unread { margin-top: var(--s-2); }
-.home-chev { flex: none; display: inline-flex; color: var(--ink-3); }
-.home-actions,
-.home-actions button {
-  display: none;
-}
-@media (min-width: 720px) {
-  .home-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-2);
-    position: relative;
-    z-index: 1;
-    flex: none;
-  }
-  .home-actions button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 30px;
-    padding: 0 var(--s-3);
-    font-size: var(--t-13);
-    font-weight: 600;
-  }
-  .home-waiting .home-chev {
-    display: none;
-  }
-}
-/* The storage card is one link to the Storage screen. The bar draws the two
-   numbers above it and the line under it says the same share in words. The
-   fill is to scale, never widened: under 1% the card draws no bar. */
-.home-storage {
-  display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4) var(--s-4);
-  color: inherit; text-decoration: none;
-}
-.home-storage-head { display: flex; align-items: baseline; font-size: var(--t-13); color: var(--ink-2); }
-.home-storage-label { font-weight: 600; }
-.home-storage-n { margin-left: auto; }
-.home-bar { display: block; height: 6px; border-radius: var(--r-1); background: var(--surface-2); overflow: hidden; }
-.home-bar span { display: block; height: 100%; background: var(--ink-3); }
-.home-storage-hint { font-size: var(--t-12); color: var(--ink-3); }
-.home .empty-state { margin-bottom: 0; }
-/* end component: home */
 /* component: project-settings */
 /* The gear in the project header, and the settings form it opens. The gear's
    drawn glyph is the design's 18px; its box is the 44px a finger needs. */
@@ -2556,124 +2455,18 @@ button.empty-link {
 }
 /* end component: feed */
 /* component: inbox */
-/* The title row: the page title, the filter as a 36px outline button, and the
-   bulk verb as accent text. Each drawn box is the design's; the target it
-   answers to is 44px. */
-.inbox-top { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-2); }
-.inbox-top h1 { flex: 1; margin: 0; }
-.inbox-filter, .inbox-quiet { position: relative; font-size: var(--t-13); }
-.inbox-filter { min-height: 36px; padding: 0 var(--s-3); }
-.inbox-filter::after, .inbox-top .inbox-quiet::after, .inbox-sync .inbox-quiet::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px;
-  transform: translateY(-50%);
-}
-/* Pressed is said twice: the fill, and the state a reader hears. */
-.inbox-filter[aria-pressed="true"] { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
+/* One item at full size, opened from Now. The quiet verb is a text button at
+   the form size whose target is 44px. */
+.inbox-quiet { position: relative; font-size: var(--t-13); }
 button.inbox-quiet {
   min-height: 36px; padding: 0 var(--s-2); border-color: transparent;
   background: transparent; color: var(--ink-2);
 }
-button.inbox-quiet[disabled] { background: transparent; border-color: transparent; color: var(--ink-3); }
-.shell-trailing-btn,
-button.inbox-quiet.shell-trailing-btn {
-  color: var(--ink-2);
-}
-button.inbox-quiet.shell-trailing-btn[disabled] {
-  color: var(--ink-3);
-}
-.row button.inbox-quiet { min-height: 32px; }
-/* The last-synced line is the whole of the refresh indicator. */
-.inbox-sync {
-  display: flex; align-items: center; justify-content: space-between; gap: var(--s-2);
-  margin: 0; min-height: 44px; color: var(--ink-3);
-}
-.inbox-sync .mono { color: var(--ink-3); }
-/* A finger moving sideways on a row is the row's, and at the top of the page a
-   finger moving down is the pull. Anything else is the page scrolling. A
-   browser that does not know the second value keeps the first. The inbox is the
-   shell whose segment says inbox; there is no separate screen element. */
-.shell[data-segment="inbox"] { touch-action: pan-y; }
-.shell[data-segment="inbox"].at-top { touch-action: pan-down; }
-
-.inbox-label { margin: var(--s-4) 0 var(--s-1); }
-.inbox-label[data-group="waiting"] { color: var(--action); }
-.inbox-group h3.group { margin: var(--s-2) 0 var(--s-1); }
-/* Full bleed on a phone, as the design draws it: a surface band ruled top and
-   bottom. Inside the desktop list pane the band keeps the pane's edges. */
-.inbox-rows {
-  margin: 0 calc(-1 * var(--s-4)) var(--s-2);
-  background: var(--surface);
-  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-}
-@media (min-width: 1100px) {
-  .pane-list .inbox-rows { margin-left: 0; margin-right: calc(-1 * var(--s-4)); }
-}
-.inbox-earlier > summary {
-  display: flex; align-items: center; min-height: 44px; margin: var(--s-2) 0 0;
-  cursor: pointer; border-radius: var(--r-1);
-}
-
-.inbox-item { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
-.inbox-item:last-child { border-bottom: 0; }
-.inbox-item[aria-current="true"] .inbox-row { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
-.inbox-row { position: relative; border-bottom: 0; touch-action: pan-y; }
-/* The item clips what leaves it, so the ring is drawn inside the row. */
-.inbox-row:focus-visible, .swipe-tray-actions button:focus-visible {
-  outline-offset: -2px; border-radius: 0; box-shadow: inset 0 0 0 2px var(--accent);
-}
-.inbox-head { display: flex; gap: var(--s-2); align-items: baseline; }
-.inbox-head .title { flex: 1; min-width: 0; }
 .inbox-time { flex: none; font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); white-space: nowrap; }
-.inbox-row .title a { color: inherit; text-decoration: none; }
-/* The title's link covers the row, so a press on the glyph, the body or the
-   foot opens the item; the row's own controls sit above it. */
-.inbox-row .title a::after { content: ""; position: absolute; inset: 0; }
-.inbox-row .inbox-acts, .inbox-row .ts { position: relative; z-index: 1; }
-.inbox-row .title a:hover { text-decoration: underline; }
-/* Unread is the dot, the weight and the word beside the dot. Read rows drop
-   to the quieter ink throughout. */
-.inbox-row.is-unread .title, .inbox-row.is-waiting .title { font-weight: 600; color: var(--ink); }
-.inbox-row.is-read .title { font-weight: 500; color: var(--ink-2); }
-.inbox-row .dot-unread { margin-top: var(--s-2); }
-.inbox-body {
-  margin-top: var(--s-1); font-size: var(--t-13); color: var(--ink-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.inbox-foot {
-  display: flex; align-items: baseline; gap: var(--s-1); margin-top: var(--s-1); min-width: 0;
-  font-size: var(--t-12); color: var(--ink-3);
-}
-.inbox-row.is-waiting .inbox-foot { margin-top: var(--s-2); }
-.inbox-foot .pill-status { margin-right: var(--s-1); }
-.inbox-foot > :not(.inbox-actor) { flex: none; }
-/* A deadline the asking agent set, said in words on the row: what it will do,
-   or what it did. Text, never a tint, carries it. */
-.inbox-deadline { margin-top: var(--s-1); font-size: var(--t-12); color: var(--ink-2); }
+/* A deadline the asking agent set, said in words under the title: what it will
+   do, or what it did. Text, never a tint, carries it. */
 .inbox-detail-deadline { margin: var(--s-2) 0 0; font-size: var(--t-13); color: var(--ink-2); }
 .inbox-project { font-weight: 600; color: var(--ink-2); }
-.inbox-actor { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inbox-acts { margin-left: auto; display: flex; gap: var(--s-2); flex: none; }
-.inbox-acts button { font-size: var(--t-13); }
-.inbox-acts button.action { font-weight: 600; }
-
-/* The trays sit under the row and the row slides off them. There is no eased
-   motion to switch off: the row follows the finger, or with reduced motion
-   asked for it stays put and the release reveals. */
-.swipe-tray { position: absolute; top: 0; bottom: 0; display: flex; }
-.swipe-tray[hidden] { display: none; }
-.swipe-tray-read {
-  left: 0; width: 112px; align-items: center; justify-content: center; gap: var(--s-2);
-  background: var(--accent-bg); color: var(--ink);
-  font-size: var(--t-13); font-weight: 600;
-}
-.swipe-tray-actions { right: 0; justify-content: flex-end; }
-.swipe-tray-actions button {
-  width: 88px; min-height: 0; padding: 0; border: 0; border-radius: 0;
-  background: var(--surface-2); color: var(--ink);
-  font-size: var(--t-13); font-weight: 600;
-}
-.swipe-tray-actions button.action { background: var(--action); color: var(--ink-inverse); }
-.inbox-item + .composer, .inbox-rows > .composer { margin: 0; padding: var(--s-2) var(--s-4) var(--s-3); border-bottom: 1px solid var(--line); }
 
 /* The medium card: one item at full size. The stage body carries no padding,
    so the card holds the pane's own 16px gutter itself. Without it the card's
@@ -2686,14 +2479,9 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   padding: var(--s-4) var(--s-4) var(--s-6);
   box-sizing: border-box;
 }
-/* The feed stage holds its gutter the same way, inside the same 640 box. */
+/* The header's back control does this job on a desktop, so the card's own
+   back link is the phone's. */
 .inbox-back { display: inline-flex; align-items: center; align-self: flex-start; min-height: 44px; font-size: var(--t-13); font-weight: 500; text-decoration: none; }
-.inbox-close-label { display: none; }
-@media (min-width: 1100px) {
-  .inbox-back { min-width: 44px; justify-content: center; }
-  .inbox-back-arrow, .inbox-back-label { display: none; }
-  .inbox-close-label { display: inline; }
-}
 .inbox-detail-head { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .inbox-detail-meta { margin-left: auto; font-size: var(--t-12); color: var(--ink-3); }
 /* The status pill and the meta share one line until the phone cannot hold
@@ -2713,6 +2501,12 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .inbox-answers button { min-height: 44px; }
 .inbox-answers button.action { font-weight: 600; }
 .inbox-reply .composer { margin: 0; }
+/* The groups an artifacts index draws its rows in. */
+.inbox-rows {
+  margin: 0 calc(-1 * var(--s-4)) var(--s-2);
+  background: var(--surface);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
 /* end component: inbox */
 
 /* Sessions phone layout */
@@ -2833,41 +2627,16 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   color: var(--ink);
 }
 
-/* Inbox: resolved earlier and snooze */
-.inbox-snooze-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 var(--s-4) var(--s-2);
-}
-
-.inbox-snooze-bar button,
+/* Inbox: an item's outcome and snooze */
 .inbox-detail-snooze-wrap button {
   min-height: 44px;
-}
-
-.inbox-snooze-info {
-  margin: 0 0 var(--s-2);
-  font-size: var(--t-13);
-  color: var(--ink-2);
-}
-
-.inbox-outcome {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  margin-top: var(--s-1);
+  font-size: var(--t-15);
 }
 
 .pill-outcome {
   font-size: var(--t-12);
   font-weight: 500;
   text-transform: uppercase;
-}
-
-.inbox-outcome-note {
-  font-size: var(--t-13);
-  color: var(--ink-2);
-  font-style: italic;
 }
 
 .inbox-detail-resolved-note {
@@ -2893,16 +2662,6 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 
 .inbox-detail-snooze-wrap {
   margin-top: var(--s-4);
-}
-
-.inbox-row.is-read,
-.inbox-row.is-resolved {
-  color: var(--ink-2);
-}
-
-.inbox-row [data-action="inbox-read"],
-.inbox-row [data-action="inbox-unread"] {
-  color: var(--ink-2);
 }
 
 /* Projects index */
@@ -6438,41 +6197,6 @@ a.session-back {
 }
 
 /* component: project navigation and create */
-/* Home header phone settings gear */
-.home-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 56px;
-}
-.home-gear {
-  min-width: 44px;
-  min-height: 44px;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-2);
-  text-decoration: none;
-  border-radius: var(--r-1);
-}
-.home-gear:hover {
-  color: var(--ink);
-}
-.home-gear:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
-.home-gear svg {
-  display: block;
-}
-@media (min-width: 720px) {
-  .home-gear {
-    display: none;
-  }
-}
-
 /* Projects empty state */
 .projects-empty {
   flex: 1;
@@ -6831,13 +6555,11 @@ a.session-back {
 .proj-head .proj-gear {
   margin: 0;
 }
-.proj-overflow-wrap,
-.inbox-overflow-wrap {
+.proj-overflow-wrap {
   position: relative;
   flex: none;
 }
-.proj-overflow-btn,
-.inbox-overflow-btn {
+.proj-overflow-btn {
   flex: none;
   width: var(--ctl);
   height: var(--ctl);
@@ -6852,31 +6574,23 @@ a.session-back {
   border-radius: var(--r-1);
   cursor: pointer;
 }
-.inbox-overflow-btn {
-  margin: 0;
-}
-.proj-overflow-btn:hover,
-.inbox-overflow-btn:hover {
+.proj-overflow-btn:hover {
   background: var(--surface-2);
 }
-.proj-overflow-btn:focus-visible,
-.inbox-overflow-btn:focus-visible {
+.proj-overflow-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.proj-overflow-btn svg,
-.inbox-overflow-btn svg {
+.proj-overflow-btn svg {
   display: block;
 }
 @media (pointer: coarse) {
-  .proj-overflow-btn,
-  .inbox-overflow-btn {
+  .proj-overflow-btn {
     width: var(--tap);
     height: var(--tap);
   }
 }
-.proj-overflow-menu,
-.inbox-overflow-menu {
+.proj-overflow-menu {
   position: absolute;
   top: 44px;
   right: 0;
@@ -6891,12 +6605,10 @@ a.session-back {
   display: flex;
   flex-direction: column;
 }
-.proj-overflow-menu[hidden],
-.inbox-overflow-menu[hidden] {
+.proj-overflow-menu[hidden] {
   display: none;
 }
-.proj-overflow-menu .proj-menu-item,
-.inbox-overflow-menu .inbox-menu-item {
+.proj-overflow-menu .proj-menu-item {
   min-height: 44px;
   padding: 0 var(--s-4);
   display: flex;
@@ -6912,12 +6624,10 @@ a.session-back {
   box-sizing: border-box;
   cursor: pointer;
 }
-.proj-overflow-menu .proj-menu-item:hover,
-.inbox-overflow-menu .inbox-menu-item:hover {
+.proj-overflow-menu .proj-menu-item:hover {
   background: var(--surface-2);
 }
-.proj-overflow-menu .proj-menu-item:focus-visible,
-.inbox-overflow-menu .inbox-menu-item:focus-visible {
+.proj-overflow-menu .proj-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -7507,13 +7217,11 @@ dialog.dialog-project-delete {
 .shell-group-menu button[aria-checked="true"] { font-weight: 600; }
 .shell-menu-n { color: var(--ink-3); }
 
-/* The inbox in the shell: the list is the index, the item is the stage. The
-   stage owns the head, so the card's own back link is only needed on a phone,
-   where the shell shows one zone at a time. */
+/* An inbox item's stage owns the head, so the card's own back link is only
+   needed on a phone, where the header's back slot is the leading slot. */
 @media (min-width: 1100px) {
   .shell-stage .inbox-back { display: none; }
 }
-.shell-index .inbox-top { display: none; }
 
 /* Settings is the one screen with no index: rail and stage, a 640px form. */
 .settings-pad { padding: 0 var(--s-4) 48px; }
@@ -7626,16 +7334,6 @@ dialog.dialog-project-delete {
 }
 .shell-aside .hub-comments-cards-list { padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-3); }
 
-/* The inbox index rows: the design's scannable shape. The title, one line of
-   body, and one meta line that never wraps. Status is not a plate here. */
-.inbox-index .inbox-body,
-.shell-index .inbox-body {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.shell-index .inbox-foot { white-space: nowrap; overflow: hidden; }
-.shell-index .inbox-row .title { min-width: 0; }
 .dot-action {
   flex: none;
   width: 7px;
@@ -7645,18 +7343,9 @@ dialog.dialog-project-delete {
   align-self: flex-start;
   margin-top: var(--s-2);
 }
-/* The group headers are a mono label over a hairline, not a card. */
-.shell-index .inbox-label {
-  margin: 0;
-  padding: var(--s-3) var(--s-4) var(--s-2);
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-}
-.shell-index .inbox-group { background: transparent; }
 .shell-index .inbox-rows { background: var(--surface); }
 
-/* The artifacts index group headers: a mono label over a hairline, the same
-   shape the inbox groups use. */
+/* The artifacts index group headers: a mono label over a hairline. */
 .shell-index .shell-group-label { border-bottom: 1px solid var(--line); }
 
 /* The index is a flat list. A card in an index spends width on chrome the
@@ -7689,7 +7378,6 @@ dialog.dialog-project-delete {
    to be stated on the item rather than left to `.row:last-child`. */
 .shell-index .feed-item .row { border-bottom: 1px solid var(--line); }
 .shell-index .feed-item:last-child .row { border-bottom: 0; }
-.shell-index .inbox-label,
 .shell-index .shell-group-label,
 .shell-index .hub-group-header,
 .shell-index h2.day,
@@ -7728,22 +7416,191 @@ dialog.dialog-project-delete {
   white-space: nowrap;
 }
 
-/* The inbox's sync line is a control-row control, not a third band. */
-.shell-controls .inbox-sync {
-  margin: 0;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-}
-.shell-controls .inbox-sync .inbox-sync-text { font-size: var(--t-12); color: var(--ink-3); }
-.shell-controls .inbox-sync .inbox-quiet { min-height: 28px; }
-.shell-index .inbox-quiet-line { margin: 0; padding: var(--s-3) var(--s-4); }
 
-/* Home is a stage with no index: one 640 column, the same measure the prose
-   keeps everywhere else. */
-.home-pad { padding: var(--s-5) var(--s-4) 48px; }
-.home-pad > * { max-width: 640px; }
+/* component: now */
+/* Now is a stage with no index: one stream in a 680 column, and beside it on a
+   wide stage a 300 margin that holds each row's receipts level with the row.
+   The margin is read against the row it sits beside, which is what an aside
+   is for, so it is the stream's own aside rather than a pane of its own. */
+.now-pad { padding: 0 var(--s-4) 48px; }
+.now { container: now / inline-size; max-width: calc(680px + 300px + 2 * var(--s-6)); }
+.now p { margin: 0; }
+.now-lr { display: grid; grid-template-columns: minmax(0, 1fr); }
+.now-main, .now-mar { min-width: 0; }
+
+/* The opening line. */
+.now-intro > .now-main { padding: calc(var(--s-6) + var(--s-2)) 0 var(--s-6); }
+.now-intro > .now-mar { display: none; }
+.now-sum { font-size: var(--t-17); line-height: 1.45; letter-spacing: -0.01em; color: var(--ink); max-width: 620px; text-wrap: pretty; }
+.now-sum b { font-weight: 600; }
+.now-rest { color: var(--ink-3); }
+.now-mar-label { display: block; margin: 0 0 var(--s-2); }
+.now-who { font-size: var(--t-13); color: var(--ink); }
+.now-node { margin-top: var(--s-1); font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
+
+/* A tier: its label over a darker rule, a sub-note, and its one verb. */
+.now-t > .now-main {
+  display: flex; align-items: center; gap: var(--s-2); min-height: 48px;
+  padding-top: var(--s-3); border-bottom: 1px solid var(--ink-3);
+}
+.now-t.is-gap > .now-main { padding-top: var(--s-6); }
+.now-label { display: inline-flex; align-items: center; gap: var(--s-2); margin: 0; white-space: nowrap; }
+.now-label .glyph { width: 16px; height: 16px; color: inherit; }
+.now-t.is-need .now-label { color: var(--accent); }
+.now-sub { font-size: var(--t-13); color: var(--ink-3); }
+.now-t button {
+  margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-2);
+  min-height: var(--ctl); padding: 0 var(--s-2); font-size: var(--t-13);
+  border-color: transparent; color: var(--ink-2);
+}
+/* A project inside the since tier: its name in mono, as the feed writes it. */
+.now-grp > .now-main { display: flex; align-items: baseline; min-height: 40px; padding-top: var(--s-4); }
+.now-grp-name { display: flex; align-items: baseline; gap: var(--s-2); margin: 0; font: 500 var(--t-13)/1.3 var(--font-mono); color: var(--ink); }
+.now-n { font-family: var(--font-mono); font-size: var(--t-12); font-weight: 400; color: var(--ink-3); }
+.now-label .now-n { color: inherit; font-weight: 600; }
+.now-more { display: flex; align-items: center; min-height: 44px; padding: 0 0 0 calc(20px + var(--s-3)); font-size: var(--t-13); color: var(--ink-2); }
+
+/* The row: glyph 20, the sentence with its verbs at the end, the time in mono
+   on the right, and under it, or beside it in the margin, its receipts. */
+.row.now-row {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; min-height: 0;
+  position: relative; background: transparent; border-bottom: 1px solid var(--line);
+}
+.now-row > .now-main {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--s-3);
+  padding: var(--s-3) 0; position: relative;
+}
+.now-k { display: flex; justify-content: center; color: var(--ink-2); }
+.now-k .glyph { width: 20px; height: 24px; }
+.now-ask .now-k { color: var(--accent); }
+.now-ask .now-k-later { padding-top: var(--s-1); color: var(--ink-3); }
+.now-s { font-size: var(--t-15); line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.now-s b { font-weight: 600; }
+.is-quiet .now-s { color: var(--ink-2); }
+.is-quiet .now-s b { font-weight: 500; }
+.now-when { font: var(--t-12)/24px var(--font-mono); color: var(--ink-3); text-align: right; white-space: nowrap; }
+/* An event row opens its event: the sentence is the link, and its target is
+   the whole row. The receipts sit above that target, so each opens its own. */
+.now-open { color: inherit; text-decoration: none; }
+.now-open::after { content: ""; position: absolute; inset: 0; }
+.now-open:hover { text-decoration: underline; text-decoration-color: var(--line-strong); }
+.now-ref, .now-rc a { position: relative; z-index: 1; }
+
+/* The verbs, at the end of the sentence. Only the selected row fills its
+   primary; every other row's verbs are outlines. */
+.now-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-left: var(--s-2); vertical-align: middle; }
+.now-acts button { gap: var(--s-2); display: inline-flex; align-items: center; }
+.now-acts button[hidden] { display: none; }
+.now-acts button.now-link { border-color: transparent; padding: 0 var(--s-1); color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.now-read {
+  display: inline-flex; align-items: center; gap: var(--s-2); min-height: var(--ctl); padding: 0 var(--s-1);
+  font-size: var(--t-13); font-weight: 600; color: var(--ink-2); text-decoration: none; position: relative;
+}
+.now-read:hover { color: var(--ink); }
+.now-row[tabindex="0"] button.now-pri,
+.now-row[tabindex="0"] button.now-pri:hover {
+  background: var(--accent); border-color: var(--accent); color: var(--ink-inverse);
+}
+.now kbd { height: 18px; min-width: 18px; background: transparent; border-color: currentColor; border-bottom-width: 1px; color: inherit; }
+.now-acts kbd, .now-t kbd { opacity: 0.8; }
+/* The keys a focused row answers to, under its sentence. */
+.now-keys { display: none; flex-wrap: wrap; gap: var(--s-4); margin-top: var(--s-2); font-size: var(--t-12); color: var(--ink-3); }
+.now-keys span { display: inline-flex; align-items: center; gap: var(--s-1); }
+/* They show while the reader moves with the keyboard, and go as soon as the
+   pointer is over the stream, so a row never grows or shrinks under a pointer
+   on its way to a button. */
+.now-row[tabindex="0"]:is(:focus-visible, :has(:focus-visible)) .now-keys { display: flex; }
+@media (hover: hover) {
+  .now:hover .now-row[tabindex="0"] .now-keys { display: none; }
+}
+.now-hints { margin-left: auto; display: flex; gap: var(--s-4); font-size: var(--t-13); color: var(--ink-3); }
+.now-hints span { display: inline-flex; align-items: center; gap: var(--s-1); }
+/* Keys belong to a keyboard: under a coarse pointer, and on a phone's width,
+   none is named. */
+@media (pointer: coarse), (max-width: 719px) {
+  .now kbd, .now-hints, .now .now-row[tabindex] .now-keys { display: none; }
+}
+/* A phone's tier line keeps its label and its verb; the projects are named by
+   the groups under it. */
+@media (max-width: 719px) {
+  .now-t .now-sub.is-where { display: none; }
+}
+@media (any-pointer: coarse) {
+  .now-acts { gap: var(--s-3); }
+  .now-t button { position: relative; }
+  .now-t button::after { z-index: 1; }
+  .now-read::after, .now-t button::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: max(100%, var(--tap)); height: max(100%, var(--tap));
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* The selected row sinks to the sunken ground with a copper edge, run out to
+   the pane's gutter. On a narrow stage that is the whole row, receipts and all. */
+.now-row[tabindex="0"] {
+  background: var(--surface-2);
+  box-shadow: calc(-1 * var(--s-4)) 0 0 var(--surface-2), var(--s-4) 0 0 var(--surface-2);
+}
+@media (hover: hover) {
+  .now-row:hover { background: var(--surface-2); }
+}
+.now-row[tabindex="0"]::before {
+  content: ""; position: absolute; left: calc(-1 * var(--s-4)); top: 0; bottom: 0; width: 2px; background: var(--accent);
+}
+.now-row:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); outline-offset: -2px; border-radius: 0; }
+
+/* The receipts, on a narrow stage: one mono line under the sentence. */
+.now-rc {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-2);
+  padding: 0 0 var(--s-3) calc(20px + var(--s-3));
+  font-family: var(--font-mono); font-size: var(--t-12); line-height: 1.6; color: var(--ink-3);
+}
+.now-r { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); min-width: 0; }
+.now-r + .now-r::before { content: "·"; margin-right: var(--s-1); color: var(--ink-3); }
+.now-r-kind { display: none; }
+.now-r-kind + .now-r::before { content: none; }
+.now-r-due { color: var(--ink-2); }
+.now-r-due svg { color: var(--ink-3); }
+.now-ref { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+
+.now-row + .composer { margin: 0; padding: var(--s-2) 0 var(--s-3) calc(20px + var(--s-3)); max-width: 680px; border-bottom: 1px solid var(--line); }
+.now-empty > .now-main { padding-top: var(--s-4); }
+.now-end-line { display: flex; align-items: center; gap: var(--s-2); padding-top: var(--s-5); font-size: var(--t-15); color: var(--ink-2); }
+.now-end-k { display: flex; color: var(--ok); }
+
+/* A wide stage: the margin opens beside the column, ruled off by one hairline
+   that runs the length of the stream, and each receipt sits level with its row. */
+@container now (min-width: 940px) {
+  .now-lr { grid-template-columns: minmax(0, 680px) minmax(240px, 300px); column-gap: calc(2 * var(--s-6)); }
+  .now-mar { border-left: 1px solid var(--line); padding-left: var(--s-5); margin-left: calc(-1 * var(--s-6)); }
+  .now-sum { font-size: var(--t-22); line-height: 1.42; }
+  .now-intro > .now-mar { display: block; padding-top: calc(var(--s-6) + var(--s-2)); }
+  .row.now-row { grid-template-columns: minmax(0, 680px) minmax(240px, 300px); column-gap: calc(2 * var(--s-6)); border-bottom: 0; }
+  .now-row > .now-main, .now-row > .now-mar { border-bottom: 1px solid var(--line); }
+  .now-rc {
+    flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: var(--s-1);
+    padding: var(--s-3) 0 var(--s-3) var(--s-5);
+    font-family: var(--font-sans); font-size: var(--t-13); line-height: 1.45;
+  }
+  .now-r + .now-r::before { content: none; }
+  .now-r-kind { display: inline-flex; color: var(--ink-2); font-weight: 500; }
+  .now-row[tabindex="0"], .now-row:hover { background: transparent; box-shadow: none; }
+  .now-row[tabindex="0"]::before { content: none; }
+  .now-row:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  .now-row[tabindex="0"] > .now-main {
+    background: var(--surface-2);
+    box-shadow: calc(-1 * var(--s-4)) 0 0 var(--surface-2), var(--s-4) 0 0 var(--surface-2);
+  }
+  @media (hover: hover) {
+    .now-row:hover > .now-main { background: var(--surface-2); }
+  }
+  .now-row[tabindex="0"] > .now-main::before {
+    content: ""; position: absolute; left: calc(-1 * var(--s-4)); top: 0; bottom: 0; width: 2px; background: var(--accent);
+  }
+  .now-row + .composer { padding-left: calc(20px + var(--s-3)); }
+}
+/* end component: now */
 
 /* Search in the one shell: the field and the scope chips are the chrome, the
    count line and the groups are the index body. The head's own field, title,
@@ -7786,19 +7643,11 @@ dialog.dialog-project-delete {
    other index label takes. */
 .shell-index .search-results .section-label { padding-left: var(--s-4); }
 
-/* The rail's foot carries the sync line wherever the rail is shown, so the
-   inbox's own copy is for the phone, where the rail is not. Without this the
-   line eats the control row and leaves the filter field unreadably narrow. */
-@media (min-width: 1100px) {
-  .shell-controls .inbox-sync { display: none; }
-}
-.home-pad .home { flex: none; }
 
 /* A selected row's meta sits on the accent background, which needs the
    secondary ink rather than the meta one to stay above 4.5:1. */
 .shell-index .row.selected .meta,
 .shell-index .row.selected .meta.mono { color: var(--ink-2); }
-.home-pad .home .home-summary { margin: 0; }
 
 /* Connect has no tab bar */
 .app:has(.connect) .tabbar {
@@ -8144,15 +7993,6 @@ dialog.dialog-project-delete {
   .shell-controls .chip {
     flex: none;
     white-space: nowrap;
-  }
-
-  /* Home at rest: the bar is in layout but transparent, and its title waits at
-     opacity 0 while the greeting in the body shows. It is never display:none,
-     because a bar removed from layout cannot animate and leaves the content
-     underneath it. The Home-specific rules live in home.mjs. */
-  .shell:has(.home-pad) .shell-head:not(.is-compressed) {
-    background: transparent;
-    border-bottom: 0;
   }
 
   /* Reduced motion instant switch */
@@ -9395,7 +9235,6 @@ button.project-wiki-new {
 .session-kv-read { margin: 0; padding: var(--s-4); font-size: var(--t-13); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .session-kv-missing { padding: var(--s-4); }
 .artifact-row-glyph { background: none; border-radius: 0; color: var(--ink-3); box-shadow: none; display: grid; place-items: center; }
-.inbox-head .title.inbox-title-strong { font-weight: 600; }
 .hub-resolved-title { text-align: left; }
 .search-hit { background: var(--action-bg); color: var(--ink); border-radius: var(--r-1); padding: 0 var(--s-1); }
 .search-chip-count { font-family: var(--font-mono); font-weight: 500; }
