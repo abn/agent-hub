@@ -96,8 +96,8 @@ deep writes `../assets/screens/x.png`, and one two directories deep writes
 
 ```html
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-desktop-dark.png">
-  <img src="../assets/screens/home-desktop-light.png" alt="Now at desktop width.">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-desktop-dark.png">
+  <img src="../assets/screens/now-desktop-light.png" alt="Now at desktop width.">
 </picture>
 ```
 

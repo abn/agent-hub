@@ -282,13 +282,13 @@ three chips, All, Needs you and Since you looked, each with its count.
   and the desk is clear."
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-desktop-dark.png">
-  <img src="../assets/screens/home-desktop-light.png" alt="Now at desktop width: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-desktop-dark.png">
+  <img src="../assets/screens/now-desktop-light.png" alt="Now at desktop width: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
 </picture>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-phone-dark.png">
-  <img src="../assets/screens/home-phone-light.png" alt="Now at phone width: the same stream in one column, each row's receipts under its sentence.">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-phone-dark.png">
+  <img src="../assets/screens/now-phone-light.png" alt="Now at phone width: the same stream in one column, each row's receipts under its sentence.">
 </picture>
 
 ### Inbox item
@@ -462,7 +462,7 @@ than dimming alone.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/artifacts-desktop-dark.png">
-  <img src="../assets/screens/artifacts-desktop-light.png" alt="The artifact index, with the newest artifact open and its comments in the aside.">
+  <img src="../assets/screens/artifacts-desktop-light.png" alt="Artifacts across projects, newest first, with the focused artifact's status and versions in the margin.">
 </picture>
 
 <picture>

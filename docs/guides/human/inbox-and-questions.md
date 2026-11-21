@@ -16,8 +16,8 @@ link and a notification land on the same asks. Questions and approvals also
 appear on their project's feed.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/inbox-desktop-dark.png">
-  <img src="../../assets/screens/inbox-desktop-light.png" alt="Now showing what needs you, each ask with its verbs at the end of its line.">
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/now-desktop-dark.png">
+  <img src="../../assets/screens/now-desktop-light.png" alt="Now showing what needs you, each ask with its verbs at the end of its line.">
 </picture>
 
 ## The tiers
@@ -62,8 +62,6 @@ key it names, when it was asked and what happens if you stay silent) and the
 other asks from the same session or project.
 
 ## Questions
-
-<img src="../../assets/screens/idea-capture-desktop-light.png" alt="Capturing an idea into a project's inbox.">
 
 A question asks you something and lands as an action item. A question may
 suggest answers: they are buttons at the end of its line on Now, and above the

@@ -16,7 +16,7 @@ human's half; the tool shapes and routes are in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/artifacts-desktop-dark.png">
-  <img src="../../assets/screens/artifacts-desktop-light.png" alt="The artifact index, with the newest artifact open and its comments in the aside.">
+  <img src="../../assets/screens/artifacts-desktop-light.png" alt="Artifacts across projects, newest first, with the focused artifact's status and versions in the margin.">
 </picture>
 
 ## The artifacts list

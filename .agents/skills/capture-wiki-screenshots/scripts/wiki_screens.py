@@ -157,9 +157,10 @@ def seed_wiki(port: int) -> None:
 # before it. A route with an id interpolates the seeded ids through `format`.
 #
 # The stems are the stable part of the filename; the width and theme are added
-# by `shot`. The set follows the router's screens: Now, Now showing what
-# needs the reader (the Inbox's address), an open item, projects, the project feed, sessions and the session detail, artifacts
-# and the viewer, wiki and a reader page, search, storage, settings, access.
+# by `shot`. The set follows the router's screens: Now (the `home` route), an
+# open item (the Inbox's address with `open=`), projects, the project feed,
+# sessions and the session detail, artifacts and the viewer, wiki and a reader
+# page, search, storage, settings, access.
 def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
     project = seeded["project_id"]
     session = seeded["session_id"]
@@ -168,8 +169,7 @@ def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
     # capture's default selection does not.
     sealed = seeded["protected_id"]
     return [
-        ("home", "main .now .now-sum", "home"),
-        ("inbox", "main .now .now-sum", "inbox"),
+        ("home", "main .now .now-sum", "now"),
         (
             "inbox?open={question_id}".format(**seeded),
             "main .inbox-detail .item-title",
@@ -183,7 +183,7 @@ def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
             "main .session-detail-view",
             "session-detail",
         ),
-        (f"projects/{project}/artifacts", "main .shell-index .artifact-row", "artifacts"),
+        ("artifacts", "main .arts .arts-row", "artifacts"),
         (
             f"artifacts/{sealed}?project={project}",
             "main .shell.has-selection .hub-viewer-doc",
