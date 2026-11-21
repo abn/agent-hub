@@ -1,9 +1,11 @@
 {
   "name": "agent-hub",
-  "version": "1.0.0",
-  "description": "The Agent Hub house style: a warm paper ground, blue identity, system type, and the app's control radii, layered over the paper defaults.",
+  "version": "2.0.0",
+  "description": "The Agent Hub house style: lichen slate neutrals, one copper signal, IBM Plex, and the app's 2px and 4px radii, layered over the paper defaults.",
   "assets": {
     "tokens.css": { "mode": "replace" },
+    "fonts.css": { "mode": "replace" },
+    "fonts/": { "mode": "replace" },
     "brand-mark.svg": { "mode": "replace" },
     "favicon.svg": { "mode": "replace" }
   }

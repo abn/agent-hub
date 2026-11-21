@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### The docs site wears the app's palette
+
+* **Update**: [Human interface](/design/human-interface.md) notes that the
+  docs site takes the app's tokens: the lichen canvas, ink links, copper focus
+  and IBM Plex from the same font files.
+
 ### The remaining screens take the quiet desk
 
 * **Update**: [Human interface](/design/human-interface.md) describes the last

@@ -54,6 +54,9 @@ value the token file does not carry is a design question, not a local decision.
   sunken ground with a copper edge. A byte count, a prune verb and a switch
   that is on are never copper. An ok green marks resolved and active, and a
   raspberry is reserved for deletion.
+- **Docs site.** The wiki that publishes these pages wears the same tokens:
+  the lichen canvas, ink links, copper focus and IBM Plex from the same OFL
+  files.
 - **Event kinds.** Kinds are not tinted. Each of the six families is told apart
   by its glyph and its word, drawn in ink. An olive tone is kept for the
   Storage breakdown's knowledge segment and legend alone; the other segments

@@ -39,6 +39,15 @@ The mark ships as `web/icon.svg` and the three `web/icon-*.png` icons, and the
 docs site mirrors it in `wiki-theme/assets/brand-mark.svg` and
 `wiki-theme/assets/favicon.svg`.
 
+The docs site wears the app's tokens. `wiki-theme/assets/tokens.css` restates
+the palette, the 2px and 4px radii and IBM Plex from the same values, and
+`wiki-theme/assets/fonts/` carries the same OFL files. A link and the current
+page are ink, as in the app; copper is the focus ring, the one filled control
+and the warning callout.
+  - **Deviation: the docs' chips stay round.** The renderer draws its tag and
+    download chips with its pill radius, which the theme keeps for its dots, so
+    those two chips are round where the app's are 2px.
+
 ## Tokens
 
 `web/tokens.css` is the design's token file, shipped verbatim except for the

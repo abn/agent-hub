@@ -3,17 +3,17 @@
    ----------------------------------------------------------------------------
    The wiki themed to the Agent Hub application. Every value here is taken from
    the app's own token file (web/tokens.css) so the docs and the product read as
-   one house: a warm paper ground, near-black ink, one blue identity, and the
-   app's controls.
+   one house: lichen slate neutrals, near-black ink, one copper signal, IBM Plex,
+   and the app's 2px and 4px radii.
 
-   The ground is warm, not white. The app's light surface is #F5F3EE, a paper
-   tone, and its dark surface is #141311, a warm near-black; the wiki keeps that
-   warmth rather than switching to a neutral white or grey. Ink, rules, status
-   tones and the kind colours are the app's, unchanged.
+   The ground is the app's canvas, #F3F5F2 in light and #111513 in dark. Links
+   are ink with a quiet underline, as they are in the app; copper is kept for
+   focus and the one filled control, and for the warning callout, which is the
+   docs' nearest thing to "this needs you".
 
-   Type is the app's, which is the system stack rather than a bundled face: the
-   application ships no webfont, so neither does the wiki. The display and UI
-   faces are the same stack, and code is the platform's mono stack.
+   Type is IBM Plex Sans for words and Plex Mono for code, the faces the app
+   ships. The OFL files sit in fonts/ beside this sheet, so a render stays
+   offline.
 
    Contrast was checked against the surface each value is read on. Text clears
    4.5:1, the control boundary clears the 3:1 that SC 1.4.11 asks for, and each
@@ -25,70 +25,71 @@
   color-scheme: light;
 
   /* ---- ground and surfaces ------------------------------------------------
-     The app's surfaces: a warm paper ground, a white raised surface, and two
-     sunken steps for the breadcrumb bar and for code and quote surfaces. */
-  --color-bg: #F5F3EE;
-  --color-surface: #FFFFFF;
-  --color-surface-sunken: #EDEAE3;
-  --color-surface-sunken-deep: #E4E0D8;
-  --color-bg-elevated: #FFFFFF;
+     The app's canvas, its raised step for what floats, and two sunken steps
+     for the breadcrumb bar and for code and quote surfaces. */
+  --color-bg: #F3F5F2;
+  --color-surface: #FBFCFA;
+  --color-surface-sunken: #E8ECE7;
+  --color-surface-sunken-deep: #DDE3DC;
+  --color-bg-elevated: #FBFCFA;
 
   /* ---- ink ----------------------------------------------------------------
-     The app's three ink steps: 15.37:1, 6.39:1 and 4.84:1 on the paper ground,
-     so even the faint step clears 4.5:1 as text. */
-  --color-text: #1D1C19;
-  --color-heading: #1D1C19;
-  --color-text-muted: #5C584F;
-  --color-text-faint: #6F6A61;
+     The app's three ink steps: 15.95:1, 8.97:1 and 5.82:1 on the canvas, so
+     even the faint step clears 4.5:1 as text. */
+  --color-text: #151B17;
+  --color-heading: #151B17;
+  --color-text-muted: #3B4640;
+  --color-text-faint: #56625A;
 
   /* ---- rules --------------------------------------------------------------
      A quiet decorative rule, a stronger one, and a control boundary held to
      3:1 because it is the only thing describing that control's extent. */
-  --color-line: #E4E0D8;
-  --color-line-strong: #CFC9BE;
-  --color-line-control: #8B8579;   /* 3.31:1 on the paper ground */
+  --color-line: #D3DAD2;
+  --color-line-strong: #BAC4BA;
+  --color-line-control: #66726A;   /* 4.58:1 on the canvas */
 
   /* ---- accent -------------------------------------------------------------
-     The app's split: a near-black action fill that carries the control's
-     silhouette, and a blue that carries identity on links, focus and current
-     state. The blue is 5.70:1 on the ground and 6.32:1 on white. */
-  --color-accent: #1D1C19;
-  --color-on-accent: #F5F3EE;
-  --color-accent-text: #2F5FA8;
-  --color-accent-soft: #E6ECF7;
-  --color-accent-ring: #B9C9E6;
-  --color-current-tint: #E6ECF7;
+     The app's split: copper fills the one primary control and draws the focus
+     ring (6.66:1 on the canvas), and a link or the current page is ink, told
+     apart by its underline or by the sunken ground under it. */
+  --color-accent: #84461D;
+  --color-on-accent: #F3F5F2;
+  --color-accent-text: #151B17;
+  --color-accent-soft: #E8ECE7;
+  --color-accent-ring: #66726A;
+  --color-current-tint: #E8ECE7;
 
-  --focus-ring: #2F5FA8;
+  --focus-ring: #84461D;
   --focus-ring-offset: 2px;
   --focus-ring-width: 2px;
 
   /* ---- status ------------------------------------------------------------
-     The app's status family, one tint, line and label per role. Every label
-     clears 4.5:1 on its own tint. */
-  --status-success-tint: #E2F1E7;
-  --status-success-line: #C6E2D1;
-  --status-success-text: #246B43;
-  --status-info-tint: #E6ECF7;
-  --status-info-line: #C9D8F0;
-  --status-info-text: #2A5296;
-  --status-warn-tint: #F7EBD5;
-  --status-warn-line: #EBD6AC;
-  --status-warn-text: #85500A;
-  --status-danger-tint: #F6E3DF;
-  --status-danger-line: #E8C6BE;
-  --status-danger-text: #93321F;
-  --status-neutral-tint: #EDEAE3;
-  --status-neutral-line: #DAD5CB;
-  --status-neutral-text: #5C584F;
+     The app's status family, one tint, line and label per role. A note is
+     neutral, as the app's kinds are; a warning takes the copper wash and a
+     caution the deletion tone. Every label clears 4.5:1 on its own tint. */
+  --status-success-tint: #DFEBE1;
+  --status-success-line: #BCD3C1;
+  --status-success-text: #2C6A3D;
+  --status-info-tint: #E8ECE7;
+  --status-info-line: #D3DAD2;
+  --status-info-text: #3B4640;
+  --status-warn-tint: #F1E4D8;
+  --status-warn-line: #E0C6AE;
+  --status-warn-text: #84461D;
+  --status-danger-tint: #F7E3EA;
+  --status-danger-line: #EBC3D1;
+  --status-danger-text: #A3154A;
+  --status-neutral-tint: #E8ECE7;
+  --status-neutral-line: #D3DAD2;
+  --status-neutral-text: #3B4640;
 
   /* ---- type ---------------------------------------------------------------
-     The app's faces, which are the platform's: no webfont ships. Leading and
-     tracking run the same optical direction as the defaults, tightening as
-     size grows. */
-  --font-display: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
-  --font-ui: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
-  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+     The app's faces: IBM Plex Sans for words, Plex Mono for code, from
+     fonts.css. Leading and tracking run the same optical direction as the
+     defaults, tightening as size grows. */
+  --font-display: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   --fw-regular: 400;
   --fw-medium: 500;
@@ -128,18 +129,20 @@
   --space-16: 4rem;
 
   /* ---- radius -------------------------------------------------------------
-     The app's set is small: 6px for a control, 12px for a card, a pill. */
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+     The app's set: 2px for a control, 4px for a field, a card or a sheet. The
+     pill is kept for dots and the switch. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
   --radius-pill: 999px;
 
   /* ---- elevation ----------------------------------------------------------
-     Hairline first, shadow second, in the app's warm shadow tone. */
-  --shadow-sm: 0 1px 2px rgba(29, 28, 25, 0.06);
-  --shadow-md: 0 4px 8px -2px rgba(29, 28, 25, 0.08), 0 2px 4px -2px rgba(29, 28, 25, 0.06);
-  --shadow-lg: 0 8px 24px rgba(29, 28, 25, 0.12);
+     Hairlines, not boxes: nothing on the canvas casts a shadow. Only what
+     floats over it keeps one, in the app's slate shadow tone. */
+  --shadow-sm: none;
+  --shadow-md: 0 4px 8px -2px rgba(21, 27, 23, 0.08), 0 2px 4px -2px rgba(21, 27, 23, 0.06);
+  --shadow-lg: 0 8px 24px rgba(21, 27, 23, 0.14);
 
   /* ---- motion -------------------------------------------------------------
      One easing family with long tails, every duration named. */
@@ -150,7 +153,7 @@
   --ease-strong: cubic-bezier(0.23, 1, 0.32, 1);
 
   /* ---- scrim and layers --------------------------------------------------- */
-  --color-scrim: rgba(29, 28, 25, 0.44);
+  --color-scrim: rgba(21, 27, 23, 0.44);
   --z-base: 0;
   --z-sticky: 10;
   --z-header: 30;
@@ -159,36 +162,36 @@
   --z-lightbox: 60;
 
   /* ---- code and selection -------------------------------------------------
-     The code surface is warm near-black in both grounds, the app's ink taken
-     to a reading background, so a code block is a picture of code and keeps one
-     contrast regime. */
-  --color-code-bg: #1F1D1A;
-  --color-code-fg: #ECE8E0;
-  --color-code-line: #38352E;
-  --color-inline-code-bg: #EAE6DE;
-  --color-inline-code-fg: #1D1C19;
-  --color-selection-bg: #C9D8F0;
-  --color-selection-fg: #1D1C19;
-  --color-mark: #C9D8F0;
-  --color-mark-ink: #123A78;
+     The code surface is the app's ink in both grounds, taken to a reading
+     background, so a code block is a picture of code and keeps one contrast
+     regime. A selection and a mark take the copper wash, the app's tint for a
+     passage the reader is pointed at. */
+  --color-code-bg: #151B17;
+  --color-code-fg: #E4EAE5;
+  --color-code-line: #29312C;
+  --color-inline-code-bg: #E8ECE7;
+  --color-inline-code-fg: #151B17;
+  --color-selection-bg: #F1E4D8;
+  --color-selection-fg: #151B17;
+  --color-mark: #F1E4D8;
+  --color-mark-ink: #151B17;
 
   /* ---- diagram palette ----------------------------------------------------
-     Read by diagrams.js. The light-ground values, paired to the paper ground
-     the way the tokens above are: ink, muted, and the app's blue for accent,
-     with the kind colours for the rest. The dark block redeclares the whole
-     set. */
-  --diagram-font: "Avenir Next", "Seravek", "Segoe UI Variable Text", "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
-  --diagram-ground: #F5F3EE;
-  --diagram-surface: #FFFFFF;
-  --diagram-surface-alt: #EDEAE3;
-  --diagram-ink: #1D1C19;
-  --diagram-muted: #5C584F;
-  --diagram-line: #CFC9BE;
-  --diagram-accent: #2F5FA8;
-  --diagram-accent-soft: #E6ECF7;
-  --diagram-accent-ink: #24487F;
-  --diagram-accent-2: #6E92D1;
-  --diagram-accent-3: #A9C0E4;
+     Read by diagrams.js. The light-ground values, paired to the canvas the way
+     the tokens above are: ink, muted, and copper for accent, with a spread of
+     hues for the categorical series. The dark block redeclares the whole set. */
+  --diagram-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --diagram-ground: #F3F5F2;
+  --diagram-surface: #FBFCFA;
+  --diagram-surface-alt: #E8ECE7;
+  --diagram-ink: #151B17;
+  --diagram-muted: #3B4640;
+  --diagram-line: #BAC4BA;
+  --diagram-accent: #84461D;
+  --diagram-accent-soft: #F1E4D8;
+  --diagram-accent-ink: #6B3816;
+  --diagram-accent-2: #B4794E;
+  --diagram-accent-3: #D9B08F;
   --diagram-yellow: #B98A12;
   --diagram-cyan: #2B7C8A;
   --diagram-red: #9E3B2B;
@@ -200,94 +203,94 @@
 
   /* ---- lightbox -----------------------------------------------------------
      The diagram viewer stages a diagram on a dark field in both grounds, so it
-     carries its own warm-dark tokens rather than borrowing the page's. */
-  --lb-bg: #141311;
-  --lb-bar: #1D1C19;
-  --lb-line: #2F2C26;
-  --lb-line-strong: #44403A;
-  --lb-text: #ECE8E0;
-  --lb-muted: #B3ADA2;
-  --lb-faint: #948E83;
-  --lb-accent: #8AAAE8;
-  --lb-accent-line: #35507E;
-  --lb-hint: #948E83;
+     carries the app's dark tokens rather than borrowing the page's. */
+  --lb-bg: #111513;
+  --lb-bar: #161B18;
+  --lb-line: #29312C;
+  --lb-line-strong: #3A443D;
+  --lb-text: #E4EAE5;
+  --lb-muted: #B5BFB8;
+  --lb-faint: #8E9991;
+  --lb-accent: #E3A06F;
+  --lb-accent-line: #6B4A33;
+  --lb-hint: #8E9991;
 }
 
 /* ---- dark -----------------------------------------------------------------
-   A second palette for the app's warm near-black ground. Ink is 15.20:1,
-   muted 8.33:1, faint 5.71:1, and a raised surface is genuinely lighter than
+   A second palette for the app's slate near-black ground. Ink is 15.08:1,
+   muted 9.74:1, faint 6.24:1, and a raised surface is genuinely lighter than
    the ground so elevation reads without a shadow. */
 @media screen and (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --color-bg: #141311;
-    --color-surface: #1D1C19;
-    --color-surface-sunken: #0F0E0C;
-    --color-surface-sunken-deep: #0A0908;
-    --color-bg-elevated: #26241F;
+    --color-bg: #111513;
+    --color-surface: #161B18;
+    --color-surface-sunken: #1A1F1C;
+    --color-surface-sunken-deep: #212823;
+    --color-bg-elevated: #1A1F1C;
 
-    --color-text: #ECE8E0;
-    --color-heading: #F5F3EE;
-    --color-text-muted: #B3ADA2;
-    --color-text-faint: #948E83;
+    --color-text: #E4EAE5;
+    --color-heading: #E4EAE5;
+    --color-text-muted: #B5BFB8;
+    --color-text-faint: #8E9991;
 
-    --color-line: #2F2C26;
-    --color-line-strong: #44403A;
-    --color-line-control: #6E685E;   /* 3.36:1 on the ground */
+    --color-line: #29312C;
+    --color-line-strong: #3A443D;
+    --color-line-control: #7A867E;   /* 4.86:1 on the ground */
 
-    --color-accent: #ECE8E0;
-    --color-on-accent: #141311;
-    --color-accent-text: #8AAAE8;
-    --color-accent-soft: #26241F;
-    --color-accent-ring: #35507E;
-    --color-current-tint: #223052;
+    --color-accent: #E3A06F;
+    --color-on-accent: #111513;
+    --color-accent-text: #E4EAE5;
+    --color-accent-soft: #1A1F1C;
+    --color-accent-ring: #7A867E;
+    --color-current-tint: #1A1F1C;
 
-    --focus-ring: #8AAAE8;
+    --focus-ring: #E3A06F;
 
-    --status-success-tint: #1C3627;
-    --status-success-line: #2C523A;
-    --status-success-text: #6FC08C;
-    --status-info-tint: #223052;
-    --status-info-line: #34496F;
-    --status-info-text: #8AAAE8;
-    --status-warn-tint: #3A2C14;
-    --status-warn-line: #5A4522;
-    --status-warn-text: #DDA44E;
-    --status-danger-tint: #43221D;
-    --status-danger-line: #5F332B;
-    --status-danger-text: #E08373;
-    --status-neutral-tint: #26241F;
-    --status-neutral-line: #38352E;
-    --status-neutral-text: #B3ADA2;
+    --status-success-tint: #16261B;
+    --status-success-line: #24402C;
+    --status-success-text: #7DC490;
+    --status-info-tint: #1A1F1C;
+    --status-info-line: #29312C;
+    --status-info-text: #B5BFB8;
+    --status-warn-tint: #2E241C;
+    --status-warn-line: #4A3727;
+    --status-warn-text: #E3A06F;
+    --status-danger-tint: #3A1824;
+    --status-danger-line: #5A2638;
+    --status-danger-text: #FF7099;
+    --status-neutral-tint: #1A1F1C;
+    --status-neutral-line: #29312C;
+    --status-neutral-text: #B5BFB8;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
     --color-scrim: rgba(0, 0, 0, 0.62);
-    --color-code-bg: #0F0E0C;
-    --color-code-fg: #ECE8E0;
-    --color-code-line: #2F2C26;
-    --color-inline-code-bg: #26241F;
-    --color-inline-code-fg: #ECE8E0;
-    --color-selection-bg: #35507E;
-    --color-selection-fg: #F5F3EE;
-    --color-mark: #35507E;
-    --color-mark-ink: #D6E4F7;
+    --color-code-bg: #0B0E0C;
+    --color-code-fg: #E4EAE5;
+    --color-code-line: #29312C;
+    --color-inline-code-bg: #1A1F1C;
+    --color-inline-code-fg: #E4EAE5;
+    --color-selection-bg: #4A3727;
+    --color-selection-fg: #E4EAE5;
+    --color-mark: #2E241C;
+    --color-mark-ink: #F1E4D8;
 
     /* ---- diagram palette, dark ground ------------------------------------- */
-    --diagram-ground: #141311;
-    --diagram-surface: #1D1C19;
-    --diagram-surface-alt: #0F0E0C;
-    --diagram-ink: #ECE8E0;
-    --diagram-muted: #948E83;
-    --diagram-line: #44403A;
-    --diagram-accent: #8AAAE8;
-    --diagram-accent-soft: #223052;
-    --diagram-accent-ink: #A9C0E4;
-    --diagram-accent-2: #6E92D1;
-    --diagram-accent-3: #A9C0E4;
+    --diagram-ground: #111513;
+    --diagram-surface: #161B18;
+    --diagram-surface-alt: #1A1F1C;
+    --diagram-ink: #E4EAE5;
+    --diagram-muted: #8E9991;
+    --diagram-line: #3A443D;
+    --diagram-accent: #E3A06F;
+    --diagram-accent-soft: #2E241C;
+    --diagram-accent-ink: #F1C9A8;
+    --diagram-accent-2: #C78452;
+    --diagram-accent-3: #8F5A35;
     --diagram-yellow: #DDA44E;
     --diagram-cyan: #63B8B4;
     --diagram-red: #E08373;
@@ -306,73 +309,73 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
 
-    --color-bg: #141311;
-    --color-surface: #1D1C19;
-    --color-surface-sunken: #0F0E0C;
-    --color-surface-sunken-deep: #0A0908;
-    --color-bg-elevated: #26241F;
+    --color-bg: #111513;
+    --color-surface: #161B18;
+    --color-surface-sunken: #1A1F1C;
+    --color-surface-sunken-deep: #212823;
+    --color-bg-elevated: #1A1F1C;
 
-    --color-text: #ECE8E0;
-    --color-heading: #F5F3EE;
-    --color-text-muted: #B3ADA2;
-    --color-text-faint: #948E83;
+    --color-text: #E4EAE5;
+    --color-heading: #E4EAE5;
+    --color-text-muted: #B5BFB8;
+    --color-text-faint: #8E9991;
 
-    --color-line: #2F2C26;
-    --color-line-strong: #44403A;
-    --color-line-control: #6E685E;
+    --color-line: #29312C;
+    --color-line-strong: #3A443D;
+    --color-line-control: #7A867E;
 
-    --color-accent: #ECE8E0;
-    --color-on-accent: #141311;
-    --color-accent-text: #8AAAE8;
-    --color-accent-soft: #26241F;
-    --color-accent-ring: #35507E;
-    --color-current-tint: #223052;
+    --color-accent: #E3A06F;
+    --color-on-accent: #111513;
+    --color-accent-text: #E4EAE5;
+    --color-accent-soft: #1A1F1C;
+    --color-accent-ring: #7A867E;
+    --color-current-tint: #1A1F1C;
 
-    --focus-ring: #8AAAE8;
+    --focus-ring: #E3A06F;
 
-    --status-success-tint: #1C3627;
-    --status-success-line: #2C523A;
-    --status-success-text: #6FC08C;
-    --status-info-tint: #223052;
-    --status-info-line: #34496F;
-    --status-info-text: #8AAAE8;
-    --status-warn-tint: #3A2C14;
-    --status-warn-line: #5A4522;
-    --status-warn-text: #DDA44E;
-    --status-danger-tint: #43221D;
-    --status-danger-line: #5F332B;
-    --status-danger-text: #E08373;
-    --status-neutral-tint: #26241F;
-    --status-neutral-line: #38352E;
-    --status-neutral-text: #B3ADA2;
+    --status-success-tint: #16261B;
+    --status-success-line: #24402C;
+    --status-success-text: #7DC490;
+    --status-info-tint: #1A1F1C;
+    --status-info-line: #29312C;
+    --status-info-text: #B5BFB8;
+    --status-warn-tint: #2E241C;
+    --status-warn-line: #4A3727;
+    --status-warn-text: #E3A06F;
+    --status-danger-tint: #3A1824;
+    --status-danger-line: #5A2638;
+    --status-danger-text: #FF7099;
+    --status-neutral-tint: #1A1F1C;
+    --status-neutral-line: #29312C;
+    --status-neutral-text: #B5BFB8;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
     --color-scrim: rgba(0, 0, 0, 0.62);
-    --color-code-bg: #0F0E0C;
-    --color-code-fg: #ECE8E0;
-    --color-code-line: #2F2C26;
-    --color-inline-code-bg: #26241F;
-    --color-inline-code-fg: #ECE8E0;
-    --color-selection-bg: #35507E;
-    --color-selection-fg: #F5F3EE;
-    --color-mark: #35507E;
-    --color-mark-ink: #D6E4F7;
+    --color-code-bg: #0B0E0C;
+    --color-code-fg: #E4EAE5;
+    --color-code-line: #29312C;
+    --color-inline-code-bg: #1A1F1C;
+    --color-inline-code-fg: #E4EAE5;
+    --color-selection-bg: #4A3727;
+    --color-selection-fg: #E4EAE5;
+    --color-mark: #2E241C;
+    --color-mark-ink: #F1E4D8;
 
     /* ---- diagram palette, dark ground ------------------------------------- */
-    --diagram-ground: #141311;
-    --diagram-surface: #1D1C19;
-    --diagram-surface-alt: #0F0E0C;
-    --diagram-ink: #ECE8E0;
-    --diagram-muted: #948E83;
-    --diagram-line: #44403A;
-    --diagram-accent: #8AAAE8;
-    --diagram-accent-soft: #223052;
-    --diagram-accent-ink: #A9C0E4;
-    --diagram-accent-2: #6E92D1;
-    --diagram-accent-3: #A9C0E4;
+    --diagram-ground: #111513;
+    --diagram-surface: #161B18;
+    --diagram-surface-alt: #1A1F1C;
+    --diagram-ink: #E4EAE5;
+    --diagram-muted: #8E9991;
+    --diagram-line: #3A443D;
+    --diagram-accent: #E3A06F;
+    --diagram-accent-soft: #2E241C;
+    --diagram-accent-ink: #F1C9A8;
+    --diagram-accent-2: #C78452;
+    --diagram-accent-3: #8F5A35;
     --diagram-yellow: #DDA44E;
     --diagram-cyan: #63B8B4;
     --diagram-red: #E08373;
