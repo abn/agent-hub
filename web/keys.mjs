@@ -20,8 +20,10 @@ const BEHAVIOUR = {
 // The keys a row's own controls answer to. A control names them in `data-key`
 // ("1 a" is the first choice and the approve key), so the screen that draws the
 // row decides what each key does on it. A control a whole screen owns, such as
-// a tier's fold, names its key in `data-screen-key` instead.
-const ROW_KEYS = /^[1-9aersq]$|^E$/;
+// a tier's fold, names its key in `data-screen-key` instead. An opened item
+// names `j` and `k` on its previous and next controls, so the keys move from
+// item to item there and through the rows everywhere else.
+const ROW_KEYS = /^[1-9adejkrsq]$|^E$/;
 
 // The screens the selection moves through. The other screens are fields and
 // cards rather than a list, so a selection there would have nothing to mean.
@@ -36,12 +38,13 @@ const screens = {
 // to the screen that owns it.
 const SHORTCUTS = [
   ["/", "Focus the list's filter, or search"],
-  ["j", "Next row"],
-  ["k", "Previous row"],
+  ["j", "Next row, or the next item on an opened item"],
+  ["k", "Previous row, or the previous item"],
   ["Enter", "Open the selected row"],
   ["o", "Open the selected row"],
   ["1 to 9", "Choose an answer on the selected ask"],
   ["a", "Approve the selected row"],
+  ["d", "Decline an opened approval"],
   ["r", "Reply on the selected row"],
   ["e", "Mark the selected idea done"],
   ["s", "Snooze the selected ask for an hour, or bring it back"],

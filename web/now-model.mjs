@@ -284,3 +284,62 @@ export function askSentenceHTML(item) {
           : "is waiting on you:";
   return `${who} ${want} ${esc(item.summary)}`;
 }
+
+// The asks an opened item moves through with previous and next: what needs the
+// reader now, then what can wait, the order Now draws them in. The items come
+// from more than one list, so each is taken once and put back in the hub's
+// order, newest first by id.
+export function askQueue(items, options = {}) {
+  const byId = new Map();
+  for (const item of items) if (waits(item) && !byId.has(item.event_id)) byId.set(item.event_id, item);
+  const open = [...byId.values()].sort((a, b) => (a.event_id < b.event_id ? 1 : a.event_id > b.event_id ? -1 : 0));
+  const { now, later } = needsYou({ waiting_items: open, waiting: open.length }, options);
+  return { now, later, all: [...now, ...later] };
+}
+
+// Where one item sits in the queue: the header's words, the items either side,
+// and the one that opens once this one is answered. An item outside the queue
+// (answered, or not an ask) has no place, and its next is the head of the queue.
+export function queuePlace(queue, id) {
+  const all = queue.all;
+  const at = all.findIndex((item) => item.event_id === id);
+  if (at < 0) return { place: "", previous: null, next: all[0] || null, after: all[0] || null };
+  const previous = at > 0 ? all[at - 1] : null;
+  const next = at < all.length - 1 ? all[at + 1] : null;
+  // The last ask answered hands over to the first one still waiting.
+  const after = next || all.find((item) => item.event_id !== id) || null;
+  const place =
+    at < queue.now.length
+      ? `${at + 1} of ${queue.now.length} need you`
+      : `${at - queue.now.length + 1} of ${queue.later.length} can wait`;
+  return { place, previous, next, after };
+}
+
+// Other asks worth reading beside this one: those from the same session
+// first, then those from the same project, each in queue order.
+export function relatedAsks(item, queue, limit = 4) {
+  const others = queue.all.filter((other) => other.event_id !== item.event_id);
+  const session = item.session_id ? others.filter((other) => other.session_id === item.session_id) : [];
+  const project = others.filter((other) => other.project_id === item.project_id && !session.includes(other));
+  return [
+    ...session.map((other) => ({ item: other, why: "session" })),
+    ...project.map((other) => ({ item: other, why: "project" })),
+  ].slice(0, limit);
+}
+
+// The replies on an item's thread, oldest first, from a page of the project's
+// feed read forward from the item.
+export function threadReplies(id, events = []) {
+  return events
+    .filter((event) => event.thread_id === id && event.id !== id)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+// A reply on a thread, as markup: who, and what they said. An answer reads its
+// body, which is the decision or the words sent; anything else adds to the ask.
+export function replySentenceHTML(event) {
+  const who = `<b>${esc(event.actor)}</b>`;
+  const body = typeof event.payload?.body === "string" && event.payload.body.trim() ? event.payload.body.trim() : "";
+  if (event.kind === "answer") return `${who} answered: ${esc(body || event.summary)}`;
+  return `${who} added: ${esc(body || event.summary)}`;
+}

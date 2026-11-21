@@ -39,7 +39,10 @@ export function screenRoutes(hub, wiki) {
   const page = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
   return {
     home: [["Now", "#/home", "main .now .now-sum"]],
-    inbox: [["Now, needs you", "#/inbox", "main .now .now-ask"]],
+    inbox: [
+      ["Now, needs you", "#/inbox", "main .now .now-ask"],
+      ["Opened item", `#/inbox?open=${encodeURIComponent(hub.questionId)}`, "main .inbox-detail .item-title"],
+    ],
     projects: [
       ["Projects", "#/projects", "main .projects-screen .project-row"],
       ["Feed", `${at}/feed`, "main .shell-index .feed-row"],

@@ -575,7 +575,7 @@ test.describe("summary and message", () => {
       const message = rows[messageSel] || {};
       await expect(page.locator(titleSel)).toContainText(hub.fixture.question);
       expect(
-        ["17px", "22px"].includes(title.size) && (title.weight === "600" || title.weight === "bold"),
+        ["17px", "22px", "28px"].includes(title.size) && (title.weight === "600" || title.weight === "bold"),
         `${label}: a short subject lost its item-title treatment`,
       ).toBe(true);
       expect(message.missing, `${label}: a short subject was split into a message paragraph`).toBeTruthy();

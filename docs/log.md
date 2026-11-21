@@ -6,6 +6,17 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### An opened item reads around its answer
+
+* **Update**: [Human interface](/design/human-interface.md) describes the
+  opened item: where it sits among the asks with previous and next, the body
+  with a copy control on each code block, the answer block naming the item that
+  opens next, the thread, the receipts and related asks in a margin beside it,
+  and on a phone a sheet with one thumb bar.
+* **Update**: [Inbox and questions](/guides/human/inbox-and-questions.md) gains
+  a section on the opened item: walking the asks with `k` and `j`, the numbered
+  suggested answers, and answering handing on to the next item.
+
 ### Home and the Inbox become Now
 
 * **Update**: [Human interface](/design/human-interface.md) describes Now, the

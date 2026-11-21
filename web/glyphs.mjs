@@ -15,6 +15,8 @@ export const GLYPH_PATHS = {
   // away.
   close: '<path d="M 6 6l12 12"/><path d="M 18 6L6 18"/>',
   chevronDown: '<path d="M 6 9l6 6 6-6"/>',
+  // The previous item on an opened item, beside chevronDown for the next.
+  chevronUp: '<path d="M 6 15l6-6 6 6"/>',
   chevronRight: '<path d="M 9 5l7 7-7 7"/>',
   // Round 8: corners to 2, tail 3 deep on a 12 body with its base pulled
   // inboard to x=8. A hard rectangle with a tail at the corner read as a flag

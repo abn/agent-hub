@@ -257,7 +257,10 @@ test.describe("one decision", () => {
       await drop.dispatchEvent("click");
       await group.getByRole("button", { name: "Keep it", exact: true }).dispatchEvent("click");
       release();
-      await expect(page.locator(`main .inbox-detail`)).toHaveCount(0, { timeout: 8000 });
+      // Answered, the item hands on: the next ask opens in its place, or Now
+      // when none is left, and the toast follows the paint.
+      await expect(page).not.toHaveURL(new RegExp(`open=${id}`), { timeout: 8000 });
+      await expect(page.locator(".toast-text").filter({ hasText: "Answer sent" })).toHaveCount(1, { timeout: 8000 });
     } finally {
       release();
       await page.unroute(answerRoute).catch(() => {});

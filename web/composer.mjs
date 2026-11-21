@@ -30,7 +30,8 @@ const TOUCH = () => Boolean(globalThis.matchMedia?.("(pointer: coarse)").matches
 // when there are quick answers above it. action: the send control's name.
 // empty: why the send control does nothing yet, shown while the field is
 // blank. options: the answers the asker suggested, each sent as the body when
-// pressed. maxLength: the hub's own limit, when it has one. send: what to call
+// pressed. numbered: whether each suggested answer answers to its number key,
+// which a screen that owns the whole keyboard turns on. maxLength: the hub's own limit, when it has one. send: what to call
 // with the body; it rejects with the message the reader needs to see.
 export function composer({
   label,
@@ -38,6 +39,7 @@ export function composer({
   placeholder = options.length ? "Or type a reply" : "Write a reply",
   action = "Send",
   empty = "Write a reply to send it.",
+  numbered = false,
   maxLength = 0,
   send,
 }) {
@@ -87,11 +89,20 @@ export function composer({
 
   // A suggested answer is sent as it reads, through the same send as a typed
   // one, so it is refused, retried and reported the same way.
-  const picks = options.map((option) => {
+  const picks = options.map((option, at) => {
     const pick = document.createElement("button");
     pick.type = "button";
     pick.className = "composer-option";
     pick.textContent = option;
+    // The key is named on the button and hidden from assistive technology, so
+    // the button is named by the answer alone.
+    if (numbered && at < 9) {
+      pick.dataset.screenKey = String(at + 1);
+      const key = document.createElement("kbd");
+      key.setAttribute("aria-hidden", "true");
+      key.textContent = String(at + 1);
+      pick.append(key);
+    }
     pick.addEventListener("click", () => submit(option, pick));
     return pick;
   });

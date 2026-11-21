@@ -83,6 +83,9 @@ const ALLOWED_COARSE = [
   ".wiki-editor-actions :is(button, .button)",
   ".session-actions-footer button",
   ".access-add-fields button",
+  // The phone's thumb bar on an opened item divides its width between its
+  // primary verbs.
+  ".item-thumb-main button",
 ];
 
 // The declarations that make a control take the width of its box. They are
