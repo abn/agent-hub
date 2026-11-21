@@ -45,140 +45,6 @@ function size(bytes) {
   return formatBytes(bytes || 0);
 }
 
-const PROJECTS_REGISTER_STYLE = `<style>
-.projects-tabs-track {
-  flex: 1;
-  max-width: 480px;
-  height: 36px;
-  box-sizing: border-box;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 2px;
-  border-radius: var(--r-1);
-  background: var(--surface-2);
-}
-.projects-tab-btn {
-  border: 0;
-  min-height: 32px;
-  height: 32px;
-  border-radius: 5px;
-  background: none;
-  color: var(--ink-2);
-  font: 500 14px/1 var(--font-sans);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.projects-tab-btn[aria-selected="true"] {
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-  color: var(--ink);
-  font-weight: 600;
-}
-.projects-tab-btn .tab-count {
-  font: 500 12px/1 var(--font-mono);
-  color: var(--ink-2);
-}
-.projects-screen {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  min-height: calc(100vh + 100px);
-  box-sizing: border-box;
-  padding-bottom: 80px;
-}
-@media (min-width: 720px) {
-  .projects-screen {
-    min-height: 0;
-    padding-bottom: 40px;
-  }
-}
-.projects-list {
-  display: flex;
-  flex-direction: column;
-}
-.projects-list[hidden] {
-  display: none !important;
-}
-.project-row {
-  margin: 0;
-  padding: 0;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-.project-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 60px;
-  padding: 10px 8px 10px 16px;
-  color: var(--ink);
-  text-decoration: none;
-  width: 100%;
-  box-sizing: border-box;
-}
-.project-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.project-title {
-  font-size: var(--t-15);
-  font-weight: 500;
-  line-height: 1.25;
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-title.unread {
-  font-weight: 600;
-  color: var(--ink);
-}
-.project-meta {
-  font-size: var(--t-12);
-  color: var(--ink-3);
-  line-height: 1.3;
-}
-.project-pill {
-  flex: none;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  box-sizing: border-box;
-  border-radius: var(--r-pill);
-  background: var(--accent-bg);
-  color: var(--accent);
-  font: 600 12px/22px var(--font-mono);
-  text-align: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.project-pill.pill-waiting {
-  background: var(--action-bg);
-  color: var(--action);
-}
-.project-chev-slot {
-  flex: none;
-  width: 32px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  color: var(--ink-3);
-}
-.projects-empty-tab {
-  padding: 24px 16px;
-  font-size: var(--t-13);
-  color: var(--ink-3);
-  text-align: center;
-}
-</style>`;
-
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
     const tabBtn = event.target.closest?.(".projects-tab-btn");
@@ -244,8 +110,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
   if (!projects.length) {
     paint(
       gen,
-      PROJECTS_REGISTER_STYLE +
-        shellHTML({
+      shellHTML({
           noIndex: true,
           stageHead: shellStageHead("Projects", "", newProjectBtn),
           stageControls: `<div class="shell-controls"></div>`,
@@ -404,8 +269,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
 
   paint(
     gen,
-    PROJECTS_REGISTER_STYLE +
-      shellHTML({
+    shellHTML({
         noIndex: true,
         stageHead: shellStageHead("Projects", headerMeta, newProjectBtn),
         stageControls: filterHTML,

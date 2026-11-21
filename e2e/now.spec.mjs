@@ -59,6 +59,25 @@ test.describe("Now", () => {
     await expect(asks.nth(Math.min(at, before - 2))).toBeFocused();
   });
 
+  test("on a phone an ask's verbs hold one line, Read with them", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "phone", "the line under the sentence is a phone's");
+    const subject = "now phone verbs";
+    await oneOffQuestion(hub, hub.projectId, subject, { options: ["Ship it", "Hold until Monday"] });
+    await open(page, hub, "#/inbox", "");
+    const row = page.locator(".now-ask").filter({ hasText: subject });
+    await expect(row.getByRole("link", { name: "Read" })).toBeVisible();
+    const placed = await row.evaluate((ask) => {
+      const verbs = [...ask.querySelectorAll(".now-acts > button:not([hidden]), .now-acts > a")];
+      return {
+        tops: [...new Set(verbs.map((verb) => Math.round(verb.getBoundingClientRect().top)))],
+        right: Math.max(...verbs.map((verb) => verb.getBoundingClientRect().right)),
+        edge: ask.getBoundingClientRect().right,
+      };
+    });
+    expect(placed.tops, "the ask's verbs break across lines").toHaveLength(1);
+    expect(placed.right, "the verbs run past the row").toBeLessThanOrEqual(placed.edge + 0.5);
+  });
+
   test("a snoozed ask can wait and leaves the count", async ({ hub, page }) => {
     await open(page, hub, "#/inbox", "");
     const needs = chip(page, /^Needs you \d+$/);

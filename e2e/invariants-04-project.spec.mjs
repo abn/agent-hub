@@ -46,6 +46,10 @@ test.describe("project tools and sessions", () => {
         .filter((control) => control.drawn > control.visible + 0.5),
     );
     expect(clipped, `the tools row cuts ${JSON.stringify(clipped)}`).toEqual([]);
+    // The four sections fit beside the filter glyph and the overflow: a
+    // switcher that scrolls cut its last tab's count under the filter glyph.
+    const spill = await tools.locator(".project-tools-seg").evaluate((seg) => seg.scrollWidth - seg.clientWidth);
+    expect(spill, `the section switcher scrolls ${spill}px past the tools row`).toBeLessThanOrEqual(1);
     // The action the row cannot hold lives in the row's own menu.
     await tools.locator(".proj-overflow-btn").click();
     const item = tools.locator('[data-action="capture-idea"]');
@@ -65,6 +69,33 @@ test.describe("project tools and sessions", () => {
     const stage = page.locator(".shell-stage");
     await expect(stage.getByRole("heading", { level: 2, name: subject, exact: true })).toBeVisible();
     await expect(stage.getByRole("heading", { level: 2, name: /^asked/i })).toHaveCount(0);
+  });
+
+  test("the feed's control row leaves the filter room, with Capture idea a named glyph", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await goto(page, projectRoute(hub, "feed"), "");
+    const controls = page.locator(".shell-index > .shell-controls");
+    const capture = controls.getByRole("button", { name: "Capture idea" });
+    await expect(capture).toBeVisible();
+    await expect(capture).toHaveAttribute("title", "Capture idea");
+    expect((await capture.innerText()).trim(), "Capture idea still spends the row on its words").toBe("");
+    const filter = controls.getByRole("searchbox", { name: "Filter events" });
+    const box = await filter.boundingBox();
+    expect(box.width, `the filter is ${box.width}px wide, too narrow to read its own placeholder`).toBeGreaterThanOrEqual(120);
+  });
+
+  test("the feed stage's header names the project, not the open event", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const listed = (await api(hub, "GET", "/api/v1/projects")).json().projects;
+    const project = listed.find((entry) => entry.id === hub.projectId);
+    await goto(page, projectRoute(hub, "feed"), "");
+    await page.locator(".shell-index .feed-row .feed-link").first().click();
+    const title = page.locator(".shell-stage .feed-stage-title");
+    await expect(title).toBeVisible();
+    const head = page.locator(".shell-stage > .shell-head");
+    await expect(head.getByRole("heading", { level: 1 })).toHaveText(project.display_name);
+    await expect(head).toContainText("feed");
+    await expect(head).not.toContainText((await title.innerText()).trim());
   });
 
   test("session detail renders exactly one title", async ({ hub, page }) => {
@@ -343,6 +374,11 @@ test.describe("Now and search on a phone", () => {
       expect(wrapped, `the search tools row wraps text at ${width}px`).toEqual([]);
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    // The tools row is the scope chips' alone; the count heads the results.
+    const tools = page.locator(".shell-index > .shell-controls");
+    await expect(tools.getByRole("button", { name: /^All \d+$/ })).toBeVisible();
+    await expect(tools.getByRole("status")).toHaveCount(0);
+    await expect(page.locator(".shell-index .shell-body").getByRole("status")).toContainText(/result/);
     const row = page.locator(".search-row").first();
     await expect(row, "no search row was found").toBeVisible();
     const mark = row.locator(".title mark");

@@ -112,6 +112,9 @@ const ALLOWED = [
   { property: /^margin/, family: ".composer-send", note: "the send control's own centring" },
   { property: /^margin/, family: ".points-card", note: "a card's own offset" },
   { property: /^padding/, family: ".storage-row .storage-prune", note: "a row action's own padding" },
+  { property: /^padding/, family: ".projects-tabs-track", note: "a segmented control's own inset" },
+  { property: /^padding/, family: ".project-tools-mobile", note: "a segmented control's own inset" },
+  { property: /^padding/, family: ".projects-screen", note: "the register's clearance under the tab bar" },
 ];
 
 // The number of declarations the gate counts. It is what the stylesheet carries

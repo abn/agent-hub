@@ -16,6 +16,7 @@ import { diffStat, hunks, lineDiff, onlyFinalNewline } from "./diff.mjs";
 import { esc } from "./dom.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
 import { glyphSvg } from "./glyphs.mjs";
+import { placeTime } from "./now-model.mjs";
 import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { toast } from "./toast.mjs";
@@ -60,7 +61,7 @@ async function commentsSection(id, path) {
   const thread = (comment, resolved) => `<div class="wiki-comment">
     <div class="wiki-comment-head">
       <span class="wiki-comment-author">${esc(comment.author)}</span>
-      <span class="mono wiki-comment-time">${esc(comment.created_at)}</span>
+      <span class="mono wiki-comment-time">${timeHTML(comment.created_at)}</span>
       <span class="wiki-comment-gap"></span>
       ${resolved ? "" : `<button type="button" class="btn-outline wiki-comment-resolve" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}">Resolve</button>`}
     </div>
@@ -292,7 +293,9 @@ async function pageStage(id, path, shellStageHead) {
   // The reader's two header controls share one box: Edit is an anchor, so it
   // takes the button class and the stylesheet sizes both for the band.
   const reviewBtn = `<button type="button" class="btn-outline wiki-review-btn" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}">${needsReview ? "Review" : "Review again"}</button>`;
-  const last = page.last_write ? `${page.last_write.actor} · ${page.last_write.at}` : "no write recorded";
+  const last = page.last_write
+    ? `${esc(page.last_write.actor)} · ${timeHTML(page.last_write.at)}`
+    : "no write recorded";
   const meta = [
     displayPath(page.path),
     fm.type || "concept",
@@ -319,7 +322,7 @@ async function pageStage(id, path, shellStageHead) {
       `<span class="wiki-page-actions">${reviewBtn}<a class="button btn-outline wiki-edit-link" href="${wikiPageHash(id, path, "&edit=1")}">Edit</a></span>`,
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
-    controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta mono wiki-meta-line">${esc(last)}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
+    controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta mono wiki-meta-line">${last}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
     body: `<article class="shell-prose wiki-page wiki-article">${fm.description ? `<p class="wiki-description">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
@@ -589,7 +592,8 @@ async function versionStage(id, path, version, shellStageHead) {
   const when = older.at || "";
   const lines = lineDiff(older.content, now ? now.content : "");
   const name = pageFrontmatter(older.content).title || displayPath(path).split("/").pop();
-  const meta = [when, older.actor].filter(Boolean).join(" · ");
+  const at = Date.parse(when);
+  const meta = [Number.isFinite(at) ? placeTime(at) : "", older.actor].filter(Boolean).join(" · ");
   const revert = older.current
     ? ""
     : `<button type="button" class="btn-outline wiki-revert-btn" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}">${now ? "Revert to this" : "Restore this"}</button>`;

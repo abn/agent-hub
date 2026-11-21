@@ -25,7 +25,7 @@ announced instead. Scope chips filter the result: on a desktop, All, Feed,
 Artifacts, and Sessions; on a phone, All, Feed, Artifacts, and Inbox, with
 Sessions joining once a brain is in scope. Sessions filters the wire type
 `brain`, and knowledge base pages match under All. A project filter adds a
-dismissible pill beside them. A results line
+dismissible pill beside them. A results line at the top of the results
 gives the hub's own count and how long the query took, and a page the limit cut
 is called the first of more, never a total.
 

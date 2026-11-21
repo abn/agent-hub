@@ -28,79 +28,6 @@ const MOBILE_SCOPES = [
   { type: "inbox", label: "Inbox" },
 ];
 
-const SEARCH_STYLE = `
-.search-row mark,
-.search-head mark {
-  background: var(--action-bg) !important;
-  color: var(--ink) !important;
-  border-radius: 3px !important;
-  padding: 0 2px !important;
-}
-.search-group .search-row:first-child {
-  border-top: 1px solid var(--line);
-}
-.search-group .search-row {
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-  min-height: 56px;
-  padding: 10px 16px;
-}
-@media (max-width: 1099px) {
-  .shell[data-segment="search"] .shell-head .shell-title,
-  .shell-index:has(.search-results) .shell-head .shell-title {
-    flex: 1 !important;
-    min-width: 0 !important;
-  }
-  .shell[data-segment="search"] .shell-head .search-form,
-  .shell-index:has(.search-results) .shell-head .search-form {
-    width: 100% !important;
-    flex: 1 !important;
-  }
-  .shell[data-segment="search"] .shell-head .search-field > svg,
-  .shell-index:has(.search-results) .shell-head .search-field > svg {
-    display: none !important;
-  }
-  .shell[data-segment="search"] .shell-controls,
-  .shell-index:has(.search-results) .shell-controls {
-    padding: 0 16px !important;
-  }
-  .shell[data-segment="search"] .shell-controls .search-scopes,
-  .shell-index:has(.search-results) .shell-controls .search-scopes {
-    flex: 1 !important;
-    min-width: 0 !important;
-    overflow-x: auto !important;
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    gap: 8px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    scrollbar-width: none !important;
-  }
-  .shell[data-segment="search"] .shell-controls .chip,
-  .shell-index:has(.search-results) .shell-controls .chip {
-    flex: none !important;
-    white-space: nowrap !important;
-    height: 32px !important;
-    padding: 0 12px !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    border-radius: var(--r-pill) !important;
-  }
-  .shell[data-segment="search"] .shell-controls .chip[aria-pressed="true"],
-  .shell-index:has(.search-results) .shell-controls .chip[aria-pressed="true"] {
-    background: var(--ink) !important;
-    color: var(--ink-inverse) !important;
-    border: 0 !important;
-  }
-  .shell[data-segment="search"] .shell-controls .chip[aria-pressed="false"],
-  .shell-index:has(.search-results) .shell-controls .chip[aria-pressed="false"] {
-    background: transparent !important;
-    color: var(--ink-2) !important;
-    border: 1px solid var(--line-strong) !important;
-  }
-}
-`;
-
 // A corpus family as the reader knows it, and the kind badge its rows draw. A
 // feed hit draws the badge of the event it is and says its kind; one that
 // does not say which kind it is draws the neutral mark and leaves the naming
@@ -622,30 +549,22 @@ export async function searchScreen(term, gen) {
   }
   renderProjectChip();
 
-  const line = el("p", isDesktop ? "search-count mono" : "search-line shell-meta mono", first.line);
+  const line = el("p", "search-count mono", first.line);
   line.setAttribute("role", "status");
   line.setAttribute("aria-live", "polite");
 
-  const styleEl = el("style");
-  styleEl.textContent = SEARCH_STYLE;
-
-  // The phone has a 76px header and the field and the count line both fit under
-  // it, so the line stays in the head there. The desktop header is 52px and
-  // holds the field alone, so the line reads at the top of the results column
-  // instead, on the same 16px gutter as the group labels under it. Either way
-  // it is out of the control row: beside the scope chips it took 227 of the
-  // pane's 276px, which left the strip 41px and laid three of the four chips
-  // out past the pane's edge, where the pane's own overflow clipped them and a
-  // pointer could not reach them.
+  // The count line reads at the top of the results column, on the same 16px
+  // gutter as the group labels under it, at both widths. Beside the scope
+  // chips it took most of the row and pushed the chips out past the pane's
+  // edge, where a pointer could not reach them.
   const slot = el("span", "shell-slot");
   if (!isDesktop) slot.appendChild(icon(20, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"));
   const headColumn = el("div", "shell-title");
   headColumn.append(title, form);
-  if (!isDesktop) headColumn.append(line);
   const indexHead = el("div", "shell-head");
-  indexHead.append(styleEl, slot, headColumn);
+  indexHead.append(slot, headColumn);
   const indexControls = el("div", "shell-controls");
-  indexControls.append(line, scopes);
+  indexControls.append(scopes);
 
   const indexBody = el("div", "shell-body");
   const indexCol = el("div", "shell-index");
@@ -697,10 +616,10 @@ export async function searchScreen(term, gen) {
     updateScopeChips(state.data);
     const nextResults = resultsNode(state);
     indexPane.innerHTML = "";
-    // On a desktop the count line is not in the header, so it is painted above
-    // the groups it counts, and it is the same node each time: a live region
-    // that is torn down and rebuilt announces nothing.
-    if (isDesktop) indexPane.appendChild(line);
+    // The count line is painted above the groups it counts, and it is the same
+    // node each time: a live region that is torn down and rebuilt announces
+    // nothing.
+    indexPane.appendChild(line);
     indexPane.appendChild(nextResults);
 
     allHits = (state.data?.groups || []).flatMap((g) => g.hits);
