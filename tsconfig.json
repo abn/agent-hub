@@ -12,6 +12,6 @@
     "forceConsistentCasingInFileNames": true,
     "types": []
   },
-  "include": ["web/**/*.mjs", "web/**/*.js"],
+  "include": ["web/**/*.mjs", "web/**/*.js", "types/**/*.d.ts"],
   "exclude": ["node_modules", "target", "web/vendor"]
 }

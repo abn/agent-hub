@@ -154,8 +154,8 @@ function focusSearch(event) {
   // it is used.
   for (const field of [document.querySelector("[data-index-filter]"), document.getElementById("q")]) {
     if (!onScreen(field)) continue;
-    field.focus();
-    field.select?.();
+    /** @type {HTMLElement} */ (field).focus();
+    /** @type {HTMLInputElement} */ (field).select?.();
     return;
   }
   wantSearch = true;
@@ -212,7 +212,7 @@ function openKey(event) {
 // Where the layout draws no aside, the control opens the sheet that stands in
 // for it.
 function toggleAsideKey(event) {
-  const control = document.querySelector('.shell-stage [data-action="comments-toggle"]');
+  const control = /** @type {HTMLElement} */ (document.querySelector('.shell-stage [data-action="comments-toggle"]'));
   if (!control) return;
   event.preventDefault();
   const aside = control.closest(".shell")?.querySelector(".shell-aside");

@@ -257,7 +257,7 @@ async function fillPreview(artifact) {
   const aside = main.querySelector(".arts-mar");
   if (!marginShown(aside)) return;
   const box = () => {
-    const prev = aside.querySelector(".arts-prev");
+    const prev = /** @type {HTMLElement} */ (aside.querySelector(".arts-prev"));
     return aside.isConnected && prev && prev.dataset.for === artifact.id ? prev : null;
   };
   const [versions, events] = await Promise.all([versionsOf(artifact), eventsOf(artifact.project_id)]);
@@ -288,7 +288,7 @@ function focusRow(row) {
   const artifact = listed.get(row.dataset.artifact);
   const aside = main.querySelector(".arts-mar");
   if (!artifact || !aside) return;
-  if (aside.querySelector(".arts-prev")?.dataset.for === artifact.id) return;
+  if (/** @type {HTMLElement} */ (aside.querySelector(".arts-prev"))?.dataset.for === artifact.id) return;
   aside.innerHTML = preview(artifact);
   fillPreview(artifact);
 }
@@ -299,12 +299,12 @@ onArtifactLive(forget);
 
 main.addEventListener("focusin", (event) => {
   if (!onList()) return;
-  const row = event.target.closest?.(".arts-row");
+  const row = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".arts-row"));
   if (row) focusRow(row);
 });
 
 main.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-arts]");
+  const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-arts]"));
   if (!button || !onList()) return;
   const verb = button.dataset.arts;
   if (verb === "filter") {
@@ -313,7 +313,7 @@ main.addEventListener("click", async (event) => {
     showAll = true;
     await render();
     // The first row the fold held, so the reader carries on where it opened.
-    main.querySelectorAll('[aria-labelledby="arts-earlier"] .arts-row')[EARLIER_SHOWN]?.focus({ preventScroll: true });
+    /** @type {HTMLElement} */ (main.querySelectorAll('[aria-labelledby="arts-earlier"] .arts-row')[EARLIER_SHOWN])?.focus({ preventScroll: true });
   } else if (verb === "seen") {
     seeAll([...listed.values()]);
     await render();

@@ -75,7 +75,7 @@ function action(label, where) {
   const element = document.createElement(where.href ? "a" : "button");
   element.className = "empty-link";
   element.textContent = label;
-  if (where.href) element.href = where.href;
+  if (where.href) /** @type {HTMLAnchorElement} */ (element).href = where.href;
   else {
     element.type = "button";
     element.dataset.action = where.action;

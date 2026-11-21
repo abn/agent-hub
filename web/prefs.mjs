@@ -51,7 +51,7 @@ export function applyPrefs() {
   const resolved = prefs.theme === "system" ? (systemDark.matches ? "dark" : "light") : prefs.theme;
   document.documentElement.dataset.theme = resolved;
   document.documentElement.dataset.density = prefs.density;
-  document.querySelector('meta[name="theme-color"]').content =
+  /** @type {HTMLMetaElement} */ (document.querySelector('meta[name="theme-color"]')).content =
     resolved === "dark" ? "#111513" : "#F3F5F2";
 }
 

@@ -58,9 +58,7 @@ function envelopeAad(envelope) {
 }
 
 function unsupported(message) {
-  const error = new Error(message);
-  error.code = UNSUPPORTED_ENVELOPE;
-  return error;
+  return Object.assign(new Error(message), { code: UNSUPPORTED_ENVELOPE });
 }
 
 function iterationsOf(envelope) {
@@ -76,8 +74,10 @@ async function deriveKey(password, salt, iterations) {
   // quickstart documents, has no `crypto.subtle`, and the failure otherwise
   // reads as a wrong password. H17.
   if (!globalThis.crypto || !globalThis.crypto.subtle) {
-    const refused = new Error(
-      "Web Crypto is unavailable: this page is not a secure context",
+    const refused = /** @type {Error & { code?: string }} */ (
+      new Error(
+        "Web Crypto is unavailable: this page is not a secure context",
+      )
     );
     refused.code = INSECURE_CONTEXT;
     throw refused;

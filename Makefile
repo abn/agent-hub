@@ -104,9 +104,7 @@ web/units: node_tree ## Run the client unit tests and the PWA static checks
 web/styles: node_tree ## Run the stylesheet gate over the parsed CSS
 	npx vitest run .agents/js-tests/styles.test.mjs
 
-# The client types, over the JSDoc the modules already carry. It is not a gate
-# in `check` yet: the first run lists the outstanding errors, which are counted
-# in the contributor guide until the JSDoc phase brings the count to zero.
+# The client types, over the JSDoc the modules already carry.
 web/types: node_tree ## Type-check the client sources
 	npx tsc --noEmit
 
@@ -138,7 +136,7 @@ net/check: ## Test the tailnet configuration path in a build without the feature
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles net/check serve/check test ## Everything the gate runs but the browser checks
+gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types net/check serve/check test ## Everything the gate runs but the browser checks
 gate/quick: fmt/check lint/engine clippy web/units ## Fast inner loop: format, lint and client units
 e2e: web/e2e ## The browser behaviour checks
 e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2
@@ -152,11 +150,6 @@ e2e/baselines: build node_tree ## Rewrite the changed screenshot baselines over 
 	npx playwright test --shard=2/2 --update-snapshots=changed
 check: gate e2e ## Full quality gate
 	@printf 'check: ok\n'
-
-# `web/types` is listed here rather than in `check` because it is red: the first
-# `tsc` run lists the type errors the pattern matchers could not see, and the
-# contributor guide counts them. It joins `check` when that count is zero, so
-# the gate cannot be quietly dropped.
 
 ##@ Container
 

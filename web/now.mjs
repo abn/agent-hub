@@ -339,9 +339,9 @@ const askRows = () => [...main.querySelectorAll(".now-ask")];
 // the next one. Focus goes there, or to the last ask, or to the stream.
 function focusAskAt(index) {
   const rows = askRows();
-  const row = rows[Math.min(index, rows.length - 1)];
+  const row = /** @type {HTMLElement} */ (rows[Math.min(index, rows.length - 1)]);
   if (row) row.focus({ preventScroll: false });
-  else main.querySelector(".now-row, .now-sum")?.focus?.({ preventScroll: true });
+  else /** @type {HTMLElement} */ (main.querySelector(".now-row, .now-sum"))?.focus?.({ preventScroll: true });
 }
 
 const failed = (error) => toast(`Nothing changed: ${error.message}`);
@@ -381,7 +381,7 @@ async function markEverythingSeen() {
 }
 
 main.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-now]");
+  const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-now]"));
   if (!button || !main.querySelector('.shell[data-segment="now"]')) return;
   const { now: verb, id, summary } = button.dataset;
   const row = button.closest(".now-ask");
@@ -392,13 +392,13 @@ main.addEventListener("click", (event) => {
   let work = null;
   if (verb === "show") {
     const target = button.dataset.show || "";
-    pendingFocus = () => main.querySelector(`[data-now="show"][data-show="${target}"]`)?.focus({ preventScroll: true });
+    pendingFocus = () => /** @type {HTMLElement} */ (main.querySelector(`[data-now="show"][data-show="${target}"]`))?.focus({ preventScroll: true });
     location.hash = hrefFor(target);
     return;
   }
   if (verb === "quiet") {
     quietOpen = !quietOpen;
-    const fold = main.querySelector("#now-quiet");
+    const fold = /** @type {HTMLElement} */ (main.querySelector("#now-quiet"));
     if (fold) fold.hidden = !quietOpen;
     button.setAttribute("aria-expanded", String(quietOpen));
     button.firstChild.textContent = quietOpen ? "Hide" : "Show";
@@ -429,7 +429,7 @@ main.addEventListener("click", (event) => {
     );
   } else if (verb === "unsnooze") {
     unsnooze(id);
-    pendingFocus = () => main.querySelector(`.now-ask [data-id="${CSS.escape(id)}"]`)?.closest(".now-ask")?.focus();
+    pendingFocus = () => /** @type {HTMLElement} */ (main.querySelector(`.now-ask [data-id="${CSS.escape(id)}"]`)?.closest(".now-ask"))?.focus();
     work = render().then(() => toast(`Brought "${summary || id}" back.`));
   }
   if (work) work.catch(failed);

@@ -66,7 +66,7 @@ function setCurrent(screen, path = "") {
 
   document.querySelectorAll(".tabbar a, .rail a").forEach((anchor) => {
     if (anchor.classList.contains("rail-project-item")) {
-      const projId = anchor.dataset.projectId;
+      const projId = /** @type {HTMLElement} */ (anchor).dataset.projectId;
       if (
         projId &&
         (path === `/projects/${projId}` ||
@@ -83,7 +83,7 @@ function setCurrent(screen, path = "") {
     const href = (anchor.getAttribute("href") || "").replace(/^#\//, "").split("?")[0];
     const target = href.split("/")[0];
     if (anchor.classList.contains("rail-item")) {
-      if (anchor.dataset.route === railNav) anchor.setAttribute("aria-current", "page");
+      if (/** @type {HTMLElement} */ (anchor).dataset.route === railNav) anchor.setAttribute("aria-current", "page");
       else anchor.removeAttribute("aria-current");
     } else {
       if (target === tabNav) anchor.setAttribute("aria-current", "page");
@@ -124,7 +124,7 @@ export async function render() {
   const restore = pendingRestore;
   pendingFocus = null;
   pendingRestore = null;
-  const chip = focus && main.querySelector(`[data-action="kind"][data-kind="${CSS.escape(focus)}"]`);
+  const chip = /** @type {HTMLElement} */ (focus && main.querySelector(`[data-action="kind"][data-kind="${CSS.escape(focus)}"]`));
   // Only a change that kept the screen is handed to the screen's own restore.
   // After a real route change the reader has moved, and the route focus below
   // is what tells them where they landed. A restore that finds its item puts
@@ -135,7 +135,7 @@ export async function render() {
   if (chip) {
     chip.focus({ preventScroll: true });
   } else if (!main.contains(document.activeElement) || document.activeElement === main) {
-    const heading = main.querySelector("h1, [role='heading']");
+    const heading = /** @type {HTMLElement} */ (main.querySelector("h1, [role='heading']"));
     // Marked so the stylesheet can leave the ring off this one element. The
     // target is moved to for announcement, not because a reader steered here,
     // and nothing can tab to it, so a ring marks nothing reachable. The mark

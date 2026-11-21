@@ -90,11 +90,9 @@ Client and browser:
 | `make e2e/shard SHARD=1/2` | runs one shard of the browser checks |
 | `make e2e/baselines` | rewrites the changed screenshot baselines, on the CI runner |
 
-`make web/types` is not part of `make check` yet; [Testing](/contribute/testing.md)
-says what it has to clear before it can be. `make container/config` validates the
-compose file and `make container/build` builds the image, both by hand rather
-than in the gate. `make clean` removes the build artefacts, and
-`make hooks/update` moves the pinned hook revisions.
+`make container/config` validates the compose file and `make container/build`
+builds the image, both by hand rather than in the gate. `make clean` removes
+the build artefacts, and `make hooks/update` moves the pinned hook revisions.
 
 ## The client toolchain
 

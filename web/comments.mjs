@@ -59,7 +59,7 @@ function clearDrawerError() {
 }
 
 export function sendCommentsToFrame() {
-  const frame = document.querySelector("#hub-frame");
+  const frame = /** @type {HTMLIFrameElement} */ (document.querySelector("#hub-frame"));
   if (!frame || !frame.contentWindow) return;
   try {
     frame.contentWindow.postMessage(
@@ -97,7 +97,7 @@ export function refreshCommentsToggle() {
   // The comments panel's own header carries the same open count, so the three
   // surfaces agree. It keeps the version it was built with, which is why the
   // count is replaced and the rest of the line is left alone.
-  const headMeta = document.querySelector(".hub-comments-head-meta");
+  const headMeta = /** @type {HTMLElement} */ (document.querySelector(".hub-comments-head-meta"));
   if (headMeta && headMeta.dataset.version) {
     headMeta.textContent = `${openCount} · v${headMeta.dataset.version}`;
   }
@@ -954,7 +954,7 @@ export function renderDesktopCard(comment, replies = []) {
     else if (String(comment.id) !== String(commentsState.activeThreadId)) {
       card.classList.remove("active");
     }
-    const frame = document.querySelector("#hub-frame");
+    const frame = /** @type {HTMLIFrameElement} */ (document.querySelector("#hub-frame"));
     if (frame && frame.contentWindow) {
       frame.contentWindow.postMessage(
         { type: "hub:highlight-comment", commentId: comment.id, active },
@@ -999,7 +999,7 @@ export function openCommentSheet(comment) {
   renderComments();
 
   // Highlight and scroll in frame
-  const frame = document.querySelector("#hub-frame");
+  const frame = /** @type {HTMLIFrameElement} */ (document.querySelector("#hub-frame"));
   if (frame && frame.contentWindow) {
     frame.contentWindow.postMessage(
       { type: "hub:scroll-to-comment", commentId: comment.id },
@@ -1151,13 +1151,13 @@ export function commentsPanel({ toggle, badge }) {
       drawer.querySelectorAll(
         'button, textarea, select, input, a[href], [tabindex]:not([tabindex="-1"])',
       ),
-    ).filter((el) => !el.disabled);
+    ).filter((el) => !/** @type {HTMLInputElement | HTMLButtonElement} */ (el).disabled);
     if (!focusable.length) {
       event.preventDefault();
       return;
     }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const first = /** @type {HTMLElement} */ (focusable[0]);
+    const last = /** @type {HTMLElement} */ (focusable[focusable.length - 1]);
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last.focus();

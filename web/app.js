@@ -112,12 +112,12 @@ function acted(button, work) {
     if (document.activeElement !== main && document.activeElement !== document.body) return;
     const verb = `[data-action="${action}"]`;
     const same = id && main.querySelector(`${verb}[data-id="${CSS.escape(id)}"]`);
-    (same || main.querySelector(verb) || main).focus({ preventScroll: true });
+    /** @type {HTMLElement} */ ((same || main.querySelector(verb) || main)).focus({ preventScroll: true });
   });
 }
 
 main.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-action]");
+  const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action]"));
   if (!button || button.tagName !== "BUTTON") return;
   const { action, id } = button.dataset;
   if (action === "answer") acted(button, answer(id, button));
@@ -175,15 +175,15 @@ function projectBack() {
 // Search forms live in the top bar and on the Search screen, so the submit
 // listener is on the document rather than on the screen region alone.
 document.addEventListener("submit", (event) => {
-  const form = event.target.closest("form[data-action]");
+  const form = /** @type {HTMLFormElement} */ (/** @type {HTMLElement} */ (event.target).closest("form[data-action]"));
   if (!form || form.dataset.action !== "search") return;
   event.preventDefault();
   const data = new FormData(form);
-  location.hash = `#/search?q=${encodeURIComponent(data.get("q") || "")}`;
+  location.hash = `#/search?q=${encodeURIComponent(/** @type {string} */ (data.get("q") || ""))}`;
 });
 
 main.addEventListener("submit", (event) => {
-  const form = event.target.closest("form[data-action]");
+  const form = /** @type {HTMLFormElement} */ (/** @type {HTMLElement} */ (event.target).closest("form[data-action]"));
   if (!form || form.dataset.action === "search") return;
   event.preventDefault();
   const data = new FormData(form);
@@ -235,10 +235,10 @@ main.addEventListener("submit", (event) => {
 });
 
 main.addEventListener("change", (event) => {
-  if (event.target.dataset.role === "show-token") connectShow(event.target);
-  if (event.target.dataset.role === "project") {
+  if (/** @type {HTMLElement} */ (event.target).dataset.role === "show-token") connectShow(event.target);
+  if (/** @type {HTMLElement} */ (event.target).dataset.role === "project") {
     const screen = location.hash.replace(/^#/, "").split("?")[0] || "/feed";
-    location.hash = `${screen}?project=${encodeURIComponent(event.target.value)}`;
+    location.hash = `${screen}?project=${encodeURIComponent(/** @type {HTMLInputElement} */ (event.target).value)}`;
   }
 });
 

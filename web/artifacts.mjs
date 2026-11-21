@@ -575,7 +575,7 @@ export async function artifactIndex(projectId, selectedId = "") {
 // The group the reader picked, applied on the next paint.
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
-    const button = event.target.closest?.('[data-action="artifact-group"]');
+    const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="artifact-group"]'));
     if (!button) return;
     const group = button.dataset.group;
     if (group in ARTIFACT_GROUPS) {
@@ -619,6 +619,7 @@ async function viewerPass(id) {
 
 async function fetchRawText(id, version) {
   const query = version ? `?version=${version}` : "";
+  /** @type {Record<string, string>} */
   const headers = {};
   const token = localStorage.getItem("hub.token");
   if (token) headers.Authorization = "Bearer " + token;
@@ -645,7 +646,7 @@ export function toggleVersionMenu(button) {
   if (button) button.setAttribute("aria-expanded", String(open));
   if (open) {
     const active = menu.querySelector('[aria-current="true"]');
-    (active || menu.querySelector("button"))?.focus();
+    /** @type {HTMLElement} */ ((active || menu.querySelector("button")))?.focus();
   }
 }
 
@@ -757,7 +758,7 @@ function buildVersionSheet(id, versions, shown, projectId) {
   const closeSheet = () => {
     backdrop.hidden = true;
     sheet.hidden = true;
-    const toggle = main.querySelector(".hub-version-toggle");
+    const toggle = /** @type {HTMLElement} */ (main.querySelector(".hub-version-toggle"));
     if (toggle) {
       toggle.setAttribute("aria-expanded", "false");
       toggle.focus();
@@ -984,7 +985,7 @@ function buildShareSheet(id, current, shown, moreBtn) {
     backdrop.hidden = false;
     sheet.hidden = false;
     await renderContent();
-    const btn = sheet.querySelector(".hub-share-primary, .hub-share-copy-btn");
+    const btn = /** @type {HTMLElement} */ (sheet.querySelector(".hub-share-primary, .hub-share-copy-btn"));
     if (btn) btn.focus();
   };
 

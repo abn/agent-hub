@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### The client type check passes
+
+* **Update**: [Testing](/contribute/testing.md) records that `make web/types`
+  reports no errors and runs in `make gate`, and where the window globals are
+  declared.
+
 ### Key hints name only the keys that act
 
 * **Update**: [Human interface](/design/human-interface.md) states that a key

@@ -3,11 +3,15 @@
 
 import { prefs } from "./prefs.mjs";
 
+/**
+ * @param {string} path
+ * @param {RequestInit & { token?: string }} [options]
+ */
 export async function api(path, options = {}) {
   // A token passed here is one being checked before it is kept, so it wins
   // over the stored one without replacing it.
   const { token, ...init } = options;
-  const headers = Object.assign({}, init.headers || {});
+  const headers = /** @type {Record<string, string>} */ (Object.assign({}, init.headers || {}));
   const bearer = token || prefs.token;
   if (bearer) headers.Authorization = "Bearer " + bearer;
   if (init.body) headers["Content-Type"] = "application/json";
@@ -32,9 +36,7 @@ export async function api(path, options = {}) {
     // refusal to authenticate comes through here too: the screen that asks
     // for a token needs the hub's reason, and a sentence of our own in its
     // place would say the same thing whatever went wrong.
-    const refused = new Error(detail);
-    refused.status = response.status;
-    refused.code = code;
+    const refused = Object.assign(new Error(detail), { status: response.status, code });
     throw refused;
   }
   return response.status === 204 ? null : response.json();

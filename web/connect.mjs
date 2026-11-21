@@ -151,7 +151,7 @@ const CONNECT_STYLE = `<style>
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
-    const eye = event.target.closest?.(".connect-eye-btn, [data-role='show-token']");
+    const eye = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".connect-eye-btn, [data-role='show-token']"));
     if (eye && eye.tagName === "BUTTON") {
       event.preventDefault();
       connectShow(eye);
@@ -177,7 +177,7 @@ export async function connectScreen(params, gen) {
   const next = nextFrom(params);
   // A refusal can arrive with a dialog open on the screen behind. It outlives
   // the repaint, and a modal over this one would leave the field unreachable.
-  document.querySelectorAll("dialog[open]").forEach((box) => box.close());
+  document.querySelectorAll("dialog[open]").forEach((box) => /** @type {HTMLDialogElement} */ (box).close());
 
   // The hand-typed fallback "demo · local" named a hub that was not there. The
   // reader's own address is the real node until a token can name it properly.

@@ -47,17 +47,17 @@ function size(bytes) {
 
 if (typeof document !== "undefined") {
   document.addEventListener("click", (event) => {
-    const tabBtn = event.target.closest?.(".projects-tab-btn");
+    const tabBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.(".projects-tab-btn"));
     if (!tabBtn) return;
     const tab = tabBtn.dataset.tab;
     const root = tabBtn.closest(".shell");
     if (!root) return;
     root.querySelectorAll(".projects-tab-btn").forEach((btn) => {
-      const isSelected = btn.dataset.tab === tab;
+      const isSelected = /** @type {HTMLElement} */ (btn).dataset.tab === tab;
       btn.setAttribute("aria-selected", isSelected ? "true" : "false");
     });
-    const regularList = root.querySelector(".projects-list-regular");
-    const spacesList = root.querySelector(".projects-list-spaces");
+    const regularList = /** @type {HTMLElement} */ (root.querySelector(".projects-list-regular"));
+    const spacesList = /** @type {HTMLElement} */ (root.querySelector(".projects-list-spaces"));
     if (regularList) regularList.hidden = tab !== "projects";
     if (spacesList) spacesList.hidden = tab !== "spaces";
   });
@@ -67,7 +67,7 @@ if (typeof document !== "undefined") {
 // and replaces the count with one mono line, the same shape the index filter
 // uses. The register has no index pane, so it filters its own lists.
 function wireProjectFilter() {
-  const field = document.querySelector("[data-action='projects-filter']");
+  const field = /** @type {HTMLInputElement} */ (document.querySelector("[data-action='projects-filter']"));
   if (!field || field.dataset.wired === "on") return;
   field.dataset.wired = "on";
   const screen = document.querySelector(".projects-screen");
@@ -81,12 +81,12 @@ function wireProjectFilter() {
     let shown = 0;
     for (const row of rows) {
       const match = !q || row.textContent.toLowerCase().includes(q);
-      row.hidden = !match;
+      /** @type {HTMLElement} */ (row).hidden = !match;
       if (match) shown++;
     }
     for (const list of document.querySelectorAll(".projects-list")) {
       const any = [...list.querySelectorAll(".project-row:not([hidden])")].length > 0;
-      list.hidden = !any;
+      /** @type {HTMLElement} */ (list).hidden = !any;
     }
     if (q) {
       count.textContent = `${shown} of ${rows.length} match "${field.value.trim()}"`;

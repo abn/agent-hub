@@ -699,13 +699,13 @@ function setupMobileStorageEvents(usage) {
   if (!root) return;
 
   root.addEventListener("click", async (event) => {
-    const remeasureBtn = event.target.closest("[data-action='storage-remeasure']");
+    const remeasureBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='storage-remeasure']"));
     if (remeasureBtn) {
       event.preventDefault();
       await render();
       return;
     }
-    const pruneBtn = event.target.closest("[data-action='storage-prune-all']");
+    const pruneBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='storage-prune-all']"));
     if (pruneBtn) {
       event.preventDefault();
       const holding = usage.projects.filter((p) => p.prunable_sessions > 0);

@@ -414,19 +414,19 @@ const controls = (place) => `<div class="shell-controls item-controls">
 function mountReply() {
   const slot = main.querySelector(".inbox-reply");
   if (!slot) return;
-  const isIdea = slot.dataset.kind === "idea";
+  const isIdea = /** @type {HTMLElement} */ (slot).dataset.kind === "idea";
   const reply = composer({
     label: isIdea ? "Add an addendum" : "Your answer",
-    options: optionsFrom(slot.dataset.options),
+    options: optionsFrom(/** @type {HTMLElement} */ (slot).dataset.options),
     numbered: true,
     send: async (body) => {
       if (isIdea) {
         // An addendum adds to the idea and leaves it open, so the item stays.
-        await sendIdeaReply(slot.dataset.id, body);
+        await sendIdeaReply(/** @type {HTMLElement} */ (slot).dataset.id, body);
         await render();
         toast("Addendum logged on the idea's thread.");
       } else {
-        await sendAnswer(slot.dataset.id, body);
+        await sendAnswer(/** @type {HTMLElement} */ (slot).dataset.id, body);
         await leave(shown.landing);
         toast("Answer sent, recorded on the feed.");
       }
@@ -533,7 +533,7 @@ export async function inbox(gen) {
   // the card's, so it does not matter whether focus is in the field or on the
   // Send button beside it: closing would throw them away either way.
   unregisterCard = registerPane(() => {
-    const draft = main.querySelector(".inbox-detail .composer-field");
+    const draft = /** @type {HTMLInputElement} */ (main.querySelector(".inbox-detail .composer-field"));
     if (draft && draft.value.trim()) return;
     leave().catch(failed);
   });
@@ -627,13 +627,18 @@ export async function answerWith(id, body) {
 // readable while the answer is written and a failed send keeps the words.
 // Pressing Reply again on an open composer moves back into it rather than
 // stacking a second one. `onSent` runs once the screen has repainted.
+/**
+ * @param {string} id
+ * @param {HTMLElement} button
+ * @param {{ onSent?: Function }} [options]
+ */
 export async function answer(id, button, { onSent } = {}) {
   // A stage's action line is the row there: the composer goes under the line,
   // not into it beside the button.
   const row = button.closest(".row") || button.closest(".feed-stage-actions") || button;
   const open = row.nextElementSibling;
   if (open && open.classList.contains("composer")) {
-    open.querySelector(".composer-field").focus();
+    /** @type {HTMLElement} */ (open.querySelector(".composer-field")).focus();
     return;
   }
   const reply = composer({
@@ -771,7 +776,7 @@ async function copyCode(button) {
 
 // The card's verbs, on the answer block and the phone's thumb bar alike.
 main.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-item]");
+  const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-item]"));
   if (!button || !main.querySelector(".item-sheet")) return;
   const { id, summary, landing } = shown;
   const verb = button.dataset.item;
@@ -793,7 +798,7 @@ main.addEventListener("click", (event) => {
   else if (verb === "resolve") work = actOnIdea(id, "resolved", summary, landing);
   else if (verb === "clear") work = actOnIdea(id, "cleared", summary, landing);
   else if (verb === "reply") {
-    const field = main.querySelector(".inbox-detail .composer-field");
+    const field = /** @type {HTMLElement} */ (main.querySelector(".inbox-detail .composer-field"));
     field?.scrollIntoView({ block: "center" });
     field?.focus();
   }
@@ -805,7 +810,7 @@ main.addEventListener("click", (event) => {
 // another tab or window is the browser's.
 main.addEventListener("click", (event) => {
   if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  if (!event.target.closest("a[data-item-close]")) return;
+  if (!/** @type {HTMLElement} */ (event.target).closest("a[data-item-close]")) return;
   event.preventDefault();
   leave().catch(failed);
 });

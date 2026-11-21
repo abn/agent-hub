@@ -44,7 +44,7 @@ function dismiss() {
 // Whether the reader is composing something. A field, a picker and an editable
 // region are all places a moved caret loses them their place.
 function writing() {
-  const el = document.activeElement;
+  const el = /** @type {HTMLElement} */ (document.activeElement);
   if (!el) return false;
   if (el.isContentEditable) return true;
   return ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
