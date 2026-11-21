@@ -13,18 +13,21 @@ bundle screen by screen.
 
 ## Personality
 
-A private mailroom for your agents. Calm by default, one step louder when
-something waits on you, never alarming. Warm paper in light, warm charcoal in
-dark, one humanist sans, monospace only for literal data. Every number shown
-is real.
+A quiet desk for your agents. Calm by default, one step louder when something
+waits on you, never alarming. Lichen slate in light and slate charcoal in dark,
+hairlines rather than boxes, IBM Plex Sans for words and Plex Mono only for
+literal data. Copper is the one signal and means only "needs you", focus and the
+primary action; raspberry means deletion and nothing else. Every number shown is
+real.
 
 ## Identity
 
-The mark is three blue nodes joined in a triangle: agents working together, as
-peers rather than spokes. It is drawn from the tokens, `--accent` for the nodes
-and `--ink` for the connections, on a `--bg` ground. One shape at every size: it
-holds as a 16px favicon and as a 512px app icon, and it carries no text, so it
-never depends on a language.
+The mark is three copper nodes joined in a triangle: agents working together,
+as peers rather than spokes. It is drawn from the tokens, `--accent` for the
+nodes and `--ink` for the connections, on a `--bg` ground, so it took the copper
+and the lichen ground when the palette moved to them; the shape did not change.
+One shape at every size: it holds as a 16px favicon and as a 512px app icon,
+and it carries no text, so it never depends on a language.
 
 The tile is the mark's ground. The app icon is a full-bleed `--bg` square,
 because the platform masks it; the wiki's brand mark is a rounded tile with a
@@ -47,33 +50,84 @@ question, not a local decision.
   system by default.
 - Density switches by `data-density="compact"`. Compact changes row padding
   only, from 12px to 8px, never type size.
-- Fonts are system stacks. Nothing is fetched from a CDN, and no webfont is
-  shipped.
+- Fonts are IBM Plex Sans (400, 500, 600) and IBM Plex Mono (400, 500), Latin
+  subset, shipped in the binary and served from the hub itself under
+  `vendor/fonts/` with the OFL licence beside them. Nothing is fetched from a
+  CDN. Each face is `font-display: swap` over the system stack, so text is
+  never invisible while a face loads.
 
-**Deviation: the action tone.** The handoff's `--action` is `#9A5E0C`, which
-measures 4.47:1 on `--action-bg` and 4.39:1 on `--surface-2`, below the WCAG AA
-4.5:1 minimum for the 12/600 "waiting on you" pill and the Approve button. The
-repo ships `#95590B`, which measures 4.80:1 and 4.71:1 and passes AA while
-staying visually the same tone; round 14 confirms that value. `--k-approval` is
-that same value, so the button that asks for a decision and the badge that marks
-one stay one colour.
+**The palette is lichen slate and copper.** The token names the screens were
+built on are kept and their values remapped, so a rule that paints a role still
+paints it:
 
-**Deviation: the field border.** The handoff's hairline is one step lighter than
-the 3:1 non-text minimum against the field's own surface, so an empty field's
-border alone would not carry it. The build darkens the field border by one step.
-Round 14 accepts this as the field border everywhere.
+| Token | Role | Light | Dark |
+|---|---|---|---|
+| `--bg`, `--surface` | the canvas, the only surface | `#F3F5F2` | `#111513` |
+| `--surface-2`, `--accent-bg` | sunken: hover, the selected row, code | `#E8ECE7` | `#1A1F1C` |
+| `--raised` | a field, a sheet, a dialog, a menu | `#FBFCFA` | `#161B18` |
+| `--line` | hairline | `#D3DAD2` | `#29312C` |
+| `--line-strong` | control border | `#66726A` | `#7A867E` |
+| `--ink`, `--ink-2`, `--ink-3` | text | `#151B17`, `#3B4640`, `#56625A` | `#E4EAE5`, `#B5BFB8`, `#8E9991` |
+| `--accent`, `--action` | copper: needs you, focus, primary | `#84461D` | `#E3A06F` |
+| `--action-bg` | the copper wash | `#F1E4D8` | `#2E241C` |
+| `--ok` | active, published | `#2C6A3D` | `#7DC490` |
+| `--danger` | deletion only | `#A3154A` | `#FF7099` |
+
+- `--accent` and `--action` are one colour. The old split between a blue for
+  unread, links and selection and an amber for waiting is gone: copper marks
+  what waits on the reader, the focus ring and the primary action, and nothing
+  else.
+- A link is ink with a quiet `--line-strong` underline that darkens on hover.
+  An unread dot is ink. A selected row is the sunken ground with a 2px copper
+  edge, the row the reader is pointing at.
+- The copper wash, `--action-bg`, is the ground for an anchored passage, a
+  search hit and the waiting pill.
+- Event kinds are not tinted. Every `--k-*` pair is `--ink-2` on the sunken
+  ground, because a kind is carried by its glyph and its word.
+- Nothing on the canvas casts a shadow: `--shadow-1` is none, and only what
+  floats over the canvas, a menu, a sheet or a dialog, keeps `--shadow-2`.
+- Radii are 2px (`--r-1`, a control) and 4px (`--r-2`, a field, a sheet or a
+  card). `--r-pill` remains for a dot and a switch, which are round, and for
+  nothing that holds a word.
+
+Every text pair the interface paints, in both themes, measured:
+
+| Pair | Light | Dark |
+|---|---|---|
+| `--ink` on `--bg` / `--surface-2` / `--raised` | 15.95 / 14.64 / 16.99 | 15.08 / 13.69 / 14.28 |
+| `--ink-2` on `--bg` / `--surface-2` / `--raised` | 8.97 / 8.23 / 9.55 | 9.74 / 8.84 / 9.23 |
+| `--ink-3` on `--bg` / `--surface-2` / `--raised` | 5.82 / 5.34 / 6.20 | 6.24 / 5.66 / 5.91 |
+| `--accent` on `--bg` / `--surface-2` / `--raised` | 6.66 / 6.12 / 7.10 | 8.35 / 7.58 / 7.91 |
+| `--accent` on `--action-bg` | 5.85 | 6.88 |
+| `--ink-inverse` on `--accent` / `--danger` / `--ink` | 6.66 / 6.93 / 15.95 | 8.35 / 7.04 / 15.08 |
+| `--ok` on `--bg` / `--surface-2` | 5.92 / 5.43 | 8.92 / 8.09 |
+| `--danger` on `--bg` / `--surface-2` / `--danger-bg` | 6.93 / 6.36 / 6.20 | 7.04 / 6.39 / 6.01 |
+| `--ink` on `--action-bg` / `--danger-bg` | 14.01 / 14.26 | 12.42 / 12.87 |
+| `--line-strong` on `--bg` / `--surface-2` / `--raised` (non-text) | 4.58 / 4.21 / 4.88 | 4.86 / 4.41 / 4.60 |
+
+**The field border is the control border.** An empty field has nothing in it
+that says a control is there, so its border is the whole of what identifies it.
+`--line-strong` is held at 4.2:1 or more on every ground a field stands on, so
+the field and the outline button share one border.
 
 The status pill ("Waiting on you") is 12/600 with a 6px dot, height 22, padding
-0 8, radius 11 and a 6px gap, the same box as the live token pill. Any 11px text
+0 8, radius 2 and a 6px gap, the same box as the live token pill. Any 11px text
 is a defect: it is raised to 12 and the container grows.
 
 **The knowledge tone is storage-only.** `--k-knowledge` and `--k-knowledge-bg`
 are an olive pair used only by the Storage breakdown's knowledge segment and
-legend. Storage is the one screen where a byte count and "an agent is asking
-you" would otherwise share a tone, so knowledge gets its own, and
-`--k-question` keeps its meaning.
+legend. The other three segments take the three ink steps, so the bar stays
+neutral but for the one segment a byte count must not confuse with an ink.
+Every segment is also named and counted in the legend, so no segment is told
+apart by colour alone.
 
 ## Type
+
+The family is IBM Plex Sans for every word and IBM Plex Mono for literal data:
+times, ids, paths, keys, versions and byte counts. There is no serif and no
+third family. The artifact frame is an opaque document that cannot load the
+shell's faces, so it names Plex first for a host that has it installed and sets
+the system stack everywhere else.
 
 The scale is 28 for a page title, 22 for a section, 17 for an item title, 15
 for a row title and for body, 13 for meta, 12 for an uppercase section label
@@ -382,18 +436,24 @@ structure, not to line length.
   ring without it is a ring that vanishes in that mode, which is the one mode
   where a reader cannot be given a colour to find it by.
 - **Row.** Flex, 12px gap, row padding, a bottom hairline, a minimum height of
-  56px on mobile and 44 comfortable / 36 compact on the desktop, on the row
-  surface. Hover raises the surface one step.
-- **Kind glyph badge.** A 24px circle on the kind's background with its own
-  colour inside. A dot for signal, a check for finished, a question mark, an
-  exclamation mark for approval, a document for artifact, a half disc for
-  session, a bookmark for anchor and a star for score. The badge is hidden from
-  assistive technology and the row carries a visually hidden word for the kind
-  instead.
-- **Chips and pills.** A chip is a filter: pill radius, selected is ink fill,
-  otherwise an outline. A pill is a value, not a door.
-- **Buttons.** Sized by the control sizes above, radius 6, `white-space:
-  nowrap`. Primary is ink fill, secondary an outline, Approve the action tone,
+  56px on mobile and 44 comfortable / 36 compact on the desktop, on the canvas.
+  Hover sinks the row to the sunken ground. The selected row is the sunken
+  ground with a 2px copper edge.
+- **Kind glyph badge.** A 24px box holding the kind's mark in ink, with no fill
+  behind it: kinds are not tinted. A dot for signal, a check for finished, a
+  question mark, an exclamation mark for approval, a document for artifact, a
+  half disc for session, a bookmark for anchor and a star for score. The badge
+  is hidden from assistive technology and the row carries a visually hidden word
+  for the kind instead.
+- **Chips and pills.** A chip is a filter: 2px radius and no border at rest;
+  selected is the sunken ground with a 2px ink rule under the label. A pill is a
+  value, not a door, at the 2px radius.
+- **Key hints.** A key is named on a key chip: 12/500 mono in `--ink-2`, 20px
+  high, a `--line-strong` border with a 2px foot, on the raised ground. The
+  rail's search key and the shortcut list draw the same chip.
+- **Buttons.** Sized by the control sizes above, radius 2, `white-space:
+  nowrap`, transparent on the canvas. Primary is the copper fill with an
+  inverse label, secondary a `--line-strong` outline, Approve the primary,
   danger an outline on a screen and a fill only inside a dialog that deletes.
   Disabled is the inset surface with meta ink. A destructive action is never a
   swipe. Danger is the deletion tone: revoking a token, removing a grant,
@@ -586,11 +646,11 @@ Agents and access, Connect, and the knowledge base.
   time in mono with "current" or "not kept" as a word, then actor, what the
   write did and its size. A version opens as a line diff against the page as it
   is now, in mono at 13px, each changed line marked `+` or `-` in its own column
-  with a hidden "Added" or "Removed" for a screen reader, the added line tinted
-  `--accent-bg` and the removed one `--danger-bg`, so the tint repeats what the
-  mark says and never carries it alone. `--surface-2` was the removed tint
-  first and read as nearly the page itself in the dark theme; `--danger-bg` is
-  distinct in both, and `--ink` on it is held to AA by the contrast gate. The
+  with a hidden "Added" or "Removed" for a screen reader, the added line on
+  `--accent-bg`, the sunken ground, and the removed one on `--danger-bg`, so the
+  tint repeats what the mark says and never carries it alone. `--danger-bg` is
+  distinct in both themes, and `--ink` on either is held to AA by the contrast
+  gate. The
   revert dialog names the version's time with the app's full date formatter,
   not the raw stamp, so it reads as a date and never breaks at a hyphen. Unchanged runs fold to one 12px count
   line, three lines of context either side of a change. Long lines wrap, so the
@@ -735,10 +795,21 @@ either that it matches the design or exactly where it deviates and why.
 A browser gate that holds a character count or a screenshot baseline pins the
 sans stack to Cantarell and the mono stack to DejaVu Sans Mono, from the
 dev-only `@fontsource/cantarell` and `@fontsource/dejavu-mono` packages,
-served to the page by the test, so the count and the pixels do not depend on a
-host's installed fonts. The baselines themselves are made on CI's own browser.
-The pin lives in the test run only; the shipped binary and the design's stack
-do not change.
+served to the page by the test. The pin predates the shipped Plex, and its
+floors and baselines were measured under it, so it stays until they are
+measured again under Plex. The baselines themselves are made on CI's own
+browser. The pin lives in the test run only; the shipped binary sets Plex.
+
+**Deviation: the frame keeps its stacked title.** The handoff sets a pane's
+title at 17/600 with its meta beside it on one baseline. The build keeps the
+15/600 title over a mono meta line in the 52px header, because the phone
+header and the pane-title gate are built on that stack; a screen adopts the
+handoff's header when it is redrawn.
+
+**Deviation: control rows may fill a primary.** The handoff fills only the
+focused row's primary action. Screens that predate it still mark a band's main
+verb, such as Capture idea, as the primary, so it fills copper until that
+screen is redrawn.
 A screenshot baseline is a check tagged `@visual`, compared with one shared
 tolerance of 0.2% of the clip's pixels. Made and checked on the same browser,
 it absorbs only nondeterministic sub-pixel noise: a band moved or resized by

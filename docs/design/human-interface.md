@@ -33,43 +33,42 @@ gesture's transform, and a `display` toggle driven by state. Every other
 declaration is a class, where the token, type and control-size gates read it. A
 value the token file does not carry is a design question, not a local decision.
 
-- **Themes.** Warm paper in light, warm charcoal in dark, switched by a
+- **Themes.** Lichen slate in light, slate charcoal in dark, switched by a
   `data-theme` attribute on the root element and following the operating system
   by default. A system that changes while the app is open changes the app with
-  it, status bar included; a theme the reader chose follows nothing. Nothing is
-  fetched from a CDN and no webfont is shipped, so the fonts are system stacks.
-- **Surfaces.** A canvas, a row and card surface, and an inset surface, with
-  two line weights for dividers and control borders.
-- **Ink.** A primary, a secondary at 6.3 to 1, and a meta tone at 5 to 1 on the
-  surface.
-- **Accents.** An accent for unread, links, focus and selection; an action tone
-  for waiting items and approvals; an ok tone for resolved and active; and a
-  danger tone reserved for deletion.
-- **Event kinds.** Each of the six families has a colour and a background
-  partner, used only inside the glyph badge or as a two pixel accent, never as
-  body text. A kind borrows a tone where it has no family of its own: an answer
-  borrows the question tone, since it is the reply on that thread; an anchor
-  borrows the session tone, since a phase boundary sits inside a session's life;
-  and a score borrows the action tone the approval kind carries for a decision.
-  A seventh pair, an olive, is the knowledge
-  tone, drawn only by the Storage breakdown's knowledge segment and legend, so
-  a byte count never borrows the question tone, which means "an agent is asking
-  you".
-- **Foundations.** A focus ring, two shadows, three radii, a four step spacing
-  scale, and a type scale from 12 to 28.
+  it, status bar included; a theme the reader chose follows nothing.
+- **Fonts.** IBM Plex Sans for words and IBM Plex Mono for literal data, Latin
+  subset, shipped inside the binary and served by the hub itself, with the SIL
+  Open Font License beside them at `vendor/fonts/OFL.txt`. Nothing is fetched
+  from a CDN. Each face swaps in over the system stack, so text is never hidden
+  while a face loads.
+- **Surfaces.** One canvas that every pane, row and card stands on, a sunken
+  ground for hover, the selected row and code, and a raised ground for fields,
+  sheets, dialogs and menus. Panes and rows are told apart by hairlines, not
+  fills, and nothing on the canvas casts a shadow.
+- **Ink.** A primary, a secondary at 8.2 to 1 or better, and a meta tone at 5.3
+  to 1 or better on every ground.
+- **Signal.** Copper is the one signal. It marks what waits on the reader, the
+  focus ring and the primary action, Approve included, and nothing else. A link
+  is ink with a quiet underline, an unread dot is ink, and a selected row is the
+  sunken ground with a copper edge. An ok green marks resolved and active, and a
+  raspberry is reserved for deletion.
+- **Event kinds.** Kinds are not tinted. Each of the six families is told apart
+  by its glyph and its word, drawn in ink. An olive tone is kept for the
+  Storage breakdown's knowledge segment and legend alone; the other segments
+  take the three ink steps, and every segment is named and counted in the
+  legend.
+- **Foundations.** A focus ring, one shadow for what floats over the canvas,
+  two radii (2px for a control, 4px for a field, a sheet or a card), a four step
+  spacing scale, and a type scale from 12 to 28.
 - **Density.** Compact switches row padding only, from 12px to 8px, never type
   size.
 
-Two values depart from the handoff, and the design contract records both. The
-action tone is one step darker than the foundation draws it, because the
-foundation's value falls below the AA threshold on the inset surface and on its
-own background; `--k-approval` is that same value, so the button that asks for
-a decision and the badge that marks one are a single colour. The field border
-is also darkened by one step, because an empty field's border has to meet the
-3:1 non-text minimum against the field's own surface, since an empty field has
-nothing else inside it that says a control is there. No colour is written
-twice: the manifest, the shell, the icon and the artifact frame all use values
-the token file declares.
+Every text pair is held to WCAG AA in both themes, and the design contract
+records each ratio. The field border is the control border, at 4.2 to 1 or
+better on every ground, because an empty field has nothing else inside it that
+says a control is there. No colour is written twice: the manifest, the shell,
+the icon and the artifact frame all use values the token file declares.
 
 Radius, spacing and type are tokens. Radius is `--r-1`, `--r-2` or `--r-pill`,
 spacing uses the `--s-*` steps from 4 to 32, and type uses the `--t-*` sizes.
@@ -302,8 +301,8 @@ segmented switcher and the filter field under it; the switcher states that it
 drops its counts when the pane is narrow, and a project's four tabs read in
 full at the default width. An event opens in the stage with a "Points at" card
 carrying the reader to the artifact or session it is about. A project with
-items waiting draws an amber badge and one with unread items an accent badge,
-with amber taking priority when both exist.
+items waiting draws a copper badge and one with unread items a neutral badge,
+with copper taking priority when both exist.
 
 The control row carries the filter, the Group menu and Capture idea. The
 project's overflow carries the feed's own verbs: **Select items** and **Dismiss
@@ -561,8 +560,8 @@ newest first, carries the short time in mono with "current" or "not kept" as a
 word, then the actor, what the write did and its size; the full stamp is on the
 time element as its title and its accessible name. A version opens as a line
 diff against the page as it is now, each changed line marked `+` or `-` in its
-own column with a hidden word for a screen reader, the added line tinted with
-the accent and the removed one with the danger tint, so the tint repeats what
+own column with a hidden word for a screen reader, the added line on
+the sunken ground and the removed one on the danger tint, so the tint repeats what
 the mark says and never carries it alone. Unchanged runs fold to one 12px count
 line, three lines of context either side of a change, and long lines wrap so the
 diff never scrolls the pane sideways. The header carries Revert to this, or
@@ -729,7 +728,7 @@ text under 12px on any screen, no control in a header or control row taller than
 chip and field on a coarse pointer, a distinct mark per kind, and one kind word
 per row. Both size checks walk every screen the router registers. A waiting row
 in the feed and the inbox is held at both widths in both themes, set in a pinned
-Cantarell so the numbers and pixels match on every host. A composer check opens
+Cantarell, the face its floors and baselines were measured in. A composer check opens
 every composer at both pointers and holds its sizes, the send control's place on
 the last line, the growth cap, the keyboard rule, the empty state and its
 reason, and an optional axe pass renders the screens in both themes and reports

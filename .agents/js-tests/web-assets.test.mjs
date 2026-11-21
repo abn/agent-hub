@@ -55,6 +55,12 @@ const REQUIRED = [
   "vendor/marked.js",
   "vendor/mermaid.runtime.js",
   "vendor/MANIFEST.json",
+  "vendor/fonts/ibm-plex-sans-latin-400-normal.woff2",
+  "vendor/fonts/ibm-plex-sans-latin-500-normal.woff2",
+  "vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
+  "vendor/fonts/ibm-plex-mono-latin-400-normal.woff2",
+  "vendor/fonts/ibm-plex-mono-latin-500-normal.woff2",
+  "vendor/fonts/OFL.txt",
   "manifest.webmanifest",
   "sw.js",
   "icon.svg",
@@ -65,6 +71,11 @@ const REQUIRED = [
 const LICENSE_MARKERS = [
   ["vendor/marked.js", "MIT Licensed"],
   ["vendor/mermaid.runtime.js", "Bundled license information"],
+  // The faces are compressed, so the licence they ship under is its own file,
+  // served beside them, with the copyright lines the OFL asks a copy to keep.
+  ["vendor/fonts/OFL.txt", "SIL OPEN FONT LICENSE Version 1.1"],
+  ["vendor/fonts/OFL.txt", "IBM Plex Sans: Copyright 2019 IBM Corp."],
+  ["vendor/fonts/OFL.txt", "IBM Plex Mono: Copyright 2017 IBM Corp."],
 ];
 
 // A URL in an XML namespace declaration is not a fetched asset.
@@ -295,7 +306,7 @@ describe("the glyph set is drawn and used", () => {
   });
 });
 
-const VENDOR_LICENSES = new Set(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0"]);
+const VENDOR_LICENSES = new Set(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0", "OFL-1.1"]);
 
 /** Every vendored file against its manifest entry: name, release, licence, hash. */
 function checkVendorManifest() {

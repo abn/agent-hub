@@ -254,6 +254,36 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "application/javascript; charset=utf-8",
     },
     Asset {
+        path: "/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2",
+        body: include_bytes!("../../web/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2"),
+        content_type: "font/woff2",
+    },
+    Asset {
+        path: "/vendor/fonts/ibm-plex-sans-latin-500-normal.woff2",
+        body: include_bytes!("../../web/vendor/fonts/ibm-plex-sans-latin-500-normal.woff2"),
+        content_type: "font/woff2",
+    },
+    Asset {
+        path: "/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2",
+        body: include_bytes!("../../web/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2"),
+        content_type: "font/woff2",
+    },
+    Asset {
+        path: "/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2",
+        body: include_bytes!("../../web/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2"),
+        content_type: "font/woff2",
+    },
+    Asset {
+        path: "/vendor/fonts/ibm-plex-mono-latin-500-normal.woff2",
+        body: include_bytes!("../../web/vendor/fonts/ibm-plex-mono-latin-500-normal.woff2"),
+        content_type: "font/woff2",
+    },
+    Asset {
+        path: "/vendor/fonts/OFL.txt",
+        body: include_bytes!("../../web/vendor/fonts/OFL.txt"),
+        content_type: "text/plain; charset=utf-8",
+    },
+    Asset {
         path: "/artifact-viewer.mjs",
         body: include_bytes!("../../web/artifact-viewer.mjs"),
         content_type: "application/javascript; charset=utf-8",

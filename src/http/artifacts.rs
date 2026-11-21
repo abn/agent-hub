@@ -1275,9 +1275,10 @@ pub async fn share_og_svg(
     Ok(og_response(og_card(&artifact)))
 }
 
-/// The host shell policy: scripts only from the hub origin, no network, the
-/// artifact frame only from the hub origin, no inline scripts.
-const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+/// The host shell policy: scripts and the shell's fonts only from the hub
+/// origin, no network, the artifact frame only from the hub origin, no inline
+/// scripts.
+const HOST_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data: blob:; font-src 'self' data:; media-src data: blob:; connect-src 'none'; frame-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 fn host_response(body: String) -> Response {
     let mut response = Response::new(Body::from(body));

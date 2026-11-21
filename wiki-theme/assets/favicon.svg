@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Agent Hub">
-  <rect width="64" height="64" fill="#F5F3EE"></rect>
+  <rect width="64" height="64" fill="#F3F5F2"></rect>
   <g transform="translate(32 32) scale(2.3) translate(-12 -12)">
-    <path d="M12 6.4 6 17.6 18 17.6 Z" fill="none" stroke="#1D1C19" stroke-width="1.8" stroke-linejoin="round"></path>
-    <g fill="#2F5FA8">
+    <path d="M12 6.4 6 17.6 18 17.6 Z" fill="none" stroke="#151B17" stroke-width="1.8" stroke-linejoin="round"></path>
+    <g fill="#84461D">
       <circle cx="12" cy="6.4" r="2.5"></circle>
       <circle cx="6" cy="17.6" r="2.5"></circle>
       <circle cx="18" cy="17.6" r="2.5"></circle>

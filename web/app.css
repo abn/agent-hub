@@ -17,7 +17,7 @@
 .tabbar a[aria-current="page"] { color: var(--ink); font-weight: 600; }
 /* component: badges */
 .badge {
-  min-width: 16px; height: 16px; padding: 0 var(--s-1); border-radius: var(--r-pill);
+  min-width: 16px; height: 16px; padding: 0 var(--s-1); border-radius: var(--r-1);
   background: var(--accent); color: var(--ink-inverse);
   font-size: var(--t-12); font-weight: 600; line-height: 16px; text-align: center;
 }
@@ -25,10 +25,11 @@
    is merely unread, and never alarm. */
 .badge.waiting { background: var(--action); }
 /* The unread mark. A dot is a colour and a shape with no name of its own, so
-   whatever places it places a hidden label beside it. */
+   whatever places it places a hidden label beside it. Unread is not waiting,
+   so the dot is ink: copper is kept for what needs the reader. */
 .dot-unread {
   width: 8px; height: 8px; border-radius: 50%; flex: none;
-  background: var(--accent);
+  background: var(--ink-2);
 }
 main { flex: 1; width: 100%; min-width: 0; margin: 0; padding: var(--s-4) var(--s-4) 80px; }
 
@@ -112,7 +113,7 @@ h3.group {
   margin: var(--s-3) 0 var(--s-1);
 }
 .group-n {
-  display: inline-block; min-width: 20px; padding: 0 var(--s-2); border-radius: var(--r-pill);
+  display: inline-block; min-width: 20px; padding: 0 var(--s-2); border-radius: var(--r-1);
   background: var(--surface-2); color: var(--ink-2);
   font-size: var(--t-12); font-weight: 600; text-align: center;
 }
@@ -171,13 +172,12 @@ h3.group {
   width: 24px; height: 24px; border-radius: 50%; flex: none;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: var(--t-13); font-weight: 600;
-  line-height: 1; background: var(--kind-bg); color: var(--kind);
+  line-height: 1; background: none; color: var(--kind);
 }
-/* The kind as a word rather than a badge. A kind colour reads as low as 4.32:1
-   on its own tint, under the 4.5:1 a label needs, so the label is ink-2 and the
-   kind keeps the 2px accent it is allowed outside the badge. */
+/* The kind as a word rather than a badge: ink-2 on the sunken ground, with a
+   2px ink edge. Kinds are not tinted, so the word is what tells them apart. */
 .kind-chip {
-  display: inline-block; padding: var(--s-1) var(--s-2); border-radius: var(--r-pill);
+  display: inline-block; padding: var(--s-1) var(--s-2); border-radius: var(--r-1);
   font-size: var(--t-12); font-weight: 600;
   background: var(--kind-bg); color: var(--ink-2);
   box-shadow: inset 2px 0 0 var(--kind);
@@ -188,7 +188,7 @@ h3.group {
    as a flex child, so a line too narrow for it truncates the text beside it
    rather than breaking the pill's words across two lines. */
 .pill {
-  display: inline-block; padding: var(--s-1) var(--s-2); border-radius: var(--r-pill);
+  display: inline-block; padding: var(--s-1) var(--s-2); border-radius: var(--r-1);
   font-size: var(--t-12); font-weight: 600; background: var(--action-bg); color: var(--action);
   white-space: nowrap; flex: none;
 }
@@ -196,7 +196,7 @@ h3.group {
    same 22px height as the live token pill rather than the padded text pill. */
 .pill-status {
   display: inline-flex; align-items: center; gap: var(--s-2);
-  height: 22px; padding: 0 var(--s-2); border-radius: var(--r-pill);
+  height: 22px; padding: 0 var(--s-2); border-radius: var(--r-1);
   background: var(--action-bg); color: var(--action);
   font-size: var(--t-12); font-weight: 600;
   white-space: nowrap; flex: none;
@@ -214,9 +214,9 @@ h3.group {
   gap: var(--s-2);
   height: 32px;
   min-height: 32px;
-  padding: 0 var(--s-3);
-  border-radius: var(--r-pill);
-  border: 1px solid var(--line-strong);
+  padding: 0 var(--s-2);
+  border-radius: var(--r-1);
+  border: 1px solid transparent;
   color: var(--ink-2);
   background: transparent;
   font-size: var(--t-13);
@@ -229,9 +229,9 @@ h3.group {
   position: relative;
 }
 .chip[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--ink-inverse);
-  border-color: var(--ink);
+  background: var(--surface-2);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
   font-weight: 600;
 }
 .chip:focus-visible {
@@ -264,7 +264,7 @@ h3.group {
    and a band or a row draws it at --ctl; a coarse pointer draws it at --tap. */
 button, .button {
   min-height: var(--ctl-form); padding: 0 var(--s-4); border-radius: var(--r-1);
-  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line-strong); background: transparent; color: var(--ink);
   font: inherit; white-space: nowrap; cursor: pointer;
 }
 /* A button's label is one style per control size. --ctl-form and --tap, which
@@ -275,11 +275,13 @@ button, .button {
 button, .button { font-size: var(--t-15); font-weight: 600; }
 .row button, .row .button { font-size: var(--t-13); }
 a.button, a.chip { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
-button.primary { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
+/* Copper is the primary action. Approve is the same fill, because approving is
+   the primary action on what needs the reader. */
+button.primary { background: var(--accent); color: var(--ink-inverse); border-color: var(--accent); }
 button.action { background: var(--action); color: var(--ink-inverse); border-color: var(--action); }
 /* Prune is the one destructive verb. It stays an outline wherever it sits on a
    screen, and is filled only inside the dialog that confirms it. */
-button.danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
 dialog button.danger { background: var(--danger); color: var(--ink-inverse); }
 button[disabled] { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed; }
 /* A filled button already carries its own surface, so only the ones drawn on
@@ -387,7 +389,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 
   .rail-title {
     font-size: var(--t-13);
-    font-weight: 700;
+    font-weight: 600;
     color: var(--ink);
     letter-spacing: -0.02em;
     white-space: nowrap;
@@ -486,7 +488,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 
   .rail-title {
     font-size: var(--t-15);
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .rail-node {
@@ -501,11 +503,11 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 
   .rail-item {
     justify-content: flex-start;
-    height: 30px;
-    min-height: 30px;
+    height: 32px;
+    min-height: 32px;
     padding: 0 var(--s-2);
     gap: var(--s-2);
-    font-size: var(--t-13);
+    font-size: var(--t-15);
   }
 
   .rail-label {
@@ -517,22 +519,15 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     line-height: 1;
   }
 
-  .rail-key {
-    font-size: var(--t-12);
-    color: var(--ink-3);
-    padding: 1px var(--s-1);
-    border: 1px solid var(--line);
-    border-radius: var(--r-1);
-    line-height: 1;
-  }
+  .rail-key { display: inline-grid; }
 
   .rail-section-header {
     font-size: var(--t-12);
     font-weight: 600;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     color: var(--ink-3);
     text-transform: uppercase;
-    padding: var(--s-3) var(--s-2) var(--s-1);
+    padding: var(--s-5) var(--s-2) var(--s-2);
   }
   /* The section header is the door to the register, not only a label: with no
      projects listed under it, this is the only way to reach #/projects from the
@@ -545,9 +540,15 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     color: var(--ink);
   }
 
+  /* A rail count is copper mono text with no fill: what it counts is waiting
+     on the reader, and the rail stays a column of words. */
   .rail-badge {
     position: static;
     margin-left: auto;
+  }
+  .rail .badge {
+    background: none; color: var(--accent);
+    font-family: var(--font-mono); font-weight: 500;
   }
 
   .rail-project-badge {
@@ -1046,15 +1047,15 @@ aside.pane { display: none; }
 }
 
 /* An empty field has nothing in it that says a control is there, so its border
-   is the whole of what identifies it and has to be seen: the design's
-   --line-strong reads 1.65:1 on --surface, under the 3:1 non-text minimum, so
-   every field is drawn one step darker. An outline button keeps --line-strong,
-   because its own label is what identifies it. */
+   is the whole of what identifies it and has to be seen: the control border
+   reads at least 4.2:1 on every ground in both themes. A field is raised a step
+   off the canvas and takes the 4px radius of a field or a sheet. */
 input, select, textarea {
   width: 100%; min-height: var(--ctl-form); padding: var(--s-2) var(--s-3);
-  font: inherit; color: var(--ink); background: var(--surface);
-  border: 1px solid var(--ink-3); border-radius: var(--r-1);
+  font: inherit; color: var(--ink); background: var(--raised);
+  border: 1px solid var(--line-strong); border-radius: var(--r-2);
 }
+input::placeholder, textarea::placeholder { color: var(--ink-3); }
 label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var(--s-2) 0 var(--s-1); }
 @media (pointer: coarse) {
   input, select, textarea { min-height: var(--tap); }
@@ -1123,13 +1124,13 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   display: inline-flex; align-items: center; gap: var(--s-2);
 }
 .comments-badge {
-  display: inline-block; min-width: 20px; padding: 0 var(--s-2); border-radius: var(--r-pill);
+  display: inline-block; min-width: 20px; padding: 0 var(--s-2); border-radius: var(--r-1);
   background: var(--surface-2); color: var(--ink-2);
   font-size: var(--t-12); font-weight: 600; text-align: center;
 }
 .drawer-backdrop {
   position: fixed; inset: 0; z-index: 30;
-  background: rgba(20, 19, 17, 0.4);
+  background: rgba(21, 27, 23, 0.4);
 }
 .drawer-backdrop[hidden] { display: none; }
 .comments-drawer {
@@ -1140,7 +1141,7 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   display: flex; flex-direction: column;
   /* Its foot is a composer, so it clears a phone's home indicator. */
   padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box;
-  background: var(--surface); color: var(--ink);
+  background: var(--raised); color: var(--ink);
   border-left: 1px solid var(--line); box-shadow: var(--shadow-2);
 }
 .comments-drawer[hidden] { display: none; }
@@ -1182,14 +1183,14 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
    sets. The value is literal data, so it is mono and left as written. */
 .kv-sheet-backdrop {
   position: fixed; inset: 0; z-index: 94;
-  background: rgba(20, 19, 17, 0.4);
+  background: rgba(21, 27, 23, 0.4);
 }
 .kv-sheet-backdrop[hidden] { display: none; }
 .kv-sheet {
   position: fixed; inset-inline: 0; bottom: 0; top: auto; z-index: 95;
   width: 100%; max-height: 85vh;
   display: flex; flex-direction: column;
-  background: var(--surface); color: var(--ink);
+  background: var(--raised); color: var(--ink);
   border-top: 1px solid var(--line);
   border-top-left-radius: 20px; border-top-right-radius: 20px;
   box-shadow: var(--shadow-2);
@@ -1217,11 +1218,11 @@ label { display: block; font-size: var(--t-13); color: var(--ink-2); margin: var
   width: min(420px, calc(100vw - 2 * var(--s-4)));
   padding: var(--s-5) var(--s-4);
   border: 1px solid var(--line-strong); border-radius: var(--r-2);
-  background: var(--surface); color: var(--ink);
+  background: var(--raised); color: var(--ink);
   box-shadow: var(--shadow-2);
 }
 /* The same scrim the comments drawer uses, so the two modals read alike. */
-.dialog::backdrop { background: rgba(20, 19, 17, 0.4); }
+.dialog::backdrop { background: rgba(21, 27, 23, 0.4); }
 /* The top layer keeps pointer and focus off the page behind; the wheel still
    reaches it, so the scroll is stopped here. */
 html.has-dialog { overflow: hidden; }
@@ -1512,11 +1513,11 @@ html.has-dialog { overflow: hidden; }
    and Esc are the browser's and nothing here waits on the app's own. */
 dialog.keymap {
   border: 1px solid var(--line-strong); border-radius: var(--r-2);
-  background: var(--surface); color: var(--ink);
+  background: var(--raised); color: var(--ink);
   box-shadow: var(--shadow-2); padding: var(--s-4);
   width: min(320px, calc(100vw - var(--s-6)));
 }
-dialog.keymap::backdrop { background: rgba(20, 19, 17, 0.4); }
+dialog.keymap::backdrop { background: rgba(21, 27, 23, 0.4); }
 dialog.keymap h2 { margin: 0 0 var(--s-3); font-size: var(--t-17); }
 dialog.keymap dl {
   display: grid; grid-template-columns: auto 1fr; gap: var(--s-2) var(--s-3);
@@ -1527,10 +1528,14 @@ dialog.keymap dd { color: var(--ink-2); }
 dialog.keymap .keymap-note {
   margin: 0 0 var(--s-3); font-size: var(--t-12); color: var(--ink-3);
 }
-dialog.keymap kbd {
-  font-family: var(--font-mono); font-size: var(--t-12);
-  border: 1px solid var(--line-strong); border-radius: var(--r-1);
-  background: var(--surface-2); padding: var(--s-1) var(--s-2);
+/* A key is named on a key chip: mono, a control border with a heavier foot,
+   on the raised ground. */
+kbd, .rail-key {
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  min-width: 20px; height: 20px; padding: 0 var(--s-1);
+  font: 500 var(--t-12)/1 var(--font-mono); color: var(--ink-2);
+  border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--r-1);
+  background: var(--raised);
 }
 
 /* component: empty state */
@@ -1553,7 +1558,8 @@ dialog.keymap kbd {
 .empty-link {
   margin-top: auto; align-self: flex-start;
   display: inline-flex; align-items: center; min-height: 44px;
-  font-size: var(--t-13); font-weight: 500; color: var(--accent);
+  font-size: var(--t-13); font-weight: 500; color: var(--ink);
+  text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px;
 }
 a.empty-link { text-decoration: none; }
 button.empty-link {
@@ -1652,13 +1658,13 @@ button.empty-link {
   box-shadow: inset -1px 0 0 var(--surface);
 }
 .storage-seg:last-child { box-shadow: none; }
-.storage-seg[data-kind="events"], .storage-swatch[data-kind="events"] { background: var(--k-signal); }
-.storage-seg[data-kind="sessions"], .storage-swatch[data-kind="sessions"] { background: var(--k-session); }
-.storage-seg[data-kind="artifacts"], .storage-swatch[data-kind="artifacts"] { background: var(--k-artifact); }
+.storage-seg[data-kind="events"], .storage-swatch[data-kind="events"] { background: var(--ink-3); }
+.storage-seg[data-kind="sessions"], .storage-swatch[data-kind="sessions"] { background: var(--ink-2); }
+.storage-seg[data-kind="artifacts"], .storage-swatch[data-kind="artifacts"] { background: var(--ink); }
 .storage-seg[data-kind="knowledge"], .storage-swatch[data-kind="knowledge"] { background: var(--k-knowledge); }
-.storage-bar-seg[data-kind="events"] { background: var(--k-signal); }
-.storage-bar-seg[data-kind="sessions"] { background: var(--k-session); }
-.storage-bar-seg[data-kind="artifacts"] { background: var(--k-artifact); }
+.storage-bar-seg[data-kind="events"] { background: var(--ink-3); }
+.storage-bar-seg[data-kind="sessions"] { background: var(--ink-2); }
+.storage-bar-seg[data-kind="artifacts"] { background: var(--ink); }
 .storage-bar-seg[data-kind="knowledge"] { background: var(--k-knowledge); }
 .storage-legend {
   display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: 0; padding: 0;
@@ -1748,7 +1754,7 @@ button.empty-link {
 /* A list item still, so the platform's own marker says folded or open. */
 .storage-idle summary {
   min-height: 44px; padding: 0 var(--s-1); line-height: 44px;
-  font-size: var(--t-13); font-weight: 500; color: var(--accent); cursor: pointer;
+  font-size: var(--t-13); font-weight: 500; color: var(--ink); cursor: pointer;
   border-radius: var(--r-1);
 }
 .storage-idle-list {
@@ -1985,10 +1991,10 @@ button.empty-link {
   flex: none;
 }
 .storage-share-seg.blobs {
-  background: var(--k-artifact);
+  background: var(--ink);
 }
 .storage-share-seg.brains {
-  background: var(--k-session);
+  background: var(--ink-2);
 }
 .storage-table .dash {
   color: var(--ink-3);
@@ -2116,11 +2122,11 @@ button.empty-link {
 }
 .home-more {
   margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-1); min-height: 44px;
-  font-size: var(--t-13); font-weight: 500; color: var(--accent); text-decoration: none;
+  font-size: var(--t-13); font-weight: 500; color: var(--ink); text-decoration: none;
 }
 .home-rest {
   display: flex; align-items: center; min-height: 44px; padding: 0 var(--s-4);
-  font-size: var(--t-13); font-weight: 500; color: var(--accent); text-decoration: none;
+  font-size: var(--t-13); font-weight: 500; color: var(--ink); text-decoration: none;
 }
 /* The title is the row's link and its hit area is the whole row. The time
    sits above that area, so pressing it still shows the full stamp. */
@@ -2326,7 +2332,7 @@ button.empty-link {
 }
 .search-project-chip {
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--ink);
   border-color: transparent;
   display: inline-flex;
   align-items: center;
@@ -2532,7 +2538,7 @@ button.empty-link {
 .feed-earlier {
   display: inline-flex; align-items: center; gap: var(--s-1);
   min-height: 44px; padding: 0 var(--s-2); margin-left: calc(-1 * var(--s-2));
-  border: 0; background: none; color: var(--accent);
+  border: 0; background: none; color: var(--ink);
   font-size: var(--t-13); font-weight: 500;
 }
 .feed-earlier svg { flex: none; }
@@ -2565,7 +2571,7 @@ button.empty-link {
 .inbox-filter[aria-pressed="true"] { background: var(--ink); color: var(--ink-inverse); border-color: var(--ink); }
 button.inbox-quiet {
   min-height: 36px; padding: 0 var(--s-2); border-color: transparent;
-  background: transparent; color: var(--accent);
+  background: transparent; color: var(--ink-2);
 }
 button.inbox-quiet[disabled] { background: transparent; border-color: transparent; color: var(--ink-3); }
 .shell-trailing-btn,
@@ -2609,7 +2615,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 
 .inbox-item { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
 .inbox-item:last-child { border-bottom: 0; }
-.inbox-item[aria-current="true"] .inbox-row { box-shadow: inset 3px 0 0 var(--ink); }
+.inbox-item[aria-current="true"] .inbox-row { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
 .inbox-row { position: relative; border-bottom: 0; touch-action: pan-y; }
 /* The item clips what leaves it, so the ring is drawn inside the row. */
 .inbox-row:focus-visible, .swipe-tray-actions button:focus-visible {
@@ -2657,7 +2663,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 .swipe-tray[hidden] { display: none; }
 .swipe-tray-read {
   left: 0; width: 112px; align-items: center; justify-content: center; gap: var(--s-2);
-  background: var(--accent-bg); color: var(--accent);
+  background: var(--accent-bg); color: var(--ink);
   font-size: var(--t-13); font-weight: 600;
 }
 .swipe-tray-actions { right: 0; justify-content: flex-end; }
@@ -3032,7 +3038,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
 }
 .project-badge.badge-unread {
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--ink-2);
 }
 .project-chev {
   flex: none;
@@ -3558,7 +3564,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   white-space: nowrap;
 }
 .brain-tree-unified .tree-item[aria-selected="true"] .tree-name {
-  color: var(--accent);
+  color: var(--ink);
   font-weight: 600;
 }
 .brain-tree-unified .tree-item .tree-size,
@@ -3805,7 +3811,7 @@ button.inbox-quiet.shell-trailing-btn[disabled] {
   gap: var(--s-2);
   flex: 1;
   min-width: 0;
-  color: var(--accent);
+  color: var(--ink);
   text-decoration: none;
 }
 .session-anchor-source-link:hover { text-decoration: underline; }
@@ -3994,7 +4000,7 @@ a.session-back {
   left: 0;
   top: calc(100% + 4px);
   z-index: 50;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
   box-shadow: var(--shadow-2);
@@ -4491,7 +4497,7 @@ a.session-back {
   inset-inline: 0;
   bottom: 0;
   max-height: 80vh;
-  background: var(--surface);
+  background: var(--raised);
   border-top: 1px solid var(--line);
   border-radius: var(--r-2) var(--r-2) 0 0;
   box-shadow: var(--shadow-2);
@@ -4593,7 +4599,7 @@ a.session-back {
 }
 
 .hub-version-row.current .hub-version-num {
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .hub-version-info {
@@ -4697,7 +4703,7 @@ a.session-back {
   bottom: 0;
   max-width: 480px;
   margin: 0 auto;
-  background: var(--surface);
+  background: var(--raised);
   border-top: 1px solid var(--line);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
@@ -5075,7 +5081,7 @@ a.session-back {
 .hub-comment-card.active,
 .hub-comment-card:focus-within,
 .hub-comment-card:hover {
-  border-color: var(--k-question);
+  border-color: var(--accent);
   box-shadow: var(--shadow-1);
 }
 
@@ -5100,7 +5106,7 @@ a.session-back {
 }
 
 .hub-card-ver.current {
-  color: var(--k-question);
+  color: var(--ink);
 }
 
 .hub-card-act {
@@ -5180,9 +5186,9 @@ a.session-back {
   color: var(--ink-3);
 }
 .hub-quote-block.tinted {
-  background: var(--k-question-bg);
-  box-shadow: inset 0 -2px 0 var(--k-question);
-  border-left: 2px solid var(--k-question);
+  background: var(--action-bg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-left: 2px solid var(--accent);
   color: var(--ink);
 }
 
@@ -5204,7 +5210,7 @@ a.session-back {
 }
 
 .hub-quote-block.tinted .hub-quote-stamp {
-  color: var(--k-question);
+  color: var(--accent);
 }
 
 .hub-quote-block.outlined .hub-quote-stamp,
@@ -5226,7 +5232,7 @@ a.session-back {
   border-top-right-radius: 20px;
   border-top: 1px solid var(--line);
   box-shadow: var(--shadow-2);
-  background: var(--surface);
+  background: var(--raised);
   z-index: 95;
   display: flex;
   flex-direction: column;
@@ -5416,7 +5422,7 @@ a.session-back {
 }
 
 .hub-ver-stamp.current {
-  color: var(--k-question);
+  color: var(--ink);
 }
 
 .hub-open-version-btn {
@@ -6053,8 +6059,8 @@ a.session-back {
 
 .settings-switch[aria-checked="true"] .settings-switch-track,
 .settings-switch.on .settings-switch-track {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--ink);
+  border-color: var(--ink);
   justify-content: flex-end;
 }
 
@@ -6525,14 +6531,14 @@ a.session-back {
 /* New project sheet / modal */
 .project-create-dialog {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--raised);
   color: var(--ink);
   box-shadow: var(--shadow-2);
   padding: 0;
   box-sizing: border-box;
 }
 .project-create-dialog::backdrop {
-  background: rgba(20, 19, 17, 0.4);
+  background: rgba(21, 27, 23, 0.4);
 }
 @media (max-width: 719px) {
   .project-create-dialog {
@@ -6685,7 +6691,7 @@ a.session-back {
   padding: 0;
   font: inherit;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--ink);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -6876,7 +6882,7 @@ a.session-back {
   right: 0;
   width: 200px;
   z-index: 50;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
   box-shadow: var(--shadow-2);
@@ -6939,7 +6945,7 @@ dialog.dialog-project-delete {
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
-  background: var(--surface);
+  background: var(--raised);
   color: var(--ink);
   box-shadow: var(--shadow-2);
   overflow: hidden;
@@ -7058,12 +7064,12 @@ dialog.dialog-project-delete {
   background: var(--danger);
   border: 0;
   border-radius: var(--r-1);
-  color: #fff;
+  color: var(--ink-inverse);
   font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
 .dialog-del-btn svg {
-  stroke: #fff;
+  stroke: currentColor;
   flex: none;
 }
 .dialog-del-btn:disabled,
@@ -7193,7 +7199,7 @@ dialog.dialog-project-delete {
 }
 .shell-seg a .shell-seg-count { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
 .shell-seg a { font-weight: 600; }
-.shell-seg a[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
+.shell-seg a[aria-selected="true"] { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 .shell-seg a[aria-selected="true"] .shell-seg-count { color: var(--ink-2); }
 /* The project's four sections carry counts, and at 284px they fill a 360px index
    pane exactly. Below that they cannot, so the counts go and the tabs take less
@@ -7236,7 +7242,7 @@ dialog.dialog-project-delete {
   padding: 0 var(--s-3) 0 28px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
-  background: var(--bg);
+  background: var(--raised);
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: var(--t-13);
@@ -7336,7 +7342,9 @@ dialog.dialog-project-delete {
   justify-content: center;
   color: var(--ink-3);
 }
-.row.selected { background: var(--accent-bg); }
+/* The row the reader is pointing at: the sunken ground and the copper edge, the
+   same in every index. */
+.row.selected { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
 
 .feed-stage { padding: var(--s-5) var(--s-4) 40px; }
 .feed-stage-pills { display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-3); }
@@ -7473,7 +7481,7 @@ dialog.dialog-project-delete {
   padding: var(--s-1);
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: var(--raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
   box-shadow: var(--shadow-2);
@@ -7599,7 +7607,7 @@ dialog.dialog-project-delete {
 }
 .shell-head .search-form { flex: 1; min-width: 0; }
 .shell-index .shell-head .shell-title { flex: 0 1 auto; }
-.shell-head .search-field { height: 32px; border-radius: var(--r-pill); }
+.shell-head .search-field { height: 32px; border-radius: var(--r-1); }
 .shell-head .search-field input { height: 32px; font-size: var(--t-13); }
 @media (pointer: fine) {
   .shell-head .search-field { min-height: var(--ctl); height: var(--ctl); }
@@ -7915,7 +7923,7 @@ dialog.dialog-project-delete {
 .more-refresh-btn {
   background: none;
   border: 0;
-  color: var(--accent);
+  color: var(--ink);
   font-size: var(--t-15);
   font-weight: 600;
   padding: 0 var(--s-3);
@@ -8177,8 +8185,8 @@ dialog.dialog-project-delete {
   border-radius: var(--r-pill);
   background: var(--ink-3);
 }
-.hub-live-band[data-state="live"] .hub-live-dot { background: var(--accent); }
-.hub-live-band[data-state="idle"] .hub-live-dot { background: var(--action); }
+.hub-live-band[data-state="live"] .hub-live-dot { background: var(--ok); }
+.hub-live-band[data-state="idle"] .hub-live-dot { background: var(--ink-3); }
 .hub-live-label { color: var(--ink-2); }
 .hub-live-follow {
   position: relative;
@@ -8211,7 +8219,7 @@ dialog.dialog-project-delete {
   min-height: 32px;
   padding: 0 var(--s-2);
   border-radius: var(--r-1);
-  color: var(--accent);
+  color: var(--ink);
   font: 600 var(--t-13)/1 var(--font-sans);
   text-decoration: none;
 }
@@ -8266,7 +8274,7 @@ dialog.dialog-project-delete {
   text-decoration: none;
   box-sizing: border-box;
 }
-.row.agent-index-row[aria-current="true"] { background: var(--accent-bg); }
+.row.agent-index-row[aria-current="true"] { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
 .agent-index-meta { font-size: var(--t-12); color: var(--ink-3); }
 .row.agent-index-row[aria-current="true"] .agent-index-meta { color: var(--ink-2); }
 .agents-list > .row:first-child { border-top: 1px solid var(--line); }
@@ -8537,7 +8545,7 @@ button.agent-grant-open {
   border: 0;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-  color: var(--accent);
+  color: var(--ink);
   font: 500 var(--t-15)/1 var(--font-sans);
   text-align: left;
   cursor: pointer;
@@ -8918,7 +8926,7 @@ button.wiki-comment-resolve {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wiki-crumb-link { color: var(--accent); text-decoration: none; }
+.wiki-crumb-link { color: var(--ink); text-decoration: none; }
 .wiki-breadcrumb {
   padding: var(--s-2) var(--s-4);
   font-size: var(--t-12);
@@ -8927,7 +8935,7 @@ button.wiki-comment-resolve {
   gap: var(--s-2);
   flex-wrap: wrap;
 }
-.wiki-history-ref { color: var(--accent); }
+.wiki-history-ref { color: var(--ink); }
 button.wiki-review-btn,
 button.wiki-revert-btn {
   flex: none;
@@ -8943,7 +8951,7 @@ button.wiki-revert-btn {
 .row.wiki-backlink {
   display: block;
   padding: var(--s-2) 0;
-  color: var(--accent);
+  color: var(--ink);
   text-decoration: none;
   font-size: var(--t-15);
 }
@@ -9071,7 +9079,7 @@ button.wiki-history-earlier {
   border-radius: var(--r-1);
   border: 1px solid var(--line-strong);
   background: none;
-  color: var(--accent);
+  color: var(--ink);
   font: 600 var(--t-13)/1 var(--font-sans);
   cursor: pointer;
 }
@@ -9113,7 +9121,7 @@ button.wiki-versions-earlier {
   border-radius: var(--r-1);
   border: 1px solid var(--line-strong);
   background: none;
-  color: var(--accent);
+  color: var(--ink);
   font: 600 var(--t-13)/1 var(--font-sans);
   cursor: pointer;
 }
@@ -9144,7 +9152,7 @@ button.wiki-forget-btn {
 .wiki-finding-message { font-size: var(--t-15); }
 .wiki-finding-path {
   font-size: var(--t-12);
-  color: var(--accent);
+  color: var(--ink-2);
   text-decoration: none;
 }
 .row.wiki-review-row {
