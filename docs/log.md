@@ -6,6 +6,16 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### The project feed reads in sentences
+
+* **Update**: [Human interface](/design/human-interface.md) describes the feed's
+  rows on Now's anatomy: one sentence per event with the time in mono, days
+  headed with their date, unseen events in ink, replies set in under their
+  question, and a waiting ask's words and Answer control in copper. The opened
+  event leads with its kind line and byline, and Capture idea is an outline.
+* **Update**: [Projects and the feed](/guides/human/projects-and-feed.md)
+  describes how a feed row reads and what Answer does.
+
 ### Artifacts gets a list of its own
 
 * **Update**: [Human interface](/design/human-interface.md) describes the

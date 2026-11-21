@@ -272,6 +272,46 @@ export function timeHTML(ts) {
   return build(ts).element.outerHTML;
 }
 
+// A time the reader can place: the clock today, the weekday this week, the
+// date before that.
+export function placeTime(ms, now = Date.now()) {
+  const date = new Date(ms);
+  const today = new Date(now);
+  const hhmm = clockTime(ms);
+  if (date.toDateString() === today.toDateString()) return hhmm;
+  if (now - ms < 6 * DAY) {
+    return `${date.toLocaleDateString("en-GB", { weekday: "short" })} ${hhmm}`;
+  }
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+// The clock alone, for a row under a heading that already names its day.
+export function clockTime(ms) {
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+// A row's time as markup: the short form in mono, and the full stamp as its
+// title and as what a screen reader hears. A list that heads its rows with the
+// day passes the clock alone. The serialiser escapes it, as in `timeHTML`.
+export function stamp(ts, short = placeTime, className = "now-when") {
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return "";
+  const full = fullStamp(ms);
+  const element = document.createElement("time");
+  element.className = className;
+  element.dateTime = new Date(ms).toISOString();
+  element.title = full;
+  const shown = document.createElement("span");
+  shown.setAttribute("aria-hidden", "true");
+  shown.textContent = short(ms);
+  const heard = document.createElement("span");
+  heard.className = "sr-only";
+  heard.textContent = full;
+  element.append(shown, heard);
+  return element.outerHTML;
+}
+
 // A day bucket for grouping: Today, Yesterday, or the date.
 export function dayOf(ts, now) {
   const date = new Date(ts);

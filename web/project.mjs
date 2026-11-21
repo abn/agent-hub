@@ -525,7 +525,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
   // The overflow carries the feed's own verbs; the bar replaces the filter row
   // while the reader is picking, so both share the one control row.
-  const right = `<button type="button" class="primary" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>${feedSelectBar()}`;
+  const right = `<button type="button" class="feed-capture" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>${feedSelectBar()}`;
   return shellHTML({
     segment,
     indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false, feed: true })}</div>`,

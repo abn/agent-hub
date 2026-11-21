@@ -4,6 +4,9 @@
 // plain data, so the words are held by unit tests rather than by a page.
 
 import { esc } from "./dom.mjs";
+import { placeTime } from "./time.mjs";
+
+export { clockTime, placeTime } from "./time.mjs";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -230,19 +233,6 @@ export function summaryHTML({ now = [], later = 0, since = 0, agents = 0, unlist
   return `${parts.join(" ")} <span class="now-rest">${rest.join(" ")}</span>`;
 }
 
-// A time the reader can place: the clock today, the weekday this week, the
-// date before that.
-export function placeTime(ms, now = Date.now()) {
-  const date = new Date(ms);
-  const today = new Date(now);
-  const hhmm = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  if (date.toDateString() === today.toDateString()) return hhmm;
-  if (now - ms < 6 * DAY) {
-    return `${date.toLocaleDateString("en-GB", { weekday: "short" })} ${hhmm}`;
-  }
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
 // The closing line, plain text: how far back the stream reaches, and what is
 // left to do.
 export function endingLine({ needs = 0, oldest = null, now = Date.now() } = {}) {
@@ -269,6 +259,22 @@ export function eventSentenceHTML(event) {
   const did = Object.prototype.hasOwnProperty.call(DID, event.kind) ? DID[event.kind] : "";
   const who = `<b>${esc(event.actor)}</b>`;
   return `${who}${did ? ` ${did}` : ""}: ${esc(event.summary)}`;
+}
+
+// A summary the feed has turned into what was done: "started rel-1.10",
+// "published Notes", "asked: Roll the logs?".
+const DONE = /^(?:[a-z]+ed|picked up)\b/;
+
+// A feed row's sentence, as markup. An ask that is still open reads as it does
+// on Now. Anything else is the agent and what it did: `phrase` is the summary
+// as the feed words it, and one that already says what was done follows the
+// name directly. A signal's words are the agent's own, so it is never read as
+// a verb, and a summary that does not say what was done reads as Now reads it.
+export function feedSentenceHTML(event, phrase = event.summary) {
+  if (isOpen(event)) return askSentenceHTML(event);
+  const said = String(phrase ?? "").trim().replace(/^([A-Z])(?=[a-z]+ed\b)/, (c) => c.toLowerCase());
+  if (event.kind !== "signal" && DONE.test(said)) return `<b>${esc(event.actor)}</b> ${esc(said)}`;
+  return eventSentenceHTML(event);
 }
 
 // An ask's sentence, as markup: who wants what.

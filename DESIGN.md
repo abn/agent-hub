@@ -357,21 +357,17 @@ reader's place is kept by the browser's own scroll anchoring.
   sentence and reads the rest as body prose beneath, at 15px and normal weight.
   The split loses no characters: the subject and the message together hold the
   whole summary. A heading never carries a whole message.
-- A list's glyph column is a fixed box, 20px in the index and 28px on the
-  mobile feed, so every title starts at the same x with or without a glyph.
-- An index row's title line is the subject's alone. A waiting row says so with
-  the action dot at the row's end and 600 title weight, the same in every
-  index. The title takes the words "Waiting on you" as its accessible
-  description, and they are hidden from browse mode so a screen reader hears
-  them once. Where a row is not under a waiting heading, in the feed, the
-  status pill sits first on the meta line under the subject, hidden from
-  assistive technology for the same reason. On the meta line
-  a long agent name is what gives way, never the time. Waiting outranks
-  unread: a waiting row ends in the action dot and not the unread dot. Set in
-  Cantarell, a waiting feed row at the 300px default index shows 17 to 25
-  characters of its subject, after the feed's "asked: " where there is one,
-  where a pill beside the subject left 1 to 13; at the 260px minimum it shows
-  13 to 20, and on a phone 31 to 37.
+- A list's glyph column is a fixed box, 20px in the index and on the feed at
+  every width, so every title starts at the same x with or without a glyph.
+- A feed row is Now's row: the kind glyph in its 20px column, one sentence
+  saying who did what, wrapped whole rather than cut, and the time in mono on
+  the right. A waiting row says so in words, "Waiting on you", on the line
+  under its sentence, and it is the only row that takes copper, in those words
+  and its glyph. Its link takes the words as its accessible description, and
+  the drawn words are hidden from browse mode so a screen reader hears them
+  once. A long agent name wraps inside the sentence and never moves the time.
+  Waiting outranks unread: a waiting row carries its words and not the unread
+  dot.
 
 ### Forms
 
@@ -722,7 +718,36 @@ Projects register, Agents and access, Connect, and the knowledge base.
   segmented control and the filter field under it. An event opens in the stage
   with a "Points at" card carrying the reader to the artifact or session it is
   about.
-  The control row carries the filter, the Group menu and Capture idea. The
+  - **The feed's rows.** Each event is one row on Now's anatomy: the kind glyph,
+    one sentence (the agent in 600 and what it did, "build-bot started
+    flaky-hunt", or an open ask the way Now says it, "build-bot wants a
+    decision: Ship 1.10"), and the clock in mono on the right. A day heads its
+    rows as Now heads a tier: the day as a label with its date in mono beside
+    it, over a darker rule. A row above the read cursor is ink with the unread
+    dot under its time; a seen row is `--ink-2` with the agent at 500. A reply
+    on a question's thread is set in under the row's sentence behind a 2px rule,
+    as one sentence with its own time. An ask that still waits carries "Waiting
+    on you" in copper under its sentence and an **Answer** control that opens it
+    as an item; the row itself opens the event in the stage.
+  - **The event in the stage** opens with a kind line (the glyph and the
+    kind's word, and "Waiting on you" in copper while it waits), the title, and
+    a byline: the agent, the time and how long ago. A thread is drawn under it
+    on the same row anatomy as an opened item's.
+  - **Deviation: the feed keeps its index and stage.** The handoff draws the
+    feed as one 680 stream in the stage with a "Working here" margin. The build
+    keeps the project's shell: the rows are the index, so an event opens beside
+    them with its body, its "Points at" card and its thread, and the project's
+    section switcher stays in the index header rather than becoming tabs in the
+    control row. The margin is not drawn, because the stage is where the event
+    is read.
+  - **Deviation: no receipt ids or deadlines on a feed row.** The handoff's
+    row carries a short event id and, on an ask, when its deadline falls. The
+    row itself opens the event, so an id there would be a second way to the
+    same place, and a feed event does not carry its inbox item's deadline; the
+    opened item says it. An ask that can wait is drawn waiting, as the feed
+    does not read this device's snoozes.
+  The control row carries the filter, the Group menu and Capture idea, an
+  outline: copper is for what needs the reader. The
   project's overflow carries the feed's own verbs: **Select items** and
   **Dismiss read**. Select items replaces the control row with the count,
   Dismiss and Cancel, and each row draws a box in the kind glyph's slot, so the
@@ -900,9 +925,10 @@ Projects register, Agents and access, Connect, and the knowledge base.
 ## Alert hierarchy
 
 Three levels, and no more. Quiet for read, ended and signal items. Unread for a
-dot, weight and a badge count. Waiting on you for the action dot, weight and
-an action pill and a button, grouped at the top; on an index row the pill is on
-the meta line, never the title line. Alerts are never red, never animated, and never a modal.
+dot, weight and a badge count. Waiting on you for the action dot, weight and an
+action pill and a button, grouped at the top; on a feed row the words sit under
+the sentence, never on its line. Alerts are never red, never animated, and never
+a modal.
 
 ## Copy
 
@@ -1012,9 +1038,9 @@ header and the pane-title gate are built on that stack; a screen adopts the
 handoff's header when it is redrawn.
 
 **Deviation: control rows may fill a primary.** The handoff fills only the
-focused row's primary action. Now follows it. Screens that predate it still
-mark a band's main verb, such as Capture idea, as the primary, so it fills
-copper until that screen is redrawn.
+focused row's primary action. Now and the project feed follow it. Screens that
+predate it still mark a band's main verb as the primary, so it fills copper
+until that screen is redrawn.
 A screenshot baseline is a check tagged `@visual`, compared with one shared
 tolerance of 0.2% of the clip's pixels. Made and checked on the same browser,
 it absorbs only nondeterministic sub-pixel noise: a band moved or resized by

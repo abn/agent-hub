@@ -3,12 +3,13 @@
 // page, the rule itself is held here, and a rename no longer breaks it.
 
 import { describe, expect, it } from "vitest";
-import { SUBJECT_MAX, expiredWords, formatEventSummary, subjectAndMessage } from "../../web/feed.mjs";
+import { SUBJECT_MAX, expiredWords, formatEventSummary, stageSubject, subjectAndMessage } from "../../web/feed.mjs";
 import { deadlineWords, untilCompact } from "../../web/time.mjs";
 import { displayTitle, terms } from "../../web/search.mjs";
 import { anchorQuote } from "../../web/comments.mjs";
 import { optionsAttr, optionsFrom, questionOptions } from "../../web/dom.mjs";
 import { composer } from "../../web/composer.mjs";
+import { eventRow } from "../../web/now.mjs";
 
 // The report a finished event carries, the one the browser invariant seeded to
 // hold the subject and message split. Both stages read it: the inbox detail
@@ -122,6 +123,20 @@ describe("subjectAndMessage", () => {
 
   it("trims a summary rather than splitting inside its padding", () => {
     expect(subjectAndMessage("  Padded subject  ")).toEqual({ subject: "Padded subject", message: "" });
+  });
+});
+
+describe("stageSubject", () => {
+  it("drops the row verb from a question, an answer and an approval", () => {
+    expect(stageSubject({ kind: "question", summary: "Roll the log files?" })).toBe("Roll the log files?");
+    expect(stageSubject({ kind: "question", summary: "asked: Roll the log files?" })).toBe("Roll the log files?");
+    expect(stageSubject({ kind: "answer", summary: "re: Roll the log files?" })).toBe("Roll the log files?");
+    expect(stageSubject({ kind: "approval", summary: "re: Ship it?" })).toBe("Ship it?");
+  });
+
+  it("leaves other kinds as written", () => {
+    expect(stageSubject({ kind: "signal", summary: "Disk at 91%" })).toBe("Disk at 91%");
+    expect(stageSubject({ kind: "idea", summary: "Try a nightly roll" })).toBe("Try a nightly roll");
   });
 });
 
@@ -432,5 +447,27 @@ describe("the composer's keyboard rule and empty state", () => {
     expect(button.getAttribute("aria-label")).toBe("Post");
     expect(made.element.querySelector(".composer-hint").textContent).toBe("Write a comment to post it.");
     expect(made.field.getAttribute("aria-label")).toBe("Comment");
+  });
+});
+
+// Now reads an event in the words the feed uses, so an answer is "answered
+// Roll the log files?" on both and never "answered: re: Roll the log files?".
+describe("a row on Now", () => {
+  const sentence = (event) => {
+    const box = document.createElement("div");
+    box.innerHTML = eventRow({ id: "01J0000000000000000000ABCD", project_id: "checks", created_at: "2026-11-21T10:00:00Z", ...event });
+    return box.querySelector(".now-s").textContent;
+  };
+
+  it("words an answer as the feed does", () => {
+    expect(sentence({ kind: "answer", actor: "human", summary: "re: Roll the log files?" })).toBe(
+      "human answered Roll the log files?",
+    );
+  });
+
+  it("words a session as the feed does", () => {
+    expect(sentence({ kind: "session", actor: "build-bot", summary: "session rel-1.10 started" })).toBe(
+      "build-bot started rel-1.10",
+    );
   });
 });

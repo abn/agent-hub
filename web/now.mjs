@@ -7,13 +7,14 @@
 import { api } from "./api.mjs";
 import { esc, glyph, kindMark, kindName, main, optionsAttr, paint, projectName, questionOptions, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
+import { formatEventSummary } from "./feed.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { actOnIdea, answer, answerWith, approve, declineApproval } from "./inbox.mjs";
 import { registerScreen } from "./keys.mjs";
 import {
   askSentenceHTML,
   endingLine,
-  eventSentenceHTML,
+  feedSentenceHTML,
   needsYou,
   placeTime,
   readSnoozes,
@@ -25,7 +26,7 @@ import {
 } from "./now-model.mjs";
 import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
-import { deadlineWords, fullStamp } from "./time.mjs";
+import { deadlineWords, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // What the stream shows: everything, or one tier. The Inbox's address is Now
@@ -51,15 +52,6 @@ let quietOpen = false;
 const clock = (size = 16) => glyphSvg("clock", { size, strokeWidth: 1.8 });
 
 const shortId = (id) => String(id || "").slice(-6);
-
-// A row's time: the clock or the day in mono, and the full stamp for a reader
-// who asks.
-export function stamp(ts) {
-  const ms = Date.parse(ts);
-  if (!Number.isFinite(ms)) return "";
-  const full = esc(fullStamp(ms));
-  return `<time class="now-when" datetime="${esc(new Date(ms).toISOString())}" title="${full}"><span aria-hidden="true">${esc(placeTime(ms))}</span><span class="sr-only">${full}</span></time>`;
-}
 
 // A receipt reference: a mono id that is a link to what it names.
 const ref = (href, id, label) =>
@@ -168,10 +160,10 @@ function askRow(item, snoozes, later) {
 const feedHref = (event) =>
   `#/projects/${encodeURIComponent(event.project_id)}/feed?event=${encodeURIComponent(event.id)}`;
 
-// A row for something that happened: the agent and what it did, opening the
-// event in its project's feed. The receipt is the event and, for a publish,
-// the artifact.
-function eventRow(event, quiet = false) {
+// A row for something that happened: the agent and what it did, in the words
+// the feed uses, opening the event in its project's feed. The receipt is the
+// event and, for a publish, the artifact.
+export function eventRow(event, quiet = false) {
   const receipts = [`<span class="now-r">${ref(feedHref(event), event.id, `Event ${event.id}`)}${event.inbox_status === "unread" ? " unread" : ""}</span>`];
   const artifact = event.payload && typeof event.payload.artifact_id === "string" ? event.payload.artifact_id : "";
   if (event.kind === "artifact" && artifact) {
@@ -187,7 +179,7 @@ function eventRow(event, quiet = false) {
     <div class="now-main">
       <span class="now-k">${glyph(event.kind)}</span>
       <div class="now-body">
-        <p class="now-s"><a class="now-open" href="${esc(feedHref(event))}" data-open data-id="${esc(event.id)}">${eventSentenceHTML(event)}</a></p>
+        <p class="now-s"><a class="now-open" href="${esc(feedHref(event))}" data-open data-id="${esc(event.id)}">${feedSentenceHTML(event, formatEventSummary(event))}</a></p>
       </div>
       ${stamp(event.created_at)}
     </div>

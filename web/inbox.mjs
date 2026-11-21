@@ -32,7 +32,7 @@ import {
 import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { installShellLayout, shellHTML } from "./shell-layout.mjs";
-import { deadlineWords, fullStamp, relative } from "./time.mjs";
+import { deadlineWords, relative, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // Where closing an item goes: the stream it was opened from.
@@ -69,14 +69,8 @@ const kbd = (key) => `<kbd aria-hidden="true">${esc(key)}</kbd>`;
 const shortId = (id) => String(id || "").slice(-6);
 const clock = (size = 14) => glyphSvg("clock", { size, strokeWidth: 1.8 });
 
-// A time a reader can place, with the whole stamp as its title and what a
-// screen reader hears.
-function stamp(ts, words = placeTime) {
-  const ms = Date.parse(ts);
-  if (!Number.isFinite(ms)) return "";
-  const full = esc(fullStamp(ms));
-  return `<time class="item-time" datetime="${esc(new Date(ms).toISOString())}" title="${full}"><span aria-hidden="true">${esc(words(ms))}</span><span class="sr-only">${full}</span></time>`;
-}
+// A time a reader can place, in the opened item's own style.
+const itemStamp = (ts) => stamp(ts, placeTime, "item-time");
 
 function bodyOf(item) {
   const body = item.payload && item.payload.body;
@@ -206,7 +200,7 @@ const dl = (lines, cls, label) =>
 // if the reader stays silent.
 function marginReceipts(item, session, snoozedUntil) {
   const lines = receipts(item, session);
-  lines.push(["Asked", `${stamp(item.created_at)} <span class="item-quiet">· ${esc(relative(item.created_at))}</span>`]);
+  lines.push(["Asked", `${itemStamp(item.created_at)} <span class="item-quiet">· ${esc(relative(item.created_at))}</span>`]);
   const due = deadlineLine(item);
   if (due) lines.push([waits(item) ? "If silent" : "Deadline", esc(due)]);
   if (snoozedUntil) lines.push(["Snoozed", `until ${esc(placeTime(snoozedUntil))}, on this device`]);
@@ -222,7 +216,7 @@ function relatedList(item, queue) {
     return `<li>
       ${mark}
       <a class="item-rel-a" href="${esc(itemHref(other.event_id))}">${esc(clip(subjectAndMessage(other.summary).subject, 48))}<span class="sr-only">, ${esc(later ? "can wait" : kindName(other.kind))}</span></a>
-      ${stamp(other.created_at)}
+      ${itemStamp(other.created_at)}
       <span class="item-rel-s">${esc(other.actor)} · ${esc(projectName(other))}</span>
     </li>`;
   });
@@ -249,7 +243,7 @@ function threadHTML(item, replies) {
   const row = (kind, sentence, at) => `<div class="item-trow">
       <span class="item-tk">${kindMark(kind)}</span>
       <p class="item-ts">${sentence}</p>
-      ${stamp(at)}
+      ${itemStamp(at)}
     </div>`;
   return `<section class="item-thread" aria-labelledby="item-thread-label">
     <h3 class="section-label" id="item-thread-label">Thread</h3>
@@ -364,7 +358,7 @@ async function detail(item, { session, replies, snoozedUntil, after, later }) {
   const asked = Date.parse(item.created_at);
   const byline = [
     `<b>${esc(item.actor)}</b> in ${esc(projectName(item))}`,
-    stamp(item.created_at),
+    itemStamp(item.created_at),
     Number.isFinite(asked) ? esc(relative(asked)) : "",
   ]
     .filter(Boolean)
