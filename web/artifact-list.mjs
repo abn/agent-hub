@@ -25,10 +25,9 @@ import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { registerScreen } from "./keys.mjs";
-import { placeTime } from "./now-model.mjs";
-import { stamp } from "./now.mjs";
 import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
+import { placeTime, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // How many earlier rows show before the rest folds.

@@ -103,20 +103,16 @@ export const kindMark = (kind) =>
 
 export const glyph = (kind) => `${kindMark(kind)}<span class="sr-only">${esc(kindName(kind))}</span>`;
 
-// The waiting state on an index row, drawn the same way in every index so the
-// subject keeps the whole title line. The action dot ends the row with the
-// words beside it, and the title takes those words as its description, so a
-// reader who gets neither colour nor shape hears them on the link, once: the
-// words are hidden from browse mode, where the description already carries
-// them. A list that does not group its rows under those words puts the pill on
-// the meta line for the eye, hidden from assistive technology for the same
-// reason.
+// The waiting state on a feed row. The words sit on the line under the
+// sentence in the action tone, and the row's link takes them as its
+// description, so a reader who gets no colour hears them on the link, once:
+// the drawn words are hidden from browse mode, where the description already
+// carries them.
 export function waitingMarks(id) {
   const said = `waiting-${esc(id)}`;
   return {
     described: ` aria-describedby="${said}"`,
-    pill: `<span class="pill pill-status" aria-hidden="true"><span class="pill-dot"></span>Waiting on you</span>`,
-    dot: `<span class="dot-action" aria-hidden="true"></span><span class="sr-only" id="${said}" aria-hidden="true">Waiting on you</span>`,
+    status: `<span class="feed-wait" id="${said}" aria-hidden="true"><span class="feed-wait-dot"></span>Waiting on you</span>`,
   };
 }
 

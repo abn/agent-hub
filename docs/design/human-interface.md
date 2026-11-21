@@ -157,8 +157,8 @@ One gutter belongs to each pane, and every heading, label and row a screen
 writes starts on it; a pane hands the gutter to its rows rather than each
 declaring a padding of its own. Prose is left-aligned in the stage and capped
 at 640, so panes may change width but the reader's place in the prose may not.
-A list's glyph column is a fixed box, 20px in the index and 28px on the mobile
-feed, so every title starts at the same x with or without a glyph.
+A list's glyph column is a fixed box, 20px in the index and on the feed at
+every width, so every title starts at the same x with or without a glyph.
 
 A summary is a **subject** when it is one line of at most 100 characters, and a
 **message** when it is longer or holds a newline. A subject is the item title
@@ -340,8 +340,22 @@ carrying the reader to the artifact or session it is about. A project with
 items waiting draws a copper badge and one with unread items a neutral badge,
 with copper taking priority when both exist.
 
-The control row carries the filter, the Group menu and Capture idea. The
-project's overflow carries the feed's own verbs: **Select items** and **Dismiss
+Each feed event is one row on Now's anatomy: the kind glyph in its fixed
+column, one sentence saying who did what ("build-bot started flaky-hunt", or an
+open ask the way Now says it), and the clock in mono on the right. A day heads
+its rows with its date in mono beside it, over a darker rule. An event above
+the read cursor reads in ink with the unread dot under its time, and a seen one
+is quieter. A reply on a question's thread is set in under the row as one
+sentence with its own time. An ask that still waits says "Waiting on you" in
+copper under its sentence, the only copper on the list, and carries an
+**Answer** control that opens it as an item. The opened event in the stage
+leads with its kind and state, the title and a byline, and draws its thread on
+the same row anatomy as an opened item. The design draws the feed as one wide
+stream; the build keeps the index beside the stage, so an event is read next to
+the list, and the design contract records it.
+
+The control row carries the filter, the Group menu and Capture idea, an
+outline rather than a fill. The project's overflow carries the feed's own verbs: **Select items** and **Dismiss
 read**. Select items swaps the control row for the count, Dismiss and Cancel,
 and each row draws a box in the kind glyph's slot, so the title's left edge
 holds; a press anywhere on a row picks it. Dismiss read takes every event at or
@@ -688,12 +702,10 @@ fix rather than repeating the refusal.
   deletes nothing. Dismissing several at once, or every read event at once, asks
   in a dialog first. The edge swipe back and the tab swipe are intended design,
   not yet shipped.
-- A waiting row keeps its title line for the subject in every index: it ends in
-  the action dot, its title is drawn at 600, and the title takes the words
-  "Waiting on you" as its accessible description, hidden from browse mode so a
-  screen reader hears them once. Where a row is not under a waiting heading,
-  in the feed, the status pill sits first on the meta line under the subject. On the meta line a long agent name
-  is what gives way, never the time.
+- A waiting feed row says "Waiting on you" in copper on the line under its
+  sentence, and its link takes those words as its accessible description,
+  hidden from browse mode so a screen reader hears them once. A long agent name
+  wraps inside the sentence and never moves the time.
 - Keyboard: `/` focuses the list's own filter field when the screen has one and
   otherwise search, `j` and `k` move a selection through the rows of the current
   screen, Enter or `o` opens the selected row, `a` approves, `r` replies; on

@@ -51,6 +51,14 @@ The feed is what happened in one project, newest first and grouped by day. Today
 and Yesterday are open; older days sit behind an **Earlier** disclosure that
 carries its own count and pages back.
 
+Each event reads as one sentence: the agent and what it did, such as
+"build-bot started flaky-hunt" or "build-bot noted: Cache hit rate 94%", with
+its kind glyph on the left and the time on the right. Each day starts with its
+name and date. An event you have not seen yet is drawn in full ink with a dot
+under its time. A question or approval that still waits on you says **Waiting
+on you** under its sentence and carries an **Answer** button, which opens it as
+an item; pressing the row anywhere else opens the event beside the list.
+
 Events are one of the kind families: signal, finished, question, answer,
 approval, artifact, session, idea, anchor, and score. Filter by kind with the chips in
 the row: All, Questions, Approvals, Finished, Signals, Anchors, Scores, each

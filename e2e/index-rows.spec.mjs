@@ -1,18 +1,16 @@
-// A waiting row in an index keeps the whole title line for its subject. The
-// waiting state is the action dot at the row's end and the title's weight,
-// the title is described by the words, and the "Waiting on you" pill sits on
-// the meta line under the subject rather than beside it. The feed is the index
-// that holds waiting rows; Now says what waits in sentences, not index rows.
+// A feed row is Now's row in the project's index: the kind glyph in a fixed
+// column, one sentence saying who did what, and the time in mono on the right.
+// A row that waits on the reader says so in words under its sentence, in the
+// action tone, and its link takes those words as its description; it is the
+// only row that takes copper. Seen rows are quiet and unseen rows are ink with
+// the unread mark under the time. A day heads its rows with its date in mono.
 //
-// The type is pinned to Cantarell (see pinned-font.mjs), because a character
-// count and a screenshot are only comparable between hosts that set the same
-// face. The floors are measured under that pin, not guessed, and count the
-// subject only, after the "asked: " the feed sets before a question. At the
-// 300px default index on a desktop the check's subject shows 18 characters in
-// the feed, where the pill beside it left 1 to 5. On a phone it shows 31, where
-// it showed 13 to 18. The floors
-// sit a little under the measured counts, so a face that sets a pixel wider
-// does not fail the check and the old layout always does.
+// The waiting row is a question posted on the seeded hub. The read and unread
+// checks answer the feed from a fixed page through the router, so the cursor
+// is known exactly and nothing is written to the hub the other checks share.
+//
+// The type is pinned to Cantarell (see pinned-font.mjs) for the screenshot,
+// which is only comparable between hosts that set the same face.
 
 import { expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
@@ -21,70 +19,12 @@ import { api, oneOffQuestion } from "./invariants.mjs";
 import { fontsSettled, pinFont, pinnedFontOptions, SCREENSHOT } from "./pinned-font.mjs";
 
 const SUBJECT = "Rotate the staging certificate on the edge host before Friday";
-const FLOOR = { "rows-desktop": 16, "rows-phone": 28 };
 const LONG_ACTOR = "release-coordinator-for-the-staging-and-production-edge-hosts";
 const SCHEMES = ["light", "dark"];
 
-// How many characters of the subject the title line shows before it is cut.
-// A character counts when it ends inside the line, short of the ellipsis the
-// line draws when the text runs over. A prefix the row sets before the subject,
-// such as the feed's "asked: ", is not counted.
-const subjectShown = (link) =>
-  link.evaluate((el, subject) => {
-    const line = el.closest(".title") || el;
-    const box = line.getBoundingClientRect();
-    const over = line.scrollWidth > line.clientWidth + 0.5;
-    const probe = document.createElement("span");
-    probe.style.font = getComputedStyle(line).font;
-    probe.style.position = "absolute";
-    probe.textContent = "\u2026";
-    document.body.append(probe);
-    const ellipsis = over ? probe.getBoundingClientRect().width : 0;
-    probe.remove();
-    const end = box.left + line.clientWidth - ellipsis + 0.5;
-    const skip = Math.max(0, (el.textContent || "").indexOf(subject));
-    const range = document.createRange();
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let at = 0;
-    let shown = 0;
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      for (let i = 0; i < node.length; i++, at++) {
-        if (at < skip) continue;
-        range.setStart(node, i);
-        range.setEnd(node, i + 1);
-        if (range.getBoundingClientRect().right <= end) shown++;
-      }
-    }
-    return shown;
-  }, SUBJECT);
+const feedRoute = (hub) => `#/projects/${encodeURIComponent(hub.projectId)}/feed`;
 
-// The pill is the drawn copy of the words: the other is the dot's, in a
-// one-pixel box for the title's description.
-async function drawnPill(row) {
-  const boxes = [];
-  for (const words of await row.getByText("Waiting on you", { exact: true }).all()) {
-    const box = await words.boundingBox();
-    if (box && box.width > 1 && box.height > 1) boxes.push(box);
-  }
-  return boxes;
-}
-
-// The pill is under the title and on the line the time is on.
-async function expectPillOnMetaLine(row, link, what) {
-  const boxes = await drawnPill(row);
-  expect(boxes.length, `${what}: the row draws no waiting pill`).toBe(1);
-  const [drawn] = boxes;
-  const title = await link.boundingBox();
-  const stamp = await row.locator(".meta time").boundingBox();
-  expect.soft(drawn.y, `${what}: the pill is on the title line`).toBeGreaterThanOrEqual(title.y + title.height - 0.5);
-  const middle = drawn.y + drawn.height / 2;
-  expect.soft(
-    middle >= stamp.y && middle <= stamp.y + stamp.height,
-    `${what}: the pill is not on the meta line with the time`,
-  ).toBe(true);
-}
-
-async function openIndex(page, hub, route) {
+async function openFeed(page, hub) {
   await page.goto(`${hub.baseUrl}/`);
   // The default width, whatever an earlier check left behind.
   await page.evaluate(() => {
@@ -94,20 +34,76 @@ async function openIndex(page, hub, route) {
       // A browser that refuses storage paints the default anyway.
     }
   });
-  await page.goto(`${hub.baseUrl}/${route}`);
+  await page.goto(`${hub.baseUrl}/${feedRoute(hub)}`);
   await fontsSettled(page);
   const index = page.locator(".shell-index");
+  await expect(index.locator(".feed-row").first()).toBeVisible();
+  return index;
+}
+
+async function waitingRow(page, hub) {
+  const index = await openFeed(page, hub);
   const named = page.getByRole("link", { name: new RegExp(SUBJECT) });
   const link = index.locator(named);
   await expect(link).toBeVisible();
-  return { index, link, row: index.locator(".row").filter({ has: named }) };
+  return { index, link, row: index.locator(".feed-row").filter({ has: named }) };
 }
 
-const routes = (hub) => [["feed", `#/projects/${encodeURIComponent(hub.projectId)}/feed`]];
+// A fixed page of the feed: six events, the cursor at the third, and the
+// newest two today with the rest yesterday.
+const NOW = Date.now();
+const ago = (minutes) => new Date(NOW - minutes * 60000).toISOString();
+function fixedPage(project, actor = "build-bot") {
+  const event = (n, kind, summary, minutes) => ({
+    id: `e000${n}`,
+    project_id: project,
+    kind,
+    actor,
+    summary,
+    payload: null,
+    thread_id: null,
+    needs_action: false,
+    created_at: ago(minutes),
+    inbox_status: null,
+  });
+  const yesterday = (() => {
+    const at = new Date(NOW);
+    return Math.round((at - new Date(at.getFullYear(), at.getMonth(), at.getDate() - 1, 12)) / 60000);
+  })();
+  return {
+    events: [
+      event(6, "finished", "Finished the nightly run", 2),
+      event(5, "signal", "Cache hit rate 94% on the arm64 runner.", 3),
+      event(4, "session", "Session rel-1 started", yesterday),
+      event(3, "signal", "Disk at 40%", yesterday + 1),
+      event(2, "finished", "The nightly run scored 4 of 5", yesterday + 2),
+      event(1, "session", "Session flaky-hunt ended", yesterday + 3),
+    ],
+    last_seen: "e0003",
+    next_before: null,
+  };
+}
+
+async function fixedFeed(page, hub, actor) {
+  const body = fixedPage(hub.projectId, actor);
+  await page.route(/\/api\/v1\/projects\/[^/]+\/feed\?/, (route) => route.fulfill({ json: body }));
+  await page.route(/\/api\/v1\/projects\/[^/]+\/feed\/seen$/, (route) => route.fulfill({ status: 204, body: "" }));
+}
+
+const colour = (locator) => locator.evaluate((el) => getComputedStyle(el).color);
+const accent = (page) =>
+  page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--accent)";
+    document.body.append(probe);
+    const said = getComputedStyle(probe).color;
+    probe.remove();
+    return said;
+  });
 
 test.use(pinnedFontOptions);
 
-test.describe("a waiting row in an index", () => {
+test.describe("a waiting row in the feed", () => {
   test.beforeEach(async ({ hub, page }) => {
     await pinFont(page);
     const held = (await api(hub, "GET", "/api/v1/inbox?status=action&limit=500")).json();
@@ -116,83 +112,124 @@ test.describe("a waiting row in an index", () => {
     }
   });
 
-  test("keeps the title line for the subject and says it is waiting", async ({ hub, page }, testInfo) => {
-    const floor = FLOOR[testInfo.project.name];
+  test("reads its whole subject and says it is waiting, in copper under the sentence", async ({ hub, page }) => {
     for (const scheme of SCHEMES) {
       await page.emulateMedia({ colorScheme: scheme });
-      for (const [screen, route] of routes(hub)) {
-        const what = `${screen} in the ${scheme} theme`;
-        const { link, row } = await openIndex(page, hub, route);
-        const shown = await subjectShown(link);
-        await expect.soft(link, `${what}: the title does not say the row is waiting`).toHaveAccessibleDescription(
-          "Waiting on you",
-        );
-        expect.soft(shown, `${what}: the title line shows ${shown} characters of the subject`).toBeGreaterThanOrEqual(floor);
-        await expectPillOnMetaLine(row, link, what);
+      const what = `the ${scheme} theme`;
+      const { index, link, row } = await waitingRow(page, hub);
+      await expect.soft(link, `${what}: the link does not say the row is waiting`).toHaveAccessibleDescription("Waiting on you");
+      await expect.soft(link, `${what}: the sentence does not name the agent and the ask`).toContainText(`asks: ${SUBJECT}`);
+      const sentence = row.locator(".feed-s");
+      const fits = await sentence.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5);
+      expect.soft(fits, `${what}: the sentence is cut rather than wrapped`).toBe(true);
+      const words = row.getByText("Waiting on you", { exact: true });
+      await expect(words).toBeVisible();
+      const below = await words.boundingBox();
+      const above = await sentence.boundingBox();
+      expect.soft(below.y, `${what}: the words share the sentence's line`).toBeGreaterThanOrEqual(above.y + above.height - 0.5);
+      const copper = await accent(page);
+      expect.soft(await colour(words), `${what}: the words are not in the action tone`).toBe(copper);
+      expect.soft(await colour(row.locator(".feed-k .glyph")), `${what}: the glyph is not in the action tone`).toBe(copper);
+      // Copper is for what needs the reader: no other row's glyph takes it.
+      const others = index.locator(".feed-row:not(.is-waiting) .feed-k .glyph");
+      for (const glyph of await others.all()) {
+        expect.soft(await colour(glyph), `${what}: a row that does not wait draws its glyph in copper`).not.toBe(copper);
       }
     }
   });
 
-  test("a long agent name gives way to the time on every feed row", async ({ hub, page }) => {
-    await page.route("**/api/v1/projects/*/feed*", async (route) => {
-      const answer = await route.fetch();
-      const body = await answer.json();
-      for (const event of body.events || []) event.actor = LONG_ACTOR;
-      await route.fulfill({ response: answer, json: body });
-    });
-    const { index, row } = await openIndex(page, hub, routes(hub)[0][1]);
-    const quiet = index
-      .locator(".row")
-      .filter({ hasText: LONG_ACTOR })
-      .filter({ hasNot: page.getByText("Waiting on you", { exact: true }) })
-      .first();
-    for (const [which, held] of [
-      ["the waiting row", row],
-      ["a row with nothing waiting", quiet],
-    ]) {
-      const stamp = held.locator(".meta time");
-      await expect(stamp, `${which} shows no time`).toBeVisible();
-      const fits = await held.evaluate((el, long) => {
-        const time = el.querySelector("time");
-        const meta = time.parentElement;
-        const name = [...meta.children].find((child) => child.textContent === long);
-        const line = meta.getBoundingClientRect();
-        const drawn = time.getBoundingClientRect();
-        return {
-          inside: drawn.width > 0 && drawn.left >= line.left - 0.5 && drawn.right <= line.right + 0.5,
-          cut: Boolean(name) && name.scrollWidth > name.clientWidth,
-        };
-      }, LONG_ACTOR);
-      expect(fits.inside, `${which} pushes its time out of the meta line`).toBe(true);
-      expect(fits.cut, `${which} does not shorten the agent name`).toBe(true);
-    }
+  test("Answer opens the ask as an item", async ({ hub, page }) => {
+    const { row } = await waitingRow(page, hub);
+    const id = await row.getAttribute("data-id");
+    await row.getByRole("link", { name: "Answer", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`#/inbox\\?open=${id}$`));
+    await expect(page.locator(".inbox-detail")).toBeVisible();
   });
 
   test("passes the accessibility audit in both themes", async ({ hub, page }) => {
     for (const scheme of SCHEMES) {
       await page.emulateMedia({ colorScheme: scheme });
-      for (const [screen, route] of routes(hub)) {
-        await openIndex(page, hub, route);
-        const results = await new AxeBuilder({ page }).include(".shell-index").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
-        expect(
-          results.violations.map((violation) => `${violation.id}: ${violation.help}`),
-          `${screen} in the ${scheme} theme has accessibility violations`,
-        ).toEqual([]);
-      }
+      await waitingRow(page, hub);
+      const results = await new AxeBuilder({ page }).include(".shell-index").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      expect(
+        results.violations.map((violation) => `${violation.id}: ${violation.help}`),
+        `the feed in the ${scheme} theme has accessibility violations`,
+      ).toEqual([]);
     }
   });
 
   test("matches its baselines @visual", async ({ hub, page }) => {
     for (const scheme of SCHEMES) {
       await page.emulateMedia({ colorScheme: scheme });
-      for (const [screen, route] of routes(hub)) {
-        const { row } = await openIndex(page, hub, route);
-        await page.mouse.move(0, 0);
-        await expect(row).toHaveScreenshot(`${screen}-waiting-row-${scheme}.png`, {
-          ...SCREENSHOT,
-          mask: [row.locator(".meta time")],
-        });
-      }
+      const { row } = await waitingRow(page, hub);
+      await page.mouse.move(0, 0);
+      await expect(row).toHaveScreenshot(`feed-waiting-row-${scheme}.png`, {
+        ...SCREENSHOT,
+        mask: [row.locator("time")],
+      });
+    }
+  });
+});
+
+test.describe("a feed row", () => {
+  test.beforeEach(async ({ page }) => {
+    await pinFont(page);
+  });
+
+  test("is one sentence with the time on the right, unseen in ink and seen quiet", async ({ hub, page }) => {
+    await fixedFeed(page, hub);
+    const index = await openFeed(page, hub);
+    const row = (summary) => index.locator(".feed-row").filter({ hasText: summary });
+    await expect(row("Finished the nightly run")).toContainText("build-bot finished the nightly run");
+    await expect(row("rel-1")).toContainText("build-bot started rel-1");
+    await expect(row("Disk at 40%")).toContainText("build-bot noted: Disk at 40%");
+    for (const unseen of ["Finished the nightly run", "Cache hit rate", "rel-1"]) {
+      await expect(row(unseen).getByText("Unread", { exact: true }), `${unseen} is above the cursor`).toHaveCount(1);
+    }
+    for (const seen of ["Disk at 40%", "scored 4 of 5", "flaky-hunt"]) {
+      await expect(row(seen).getByText("Unread", { exact: true }), `${seen} is at or below the cursor`).toHaveCount(0);
+    }
+    const weight = (summary) => row(summary).locator(".feed-s b").evaluate((el) => Number(getComputedStyle(el).fontWeight));
+    expect(await weight("rel-1"), "an unseen row's agent is not heavier than a seen one's").toBeGreaterThan(await weight("Disk at 40%"));
+    // The time sits right of the sentence, in the mono family, on the row's first line.
+    const first = row("Cache hit rate");
+    const time = first.locator(".feed-at time");
+    await expect(time).toHaveText(/^\d\d:\d\d/);
+    const [t, s] = [await time.boundingBox(), await first.locator(".feed-s").boundingBox()];
+    expect(t.x, "the time is not right of the sentence").toBeGreaterThanOrEqual(s.x + s.width - 0.5);
+    expect(Math.abs(t.y - s.y), "the time is not on the sentence's first line").toBeLessThan(8);
+    expect(await time.evaluate((el) => getComputedStyle(el).fontFamily.toLowerCase())).toContain("mono");
+  });
+
+  test("a day heads its rows with its date in mono", async ({ hub, page }) => {
+    await fixedFeed(page, hub);
+    const index = await openFeed(page, hub);
+    const today = await page.evaluate(() =>
+      new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }),
+    );
+    const head = index.getByRole("heading", { name: /^Today/ });
+    await expect(head).toHaveText(`Today ${today}`, { ignoreCase: true });
+    await expect(index.getByRole("heading", { name: /^Yesterday/ })).toBeVisible();
+    const sub = head.getByText(today, { exact: true });
+    expect(await sub.evaluate((el) => getComputedStyle(el).fontFamily.toLowerCase())).toContain("mono");
+  });
+
+  test("a long agent name wraps in the sentence and leaves the time in place", async ({ hub, page }) => {
+    await fixedFeed(page, hub, LONG_ACTOR);
+    const index = await openFeed(page, hub);
+    for (const row of await index.locator(".feed-row").all()) {
+      const held = await row.evaluate((el) => {
+        const time = el.querySelector(".feed-at time").getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        const sentence = el.querySelector(".feed-s");
+        return {
+          inside: time.width > 0 && time.right <= box.right + 0.5,
+          whole: sentence.scrollWidth <= sentence.clientWidth + 0.5,
+        };
+      });
+      expect(held.inside, "a long name pushed the time out of the row").toBe(true);
+      expect(held.whole, "a long name is cut rather than wrapped").toBe(true);
+      await expect(row.locator(".feed-s")).toContainText(LONG_ACTOR);
     }
   });
 });

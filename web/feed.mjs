@@ -4,12 +4,13 @@
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { actionFor, esc, glyph, isOpen, main, waitingMarks, when } from "./dom.mjs";
+import { actionFor, esc, glyph, isOpen, kindMark, main, waitingMarks } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerPane } from "./keys.mjs";
 import { focusAfterRender, render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
-import { byDay } from "./time.mjs";
+import { clockTime, feedSentenceHTML, replySentenceHTML } from "./now-model.mjs";
+import { byDay, relative, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 // Feed chips cover the kinds a reader filters by. Anchors and scores are
@@ -312,6 +313,16 @@ export function formatEventSummary(event) {
   return summary;
 }
 
+// The stage's title: the subject alone. The row sentence's verb ("asked:",
+// "answered", "decided") belongs to the row, so the leading "asked:" or "re:"
+// marker comes off and nothing is added in its place.
+export function stageSubject(event) {
+  const summary = event.summary || "";
+  if (event.kind === "question") return summary.replace(/^asked:\s*/i, "");
+  if (event.kind === "answer" || event.kind === "approval") return summary.replace(/^re:\s*/i, "");
+  return summary;
+}
+
 function isArtifactPublish(e) {
   return (
     e.kind === "artifact" &&
@@ -366,10 +377,10 @@ function collapseDayEvents(events) {
   return result;
 }
 
-// A row's meta line: the waiting pill when there is one, then the agent and
-// the time. A long agent name is what gives way, so the time always shows.
-function metaLine(actor, ts, pill = "") {
-  return `<div class="meta">${pill}<span class="meta-actor">${esc(actor)}</span><span aria-hidden="true">·</span>${when(ts)}</div>`;
+// A row's time, in mono on the right: the clock, since the day heads the
+// rows, with the unread mark under it while the event is above the cursor.
+function rowTime(ts, unread) {
+  return `<span class="feed-at">${stamp(ts, clockTime)}${unread ? UNREAD : ""}</span>`;
 }
 
 // The kind glyph gives way to the checkbox while the reader is picking, in the
@@ -401,64 +412,68 @@ function collapsedArtifactRow(item, baseline) {
   const unread = item.events.some((e) => e.id > baseline);
   const project = item.project_id || "";
   const href = `#/projects/${encodeURIComponent(project)}/artifacts`;
-  const title = `<a class="title feed-link" href="${esc(href)}">published ${item.count} artifacts</a>`;
   const ids = item.events.map((event) => event.id).join(" ");
   const row = `<div class="row feed-row${unread ? " unread" : ""}">
-    ${pickBox(ids, `published ${item.count} artifacts`)}
-    ${glyph("artifact")}
-    <div class="grow" data-id="${esc(item.id)}">
-      ${title}
-      ${metaLine(item.actor, item.created_at)}
+    <span class="feed-k">${pickBox(ids, `published ${item.count} artifacts`)}${glyph("artifact")}</span>
+    <div class="feed-body">
+      <p class="feed-s"><a class="feed-link" href="${esc(href)}" data-open data-id="${esc(item.id)}"><b>${esc(item.actor)}</b> published ${item.count} artifacts</a></p>
     </div>
-    ${unread ? UNREAD : ""}
+    ${rowTime(item.created_at, unread)}
   </div>`;
   return feedItem(project, ids, row);
 }
 
-// The feed's own row. Event ids sort by age, which is how the hub compares
-// them to the cursor too, so an id above the baseline is an unseen event.
-// A row opens the event in the stage; the artifact or session it is about is
-// reached from the stage's own card, so the row is a door to the item and not
-// straight past it.
+// The replies on a row's thread, oldest first, each one sentence set in under
+// the row with its own time.
 function threadRepliesHTML(replies) {
   if (!replies.length) return "";
   return replies
     .slice()
     .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
     .map(
-      (reply) => `
-    <div class="feed-thread-reply">
-      <div class="feed-thread-meta">${esc(reply.actor)} · ${when(reply.created_at)}</div>
-      <div class="feed-thread-body">${esc(
-        typeof reply.payload?.body === "string" && reply.payload.body.trim()
-          ? reply.payload.body.trim()
-          : formatEventSummary(reply),
-      )}</div>
-    </div>`,
+      (reply) => `<p class="feed-thread-reply">${replySentenceHTML(reply)} ${stamp(reply.created_at, clockTime)}</p>`,
     )
     .join("");
 }
 
+// The feed's own row, on the row anatomy Now uses: the kind glyph in a fixed
+// column, one sentence saying who did what, and the time in mono on the right.
+// Event ids sort by age, which is how the hub compares them to the cursor too,
+// so an id above the baseline is an unseen event. A row opens the event in the
+// stage; the artifact or session it is about is reached from the stage's own
+// card, so the row is a door to the item and not straight past it. An ask that
+// still waits also offers Answer, which opens it as an item.
 function feedRow(event, baseline, selected = false, replies = []) {
   const unread = event.id > baseline;
   const project = event.project_id || "";
   const href = `#/projects/${encodeURIComponent(project)}/feed?event=${encodeURIComponent(event.id)}`;
-  const summaryText = formatEventSummary(event);
-  // Waiting outranks unread, so a waiting row ends in the action dot alone.
+  const phrase = formatEventSummary(event);
+  // Waiting outranks unread, so a waiting row carries its words and no dot.
   const waiting = isOpen(event) ? waitingMarks(event.id) : null;
-  const title = `<a class="title feed-link" href="${esc(href)}"${waiting ? waiting.described : ""}>${esc(summaryText)}</a>`;
+  const answer = waiting
+    ? `<a class="feed-answer" href="#/inbox?open=${encodeURIComponent(event.id)}">Answer</a>`
+    : "";
   const row = `<div class="row feed-row${unread ? " unread" : ""}${waiting ? " is-waiting" : ""}${selected ? " selected" : ""}" data-id="${esc(event.id)}">
-    ${pickBox(event.id, summaryText)}
-    ${glyph(event.kind)}
-    <div class="grow">
-      ${title}
+    <span class="feed-k">${pickBox(event.id, phrase)}${glyph(event.kind)}</span>
+    <div class="feed-body">
+      <p class="feed-s"><a class="feed-link" href="${esc(href)}" data-open data-id="${esc(event.id)}"${waiting ? waiting.described : ""}>${feedSentenceHTML(event, phrase)}</a>${answer}</p>
       ${decisionNote(event)}
-      ${metaLine(event.actor, event.created_at, waiting ? waiting.pill : "")}
+      ${waiting ? `<p class="feed-x">${waiting.status}</p>` : ""}
       ${threadRepliesHTML(replies)}
     </div>
-    ${waiting ? waiting.dot : unread ? UNREAD : ""}
+    ${rowTime(event.created_at, unread && !waiting)}
   </div>`;
   return feedItem(project, event.id, row);
+}
+
+// A day's heading: the day as a label, and its date in mono beside it.
+function dayHead(group) {
+  const ms = Date.parse(group.events[0]?.created_at || "");
+  const recent = RECENT.includes(group.label);
+  const sub = Number.isFinite(ms)
+    ? new Date(ms).toLocaleDateString("en-GB", recent ? { weekday: "short", day: "numeric", month: "short" } : { weekday: "short" })
+    : "";
+  return `<h2 class="day"><span>${esc(group.label)}</span>${sub ? ` <span class="feed-day-sub">${esc(sub)}</span>` : ""}</h2>`;
 }
 
 function dayGroups(groups, baseline, selectedId = "") {
@@ -521,7 +536,7 @@ function dayGroups(groups, baseline, selectedId = "") {
       // A day with nothing to show (for instance every row below was a reply)
       // must not paint an empty header and an empty card.
       if (!rows.length) return "";
-      return `<h2 class="day">${esc(group.label)}</h2>
+      return `${dayHead(group)}
          <div class="card feed-day">${rows.join("")}</div>`;
     })
     .filter((html) => html !== "")
@@ -785,7 +800,7 @@ export async function eventStage(event, projectId) {
   // A finished event's summary is a report, not a subject, so the stage titles
   // it with its leading sentence and reads the rest as prose. A question's
   // short subject keeps the title it always had.
-  const { subject, message } = subjectAndMessage(formatEventSummary(event));
+  const { subject, message } = subjectAndMessage(stageSubject(event));
   const body = typeof event.payload?.body === "string" ? event.payload.body.trim() : "";
   const renderedBody = body ? await renderMarkdown(body) : "";
   const detail =
@@ -806,36 +821,36 @@ export async function eventStage(event, projectId) {
       `#/projects/${encodeURIComponent(projectId)}/sessions?id=${encodeURIComponent(sessionId)}`,
     );
   }
+  const row = (kind, sentence, at) => `<div class="item-trow">
+      <span class="item-tk">${kindMark(kind)}</span>
+      <p class="item-ts">${sentence}</p>
+      ${stamp(at)}
+    </div>`;
+  const thread = threadReplies.length
+    ? `<section class="item-thread feed-stage-thread" aria-labelledby="feed-thread-label">
+        <h3 class="section-label" id="feed-thread-label">Thread</h3>
+        ${row(event.kind, feedSentenceHTML(event, formatEventSummary(event)), event.created_at)}
+        ${threadReplies.map((reply) => row(reply.kind, replySentenceHTML(reply), reply.created_at)).join("")}
+      </section>`
+    : "";
+  const at = Date.parse(event.created_at);
+  const byline = [`<b>${esc(event.actor)}</b>`, stamp(event.created_at), Number.isFinite(at) ? esc(relative(at)) : ""]
+    .filter(Boolean)
+    .join(", ");
   return `
     <article class="shell-prose feed-stage">
-      <div class="feed-stage-pills">
-        <span class="pill" data-kind="${esc(event.kind)}">${esc(word)}</span>
-        ${open ? `<span class="pill pill-status"><span class="pill-dot" aria-hidden="true"></span>Waiting on you</span>` : ""}
-      </div>
+      <p class="item-kindline feed-stage-kind">
+        <span class="item-kind">${kindMark(event.kind)}${esc(word)}</span>
+        ${open ? `<span class="item-state is-wait"><span class="item-dot" aria-hidden="true"></span>Waiting on you</span>` : ""}
+      </p>
       <h2 class="feed-stage-title">${esc(subject)}</h2>
-      <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
+      <p class="item-from feed-stage-from">${byline}</p>
       ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
       ${renderedBody ? `<div class="feed-stage-body markdown-body">${renderedBody}</div>` : ""}
       ${detail}
       <div class="feed-stage-actions">${actionFor(event)}</div>
       ${pointsAt}
-      ${
-        threadReplies.length
-          ? `<div class="feed-stage-thread">${threadReplies
-              .map(
-                (reply) => `
-        <div class="feed-stage-reply">
-          <div class="meta mono">${esc(reply.actor)} · ${when(reply.created_at)}</div>
-          <p class="feed-stage-body">${esc(
-            typeof reply.payload?.body === "string" && reply.payload.body.trim()
-              ? reply.payload.body.trim()
-              : formatEventSummary(reply),
-          )}</p>
-        </div>`,
-              )
-              .join("")}</div>`
-          : ""
-      }
+      ${thread}
     </article>`;
 }
 

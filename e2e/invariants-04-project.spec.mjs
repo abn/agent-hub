@@ -1,5 +1,5 @@
 // The project-owned screens: the tools row, session detail and its brain, the
-// artifact list and viewer, the feed's status pill, the wiki tree and reader,
+// artifact list and viewer, the feed's waiting words, the wiki tree and reader,
 // the section switcher and the search scope chips. This is the slice of the old
 // invariants.py whose subject is a screen inside a project.
 //
@@ -54,6 +54,17 @@ test.describe("project tools and sessions", () => {
     await expect(page.locator("dialog.dialog[open]"), "capture opened no dialog").toBeVisible({
       timeout: 5000,
     });
+  });
+
+  test("an opened question's stage title is its subject, without the row's verb", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const subject = "Roll the log files?";
+    expect(await oneOffQuestion(hub, hub.projectId, subject), "the question was not posted").not.toBe("");
+    await goto(page, projectRoute(hub, "feed"), "");
+    await page.locator(".shell-index .feed-row .feed-link", { hasText: subject }).first().click();
+    const stage = page.locator(".shell-stage");
+    await expect(stage.getByRole("heading", { level: 2, name: subject, exact: true })).toBeVisible();
+    await expect(stage.getByRole("heading", { level: 2, name: /^asked/i })).toHaveCount(0);
   });
 
   test("session detail renders exactly one title", async ({ hub, page }) => {
@@ -348,7 +359,7 @@ test.describe("Now and search on a phone", () => {
     expect(await page.locator(".search-group.card, .search-results .card, .shell-index .card").count(), "the search list is a boxed card").toBe(0);
   });
 
-  test("the feed status pill stays on one line", async ({ hub, page }) => {
+  test("the feed's waiting words stay on one line, under the sentence", async ({ hub, page }) => {
     const event = await oneOffQuestion(hub, hub.projectId, "Rotate the staging certificate on the edge host");
     expect(event, "the seeded question never reached the feed").toBeTruthy();
     const row = `main .feed-row[data-id="${event}"]`;
@@ -366,10 +377,10 @@ test.describe("Now and search on a phone", () => {
           return lines;
         };
         return [...document.querySelectorAll(".feed-row")]
-          .filter((row) => row.querySelector(".pill-status"))
+          .filter((row) => row.querySelector(".feed-wait"))
           .map((row) => {
-            const pill = row.querySelector(".pill-status");
-            const title = row.querySelector(".title");
+            const pill = row.querySelector(".feed-wait");
+            const title = row.querySelector(".feed-s");
             const line = pill.parentElement;
             return {
               id: row.dataset.id || "",
@@ -401,7 +412,7 @@ test.describe("Now and search on a phone", () => {
         await goto(page, projectRoute(hub, "feed"));
         await expect(page.locator(row), `the seeded row is not in the feed at ${width}px`).toBeVisible({ timeout: 8000 });
         for (const measured of await pillRows()) {
-          const what = `at ${width}px the row ${JSON.stringify(measured.title)} carries a pill ${JSON.stringify(measured.pillText)} that`;
+          const what = `at ${width}px the row ${JSON.stringify(measured.title)} carries the waiting words ${JSON.stringify(measured.pillText)} that`;
           expect(measured.textLines, `${what} runs on ${measured.textLines} lines`).toBe(1);
           expect(measured.scrollHeight <= measured.clientHeight, `${what} spills out of its box`).toBe(true);
           expect(Math.round(measured.height), `${what} is taller than its single-line box`).toBe(Math.round(measured.clientHeight));
@@ -409,10 +420,10 @@ test.describe("Now and search on a phone", () => {
           expect(measured.lineOverflow <= 0.5, `${what} pushed its line out`).toBe(true);
         }
         const theRow = (await pillRows()).find((entry) => entry.id === event);
-        expect(theRow, `at ${width}px the seeded row draws no waiting pill`).toBeTruthy();
+        expect(theRow, `at ${width}px the seeded row draws no waiting words`).toBeTruthy();
         expect(
           theRow.pillTop >= theRow.titleBottom - 0.5,
-          `at ${width}px the row's pill shares the title's line`,
+          `at ${width}px the row's waiting words share the sentence's line`,
         ).toBe(true);
       }
     } finally {

@@ -7,9 +7,11 @@ import {
   askQueue,
   canWait,
   clip,
+  clockTime,
   endingLine,
   eventSentenceHTML,
   askSentenceHTML,
+  feedSentenceHTML,
   needsYou,
   needsYouCount,
   queuePlace,
@@ -327,5 +329,35 @@ describe("the opened item's thread", () => {
     const html = replySentenceHTML({ kind: "signal", actor: "bot", summary: "<i>later</i>" });
     expect(html).not.toContain("<i>");
     expect(text(html)).toBe("bot added: <i>later</i>");
+  });
+});
+
+describe("a feed row's sentence", () => {
+  it("reads an open ask the way Now reads it", () => {
+    const event = { kind: "approval", actor: "build-bot", summary: "Ship 1.10", inbox_status: "action" };
+    expect(text(feedSentenceHTML(event, "Ship 1.10"))).toBe("build-bot wants a decision: Ship 1.10");
+  });
+
+  it("puts what was done straight after the agent", () => {
+    const session = { kind: "session", actor: "build-bot", summary: "Session rel started" };
+    expect(text(feedSentenceHTML(session, "started rel"))).toBe("build-bot started rel");
+    const asked = { kind: "question", actor: "build-bot", summary: "Roll the logs?", inbox_status: "resolved" };
+    expect(text(feedSentenceHTML(asked, "asked: Roll the logs?"))).toBe("build-bot asked: Roll the logs?");
+    const finished = { kind: "finished", actor: "a", summary: "Finished the build" };
+    expect(text(feedSentenceHTML(finished, "Finished the build"))).toBe("a finished the build");
+  });
+
+  it("reads a signal and a plain summary as Now does, and escapes them", () => {
+    const signal = { kind: "signal", actor: "a", summary: "deployed <i>x</i>" };
+    const html = feedSentenceHTML(signal);
+    expect(html).not.toContain("<i>");
+    expect(text(html)).toBe("a noted: deployed <i>x</i>");
+    expect(text(feedSentenceHTML({ kind: "finished", actor: "a", summary: "The run scored 4" }))).toBe(
+      "a finished: The run scored 4",
+    );
+  });
+
+  it("gives the clock alone", () => {
+    expect(clockTime(new Date(2026, 10, 20, 9, 5).getTime())).toBe("09:05");
   });
 });
