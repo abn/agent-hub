@@ -31,6 +31,9 @@ export const GLYPH_PATHS = {
   overflow:
     '<g fill="currentColor"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></g>',
   resolve: '<path d="M 5 12l5 5 9-9"/>',
+  // Three sheets laid on one another: the artifacts, every version of each.
+  // The rail draws it for Artifacts and the list for its earlier tier.
+  stack: '<path d="M 12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M 3.5 12l8.5 4.5 8.5-4.5"/><path d="M 3.5 16l8.5 4.5 8.5-4.5"/>',
   // The owner's call, against the designer's: a 40px circle cannot hold a word
   // legibly, and every keyboard on a phone puts an arrow where this button is.
   // Three strokes, one motif, nothing inside anything.

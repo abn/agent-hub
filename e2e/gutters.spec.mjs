@@ -27,9 +27,11 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 const ON_THE_GUTTER =
   ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .tree-pane-footnote, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .settings-helper-line, .wiki-editor-label, .wiki-comment-body";
 
-// Content that sits inside a row rather than on it, and Now's margin, which is
-// ruled off by its own hairline and carries its own gutter.
-const NESTED = "[data-depth], blockquote, .wiki-tree-row, .wiki-row, .tree-item, .search-preview-article, .shell-head, .now-mar";
+// Content that sits inside a row rather than on it, and the margins of Now and
+// the artifacts list, which are ruled off by their own hairline and carry their
+// own gutter.
+const NESTED =
+  "[data-depth], blockquote, .wiki-tree-row, .wiki-row, .tree-item, .search-preview-article, .shell-head, .now-mar, .arts-mar";
 
 // The row's fixed glyph column, which the text after a leading glyph starts
 // after. DESIGN.md fixes it at 20px in an index and 28px on the mobile feed.

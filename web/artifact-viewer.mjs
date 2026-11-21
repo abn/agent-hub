@@ -138,8 +138,10 @@ function frameLoader() {
 
 // Mirror of web/tokens.css values for the srcdoc frame: an opaque origin
 // cannot load the file, so the frame carries the values inline. Body copy
-// follows the foundation prose scale: 15px/1.6 ink-2, headings ink, 640px
-// measure. The static check fails on any colour here that tokens.css does not
+// follows the foundation prose scale: 15px/1.6 ink, a 28px title, 17px section
+// heads, and a 640px measure. Read on its own the page centres it; framed by
+// the app it sits on the stage's left edge, so the prose starts under the
+// title in the app's header. The static check fails on any colour here that tokens.css does not
 // declare, so the mirror cannot drift into a second palette. The frame cannot
 // load the shell's fonts either, so it names Plex for a host that has it
 // installed and sets the system stack everywhere else.
@@ -149,10 +151,14 @@ function frameStyle() {
     `html[data-theme="light"]{color-scheme:light;background:#F3F5F2;color:#151B17}` +
     `html[data-theme="dark"]{color-scheme:dark;background:#111513;color:#E4EAE5}` +
     `body{font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Ubuntu,Cantarell,sans-serif;` +
-    `font-size:15px;line-height:1.6;color:#3B4640;max-width:640px;margin:0 auto;padding:18px 1.25rem 4rem}` +
-    `html[data-theme="dark"] body{color:#B5BFB8}` +
-    `h1{font-size:24px;font-weight:600;letter-spacing:-.01em;margin:0 0 16px}` +
-    `h1,h2,h3{color:#151B17;line-height:1.1;text-wrap:balance}` +
+    `font-size:15px;line-height:1.6;color:#151B17;max-width:640px;margin:0 auto;padding:18px 1.25rem 4rem}` +
+    `.in-app body{margin:0;padding:16px 0 4rem}` +
+    `html[data-theme="dark"] body{color:#E4EAE5}` +
+    `h1{font-size:28px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px}` +
+    `h2{font-size:17px;font-weight:600;margin:32px 0 8px}` +
+    `h3{font-size:15px;font-weight:600;margin:24px 0 8px}` +
+    `h1,h2,h3{color:#151B17;line-height:1.25;text-wrap:balance}` +
+    `p,ul,ol{margin:0 0 16px}li{margin-bottom:4px}` +
     `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#E4EAE5}` +
     `a{color:#151B17;text-underline-offset:3px}` +
     `html[data-theme="dark"] a{color:#E4EAE5}` +
@@ -198,7 +204,7 @@ function buildSrcdoc({ title, body, theme, withMermaid }) {
     (withMermaid ? `<script src="${frameSrc("vendor/mermaid.runtime.js")}"></script>` : "") +
     frameLoader();
   return (
-    `<!doctype html><html lang="en" data-theme="${theme}"><head>` +
+    `<!doctype html><html lang="en" data-theme="${theme}"${window.top !== window.self ? ' class="in-app"' : ""}><head>` +
     `<meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<meta http-equiv="Content-Security-Policy" content="${csp}">` +
@@ -421,6 +427,9 @@ function init() {
   // in here would change the frame behind the app's back, and the app's would
   // then name a switch that had already happened.
   if (window.top !== window.self) {
+    // The app reads the threads in its own aside or sheet, and sets the page on
+    // its stage's left edge, so the framed page drops its own copy of both.
+    document.documentElement.classList.add("in-app");
     if (toggle) toggle.hidden = true;
     const header = document.querySelector("body > header");
     if (header) header.style.display = "none";

@@ -52,7 +52,9 @@ const clock = (size = 16) => glyphSvg("clock", { size, strokeWidth: 1.8 });
 
 const shortId = (id) => String(id || "").slice(-6);
 
-function stamp(ts) {
+// A row's time: the clock or the day in mono, and the full stamp for a reader
+// who asks.
+export function stamp(ts) {
   const ms = Date.parse(ts);
   if (!Number.isFinite(ms)) return "";
   const full = esc(fullStamp(ms));

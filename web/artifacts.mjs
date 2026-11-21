@@ -4,6 +4,7 @@
 // shell with the artifact selected, and reload and the browser's Back keep it.
 
 import { api } from "./api.mjs";
+import { artifactLine, artifactSlug, formatBytes, openThreadCount, seeOne } from "./artifact-model.mjs";
 import {
   closeCommentsDrawer,
   loadComments,
@@ -20,6 +21,7 @@ import { esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
+import { placeTime } from "./now-model.mjs";
 import { render } from "./router.mjs";
 import { asideAvailable, toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
@@ -32,14 +34,6 @@ function cardGlyph(protectedArtifact) {
   const path = protectedArtifact ? LOCK_PATH : DOC_PATH;
   const cls = protectedArtifact ? "lock" : "doc";
   return `<svg class="${cls}" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 // The live band: whether a version is being written, who is writing it, and
@@ -164,8 +158,9 @@ const stagedIn = new Map();
 // document controls in the control row, the sandboxed page in the body. The
 // document is the hub's own frame route, so the app never renders agent HTML
 // in its own origin. A version other than the newest is read when the address
-// names one.
-export async function artifactStage(id, projectId, version = null) {
+// names one. `listing` is the artifact as its project lists it, which names
+// the writer the version list does not.
+export async function artifactStage(id, projectId, version = null, listing = null) {
   let versions = [];
   try {
     const listed = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
@@ -185,16 +180,15 @@ export async function artifactStage(id, projectId, version = null) {
     const list = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
     const arr = Array.isArray(list) ? list : Array.isArray(list?.comments) ? list.comments : [];
     commentsCount = arr.length;
-    openCommentsCount = arr.filter((c) => !c.done).length;
+    openCommentsCount = openThreadCount(arr);
   } catch {}
 
   const project = projectId || "";
   stagedIn.set(id, project);
-  const slug =
-    (current.title || "artifact")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "") + (current.kind === "markdown" ? ".md" : ".html");
+  // Reading an artifact is looking at it, so the artifacts list stops naming it
+  // as new to the reader.
+  seeOne(id, shown);
+  const slug = artifactSlug(current.title, current.kind);
 
   // One control in two states. With no thread yet there is nothing to read, so
   // it starts one; once a thread exists it opens the threads, and the numeral
@@ -231,14 +225,22 @@ export async function artifactStage(id, projectId, version = null) {
   const copyGlyph = glyphSvg("copy", { size: 14 });
   const rawGlyph = glyphSvg("copyRaw", { size: 14 });
 
+  // The path the copy glyph lifts, drawn as it is copied: the project and the
+  // artifacts list are links, so the row is also the way back up.
+  const crumb = `<nav class="artifact-crumb mono" aria-label="Path" title="${esc(stagePath)}"><a href="#/projects/${encodeURIComponent(
+    project,
+  )}/feed">${esc(project)}</a><span aria-hidden="true">/</span><a href="#/artifacts?project=${encodeURIComponent(
+    project,
+  )}">artifacts</a><span aria-hidden="true">/</span><b>${esc(slug)}</b></nav>`;
   const controls = `
-    <span class="shell-meta mono" title="${esc(stagePath)}">${esc(stagePath)}</span>
-    <div class="grow"></div>
-    <button type="button" class="hub-btn-glyph" data-action="copy-path" data-path="${esc(
+    ${crumb}
+    <button type="button" class="hub-btn-glyph artifact-copy-path" data-action="copy-path" data-path="${esc(
       stagePath,
     )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
-    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${shown}">v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 11, strokeWidth: 2 })}</button>
-    <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}" aria-label="Copy raw">${rawGlyph}</button>`;
+    <div class="grow"></div>
+    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${shown}">v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
+    <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}" aria-label="Copy raw">${rawGlyph}</button>
+    <span class="artifact-hint" aria-hidden="true"><kbd>c</kbd> comments</span>`;
 
   const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   // A plain artifact with a live share link is concealed at its id address, so
@@ -248,16 +250,27 @@ export async function artifactStage(id, projectId, version = null) {
   // opens them, so the way to the threads is never scrolled away.
   const strip = hasThreads
     ? `<button type="button" class="hub-comments-strip" data-action="comments-strip">${glyphSvg("comments", {
-        size: 16,
-      })}<span class="grow">Comments</span><span class="mono hub-comments-count">${openCommentsCount}</span>${glyphSvg(
-        "chevronRight",
+        size: 20,
+      })}<span class="grow">Comments on v${shown}</span><span class="mono hub-comments-count">${openCommentsCount}</span>${glyphSvg(
+        "chevronUp",
         { size: 16 },
       )}</button>`
     : "";
+  // The state of the version on screen and when it was saved, above the
+  // document, where the reader starts.
+  const liveNow = listing && listing.live_version === shown;
+  const state = current.protected
+    ? `<span class="artifact-state">${glyphSvg("lock", { size: 14, strokeWidth: 2 })}Encrypted</span>`
+    : liveNow
+      ? `<span class="artifact-state">Being written</span>`
+      : `<span class="artifact-state is-ok">${glyphSvg("resolve", { size: 14, strokeWidth: 2.2 })}Published</span>`;
+  const saved = Date.parse(current.created_at);
+  const note = [Number.isFinite(saved) ? placeTime(saved) : "", (current.label || "").trim()].filter(Boolean).join(", ");
+  const docmeta = `<p class="artifact-docmeta">${state}${note ? `<span>${esc(note)}</span>` : ""}</p>`;
   // The artifact's own host page. It carries the document and, for a protected
   // artifact, the gate and the client-side decryptor, so the app never renders
   // agent bytes in its own origin.
-  const body = `<div class="hub-viewer-doc"><iframe id="hub-frame" sandbox="allow-scripts" data-pass="${esc(
+  const body = `<div class="hub-viewer-doc">${docmeta}<iframe id="hub-frame" sandbox="allow-scripts" data-pass="${esc(
     pass,
   )}" title="${esc(current.title || slug)}" src="${esc(frameSrc(id, shown, theme, pass))}"></iframe>${strip}</div>`;
 
@@ -276,7 +289,9 @@ export async function artifactStage(id, projectId, version = null) {
 
   // A protected artifact names no author: what the reader can know about it is
   // that it is sealed.
-  const who = current.protected ? "Locked · only readable with the password" : current.actor || "agent";
+  const who = current.protected
+    ? "Locked · only readable with the password"
+    : (listing && listing.actor) || current.actor || "agent";
   return {
     aside,
     title: slug,
@@ -531,9 +546,9 @@ export async function artifactIndex(projectId, selectedId = "") {
     .map((group) => {
       const body = group.items
         .map((a) => {
-          const comments = a.comments_count
-            ? ` · ${a.comments_count} ${a.comments_count === 1 ? "comment" : "comments"}`
-            : "";
+          // The list's own line, less the project the reader is already in.
+          const line = artifactLine({ ...a, project_id: "" });
+          const at = Date.parse(a.updated_at || a.created_at);
           const href = `#/projects/${encodeURIComponent(projectId)}/artifacts?artifact=${encodeURIComponent(a.id)}`;
           const lock = a.protected ? `<span class="sr-only">Encrypted</span>` : "";
           const selected = a.id === mark;
@@ -543,8 +558,9 @@ export async function artifactIndex(projectId, selectedId = "") {
               <a class="title" href="${esc(href)}"${
                 selected ? ' aria-current="true"' : ""
               }>${esc(a.title || "artifact")}${lock}</a>
-              <div class="meta mono">v${a.version || 1} · ${formatBytes(a.size_bytes)}${comments}</div>
+              <div class="meta">${esc(line)}</div>
             </div>
+            ${Number.isFinite(at) ? `<span class="artifact-when mono">${esc(placeTime(at))}</span>` : ""}
           </div>`;
         })
         .join("");

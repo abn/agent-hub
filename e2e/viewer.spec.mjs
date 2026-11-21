@@ -211,6 +211,41 @@ test.describe("the project artifact stage's actions", () => {
     await expect(sheet).toHaveCount(0);
     await expect(page.locator(".hub-comment-card").filter({ hasText: "a stage comment" })).toBeVisible();
   });
+
+  // A reply on the same passage is part of its thread, so the thread counts
+  // once and Resolve closes the whole thread. Resolving only the root left the
+  // reply behind as a thread of its own.
+  test("resolving a thread resolves its replies and counts as one", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the thread cards are the desktop's comments column");
+    const session = await newSession(hub);
+    const published = await toolCall(hub, session, "artifact_publish", {
+      project_id: hub.projectId,
+      title: "Thread check",
+      kind: "markdown",
+      content: "## Plan\n\nRoll the log files every night.",
+    });
+    const id = structured(published).artifact_id;
+    const anchor = { mode: "text", quote: "Roll the log files" };
+    for (const body of ["Why nightly?", "Because of disk size."]) {
+      await api(hub, "POST", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`, {
+        body,
+        anchor,
+        anchor_version: 1,
+      });
+    }
+
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    const card = page.locator(".hub-comment-card").filter({ hasText: "Why nightly?" });
+    await expect(card).toContainText("Because of disk size.");
+    await expect(page.locator(".hub-comments-head-meta")).toHaveText("1 · v1");
+
+    await card.getByRole("button", { name: "Resolve" }).click();
+    await expect(page.locator(".hub-comments-head-meta")).toHaveText("0 · v1");
+    const listed = await api(hub, "GET", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
+    const body = listed.json();
+    const comments = Array.isArray(body) ? body : body.comments;
+    expect(comments.map((comment) => comment.done)).toEqual([true, true]);
+  });
 });
 
 test.describe("the artifact viewer's comments bar", () => {

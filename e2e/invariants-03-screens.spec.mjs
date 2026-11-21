@@ -34,7 +34,7 @@ test.describe("phone frame", () => {
     const moreRows = await page.evaluate(() =>
       [...document.querySelectorAll(".more-screen .more-row .title")].map((el) => el.textContent.trim()),
     );
-    expect(moreRows, "the More screen rows differ from expected").toEqual(["Storage", "Agents and tokens", "Settings"]);
+    expect(moreRows, "the More screen rows differ from expected").toEqual(["Artifacts", "Storage", "Agents and tokens", "Settings"]);
 
     // Healthy means no sync element anywhere, and no space kept for one.
     const syncVisible = await page.evaluate(() => {
@@ -191,10 +191,10 @@ test.describe("desktop chrome", () => {
             if (rr.width > 0) textX = rr.left;
           }
           if (textX === null) textX = r.left + parseFloat(getComputedStyle(e).paddingLeft || "0");
-          // Now's margin and an opened item's are ruled off by their own
-          // hairline and carry their own gutter, so a label there is measured
-          // from the rule.
-          const margin = e.closest(".now-mar, .item-mar");
+          // Now's margin, the artifacts list's and an opened item's are ruled
+          // off by their own hairline and carry their own gutter, so a label
+          // there is measured from the rule.
+          const margin = e.closest(".now-mar, .arts-mar, .item-mar");
           const pane = stage && r.left >= stage.getBoundingClientRect().left ? stage : idx || stage;
           const from = margin
             ? margin.getBoundingClientRect().left + parseFloat(getComputedStyle(margin).borderLeftWidth || "0")

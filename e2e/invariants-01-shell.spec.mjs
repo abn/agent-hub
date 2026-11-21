@@ -310,7 +310,7 @@ test.describe("races", () => {
       feed: [["the bare feed address", "#/feed", "/api/v1/projects"]],
       sessions: [["the bare sessions address", "#/sessions", "/api/v1/projects"]],
       artifacts: [
-        ["the bare artifacts address", "#/artifacts", "/api/v1/projects"],
+        ["artifacts list", "#/artifacts", "/api/v1/projects"],
         [
           "artifact viewer",
           `#/artifacts/${encodeURIComponent(artifact)}`,

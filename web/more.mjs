@@ -1,8 +1,9 @@
-// The More screen. Tab root on a phone for storage, agents and tokens,
-// settings, and the permanent sync line.
+// The More screen. Tab root on a phone for the artifacts list, storage,
+// agents and tokens, settings, and the permanent sync line.
 
 import { api } from "./api.mjs";
 import { esc, paint } from "./dom.mjs";
+import { glyphSvg } from "./glyphs.mjs";
 import { shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { relative } from "./time.mjs";
@@ -40,6 +41,8 @@ export async function moreScreen(gen) {
   }
   const agentSub = newestCall ? `last call ${relative(newestCall)}` : "no calls yet";
 
+  const artifactBytes = (usage.projects || []).reduce((sum, p) => sum + (Number(p.artifact_bytes) || 0), 0);
+  const stackGlyph = glyphSvg("stack", { size: 19 });
   const storageGlyph = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"></path></svg>`;
   const keyGlyph = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12l9-9M17 6l3 3M15 8l2 2"></path></svg>`;
   const gearGlyph = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7"></path></svg>`;
@@ -48,6 +51,15 @@ export async function moreScreen(gen) {
   const content = `
     <div class="more-screen">
       <div class="more-gap"></div>
+      <a class="row more-row" href="#/artifacts">
+        <span class="more-glyph" aria-hidden="true">${stackGlyph}</span>
+        <span class="more-main grow">
+          <span class="title">Artifacts</span>
+          <span class="more-sub">every project, newest first</span>
+        </span>
+        <span class="more-val mono">${esc(formatBytes(artifactBytes))}</span>
+        <span class="more-chevron" aria-hidden="true">${chevronRight}</span>
+      </a>
       <a class="row more-row" href="#/storage">
         <span class="more-glyph" aria-hidden="true">${storageGlyph}</span>
         <span class="more-main grow">
