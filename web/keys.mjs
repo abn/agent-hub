@@ -368,6 +368,10 @@ function onFocusIn(event) {
     return;
   }
   following = true;
+  // A pointer press on a control inside an unselected row leaves the selection
+  // where it was: moving it would draw key chips and shift the control from
+  // under the pointer before the click lands.
+  if (event.target !== row && !event.target.matches?.(":focus-visible")) return;
   const list = rows();
   const index = list.indexOf(row);
   if (index >= 0) {

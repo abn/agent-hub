@@ -7618,22 +7618,28 @@ dialog.dialog-project-delete {
 }
 .now kbd { height: 18px; min-width: 18px; background: transparent; border-color: currentColor; border-bottom-width: 1px; color: inherit; }
 .now-acts kbd, .now-t kbd { opacity: 0.8; }
-/* The keys a focused row answers to, under its sentence. */
-.now-keys { display: none; flex-wrap: wrap; gap: var(--s-4); margin-top: var(--s-2); font-size: var(--t-12); color: var(--ink-3); }
-.now-keys span { display: inline-flex; align-items: center; gap: var(--s-1); }
-/* They show while the reader moves with the keyboard, and go as soon as the
-   pointer is over the stream, so a row never grows or shrinks under a pointer
-   on its way to a button. */
-.now-row[tabindex="0"]:is(:focus-visible, :has(:focus-visible)) .now-keys { display: flex; }
-@media (hover: hover) {
-  .now:hover .now-row[tabindex="0"] .now-keys { display: none; }
-}
 .now-hints { margin-left: auto; display: flex; gap: var(--s-4); font-size: var(--t-13); color: var(--ink-3); }
 .now-hints span { display: inline-flex; align-items: center; gap: var(--s-1); }
+/* A key is named only where pressing it acts. The map presses the selected
+   row's controls and no other row's, so a verb's chip is drawn on the selected
+   ask alone. */
+.now-row:not([tabindex="0"]) :is(.now-acts, .now-read) kbd { display: none; }
+/* On a fine pointer an ask shows its verbs only when it is the selected row,
+   under the pointer, or holds focus. The rest keep their place in the line,
+   so a row is the same height whichever is selected. The verbs always take
+   their own line, so every ask is the same height whether its sentence is
+   short or long. */
+@media (pointer: fine) and (min-width: 720px) {
+  .now-ask .now-acts { display: flex; margin: var(--s-2) 0 0 0; }
+  .now-row.now-ask:not([tabindex="0"], :hover, :focus-within) .now-acts { visibility: hidden; }
+}
+/* The keys that move and open have nothing to act on in a stream with no row.
+   The artifacts list draws its rows on the same class. */
+.shell:not(:has(.now-row:not(.now-quiet[hidden] .now-row))) .now-hint-row { display: none; }
 /* Keys belong to a keyboard: under a coarse pointer, and on a phone's width,
    none is named. */
 @media (pointer: coarse), (max-width: 719px) {
-  .now kbd, .now-hints, .now .now-row[tabindex] .now-keys { display: none; }
+  .now kbd, .now-hints { display: none; }
 }
 /* A phone's tier line keeps its label and its verb; the projects are named by
    the groups under it. */

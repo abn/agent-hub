@@ -108,34 +108,25 @@ function askActions(item, snoozedUntil) {
   const button = (verb, label, keys, extra = "", primary = false) =>
     `<button type="button" class="${primary ? "now-pri" : ""}" data-now="${verb}" data-id="${id}" data-summary="${summary}" data-key="${keys}"${extra}>${esc(label)}${kbd(keys.split(" ")[0])}</button>`;
   const verbs = [];
-  const hints = [];
   if (item.kind === "approval") {
     verbs.push(button("approve", "Approve", "1 a", "", true), button("decline", "Decline", "2"));
-    hints.push(["1", "approve"], ["2", "decline"], ["r", "reply"]);
   } else if (item.kind === "question") {
     const options = questionOptions(item.payload).slice(0, 9);
     options.forEach((option, at) => {
       verbs.push(button("choose", option, String(at + 1), ` data-choice="${esc(option)}"`, at === 0));
     });
-    if (options.length) hints.push([`1-${options.length}`, "choose"]);
     verbs.push(
       `<button type="button" class="${options.length ? "now-link" : "now-pri"}" data-now="reply" data-id="${id}" data-key="${options.length ? "r" : "1 r"}"${optionsAttr(item.payload)}>Reply${kbd(options.length ? "r" : "1")}</button>`,
     );
-    hints.push(["r", "reply"]);
   } else if (item.kind === "idea") {
     verbs.push(button("resolve", "Resolve", "1 e", "", true), button("clear", "Clear", "2"));
-    hints.push(["e", "done"]);
   }
-  hints.push(["s", snoozedUntil ? "bring back" : "snooze 1h"]);
   // Snoozing has a key and a control: the key on a keyboard, and the button on
   // a row that is already snoozed, where bringing it back is the one thing to do.
   if (snoozedUntil) verbs.push(button("unsnooze", "Bring back", "s"));
   else verbs.push(`<button type="button" class="now-key-only" data-now="snooze" data-id="${id}" data-summary="${summary}" data-key="s" tabindex="-1" aria-hidden="true" hidden></button>`);
   verbs.push(open);
-  const keys = [["j k", "move"], ...hints]
-    .map(([key, what]) => `<span>${key.split(" ").map(kbd).join("")} ${esc(what)}</span>`)
-    .join("");
-  return { html: verbs.join(""), keys };
+  return { html: verbs.join("") };
 }
 
 function askRow(item, snoozes, later) {
@@ -149,7 +140,6 @@ function askRow(item, snoozes, later) {
       ${mark}
       <div class="now-body">
         <p class="now-s">${askSentenceHTML(item)}<span class="now-acts">${acts.html}</span></p>
-        <p class="now-keys" aria-hidden="true">${acts.keys}</p>
       </div>
       ${stamp(item.created_at)}
     </div>
@@ -267,7 +257,9 @@ function chips(show, asks, sinceCount) {
     .join("");
 }
 
-const HINTS = `<span class="now-hints" aria-hidden="true"><span>${kbd("j")}${kbd("k")} move</span><span>${kbd("o")} open</span><span>${kbd("?")} keys</span></span>`;
+// The keys that move and open need a row to act on, so their hints go with the
+// rows; the shortcut list opens from anywhere.
+const HINTS = `<span class="now-hints" aria-hidden="true"><span class="now-hint-row">${kbd("j")}${kbd("k")} move</span><span class="now-hint-row">${kbd("o")} open</span><span>${kbd("?")} keys</span></span>`;
 
 function headerMeta(oldest) {
   const date = new Date();

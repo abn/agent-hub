@@ -426,9 +426,15 @@ verb beside a field remains the defect the label rule came from.
 - Lists are flat rows, edge to edge under a hairline, with Now's row as the
   model. A card means "this is a summary"; the storage summary is one, and no
   list is.
-- An ask's verbs on Now take their own line under its sentence and run on
-  under the time column, which holds only the first line's clock, so Read does
-  not fall to a line of its own beside three other verbs.
+- On a fine pointer at a desktop width an ask shows its verbs only on the
+  selected row, on the row under the pointer (as outlines, with no key chips)
+  and on a row that holds focus. The rest are `visibility: hidden`, so a row is
+  the same height whichever is selected and an unselected row reads as the
+  sentence and its time. Under a coarse pointer or on a phone the verbs are
+  always shown.
+- On a phone an ask's verbs on Now take their own line under its sentence and
+  run on under the time column, which holds only the first line's clock, so Read
+  does not fall to a line of its own beside three other verbs.
 - An empty note is prose: left-aligned on the pane's gutter, never centred.
   Connect is the one question on its screen and starts at the top of the
   stage on the same gutter, as every other screen's column does.
@@ -529,7 +535,15 @@ structure, not to line length.
   on Now the chip takes the button's own ink with a 1px foot, and it is hidden
   from assistive technology, so a button is named by its word alone. Keys are
   named only on a fine pointer at a desktop width; under a coarse pointer and
-  on a phone none is.
+  on a phone none is. A key is named only where pressing it now would act. The
+  map presses the selected row's own controls and no other row's, so on Now a
+  verb draws its chip on the selected ask alone; elsewhere the chip is not
+  drawn at all, so a button holds no empty space for it.
+  A screen's hint names a key only while the screen has something for it: j, k
+  and o need a row, so an empty list names none of them, and the item's j and k
+  are named one at a time, with no previous on the first ask and no next on the
+  last. Now has no per-row line of keys: the control row's "j k move, o open,
+  ? keys" names them once, and `?` opens the full list.
 - **Buttons.** Sized by the control sizes above, radius 2, `white-space:
   nowrap`, transparent on the canvas. Primary is the copper fill with an
   inverse label, secondary a `--line-strong` outline, Approve the primary,

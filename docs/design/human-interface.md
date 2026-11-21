@@ -263,9 +263,12 @@ three chips, All, Needs you and Since you looked, each with its count.
 - **Needs you** holds every open question, approval and idea as a sentence,
   the agent first and then what it wants, with the verbs at the end of the
   line: Approve and Decline, a question's suggested answers and Reply, an
-  idea's Resolve and Clear, and Read, which opens the item. Only the selected
-  row fills its primary, and it shows its keys under the sentence on a
-  keyboard. Once an ask is answered the selection moves to the next. An ask
+  idea's Resolve and Clear, and Read, which opens the item. On a desktop
+  only the selected row shows its verbs, with the primary filled and a key chip
+  on each; the row under the pointer or holding focus shows them as outlines
+  with no chips, and the rest show none, so a row keeps its height. On a phone
+  the verbs are always shown. The control row names the move and open keys once. Once an
+  ask is answered the selection moves to the next. An ask
   whose deadline is more than a day off, or that the reader snoozed on this
   device, can wait: it stays in the tier with a clock glyph, under the rest,
   and is not counted in the badge.
@@ -735,6 +738,9 @@ fix rather than repeating the refusal.
   never takes focus. Nothing fires while the reader is typing, while a modifier
   is held, or while a dialog holds the keyboard, and Settings carries a
   single-key shortcuts switch so a key that needs no modifier can be turned off.
+  A hint names a key only while it would act: a list with no rows names no
+  move or open key, and an opened item names previous and next only where there
+  is an item to step to.
 - Time is short on a row and whole on request. A row carries a compact relative
   form in the reader's own locale, counting itself up while the app is open; the
   full local timestamp is the element's accessible name and its hover title, and

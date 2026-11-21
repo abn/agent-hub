@@ -403,9 +403,11 @@ function head(item, place) {
   </div>`;
 }
 
-const controls = `<div class="shell-controls item-controls">
+// A step is named only where there is an item to step to: the first ask has no
+// previous and the last has no next, and j or k on them does nothing.
+const controls = (place) => `<div class="shell-controls item-controls">
   <a class="item-back" href="${BACK}" data-item-close>${glyphSvg("chevronBack", { size: 16, strokeWidth: 1.8 })}Now${kbd("esc")}</a>
-  <span class="item-hints" aria-hidden="true"><span>${kbd("k")} previous</span><span>${kbd("j")} next</span></span>
+  <span class="item-hints" aria-hidden="true">${place.previous ? `<span>${kbd("k")} previous</span>` : ""}${place.next ? `<span>${kbd("j")} next</span>` : ""}</span>
 </div>`;
 
 // A question's card holds its composer open, as the design draws it.
@@ -546,7 +548,7 @@ export async function inbox(gen) {
       noIndex: true,
       segment: "inbox",
       stageHead: head(opened, place),
-      stageControls: controls,
+      stageControls: controls(place),
       stageBody: `<div class="shell-pad item-pad item-sheet${thumb ? " has-thumb" : ""}">
         <div class="item"><div class="item-grid">
           ${article}

@@ -14,6 +14,8 @@ test("a waiting approval with a deadline says what it will do", async ({ hub, pa
   const row = page.locator(".now-ask", { hasText: secondApproval });
   await expect(row).toContainText(WORDS);
 
+  // An unselected ask shows its verbs under the pointer.
+  await row.hover();
   await row.getByRole("link", { name: "Read" }).click();
   await expect(page.getByRole("article")).toContainText(WORDS);
 });
