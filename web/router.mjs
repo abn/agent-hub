@@ -50,12 +50,17 @@ function setCurrent(screen, path = "") {
   // The project-owned screens sit under the Projects tab: the segmented
   // project view has that tab on every segment, and the artifact viewer is
   // the artifact inside a project, so it keeps the tab where it was opened.
-  // Settings, Storage and Agents and tokens are pushed from More: on a phone
-  // More stays current while they are open.
+  // The artifacts list has its own rail row. It, Settings, Storage and Agents
+  // and tokens are pushed from More: on a phone More stays current while they
+  // are open.
   const isPushedFromMore =
-    screen === "settings" || screen === "storage" || screen === "access" || screen === "agents";
+    screen === "settings" ||
+    screen === "storage" ||
+    screen === "access" ||
+    screen === "agents" ||
+    screen === "artifacts";
   // The Inbox's address is Now showing what needs the reader, so it marks Now.
-  const own = screen === "artifacts" ? "projects" : screen === "inbox" ? "home" : screen;
+  const own = screen === "inbox" ? "home" : screen;
   const railNav = own;
   const tabNav = isPushedFromMore ? "more" : own;
 

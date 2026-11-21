@@ -5,6 +5,7 @@
 // so no comment body or quote ever executes as markup.
 
 import { api } from "./api.mjs";
+import { commentThreads, openThreadCount } from "./artifact-model.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -75,7 +76,7 @@ export function sendCommentsToFrame() {
 
 export function refreshCommentsToggle() {
   const els = commentsState.elements;
-  const openCount = commentsState.comments.filter((c) => !c.done).length;
+  const openCount = openThreadCount(commentsState.comments);
   if (els && els.badge) {
     els.badge.hidden = openCount === 0;
     els.badge.textContent = String(openCount);
@@ -257,6 +258,32 @@ export async function toggleCommentDone(comment) {
   }
 }
 
+// Resolving a thread resolves its root and every reply, so no reply is left
+// open as a thread of its own once the card is gone.
+export async function resolveThread(entries) {
+  try {
+    const open = entries.filter((entry) => !entry.done);
+    const updated = await Promise.all(
+      open.map((entry) =>
+        api(`${commentsBase(commentsState.artifactId)}/${encodeURIComponent(entry.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ done: true }),
+        }),
+      ),
+    );
+    for (const item of updated) {
+      const index = commentsState.comments.findIndex((comment) => comment.id === item.id);
+      if (index >= 0) commentsState.comments[index] = item;
+    }
+    clearDrawerError();
+  } catch (error) {
+    drawerError(error.message);
+  }
+  renderComments();
+  renderDesktopCards();
+  sendCommentsToFrame();
+}
+
 export async function deleteComment(comment) {
   const confirmed = await confirmAction({
     title: "Delete this comment?",
@@ -425,10 +452,10 @@ function renderListView() {
     .filter((c) => c.done)
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 
-  // Render open comments
-  for (const comment of openComments) {
-    const row = renderListRow(comment);
-    els.list.appendChild(row);
+  // One row per thread: the replies on its passage are read in the thread's
+  // own sheet, and the row says how many there are.
+  for (const { root, replies } of commentThreads(openComments)) {
+    els.list.appendChild(renderListRow(root, replies.length));
   }
 
   // Resolved section footer (Screen 06)
@@ -466,7 +493,7 @@ function renderListView() {
   els.list.appendChild(helper);
 }
 
-function renderListRow(comment) {
+function renderListRow(comment, replyCount = 0) {
   const row = document.createElement("div");
   row.className = "hub-list-comment" + (comment.done ? " done" : "");
   row.dataset.commentId = String(comment.id);
@@ -518,6 +545,12 @@ function renderListRow(comment) {
     const resNote = document.createElement("span");
     resNote.textContent = " · resolved";
     meta.appendChild(resNote);
+  }
+  if (replyCount) {
+    const replies = document.createElement("span");
+    replies.className = "hub-list-replies";
+    replies.textContent = ` · ${replyCount} ${replyCount === 1 ? "reply" : "replies"}`;
+    meta.appendChild(replies);
   }
 
   row.appendChild(meta);
@@ -769,9 +802,6 @@ export function renderDesktopCards() {
   }
   container.innerHTML = "";
 
-  const openCount = commentsState.comments.filter((c) => !c.done).length;
-
-
   if (!commentsState.comments.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
@@ -792,14 +822,11 @@ export function renderDesktopCards() {
     .filter((c) => c.done)
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 
-  // Render open cards for this version
-  for (const comment of openThisVer) {
-    container.appendChild(renderDesktopCard(comment));
-  }
-
-  // Render older version cards
-  for (const comment of olderVer) {
-    container.appendChild(renderDesktopCard(comment));
+  // A thread is one card: the comment that opened it on a passage, and the
+  // later comments on the same passage as its replies. Open threads on the
+  // version being read come first, then those on older versions.
+  for (const { root, replies } of commentThreads(openThisVer).concat(commentThreads(olderVer))) {
+    container.appendChild(renderDesktopCard(root, replies));
   }
 
   // Resolved collapsed section
@@ -825,7 +852,7 @@ export function renderDesktopCards() {
   }
 }
 
-export function renderDesktopCard(comment) {
+export function renderDesktopCard(comment, replies = []) {
   const card = document.createElement("div");
   card.className = "hub-comment-card" + (comment.done ? " resolved" : "");
   card.dataset.commentId = String(comment.id);
@@ -851,18 +878,32 @@ export function renderDesktopCard(comment) {
     if (qb) card.appendChild(qb);
   }
 
-  const body = document.createElement("p");
-  body.className = "hub-card-body";
-  body.textContent = comment.body;
-  card.appendChild(body);
+  // Who wrote it and when, over what they wrote; each reply the same, set in.
+  const said = (entry, cls) => {
+    const head = document.createElement("div");
+    head.className = "hub-card-head";
+    head.append(authorNode(entry.author), timeNode(entry.created_at));
+    const text = document.createElement("p");
+    text.className = cls;
+    text.textContent = entry.body;
+    return [head, text];
+  };
+  card.append(...said(comment, "hub-card-body"));
+  if (replies.length) {
+    const thread = document.createElement("div");
+    thread.className = "hub-card-replies";
+    for (const reply of replies) {
+      const item = document.createElement("div");
+      item.className = "hub-card-reply";
+      item.append(...said(reply, "hub-card-body"));
+      thread.appendChild(item);
+    }
+    card.appendChild(thread);
+  }
 
-  // Meta row: author · time · version; Reply; Resolve
+  // Meta row: version; Reply; Resolve
   const meta = document.createElement("div");
   meta.className = "hub-card-meta mono";
-
-  const author = authorNode(comment.author);
-  const time = timeNode(comment.created_at);
-  meta.append(author, document.createTextNode(" · "), time);
 
   if (comment.anchor_version) {
     const verSpan = document.createElement("span");
@@ -871,7 +912,7 @@ export function renderDesktopCard(comment) {
     if (comment.anchor_version === commentsState.shownVersion && !comment.done) {
       verSpan.className += " current";
     }
-    meta.append(document.createTextNode(" · "), verSpan);
+    meta.append(verSpan);
   }
 
   const spacer = document.createElement("span");
@@ -900,7 +941,7 @@ export function renderDesktopCard(comment) {
     resolveBtn.type = "button";
     resolveBtn.className = "hub-card-act";
     resolveBtn.textContent = "Resolve";
-    resolveBtn.addEventListener("click", () => toggleCommentDone(comment));
+    resolveBtn.addEventListener("click", () => resolveThread([comment, ...replies]));
 
     meta.append(replyBtn, resolveBtn);
   }

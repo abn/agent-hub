@@ -565,7 +565,12 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
   let info = null;
 
   if (chosen) {
-    info = await artifactStage(chosen, id, selected ? params?.get?.("version") : null);
+    info = await artifactStage(
+      chosen,
+      id,
+      selected ? params?.get?.("version") : null,
+      artifacts.find((a) => a.id === chosen) || null,
+    );
     if (info) {
       stageHead = shellStageHead(info.title, info.meta, info.actions, backHref);
       stageControls = `<div class="shell-controls artifact-stage-controls">${info.controls}</div>`;

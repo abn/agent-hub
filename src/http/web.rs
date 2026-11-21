@@ -114,6 +114,16 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/artifact-list.mjs",
+        body: include_bytes!("../../web/artifact-list.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/artifact-model.mjs",
+        body: include_bytes!("../../web/artifact-model.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/inbox.mjs",
         body: include_bytes!("../../web/inbox.mjs"),
         content_type: "text/javascript; charset=utf-8",

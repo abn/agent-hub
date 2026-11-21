@@ -31,7 +31,7 @@ const TARGETS = ["button", "link", "tab", "radio", "checkbox", "switch", "search
 const KNOWN_GAPS = [
   // The project switcher scrolls sideways in a 36px track, and a scroll box
   // clips the hit area of what it holds.
-  { screens: ["Feed", "Artifacts", "Sessions", "Wiki", "the bare feed address", "the bare sessions address", "the bare artifacts address"], role: "tab" },
+  { screens: ["Feed", "Artifacts", "Sessions", "Wiki", "the bare feed address", "the bare sessions address"], role: "tab" },
 ];
 
 const knownGap = (screen, control) =>

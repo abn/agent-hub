@@ -58,10 +58,9 @@ export function screenRoutes(hub, wiki) {
     feed: [["the bare feed address", "#/feed", "main .shell-index .feed-row"]],
     sessions: [["the bare sessions address", "#/sessions", "main .session-row"]],
     artifacts: [
-      ["the bare artifacts address", "#/artifacts", "main .shell-index .artifact-row"],
-      // The address lands on the project's shell with the artifact selected.
-      // The bare artifacts address before it paints the same shell with no
-      // selection, so the selection is what says this screen has painted.
+      ["Artifacts list", "#/artifacts", "main .arts .arts-row"],
+      // The address lands on the project's shell with the artifact selected,
+      // so the selection is what says this screen has painted.
       [
         "Artifact viewer",
         `#/artifacts/${encodeURIComponent(hub.artifactId)}`,

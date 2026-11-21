@@ -19,20 +19,47 @@ human's half; the tool shapes and routes are in
   <img src="../../assets/screens/artifacts-desktop-light.png" alt="The artifact index, with the newest artifact open and its comments in the aside.">
 </picture>
 
-## The gallery
+## The artifacts list
 
-Artifacts are listed per project under the **Artifacts** tab, grouped by day,
-agent, or kind, with counts. A card preview shows the document's own first lines
-as an ornament; an encrypted artifact shows a lock tile rather than ciphertext.
-Each row carries a bare document glyph and the thread count.
+**Artifacts** in the rail, or the first row of **More** on a phone, lists every
+project's artifacts in one place. Each row is the file name, a line under it
+naming the project, the agent that wrote it, its version and its comments, and
+the time it last changed. A protected artifact carries a lock and says it is
+encrypted in your browser.
+
+The list has two tiers. **Since you looked** holds what changed for you: an
+artifact with a version newer than the one you last read on this device, or one
+published since this device started keeping count. **Mark seen** (`E`) clears
+it. **Earlier** holds everything else, newest first, and folds after ten rows
+into a line saying how many more there are and how far back they go, with
+**Show all**. Opening an artifact counts as looking at it, so it leaves the
+first tier. The record is kept in the browser on each device; a device that has
+never looked starts with nothing new.
+
+The chips above the list narrow it to one project, and the address keeps the
+choice (`#/artifacts?project=<id>`). With a keyboard, `j` and `k` move through
+the rows and `o` opens one. On a wide screen a margin beside the list previews
+the focused artifact: whether it is published, encrypted or being written, its
+comments, the feed event that published it, its path with a copy control, and
+its last versions with their labels, above **Open**.
+
+## A project's artifacts
+
+Each project also lists its own artifacts under its **Artifacts** tab, grouped
+by day, agent, or kind, with counts. Each row carries the same glyph and line,
+less the project, and the time.
 
 ## Reading an artifact
 
-An artifact opens in the stage beside the index. Its header carries the title, a
-meta line of author (or that it is locked), version, size, and age, and
-**More**. The document keeps a 640px measure, so opening or closing the comments
-aside does not move it. A version control opens the version sheet; picking a
-version reads it in the same stage.
+An artifact opens in its project, in the stage beside that project's list.
+Its header carries the file name, a meta line of author (or that it is locked),
+version, size, and age, the comments control, and **More**. The row under it
+carries the path with a copy control, where the project and the artifacts list
+are links back up, then the version control and **Copy raw**. A line above the
+document says whether the version is published, encrypted or being written, and
+when it was saved. The document keeps a 640px measure on the left edge, so
+opening or closing the comments aside does not move it. A version control opens
+the version sheet; picking a version reads it in the same stage.
 
 While an agent holds a version live, the stage carries a live band above the
 document naming that agent, and the version sheet lists the live version as
@@ -55,7 +82,8 @@ An artifact is `html` or `markdown`.
 ## Comments
 
 You read and write comments in the aside beside the document on a desktop, or in
-a sheet on a phone. A comment may anchor to a quote or to a point on a version.
+a sheet on a phone. Each thread is one card: the passage it is on, the comment,
+and the later comments on the same passage as its replies. A comment may anchor to a quote or to a point on a version.
 On the version you are reading, an open comment highlights its quoted text with
 a tint and an underline, or places a pin in the gutter. Quotes match with
 whitespace and case normalised, so a small formatting change keeps the
@@ -123,8 +151,9 @@ answers as that version was published.
 
 ## You should now see
 
-The project's artifacts, with the newest one open in the stage, its version
-history in the version sheet, and any threads in the aside.
+Every project's artifacts in the artifacts list, what changed since you looked
+at the top; and, opened, an artifact in its project's stage, its version history
+in the version sheet, and any threads in the aside.
 
 ## See also
 

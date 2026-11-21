@@ -138,8 +138,9 @@ it selects what the index lists and never changes the shell.
 An index exists only where items are opened one at a time, so Settings and Now
 have no index: a short form is not a list, and Now is a stream read top to
 bottom. An aside exists only where something is read against the stage, which
-is anchored comments on an artifact, a brain `kv` key, and the receipts beside
-each row on Now and beside an opened item. Correspondence, a feed thread or an inbox item's, is the
+is anchored comments on an artifact, a brain `kv` key, the receipts beside
+each row on Now and beside an opened item, and the preview beside the focused
+row on the artifacts list. Correspondence, a feed thread or an inbox item's, is the
 stage, not a panel, and the aside toggle is absent, not disabled, on feed, Now,
 an inbox item and settings.
 
@@ -234,8 +235,9 @@ rather than by its width.
 
 ## Screens
 
-Eight screens share the shell: Now, an inbox item, Project (feed, artifacts, sessions
-and the knowledge base under one shell), the artifact viewer, session detail,
+Nine screens share the shell: Now, an inbox item, the artifacts list, Project
+(feed, artifacts, sessions and the knowledge base under one shell), the artifact
+viewer, session detail,
 Search, Storage and prune, and Settings, with Agents and access on its own
 screen reached from Settings and Connect as the token gate. Each screen's
 design is below; the routes and the fields they carry are in
@@ -398,15 +400,35 @@ that owns it.
 
 ### Artifacts
 
+Artifacts sits in the rail under Now, and on a phone it is the first row of
+More. It lists every project's artifacts in one stream on Now's row: a document
+glyph, or a lock for a protected artifact, the file name, a line naming the
+project, the writer, the version and the comments, and the time in mono on the
+right. Two tiers order it. **Since you looked** holds the artifacts whose
+version moved past the one you last read on this device, and those published
+since this device started keeping count, with **Mark seen**. **Earlier** holds
+the rest, newest first, ten rows and then how many more there are and how far
+back they reach, with **Show all**. Opening an artifact counts as looking at
+it. The control row narrows the list to one project with a chip each, and on a
+fine pointer names the keys: `j` and `k` move the focus and `o` opens. On a
+wide stage a margin beside the list previews the focused row: its state, its
+comments, the event that published it, its path with a copy glyph, its last
+versions with their summaries, and Open. A phone shows the list alone.
+
 An artifact has one surface. It is read in its project's Artifacts shell with
 it selected in the stage, beside the index with its row marked, and on a fine
 pointer at desktop widths the comments aside. Below that, or under a coarse
 pointer, the same threads open in one sheet, and never both. The address a link
 carries is replaced by the shell's own, so there is no second chrome for the
 same document and Back leaves the artifact rather than landing on a hop that
-forwards again. The stage's control row carries the path, Copy path, the
-version control and Copy raw, each a 32px band control on a fine pointer and
-answering to a 44 by 44 target under a coarse one. The version control opens
+forwards again. The stage's control row carries the path as it is copied, with
+the project and the artifacts list as links and the copy glyph after it, then
+the version control and Copy raw, each a 32px band control on a fine pointer
+and answering to a 44 by 44 target under a coarse one. A line over the
+document says whether the version is published, encrypted or being written,
+and when it was saved. The document keeps a 640 measure on the stage's left
+edge. The aside draws each thread as one card: the passage under a copper rule,
+the comment, and the later comments on the same passage as replies under it. The version control opens
 the version sheet with whole-save history, and a version an agent is holding
 live is listed there, labelled as being written, while the stage carries a 34px
 live band above the document naming that agent, with follow or pause and the

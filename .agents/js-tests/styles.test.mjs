@@ -1007,8 +1007,8 @@ const VIEWER_ROLES = [
   ['html[data-theme="light"]', "color", "light", "--ink", "light text"],
   ['html[data-theme="dark"]', "background", "dark", "--bg", "dark background"],
   ['html[data-theme="dark"]', "color", "dark", "--ink", "dark text"],
-  ["body", "color", "light", "--ink-2", "light body text"],
-  ['html[data-theme="dark"] body', "color", "dark", "--ink-2", "dark body text"],
+  ["body", "color", "light", "--ink", "light body text"],
+  ['html[data-theme="dark"] body', "color", "dark", "--ink", "dark body text"],
   ["h1,h2,h3", "color", "light", "--ink", "light headings"],
   [
     'html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3',

@@ -6,6 +6,18 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### Artifacts gets a list of its own
+
+* **Update**: [Human interface](/design/human-interface.md) describes the
+  artifacts list in the rail: every project's artifacts on Now's row, in two
+  tiers (since you looked, and earlier with the rest folded), project chips,
+  the keys, and the margin that previews the focused artifact. The viewer's
+  path row, the state line over the document, and the threads drawn one card
+  each are described with it.
+* **Update**: [Artifacts](/guides/human/artifacts.md) gains a section on the
+  artifacts list and what counts as looking, and describes the viewer's path
+  row, state line and thread cards.
+
 ### An opened item reads around its answer
 
 * **Update**: [Human interface](/design/human-interface.md) describes the

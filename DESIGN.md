@@ -193,7 +193,8 @@ One shell for feed, artifacts and sessions. Four zones, in order:
 | Aside | 320 default, 288 to 440, draggable | only where something is read against the stage |
 
 The rail is navigation, not a pane. It is one 52px identity block, then rows,
-then a footer. It owes no control row.
+then a footer. It owes no control row. Its rows are Now, Artifacts and Search,
+then the projects.
 
 The project's section switcher is a segmented control inside the index header,
 not a tab strip above the panes. It selects what the index lists and never
@@ -218,7 +219,8 @@ with no aside toggle.
 
 An aside exists only where something is read against the stage: anchored
 comments on an artifact, a `kv` key beside the brain tree, the receipts beside
-each row on Now, and the receipts beside an opened item. Correspondence, which
+each row on Now, the receipts beside an opened item, and the preview beside the
+focused row on the artifacts list. Correspondence, which
 is a feed thread or an inbox item's, is the stage, not a panel. The aside
 toggle is absent, not disabled, on feed, Now, an inbox item and settings.
 
@@ -249,6 +251,19 @@ phone, the receipts move under the title as a compact two-column list between
 hairlines, and Related follows the thread. It has no header, no control row,
 no splitter and no toggle, like Now's.
 
+**The artifacts list's margin is a preview.** On a stage at least 940 wide the
+artifacts list is a 680 column with a 300 margin beside it, ruled off by one
+hairline the length of the list, and the margin previews the focused row: a
+Focused label, the file name at 17/600, its project, writer and size, then a
+two-column list (Status, Comments, Event, Path), the last few versions with
+their summaries and times, and Open with its key. The path is a mono string
+with its copy glyph on the same line, as the copy rule asks. The preview is
+sticky, so it stays in view while the list scrolls under the focus, and it
+follows the focus as `j` and `k` move it. It is held to the aside rule like
+Now's ledger: no header, no control row, no splitter, no toggle. Below 940,
+and on a phone, there is no preview; the row's own line says what the list
+knows.
+
 ### Content travels, chrome does not
 
 Round 12 splits the interface into content rules and chrome rules. The content
@@ -267,11 +282,12 @@ sync line is hidden when healthy.
 
 **An artifact has one surface.** It is read in its project's Artifacts shell
 with it selected in the stage, beside the index with its row marked. The
-address a link carries, `#/artifacts/<id>`, is replaced by the shell's own, so
-there is no second chrome for the same document: the stage's 52px header and
-40px control row and the aside's are the frame every other pane reserves, and
-on a phone the address lands on the stage with the phone frame and a back
-control to the index.
+artifacts list is a way to it, not a second reader: its rows open that shell.
+The address a link carries, `#/artifacts/<id>`, is replaced by the shell's own,
+so there is no second chrome for the same document: the stage's 52px header and
+40px control row and the aside's are the frame every other pane reserves, and on
+a phone the address lands on the stage with the phone frame and a back control
+to the index.
 
 **The live band sits above the document in the stage.** While a version is
 live or idle, the stage carries a 34px band between the meta line and the
@@ -390,8 +406,8 @@ verb beside a field remains the defect the label rule came from.
 - One header and one tools row, sized as above. The tab bar is four labelled
   tabs: Now, Projects, Search, More. Now carries the needs-you badge, the
   count the Inbox tab carried before the two merged. More is a tab root, not an
-  overlay or a bare hamburger, and it holds Storage, Agents and tokens,
-  Settings and the sync line.
+  overlay or a bare hamburger, and it holds Artifacts, Storage, Agents and
+  tokens, Settings and the sync line.
 - Lists are flat rows, edge to edge under a hairline, with Now's row as the
   model. A card means "this is a summary"; the storage summary is one, and no
   list is.
@@ -597,9 +613,9 @@ structure, not to line length.
 
 ## Screens
 
-Now, an inbox item, Project (feed, artifacts, sessions under one shell),
-artifact viewer, session detail, Search, Storage and prune, Settings, Projects
-register, Agents and access, Connect, and the knowledge base.
+Now, an inbox item, Artifacts, Project (feed, artifacts, sessions under one
+shell), artifact viewer, session detail, Search, Storage and prune, Settings,
+Projects register, Agents and access, Connect, and the knowledge base.
 
 - **Now.** Home and the Inbox are one screen: one stream in three tiers, read
   top to bottom, painted from the one Home response. `#/home` is its address;
@@ -718,16 +734,74 @@ register, Agents and access, Connect, and the knowledge base.
   deletion: the event leaves the project feed, the cross-project feed, Now's
   stream and the unseen count, while its id, inbox row, search document and
   payload stay, so an agent still reads it.
+- **Artifacts.** Every project's artifacts in one list at `#/artifacts`, a
+  stage with no index, in two tiers on Now's row: a 20px glyph (a document, or
+  a lock for a protected artifact, with the word for a reader who gets no
+  glyph), the file name at 15/500, a line under it (project, writer, version,
+  then the comments, "encrypted in your browser", "being written" or the
+  version's label), and the time in mono on the right. **Since you looked**
+  holds the artifacts whose version moved past the one the reader last saw on
+  this device, and those published since the record began, newest first, with
+  **Mark seen** (`E`). **Earlier** holds the rest, newest first, ten rows and
+  then one line, "N more, back to <date>", with **Show all**. Opening an
+  artifact marks its version seen; the record is per device, kept in local
+  storage, and a device that has never looked starts with nothing new. The
+  control row carries All and one chip per project with its count, which
+  narrows the list at `#/artifacts?project=<id>`, and the keys on the right on
+  a fine pointer. `j` and `k` move, `o` opens. The header reads "N in M projects
+  · size". On a phone it is the list alone, reached from More.
+  - **Deviation: no publish event is drawn without a read.** The handoff's
+    preview shows the event that published the artifact. The artifact list does
+    not carry it, so the preview reads the project's artifact events once per
+    project and names the newest one for the artifact; an artifact whose event
+    has been dismissed says "Not in the feed".
+  - **Deviation: chips name projects as the rail does.** The handoff writes
+    project ids in lower case; the chips and the row lines use each project's
+    display name, as the rail does, and the path keeps the id.
+  - **Deviation: Copy path is a glyph.** The handoff draws a text "Copy path"
+    button beside Open. The copy rule puts a glyph on the line that holds the
+    string, so the preview carries the path with its glyph.
 - **Artifact viewer.** The Artifacts shell with the artifact selected: the
-  stage renders the document, and its control row carries the path, Copy path,
-  the version control and Copy raw. A version picked there is read in the same
-  stage. The aside holds anchored comments wherever the layout draws it, a
-  fine pointer at desktop widths; on a coarse pointer, or a fine one below the
-  desktop shell where there is no aside, the same thread is one sheet. Never
-  both. The `c` key toggles the aside, with or without a thread, and opens the
-  sheet where there is no aside. While open threads
-  exist, a comments bar rides the bottom of the reader's viewport, above the
-  phone's fixed tab bar, and the document scrolls under it.
+  stage renders the document, and its control row carries the path as it is
+  copied (project, artifacts, file name; the first two are links to the
+  project's feed and the artifacts list narrowed to it) with its copy glyph,
+  then on the right the version control, drawn with a line-strong border, Copy
+  raw, and the `c` key's hint where the aside is drawn. Over the document a
+  line gives the version's state (Published in the ok tone with a check,
+  Encrypted with a lock, or Being written) and when it was saved with its
+  label. The document is the 640 measure on the stage's left edge, at 15/1.6
+  ink with a 28px title and 17px section heads; framed by the app, the page
+  drops its own read-only thread and its own gutter. A version picked there is
+  read in the same stage. The aside draws each thread as one card between
+  hairlines: the passage under a copper rule, the writer and a mono time, the
+  comment, and the later comments on the same passage of the same version set
+  in under it as replies. The phone's comment list draws one row per thread
+  with its reply count.
+  - **Deviation: the index stays beside the viewer.** The handoff draws the
+    viewer as rail, document and comments. The artifact keeps its one surface
+    in its project's shell, so on a desktop its project's index is beside it,
+    and the rail marks the project rather than Artifacts.
+  - **Deviation: the path reads project first, and the header keeps its
+    comments control.** The handoff's crumb reads artifacts / project / file
+    and puts Copy path and View source in the header. The crumb here is the
+    string the glyph copies, and both copy glyphs sit on the control row with
+    it. The header keeps the comments control and More, because the aside can
+    be closed and a phone has no aside.
+  - **Deviation: no numbered anchors.** The handoff numbers each anchored
+    passage and its quote in the margin. Passages are matched by the hover
+    between card and highlight instead. The aside holds anchored comments
+    wherever the layout draws it, a fine pointer at desktop widths; on a coarse
+    pointer, or a fine one below the desktop shell where there is no aside, the
+    same thread is one sheet. Never both. The `c` key toggles the aside, with or
+    without a thread, and opens the sheet where there is no aside. While open
+    threads exist, a comments bar rides the bottom of the reader's viewport,
+    above the phone's fixed tab bar, and the document scrolls under it. It runs
+    the stage's width under a hairline and reads "Comments on vN" with the open
+    count and an up chevron.
+  - **Deviation: the comments bar stays on a desktop, and the phone keeps the
+    tab bar.** The handoff's desktop has no bar and its phone viewer no tab
+    bar. The bar is the way to the threads when the aside is closed, and the
+    viewer is a project screen that keeps the phone's tab bar.
 - **Session detail.** The brain tree in the stage, under an anchor card. The
   card opens with the section label Anchor, then the session owner's last phase
   boundary: the phase as a value pill, the summary capped at 640, an ordered

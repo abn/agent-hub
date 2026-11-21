@@ -15,6 +15,7 @@ import {
 } from "./agents.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
+import { artifactListScreen } from "./artifact-list.mjs";
 import { artifactRoute, pickVersion, squashArtifactVersions, toggleVersionMenu } from "./artifacts.mjs";
 import { main, stale } from "./dom.mjs";
 import { refreshBadge, startStream } from "./events.mjs";
@@ -76,12 +77,13 @@ setScreens({
     if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/sessions`;
     else toFirstProject("sessions", gen)();
   },
-  // `#/artifacts/<id>` opens the artifact in its project's Artifacts shell.
+  // `#/artifacts` is every project's artifacts in one list, narrowed to one
+  // project by `?project=`; `#/artifacts/<id>` opens the artifact in its
+  // project's Artifacts shell.
   artifacts: (params, gen, path) => {
     const segments = (path || "").split("/");
     if (segments[2]) return artifactRoute(params, gen, path);
-    else if (params.get("project")) location.hash = `#/projects/${encodeURIComponent(params.get("project"))}/artifacts`;
-    else toFirstProject("artifacts", gen)();
+    return artifactListScreen(gen);
   },
   // `#/session?...` is the address older links carry. A session is read
   // inside its project, so the entry resolves the project and forwards to that
