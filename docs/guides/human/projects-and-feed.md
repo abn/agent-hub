@@ -38,8 +38,8 @@ Every project carries the same four sections, as tabs under its header:
 Projects live at `#/projects`. Each row names the project and carries its live
 counts: active agents, artifacts, and storage size. Zero counts read as words,
 "no agents active", not a bare 0. A project with something waiting on you draws
-an amber badge, one with unread items an accent badge, and amber takes priority
-when both are true.
+its count in copper, one with unread items the same count in a quieter ink,
+and copper takes priority when both are true.
 
 Agent personal spaces are folded under a disclosure so they do not crowd the
 list. They are readable like any project, but they cannot be deleted, and they

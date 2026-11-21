@@ -758,6 +758,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
 
   const form = document.createElement("form");
   form.method = "dialog";
+  form.className = "dialog-form";
 
   const heading = document.createElement("h2");
   heading.className = "dialog-title";
@@ -835,6 +836,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       note.textContent = "Reissuing cannot be undone.";
       safe.textContent = "Cancel";
       commit.textContent = "Reissue";
+      commit.className = "dialog-commit danger";
       fieldWrap.hidden = true;
       value.textContent = "";
       setup = null;
@@ -848,6 +850,8 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       note.textContent = "Done closes this and drops the token from the page.";
       safe.hidden = true;
       commit.textContent = "Done";
+      // Done deletes nothing, so it takes the action fill, not the danger one.
+      commit.className = "dialog-commit action";
       fieldWrap.hidden = false;
       value.textContent = visible || "";
       setup = visible ? mcpSetup("", visible) : null;
@@ -952,6 +956,7 @@ function openGrantPicker(agentId, agentName, projects, grants) {
 
   const form = document.createElement("form");
   form.method = "dialog";
+  form.className = "dialog-form";
 
   const heading = document.createElement("h2");
   heading.className = "dialog-title";

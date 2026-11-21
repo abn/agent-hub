@@ -51,7 +51,8 @@ value the token file does not carry is a design question, not a local decision.
 - **Signal.** Copper is the one signal. It marks what waits on the reader, the
   focus ring and the primary action, Approve included, and nothing else. A link
   is ink with a quiet underline, an unread dot is ink, and a selected row is the
-  sunken ground with a copper edge. An ok green marks resolved and active, and a
+  sunken ground with a copper edge. A byte count, a prune verb and a switch
+  that is on are never copper. An ok green marks resolved and active, and a
   raspberry is reserved for deletion.
 - **Event kinds.** Kinds are not tinted. Each of the six families is told apart
   by its glyph and its word, drawn in ink. An olive tone is kept for the
@@ -337,8 +338,11 @@ segmented switcher and the filter field under it; the switcher states that it
 drops its counts when the pane is narrow, and a project's four tabs read in
 full at the default width. An event opens in the stage with a "Points at" card
 carrying the reader to the artifact or session it is about. A project with
-items waiting draws a copper badge and one with unread items a neutral badge,
-with copper taking priority when both exist.
+items waiting draws its count in copper mono text and one with unread items the
+same count in a quieter ink, with copper taking priority when both exist;
+neither count has a fill. On a phone the section switcher shares the tools row
+with the filter glyph and the overflow, and it drops its counts there so the
+last tab is never cut.
 
 Each feed event is one row on Now's anatomy: the kind glyph in its fixed
 column, one sentence saying who did what ("build-bot started flaky-hunt", or an
@@ -355,7 +359,9 @@ stream; the build keeps the index beside the stage, so an event is read next to
 the list, and the design contract records it.
 
 The control row carries the filter, the Group menu and Capture idea, an
-outline rather than a fill. The project's overflow carries the feed's own verbs: **Select items** and **Dismiss
+outlined bulb glyph named on hover, so the filter keeps room to show what is
+typed in it. The stage's header names the project and its feed rather than
+repeating the event, whose kind, title, author and time open the body. The project's overflow carries the feed's own verbs: **Select items** and **Dismiss
 read**. Select items swaps the control row for the count, Dismiss and Cancel,
 and each row draws a box in the kind glyph's slot, so the title's left edge
 holds; a press anywhere on a row picks it. Dismiss read takes every event at or
@@ -380,7 +386,8 @@ and its status, the owner, the time and a right-column mono size. The session
 detail draws the brain tree in the stage, under an anchor card. The card opens
 with the section label Anchor and then the owner's last phase boundary: the
 phase as a value pill, the summary capped at 640, an ordered list of next
-steps, the sources it rests on, and the owner and time. A found source opens the
+steps, the sources it rests on, and the owner and time. The card is lines on
+the canvas, not a box, and the session's state is a dot and a word. A found source opens the
 event in the project's feed; a source that no longer resolves keeps its mono id
 and the word "missing" rather than being dropped. The latest score reads
 "Score 4/5" with its rationale. A session with no anchor says so in one line and
@@ -470,7 +477,9 @@ known before a query runs. Results are flat rows grouped by family in one list
 rather than tabs, each carrying its title, the snippet with matched words
 marked, the project by its display name and when it changed. Matched words are
 marked directly in the title with an action-tinted `<mark>`, without a repeated
-snippet line beneath it. From the desktop shell, Search is a two-pane layout
+snippet line beneath it. The count line, how many results and how long the
+index took, heads the results column at both widths, so the scope chips keep
+the tools row to themselves. From the desktop shell, Search is a two-pane layout
 with a results index and a preview stage, where selecting a result previews it
 without navigating away; the preview header carries the match position beside
 previous and next step buttons and an Open link.
@@ -490,7 +499,9 @@ own 4px bar split four ways to scale, and the same split in words, with a Prune
 button carrying the bytes its ended sessions would free. Prune is confirmed in a
 dialog that opens with the safe action focused, then reversible for 30s in a
 toast, then committed. Storage never touches feed events or artifacts, and a
-project a prune has just emptied keeps its row.
+project a prune has just emptied keeps its row. The bytes a prune would free
+read in ink like every other count: copper is kept for what waits on the
+reader.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/storage-desktop-dark.png">
@@ -555,7 +566,8 @@ sends. A refusal shows the hub's own words in a live region beside the field,
 keeps what was typed and returns focus to it, and stores nothing. Settings has
 no field of its own; it links here to change a token. A hub with no admin token
 configured says so and points at the startup fix rather than repeating the
-refusal.
+refusal. The field starts at the top of the stage on the pane's gutter, as
+every other screen's column does, rather than floating in its middle.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/connect-desktop-dark.png">
@@ -567,9 +579,11 @@ refusal.
 The dialogs are where a decision is taken. Each traps focus, opens with the
 safe action focused, treats Esc as keeping, and hands focus back to the control
 that opened it. End session is not prune: ending stops something live and
-cannot be undone, so it is an outline in the action tone with a confirmation,
+cannot be undone, so it is a plain outline whose dialog fills the action tone,
 while prune deletes bytes and takes the danger tone. Danger is reserved for
-deletion, and it fills only inside the dialog that confirms it.
+deletion, and it fills only inside the dialog that confirms it; Done on a new
+token deletes nothing and takes the action fill. A menu is a raised panel
+with its items at one weight and its groups parted by a single hairline.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/new-project-desktop-dark.png">
@@ -737,7 +751,7 @@ fix rather than repeating the refusal.
   icon with a name. While the field is empty the send control is dimmed and the
   line under the field says why. The composer is at most 640 wide.
 - End session is not prune. Ending stops something live and cannot be undone,
-  while prune deletes bytes. End session is an outline in the action tone with
+  while prune deletes bytes. End session is a plain outline with
   an ellipsis and a confirmation; Prune is the danger tone and appears as a fill
   only inside the dialog, and on a screen it stays disabled until the session
   has ended.

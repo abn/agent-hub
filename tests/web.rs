@@ -2104,16 +2104,17 @@ fn desktop_connect_is_the_centred_frame_with_no_token_characters() {
 // switcher's wrapper into one indexHead. Two things went wrong there: the
 // switcher rule hid every .shell-head (so the phone header vanished), and the
 // tools row pinned itself at a hardcoded 52px (so it floated 24px into the
-// 76px header at rest). Both are checked here so neither can come back.
+// 76px header at rest). Both are checked here so neither can come back. The
+// rules live in the stylesheet, scoped to an index that holds the tools row,
+// so no other screen's control row is hidden on a phone.
 #[test]
 fn phone_project_chrome_is_one_header_and_one_tools_row() {
     assert!(
-        PROJECT_JS
-            .contains(".shell-index .shell-head.project-seg-head { display: none !important; }"),
+        APP_CSS.contains(".shell-index .shell-head.project-seg-head { display: none !important; }"),
         "only the switcher's wrapper may hide on a phone; the header is a .shell-head too"
     );
     assert!(
-        !PROJECT_JS.contains(".shell-index .shell-head { display: none !important; }"),
+        !APP_CSS.contains(".shell-index .shell-head { display: none !important; }"),
         "a blanket .shell-head hide inside .shell-index takes the phone header with it"
     );
     assert!(
@@ -2126,7 +2127,7 @@ fn phone_project_chrome_is_one_header_and_one_tools_row() {
         PROJECT_JS.contains(r#"class="project-tools-mobile shell-controls""#),
         "the project tools row is a .shell-controls so the frame's two-height rule governs it"
     );
-    let tools_block = PROJECT_JS
+    let tools_block = APP_CSS
         .split(".project-tools-mobile {")
         .nth(1)
         .expect("the tools row has a style block")
@@ -2144,8 +2145,8 @@ fn phone_project_chrome_is_one_header_and_one_tools_row() {
     // The filter glyph toggles the chips row, which is the other .shell-controls
     // in the index. If it matches the tools row first, the panel never opens.
     assert!(
-        PROJECT_JS.contains(
-            r#".shell-index .shell-controls:not(.project-tools-mobile):not(.mobile-filter-open)"#
+        APP_CSS.contains(
+            r#".shell-index:has(.project-tools-mobile) .shell-controls:not(.project-tools-mobile):not(.mobile-filter-open)"#
         ),
         "the chips row stays hidden until the filter opens it, excluding the tools row"
     );
@@ -2343,8 +2344,8 @@ fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
         .next()
         .expect("summary rule closes");
     assert!(
-        summary.contains("border: 0;") && summary.contains("border-bottom: 1px solid var(--line);"),
-        "C8: the summary sits between hairlines, not in a bordered card"
+        summary.contains("border: 0;") && !summary.contains("border-top"),
+        "C8: the summary sits on the canvas between the control row's hairline and the table's, not in a bordered card"
     );
     // CHECK 13.D: the storage control row is flush under the 52 header. The
     // shared flex gap pushed it to y 68; the fix cancels exactly that one gap.

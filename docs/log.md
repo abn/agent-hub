@@ -6,6 +6,20 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### The remaining screens take the quiet desk
+
+* **Update**: [Human interface](/design/human-interface.md) describes the last
+  screens on the lichen palette: copper kept off byte counts, prune verbs and
+  switches; project counts as mono text with no fill; the feed's Capture idea
+  as a glyph and its stage header naming the project; the search count line at
+  the head of the results; the session's anchor card as lines rather than a box
+  and its state as a dot and a word; Connect at the top of its stage; menus at
+  one weight with one hairline between groups.
+* **Update**: [Projects and the feed](/guides/human/projects-and-feed.md) says
+  how a project's waiting and unread counts read.
+* **Update**: [Search](/guides/human/search.md) says where the results line
+  sits.
+
 ### The project feed reads in sentences
 
 * **Update**: [Human interface](/design/human-interface.md) describes the feed's

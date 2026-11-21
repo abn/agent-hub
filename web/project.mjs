@@ -17,7 +17,6 @@ import {
   feedSection,
   feedSelectBar,
   feedVisit,
-  formatEventSummary,
   kindMenu,
   resumePicking,
   setFeedSelection,
@@ -46,7 +45,6 @@ import {
   shellStageHead,
 } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
-import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
 
@@ -158,128 +156,6 @@ function segSwitcher(id, segment, stats) {
   </div>`;
 }
 
-const PROJECT_MOBILE_STYLE = `<style>
-@media (max-width: 1099px) {
-  /* Only the desktop segmented switcher's wrapper hides on a phone. The phone
-     header is also a .shell-head inside .shell-index, so the rule must name the
-     switcher (project-seg-head), not every .shell-head, or it takes the header
-     with it. */
-  .shell-index .shell-head.project-seg-head { display: none !important; }
-  /* The chips row is the filter panel: hidden until the filter glyph opens it.
-     The tools row carries .shell-controls too now, so it is excluded here and
-     stays visible. */
-  .shell-index .shell-controls:not(.project-tools-mobile):not(.mobile-filter-open) { display: none !important; }
-  .shell-index .shell-controls.mobile-filter-open { display: flex !important; }
-  /* RULE 12.2: this is the project's tools row, so it carries .shell-controls
-     and the framework owns its height, its sticky offset (76px at rest, 52px
-     compressed) and its z-index. Pinning it at a hardcoded 52px put it 24px
-     inside the 76px header at rest, which is the band that floated over the
-     feed. */
-  .project-tools-mobile {
-    display: flex !important;
-    padding: 0 16px;
-    gap: 8px;
-    min-width: 0;
-  }
-  /* Picking spends the one tools row on the selection, so the phone keeps its
-     single 44px band rather than growing a second one over the list. */
-  .project-tools-mobile.is-picking > :not(.feed-select-bar) {
-    display: none !important;
-  }
-  .project-tools-mobile.is-picking > .feed-select-bar {
-    flex: 1 1 auto;
-  }
-  /* The switcher takes what is left and scrolls sideways rather than squeezing
-     its tabs into collisions; the tabs keep their drawn width. The 44px tools
-     row then always holds the filter and the overflow inside 390. */
-  .project-tools-mobile > .project-tools-seg {
-    flex: 1 1 auto;
-    min-width: 0;
-    display: flex;
-    height: 36px;
-    background: var(--surface-2);
-    border-radius: var(--r-1);
-    padding: 2px;
-    box-sizing: border-box;
-    align-items: center;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .project-tools-mobile > .project-tools-seg::-webkit-scrollbar {
-    display: none;
-  }
-  .project-tools-seg a {
-    position: relative;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    height: 100%;
-    padding: 0 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--ink-2);
-    text-decoration: none;
-    border-radius: 5px;
-    white-space: nowrap;
-  }
-  /* The tabs are 32px drawn inside the 36px switcher, so under a coarse pointer
-     each one grows to a 44px target with the same pseudo-element expansion the
-     chips and glyph buttons use. */
-  @media (pointer: coarse) {
-    .project-tools-seg a::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
-      height: 44px;
-      transform: translateY(-50%);
-    }
-  }
-  .project-tools-seg a[aria-selected="true"],
-  .project-tools-seg a[aria-current="page"] {
-    background: var(--surface);
-    color: var(--ink);
-    font-weight: 600;
-    box-shadow: var(--shadow-1);
-  }
-  .project-tools-seg .shell-seg-count {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--ink-2);
-  }
-  .project-filter-btn {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--ink-2);
-    cursor: pointer;
-    border-radius: var(--r-1);
-    flex: none;
-    overflow: hidden;
-  }
-  .project-filter-btn:hover,
-  .project-filter-btn:focus-visible {
-    color: var(--ink);
-  }
-}
-@media (min-width: 1100px) {
-  .project-tools-mobile {
-    display: none !important;
-  }
-}
-</style>`;
-
 function projectToolsMobile(id, segment, stats, project) {
   const count = (n) => (n == null ? "" : `<span class="shell-seg-count">${n}</span>`);
   const tab = (seg, label, n) =>
@@ -303,6 +179,8 @@ function projectToolsMobile(id, segment, stats, project) {
     ${segment === "feed" ? feedSelectBar() : ""}
   </div>`;
 }
+
+const IDEA_GLYPH = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M 9 18h6 M 10 21h4 M 12 3a6.5 6.5 0 0 0-3.8 11.8c.8.6 1.3 1.6 1.3 2.7h5c0-1.1.5-2.1 1.3-2.7A6.5 6.5 0 0 0 12 3z"></path></svg>`;
 
 const FEED_GLYPH = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>`;
 
@@ -521,14 +399,24 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const event = selected ? feedEvent(id, selected) : held?.events?.[0] || null;
   const missing = Boolean(selected) && !event;
   const filtered = activeKinds(id).size > 0;
-  const title = missing ? "Event not in the feed" : event ? formatEventSummary(event) : "Feed";
-  const meta = event ? `${event.actor} · ${relative(event.created_at)}` : "";
+  // The stage's header says where the reader is, the project and its feed.
+  // The event's own kind, title, author and time are the body's first lines,
+  // so the header does not repeat them.
+  const title = project?.display_name || id;
+  const meta = [
+    "feed",
+    stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   // The overflow carries the feed's own verbs; the bar replaces the filter row
   // while the reader is picking, so both share the one control row.
-  const right = `<button type="button" class="feed-capture" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea">Capture idea</button>${feedSelectBar()}`;
+  // Capture idea is a glyph with its name on hover, so the filter beside it
+  // keeps room to read what is typed into it.
+  const right = `<button type="button" class="feed-capture" data-action="capture-idea" data-project="${esc(id)}" aria-label="Capture idea" title="Capture idea">${IDEA_GLYPH}</button>${feedSelectBar()}`;
   return shellHTML({
     segment,
-    indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false, feed: true })}</div>`,
+    indexHead: `${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false, feed: true })}</div>`,
     indexControls: shellIndexControls("Filter events", group, right),
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
@@ -586,7 +474,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
+      indexHead: `${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
       indexBody: rows,
       stageHead,
@@ -692,7 +580,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   return {
     html: shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
+      indexHead: `${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Filter sessions"),
       indexBody: card,
       stageHead,
@@ -786,7 +674,7 @@ export async function projectScreen(params, gen, path) {
     const newBtn = `<button type="button" class="btn-outline project-wiki-new" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(project?.display_name || id)}">New page</button>`;
     shell = shellHTML({
       segment,
-      indexHead: `${PROJECT_MOBILE_STYLE}${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
+      indexHead: `${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
       indexControls: shellIndexControls("Search this wiki", "", newBtn),
       indexBody,
       stageHead: stage.head,

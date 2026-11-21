@@ -111,8 +111,15 @@ that says a control is there, so its border is the whole of what identifies it.
 the field and the outline button share one border.
 
 The status pill ("Waiting on you") is 12/600 with a 6px dot, height 22, padding
-0 8, radius 2 and a 6px gap, the same box as the live token pill. Any 11px text
-is a defect: it is raised to 12 and the container grows.
+0 8, radius 2 and a 6px gap. A state that does not wait on the reader is a dot
+and a word with no fill: a session's "active" or "ended", a token's "live". Any
+11px text is a defect: it is raised to 12 and the container grows.
+
+**Copper never stands in for a link or a plain value.** A byte count that can
+be reclaimed is ink, the same as any other count; a prune verb written as text
+is `--danger`, because pruning deletes; a switch that is on is ink. A count that
+waits on the reader is copper mono text with no fill, in the rail and in the
+Projects register alike, and an unread count is the same text in `--ink-2`.
 
 **The knowledge tone is storage-only.** `--k-knowledge` and `--k-knowledge-bg`
 are an olive pair used only by the Storage breakdown's knowledge segment and
@@ -210,7 +217,10 @@ because the pane is draggable and a narrow pane on a wide window has the same
 room problem. Below the compact threshold the switcher may still scroll at the
 260px minimum; the 300px default is what has to read in full. A count is the
 first thing a reader can lose and the last they want back, which is why it goes
-before the padding does.
+before the padding does. The phone's tools row holds the same four tabs beside
+the filter glyph and the overflow, and the same rule carries to it: below a
+420px pane the counts go, so a phone's last tab is never cut under the filter
+glyph, and the tabs share the switcher's width.
 
 An index exists only where items are opened one at a time. Settings and Now
 have no index: a short form is not a list, and Now is a stream read top to
@@ -407,6 +417,12 @@ verb beside a field remains the defect the label rule came from.
 - Lists are flat rows, edge to edge under a hairline, with Now's row as the
   model. A card means "this is a summary"; the storage summary is one, and no
   list is.
+- An ask's verbs on Now take their own line under its sentence and run on
+  under the time column, which holds only the first line's clock, so Read does
+  not fall to a line of its own beside three other verbs.
+- An empty note is prose: left-aligned on the pane's gutter, never centred.
+  Connect is the one question on its screen and starts at the top of the
+  stage on the same gutter, as every other screen's column does.
 - Settings is rows with quiet group labels, no panels and no tools row. It
   shows the data path once, last two segments, with a copy glyph. Single-key
   shortcuts are absent under a coarse pointer.
@@ -517,8 +533,11 @@ structure, not to line length.
   pruning bytes keep the danger tone, and it fills only inside the dialog that
   confirms them.
 - **Menu.** A trigger's label is a fixed word, not its current value. A select
-  earns its place at about six options.
-- **Dialog.** Trap focus, focus the safe action first, Esc keeps.
+  earns its place at about six options. A menu is raised, with its items at
+  13/500 whatever element draws them, and groups part by one hairline.
+- **Dialog.** Trap focus, focus the safe action first, Esc keeps. A commit
+  fills `--danger` only when it deletes; a commit that only closes, such as
+  Done on a new token, takes the action fill.
 - **Toast.** Ink fill, inverse text, one at a time. Auto-dismiss at 30s when it
   carries an undo, 5s otherwise. It is a live region.
 - **Empty state.** The screen's name in mono, a title, one line, at most one
@@ -747,7 +766,11 @@ Projects register, Agents and access, Connect, and the knowledge base.
     opened item says it. An ask that can wait is drawn waiting, as the feed
     does not read this device's snoozes.
   The control row carries the filter, the Group menu and Capture idea, an
-  outline: copper is for what needs the reader. The
+  outlined glyph (a bulb) named on hover and to a screen reader, so the filter
+  keeps the width to show what is typed in it: copper is for what needs the
+  reader. The stage's header names where the reader is, the project and
+  "feed" with its active agents; the event's kind, title, author and time are
+  the body's first lines, so the header does not repeat them. The
   project's overflow carries the feed's own verbs: **Select items** and
   **Dismiss read**. Select items replaces the control row with the count,
   Dismiss and Cancel, and each row draws a box in the kind glyph's slot, so the
@@ -833,7 +856,10 @@ Projects register, Agents and access, Connect, and the knowledge base.
   list of next steps, the sources it rests on, and the owner and time. A found
   source opens the event in the project's feed; a source that no longer
   resolves keeps its mono id and the word "missing" rather than being dropped.
-  The latest score reads "Score 4/5" with its rationale. A session with no
+  The latest score reads "Score 4/5" with its rationale, set off by a 2px
+  `--line-strong` rule rather than a sunken box: the card is not a box either,
+  only its label and its lines on the canvas. The session's state is a dot and
+  a word, the dot ok while it runs. A session with no
   anchor says so in one line and offers no score control. **Score this run**
   appears only with an anchor and opens one dialog: a 1 to 5 segmented radio
   group and a required rationale of up to 2000 characters, counted as it is
@@ -860,7 +886,10 @@ Projects register, Agents and access, Connect, and the knowledge base.
   stop. One
   helper line in the whole screen. No paragraph explains a toggle.
 - **Storage.** The summary and the by-project rows. Never touches feed events
-  or artifacts.
+  or artifacts. On a desktop the summary sits on the canvas between the control
+  row's hairline and the table's, with no rules of its own: the total in mono,
+  the four-segment bar, the legend and the one helper line, spaced as a stack.
+  The table's column labels are the section-label sans, not mono.
 - **Knowledge base history.** A page's History is a stage of its own, reached
   from a History link in the reader's control row (32px inline, 44px under a
   coarse pointer) and from every Recent changes row, which opens that page's
@@ -901,10 +930,10 @@ Projects register, Agents and access, Connect, and the knowledge base.
 - Prune is confirmed in a dialog, reversible for 30s in a toast, then
   committed. The dialog opens with the safe action focused.
 - End session is not prune. Ending stops something live and cannot be undone,
-  while prune deletes bytes. End session is an outline in the action tone with
-  an ellipsis and a confirmation. Prune is the danger tone and appears as a
-  fill only inside the dialog; on a screen it stays disabled until the session
-  has ended. Danger is reserved for deletion.
+  while prune deletes bytes. End session is a plain outline with an ellipsis,
+  and its confirming dialog fills the action tone. Prune is the danger tone and
+  appears as a fill only inside the dialog; on a screen it stays disabled until
+  the session has ended. Danger is reserved for deletion.
 - Keyboard: `/` focuses the filter or search field, `j` and `k` move through
   index rows, Enter or `o` opens, `a` approves, `r` replies, Ctrl+Enter
   (Cmd+Enter on an Apple device) sends from a composer, `c` toggles the aside,
