@@ -115,7 +115,7 @@ function chips(active, choices) {
   return [chip("", "All", null), ...choices.map((c) => chip(c.id, c.name, c.count))].join("");
 }
 
-const HINTS = `<span class="now-hints arts-hints" aria-hidden="true"><span>${kbd("j")}${kbd("k")} move</span><span>${kbd("o")} open</span></span>`;
+const HINTS = `<span class="now-hints arts-hints" aria-hidden="true"><span class="now-hint-row">${kbd("j")}${kbd("k")} move</span><span class="now-hint-row">${kbd("o")} open</span></span>`;
 
 async function everyArtifact(projects) {
   const lists = await Promise.all(

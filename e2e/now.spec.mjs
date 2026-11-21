@@ -66,6 +66,7 @@ test.describe("Now", () => {
     await open(page, hub, "#/inbox", "");
     const row = page.locator(".now-ask").filter({ hasText: subject });
     await expect(row.getByRole("link", { name: "Read" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Ship it" })).toBeVisible();
     const placed = await row.evaluate((ask) => {
       const verbs = [...ask.querySelectorAll(".now-acts > button:not([hidden]), .now-acts > a")];
       return {

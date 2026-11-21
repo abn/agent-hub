@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### Key hints name only the keys that act
+
+* **Update**: [Human interface](/design/human-interface.md) states that a key
+  is named only where pressing it acts. On Now only the selected ask shows its
+  verbs and their key chips (the row under the pointer or holding focus shows
+  them as outlines), there is no per-row line of keys, a list with no rows
+  names no move or open key, and an opened item names previous and next only
+  where there is an item to step to.
+
 ### The product screens are recaptured
 
 * **Update**: [Product tour](/screens.md) shows every screen in the new
