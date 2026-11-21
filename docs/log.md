@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-11-21
 
+### The product screens are recaptured
+
+* **Update**: [Product tour](/screens.md) shows every screen in the new
+  interface at both widths in both themes. Now replaces the Home and Inbox
+  captures, an opened item is read around its answer, and Artifacts is the
+  list across projects.
+* **Update**: the guides, the design page and the project README point at the
+  renamed Now captures.
+
 ### The docs site wears the app's palette
 
 * **Update**: [Human interface](/design/human-interface.md) notes that the

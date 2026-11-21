@@ -19,45 +19,31 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
 ### Now, desktop
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/home-desktop-dark.png">
-  <img src="assets/screens/home-desktop-light.png" alt="Now: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/now-desktop-dark.png">
+  <img src="assets/screens/now-desktop-light.png" alt="Now: the opening line, what needs you with each ask's verbs, and the receipts in the margin.">
 </picture>
 
 ### Now, phone
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/home-phone-dark.png">
-  <img src="assets/screens/home-phone-light.png" alt="Now on a phone: the same stream in one column.">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/now-phone-dark.png">
+  <img src="assets/screens/now-phone-light.png" alt="Now on a phone: the same stream in one column.">
 </picture>
 
 ## What needs you
 
-### Needs you, desktop
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-desktop-dark.png">
-  <img src="assets/screens/inbox-desktop-light.png" alt="Now showing only what needs you, the address the Inbox had.">
-</picture>
-
-### Needs you, phone
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-phone-dark.png">
-  <img src="assets/screens/inbox-phone-light.png" alt="Now showing only what needs you, on a phone.">
-</picture>
-
-### An open inbox item, desktop
+### An open item, desktop
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-item-desktop-dark.png">
-  <img src="assets/screens/inbox-item-desktop-light.png" alt="One inbox item open in the stage, with its question and its answer.">
+  <img src="assets/screens/inbox-item-desktop-light.png" alt="One item open in the stage, read around its answer.">
 </picture>
 
-### An open inbox item, phone
+### An open item, phone
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/inbox-item-phone-dark.png">
-  <img src="assets/screens/inbox-item-phone-light.png" alt="One inbox item open in the stage, with its question and its answer.">
+  <img src="assets/screens/inbox-item-phone-light.png" alt="One item open in the stage, read around its answer.">
 </picture>
 
 ## Projects and the feed
@@ -126,14 +112,14 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/artifacts-desktop-dark.png">
-  <img src="assets/screens/artifacts-desktop-light.png" alt="The artifact index, with the newest artifact open and its comments in the aside.">
+  <img src="assets/screens/artifacts-desktop-light.png" alt="Artifacts across projects, newest first, with the focused artifact's status and versions in the margin.">
 </picture>
 
 ### Artifacts, phone
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/artifacts-phone-dark.png">
-  <img src="assets/screens/artifacts-phone-light.png" alt="The artifact index, with the newest artifact open and its comments in the aside.">
+  <img src="assets/screens/artifacts-phone-light.png" alt="Artifacts across projects, newest first, with the focused artifact's status and versions in the margin.">
 </picture>
 
 ### A sealed artifact, desktop

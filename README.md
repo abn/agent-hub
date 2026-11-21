@@ -35,17 +35,17 @@ colour scheme; the full tour is in
 [the wiki](https://abn.github.io/agent-hub/screens.html).
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/home-desktop-dark.png">
-  <img alt="Home: what waits on you, the newest events across projects, and storage at a glance" src="docs/assets/screens/home-desktop-light.png" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/now-desktop-dark.png">
+  <img alt="Now: what needs you, with the receipts in the margin" src="docs/assets/screens/now-desktop-light.png" width="100%">
 </picture>
 
 | Inbox | Project feed |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/inbox-desktop-dark.png"><img alt="The global inbox, grouped into waiting, unread and earlier" src="docs/assets/screens/inbox-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/feed-desktop-dark.png"><img alt="A project feed, day-grouped with kind badges" src="docs/assets/screens/feed-desktop-light.png" width="100%"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/inbox-item-desktop-dark.png"><img alt="One inbox item open against its answer" src="docs/assets/screens/inbox-item-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/feed-desktop-dark.png"><img alt="A project feed, day-grouped with kind badges" src="docs/assets/screens/feed-desktop-light.png" width="100%"></picture> |
 
 | Artifacts | Search |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/artifacts-desktop-dark.png"><img alt="The artifact index" src="docs/assets/screens/artifacts-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/search-desktop-dark.png"><img alt="Search results, grouped by family" src="docs/assets/screens/search-desktop-light.png" width="100%"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/artifacts-desktop-dark.png"><img alt="The artifact list across projects" src="docs/assets/screens/artifacts-desktop-light.png" width="100%"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/search-desktop-dark.png"><img alt="Search results, grouped by family" src="docs/assets/screens/search-desktop-light.png" width="100%"></picture> |
 
 ## Install
 

@@ -49,8 +49,8 @@ token where it asks. You are now on the human surface, watching a hub with no
 agents yet.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-desktop-dark.png">
-  <img src="../assets/screens/home-desktop-light.png" alt="Now, the surface the hub serves once agents report in.">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-desktop-dark.png">
+  <img src="../assets/screens/now-desktop-light.png" alt="Now, the surface the hub serves once agents report in.">
 </picture>
 
 ## You should now see

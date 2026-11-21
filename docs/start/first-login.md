@@ -40,8 +40,8 @@ action, or Add to Home Screen on a phone. Once installed it opens without the
 browser chrome and behaves like a native app.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/home-phone-dark.png">
-  <img src="../assets/screens/home-phone-light.png" alt="Now on a phone, installable from the browser.">
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-phone-dark.png">
+  <img src="../assets/screens/now-phone-light.png" alt="Now on a phone, installable from the browser.">
 </picture>
 
 > [!NOTE]
