@@ -901,8 +901,13 @@ Projects register, Agents and access, Connect, and the knowledge base.
   Encrypted with a lock, or Being written) and when it was saved with its
   label. The document is the 640 measure on the stage's left edge, at 15/1.6
   ink with a 28px title and 17px section heads; framed by the app, the page
-  drops its own read-only thread and its own gutter. A version picked there is
-  read in the same stage. The aside draws each thread as one card between
+  drops its own read-only thread and its own gutter. The version control opens
+  the list of versions as a menu hung under its trigger when a mouse or pen
+  opens it, with no scrim, and as a bottom sheet over a scrim when a touch does
+  (a key follows the primary pointer). The menu holds its items as radios,
+  answers the arrow keys, closes on Tab, and stays inside the viewport with its
+  list scrolling; Esc closes either and returns focus to the trigger. A version picked there is read in
+  the same stage. The aside draws each thread as one card between
   hairlines: the passage under a copper rule, the writer and a mono time, the
   comment, and the later comments on the same passage of the same version set
   in under it as replies. The phone's comment list draws one row per thread

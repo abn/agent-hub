@@ -6876,6 +6876,29 @@ a.session-back {
   stroke: var(--danger);
   flex: none;
 }
+/* The artifact stage's version list hangs under its trigger. It is bounded by
+   the viewport on every side, and its list scrolls inside. */
+.proj-overflow-menu.hub-version-popover {
+  top: calc(100% + var(--s-1));
+  width: 300px;
+  max-width: calc(100vw - 2 * var(--s-2));
+  max-height: min(420px, calc(100vh - 120px));
+}
+.hub-version-popover.from-start {
+  left: 0;
+  right: auto;
+}
+.hub-version-popover.fit-viewport {
+  position: fixed;
+  top: auto;
+  left: var(--s-2);
+  right: var(--s-2);
+  width: auto;
+  max-width: none;
+}
+.hub-version-popover .hub-version-sheet-list {
+  min-height: 0;
+}
 
 /* Dedicated typed confirmation dialog for project deletion */
 dialog.dialog-project-delete {

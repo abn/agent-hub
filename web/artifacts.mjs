@@ -18,7 +18,7 @@ import {
   openThreadsOn,
 } from "./comments.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { confirmCopy, esc, main, paint, stale } from "./dom.mjs";
+import { confirmCopy, esc, kindMark, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, ERROR_COPY, emptyStateHTML, errorShellHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -27,15 +27,6 @@ import { render } from "./router.mjs";
 import { asideAvailable, installShellLayout, toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
-
-const DOC_PATH = "M 7 3h7l4 4v14H7z M 14 3v4h4";
-const LOCK_PATH = "M 7 11V8a5 5 0 0 1 10 0v3 M 5 11h14v10H5z";
-
-function cardGlyph(protectedArtifact) {
-  const path = protectedArtifact ? LOCK_PATH : DOC_PATH;
-  const cls = protectedArtifact ? "lock" : "doc";
-  return `<svg class="${cls}" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"></path></svg>`;
-}
 
 // The live band: whether a version is being written, who is writing it, and
 // whether the reader is following. It rides above the document in the stage.
@@ -239,7 +230,7 @@ export async function artifactStage(id, projectId, version = null, listing = nul
       stagePath,
     )}" aria-label="Copy path ${esc(slug)}">${copyGlyph}</button>
     <div class="grow"></div>
-    <button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${shown}">v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button>
+    <span class="proj-overflow-wrap hub-version-wrap"><button type="button" class="hub-version-toggle mono" data-action="version-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="hub-version-menu" aria-label="Version ${shown}">v${shown} of ${versions.length} ${glyphSvg("chevronDown", { size: 12, strokeWidth: 2 })}</button></span>
     <button type="button" class="hub-btn-glyph" data-action="copy-raw" data-id="${esc(id)}" data-version="${shown}" aria-label="Copy raw">${rawGlyph}</button>
     <span class="artifact-hint" aria-hidden="true"><kbd>c</kbd> comments</span>`;
 
@@ -536,11 +527,22 @@ export function wireArtifactStage(root, id, info) {
     });
   }
 
-  // The version control opens the version sheet; a pick reads that version in
-  // this same stage.
+  // The version control opens the list on demand; a pick reads that version in
+  // this same stage. The picker is built at open time, so the surface follows
+  // the input that opened it.
   if (info && Array.isArray(info.versions) && info.versions.length > 0) {
-    const { backdrop, sheet } = buildVersionSheet(id, info.versions, info.version, "");
-    root.append(backdrop, sheet);
+    versionData = { id, versions: info.versions, shown: info.version, root };
+    const onPointer = (e) => (lastPointerType = e.pointerType || "");
+    const onKey = () => (lastPointerType = "");
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey, true);
+    root.querySelector('[data-action="version-toggle"]')?.setAttribute("aria-haspopup", versionAsMenu() ? "menu" : "dialog");
+    undo.push(() => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey, true);
+      closeVersionPicker?.(false);
+      versionData = null;
+    });
   }
 }
 
@@ -626,11 +628,13 @@ export async function artifactIndex(projectId, selectedId = "") {
           const lock = a.protected ? `<span class="sr-only">Encrypted</span>` : "";
           const selected = a.id === mark;
           return `<div class="row artifact-row${selected ? " selected" : ""}" data-id="${esc(a.id)}">
-            <span class="row-glyph artifact-row-glyph" aria-hidden="true">${cardGlyph(a.protected)}</span>
+            <span class="row-glyph artifact-row-glyph" aria-hidden="true">${
+              a.protected ? glyphSvg("lock", { size: 14, strokeWidth: 2.4 }) : kindMark("artifact")
+            }</span>
             <div class="grow">
               <a class="title" href="${esc(href)}"${
                 selected ? ' aria-current="true"' : ""
-              }>${esc(a.title || "artifact")}${lock}</a>
+              }>${esc(artifactSlug(a.title, a.kind))}${lock}</a>
               <div class="meta">${esc(line)}</div>
             </div>
             ${Number.isFinite(at) ? `<span class="artifact-when mono">${esc(placeTime(at))}</span>` : ""}
@@ -709,18 +713,31 @@ async function fetchRawText(id, version) {
   return await res.text();
 }
 
+// The input that last pressed down, so a click knows what activated it. A
+// keyboard click carries no pointer, so a key press clears it.
+// The stage's wiring listens for it and takes the listeners down with it.
+let lastPointerType = "";
+
+// What the open version picker needs, set by the stage's wiring, and the one
+// way out of it. Null while closed.
+let versionData = null;
+let closeVersionPicker = null;
+
+// A touch opens the sheet; a mouse or pen opens the menu; a keyboard follows
+// the primary pointer.
+function versionAsMenu() {
+  if (lastPointerType === "touch") return false;
+  if (lastPointerType) return true;
+  return typeof window.matchMedia === "function" && window.matchMedia("(pointer: fine)").matches;
+}
+
 export function toggleVersionMenu(button) {
-  const menu = document.getElementById("hub-version-menu");
-  const backdrop = document.getElementById("hub-version-backdrop");
-  if (!menu) return;
-  const open = menu.hidden;
-  menu.hidden = !open;
-  if (backdrop) backdrop.hidden = !open;
-  if (button) button.setAttribute("aria-expanded", String(open));
-  if (open) {
-    const active = menu.querySelector('[aria-current="true"]');
-    /** @type {HTMLElement} */ ((active || menu.querySelector("button")))?.focus();
+  if (closeVersionPicker) {
+    closeVersionPicker(true);
+    return;
   }
+  if (!versionData) return;
+  openVersionPicker(button, versionData, versionAsMenu());
 }
 
 // Squash every version before the one being viewed into it, after confirmation.
@@ -747,6 +764,7 @@ export async function squashArtifactVersions(id, version) {
 // A version is read in the stage it was picked from. The pick replaces the
 // address rather than adding to it, so Back still leaves the artifact.
 export function pickVersion(id, version) {
+  closeVersionPicker?.(false);
   const parts = location.hash.replace(/^#/, "").split("?")[0].split("/");
   const project = parts[1] === "projects" ? decodeURIComponent(parts[2] || "") : "";
   location.replace(
@@ -756,20 +774,26 @@ export function pickVersion(id, version) {
   );
 }
 
-// Version sheet (Screen 02): replaces inline version select
-function buildVersionSheet(id, versions, shown, projectId) {
-  const backdrop = document.createElement("div");
-  backdrop.id = "hub-version-backdrop";
-  backdrop.className = "hub-version-backdrop";
-  backdrop.hidden = true;
+// The version list: a menu under its trigger on a fine pointer, a sheet over a
+// scrim on a coarse one. Built when opened and taken out when closed.
+function openVersionPicker(button, { id, versions, shown, root }, asMenu) {
+  const backdrop = asMenu ? null : document.createElement("div");
+  if (backdrop) {
+    backdrop.id = "hub-version-backdrop";
+    backdrop.className = "hub-version-backdrop";
+  }
 
   const sheet = document.createElement("div");
   sheet.id = "hub-version-menu";
-  sheet.className = "hub-version-sheet hub-version-menu";
-  sheet.hidden = true;
-  sheet.setAttribute("role", "dialog");
-  sheet.setAttribute("aria-modal", "true");
   sheet.setAttribute("aria-label", "Versions");
+  if (asMenu) {
+    sheet.className = "proj-overflow-menu hub-version-popover";
+    sheet.setAttribute("role", "menu");
+  } else {
+    sheet.className = "hub-version-sheet hub-version-menu";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+  }
 
   const handle = document.createElement("div");
   handle.className = "hub-version-sheet-handle";
@@ -792,6 +816,10 @@ function buildVersionSheet(id, versions, shown, projectId) {
     row.dataset.action = "version-pick";
     row.dataset.id = id;
     row.dataset.version = String(v.version);
+    if (asMenu) {
+      row.setAttribute("role", "menuitemradio");
+      row.setAttribute("aria-checked", String(isCurrent));
+    }
     if (isCurrent) row.setAttribute("aria-current", "true");
 
     const age = v.created_at ? relative(Date.parse(v.created_at)) : "";
@@ -813,7 +841,7 @@ function buildVersionSheet(id, versions, shown, projectId) {
 
   const footer = document.createElement("div");
   footer.className = "hub-version-sheet-footer";
-  footer.textContent = "Versions are whole saves. Nothing is compared - the hub keeps no diff.";
+  footer.textContent = "Versions are whole saves. The hub keeps no diff, so nothing is compared.";
   const hasPrior = versions.some((v) => v.version < shown);
   if (hasPrior) {
     const squash = document.createElement("button");
@@ -822,37 +850,79 @@ function buildVersionSheet(id, versions, shown, projectId) {
     squash.dataset.action = "version-squash";
     squash.dataset.id = id;
     squash.dataset.version = String(shown);
+    if (asMenu) squash.setAttribute("role", "menuitem");
     squash.textContent = "Squash";
     footer.appendChild(squash);
   }
 
-  sheet.append(handle, head, list, footer);
+  if (asMenu) sheet.append(head, list, footer);
+  else sheet.append(handle, head, list, footer);
 
-  const closeSheet = () => {
-    backdrop.hidden = true;
-    sheet.hidden = true;
-    const toggle = /** @type {HTMLElement} */ (main.querySelector(".hub-version-toggle"));
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.focus();
-    }
+  const items = () => [...sheet.querySelectorAll("button")];
+
+  // The one way out. A pick, an outside press and the stage's teardown close
+  // without moving focus; Esc and a second press on the trigger return it.
+  const close = (refocus) => {
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("click", onOutside, true);
+    backdrop?.remove();
+    sheet.remove();
+    button.setAttribute("aria-expanded", "false");
+    closeVersionPicker = null;
+    if (refocus && button.isConnected) button.focus();
   };
-
-  backdrop.addEventListener("click", closeSheet);
-  sheet.addEventListener("keydown", (e) => {
+  const onKey = (e) => {
     if (e.key === "Escape") {
       e.stopPropagation();
-      closeSheet();
+      close(true);
+      return;
     }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !sheet.hidden) {
-      e.stopPropagation();
-      closeSheet();
+    if (!asMenu) return;
+    if (e.key === "Tab") {
+      // Focus leaves from the trigger, so Tab moves on to what follows it.
+      button.focus();
+      close(false);
+      return;
     }
-  });
+    const keys = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
+    if (!(e.key in keys)) return;
+    e.preventDefault();
+    const all = items();
+    const at = all.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
+    const step = keys[e.key];
+    const next = step === "first" ? 0 : step === "last" ? all.length - 1 : (at + step + all.length) % all.length;
+    all[next]?.focus();
+  };
+  const onOutside = (e) => {
+    if (!(e.target instanceof Node)) return;
+    if (sheet.contains(e.target) || button.contains(e.target)) return;
+    if (!backdrop) close(false);
+  };
 
-  return { backdrop, sheet };
+  button.setAttribute("aria-haspopup", asMenu ? "menu" : "dialog");
+  button.setAttribute("aria-expanded", "true");
+  if (asMenu) {
+    button.parentElement?.append(sheet);
+    // Kept inside the viewport: a menu that would run off the left edge hangs
+    // from the left of its trigger instead.
+    const fits = () => {
+      const r = sheet.getBoundingClientRect();
+      return r.left >= 8 && r.right <= window.innerWidth - 8;
+    };
+    if (!fits()) sheet.classList.add("from-start");
+    if (!fits()) sheet.classList.add("fit-viewport");
+  } else {
+    root.append(backdrop, sheet);
+    backdrop.addEventListener("click", () => close(true));
+  }
+  closeVersionPicker = close;
+  sheet.addEventListener("click", (e) => {
+    if (e.target instanceof Element && e.target.closest('[data-action="version-squash"]')) close(false);
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.addEventListener("click", onOutside, true);
+  const active = sheet.querySelector('[aria-current="true"]');
+  /** @type {HTMLElement} */ (active || items()[0])?.focus();
 }
 
 // The share URL is long and its tail is the part that differs, so the middle is
