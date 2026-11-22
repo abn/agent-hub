@@ -40,7 +40,7 @@ mod comments;
 mod feed;
 mod identity;
 mod inbox;
-mod notifications;
+pub(crate) mod notifications;
 mod resources;
 mod search;
 mod subscriptions;
@@ -377,7 +377,17 @@ impl ServerHandler for HubServer {
         let principal = self.principal(&context);
         let tcc = ToolCallContext::new(self, request, context);
         let response = self.tool_router.call(tcc).await?;
-        Ok(merge_trailer(&self.state, &principal, name.as_ref(), response).await)
+        // Read after the call, so a `session_start` that bound the connection
+        // delivers into the session it just began.
+        let session = self.lease_session(&principal).await;
+        Ok(merge_trailer(
+            &self.state,
+            &principal,
+            session.as_deref(),
+            name.as_ref(),
+            response,
+        )
+        .await)
     }
 
     /// Advertise the resource surface alongside the tools.
@@ -540,11 +550,15 @@ impl ServerHandler for HubServer {
 /// from the merged object, so both views stay identical. Anything else passes
 /// through untouched, and the trailer never fails the call it rides on.
 ///
+/// `session` is the connection's active session, which scopes what the trailer
+/// delivers: the items asked in it and those asked outside any session.
+///
 /// A session brief already carries the answers and decisions it lists, so the
 /// trailer on it delivers those without repeating them.
 async fn merge_trailer(
     state: &AppState,
     principal: &Principal,
+    session: Option<&str>,
     tool: &str,
     response: CallToolResponse,
 ) -> CallToolResponse {
@@ -567,7 +581,7 @@ async fn merge_trailer(
     if body.contains_key("notifications") {
         return CallToolResponse::Complete(result);
     }
-    let Some(mut trailer) = notifications::trailer(state, principal).await else {
+    let Some(mut trailer) = notifications::trailer(state, principal, session).await else {
         return CallToolResponse::Complete(result);
     };
     if tool == "session_brief" {
@@ -708,57 +722,49 @@ async fn require_bearer(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = request
-        .headers()
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            let (scheme, token) = value.split_once(' ')?;
-            (scheme.eq_ignore_ascii_case("Bearer") && !token.is_empty()).then(|| token.to_owned())
-        });
-
-    // On loopback the hub runs for the operator alone: a caller that presents
-    // no token declares its identity through X-Agent-Id instead. This never
-    // applies past loopback, so a networked hub keeps requiring a token.
-    // Local identity without a token is available only on loopback when no admin
-    // token is configured, so a hub that pins an admin token keeps requiring
-    // agent tokens too. A caller that does present a token is resolved below
-    // exactly as on any bind, and the header then names a sub-identity of the
-    // token's agent rather than an agent.
-    if token.is_none() && state.config.bind.ip().is_loopback() && state.config.admin_token.is_none()
-    {
-        let declared = request
-            .headers()
-            .get(crate::principal::AGENT_ID_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("loopback")
-            .to_string();
-        return match crate::store::identity::ensure_local_agent(&state.db, &declared).await {
-            Ok(agent_id) => {
-                let principal = crate::principal::Principal {
-                    actor: agent_id.clone(),
-                    agent_id: Some(agent_id),
-                    is_admin: false,
-                    is_pending: false,
-                };
-                request.extensions_mut().insert(principal);
-                next.run(request).await
-            }
-            Err(err) => error_response(&err),
-        };
-    }
-
-    match state
-        .auth
-        .resolve_agent_as(&state.db, token.as_deref(), request.headers())
-        .await
-    {
+    match resolve_caller(&state, request.headers()).await {
         Ok(principal) => {
             request.extensions_mut().insert(principal);
             next.run(request).await
         }
         Err(err) => error_response(&err),
     }
+}
+
+/// The agent behind a request to the agent surface, MCP or REST.
+///
+/// On loopback the hub runs for the operator alone: a caller that presents no
+/// token declares its identity through `X-Agent-Id` instead. This never
+/// applies past loopback, so a networked hub keeps requiring a token. Local
+/// identity without a token is available only on loopback when no admin token
+/// is configured, so a hub that pins an admin token keeps requiring agent
+/// tokens too. A caller that does present a token is resolved exactly as on
+/// any bind, and the header then names a sub-identity of the token's agent
+/// rather than an agent.
+pub(crate) async fn resolve_caller(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> crate::Result<Principal> {
+    let token = crate::http::auth::bearer_token(headers);
+    if token.is_none() && state.config.bind.ip().is_loopback() && state.config.admin_token.is_none()
+    {
+        let declared = headers
+            .get(crate::principal::AGENT_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("loopback")
+            .to_string();
+        let agent_id = crate::store::identity::ensure_local_agent(&state.db, &declared).await?;
+        return Ok(Principal {
+            actor: agent_id.clone(),
+            agent_id: Some(agent_id),
+            is_admin: false,
+            is_pending: false,
+        });
+    }
+    state
+        .auth
+        .resolve_agent_as(&state.db, token.as_deref(), headers)
+        .await
 }

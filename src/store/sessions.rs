@@ -616,6 +616,9 @@ pub async fn end(
         },
     )
     .await?;
+    // An ended session has no one left to deliver to, so the subscriptions made
+    // for it go in the same commit.
+    super::subscriptions::forget_session_in_tx(&tx, session_id).await?;
     tx.commit().await.map_err(engine)?;
     Ok(())
 }

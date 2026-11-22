@@ -102,6 +102,10 @@ fn an_answer_to_the_agent_question_is_delivered_once() {
     assert_eq!(items[0]["id"], question_id.as_str());
     assert_eq!(items[0]["project_id"], "proj");
     assert_eq!(items[0]["title"], "answered: Deploy tonight?");
+    assert_eq!(
+        items[0]["direct"], true,
+        "an answer on its own question is direct: {next}"
+    );
     assert!(
         items[0]["at"].as_str().is_some_and(|at| !at.is_empty()),
         "the item says when it was resolved: {next}"
@@ -204,4 +208,148 @@ fn an_error_result_carries_no_trailer() {
             && invalid.pointer("/result/notifications").is_none(),
         "a protocol error carries no trailer: {invalid}"
     );
+}
+
+/// Ask a question in the data directory, optionally inside a session, and
+/// return its id. The server is dropped afterwards so the answer can land.
+fn ask(data_dir: &Path, session: Option<&str>, subject: &str) -> String {
+    let mut server = spawn(data_dir);
+    server.initialize();
+    if let Some(name) = session {
+        server.call_tool(
+            "session_start",
+            json!({"project_id": "proj", "session_name": name}),
+        );
+    }
+    let asked = server.call_tool(
+        "question_post",
+        json!({"project_id": "proj", "subject": subject, "body": "Please."}),
+    );
+    structured(&asked)["question_id"]
+        .as_str()
+        .expect("question_post returns the question id")
+        .to_string()
+}
+
+fn titles(response: &Value) -> Vec<String> {
+    pending(response)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item["title"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn an_answer_to_a_question_asked_in_a_session_waits_for_that_session() {
+    let data_dir = TempDir::new("notify-session-bound");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let bound = ask(data_dir.path(), Some("work"), "In the session");
+    let free = ask(data_dir.path(), None, "Outside any session");
+    answer_question(data_dir.path(), &bound);
+    answer_question(data_dir.path(), &free);
+
+    let mut server = spawn(data_dir.path());
+    server.initialize();
+    let sessionless = server.call_tool("version", json!({}));
+    assert_eq!(
+        titles(&sessionless),
+        vec!["answered: Outside any session"],
+        "a call in no session is shown only what was asked outside one: {sessionless}"
+    );
+
+    // Starting the same named session binds the connection to it, and the
+    // result of that very call carries what the session was waiting for.
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "work"}),
+    );
+    assert_eq!(
+        titles(&started),
+        vec!["answered: In the session"],
+        "the session is shown its own answer: {started}"
+    );
+    let after = server.call_tool("version", json!({}));
+    assert!(pending(&after).is_none(), "delivered once: {after}");
+}
+
+#[test]
+fn a_session_is_also_shown_what_was_asked_outside_any_session() {
+    let data_dir = TempDir::new("notify-session-sees-free");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let free = ask(data_dir.path(), None, "Outside any session");
+    answer_question(data_dir.path(), &free);
+
+    let mut server = spawn(data_dir.path());
+    server.initialize();
+    let started = server.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "work"}),
+    );
+    assert_eq!(
+        titles(&started),
+        vec!["answered: Outside any session"],
+        "{started}"
+    );
+}
+
+#[test]
+fn notify_wait_in_a_named_session_reads_that_scope_and_leaves_the_others() {
+    let data_dir = TempDir::new("notify-wait-named");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut first = spawn(data_dir.path());
+    first.initialize();
+    let work = structured(&first.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "work"}),
+    ))["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    let other = structured(&first.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "other"}),
+    ))["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    // The connection now holds the second session. Ask under the first by
+    // naming nothing: re-bind to it, ask, then step aside.
+    first.call_tool(
+        "session_start",
+        json!({"project_id": "proj", "session_name": "work"}),
+    );
+    let asked = first.call_tool(
+        "question_post",
+        json!({"project_id": "proj", "subject": "Which?", "body": "A or B."}),
+    );
+    let question = structured(&asked)["question_id"]
+        .as_str()
+        .expect("question id")
+        .to_string();
+    drop(first);
+    answer_question(data_dir.path(), &question);
+
+    let mut server = spawn(data_dir.path());
+    server.initialize();
+    let elsewhere = server.call_tool(
+        "notify_wait",
+        json!({"wait_seconds": 0, "session": {"session_id": other}}),
+    );
+    assert!(
+        titles(&elsewhere).is_empty(),
+        "another session's scope is not shown it: {elsewhere}"
+    );
+    let named = server.call_tool(
+        "notify_wait",
+        json!({"wait_seconds": 0, "session": {"session_id": work}}),
+    );
+    assert_eq!(titles(&named), vec!["answered: Which?"], "{named}");
+    let again = server.call_tool(
+        "notify_wait",
+        json!({"wait_seconds": 0, "session": {"session_id": work}}),
+    );
+    assert!(titles(&again).is_empty(), "delivered once: {again}");
 }

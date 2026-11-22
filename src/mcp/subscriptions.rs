@@ -24,6 +24,8 @@ use crate::policy::{self, Access};
 use crate::store::events;
 use crate::store::subscriptions::{self, DRAIN_LIMIT, Subscription};
 
+use super::brain::SessionRef;
+use super::notifications::Entry;
 use super::{HubServer, to_error_data};
 
 /// The kinds an agent may subscribe to. `session` and `system` are the hub's
@@ -36,7 +38,7 @@ const SUBSCRIBABLE_KINDS: &[&str] = &[
 #[tool_router(router = subscriptions_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, score, idea, comment, and page; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id and the cursor it started at. about_self keeps only events that name you in their audience: comments on artifacts and pages you worked on, and edits to a page you wrote last. Matching events are delivered through the notifications member of a later tool result."
+        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, score, idea, comment, and page; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id, its cursor, created and the session_id it is bound to. It is bound to the session you name in session, else this connection's active session, else to none, which serves every session of yours; subscribing the same shape again returns the existing subscription with created false. about_self keeps only events that name you in their audience: comments on artifacts and pages you worked on, and edits to a page you wrote last. Matching events are delivered through the notifications member of a later tool result."
     )]
     async fn notify_subscribe(
         &self,
@@ -45,6 +47,10 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let kinds = parse_kinds(&params.kinds).map_err(to_error_data)?;
         let principal = self.principal(&context);
+        let session = self
+            .subscribe_scope(&principal, params.session.as_ref())
+            .await
+            .map_err(to_error_data)?;
         if let Some(project_id) = &params.project_id {
             policy::authorize(&self.state.db, &principal, project_id, Access::Read)
                 .await
@@ -64,9 +70,10 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let subscription_id = subscriptions::create_with_filters(
+        let registered = subscriptions::create_with_filters(
             &self.state.db,
             &principal.actor,
+            session.as_deref(),
             params.project_id.as_deref(),
             &kinds,
             &cursor,
@@ -80,8 +87,10 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         Ok(CallToolResult::structured(json!({
-            "subscription_id": subscription_id,
-            "cursor": cursor,
+            "subscription_id": registered.id,
+            "cursor": registered.last_seen_event_id,
+            "created": registered.created,
+            "session_id": session,
         })))
     }
 
@@ -126,6 +135,7 @@ impl HubServer {
                     "kinds": row.kinds,
                     "project_id": row.project_id,
                     "cursor": row.last_seen_event_id,
+                    "session_id": row.session_id,
                     "about_self": row.about_self,
                     "created_at": row.created_at,
                 })
@@ -137,7 +147,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to one of its questions, a decision on one of its approvals, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
+        description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to one of its questions, a decision on one of its approvals, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. What is delivered is the scope of a session: name one of your own running sessions in session, or omit it for this connection's active session. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
     )]
     async fn notify_wait(
         &self,
@@ -145,6 +155,10 @@ impl HubServer {
         Parameters(params): Parameters<NotifyWaitParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let session = self
+            .notify_scope(&principal, params.session.as_ref())
+            .await
+            .map_err(to_error_data)?;
         let wait = params
             .wait_seconds
             .unwrap_or(DEFAULT_WAIT_SECONDS)
@@ -154,27 +168,27 @@ impl HubServer {
         // and listening.
         let mut ticker = self.state.ticker.subscribe();
 
-        if let Some(trailer) = super::notifications::trailer(&self.state, &principal).await {
-            return Ok(CallToolResult::structured(json!({
-                "notifications": trailer,
-            })));
+        if let Some(trailer) =
+            super::notifications::trailer(&self.state, &principal, session.as_deref()).await
+        {
+            return Ok(delivered(trailer));
         }
         if wait == 0 {
-            return Ok(CallToolResult::structured(json!({})));
+            return Ok(nothing_pending());
         }
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
 
         loop {
-            if let Some(trailer) = super::notifications::trailer(&self.state, &principal).await {
-                return Ok(CallToolResult::structured(json!({
-                    "notifications": trailer,
-                })));
+            if let Some(trailer) =
+                super::notifications::trailer(&self.state, &principal, session.as_deref()).await
+            {
+                return Ok(delivered(trailer));
             }
 
             let now = std::time::Instant::now();
             if now >= deadline {
-                return Ok(CallToolResult::structured(json!({})));
+                return Ok(nothing_pending());
             }
             let remaining = deadline - now;
 
@@ -190,21 +204,67 @@ impl HubServer {
             }
         }
 
-        Ok(CallToolResult::structured(json!({})))
+        Ok(nothing_pending())
     }
 }
 
-/// Report every subscription the caller owns through the next tool result.
+/// The result of a wait that found something.
+fn delivered(trailer: Value) -> CallToolResult {
+    CallToolResult::structured(json!({ "notifications": trailer }))
+}
+
+/// The result of a wait that found nothing.
 ///
+/// It names an empty `notifications` member rather than leaving it out: a result
+/// without one gets the connection's own trailer, which reads the connection's
+/// scope and not the one the wait was asked about.
+fn nothing_pending() -> CallToolResult {
+    delivered(json!({ "pending": [] }))
+}
+
+/// What one read of the caller's subscriptions found, and where each cursor
+/// stands once it is delivered.
+pub(crate) struct Read {
+    pub entries: Vec<Entry>,
+    /// Each subscription read and the newest event id scanned in it.
+    pub cursors: Vec<(String, String)>,
+    /// Each subscription and the newest event id that is safe to pass without
+    /// delivering anything: the last of the events before its first reportable
+    /// one that it could never report.
+    pub skips: Vec<(String, String)>,
+}
+
+/// The most pages one subscription walks in a single read.
+///
+/// A page the caller may not read, or whose events its filters drop, reports
+/// nothing, and the read keeps walking until it finds something or reaches the
+/// newest event, so a standing interest is not pinned behind a stretch of
+/// events that never match. The bound keeps one read finite.
+const MAX_SCAN_PAGES: usize = 20;
+
+/// Read every subscription the caller may drain in one session scope, without
+/// moving any cursor.
+///
+/// A call bound to a session reads the subscriptions bound to it and those
+/// bound to none; a call bound to no session reads only the second kind.
 /// Returns `None` when there is nothing to report, so a caller that never
 /// registered anything costs one indexed read and nothing else.
-pub(crate) async fn drain(
+///
+/// A `floor` above a subscription's cursor is where its scan starts, so a peek
+/// that already holds a page reads what follows it. Nothing is skipped past
+/// from there: the rows between the cursor and the floor were not looked at.
+pub(crate) async fn read(
     state: &crate::app::AppState,
     principal: &crate::principal::Principal,
-) -> Option<Vec<Value>> {
-    let owned = subscriptions::list(&state.db, &principal.actor)
+    session: Option<&str>,
+    floor: Option<&str>,
+) -> Option<Read> {
+    let owned = subscriptions::list_in_scope(&state.db, &principal.actor, session)
         .await
         .ok()?;
+    if owned.is_empty() {
+        return None;
+    }
     // An unscoped subscription spans every project the caller may read, so the
     // set is resolved once here rather than per event.
     let visible = match policy::visibility(&state.db, principal).await {
@@ -215,30 +275,57 @@ pub(crate) async fn drain(
         }
     };
 
-    let mut items: Vec<Value> = Vec::new();
+    let mut read = Read {
+        entries: Vec::new(),
+        cursors: Vec::new(),
+        skips: Vec::new(),
+    };
     for subscription in owned {
-        match drain_one(state, principal, &subscription, &visible).await {
-            Ok(delivered) => items.extend(delivered),
-            // A drain rides along with a call the caller made for something
+        match scan(state, principal, &subscription, &visible, floor).await {
+            Ok(scanned) => {
+                read.entries.extend(scanned.entries);
+                if let Some(cursor) = scanned.cursor {
+                    read.cursors.push((subscription.id.clone(), cursor));
+                }
+                if let Some(skip) = scanned.skip {
+                    read.skips.push((subscription.id.clone(), skip));
+                }
+            }
+            // A read rides along with a call the caller made for something
             // else, so a store failure costs it the trailer and not the call.
             Err(err) => tracing::warn!(
                 subscription = %subscription.id,
                 error = %err,
-                "a notification subscription could not be drained"
+                "a notification subscription could not be read"
             ),
         }
     }
-    (!items.is_empty()).then_some(items)
+    Some(read)
 }
 
-/// Drain one subscription, leaving its cursor on the newest event reported.
-async fn drain_one(
+/// What scanning one subscription found.
+struct Scanned {
+    entries: Vec<Entry>,
+    /// Where the cursor moves once what was found is delivered, if it moved.
+    cursor: Option<String>,
+    /// Where it may move without delivering, if that is past where it stands.
+    skip: Option<String>,
+}
+
+/// Scan one subscription from its cursor.
+async fn scan(
     state: &crate::app::AppState,
     principal: &crate::principal::Principal,
     subscription: &Subscription,
     visible: &policy::Visibility,
-) -> crate::error::Result<Vec<Value>> {
-    // A scoped subscription is re-checked on every drain rather than trusted
+    floor: Option<&str>,
+) -> crate::error::Result<Scanned> {
+    let nothing = Scanned {
+        entries: Vec::new(),
+        cursor: None,
+        skip: None,
+    };
+    // A scoped subscription is re-checked on every read rather than trusted
     // from the day it was registered: a grant can be revoked and a project can
     // be made confidential, and a standing interest is not a lasting permission.
     if let Some(project_id) = &subscription.project_id
@@ -246,51 +333,67 @@ async fn drain_one(
             .await
             .is_err()
     {
-        return Ok(Vec::new());
+        return Ok(nothing);
     }
 
-    let scanned = subscriptions::drain_events(&state.db, subscription, DRAIN_LIMIT).await?;
-    let Some(newest) = scanned.last().map(|event| event.id.clone()) else {
-        return Ok(Vec::new());
+    let start = match floor {
+        Some(floor) if floor > subscription.last_seen_event_id.as_str() => floor.to_string(),
+        _ => subscription.last_seen_event_id.clone(),
     };
-    // The cursor moves to the last event scanned, whether or not any of the
-    // batch is reported: events the caller cannot read and events the filters
-    // drop are left behind rather than retried on every call, and a batch made
-    // only of them must not pin the cursor in front of an event that follows.
-    subscriptions::set_cursor(&state.db, &subscription.id, &newest).await?;
-
-    // An unscoped read spans every project in the store, so what the caller may
-    // read is applied here.
-    let page: Vec<&events::Event> = match subscription.project_id {
-        Some(_) => scanned.iter().collect(),
-        None => scanned
-            .iter()
-            .filter(|event| may_read(visible, &event.project_id))
-            .collect(),
-    };
-
-    let page: Vec<&events::Event> = page
-        .into_iter()
-        .filter(|event| {
-            if let Some(actor) = &subscription.actor_filter
-                && event.actor != *actor
-            {
-                return false;
+    let mut cursor = start.clone();
+    // Rows are passed without delivery only from where the subscription stands,
+    // and only up to the first one that is not the subscription's own to drop.
+    let mut skipping = start == subscription.last_seen_event_id;
+    let mut skip = None;
+    let mut entries = Vec::new();
+    for _ in 0..MAX_SCAN_PAGES {
+        let scanned =
+            subscriptions::drain_events(&state.db, subscription, &cursor, DRAIN_LIMIT).await?;
+        let Some(newest) = scanned.last().map(|event| event.id.clone()) else {
+            break;
+        };
+        // The cursor moves to the last event scanned, whether or not any of
+        // the batch is reported: events the caller cannot read and events the
+        // filters drop are left behind rather than retried on every call.
+        // Every reportable event of a batch is returned, so nothing is passed
+        // that was not.
+        cursor = newest;
+        for event in &scanned {
+            // What the subscription's own filters drop it can never report. A
+            // project the caller may not read is another matter: access can be
+            // granted later, so such a row is not one to pass without delivery.
+            let wanted = subscription
+                .actor_filter
+                .as_ref()
+                .is_none_or(|actor| event.actor == *actor)
+                && !(subscription.exclude_self && event.actor == principal.actor)
+                && (!subscription.about_self || names_actor(event, &principal.actor));
+            // An unscoped read spans every project in the store, so what the
+            // caller may read is applied here.
+            let readable =
+                subscription.project_id.is_some() || may_read(visible, &event.project_id);
+            if wanted && readable {
+                skipping = false;
+                entries.push(Entry {
+                    item: item(event, names_actor(event, &principal.actor)),
+                    key: event.id.clone(),
+                });
+            } else if !wanted && skipping && entries.is_empty() {
+                skip = Some(event.id.clone());
+            } else {
+                skipping = false;
             }
-            if subscription.exclude_self && event.actor == principal.actor {
-                return false;
-            }
-            if subscription.about_self && !names_actor(event, &principal.actor) {
-                return false;
-            }
-            true
-        })
-        .collect();
-    if page.is_empty() {
-        return Ok(Vec::new());
+        }
+        if !entries.is_empty() || (scanned.len() as i64) < DRAIN_LIMIT {
+            break;
+        }
     }
-
-    Ok(page.into_iter().map(item).collect())
+    let moved = cursor != start;
+    Ok(Scanned {
+        entries,
+        cursor: moved.then_some(cursor),
+        skip,
+    })
 }
 
 /// Whether an event's payload lists the actor in its `audience`.
@@ -315,7 +418,10 @@ fn may_read(visible: &policy::Visibility, project_id: &str) -> bool {
 ///
 /// A short line is the point: the item says that something happened and where
 /// to read it, and the agent fetches the detail it needs from the event id.
-fn item(event: &events::Event) -> Value {
+///
+/// `direct` says the event names the caller in its audience, as a comment on
+/// the caller's own artifact does, as against ambient project activity.
+fn item(event: &events::Event, direct: bool) -> Value {
     json!({
         "source": "subscription",
         "kind": event.kind,
@@ -323,6 +429,7 @@ fn item(event: &events::Event) -> Value {
         "project_id": event.project_id,
         "title": event.summary,
         "at": event.created_at,
+        "direct": direct,
     })
 }
 
@@ -417,6 +524,11 @@ struct NotifySubscribeParams {
     /// such as a comment on an artifact the agent published.
     #[serde(default)]
     about_self: bool,
+    /// The session to bind the subscription to, which must be the caller's
+    /// own. Omitted, it is this connection's active session, and with none the
+    /// subscription serves every session of the agent.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// Arguments for `notify_unsubscribe`.
@@ -431,6 +543,10 @@ struct NotifyWaitParams {
     /// How long to wait, in seconds. 30 by default, 60 at most; 0 polls once and returns.
     #[serde(default)]
     wait_seconds: Option<u64>,
+    /// The session whose notifications to read, which must be the caller's
+    /// own. Omitted, it is this connection's active session.
+    #[serde(default)]
+    session: Option<SessionRef>,
 }
 
 /// The default and maximum waits, in seconds, for `notify_wait`.
@@ -521,6 +637,26 @@ mod tests {
         subscriptions::create(&state.db, &principal.actor, Some("p1"), &kinds, &cursor)
             .await
             .expect("create")
+    }
+
+    /// Drain what the caller may read in one session scope, moving the cursors.
+    async fn drain_in(
+        state: &AppState,
+        principal: &Principal,
+        session: Option<&str>,
+    ) -> Option<Vec<Value>> {
+        let read = read(state, principal, session, None).await?;
+        for (id, newest) in &read.cursors {
+            subscriptions::set_cursor(&state.db, id, newest)
+                .await
+                .expect("set cursor");
+        }
+        let items: Vec<Value> = read.entries.into_iter().map(|entry| entry.item).collect();
+        (!items.is_empty()).then_some(items)
+    }
+
+    async fn drain(state: &AppState, principal: &Principal) -> Option<Vec<Value>> {
+        drain_in(state, principal, None).await
     }
 
     /// The trailer's line for the newest reported event.
@@ -668,8 +804,9 @@ mod tests {
         assert_eq!(titles(&state, &principal).await, vec!["yours"]);
     }
 
-    /// A batch the caller may not read, a whole drain page of it, must not
-    /// hold the cursor in front of the visible event that follows.
+    /// A batch the caller may not read, a whole drain page of it, must hold
+    /// neither the cursor nor the read in front of the visible event that
+    /// follows.
     #[tokio::test]
     async fn a_batch_of_unreadable_events_does_not_pin_the_cursor() {
         let state = state("subs-pinned").await;
@@ -711,14 +848,14 @@ mod tests {
         }
         append(&state, "signal", "yours").await;
 
-        assert!(
-            drain(&state, &principal).await.is_none(),
-            "a page of unreadable events reports nothing"
-        );
         assert_eq!(
             titles(&state, &principal).await,
             vec!["yours"],
-            "the next drain reaches the readable event behind them"
+            "the drain walks past a page of unreadable events to the readable one behind it"
+        );
+        assert!(
+            drain(&state, &principal).await.is_none(),
+            "and reports it once"
         );
     }
 
@@ -747,6 +884,7 @@ mod tests {
         let id = subscriptions::create_with_filters(
             &state.db,
             &principal.actor,
+            None,
             Some("p1"),
             &kinds,
             &cursor,
@@ -757,7 +895,7 @@ mod tests {
         )
         .await
         .expect("create");
-        assert!(!id.is_empty());
+        assert!(!id.id.is_empty());
 
         crate::store::events::append(
             &state.db,
@@ -831,6 +969,7 @@ mod tests {
         subscriptions::create_with_filters(
             &state.db,
             &principal.actor,
+            None,
             Some("p1"),
             &kinds,
             &cursor,
@@ -882,5 +1021,412 @@ mod tests {
             .expect("a match is reported");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["title"], "theirs");
+    }
+
+    async fn begin_session(state: &AppState, actor: &str, name: &str) -> String {
+        crate::store::sessions::start(&state.db, "p1", name, actor)
+            .await
+            .expect("start a session")
+            .id
+    }
+
+    /// Ask a question as `actor` and have the human answer it, so it sits in
+    /// the actor's attention queue. Returns the question id.
+    async fn answered(
+        state: &AppState,
+        actor: &str,
+        session: Option<&str>,
+        subject: &str,
+    ) -> String {
+        let id = crate::store::questions::post(
+            &state.db,
+            &crate::limits::InboxCaps::disabled(),
+            0,
+            crate::store::questions::NewQuestion {
+                actor,
+                project_id: "p1",
+                subject,
+                body: Some("Please."),
+                context: None,
+                options: None,
+                idempotency_key: None,
+                session_id: session,
+                deadline: None,
+            },
+        )
+        .await
+        .expect("post a question");
+        crate::store::questions::answer(&state.db, 0, "human", &id, "yes", None)
+            .await
+            .expect("answer it");
+        id
+    }
+
+    fn delivered_titles(trailer: Option<Value>) -> Vec<String> {
+        trailer
+            .and_then(|trailer| trailer["pending"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|item| item["title"].as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_flood_of_resolutions_in_another_session_does_not_hide_this_sessions_answer() {
+        let state = state("attention-flood").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let mine = begin_session(&state, "agent-a", "mine").await;
+        let other = begin_session(&state, "agent-a", "other").await;
+
+        answered(&state, "agent-a", Some(&mine), "mine, answered first").await;
+        for n in 0..600 {
+            answered(&state, "agent-a", Some(&other), &format!("other {n}")).await;
+        }
+
+        let shown = delivered_titles(
+            super::super::notifications::trailer(&state, &principal, Some(&mine)).await,
+        );
+        assert_eq!(
+            shown,
+            vec!["answered: mine, answered first"],
+            "the other session's 600 later resolutions did not push it out"
+        );
+        assert!(
+            super::super::notifications::trailer(&state, &principal, Some(&mine))
+                .await
+                .is_none(),
+            "and it is delivered once"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_backlog_over_one_page_drains_across_calls_with_none_lost() {
+        let state = state("attention-backlog").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let session = begin_session(&state, "agent-a", "work").await;
+        let mut asked = Vec::new();
+        for n in 0..120 {
+            let scope = (n % 2 == 0).then_some(session.as_str());
+            answered(&state, "agent-a", scope, &format!("q{n:03}")).await;
+            asked.push(format!("answered: q{n:03}"));
+        }
+
+        let mut shown = Vec::new();
+        let mut sizes = Vec::new();
+        while let Some(trailer) =
+            super::super::notifications::trailer(&state, &principal, Some(&session)).await
+        {
+            let page = delivered_titles(Some(trailer));
+            sizes.push(page.len());
+            shown.extend(page);
+            assert!(sizes.len() < 10, "the backlog drains");
+        }
+        assert!(sizes.iter().all(|size| *size <= 100), "{sizes:?}");
+        assert!(sizes.len() > 1, "more than one page: {sizes:?}");
+        shown.sort();
+        assert_eq!(shown, asked, "every item arrived once, none lost");
+    }
+
+    #[tokio::test]
+    async fn concurrent_calls_of_one_scope_deliver_each_item_once() {
+        let state = state("attention-serialised").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let session = begin_session(&state, "agent-a", "work").await;
+        for n in 0..12 {
+            answered(&state, "agent-a", None, &format!("free {n:02}")).await;
+            answered(&state, "agent-a", Some(&session), &format!("bound {n:02}")).await;
+        }
+
+        let mut calls = tokio::task::JoinSet::new();
+        for n in 0..8 {
+            let state = state.clone();
+            let principal = principal.clone();
+            let session = session.clone();
+            calls.spawn(async move {
+                // Some calls run in the session and some outside any, and the
+                // two share the session-less cursor.
+                let scope = (n % 2 == 0).then_some(session.as_str());
+                delivered_titles(
+                    super::super::notifications::trailer(&state, &principal, scope).await,
+                )
+            });
+        }
+        let mut shown = Vec::new();
+        while let Some(done) = calls.join_next().await {
+            shown.extend(done.expect("a call finished"));
+        }
+        let before = shown.len();
+        shown.sort();
+        shown.dedup();
+        assert_eq!(shown.len(), before, "nothing was delivered twice");
+        assert_eq!(shown.len(), 24, "and nothing was lost: {shown:?}");
+    }
+
+    #[tokio::test]
+    async fn a_settle_after_the_session_ended_writes_no_cursor() {
+        let state = state("attention-ended").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let session = begin_session(&state, "agent-a", "work").await;
+        crate::store::sessions::end(&state.db, &session, "agent-a", Some("agent-a"), None)
+            .await
+            .expect("end");
+
+        crate::store::notifications::advance(&state.db, "agent-a", &session, "evt")
+            .await
+            .expect("advance");
+        crate::store::notifications::advance(&state.db, "agent-a", "no-such-session", "evt")
+            .await
+            .expect("advance");
+        for scope in [session.as_str(), "no-such-session"] {
+            assert_eq!(
+                crate::store::notifications::cursor(&state.db, "agent-a", scope)
+                    .await
+                    .expect("cursor"),
+                None,
+                "no cursor row for {scope}"
+            );
+        }
+        crate::store::notifications::advance(&state.db, "agent-a", "", "evt")
+            .await
+            .expect("advance");
+        assert_eq!(
+            crate::store::notifications::cursor(&state.db, "agent-a", "")
+                .await
+                .expect("cursor")
+                .as_deref(),
+            Some("evt"),
+            "the session-less scope has no session to check"
+        );
+    }
+
+    #[tokio::test]
+    async fn ending_a_session_removes_its_subscriptions_and_refuses_new_ones() {
+        let state = state("subs-ended").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let session = begin_session(&state, "agent-a", "work").await;
+        let kinds = vec!["signal".to_string()];
+        let filters = subscriptions::Filters::default();
+        subscriptions::create_with_filters(
+            &state.db,
+            "agent-a",
+            Some(&session),
+            None,
+            &kinds,
+            "",
+            filters,
+        )
+        .await
+        .expect("bound subscription");
+        subscriptions::create_with_filters(&state.db, "agent-a", None, None, &kinds, "", filters)
+            .await
+            .expect("session-less subscription");
+
+        crate::store::sessions::end(&state.db, &session, "agent-a", None, None)
+            .await
+            .expect("end");
+
+        let left = subscriptions::list(&state.db, "agent-a")
+            .await
+            .expect("list");
+        assert_eq!(left.len(), 1, "only the session-less one remains");
+        assert_eq!(left[0].session_id, None);
+        let refused = subscriptions::create_with_filters(
+            &state.db,
+            "agent-a",
+            Some(&session),
+            None,
+            &kinds,
+            "",
+            filters,
+        )
+        .await
+        .expect_err("an ended session takes no subscription");
+        assert!(matches!(refused, Error::Conflict(_)), "{refused:?}");
+    }
+
+    #[tokio::test]
+    async fn rows_a_subscription_can_never_report_are_skipped_across_peeks() {
+        let state = state("subs-skip").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let kinds = vec!["signal".to_string()];
+        subscriptions::create_with_filters(
+            &state.db,
+            "agent-a",
+            None,
+            Some("p1"),
+            &kinds,
+            "",
+            subscriptions::Filters {
+                exclude_self: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create");
+        for n in 0..1000 {
+            crate::store::events::append(
+                &state.db,
+                0,
+                "agent-a",
+                None,
+                crate::store::events::NewEvent {
+                    project_id: "p1".to_string(),
+                    kind: "signal".to_string(),
+                    summary: format!("mine {n}"),
+                    payload: None,
+                    needs_action: false,
+                    thread_id: None,
+                    session_id: None,
+                },
+            )
+            .await
+            .expect("append");
+        }
+        append(&state, "signal", "theirs").await;
+
+        let first = super::super::notifications::read(&state, &principal, None, None).await;
+        assert!(
+            first.entries.is_empty(),
+            "the scan is bounded and ends inside the filtered rows"
+        );
+        first.settle_skips(&state).await;
+        let second = super::super::notifications::read(&state, &principal, None, None).await;
+        let titles: Vec<&str> = second
+            .entries
+            .iter()
+            .map(|entry| entry.item["title"].as_str().unwrap_or_default())
+            .collect();
+        assert_eq!(titles, vec!["theirs"], "the next peek reaches the match");
+        assert!(
+            !subscriptions::list(&state.db, "agent-a")
+                .await
+                .expect("list")[0]
+                .last_seen_event_id
+                .is_empty(),
+            "the stored cursor moved past the filtered stretch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peek_skip_never_passes_a_reportable_row() {
+        let state = state("subs-skip-stops").await;
+        crate::store::projects::create(&state.db, "p1", "Project")
+            .await
+            .expect("create project");
+        let principal = caller("agent-a", false);
+        let kinds = vec!["signal".to_string()];
+        subscriptions::create_with_filters(
+            &state.db,
+            "agent-a",
+            None,
+            Some("p1"),
+            &kinds,
+            "",
+            subscriptions::Filters {
+                exclude_self: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create");
+        let mine = |summary: &str| crate::store::events::NewEvent {
+            project_id: "p1".to_string(),
+            kind: "signal".to_string(),
+            summary: summary.to_string(),
+            payload: None,
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        };
+        crate::store::events::append(&state.db, 0, "agent-a", None, mine("mine"))
+            .await
+            .expect("append");
+        let theirs = append(&state, "signal", "theirs").await;
+        crate::store::events::append(&state.db, 0, "agent-a", None, mine("mine again"))
+            .await
+            .expect("append");
+
+        let read = super::super::notifications::read(&state, &principal, None, None).await;
+        read.settle_skips(&state).await;
+        let held = subscriptions::list(&state.db, "agent-a")
+            .await
+            .expect("list");
+        assert!(
+            held[0].last_seen_event_id < theirs,
+            "the cursor stops before the reportable row"
+        );
+        let again = super::super::notifications::read(&state, &principal, None, None).await;
+        assert_eq!(again.entries.len(), 1, "it is still waiting");
+    }
+
+    #[tokio::test]
+    async fn a_peek_skip_never_passes_a_row_the_caller_cannot_read_yet() {
+        let state = state("subs-skip-visibility").await;
+        for (id, confidential) in [("p1", false), ("secret", true)] {
+            crate::store::projects::create(&state.db, id, id)
+                .await
+                .expect("create project");
+            crate::store::projects::set_confidential(&state.db, id, confidential)
+                .await
+                .expect("posture");
+        }
+        crate::store::identity::create_agent(&state.db, "agent-a", "Agent A")
+            .await
+            .expect("create agent");
+        let principal = caller("agent-a", false);
+        let kinds = vec!["signal".to_string()];
+        subscriptions::create(&state.db, "agent-a", None, &kinds, "")
+            .await
+            .expect("create");
+        crate::store::events::append(
+            &state.db,
+            0,
+            "seeder",
+            None,
+            crate::store::events::NewEvent {
+                project_id: "secret".to_string(),
+                kind: "signal".to_string(),
+                summary: "later granted".to_string(),
+                payload: None,
+                needs_action: false,
+                thread_id: None,
+                session_id: None,
+            },
+        )
+        .await
+        .expect("append");
+
+        let peeked = super::super::notifications::read(&state, &principal, None, None).await;
+        assert!(peeked.entries.is_empty());
+        peeked.settle_skips(&state).await;
+        assert!(
+            subscriptions::list(&state.db, "agent-a")
+                .await
+                .expect("list")[0]
+                .last_seen_event_id
+                .is_empty(),
+            "an unreadable row is not passed by a peek"
+        );
+
+        crate::store::identity::add_grant(&state.db, "agent-a", "secret")
+            .await
+            .expect("grant");
+        assert_eq!(titles(&state, &principal).await, vec!["later granted"]);
     }
 }

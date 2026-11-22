@@ -203,11 +203,18 @@ pub async fn list_visible(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Vec<InboxItem>> {
-    Ok(
-        list_as(db, status, project_id, None, None, limit, visible, false)
-            .await?
-            .items,
+    Ok(list_as(
+        db,
+        status,
+        project_id,
+        None,
+        None,
+        limit,
+        visible,
+        Listing::human(),
     )
+    .await?
+    .items)
 }
 
 /// The same listing as an agent may see it.
@@ -249,7 +256,87 @@ pub async fn page_for_agent(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<InboxPage> {
-    list_as(db, status, project_id, actor, since, limit, visible, true).await
+    list_as(
+        db,
+        status,
+        project_id,
+        actor,
+        since,
+        limit,
+        visible,
+        Listing::agent(),
+    )
+    .await
+}
+
+/// Where an item was asked, for a listing confined to one session scope.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AskedIn<'a> {
+    /// Asked in this session.
+    Session(&'a str),
+    /// Asked outside any session.
+    Outside,
+}
+
+/// The resolved entries one actor wrote in one session scope, oldest
+/// resolution first, from the first one newer than `since`.
+///
+/// The scope is part of the query, so the page holds only that scope's items
+/// and a long run of resolutions in another scope cannot fill it. The order is
+/// ascending by the id a cursor counts, so a caller that moves its cursor to
+/// the last item returned passes nothing it was not given.
+pub(crate) async fn resolved_in_scope(
+    db: &Database,
+    actor: &str,
+    scope: AskedIn<'_>,
+    since: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<InboxPage> {
+    list_as(
+        db,
+        Some("resolved"),
+        None,
+        Some(actor),
+        since,
+        limit,
+        visible,
+        Listing {
+            collapse_read: true,
+            scope: Some(scope),
+            ascending: true,
+        },
+    )
+    .await
+}
+
+/// How a listing is presented and ordered.
+#[derive(Clone, Copy)]
+struct Listing<'a> {
+    /// Report a read entry as unread, as an agent sees it.
+    collapse_read: bool,
+    /// Keep only entries asked in one session scope.
+    scope: Option<AskedIn<'a>>,
+    /// Oldest first by the id a cursor counts, instead of newest first.
+    ascending: bool,
+}
+
+impl Listing<'_> {
+    fn human() -> Self {
+        Listing {
+            collapse_read: false,
+            scope: None,
+            ascending: false,
+        }
+    }
+
+    fn agent() -> Self {
+        Listing {
+            collapse_read: true,
+            scope: None,
+            ascending: false,
+        }
+    }
 }
 
 /// A listing with the agent's filters and cursor, shared by the plain list and
@@ -263,8 +350,9 @@ async fn list_as(
     since: Option<&str>,
     limit: i64,
     visible: Option<&[String]>,
-    collapse_read: bool,
+    listing: Listing<'_>,
 ) -> Result<InboxPage> {
+    let collapse_read = listing.collapse_read;
     if let Some(status) = status {
         if collapse_read && status == "read" {
             return Err(Error::InvalidArgument(format!(
@@ -324,6 +412,14 @@ async fn list_as(
         params.push(Value::Text(actor.to_string()));
         sql.push_str(&format!(" AND e.actor = ?{}", params.len()));
     }
+    match listing.scope {
+        Some(AskedIn::Session(session_id)) => {
+            params.push(Value::Text(session_id.to_string()));
+            sql.push_str(&format!(" AND e.session_id = ?{}", params.len()));
+        }
+        Some(AskedIn::Outside) => sql.push_str(" AND e.session_id IS NULL"),
+        None => {}
+    }
     if let Some(visible) = visible {
         let mut placeholders = Vec::with_capacity(visible.len());
         for id in visible {
@@ -349,7 +445,9 @@ async fn list_as(
     // the deciding event instead, so an answered question lands at the head it
     // belongs at, above older entries.
     params.push(Value::Integer(limit));
-    let order = if since.is_some() {
+    let order = if listing.ascending {
+        format!("COALESCE({effective}, e.id) ASC")
+    } else if since.is_some() {
         format!("COALESCE({effective}, e.id) DESC")
     } else {
         "e.id DESC".to_string()

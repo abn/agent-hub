@@ -691,12 +691,39 @@ CREATE INDEX IF NOT EXISTS feed_dismissals_project
   ON feed_dismissals(project_id, dismissed_at);
 "#;
 
-/// Version 27: subscriptions that report only events about the subscriber.
+/// Version 27: subscriptions that report only events about the subscriber, and
+/// delivery scoped to one session.
 ///
 /// A comment or page event names the actors it concerns in its payload's
 /// `audience`. A subscription with `about_self` set keeps an event only when
 /// the registering actor is in that list, so an agent hears about discussion of
 /// its own artifacts and pages and not the whole project's.
+///
+/// Two sessions of one actor used to share one attention cursor and one set of
+/// subscription cursors, so whichever called first took the other's
+/// notifications. A subscription now carries the session it was made for, null
+/// meaning the whole actor, and the attention cursor is keyed by the actor and
+/// a session, the empty string standing for items asked outside any session.
+/// The rebuilt cursor table keeps every existing row as the actor's session-less
+/// cursor and copies it to each of the actor's sessions, so nothing already
+/// delivered is delivered again.
 const V27: &str = r#"
 ALTER TABLE notify_subscriptions ADD COLUMN about_self INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notify_subscriptions ADD COLUMN session_id TEXT;
+CREATE INDEX IF NOT EXISTS notify_subscriptions_session ON notify_subscriptions(session_id);
+
+CREATE TABLE agent_notify_cursors_v27(
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL DEFAULT '',
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(agent, session_id)
+);
+INSERT INTO agent_notify_cursors_v27(agent, session_id, last_seen_event_id, updated_at)
+  SELECT agent, '', last_seen_event_id, updated_at FROM agent_notify_cursors;
+INSERT INTO agent_notify_cursors_v27(agent, session_id, last_seen_event_id, updated_at)
+  SELECT c.agent, s.id, c.last_seen_event_id, c.updated_at
+  FROM agent_notify_cursors c JOIN sessions s ON s.agent = c.agent;
+DROP TABLE agent_notify_cursors;
+ALTER TABLE agent_notify_cursors_v27 RENAME TO agent_notify_cursors;
 "#;

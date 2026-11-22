@@ -77,11 +77,11 @@ identity.
 | `question_post` | Ask the human a question. It lands in the inbox and the feed, and returns the question id. Questions are for the human: agent-to-agent messaging is deferred, so there is no addressee field. Optional `options` suggest answers the human can pick with one tap. It may carry a deadline (see [Deadlines](#deadlines-on-questions-and-approvals)). |
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`, and the `session_id` it was posted in, absent when it was posted outside a session. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. An item with a deadline carries `expires_at` and `on_expiry`, and a resolution the hub made at the deadline carries `expired: true` with `hub` as the actor. |
-| `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
-| `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, and optionally narrowed to one actor, with the caller's own events dropped (`exclude_self`), or to events that name the caller in their audience (`about_self`), so they are delivered through the notification trailer instead of polled. The subscribable kinds are `signal`, `finished`, `approval`, `question`, `answer`, `artifact`, `anchor`, `score`, `idea`, `comment` and `page`. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
+| `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. `session` names one of the caller's own running sessions to read the scope of, for a caller that holds no active session; omitted, it is the connection's active session. |
+| `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, and optionally narrowed to one actor, with the caller's own events dropped (`exclude_self`), or to events that name the caller in their audience (`about_self`), so they are delivered through the notification trailer instead of polled. It is bound to a session, the one named in `session` or else the connection's active session, and with neither it serves every session of the caller. Registering the same shape again returns the existing subscription. The subscribable kinds are `signal`, `finished`, `approval`, `question`, `answer`, `artifact`, `anchor`, `score`, `idea`, `comment` and `page`. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id`, its cursor, `created` (false when an identical subscription already existed) and the `session_id` it is bound to. |
 | `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
-| `notify_list` | List the caller's own subscriptions, with ids, kinds, scope, `about_self`, and cursor. |
-| `notify_wait` | Block until something is pending for the caller or `wait_seconds` elapses (30 by default, 60 at most); returns the same `notifications` shape as an ordinary tool result, delivered once. `wait_seconds: 0` polls once. |
+| `notify_list` | List the caller's own subscriptions, with ids, kinds, scope, the `session_id` each is bound to, `about_self`, and cursor. |
+| `notify_wait` | Block until something is pending for the caller or `wait_seconds` elapses (30 by default, 60 at most); returns the same `notifications` shape as an ordinary tool result, delivered once. A wait that finds nothing returns `notifications.pending` as an empty list, so the connection's own scope is not drained on top of the scope that was asked about. `wait_seconds: 0` polls once. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact, sealing any live version first. |
 | `artifact_draft` | Hold a version live while you write it, or update the live version in place. Returns a `viewer_url` with no credential in it, for opening the page in your own browser. |
@@ -238,16 +238,39 @@ approval it posted, or `subscription` for a standing subscription it registered.
 The item is a nudge, not the record: the detail stays in the inbox and the feed,
 read by `inbox_read`, `inbox_wait`, or `feed_read`.
 
-Each item is delivered once. Two server-side cursors, keyed on the resolved
-actor and never the token, record what has been shown: one for the caller's own
+Each item also carries `direct`, set by the server: true for an attention item,
+and for a subscription item whose payload `audience` names the caller, such as a
+comment on an artifact the caller published. It is false for ambient activity in
+the project. A client reads the flag and never works it out.
+
+Each item is delivered once. Server-side cursors, keyed on the resolved actor and
+never the token, record what has been shown: one per session for the caller's own
 attention queue, and one per subscription. A delivered read advances its cursor,
-so the next call carries only what is new; an empty read moves nothing. An error
+so the next call carries only what is new; an empty read moves nothing. A scope
+delivers its oldest items first, at most 50 from the attention queue and a page
+from each subscription per call, so a backlog drains over successive calls with
+none passed over. Calls of one actor that read the same cursors are serialised, so
+two of them never deliver the same item. An error
 result carries no `notifications` member, and neither does a result when there is
 nothing to report. `notify_subscribe` seeds its cursor at the newest matching
 event, so a subscription reports from the moment it was made rather than
 replaying history, and an unscoped drain keeps to the projects the caller may
 read at drain time: an event in a project it may not read is left above the
 cursor rather than consumed, so it arrives if a grant is later given.
+
+Delivery is scoped to a session, so two sessions of one actor do not take each
+other's notifications. A connection is bound to the session it started, or a call
+names one with `session` on `notify_wait` and `notify_subscribe`, which must be
+the caller's own running session. A connection whose session has since ended
+is bound to none. A call bound to a session is shown the answers
+and decisions on items asked in that session, the items asked outside any
+session, and the subscriptions bound to that session or to none. A call bound to
+no session is shown only the items asked outside any session and the
+subscriptions bound to none. A subscription bound to a session is removed when
+that session ends and when it is pruned, and a session that has ended takes no
+new subscription and keeps no cursor. The peek route
+[`GET /api/v1/me/pending`](/reference/rest-api.md#reading-what-is-pending) reads
+the same scope without delivering it.
 
 ## Deadlines on questions and approvals
 
@@ -460,8 +483,10 @@ stored cursor to the returned `next_since`, so a targeted read records progress.
 A backward read returns no `next_since` and moves nothing.
 
 Tool errors are structured (`code`, `message`, `retryable`, `details`) rather
-than prose. A resource a caller may not reach returns the same error whether it
-is missing or denied, so an agent cannot use an error as an existence check. A
+than prose. `details.reason` names a cause a caller can act on where the code is
+too broad, such as `no_active_session` on a brain call made before
+`session_start`. A resource a caller may not reach returns the same error whether
+it is missing or denied, so an agent cannot use an error as an existence check. A
 write that creates a durable record elsewhere (a feed event, a question, an
 answer, an artifact, or a decision) accepts an optional idempotency key, so a
 retry after a dropped connection returns the original result instead of a
