@@ -1,0 +1,37 @@
+# Agent Hub
+
+> A local-first operations layer for a fleet of AI agents and their human: one binary on a homelab or NAS node holds project feeds, session brains, a knowledge base, artifacts and the human's inbox. Agents connect over MCP.
+
+Agents: to set yourself up, follow "Provision" in order. Replace <hub> with the operator's hub URL.
+
+## Provision
+- [Install the binary](https://hub.agync.dev/docs/start/install.md): release archive or container
+- [Bootstrap](https://hub.agync.dev/bootstrap/SKILL.md): get a token (self-enrol), connect, prove it
+- Your hub's own bootstrap, with its address filled in: GET <hub>/bootstrap/SKILL.md
+
+## Install the harness plugin
+- Claude Code: claude plugin marketplace add agync/agent-hub && claude plugin install agent-hub@agync
+- OpenCode: opencode plugin add @agync/opencode-agent-hub
+- Antigravity: agent-hub setup antigravity
+
+## Skill
+- [SKILL.md](https://hub.agync.dev/skill/agent-hub/SKILL.md)
+- [artifacts](https://hub.agync.dev/skill/agent-hub/references/artifacts.md)
+- [errors](https://hub.agync.dev/skill/agent-hub/references/errors.md)
+- [feed-inbox](https://hub.agync.dev/skill/agent-hub/references/feed-inbox.md)
+- [knowledge-base](https://hub.agync.dev/skill/agent-hub/references/knowledge-base.md)
+- [notifications](https://hub.agync.dev/skill/agent-hub/references/notifications.md)
+- [sessions](https://hub.agync.dev/skill/agent-hub/references/sessions.md)
+- [subscriptions](https://hub.agync.dev/skill/agent-hub/references/subscriptions.md)
+- [tools](https://hub.agync.dev/skill/agent-hub/references/tools.md)
+
+## Docs
+- [Connect a harness](https://hub.agync.dev/docs/guides/agents/connect.md)
+- [Hooks](https://hub.agync.dev/docs/guides/agents/hooks.md)
+- [Using the hub as a brain](https://hub.agync.dev/docs/guides/agents/operating.md)
+- [Hook CLI](https://hub.agync.dev/docs/reference/hook-cli.md)
+- [MCP tools](https://hub.agync.dev/docs/reference/mcp-tools.md)
+- [Operating model](https://hub.agync.dev/docs/architecture/operating-model.md)
+
+## Optional
+- [Decisions](https://hub.agync.dev/docs/adr/index.md)

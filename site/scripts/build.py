@@ -4,7 +4,7 @@
     build.py assemble --site-url URL --fonts DIR --render DIR <site> <dist>
         Write the landing and not-found pages with the site origin filled
         in, copy the assets and the app's fonts, add the rendered docs under
-        docs/, and write _headers with the hashes of the docs' inline scripts.
+        docs/, publish llms.txt, the bootstrap guide and the skill, and write _headers with the hashes of the docs' inline scripts.
 """
 
 import argparse
@@ -16,7 +16,9 @@ import shutil
 import sys
 
 PAGES = ("index.html", "404.html")
-STATIC = ("favicon.svg", "favicon-32.png", "apple-touch-icon.png", "robots.txt")
+STATIC = ("favicon.svg", "favicon-32.png", "apple-touch-icon.png", "robots.txt", "llms.txt")
+SKILL = pathlib.Path("skills") / "agent-hub"
+BASE_URL = "{{base_url}}"
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*(?:^|\s)src=)([^>]*)>(.*?)</script>", re.S)
 PLACEHOLDER = re.compile(r"@[A-Z_]+@")
 
@@ -33,6 +35,24 @@ def script_hashes(docs: pathlib.Path) -> list[str]:
             digest = base64.b64encode(hashlib.sha256(body.encode("utf-8")).digest()).decode()
             found.add(f"'sha256-{digest}'")
     return sorted(found)
+
+
+def provision_skill(root: pathlib.Path, dist: pathlib.Path) -> None:
+    """Publish the bootstrap guide and the skill, with the hub address left as <hub>.
+
+    A hub serves its own bootstrap with its address filled in; the public copy
+    cannot know it, so it names the placeholder an agent replaces.
+    """
+    source = root / SKILL
+    if not (source / "bootstrap.md").is_file():
+        sys.exit(f"build.py: no skill at {source}")
+    bootstrap = (source / "bootstrap.md").read_text(encoding="utf-8").replace(BASE_URL, "<hub>")
+    (dist / "bootstrap").mkdir()
+    (dist / "bootstrap" / "SKILL.md").write_text(bootstrap, encoding="utf-8")
+    target = dist / "skill" / "agent-hub"
+    shutil.copytree(source, target)
+    copy = target / "bootstrap.md"
+    copy.write_text(copy.read_text(encoding="utf-8").replace(BASE_URL, "<hub>"), encoding="utf-8")
 
 
 def assemble(args: argparse.Namespace) -> None:
@@ -59,6 +79,8 @@ def assemble(args: argparse.Namespace) -> None:
         (dist / name).write_text(text, encoding="utf-8")
     for name in STATIC:
         shutil.copy2(site / name, dist / name)
+
+    provision_skill(site.resolve().parent, dist)
 
     rendered = pathlib.Path(args.render) / "docs"
     if not (rendered / "index.html").is_file():

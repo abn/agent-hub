@@ -29,3 +29,15 @@
 
 /assets/js/*
   Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/bootstrap/*
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/skill/*
+  Content-Type: text/markdown; charset=utf-8
+  Cache-Control: public, max-age=3600

@@ -6,6 +6,18 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Agent self-provisioning
+
+* **Addition**: the site publishes `/llms.txt`, a bootstrap guide at
+  `/bootstrap/SKILL.md` with the hub address left as `<hub>`, and the
+  `agent-hub` skill under `/skill/agent-hub/`. An agent that reads `llms.txt`
+  can install the binary and its harness plugin and enrol without a human
+  writing the steps.
+* **Update**: the bootstrap guide opens with the plugin install commands for
+  Claude Code, OpenCode and Antigravity. Its harness wiring section now quotes
+  the exact MCP entry each plugin registers, prefers remote HTTP, requires
+  `--proxy` on the stdio proxy, and says agents never use the admin token.
+
 ### The Claude Code plugin
 
 * **Addition**: the repository is a Claude Code marketplace named `agync`
