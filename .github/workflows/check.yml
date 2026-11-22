@@ -43,7 +43,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: make web/crypto web/units web/styles
+      - run: make web/crypto web/units web/styles plugins/check
 
   checks:
     name: Rust checks

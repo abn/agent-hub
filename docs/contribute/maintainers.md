@@ -47,3 +47,26 @@ scratch area and is never committed.
 - [Contributor guide](/contribute/guide.md) - the workflow and the gates
 - [Testing](/contribute/testing.md) - the checks a review reads
 - [Documentation](/contribute/documentation.md) - the docs standard
+
+## Releasing the plugins
+
+The three harness plugins release with the hub and share its version:
+`release-please` bumps the Claude, OpenCode and Antigravity manifests together
+with `Cargo.toml`, and `make plugins/check` (run in CI) fails when they drift.
+
+On each release:
+
+- **Claude Code**: nothing to do. The repository is the marketplace, so users
+  receive the new version from `main`.
+- **OpenCode**: the release workflow publishes `@agync/opencode-agent-hub` to
+  npm with provenance, only when the `NPM_TOKEN` secret or the `PUBLISH_NPM`
+  repository variable is set.
+- **Antigravity**: the release workflow attaches
+  `agent-hub-antigravity-<version>.tar.gz` and its checksum to the GitHub
+  release.
+
+Three steps are the owner's, once: create the `@agync` npm organisation and set
+`NPM_TOKEN` (or trusted publishing and `PUBLISH_NPM`), submit the Antigravity
+archive through the marketplace intake form, and, for a Claude directory
+listing, supply an icon and a privacy policy URL. The commands are in the
+repository's `RELEASING.md`.

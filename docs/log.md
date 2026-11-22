@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Plugin releases
+
+* **Addition**: the maintainer guide covers releasing the harness plugins:
+  versions bumped with the hub, the Antigravity archive attached to each
+  release, the OpenCode package published to npm when configured, and the
+  owner's one-time setup.
+
 ### The Antigravity plugin
 
 * **Addition**: `agent-hub setup antigravity` installs the hub plugin into
