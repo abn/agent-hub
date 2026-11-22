@@ -33,7 +33,11 @@ import { render } from "./router.mjs";
 import { renderMarkdown } from "./sessions.mjs";
 import { installShellLayout, shellHTML } from "./shell-layout.mjs";
 import { deadlineWords, relative, stamp } from "./time.mjs";
-import { toast } from "./toast.mjs";
+import { quoted, toast } from "./toast.mjs";
+
+// The item a toast or dialog names: the subject the item's own card is titled
+// with, in curly quotes and clamped to a line.
+export const named = (summary, fallback = "") => quoted(subjectAndMessage(summary).subject, fallback);
 
 // Where closing an item goes: the stream it was opened from.
 const BACK = "#/home";
@@ -427,6 +431,9 @@ function mountReply() {
   const slot = main.querySelector(".inbox-reply");
   if (!slot) return;
   const isIdea = /** @type {HTMLElement} */ (slot).dataset.kind === "idea";
+  // The item this composer was mounted for: another may open while the send is
+  // in flight, and the toast names the one that was answered.
+  const { summary, landing } = shown;
   const reply = composer({
     label: isIdea ? "Add an addendum" : "Your answer",
     options: optionsFrom(/** @type {HTMLElement} */ (slot).dataset.options),
@@ -436,15 +443,16 @@ function mountReply() {
         // An addendum adds to the idea and leaves it open, so the item stays.
         await sendIdeaReply(/** @type {HTMLElement} */ (slot).dataset.id, body);
         await render();
-        toast("Addendum logged on the idea's thread.");
+        toast(`Addendum logged on ${named(summary, "the idea")}.`);
       } else {
         const queued = await answerWith(/** @type {HTMLElement} */ (slot).dataset.id, body);
         if (queued) {
           toast("Queued, will send when online.");
           return;
         }
-        await leave(shown.landing);
-        toast("Answer sent, recorded on the feed.");
+        const subject = named(summary, "the question");
+        await leave(landing);
+        toast(`Answer sent on ${subject}, recorded on the feed.`);
       }
     },
   });
@@ -532,8 +540,9 @@ export async function inbox(gen) {
   dropCard();
   if (!opened) {
     // Decided or answered elsewhere, or a link to something pruned.
-    history.replaceState(history.state, "", BACK);
+    history.replaceState(history.state, "", "#/home?show=needs");
     await render();
+    toast("That item is no longer waiting. Showing what needs you.");
     return;
   }
   const [session, replies] = await Promise.all([sessionOf(opened), repliesOf(opened)]);
@@ -608,7 +617,7 @@ export async function actOnIdea(id, status, summary, landing = "") {
     history.replaceState(history.state, "", landing);
   }
   await render();
-  toast(`${status === "cleared" ? "Cleared" : "Resolved"} "${summary || id}".`);
+  toast(`${status === "cleared" ? "Cleared" : "Resolved"} ${named(summary, id)}.`);
 }
 
 function isOfflineError(error) {
@@ -657,6 +666,9 @@ export async function answer(id, button, { onSent } = {}) {
     /** @type {HTMLElement} */ (open.querySelector(".composer-field")).focus();
     return;
   }
+  // The subject is read now: the list redraws under the composer, and the
+  // button it was typed from may be gone by the time the answer is sent.
+  const subject = named(button.dataset.summary, "the question");
   const reply = composer({
     label: "Your answer",
     options: optionsFrom(button.dataset.options),
@@ -667,7 +679,7 @@ export async function answer(id, button, { onSent } = {}) {
         return;
       }
       await render();
-      toast("Answer sent, recorded on the feed.");
+      toast(`Answer sent on ${subject}, recorded on the feed.`);
       onSent?.();
     },
   });
@@ -729,7 +741,7 @@ async function send(id, decision, note, landing) {
 // dialog names what is decided and the toast states the result. The request
 // is sent with the dialog still open: a refusal lands beside the note rather
 // than after the words are gone.
-async function ask(id, decision, { title, danger, tone, done, landing }) {
+async function ask(id, decision, { title, danger, tone, done, summary, landing }) {
   if (deciding.has(id)) return;
   let noted = false;
   let queued = false;
@@ -747,26 +759,28 @@ async function ask(id, decision, { title, danger, tone, done, landing }) {
   });
   if (confirmed) {
     if (queued) toast("Queued, will send when online.");
-    else toast(`${done}${noted ? " with your note" : ""}, recorded on the feed.`);
+    else toast(`${done} ${named(summary, "this action")}${noted ? " with your note" : ""}, recorded on the feed.`);
   }
 }
 
 export const approve = (id, summary, { landing = "" } = {}) =>
   ask(id, "approve", {
-    title: summary ? `Approve "${summary}"?` : "Approve this action?",
+    title: summary ? `Approve ${named(summary)}?` : "Approve this action?",
     danger: "Approve",
     tone: "action",
     done: "Approved",
+    summary,
     landing,
   });
 
 // The other answer to the same question, asked the same way.
 export const declineApproval = (id, summary, { landing = "" } = {}) =>
   ask(id, "decline", {
-    title: summary ? `Decline "${summary}"?` : "Decline this action?",
+    title: summary ? `Decline ${named(summary)}?` : "Decline this action?",
     danger: "Decline",
     tone: "action",
     done: "Declined",
+    summary,
     landing,
   });
 
@@ -801,14 +815,14 @@ main.addEventListener("click", (event) => {
   else if (verb === "snooze") {
     snooze(id);
     work = leave(landing).then(() =>
-      toast(`Snoozed "${summary || id}" for 1 hour, on this device.`, () => {
+      toast(`Snoozed ${named(summary, id)} for 1 hour, on this device.`, () => {
         unsnooze(id);
         render().catch(failed);
       }),
     );
   } else if (verb === "unsnooze") {
     unsnooze(id);
-    work = render().then(() => toast(`Brought "${summary || id}" back.`));
+    work = render().then(() => toast(`Brought ${named(summary, id)} back.`));
   } else if (verb === "approve") work = approve(id, summary, { landing });
   else if (verb === "decline") work = declineApproval(id, summary, { landing });
   else if (verb === "resolve") work = actOnIdea(id, "resolved", summary, landing);

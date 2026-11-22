@@ -9,7 +9,7 @@ import { esc, glyph, kindMark, kindName, main, optionsAttr, paint, projectName, 
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { formatEventSummary } from "./feed.mjs";
 import { glyphSvg } from "./glyphs.mjs";
-import { actOnIdea, answer, answerWith, approve, declineApproval } from "./inbox.mjs";
+import { actOnIdea, answer, answerWith, approve, declineApproval, named } from "./inbox.mjs";
 import { registerScreen } from "./keys.mjs";
 import {
   askSentenceHTML,
@@ -116,7 +116,7 @@ function askActions(item, snoozedUntil) {
     options.forEach((option, at) => {
       verbs.push(button("choose", option, String(at + 1), ` data-choice="${esc(option)}"`, at === 0));
     });
-    const reply = `<button type="button" class="${options.length ? "now-sec" : "now-pri"}" data-now="reply" data-id="${id}" data-key="${options.length ? "r" : "1 r"}"${optionsAttr(item.payload)}>Reply${kbd(options.length ? "r" : "1")}</button>`;
+    const reply = `<button type="button" class="${options.length ? "now-sec" : "now-pri"}" data-now="reply" data-id="${id}" data-summary="${summary}" data-key="${options.length ? "r" : "1 r"}"${optionsAttr(item.payload)}>Reply${kbd(options.length ? "r" : "1")}</button>`;
     // With suggested answers Reply is a secondary, on the bottom line; with
     // none it is the one answer and stays first.
     (options.length ? foot : verbs).push(reply);
@@ -308,7 +308,7 @@ export async function now(gen) {
   } else if (!tiers) {
     body = intro + ledger("now-empty", emptyStateHTML(EMPTY_COPY.now, {}, { action: "new-project" }));
   } else {
-    const end = endingLine({ needs: show === "since" ? 0 : needs, oldest: show === "needs" ? null : oldest, now: at });
+    const end = endingLine({ needs: show === "since" ? 0 : needs, oldest: show === "needs" ? null : oldest, now: at, scope: show });
     body = intro + tiers + ledger("now-end", `<p class="now-end-line"><span class="now-end-k" aria-hidden="true">${glyphSvg("resolve", { size: 16, strokeWidth: 2 })}</span>${esc(end)}</p>`);
   }
 
@@ -413,7 +413,7 @@ main.addEventListener("click", (event) => {
     next();
     work = answerWith(id, button.dataset.choice).then(async (queued) => {
       await render();
-      toast(queued ? "Queued, will send when online." : `Answered "${button.dataset.choice}", recorded on the feed.`);
+      toast(queued ? "Queued, will send when online." : `Answered ${named(summary, id)} with \u201c${button.dataset.choice}\u201d, recorded on the feed.`);
     });
   } else if (verb === "reply") {
     work = answer(id, button, { onSent: () => focusAskAt(index) });
@@ -424,7 +424,7 @@ main.addEventListener("click", (event) => {
     snooze(id);
     pendingFocus = () => focusAskAt(index);
     work = render().then(() =>
-      toast(`Snoozed "${summary || id}" for 1 hour, on this device.`, () => {
+      toast(`Snoozed ${named(summary, id)} for 1 hour, on this device.`, () => {
         unsnooze(id);
         render().catch(failed);
       }),
@@ -432,7 +432,7 @@ main.addEventListener("click", (event) => {
   } else if (verb === "unsnooze") {
     unsnooze(id);
     pendingFocus = () => /** @type {HTMLElement} */ (main.querySelector(`.now-ask [data-id="${CSS.escape(id)}"]`)?.closest(".now-ask"))?.focus();
-    work = render().then(() => toast(`Brought "${summary || id}" back.`));
+    work = render().then(() => toast(`Brought ${named(summary, id)} back.`));
   }
   if (work) work.catch(failed);
 });

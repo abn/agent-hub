@@ -29,8 +29,69 @@ document.body.appendChild(region);
 
 let current = null;
 
+// The controls that sit at the foot of the screen and that a toast must not
+// cover: the phone's tab bar and item thumb bar, and a desktop editor's action
+// row. Only the ones drawn are measured.
+const BOTTOM_CHROME = ".tabbar, .item-thumb, .wiki-editor-actions";
+
+// Lift the region above whatever bottom chrome is drawn under where the toast
+// will stand, so what the reader may press next is never behind it.
+function clearControls() {
+  const width = Math.min(420, window.innerWidth - 32);
+  const left = (window.innerWidth - width) / 2;
+  const right = left + width;
+  let top = window.innerHeight;
+  for (const control of document.querySelectorAll(BOTTOM_CHROME)) {
+    const box = control.getBoundingClientRect();
+    if (!box.width || !box.height || box.bottom <= window.innerHeight / 2) continue;
+    if (box.right <= left || box.left >= right) continue;
+    top = Math.min(top, box.top);
+  }
+  const lift = top < window.innerHeight ? `${Math.ceil(window.innerHeight - top)}px` : "";
+  if (region.style.getPropertyValue("--toast-lift") === lift) return;
+  if (lift) region.style.setProperty("--toast-lift", lift);
+  else region.style.removeProperty("--toast-lift");
+}
+
+// The chrome under a toast changes while it stands: a sheet opens or closes,
+// the window is resized, the route moves on. Re-measure on each, once per
+// frame, and stop when the toast goes.
+function watchControls() {
+  let frame = 0;
+  const hasFrames = typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function";
+  const cancel = () => (hasFrames ? cancelAnimationFrame(frame) : clearTimeout(frame));
+  const measure = () => {
+    cancel();
+    frame = hasFrames ? requestAnimationFrame(clearControls) : setTimeout(clearControls, 16);
+  };
+  const mutated = new MutationObserver((records) => {
+    if (records.some((record) => !region.contains(record.target))) measure();
+  });
+  mutated.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden", "style"] });
+  const resized = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+  resized?.observe(document.documentElement);
+  window.addEventListener("resize", measure);
+  window.addEventListener("hashchange", measure);
+  return () => {
+    cancel();
+    mutated.disconnect();
+    resized?.disconnect();
+    window.removeEventListener("resize", measure);
+    window.removeEventListener("hashchange", measure);
+  };
+}
+
+// A subject a toast names: the item's own words, cut to a line, in the same
+// curly quotes the dialogs use.
+export function quoted(summary, fallback = "") {
+  const text = String(summary || fallback).replace(/\s+/g, " ").trim();
+  const clamped = text.length > 48 ? `${text.slice(0, 47).trimEnd()}…` : text;
+  return `\u201c${clamped}\u201d`;
+}
+
 function dismiss() {
   if (!current) return;
+  current.unwatch();
   clearInterval(current.tick);
   clearTimeout(current.timer);
   const held = current.el.contains(document.activeElement);
@@ -134,7 +195,8 @@ export function toast(message, undo) {
 
   swipeToDismiss(el);
   region.appendChild(el);
-  current = { el, tick: 0, timer: 0 };
+  clearControls();
+  current = { el, tick: 0, timer: 0, unwatch: watchControls() };
 
   if (undoButton) {
     current.tick = setInterval(() => {

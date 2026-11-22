@@ -166,12 +166,13 @@ describe("the closing line", () => {
     const now = new Date(NOW);
     now.setHours(22, 40, 0, 0);
     expect(endingLine({ needs: 2, oldest: oldest.getTime(), now: now.getTime() })).toBe(
-      "That is everything since 18:05. Two answers and the desk is clear.",
+      "That is everything since 18:05. Two asks to go and the desk is clear.",
     );
     expect(endingLine({ needs: 1, oldest: null, now: now.getTime() })).toBe(
-      "That is everything. One answer and the desk is clear.",
+      "That is everything. One ask to go and the desk is clear.",
     );
     expect(endingLine({ needs: 0, oldest: null })).toBe("That is everything.");
+    expect(endingLine({ needs: 3, oldest: null, scope: "needs" })).toBe("That is every ask waiting on you.");
   });
 });
 

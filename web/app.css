@@ -1447,11 +1447,14 @@ html.has-dialog { overflow: hidden; }
   color: var(--ink-inverse); font-weight: 600;
 }
 
-/* component: toast. One at a time, above the tab bar, carrying the way back
+/* component: toast. One at a time, above the bottom chrome, carrying the way back
    from what just happened. */
 .toast-region {
   position: fixed; z-index: 40; left: var(--s-4); right: var(--s-4);
-  bottom: calc(56px + var(--s-2) + env(safe-area-inset-bottom, 0px));
+  /* The script sets --toast-lift to the height of the bottom chrome drawn
+     under the toast, so it stands above the tab bar, the item's thumb bar or
+     an editor's actions, whichever is there. */
+  bottom: calc(var(--toast-lift, env(safe-area-inset-bottom, 0px)) + var(--s-4));
   display: flex; justify-content: center; pointer-events: none;
 }
 .toast {
@@ -1474,9 +1477,6 @@ html.has-dialog { overflow: hidden; }
 @media (pointer: coarse) {
   /* The drawn box stays 32px, as the design has it; the finger gets 44. */
   .toast-undo::after, .toast-close::after { content: ""; position: absolute; inset: -6px; }
-}
-@media (min-width: 720px) {
-  .toast-region { bottom: calc(var(--s-4) + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* component: composer. The one control a reply or a comment is written in.

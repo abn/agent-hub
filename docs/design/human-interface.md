@@ -286,8 +286,9 @@ three chips, All, Needs you and Since you looked, each with its count.
   and marks every unread item read.
 - **Quiet** is the rest of the recent events, folded under its count behind
   Show.
-- **The end** is one calm line: "That is everything since 18:05. Two answers
-  and the desk is clear."
+- **The end** is one calm line: "That is everything since 18:05. Two asks to
+  go and the desk is clear." Under the Needs you chip it reads "That is every
+  ask waiting on you."
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/now-desktop-dark.png">

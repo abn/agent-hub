@@ -235,10 +235,14 @@ export function summaryHTML({ now = [], later = 0, since = 0, agents = 0, unlist
 
 // The closing line, plain text: how far back the stream reaches, and what is
 // left to do.
-export function endingLine({ needs = 0, oldest = null, now = Date.now() } = {}) {
+// `scope` is the chip the reader has pressed: a line under Needs you speaks of
+// what waits on them and not of the stream, and an ask may be an approval, so
+// the count is of asks and not of answers.
+export function endingLine({ needs = 0, oldest = null, now = Date.now(), scope = "" } = {}) {
+  if (scope === "needs") return "That is every ask waiting on you.";
   const reach = oldest === null ? "That is everything." : `That is everything since ${placeTime(oldest, now)}.`;
   if (!needs) return reach;
-  return `${reach} ${capital(word(needs))} ${needs === 1 ? "answer" : "answers"} and the desk is clear.`;
+  return `${reach} ${capital(word(needs))} ${needs === 1 ? "ask" : "asks"} to go and the desk is clear.`;
 }
 
 // What each kind did, for the sentence a row reads as.
