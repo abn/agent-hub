@@ -43,6 +43,18 @@ structurally impossible. The hub event store runs under the engine's concurrent
 journal mode. The wrapper is also the single place that writes the search
 index, on every change it makes.
 
+## The client side
+
+The same binary is also the client on an agent's host. It carries the stdio
+proxy, the one-shot `call` and `kb` commands, and the `hook` and `watch`
+commands that a harness runs as shell hooks. They start and resume a session,
+read what is waiting through the peek route, and hold a long peek for an idle
+agent, all against the hub's public MCP and REST surface and with no store of
+their own beyond a small per-session state file. A harness that runs plugin code
+in process, such as OpenCode, implements the same contract in its own language.
+Neither adds a process to the hub: the plugins are installed in the harness, not
+in the node. See [Harness plugins](/guides/agents/plugins.md).
+
 The tools the MCP server exposes are in [MCP tools](/reference/mcp-tools.md);
 the routes the HTTP API serves are in [REST API](/reference/rest-api.md).
 

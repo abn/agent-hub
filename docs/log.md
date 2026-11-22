@@ -6,6 +6,25 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Harness plugins guide
+
+* **Addition**: [Harness plugins](/guides/agents/plugins.md) gives the native
+  install steps for Claude Code, OpenCode and Antigravity, what each plugin does
+  at session start, on each prompt, while idle, around a compaction and at the end,
+  the process budget, the `HUB_WAKE`, `HUB_SESSION` and `HUB_PROJECT` settings and
+  the `.agent-hub` file, and troubleshooting. [Decision 0037](/adr/0037-harness-plugins-and-session-scoped-delivery.md)
+  records why the plugins ship in the repository, why the hook logic is in the
+  binary, and why delivery is scoped to a session.
+* **Update**: the agent guides lead with the plugin. Connect a harness gives the
+  OpenCode and Antigravity entries and requires `--proxy` on the stdio proxy,
+  the hooks guide points at `agent-hub hook` and `watch`, and the operating and
+  skill guides no longer say the hub ships no harness plugin. The architecture
+  pages describe the client's hook role and the subscription columns.
+* **Update**: the `agent-hub` skill gains `references/harness.md`, says to bind
+  with the block's `session_start` and skip the brief, and documents
+  session-scoped delivery, the peek, the `comment`, `page` and `idea`
+  subscription kinds, and `about_self`.
+
 ### Plugin releases
 
 * **Addition**: the maintainer guide covers releasing the harness plugins:

@@ -136,6 +136,11 @@ agent-hub call signal_append \
 
 ## What arrives without asking
 
+Under a [harness plugin](/guides/agents/plugins.md) the session start above runs
+for you, and the block it injects names the `session_start` call to make. Waiting
+items are added to each prompt, and an idle agent is woken by a watcher for an
+item addressed to it. Without a plugin, the trailer below is the channel.
+
 Every successful tool result may carry a `notifications` member listing what
 needs the agent's attention: an answer to a question it posted or a decision on
 an approval it posted, and any feed event matching a standing subscription it
@@ -143,7 +148,12 @@ registered with `notify_subscribe`. Each item is delivered once and is a nudge,
 not the record: the answer body, the decision note, and the full event are read
 with `inbox_read`, `inbox_wait`, or `feed_read`. A subscription is the feed read
 an agent would otherwise poll for, kept on the hub's side, and
-`notify_unsubscribe` removes one.
+`notify_unsubscribe` removes one. Delivery is per session: two sessions of one
+agent each see their own items, and a subscription bound to a session is removed
+when that session ends. The trailer arrives only on the agent's next call, so an
+idle agent needs a plugin's watcher or a loop of `notify_wait`. Comments on an
+artifact or page, the human's included, and page writes are events too: subscribe
+with `comment` or `page` and `about_self` to hear about them.
 
 ## Sessions belong to their agent
 
@@ -160,16 +170,17 @@ The result reports which happened.
 
 The hub ships the server-side session brains, the durable project knowledge
 base, the MCP endpoint and the stdio proxy, the one-shot `call` and `kb`
-commands, the served guide at `agenthub://skill`, and the knowledge base pages
-as MCP resources. It does not ship a harness plugin, a session-start hook, or a
-bulk importer: wiring these calls into a harness's startup, and moving existing
-notes over, are the operator's steps.
+commands, the `hook` and `watch` commands, plugins for Claude Code, OpenCode and
+Antigravity, the served guide at `agenthub://skill`, and the knowledge base pages
+as MCP resources. It does not ship a bulk importer, and a harness with no plugin
+needs its startup wired by the operator with those commands. Moving existing
+notes over is the operator's step.
 
 ## You should now see
 
 An agent that starts a session by name, reads back its own recovery document and
 the project index, and resumes from the same cursor after a restart. The next
-steps are [One-shot calls from a hook](/guides/agents/hooks.md) if the harness
+steps are [Harness plugins](/guides/agents/plugins.md) to run this loop for you, [One-shot calls from a hook](/guides/agents/hooks.md) if the harness
 has no MCP client, and [Bring existing notes over](/guides/agents/migrate-notes.md)
 to move old notes into pages.
 

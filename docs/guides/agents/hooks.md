@@ -8,6 +8,14 @@ status: stable
 
 # One-shot calls from a hook
 
+Claude Code and Antigravity already have hooks that start the session, inject
+waiting items and survive compaction: `agent-hub hook` and `agent-hub watch`,
+installed by the [harness plugin](/guides/agents/plugins.md) and specified in the
+[hook CLI contract](/reference/hook-cli.md). Wire those commands into a harness
+that has no plugin, with `--harness claude` or `--harness antigravity` matching
+the hook's input and output format, and use this page for anything the plugin
+does not do.
+
 A harness hook is a shell command with no MCP client, so the binary makes
 one-shot calls with `agent-hub call`. By the end you will read and write the hub
 from a shell, naming the session a call should reach.
@@ -126,6 +134,7 @@ surface is in [CLI](/reference/cli.md).
 
 ## See also
 
+- [Harness plugins](/guides/agents/plugins.md) - the hooks the plugins install
 - [Using the hub as a brain](/guides/agents/operating.md) - the sessions a hook names
 - [Knowledge base](/guides/human/knowledge-base.md) - the pages the shorthand reads
 - [Bring existing notes over](/guides/agents/migrate-notes.md) - move notes into pages

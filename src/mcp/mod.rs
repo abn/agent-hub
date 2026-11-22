@@ -179,6 +179,10 @@ const SKILL_FILES: &[SkillFile] = &[
         body: include_str!("../../skills/agent-hub/references/feed-inbox.md"),
     },
     SkillFile {
+        rel: "references/harness.md",
+        body: include_str!("../../skills/agent-hub/references/harness.md"),
+    },
+    SkillFile {
         rel: "references/knowledge-base.md",
         body: include_str!("../../skills/agent-hub/references/knowledge-base.md"),
     },

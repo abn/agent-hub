@@ -8,9 +8,9 @@ status: stable
 
 # The agent-hub skill
 
-The hub ships the primitives, not a harness plugin: a served guide an agent
-reads, and an installable skill that carries the workflow. This page describes
-both, and where the boundary between shipped and manual falls.
+The hub serves a guide an agent reads and an installable skill that carries the
+workflow. The harness plugins bring the same skill with them. This page
+describes all of it, and where the boundary between shipped and manual falls.
 
 ## What the hub serves
 
@@ -70,10 +70,21 @@ base, the MCP endpoint and the stdio proxy, the one-shot `call` and `kb`
 commands, the served guide at `agenthub://skill`, and the knowledge base pages
 as MCP resources.
 
-It does not ship a harness plugin, a session-start hook, or a bulk importer.
-Wiring the session-start calls into a harness's startup, and choosing and moving
-the notes to bring over, are steps the operator takes. The hub exposes the
-primitives; the integration is yours.
+It also ships the [harness plugins](/guides/agents/plugins.md) for Claude Code,
+OpenCode and Antigravity, and the `hook` and `watch` commands they run. It does
+not ship a bulk importer: choosing and moving the notes to bring over is a step
+the operator takes.
+
+## Where each plugin gets the skill
+
+| Harness | The skill |
+|---|---|
+| Claude Code | the plugin carries it, the same files as `skills/agent-hub` in the repository |
+| OpenCode | not bundled. Install it with `npx skills add agync/agent-hub`, or read it over MCP |
+| Antigravity | the plugin carries it, with a short always-on rule that points at it |
+
+The skill's `references/harness.md` tells the agent what a plugin has already
+done, so it does not run the session ritual twice.
 
 ## You should now see
 

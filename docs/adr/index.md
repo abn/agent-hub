@@ -58,3 +58,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   are derived facts
 * [0036](0036-declared-names-beside-a-token.md) - A name declared beside a
   token is attribution only
+* [0037](0037-harness-plugins-and-session-scoped-delivery.md) - Harness plugins
+  and session-scoped delivery
