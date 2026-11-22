@@ -21,12 +21,21 @@ Expected: `project_id`, `project_source` (`env`, `file`, `origin`, `dir`,
 `harness_session`) and `context_line` (a string, or `null`; several lines are
 joined with a newline).
 
+When the session name falls to the harness session, it is
+`<harness>-<short id>`: the first 8 characters of `harness_session_id` once
+characters outside `[A-Za-z0-9_-]` are removed, or the first 8 hex characters of
+the SHA-256 of the whole id (UTF-8 bytes) when fewer than 8 remain.
+
 ## notice-*
 
 Input: `hub_wake` (`direct`, `all`, `never`, an unknown string, or `null` for
 unset), `now` and `last_wake_at` (epoch seconds, or `null`), and `items`, each
 `{id, kind, title, project, direct}`. `direct` is computed by the server and is
 plain input here.
+
+Every item field is flattened (runs of whitespace become one space, the ends are
+trimmed) and has `<agent-hub` and `</agent-hub` rewritten to `<agent_hub` and
+`</agent_hub`, in any letter case; the title is cut afterwards.
 
 Expected: `lines` (a line per input item, in order), `wake` (whether an idle
 agent is woken) and `watch_lines` (what `watch` prints before exiting `2`: every
@@ -40,6 +49,9 @@ Input: `project_id`, `session_name`, `session_id` (or `null`), `actor`,
 header line), `brief`,
 `anchor` (`{phase, age, lines}` or `null`), `handoff`, `kb_index` and `pending`
 (notice lines). Lists are lines before any cap.
+
+Every text field (the names, the session id, the anchor phase and age, and every
+line) is flattened and has the tag rewritten, as in `notice-*`, before it is cut.
 
 Expected: `text`, the whole `<agent-hub>` block without a trailing newline, and
 `truncated`, whether the cap removed lines.

@@ -21,6 +21,9 @@ agent-hub call <tool> [json]   call one tool and print its JSON result
 agent-hub tools                list the hub's tools
 agent-hub kb <command>         read and write the project knowledge base
 agent-hub project <command>    create, list, and delete projects
+agent-hub hook <event>         run one harness hook against the hub
+agent-hub watch                wait for items that may wake an idle agent
+agent-hub setup <harness>      install the hub plugin into a harness
 agent-hub config [flags]       inspect and validate configuration
 agent-hub enrol [why]          request enrolment and wait for operator approval
 agent-hub backup --out DIR     back up the store while no hub serves it
@@ -202,6 +205,23 @@ token; deleting is the admin's, and a caller without the admin token gets the
 hub's own refusal. `--plain` prints one project per line instead of JSON. For
 `delete`, `--id` defaults to the `HUB_PROJECT` setting.
 
+## `hook`, `watch` and `setup`
+
+```text
+agent-hub hook <event> --harness claude|antigravity
+agent-hub watch --harness claude [--max-seconds N]
+agent-hub setup antigravity [--workspace DIR]
+```
+
+The commands a coding harness runs as shell hooks. `hook` reads the harness's
+hook JSON on stdin, prints the harness's own output on stdout, and always exits
+0: on any failure it prints the no-op and one line on stderr. `watch` is the idle
+watcher a Claude Code `Stop` hook runs in the background; it exits 0, or 2 to
+wake an idle session, and 64 for a bad command line, never 2. Their settings,
+the events, the output formats and the rules for resolving the project and the
+session are in [Hook CLI contract](/reference/hook-cli.md). `setup antigravity`
+installs the Antigravity plugin and is not available in every build.
+
 ## `config`
 
 ```sh
@@ -258,8 +278,8 @@ the store stops answering.
 ## The client feature
 
 The client subcommands (the stdio proxy, `call`, `tools`, `kb`, `project`,
-`config`, `enrol`, and the offline data operations) are a cargo feature named
-`client`, on by default. A build with `--no-default-features` serves only, which
+`hook`, `watch`, `setup`, `config`, `enrol`, and the offline data operations) are
+a cargo feature named `client`, on by default. A build with `--no-default-features` serves only, which
 is what the container image needs; there the client subcommands report that the
 binary was built without the client.
 

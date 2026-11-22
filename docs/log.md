@@ -6,6 +6,34 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The hook CLI
+
+* **Addition**: `agent-hub hook`, `agent-hub watch` and `agent-hub setup` are
+  the client commands a coding harness runs as shell hooks. `hook` starts and
+  resumes a hub session, injects waiting items on each prompt with one request
+  when nothing waits, and keeps the session through compaction. `watch` holds a
+  long peek for an idle Claude Code session and exits 2 to wake it. See
+  [CLI](/reference/cli.md).
+* **Update**: the [hook contract](/reference/hook-cli.md) is stable. The watcher
+  follows the peek response's `cursor` rather than a last seen id. The page
+  records what each event calls, the time budgets, the lock, the layers a token
+  is bound to, the agent name settings and the exit code of a bad `watch`
+  command line.
+* **Update**: the hook contract states how a hook keeps its footing. Every
+  invocation has one absolute deadline, hub-sourced text in the `agent-hub`
+  block and in notice lines is flattened and cannot carry the block's own tag,
+  a session named from a harness id that is not plain text gets a hash-based
+  short id, a transcript is read only from the harness's own directory, and a
+  watcher is held by a kernel lock and stopped by the removal of its session
+  state, with no signals and no process ids.
+* **Update**: the hook contract states how the locks and the deadlines hold.
+  The state lock is tried until the invocation's deadline and never waited on,
+  the watcher lock is never deleted and is held until the process exits, a
+  watcher fails closed when its lock cannot be taken, git output is drained
+  while git runs, a transcript is checked again after it is opened, a config
+  file that is not a regular file is not read, and stdin that stays open is
+  read as far as it is complete JSON.
+
 ### Session-scoped delivery and the peek route
 
 * **Addition**: `GET /api/v1/me/pending` reads what the notification trailer

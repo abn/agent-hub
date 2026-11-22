@@ -3,6 +3,7 @@
 // readTopLevelFile collect them from the machine.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { clip, flatten } from "./format.mjs";
 
@@ -11,6 +12,14 @@ const NAME_MAX = 64;
 const PERSONAL_LINE = "no project matched; write `.agent-hub` to pin one";
 
 const chars = (text) => Array.from(text);
+
+// The first 8 characters of the harness id that a session name may hold. An id
+// with fewer than 8 such characters is named by the start of its SHA-256.
+export function shortSessionId(harnessSessionId) {
+  const valid = String(harnessSessionId).replace(/[^A-Za-z0-9_-]/gu, "");
+  if (valid.length >= 8) return valid.slice(0, 8);
+  return createHash("sha256").update(String(harnessSessionId), "utf8").digest("hex").slice(0, 8);
+}
 
 export function slug(text) {
   const lowered = String(text).replace(/[A-Z]/g, (c) => c.toLowerCase());
@@ -96,7 +105,7 @@ export function resolveContext(input) {
   }
   if (!session) {
     session = {
-      session_name: `${harness}-${chars(harness_session_id).slice(0, 8).join("")}`,
+      session_name: `${harness}-${shortSessionId(harness_session_id)}`,
       session_source: "harness_session",
     };
   }

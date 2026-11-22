@@ -21,6 +21,7 @@ use crate::config::ClientConfig;
 
 pub mod backup;
 pub mod enrol;
+pub mod hook;
 pub mod kb_bundle;
 pub mod projects;
 mod proxy;

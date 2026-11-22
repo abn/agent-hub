@@ -1,0 +1,28 @@
+{
+  "name": "resolve-session-harness-id-all-non-ascii-is-hashed",
+  "input": {
+    "harness": "claude",
+    "harness_session_id": "\u00e9/\u00fc \u00f1",
+    "cwd": "/work/agent-hub",
+    "env": {},
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/agent-hub",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "main",
+      "detached": false
+    },
+    "files": {},
+    "known_projects": [
+      "agent-hub"
+    ],
+    "personal_project": "abn-claude"
+  },
+  "expected": {
+    "project_id": "agent-hub",
+    "project_source": "origin",
+    "session_name": "claude-9cbbe3e1",
+    "session_source": "harness_session",
+    "context_line": null
+  }
+}

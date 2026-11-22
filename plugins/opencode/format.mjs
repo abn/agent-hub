@@ -20,8 +20,14 @@ export function flatten(text) {
     .replace(/^ | $/g, "");
 }
 
+// A hub-sourced field is one line, and cannot open or close the block it sits in.
+export function sanitize(text) {
+  return flatten(text).replace(/<(\/?)agent-hub/gi, "<$1agent_hub");
+}
+
 export function noticeLine(item) {
-  return `- [${item.kind}] ${clip(flatten(item.title), TITLE_MAX)} (${item.project}, ${item.id})`;
+  const title = clip(sanitize(item.title), TITLE_MAX);
+  return `- [${sanitize(item.kind)}] ${title} (${sanitize(item.project)}, ${sanitize(item.id)})`;
 }
 
 export function wakeMode(value) {
@@ -40,11 +46,17 @@ export function notices({ hub_wake, now, last_wake_at, items }) {
   return { lines, wake, watch_lines: wake ? ordered.map(noticeLine) : [] };
 }
 
-const cut = (lines, max) => lines.slice(0, max).map((line) => clip(line, LINE_MAX));
+const cut = (lines, max) => lines.slice(0, max).map((line) => clip(sanitize(line), LINE_MAX));
 
 export function contextBlock(input) {
-  const { project_id, session_name, session_id, actor, anchor } = input;
-  const contextLines = input.context_lines ?? [];
+  const project_id = sanitize(input.project_id);
+  const session_name = sanitize(input.session_name);
+  const session_id = input.session_id ? sanitize(input.session_id) : null;
+  const actor = sanitize(input.actor);
+  const anchor = input.anchor
+    ? { ...input.anchor, phase: sanitize(input.anchor.phase), age: sanitize(input.anchor.age) }
+    : null;
+  const contextLines = (input.context_lines ?? []).map(sanitize);
   const head = [
     `project ${project_id} | session ${session_name}${session_id ? ` (${session_id})` : ""} | you are ${actor}`,
     ...contextLines,
