@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The Artifacts list folds extra projects into a menu
+
+* **Update**: [Human interface](/design/human-interface.md) says that on a wide
+  stage the Artifacts control row keeps the three busiest projects as chips and
+  lists the rest in a More menu when a hub has five or more projects.
+
 ### The register lists agent spaces and filters on a phone
 
 * **Update**: [Human interface](/design/human-interface.md) says a desktop

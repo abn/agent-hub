@@ -444,8 +444,11 @@ version moved past the one you last read on this device, and those published
 since this device started keeping count, with **Mark seen**. **Earlier** holds
 the rest, newest first, ten rows and then how many more there are and how far
 back they reach, with **Show all**. Opening an artifact counts as looking at
-it. The control row narrows the list to one project with a chip each, and on a
-fine pointer names the keys: `j` and `k` move the focus and `o` opens. On a
+it. The control row narrows the list to one project with a chip each. On a
+wide stage a hub with five or more projects keeps the three with the most
+artifacts as chips and lists the rest, with their counts, in a **More** menu;
+a project picked from it stays on the row as a selected chip. On a fine
+pointer the row also names the keys: `j` and `k` move the focus and `o` opens. On a
 wide stage a margin beside the list previews the focused row: its state, its
 comments, the event that published it, its path with a copy glyph, its last
 versions with their summaries, and Open. A phone shows the list alone.

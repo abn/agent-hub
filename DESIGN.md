@@ -875,6 +875,14 @@ Projects register, Agents and access, Connect, and the knowledge base.
   - **Deviation: chips name projects as the rail does.** The handoff writes
     project ids in lower case; the chips and the row lines use each project's
     display name, as the rail does, and the path keeps the id.
+  - **Deviation: many projects fold into a More menu.** The handoff draws one
+    chip per project. From 720px wide, a hub with five or more projects keeps
+    All, the three projects with the most artifacts and a More menu (the
+    Group menu's component: menu, arrow keys, Escape back to the trigger,
+    checked item shown with a check mark) in the 40px row, so the row never
+    runs past the pane and the key hints stay in it; chip names are cut with
+    an ellipsis before More or the hints give way, and the counts stay whole. A folded project that is the current filter shows as
+    a selected chip after the three. A phone keeps the scrolling strip.
   - **Deviation: Copy path is a glyph.** The handoff draws a text "Copy path"
     button beside Open. The copy rule puts a glyph on the line that holds the
     string, so the preview carries the path with its glyph.

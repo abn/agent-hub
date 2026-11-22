@@ -147,6 +147,132 @@ test.describe("the artifacts list", () => {
     await expect(rows(page)).toHaveCount(1);
   });
 
+  // A hub with many projects: counts 9, 5, 4, 3, 2, 2, 1, 1, so the busiest
+  // three are chips and the other five sit in the More menu. The API lists
+  // them in a different order, so the ranking is the list's own.
+  const MANY = [
+    ["roundhouse-with-a-long-name", 9],
+    ["research", 5],
+    ["agents", 4],
+    ["sprind", 3],
+    ["equiloom-with-another-long-name", 2],
+    ["opencode", 2],
+    ["notes", 1],
+    ["hub", 1],
+  ];
+  const SHUFFLED = [4, 7, 1, 5, 0, 3, 6, 2];
+  async function manyProjects(page, count) {
+    const chosen = MANY.slice(0, count);
+    const served = count === MANY.length ? SHUFFLED.map((i) => MANY[i]) : [...chosen].reverse();
+    await page.route(/\/api\/v1\/projects$/, (route) =>
+      route.fulfill({ json: { projects: served.map(([id]) => ({ id, display_name: id, confidential: false })) } }),
+    );
+    for (const [id, n] of chosen) {
+      await page.route(new RegExp(`/api/v1/projects/${id}/artifacts$`), (route) =>
+        route.fulfill({ json: { artifacts: Array.from({ length: n }, (_, i) => fixture(`${id}-doc-${i + 1}`, id, 20 + i * 5)) } }),
+      );
+    }
+    await page.route(/\/api\/v1\/artifacts\/[^/]+\/versions$/, (route) => route.fulfill({ json: { versions: [] } }));
+    await page.route(/\/api\/v1\/projects\/[^/]+\/feed\?/, (route) => route.fulfill({ json: { events: [] } }));
+  }
+
+  const fitsRow = async (bar) => {
+    expect(await bar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const edge = (await bar.boundingBox()).x + (await bar.boundingBox()).width;
+    for (const part of [bar.locator(".arts-hints"), bar.getByRole("button", { name: "More" })]) {
+      await expect(part).toBeVisible();
+      const box = await part.boundingBox();
+      expect(box.x + box.width).toBeLessThanOrEqual(edge);
+    }
+  };
+
+  test("many projects fold into a More menu and the row keeps its hints", async ({ hub, page }, testInfo) => {
+    test.skip(!isDesktop(testInfo), "the fold is a wide row's");
+    await manyProjects(page, 8);
+    await openList(page, hub);
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    await fitsRow(bar);
+    await expect(bar.getByRole("button", { name: /^roundhouse-with-a-long-name 9$/ })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "research 5" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "agents 4" })).toBeVisible();
+    await expect(bar.getByRole("button", { name: "sprind 3" })).toHaveCount(0);
+
+    const more = bar.getByRole("button", { name: "More" });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.focus();
+    await page.keyboard.press("ArrowDown");
+    const menu = page.getByRole("menu", { name: "More projects" });
+    await expect(menu).toBeVisible();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(5);
+    await expect(menu.getByRole("menuitemradio").first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitemradio").nth(1)).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await expect(more).toBeFocused();
+
+    // Enter on an item picks it: the list narrows and the new chip has focus.
+    await more.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitemradio", { name: /^equiloom-with-another-long-name 2$/ })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#\/artifacts\?project=equiloom-with-another-long-name$/);
+    await expect(rows(page)).toHaveCount(2);
+    const picked = bar.getByRole("button", { name: /^equiloom-with-another-long-name 2$/ });
+    await expect(picked).toHaveAttribute("aria-pressed", "true");
+    await expect(picked).toBeFocused();
+    await fitsRow(bar);
+
+    // The checked item is marked; picking it again keeps the list and returns
+    // focus to More.
+    await more.click();
+    const checked = menu.getByRole("menuitemradio", { name: /^equiloom-with-another-long-name 2$/ });
+    await expect(checked).toHaveAttribute("aria-checked", "true");
+    await expect(checked.locator(".arts-check")).toBeVisible();
+    await expect(menu.getByRole("menuitemradio", { name: "opencode 2" }).locator(".arts-check")).toBeHidden();
+    await checked.click();
+    await expect(menu).toBeHidden();
+    await expect(more).toBeFocused();
+    await expect(rows(page)).toHaveCount(2);
+  });
+
+  test("the row fits at 720px with long names and a folded project chosen", async ({ hub, page }, testInfo) => {
+    test.skip(!isDesktop(testInfo), "the fold is a wide row's");
+    await page.setViewportSize({ width: 720, height: 900 });
+    await manyProjects(page, 8);
+    await openList(page, hub, "#/artifacts?project=equiloom-with-another-long-name");
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    await fitsRow(bar);
+    await expect(bar.getByRole("button", { name: /^equiloom-with-another-long-name 2$/ })).toHaveAttribute("aria-pressed", "true");
+    await bar.getByRole("button", { name: "More" }).click();
+    const menu = page.getByRole("menu", { name: "More projects" });
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(720);
+  });
+
+  test("a phone keeps the scrolling strip of every project and no More menu", async ({ hub, page }, testInfo) => {
+    test.skip(isDesktop(testInfo), "the strip is a phone's");
+    await manyProjects(page, 8);
+    await openList(page, hub);
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    await expect(bar.getByRole("button", { name: "More" })).toBeHidden();
+    await expect(bar.getByRole("button", { name: "hub 1" })).toBeAttached();
+    await expect(bar.getByRole("button", { name: "sprind 3" })).toBeAttached();
+  });
+
+  test("four projects are chips with no More menu", async ({ hub, page }) => {
+    await manyProjects(page, 4);
+    await openList(page, hub);
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    await expect(bar.getByRole("button", { name: "sprind 3" })).toBeAttached();
+    await expect(bar.getByRole("button", { name: "More" })).toHaveCount(0);
+  });
+
   test("the margin previews the focused row and follows j and k", async ({ hub, page }, testInfo) => {
     test.skip(!isDesktop(testInfo), "the margin is a wide stage's");
     await fixedList(page);
