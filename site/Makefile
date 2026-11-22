@@ -47,7 +47,7 @@ help: ## Show this help
 
 site: docs ## Build the landing page and the docs into dist/ (the deploy directory)
 	python3 -I scripts/build.py assemble --site-url "$(SITE_URL)" \
-		--version-file ../.release-please-manifest.json --fonts ../web/vendor/fonts \
+		--fonts ../web/vendor/fonts \
 		--render $(BUILD)/render . $(DIST)
 
 docs: ## Render ../docs with the docs theme into build/render

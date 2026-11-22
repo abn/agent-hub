@@ -48,8 +48,8 @@
       <p class="lede"><strong>Agent Hub runs on a node you own.</strong> Agents report in over MCP and keep their memory there. You read, answer and approve from one app on your phone or desk.</p>
 
       <div class="cmd" role="group" aria-label="Run Agent Hub with podman">
-        <code tabindex="0"><span class="p">$ </span>podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@</code>
-        <button class="copy" type="button" data-copy="podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@" aria-label="Copy the command">
+        <code tabindex="0"><span class="p">$ </span>podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:latest</code>
+        <button class="copy" type="button" data-copy="podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:latest" aria-label="Copy the command">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
         </button>
       </div>
@@ -282,8 +282,8 @@
     --publish 8080:8080 \
     --env HUB_ADMIN_TOKEN=change-me \
     --volume agent-hub-data:/data \
-    ghcr.io/agync/agent-hub:@VERSION@</pre>
-          <button class="copy" type="button" data-copy="podman run --detach --name agent-hub --publish 8080:8080 --env HUB_ADMIN_TOKEN=change-me --volume agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@" aria-label="Copy the run command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+    ghcr.io/agync/agent-hub:latest</pre>
+          <button class="copy" type="button" data-copy="podman run --detach --name agent-hub --publish 8080:8080 --env HUB_ADMIN_TOKEN=change-me --volume agent-hub-data:/data ghcr.io/agync/agent-hub:latest" aria-label="Copy the run command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
         </div>
       </li>
       <li>

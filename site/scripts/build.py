@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """Assemble the static site for Cloudflare.
 
-    build.py assemble --site-url URL --version-file FILE --fonts DIR --render DIR <site> <dist>
-        Write the landing and not-found pages with the site origin and the
-        current release filled in, copy the assets and the app's fonts, add the
-        rendered docs under docs/, and write _headers with the hashes of the
-        docs' inline scripts.
+    build.py assemble --site-url URL --fonts DIR --render DIR <site> <dist>
+        Write the landing and not-found pages with the site origin filled
+        in, copy the assets and the app's fonts, add the rendered docs under
+        docs/, and write _headers with the hashes of the docs' inline scripts.
 """
 
 import argparse
 import base64
 import hashlib
-import json
 import pathlib
 import re
 import shutil
@@ -43,8 +41,6 @@ def assemble(args: argparse.Namespace) -> None:
     url = args.site_url.rstrip("/")
     if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]+)?", url):
         sys.exit(f"build.py: SITE_URL must be an https origin with no path, got {url!r}")
-    manifest = json.loads(pathlib.Path(args.version_file).read_text(encoding="utf-8"))
-    version = manifest["."]
 
     shutil.rmtree(dist, ignore_errors=True)
     dist.mkdir(parents=True)
@@ -56,7 +52,7 @@ def assemble(args: argparse.Namespace) -> None:
         text = (site / name).read_text(encoding="utf-8")
         if INLINE_SCRIPT.search(text) or re.search(r"<style|\sstyle=", text):
             sys.exit(f"build.py: {name} has an inline script or style; the policy forbids it")
-        text = text.replace("@SITE_URL@", url).replace("@VERSION@", version)
+        text = text.replace("@SITE_URL@", url)
         left = PLACEHOLDER.findall(text)
         if left:
             sys.exit(f"build.py: {name} has unfilled placeholders: {', '.join(sorted(set(left)))}")
@@ -76,7 +72,7 @@ def assemble(args: argparse.Namespace) -> None:
 
     files = sum(1 for p in dist.rglob("*") if p.is_file())
     print(f"build.py: {dist} ready, {files} files, {len(hashes)} docs script hashes, "
-          f"release {version}, site {url}")
+          f"site {url}")
 
 
 def main() -> None:
@@ -84,7 +80,6 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     a = sub.add_parser("assemble")
     a.add_argument("--site-url", required=True)
-    a.add_argument("--version-file", required=True)
     a.add_argument("--fonts", required=True)
     a.add_argument("--render", required=True)
     a.add_argument("site")
