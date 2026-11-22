@@ -19,10 +19,10 @@ test.describe("Now", () => {
     await expect(page.getByRole("heading", { name: /^Needs you · \d+/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^Since you looked/ })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: /^Quiet/ })).toHaveCount(0);
-    // Every ask is a sentence that names the agent first, with a way to read it.
+    // Every ask is a sentence that names the agent first, with a way to open it.
     const first = page.locator(".now-ask").first();
     await expect(first.locator(".now-s b").first()).not.toBeEmpty();
-    await expect(first.getByRole("link", { name: "Read" })).toHaveAttribute("href", /#\/inbox\?open=/);
+    await expect(first.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", /#\/inbox\?open=/);
 
     await chip(page, "All").click();
     await expect(page).toHaveURL(/#\/home$/);
@@ -59,24 +59,105 @@ test.describe("Now", () => {
     await expect(asks.nth(Math.min(at, before - 2))).toBeFocused();
   });
 
-  test("on a phone an ask's verbs hold one line, Read with them", async ({ hub, page }, testInfo) => {
-    test.skip(testInfo.project.name !== "phone", "the line under the sentence is a phone's");
+  test("on a phone the answers hold one line and Open sits right-aligned on the line below", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "phone", "the lines under the sentence are a phone's");
     const subject = "now phone verbs";
     await oneOffQuestion(hub, hub.projectId, subject, { options: ["Ship it", "Hold until Monday"] });
     await open(page, hub, "#/inbox", "");
     const row = page.locator(".now-ask").filter({ hasText: subject });
-    await expect(row.getByRole("link", { name: "Read" })).toBeVisible();
+    await expect(row.getByRole("link", { name: "Open", exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "Ship it" })).toBeVisible();
     const placed = await row.evaluate((ask) => {
-      const verbs = [...ask.querySelectorAll(".now-acts > button:not([hidden]), .now-acts > a")];
+      const box = (el) => el.getBoundingClientRect();
+      const verbs = [...ask.querySelectorAll(".now-acts > button:not([hidden])")];
+      const foot = [...ask.querySelectorAll(".now-foot > *")];
       return {
-        tops: [...new Set(verbs.map((verb) => Math.round(verb.getBoundingClientRect().top)))],
-        right: Math.max(...verbs.map((verb) => verb.getBoundingClientRect().right)),
-        edge: ask.getBoundingClientRect().right,
+        tops: [...new Set(verbs.map((verb) => Math.round(box(verb).top)))],
+        right: Math.max(...verbs.map((verb) => box(verb).right)),
+        edge: box(ask).right,
+        verbsBottom: Math.max(...verbs.map((verb) => box(verb).bottom)),
+        footTops: foot.map((el) => box(el).top),
+        footRight: Math.max(...foot.map((el) => box(el).right)),
+        foot: foot.map((el) => el.firstChild.textContent.trim()).sort(),
       };
     });
-    expect(placed.tops, "the ask's verbs break across lines").toHaveLength(1);
-    expect(placed.right, "the verbs run past the row").toBeLessThanOrEqual(placed.edge + 0.5);
+    expect(placed.tops, "the ask's answers break across lines").toHaveLength(1);
+    expect(placed.right, "the answers run past the row").toBeLessThanOrEqual(placed.edge + 0.5);
+    expect(placed.foot, "Open and Reply are the bottom line").toEqual(["Open", "Reply"]);
+    expect(Math.min(...placed.footTops), "Open is not below the answers").toBeGreaterThanOrEqual(placed.verbsBottom);
+    expect(placed.edge - placed.footRight, "Open is not right-aligned").toBeLessThanOrEqual(2);
+  });
+
+  test("Open and Reply are smaller secondaries on a bottom line, right-aligned", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "measured on the desktop's pointer");
+    const subject = "now bottom line";
+    await oneOffQuestion(hub, hub.projectId, subject, { options: ["Ship it", "Hold"] });
+    await open(page, hub, "#/inbox", "");
+    const row = page.locator(".now-ask").filter({ hasText: subject });
+    await row.click({ position: { x: 2, y: 2 } });
+    const placed = await row.evaluate((ask) => {
+      const box = (el) => el.getBoundingClientRect();
+      const answer = box(ask.querySelector('.now-acts button[data-choice]'));
+      const foot = [...ask.querySelectorAll(".now-foot > *")].map((el) => ({ label: el.firstChild.textContent.trim(), top: box(el).top, right: box(el).right, height: box(el).height }));
+      const main = box(ask.querySelector(".now-body"));
+      return { answer: { bottom: answer.bottom, height: answer.height }, foot, bodyRight: main.right };
+    });
+    expect(placed.foot.map((f) => f.label).sort()).toEqual(["Open", "Reply"]);
+    for (const f of placed.foot) {
+      expect(f.top, `${f.label} is not below the answers`).toBeGreaterThanOrEqual(placed.answer.bottom);
+      expect(f.height, `${f.label} is not the compact size`).toBe(28);
+    }
+    expect(placed.answer.height, "the answers are not larger than the secondaries").toBeGreaterThan(28);
+    expect(placed.bodyRight - Math.max(...placed.foot.map((f) => f.right)), "the bottom line is not right-aligned").toBeLessThanOrEqual(2);
+  });
+
+  test("under a touch pointer the lines are far enough apart that no 44px target overlaps", async ({ hub, browser }, testInfo) => {
+    test.skip(testInfo.project.name !== "phone", "a touch pointer is a phone's");
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+    await context.addInitScript((token) => window.localStorage.setItem("hub.token", token), hub.token);
+    const page = await context.newPage();
+    try {
+      await oneOffQuestion(hub, hub.projectId, "now touch lines", { options: ["Ship it", "Hold"] });
+      await open(page, hub, "#/inbox", "");
+      const row = page.locator(".now-ask").filter({ hasText: "now touch lines" });
+      await expect(row.getByRole("link", { name: "Open", exact: true })).toBeVisible();
+      const gap = await row.evaluate((ask) => {
+        const grown = (el) => {
+          const b = el.getBoundingClientRect();
+          const h = Math.max(b.height, 44);
+          const mid = (b.top + b.bottom) / 2;
+          return { top: mid - h / 2, bottom: mid + h / 2 };
+        };
+        const answers = [...ask.querySelectorAll(".now-acts > button:not([hidden])")].map(grown);
+        const open = grown(ask.querySelector(".now-foot a"));
+        return open.top - Math.max(...answers.map((a) => a.bottom));
+      });
+      expect(gap, "an answer's and Open's 44px targets overlap").toBeGreaterThanOrEqual(0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("an ask's sentence opens the item and an answer does not", async ({ hub, page }) => {
+    const subject = "now answer stays";
+    const other = "now sentence opens";
+    const id = await oneOffQuestion(hub, hub.projectId, subject, { options: ["Ship it", "Hold"] });
+    const second = await oneOffQuestion(hub, hub.projectId, other, { options: ["Ship it", "Hold"] });
+    expect(id && second, "the questions were not posted").toBeTruthy();
+    await open(page, hub, "#/inbox", "");
+    const row = page.locator(".now-ask").filter({ hasText: subject });
+    await expect(row).toBeVisible();
+    // Choosing an answer is not opening: the address stays on Now.
+    const sent = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/v1/questions/${id}/answer`));
+    await row.click({ position: { x: 2, y: 2 } });
+    await row.getByRole("button", { name: "Ship it" }).click();
+    await sent;
+    await expect(page).not.toHaveURL(/open=/);
+    await expect(page.getByRole("heading", { level: 1, name: "Now" })).toBeVisible();
+
+    await page.locator(".now-ask").filter({ hasText: other }).getByRole("link", { name: other }).click();
+    await expect(page).toHaveURL(new RegExp(`open=${second}`));
+    await expect(page.locator("#inbox-detail-title")).toHaveText(other);
   });
 
   test("a snoozed ask can wait and leaves the count", async ({ hub, page }) => {
@@ -93,7 +174,7 @@ test.describe("Now", () => {
     } else {
       // Snoozed from the item, the next ask opens; the reader closes it to
       // come back to Now.
-      const read = first.getByRole("link", { name: "Read" });
+      const read = first.getByRole("link", { name: "Open", exact: true });
       const opened = (await read.getAttribute("href")).split("open=")[1];
       await read.click();
       await page.getByRole("group", { name: "Answer" }).getByRole("button", { name: "Snooze 1h" }).click();

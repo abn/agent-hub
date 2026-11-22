@@ -446,9 +446,12 @@ verb beside a field remains the defect the label rule came from.
   the same height whichever is selected and an unselected row reads as the
   sentence and its time. Under a coarse pointer or on a phone the verbs are
   always shown.
-- On a phone an ask's verbs on Now take their own line under its sentence and
-  run on under the time column, which holds only the first line's clock, so Read
-  does not fall to a line of its own beside three other verbs.
+- An ask on Now is its sentence, which is the link that opens the item, then
+  two lines: the answers (a question's suggested answers, Approve and Decline,
+  Resolve and Clear) on the first, and Open and Reply on a bottom line,
+  right-aligned, as smaller outlined secondaries. A question with no suggested
+  answers keeps Reply as its primary on the first line. On a phone the lines
+  run on under the time column, which holds only the first line's clock.
 - An empty note is prose: left-aligned on the pane's gutter, never centred.
   Connect is the one question on its screen and starts at the top of the
   stage on the same gutter, as every other screen's column does.
@@ -697,12 +700,16 @@ Projects register, Agents and access, Connect, and the knowledge base.
   - **Needs you.** The label is copper. Each ask is one sentence, the agent in
     600 and then what it wants, with its verbs at the end of the line: an
     approval's Approve and Decline, a question's suggested answers and Reply,
-    an idea's Resolve and Clear, and Read, which opens the item. Only the
-    selected row fills its primary; every other row's verbs are outlines.
-    While the reader moves with the keyboard, the selected row expands in
-    place with its keys under the sentence; the keys go as soon as the pointer
-    is over the stream, so no row grows or shrinks under a pointer on its way
-    to a button. Approve and
+    an idea's Resolve and Clear. The sentence is the link that opens the item.
+    The answers hold the first action line; Open, which opens the item, and
+    Reply are smaller outlined secondaries on a bottom line of their own,
+    right-aligned, at the compact control size. A question with no suggested
+    answers keeps Reply as its primary on the first line, and only Open is on
+    the bottom line. Only the selected row fills its primary and names its keys
+    on key chips; every other row's verbs are outlines with no chip, though
+    the chip's width is held, so no row changes height or rewraps when the
+    selection moves. Under a coarse pointer the two lines are 16px apart so
+    the 44px hit areas do not overlap. Approve and
     Decline ask in the decision dialog, as everywhere; a suggested answer sends
     at once, as a quick answer does. Once an ask is answered it leaves the
     tier and the selection moves to the ask now in its place. An ask can wait

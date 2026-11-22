@@ -44,11 +44,11 @@ test.describe("Now shows an ask's verbs on the selected row", () => {
       await select(page, one);
       await page.mouse.move(4, 600);
       await expect(one.getByRole("button", { name: "Ship it" })).toBeVisible();
-      await expect(one.getByRole("link", { name: "Read" })).toBeVisible();
+      await expect(one.getByRole("link", { name: "Open", exact: true })).toBeVisible();
       await expect(chips(one).filter({ visible: true })).not.toHaveCount(0);
-      await expect(one.getByRole("link", { name: "Read" }).locator("kbd")).toBeVisible();
+      await expect(one.getByRole("link", { name: "Open", exact: true }).locator("kbd")).toBeVisible();
       await expect(two.getByRole("button", { name: "Ship it" })).toBeHidden();
-      await expect(two.getByRole("link", { name: "Read" })).toBeHidden();
+      await expect(two.getByRole("link", { name: "Open", exact: true })).toBeHidden();
       await expect(chips(two).filter({ visible: true })).toHaveCount(0);
       // Exactly one ask names its keys, and it is the selected one.
       await expect(asks(page).filter({ has: page.locator(".now-acts kbd:visible") })).toHaveCount(1);
@@ -76,7 +76,7 @@ test.describe("Now shows an ask's verbs on the selected row", () => {
       await expect(two.getByRole("button", { name: "Ship it" })).toBeHidden();
       await two.hover({ position: { x: 40, y: 4 } });
       await expect(two.getByRole("button", { name: "Ship it" })).toBeVisible();
-      await expect(two.getByRole("link", { name: "Read" })).toBeVisible();
+      await expect(two.getByRole("link", { name: "Open", exact: true })).toBeVisible();
       await expect(chips(two).filter({ visible: true })).toHaveCount(0);
       await expect(two).not.toHaveAttribute("tabindex", "0");
       const fill = await two.getByRole("button", { name: "Ship it" }).evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -95,11 +95,13 @@ test.describe("Now shows an ask's verbs on the selected row", () => {
       await select(page, one);
       await page.mouse.move(4, 600);
       await one.evaluate((el) => el.focus());
+      // The sentence is the first stop, then the answers.
+      await page.keyboard.press("Tab");
       await page.keyboard.press("Tab");
       const button = one.getByRole("button", { name: "Ship it" });
       await expect(button).toBeFocused();
       await expect(button).toBeVisible();
-      await expect(one.getByRole("link", { name: "Read" })).toBeVisible();
+      await expect(one.getByRole("link", { name: "Open", exact: true })).toBeVisible();
     } finally {
       await settleAll(hub, [first]);
     }
@@ -123,6 +125,33 @@ test.describe("Now shows an ask's verbs on the selected row", () => {
       await expect(page.locator(".now-keys")).toHaveCount(0);
     } finally {
       await settleAll(hub, [first, second]);
+    }
+  });
+
+  test("a choice set that nearly wraps keeps every row's height whichever row is selected", async ({ hub, page }) => {
+    // The chips take width only on the selected row, so a set that fills its
+    // line to within a chip's width is the one that would rewrap on selection.
+    // Sweeping the first label's length by less than the chips' width puts one
+    // set inside that window whatever the column's width is.
+    const ids = [];
+    for (let n = 0; n <= 40; n += 4) {
+      ids.push(await questionOf(hub, `keys wrap ${String(n).padStart(2, "0")}`, [`Choice ${"a".repeat(n)}`, "Second choice", "Third"]));
+    }
+    try {
+      await open(page, hub, "#/inbox", "");
+      const rows = asks(page).filter({ hasText: "keys wrap" });
+      await expect(rows).toHaveCount(ids.length);
+      const heights = async () => rows.evaluateAll((all) => all.map((row) => row.getBoundingClientRect().height));
+      await select(page, rows.first());
+      await page.mouse.move(4, 600);
+      const base = await heights();
+      for (let at = 1; at < ids.length; at += 1) {
+        await select(page, rows.nth(at));
+        await page.mouse.move(4, 600);
+        expect(await heights(), `selecting row ${at} changed a row's height`).toEqual(base);
+      }
+    } finally {
+      await settleAll(hub, ids);
     }
   });
 
@@ -258,7 +287,7 @@ test.describe("an opened item names its keys", () => {
 
   test("j and k are named only where there is an item to step to, and do nothing otherwise", async ({ hub, page }) => {
     await open(page, hub, "#/inbox", "");
-    await asks(page).first().getByRole("link", { name: "Read" }).click();
+    await asks(page).first().getByRole("link", { name: "Open", exact: true }).click();
     const hints = page.locator(".item-hints");
     await expect(page.getByRole("button", { name: "Previous item" })).toBeDisabled();
     await expect(hints.getByText("previous")).toBeHidden();
