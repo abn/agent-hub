@@ -79,16 +79,25 @@ main { flex: 1; width: 100%; min-width: 0; margin: 0; padding: var(--s-4) var(--
 .markdown-body h3,
 .markdown-body h4,
 .markdown-body h5,
-.markdown-body h6 { font-size: var(--t-13); }
+.markdown-body h6 { font-size: var(--t-15); }
+.markdown-body { overflow-wrap: anywhere; }
+.markdown-body blockquote { margin: var(--s-3) 0; padding: 0 0 0 var(--s-3); border-left: 3px solid var(--ink-2); color: var(--ink-2); }
+.markdown-body hr { border: 0; border-top: 1px solid var(--line-strong); margin: var(--s-4) 0; }
+.markdown-body li > ul,
+.markdown-body li > ol { margin: 0; }
+.markdown-body li:has(> input[type="checkbox"], > p:first-child > input[type="checkbox"]) { list-style: none; position: relative; }
+.markdown-body li > input[type="checkbox"],
+.markdown-body li > p:first-child > input[type="checkbox"] { position: absolute; left: calc(-1 * var(--s-4)); top: 0.3em; width: 1em; height: 1em; min-height: 0; margin: 0; padding: 0; }
 .markdown-body pre { margin: var(--s-3) 0; padding: var(--s-3); overflow-x: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-1); font-family: var(--font-mono); font-size: var(--t-13); line-height: 1.5; }
 .markdown-body pre code { font: inherit; }
 .markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .markdown-body th,
 .markdown-body td { min-width: 120px; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
 .markdown-body th { color: var(--ink); font-weight: 600; white-space: nowrap; border-top: 1px solid var(--line); }
+.markdown-body :is(th, td):has(p) { min-width: 320px; }
 .markdown-body th:first-child,
 .markdown-body td:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg); }
-.markdown-body :not(pre) > code { font-family: var(--font-mono); font-size: var(--t-13); background: var(--surface-2); border-radius: var(--r-1); padding: 1px var(--s-1); }
+.markdown-body :not(pre) > code { font-family: var(--font-mono); font-size: var(--t-13); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-1); padding: 1px var(--s-1); overflow-wrap: anywhere; }
 /* end component: markdown body */
 /* The foundation's scale, top to bottom: 28 page title, 22 section, 17 item
    title, 15 row title and body, 13 meta, 12 uppercase section label and mono
@@ -4998,6 +5007,7 @@ a.session-back {
 }
 
 .hub-card-body {
+  white-space: pre-wrap;
   margin: 0;
   font-size: var(--t-13);
   line-height: 1.5;
@@ -5252,6 +5262,7 @@ a.session-back {
 }
 
 .hub-thread-body {
+  white-space: pre-wrap;
   margin: 0;
   font-size: var(--t-15);
   line-height: 1.55;
@@ -5314,6 +5325,7 @@ a.session-back {
 }
 
 .hub-list-body {
+  white-space: pre-wrap;
   margin: 0;
   font-size: var(--t-15);
   line-height: 1.5;

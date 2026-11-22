@@ -678,13 +678,13 @@ const ALLOWED_TAGS = new Set([
   "p", "blockquote", "pre", "code", "hr", "br",
   "ul", "ol", "li",
   "strong", "b", "em", "i", "s", "del", "strike", "sub", "sup", "mark", "span",
-  "a", "img",
+  "a", "img", "input",
   "table", "thead", "tbody", "tr", "th", "td",
 ]);
 
 const DANGEROUS_TAGS = new Set([
   "script", "style", "iframe", "frame", "object", "embed", "applet",
-  "form", "input", "button", "textarea", "select", "option",
+  "form", "button", "textarea", "select", "option",
   "svg", "math", "base", "meta", "link", "template", "noscript",
 ]);
 
@@ -693,6 +693,7 @@ const ALLOWED_ATTRS = {
   img: new Set(["src", "alt", "title", "width", "height"]),
   th: new Set(["align"]),
   td: new Set(["align"]),
+  input: new Set(["type", "checked", "disabled"]),
   code: new Set(["class"]),
   pre: new Set(["class"]),
   span: new Set(["class"]),
@@ -730,11 +731,23 @@ function sanitizeNode(parent) {
         continue;
       }
       if (!ALLOWED_TAGS.has(tag)) {
+        // Sanitise the wrapper's children before they are hoisted, or they
+        // would never be visited.
+        sanitizeNode(node);
         while (node.firstChild) {
           parent.insertBefore(node.firstChild, node);
         }
         node.remove();
         continue;
+      }
+      // Only a GFM task box survives: a disabled checkbox. Any other input
+      // is a form control and goes.
+      if (tag === "input") {
+        if (node.type !== "checkbox") {
+          node.remove();
+          continue;
+        }
+        node.setAttribute("disabled", "");
       }
       const attrs = Array.from(node.attributes);
       const allowedAttrsForTag = ALLOWED_ATTRS[tag];

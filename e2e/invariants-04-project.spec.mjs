@@ -270,14 +270,14 @@ test.describe("feed stage", () => {
     expect(sticky.position, "the wide table's first column does not stick").toBe("sticky");
     expect(Math.abs(sticky.offset), "the sticky first column left its edge").toBeLessThanOrEqual(1);
 
-    // A body heading sits under the 22px stage title, and the smallest one
-    // stays on the 12px floor rather than shrinking to a browser default.
+    // A body heading sits under the 22px stage title, and h3 and below
+    // sit at body size, never under the text they head.
     await page.setViewportSize({ width: 1440, height: 900 });
     await scrollsInPlace();
     const sizes = await stage.evaluate((el) =>
       ["h1", "h2", "h3"].map((tag) => window.getComputedStyle(el.querySelector(tag)).fontSize),
     );
-    expect(sizes, "the body headings left the prose scale").toEqual(["17px", "15px", "13px"]);
+    expect(sizes, "the body headings left the prose scale").toEqual(["17px", "15px", "15px"]);
 
     // Both scroll regions are focusable, so a keyboard reader can reach them.
     await table.evaluate((el) => { el.scrollLeft = 0; });
