@@ -323,7 +323,7 @@ async function pageStage(id, path, shellStageHead) {
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
     controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta mono wiki-meta-line">${last}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
-    body: `<article class="shell-prose wiki-page wiki-article">${fm.description ? `<p class="wiki-description">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
+    body: `<article class="shell-prose wiki-page wiki-article markdown-body">${fm.description ? `<p class="wiki-description">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
 
@@ -611,7 +611,7 @@ async function versionStage(id, path, version, shellStageHead) {
   // a restore would put back.
   const body =
     older.current || !lines || !now
-      ? `<article class="shell-prose wiki-page wiki-article">${await renderMarkdown(pageBody(older.content))}</article>`
+      ? `<article class="shell-prose wiki-page wiki-article markdown-body">${await renderMarkdown(pageBody(older.content))}</article>`
       : `<div class="wiki-diff mono" role="group" aria-label="Changes since this version">${hunks(lines).map(diffLine).join("") || `<div class="wiki-diff-skip">${esc(summary === "Only the final newline differs." ? summary : "No line changed.")}</div>`}</div>`;
   return {
     head: shellStageHead(name, meta, revert, backToHistory),
