@@ -1,6 +1,6 @@
 ---
 name: agent-hub
-description: "Operate an Agent Hub instance: connect an agent over MCP, start and resume sessions, read and write session brains, append feed events, post and answer questions through the human's inbox, publish and version artifacts, and search a project. Use when a user asks to connect an agent to their hub, publish or update an artifact, check what is waiting on the human, read a project feed, or look something up in a hub. Not for building MCP servers or for other artifact publishers."
+description: "Operate an Agent Hub instance: connect an agent over MCP, start and resume sessions, read and write session brains, append feed events, post and answer questions through the human's inbox, publish and version artifacts, and search a project. Use when a user asks to connect an agent to their hub, install the hub's harness plugin, publish or update an artifact, check what is waiting on the human, read a project feed, or look something up in a hub. Not for building MCP servers or for other artifact publishers."
 ---
 
 # Using Agent Hub
@@ -22,7 +22,8 @@ Five things, and the split between them is the whole design:
 
 - **A feed** is what happened in a project: signals, finished notices, ideas
   captured by the human, and the questions and approvals that wait on the
-  human.- **A session brain** is one session's working state, on the node, one file per
+  human.
+- **A session brain** is one session's working state, on the node, one file per
   session. It survives a compaction or a restart of the same session name, and
   the human's prune collects it.
 - **The project knowledge base** is durable, shared by every agent on the
@@ -34,7 +35,15 @@ Five things, and the split between them is the whole design:
 
 ## Session start
 
-Run these when a session starts; each answers the next question:
+If a harness plugin is installed, it has already started or resumed your
+session and put an `<agent-hub>` block in your context. When that block is
+present, call `session_start` once with the project and session it names, to
+bind your connection, and skip steps 1, 4 and 5 below: the block is the brief,
+the recovery note and the knowledge base index. A subagent never calls
+`session_start`; it shares its parent's session. See
+`references/harness.md`.
+
+With no block, run these when a session starts; each answers the next question:
 
 1. `session_brief(project_id)` says what you would otherwise piece together
    from four tools: since your own last look, the answers and decisions on
@@ -70,16 +79,18 @@ events (the cursor is the hub's, per agent per project, so you carry nothing),
   declines itself at the deadline unless you name `on_expiry: "approve"`.
 - **Read the trailer.** Every successful tool result may carry a
   `notifications` member with what needs your attention, delivered once. It is
-  a nudge, not the record: the detail is read from the inbox or the feed. To be
-  told about feed events without polling, register a standing interest with
-  `notify_subscribe`.
+  a nudge, not the record: the detail is read from the inbox or the feed. It
+  arrives only on your next call, so an idle agent sees nothing; a plugin's
+  watcher covers that, or call `notify_wait`. To be told about feed events
+  without polling, register a standing interest with `notify_subscribe`.
 - **Artifacts are versioned snapshots.** You can hold one version live with
   `artifact_draft` while you write it, and seal it by publishing with
   `artifact_update`; the public URL keeps serving the last sealed version until
   then. Publishing is yours; sharing outward is the human's act.
 - **Retry safely.** A write that creates a durable record accepts an idempotency
   key, so a retry after a dropped connection returns the original result.
-- **Never send an actor.** The hub sets it from the token.
+- **Never send an actor.** The hub sets it from the token. Agents never use
+  the admin token: it authors everything as `human`.
 - **One credential.** Keep one client config with the hub URL and your token: it
   reaches every ordinary project. Do not mint a token or a config file per
   project; pass `project_id` on a call instead. A confidential project needs a
@@ -117,6 +128,8 @@ The depth lives in `references/`, read on demand:
   waiting instead of polling.
 - `references/artifacts.md` publish and update, comments, sharing, and
   protected content.
+- `references/harness.md` what a harness plugin does for you, the
+  `<agent-hub>` block, compaction and subagents.
 - `references/notifications.md` the notification trailer on tool results.
 - `references/subscriptions.md` standing subscriptions, delivered through the
   trailer.

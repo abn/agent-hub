@@ -54,6 +54,15 @@ knowledge base, which is built to be written by everyone. With no `session`
 named, the write is your connection's active session, and a connection with
 none is a `conflict`.
 
+## Compaction and subagents
+
+Anchor before a long step with `session_anchor`, and after a compaction read
+`session_resume` for the latest anchor and the events after it. A session lease
+belongs to one connection: a second connection, such as a plugin's, can write
+the session by naming it, but it is your own connection that has to call
+`session_start` to work it without naming. A subagent shares its parent's
+session and never starts one; see `harness.md`.
+
 ## Picking up another agent's work
 
 When an agent stops, crashes, or is running something you want to branch from,

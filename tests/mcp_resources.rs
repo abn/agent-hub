@@ -171,7 +171,11 @@ fn the_guide_and_the_bootstrap_are_read_through_the_proxy() {
     let mut client = proxy(&hub);
 
     let (uris, _) = list_page(&mut client, None);
-    for expected in ["agenthub://skill", "skill://agent-hub/SKILL.md"] {
+    for expected in [
+        "agenthub://skill",
+        "skill://agent-hub/SKILL.md",
+        "skill://agent-hub/references/harness.md",
+    ] {
         assert!(
             uris.iter().any(|uri| uri == expected),
             "{expected} is listed: {uris:?}"
@@ -184,6 +188,11 @@ fn the_guide_and_the_bootstrap_are_read_through_the_proxy() {
     );
     let guide = read_text(&mut client, "skill://agent-hub/SKILL.md");
     assert!(guide.starts_with("---\n"), "the guide is the skill itself");
+    let harness = read_text(&mut client, "skill://agent-hub/references/harness.md");
+    assert!(
+        harness.contains("<agent-hub>"),
+        "the harness reference is served: {harness}"
+    );
 }
 
 #[test]

@@ -21,6 +21,13 @@ harness wiring in full.
 | A running hub and an agent token | the endpoint refuses a request without a token |
 | The harness on the agent's machine | Claude Code, opencode, Gemini, or any MCP client |
 
+## Install the plugin first
+
+Claude Code, OpenCode and Antigravity each have a plugin that wires the MCP
+connection and runs the session ritual, so the steps below are only needed
+without one. One install line per harness is in
+[Harness plugins](/guides/agents/plugins.md).
+
 ## The endpoint
 
 Agents reach the hub over the Model Context Protocol, streamable HTTP on the
@@ -31,8 +38,8 @@ exposes all the tools. The tool shapes are in
 
 ## Claude Code
 
-Add the server in the project's `.mcp.json`, or register it with
-`claude mcp add`:
+Without the plugin, add the server in the project's `.mcp.json`, or register it
+with `claude mcp add`:
 
 ```json
 {
@@ -59,7 +66,7 @@ session started through the proxy stays active for the rest of that process.
   "mcpServers": {
     "agent-hub": {
       "command": "agent-hub",
-      "args": ["mcp"],
+      "args": ["mcp", "--proxy"],
       "env": { "HUB_URL": "http://hub.lan:8080", "HUB_TOKEN": "<agent token>" }
     }
   }
@@ -71,14 +78,48 @@ The proxy reads its settings from the environment first, then from
 `/etc/agent-hub/config.toml`); `HUB_CONFIG` names another file. With no
 `HUB_URL` it serves the local data directory standalone instead, as the human
 admin, and says so on startup; that mode opens the data directory itself, so it
-cannot run beside a hub on the same directory.
+cannot run beside a hub on the same directory. Always pass `--proxy` (or set
+`HUB_MODE=proxy`): it never falls back to the data directory, so a missing
+config fails loudly instead of opening a store as the local admin.
 
-## opencode and Gemini
+## OpenCode and Antigravity
 
-For opencode, the same stdio entry goes in the MCP section of `opencode.json`.
-For Gemini, it goes in `settings.json` under `mcpServers`. The command and its
-environment are the harness's, not the hub's: the hub serves every one of them
-the same endpoint and the same tools.
+OpenCode takes a remote HTTP entry in `opencode.jsonc`, with the token read from
+a file:
+
+```jsonc
+{
+  "mcp": {
+    "agent-hub": {
+      "type": "remote",
+      "url": "http://hub.lan:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer {file:~/.config/agent-hub/token}",
+        "X-Agent-Id": "opencode"
+      }
+    }
+  }
+}
+```
+
+Antigravity takes the stdio proxy in its `mcp_config.json`, under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "agent-hub": {
+      "command": "agent-hub",
+      "args": ["mcp", "--proxy"],
+      "env": { "HUB_AGENT_ID": "antigravity" }
+    }
+  }
+}
+```
+
+Its remote form uses `serverUrl`, not `url`. The command and its environment are
+the harness's, not the hub's: the hub serves every one of them the same endpoint
+and the same tools. Prefer remote HTTP where the harness supports it; the stdio
+proxy needs the binary on `PATH`.
 
 > [!NOTE]
 > A project server entry lives with one repository and is shared with everyone

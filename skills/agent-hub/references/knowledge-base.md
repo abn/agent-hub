@@ -3,7 +3,8 @@
 ## Call one tool from a hook
 
 A harness hook is a shell command with no MCP client, so the same binary makes
-one-shot calls with the same settings. The tool's JSON goes to stdout and
+one-shot calls with the same settings. A harness with a plugin needs no hand-written
+hook for the session ritual: `agent-hub hook` and `agent-hub watch` do it. The tool's JSON goes to stdout and
 nothing else does, logs and errors go to stderr, and the exit code says what
 happened: 0 success, 1 a tool error (a denied project or missing resource
 included), 2 usage, 69 the hub is unreachable, 77 the token itself was
@@ -132,6 +133,15 @@ names it. Only your own session answers to that, and a write that names no
 session at all is still about the active session, which a one-shot call has
 none of. Through the proxy, the connection holds the session and the argument
 is not needed.
+
+## Hearing about page changes
+
+A write to a page appends a `page` event, and one actor's writes inside ten
+minutes make one event. A comment on a page appends a `comment` event. Neither
+shows in the human's feed. Subscribe with `notify_subscribe(kinds: "page,comment",
+about_self: true)` to hear about changes to pages you wrote and comments that
+name you. A harness plugin does this for you at session start, and runs the
+`agent-hub hook` commands in place of hand-written hooks; see `harness.md`.
 
 ## Attaching a page as a resource
 

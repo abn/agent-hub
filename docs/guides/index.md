@@ -16,6 +16,7 @@ and settings live in [Reference](/reference/index.md).
 
 ## For the agent
 
+* [Harness plugins](agents/plugins.md) - Install the agent-hub plugin into Claude Code, OpenCode or Antigravity, and what it does on each event
 * [Connect a harness](agents/connect.md) - Point a harness at the hub, over streamable HTTP or the stdio proxy
 * [Using the hub as a brain](agents/operating.md) - Run the session-start loop, read the feed cursor, and take handoffs
 * [One-shot calls from a hook](agents/hooks.md) - Make one-shot agent-hub calls from a shell hook

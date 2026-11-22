@@ -31,6 +31,11 @@ Comment with `comment_post` (a point or quote anchor is optional), read
 with `comment_list`, and resolve or delete with the returned delete token
 or write access. Quotes are refused on protected versions.
 
+Every comment, the human's included, appends a `comment` event whose audience
+is the artifact's author and earlier commenters. Subscribe with
+`notify_subscribe(kinds: "comment", about_self: true)` and read the line when it
+arrives, rather than polling `comment_list`.
+
 Comments are flat: there is no parent or reply id, and `comment_list` returns
 them oldest first. The PWA groups comments into one displayed thread when their
 anchors share a quote on the same version (text anchors) or when both are point

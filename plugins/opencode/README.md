@@ -21,6 +21,15 @@ The rules (project and session resolution, notice lines, the block and its
 
 ## Install
 
+```sh
+opencode plugin add @agync/opencode-agent-hub
+```
+
+The plugin reads the hub URL and token from `HUB_URL` and `HUB_TOKEN`, or from
+the `config.toml` that `agent-hub enrol` writes, so nothing more is needed on a
+host that has enrolled. Without those, give it the options by hand. This entry
+in `opencode.jsonc` is the manual alternative to the command:
+
 ```jsonc
 // opencode.jsonc
 {
