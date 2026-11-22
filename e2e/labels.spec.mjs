@@ -22,7 +22,7 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 
 // The classes that draw a section label.
 const LABELS =
-  ".form-group-label, .settings-group-title, .agents-section-label, .access-section-label, .storage-section-label, .wiki-section-label, .wiki-history-day, .session-group-header, .brain-label, .settings-group-label, .shell-group-label";
+  ".form-group-label, .settings-group-title, .agents-section-label, .access-section-label, .storage-section-label, .wiki-section-label, .wiki-history-day, .session-group-header, .brain-label, .settings-group-label, .shell-group-label, .section-label, .wiki-stat-label, .agent-detail-label";
 
 test.describe("one section-label style", () => {
   test("every section label is the one style, and no label is set in the mono family", async ({ hub, page }) => {
@@ -70,6 +70,36 @@ test.describe("one section-label style", () => {
         }
       }
     }
+    // The agent's own detail is a screen of its own: the bare address lists the
+    // agents and draws none of its labels.
+    await openScreen(page, hub, "#/access", "main .agent-index-row");
+    await page.locator("main .agent-index-row").first().click();
+    await expect(page.locator(".agent-detail-label").first()).toBeVisible();
+    const detail = await page.$$eval(".agent-detail-label", (els) =>
+      els.map((el) => {
+        const cs = getComputedStyle(el);
+        const count = el.querySelector(".mono");
+        return {
+          text: (el.textContent || "").trim().slice(0, 28),
+          size: cs.fontSize,
+          weight: cs.fontWeight,
+          transform: cs.textTransform,
+          mono: cs.fontFamily.toLowerCase().includes("mono"),
+          count: count ? getComputedStyle(count).fontFamily.toLowerCase().includes("mono") : null,
+        };
+      }),
+    );
+    for (const label of detail) {
+      held += 1;
+      if (label.size !== "12px" || label.weight !== "600" || label.transform !== "uppercase") {
+        found.push(`agent detail: ${label.text} is ${label.size}/${label.weight}/${label.transform}`);
+      }
+      if (label.mono) mono.push(`agent detail: ${label.text} is set in the mono family`);
+      expect(label.count, "the agent detail's count is not a mono span").toBe(true);
+    }
+    // Both classes must have been walked, or the check holds nothing for them.
+    await openScreen(page, hub, screenRoutes(hub, wiki).projects.find(([n]) => n === "Wiki")[1], "main .wiki-stat-label");
+    expect(await page.locator(".wiki-stat-label").count(), "no wiki stat label was found").toBeGreaterThan(0);
     expect(held, "no section label was found on any screen").toBeGreaterThan(0);
     expect(found, "a section label is not the one label style").toEqual([]);
     expect(mono, "a section label is set in the mono family").toEqual([]);

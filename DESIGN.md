@@ -546,6 +546,12 @@ structure, not to line length.
 - **Chips and pills.** A chip is a filter: 2px radius and no border at rest;
   selected is the sunken ground with a 2px ink rule under the label. A pill is a
   value, not a door, at the 2px radius.
+- **Segmented control.** The selected segment carries a 2px ink rule along its
+  foot, as a chip does, because a fill a shade off the track is not told apart
+  at 3:1. Theme segments and the project section switcher, on desktop and on a
+  phone, carry it at rest; the phone Projects and Agent spaces register stays
+  fill-only. A phone tab's focus ring is drawn inside the tab, beside the mark,
+  so the scrolling track does not clip it.
 - **Key hints.** A key is named on a key chip: 12/500 mono in `--ink-2`, 20px
   high, a `--line-strong` border with a 2px foot, on the raised ground. The
   rail's search key and the shortcut list draw the same chip. Inside a button

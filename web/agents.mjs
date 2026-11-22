@@ -197,7 +197,7 @@ function renderDesktopAgents(agents, projects, grantsByAgent, selectedAgent = nu
       <div class="agent-stage-content agent-detail-body">
         <div class="agent-detail-column">
           ${enrolReason}
-          <div class="agent-detail-label">PROJECTS · ${grants.length}</div>
+          <div class="agent-detail-label">Projects <span class="mono">${grants.length}</span></div>
           ${projectRows}
           ${grantRow}
           <div class="agent-detail-gap"></div>
