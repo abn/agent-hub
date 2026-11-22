@@ -2571,6 +2571,8 @@ button.empty-link {
 .item-code-lang { font-family: var(--font-mono); font-size: var(--t-12); color: var(--ink-3); }
 .item-copy { border: 0; color: var(--ink-2); }
 .item-copy.is-copied { color: var(--ok); }
+/* Any copy glyph that has just confirmed, hover included. */
+button.is-copied, button.is-copied:hover { color: var(--ok); }
 
 /* The answer block: under a darker rule, the verbs, the reply field, and
    where answering goes. */

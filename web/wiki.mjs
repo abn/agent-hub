@@ -13,7 +13,7 @@ import { api } from "./api.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction, slugify } from "./dialog.mjs";
 import { diffStat, hunks, lineDiff, onlyFinalNewline } from "./diff.mjs";
-import { esc } from "./dom.mjs";
+import { confirmCopy, esc } from "./dom.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { placeTime } from "./now-model.mjs";
@@ -872,14 +872,7 @@ export async function wikiCommentResolve(button) {
 export function wikiInstruction(button) {
   const project = button.dataset.project || button.dataset.id || "";
   const command = `hub wiki write ${project} --type concept`;
-  const done = () => toast("Agent instruction copied.");
-  try {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(command).then(done, done);
-      return;
-    }
-  } catch {}
-  done();
+  return confirmCopy(button, command, () => toast("Nothing copied."));
 }
 
 // The New page control: the editor opens empty, and the path is typed there.
