@@ -267,7 +267,9 @@ three chips, All, Needs you and Since you looked, each with its count.
   only the selected row shows its verbs, with the primary filled and a key chip
   on each; the row under the pointer or holding focus shows them as outlines
   with no chips, and the rest show none, so a row keeps its height. On a phone
-  the verbs are always shown. The control row names the move and open keys once. Once an
+  the verbs are always shown. A suggested answer is the agent's own words, so
+  a long one wraps onto further lines inside the column rather than running
+  past the screen's edge. The control row names the move and open keys once. Once an
   ask is answered the selection moves to the next. An ask
   whose deadline is more than a day off, or that the reader snoozed on this
   device, can wait: it stays in the tier with a clock glyph, under the rest,
