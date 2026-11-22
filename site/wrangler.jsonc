@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The name must match the Worker in the Cloudflare dashboard.
+  "name": "agent-hub",
+  "compatibility_date": "2026-11-01",
+
+  // Pull request builds run `npx wrangler preview`, which refuses to run
+  // without this block. Every setting here is top level, so it is empty.
+  "previews": {},
+
+  // Static assets only, no Worker script. `make site` writes the landing page,
+  // the rendered docs under docs/ and the generated _headers into dist/. The
+  // production domain is hub.agync.dev.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}

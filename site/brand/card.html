@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Agent Hub card</title>
+<style>
+@font-face { font-family: Plex; font-weight: 400; src: url("../../web/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2"); }
+@font-face { font-family: Plex; font-weight: 600; src: url("../../web/vendor/fonts/ibm-plex-sans-latin-600-normal.woff2"); }
+@font-face { font-family: PlexMono; font-weight: 400; src: url("../../web/vendor/fonts/ibm-plex-mono-latin-400-normal.woff2"); }
+html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; }
+body { background: #F3F5F2; color: #151B17; font-family: Plex, sans-serif; font-size: calc(100vw / 1280 * 16); -webkit-font-smoothing: antialiased; }
+.c { position: absolute; inset: 0; padding: 4.5em 5em; display: grid; grid-template-columns: 1fr 22em; }
+.l { display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: .7em; font-weight: 600; font-size: 1.7em; letter-spacing: -.01em; }
+.brand svg { width: 1.6em; height: 1.6em; }
+h1 { margin: auto 0 0; font-weight: 600; font-size: 4.6em; line-height: 1.04; letter-spacing: -.03em; max-width: 11ch; }
+p { margin: .9em 0 0; font-size: 1.55em; line-height: 1.45; color: #3B4640; max-width: 26em; }
+.url { margin-top: 2em; font-family: PlexMono, monospace; font-size: 1.15em; color: #56625A; display: flex; gap: 1.6em; }
+.url b { color: #84461D; font-weight: 400; }
+.r { position: relative; }
+.r svg { position: absolute; right: -1em; top: 50%; transform: translateY(-50%); width: 24em; height: 24em; }
+.rule { position: absolute; left: 0; right: 0; bottom: 0; height: .5em; background: #84461D; }
+</style></head><body>
+<div class="c">
+  <div class="l">
+    <div class="brand"><svg viewBox="0 0 24 24"><path d="M12 5.8 6.28 15.7 17.72 15.7 Z" fill="none" stroke="#151B17" stroke-width="1.7" stroke-linejoin="round"/><g fill="#84461D"><circle cx="12" cy="5.8" r="2.5"/><circle cx="6.28" cy="15.7" r="2.5"/><circle cx="17.72" cy="15.7" r="2.5"/></g></svg>Agent Hub</div>
+    <h1>One quiet desk for all your agents.</h1>
+    <p>A local-first operations layer for AI agents and their human. One binary on a node you own.</p>
+    <div class="url"><span><b>hub.agync.dev</b></span><span>github.com/agync/agent-hub</span></div>
+  </div>
+  <div class="r">
+    <svg viewBox="0 0 240 240" aria-hidden="true">
+      <g fill="none" stroke="#D3DAD2" stroke-width="1">
+        <circle cx="120" cy="120" r="112"/><circle cx="120" cy="120" r="78"/>
+      </g>
+      <g stroke="#66726A" stroke-width="1" fill="none">
+        <path d="M120 8 L120 54"/><path d="M23 176 L63 153"/><path d="M217 176 L177 153"/>
+      </g>
+      <g fill="#F3F5F2" stroke="#66726A"><circle cx="120" cy="8" r="5"/><circle cx="23" cy="176" r="5"/><circle cx="217" cy="176" r="5"/></g>
+      <path d="M120 54 63 153 177 153 Z" fill="none" stroke="#151B17" stroke-width="5" stroke-linejoin="round"/>
+      <g fill="#84461D"><circle cx="120" cy="54" r="19"/><circle cx="63" cy="153" r="19"/><circle cx="177" cy="153" r="19"/></g>
+    </svg>
+  </div>
+</div>
+<div class="rule"></div>
+</body></html>

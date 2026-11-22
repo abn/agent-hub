@@ -45,3 +45,11 @@ __pycache__/
 
 # Node toolchain for the PWA. The lockfile is committed; the tree is not.
 /node_modules/
+
+# Site build output and the docs renderer it downloads
+/site/build/
+/site/dist/
+/site/.toolchain/
+/site/.toolchain-work/
+/site/node_modules/
+/site/.wrangler/

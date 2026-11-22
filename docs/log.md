@@ -4,6 +4,16 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-22
+
+### The docs move to the project site
+
+* **Update**: the wiki is published under `/docs/` on the project site at
+  `https://hub.agync.dev`, beside a landing page, instead of on GitHub Pages.
+  [Documentation](/contribute/documentation.md) says where the site lives, how
+  `make site` builds it and how the Cloudflare Worker deploys it.
+* **Remove**: `.github/workflows/pages.yml`, the GitHub Pages publish.
+
 ## 2026-11-21
 
 ### The client type check passes

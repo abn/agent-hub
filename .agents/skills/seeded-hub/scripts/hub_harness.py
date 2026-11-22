@@ -894,7 +894,7 @@ def scratch_root() -> str:
 
 
 @contextmanager
-def running_hub(name: str, override: str | None = None, cwd: str | None = None):
+def running_hub(name: str, override: str | None = None, cwd: str | None = None, seeder=None):
     """A hub on a free port over a throwaway data directory, seeded.
 
     `override` gives the hub a caller-named data directory instead of a
@@ -904,6 +904,9 @@ def running_hub(name: str, override: str | None = None, cwd: str | None = None):
 
     `cwd` starts the hub in that directory, so a relative `override` resolves
     there and the path the hub reports is the relative one it was given.
+
+    `seeder` fills the hub in place of `seed`; it takes the port and returns what
+    the caller needs.
 
     `HUB_BIN` may name a wrapper command, split on spaces, so the hub can run
     under a launcher; the last token is the binary.
@@ -937,7 +940,7 @@ def running_hub(name: str, override: str | None = None, cwd: str | None = None):
     )
     try:
         wait_for_hub(name, port)
-        yield port, seed(port)
+        yield port, (seeder or seed)(port)
     finally:
         hub.terminate()
         # Above the hub's ten-second drain, so a clean stop is not reported as a
