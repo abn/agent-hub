@@ -365,6 +365,41 @@ test.describe("a form is a 640 column, a row is 48, a button is its label", () =
     expect(twoLine.length, "no two-line settings row was measured").toBeGreaterThan(0);
   });
 
+  test("Settings shows one helper line and copies the full data path", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "forms-desktop", "the viewport is resized by the test");
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const lines = page.locator(".settings .form-row-sub:visible, .settings .settings-row-sub:visible");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.baseUrl}/#/settings`);
+    await expect(page.locator(".settings")).toBeVisible();
+    await expect(lines).toHaveCount(1);
+    const full = await page.locator(".shell-controls-path [data-action='copy-path']").getAttribute("data-path");
+    expect(full.length).toBeGreaterThan(0);
+    const shown = await page.locator(".settings-control-path").textContent();
+    expect(shown.split("/").filter(Boolean).length).toBeLessThanOrEqual(3);
+    await page.getByRole("button", { name: "Copy full data path" }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(full);
+    await page.setViewportSize({ width: 600, height: 800 });
+    await page.goto(`${hub.baseUrl}/#/more`);
+    await page.goto(`${hub.baseUrl}/#/settings`);
+    await expect(page.locator(".settings-flat-row").first()).toBeVisible();
+    await expect(lines).toHaveCount(1);
+  });
+
+  test("the More screen's control row follows the 720px breakpoint", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "forms-desktop", "the viewport is resized by the test");
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${hub.baseUrl}/#/more`);
+    const row = page.locator(".shell-stage > .shell-controls");
+    await expect(page.locator(".more-screen")).toBeVisible();
+    await expect(row).toHaveCount(1);
+    await page.setViewportSize({ width: 600, height: 800 });
+    await expect(row).toHaveCount(0);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(row).toHaveCount(1);
+    expect((await row.boundingBox()).height).toBe(40);
+  });
+
   test("a coarse pointer divides an action row between its actions", async ({ hub, page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "forms-touch",

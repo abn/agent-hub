@@ -100,14 +100,49 @@ export async function moreScreen(gen) {
     shellHTML({
       noIndex: true,
       stageHead: shellStageHead("More", nodeLine),
-      // More has nothing to put in the control row, but the frame is reserved
-      // whether or not a pane has content for it: the row is there so a screen
-      // that grows one keeps its place.
-      stageControls: '<div class="shell-controls"></div>',
+      // On a desktop the frame is reserved whether or not a pane has content
+      // for the control row. A phone reserves nothing, so no empty band.
+      stageControls: desktopQuery()?.matches ? CONTROL_ROW : "",
       stageBody: content,
     }),
   );
   // More shows the same sync state the rail does, and no more: healthy means
   // the line is absent here too, with no space reserved for it.
   refreshSyncDisplay();
+  watchBreakpoint();
 }
+
+const CONTROL_ROW = '<div class="shell-controls"></div>';
+const desktopQuery = () => globalThis.matchMedia?.("(min-width: 720px)");
+let watched = null;
+
+// The control row is reserved on a desktop and absent on a phone, so the row
+// follows the window across the breakpoint without a re-fetch.
+function syncControlRow() {
+  const stage = document.querySelector(".more-screen")?.closest(".shell-stage");
+  if (!stage) return;
+  const row = stage.querySelector(":scope > .shell-controls");
+  if (desktopQuery().matches && !row) {
+    stage.querySelector(":scope > .shell-head, :scope > header")?.insertAdjacentHTML("afterend", CONTROL_ROW);
+  } else if (!desktopQuery().matches && row) {
+    row.remove();
+  }
+}
+
+function unwatchBreakpoint() {
+  watched?.removeEventListener?.("change", syncControlRow);
+  watched = null;
+}
+
+// Only the render that is still on screen watches, and leaving More ends it.
+function watchBreakpoint() {
+  const query = desktopQuery();
+  if (!query || !document.querySelector(".more-screen")) return;
+  unwatchBreakpoint();
+  watched = query;
+  query.addEventListener?.("change", syncControlRow);
+}
+
+globalThis.addEventListener?.("hashchange", () => {
+  if (!/^#\/more(\/|\?|$)/.test(location.hash)) unwatchBreakpoint();
+});
