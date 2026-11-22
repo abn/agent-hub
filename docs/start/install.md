@@ -32,12 +32,12 @@ HUB_ADMIN_TOKEN="$(openssl rand -hex 32)"
 Pull and run the published image. This is the default lane.
 
 ```sh
-podman pull ghcr.io/abn/agent-hub:1.0.0
+podman pull ghcr.io/agync/agent-hub:1.0.0
 podman run --detach --name agent-hub \
   --publish 127.0.0.1:8080:8080 \
   --env HUB_ADMIN_TOKEN="$HUB_ADMIN_TOKEN" \
   --volume agent-hub-data:/data \
-  ghcr.io/abn/agent-hub:1.0.0
+  ghcr.io/agync/agent-hub:1.0.0
 ```
 
 `docker run` takes the same arguments. The image is distroless and runs as a
@@ -52,7 +52,7 @@ version and that commit:
 ```sh
 podman build -f Containerfile \
   --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
-  --tag ghcr.io/abn/agent-hub:1.0.0 .
+  --tag ghcr.io/agync/agent-hub:1.0.0 .
 ```
 
 Compose builds that image, mounts a named volume at `/data`, keeps the rest of
@@ -78,7 +78,7 @@ checksum beside it. Download the one for the host, check it, and unpack it:
 VERSION=v1.2.0
 TARGET=aarch64-apple-darwin
 NAME="agent-hub-$VERSION-$TARGET"
-BASE="https://github.com/abn/agent-hub/releases/download/agent-hub-$VERSION"
+BASE="https://github.com/agync/agent-hub/releases/download/agent-hub-$VERSION"
 curl -fsSLO "$BASE/$NAME.tar.gz"
 curl -fsSLO "$BASE/$NAME.sha256"
 shasum -a 256 -c "$NAME.sha256"

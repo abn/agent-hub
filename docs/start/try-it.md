@@ -27,7 +27,7 @@ podman run --detach --name agent-hub \
   --publish 8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
-  ghcr.io/abn/agent-hub:1.0.0
+  ghcr.io/agync/agent-hub:1.0.0
 ```
 
 `docker run` takes the same arguments. The image is distroless and runs as a

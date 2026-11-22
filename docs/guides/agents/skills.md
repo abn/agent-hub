@@ -39,7 +39,7 @@ conventions without a human handing it the document.
 Install it where the harness looks for skills:
 
 ```sh
-npx skills add abn/agent-hub
+npx skills add agync/agent-hub
 ```
 
 The skill's `bootstrap.md` is the setup document: get a token, connect, and

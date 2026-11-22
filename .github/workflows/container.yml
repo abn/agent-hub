@@ -52,7 +52,7 @@ jobs:
       - name: Build the image
         uses: redhat-actions/buildah-build@b13805753a7ac93d18d14b22f6ebdf8499a3a95e # v2.9
         with:
-          image: ghcr.io/abn/agent-hub
+          image: ghcr.io/agync/agent-hub
           tags: ci
           containerfiles: Containerfile
           build-args: |

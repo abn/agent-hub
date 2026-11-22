@@ -153,7 +153,7 @@ fn guide_text(config: &Config, context: &RequestContext<RoleServer>) -> StdStrin
 /// enumerated through the Skills extension (`io.modelcontextprotocol/skills`).
 ///
 /// The bytes are embedded at build time from `skills/agent-hub/`, the same
-/// source `npx skills add abn/agent-hub` installs, so the entry's manifest and
+/// source `npx skills add agync/agent-hub` installs, so the entry's manifest and
 /// digests always describe what is served. Only `SKILL.md` and its references
 /// are the skill; the bootstrap is a separate resource.
 struct SkillFile {

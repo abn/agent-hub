@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The project moves to agync
+
+* **Update**: the install, deploy and agent guides name the repository
+  `agync/agent-hub` and the image `ghcr.io/agync/agent-hub`, and the skill
+  installs with `npx skills add agync/agent-hub`.
+
 ### The docs move to the project site
 
 * **Update**: the wiki is published under `/docs/` on the project site at

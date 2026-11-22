@@ -59,7 +59,7 @@ podman run --detach --name agent-hub \
   --env HUB_ADMIN_TOKEN="$HUB_ADMIN_TOKEN" \
   --env HUB_PUBLIC_URL=https://hub.example \
   --volume agent-hub-data:/data \
-  ghcr.io/abn/agent-hub:1.0.0
+  ghcr.io/agync/agent-hub:1.0.0
 ```
 
 `HUB_PUBLIC_URL` takes a bare origin, scheme and host with an optional port and
