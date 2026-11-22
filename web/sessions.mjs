@@ -2,8 +2,9 @@
 // that close or reclaim a session.
 
 import { api } from "./api.mjs";
-import { focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
+import { count, focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
+import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { esc, glyph, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { pickProject, withProject } from "./projects.mjs";
@@ -41,7 +42,7 @@ export function sessionRow(s, current, isSelected = false) {
   const owner = esc(s.owner ?? s.agent ?? "");
   const statusWord = esc(s.status || "");
   const truncatedId = truncateMiddle(s.id);
-  const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)}`;
+  const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)} · <span class="session-id mono">${truncatedId}</span>`;
 
   const href = current
     ? `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(s.id)}`
@@ -53,7 +54,7 @@ export function sessionRow(s, current, isSelected = false) {
     ${dot}
     <a class="session-link stretched-link" href="${href}" aria-label="Open session ${esc(s.session_name)}, ${statusWord}">
       <span class="grow">
-        <span class="title ${isPruned ? "pruned" : ""}"><span class="session-id mono">${truncatedId}</span> <span class="sep">·</span> ${esc(s.session_name)}</span>
+        <span class="title ${isPruned ? "pruned" : ""}">${esc(s.session_name || s.id)}</span>
         <span class="meta">${metaText}</span>
       </span>
       <span class="session-size mono">${size}</span>
@@ -120,7 +121,7 @@ export async function sessionRows(current, selectedId = null) {
 
   const content = (activeSection || endedSection)
     ? `<div class="sessions-list">${indexHead}${activeSection}${endedSection}${footerNote}</div>`
-    : `<p class="empty">No sessions yet.</p>`;
+    : emptyStateHTML(EMPTY_COPY.sessions);
 
   return { sessions, card: `<div class="sessions-card-wrap">${content}</div>` };
 }
@@ -261,12 +262,10 @@ export function sessionDetailHTML(
   resumeMode = false,
 ) {
   const isEnded = session.status === "ended" || session.status === "pruned";
-  const statusClass = session.status === "active" ? "active" : "ended";
   const eventsCount = session.events ?? 0;
   const brainSize = fmtBytes(session.brain_bytes ?? 0);
   const totalItems = (kvEntries?.length || 0) + (fsEntries?.length || 0);
 
-  const truncatedId = truncateMiddle(session.id);
 
   const file = typeof location !== "undefined" ? new URLSearchParams(location.hash.split("?")[1] || "").get("file") : null;
 
@@ -279,7 +278,7 @@ export function sessionDetailHTML(
 
   const lastEvent = session.last_event
     ? `<a class="audit-row" href="#/projects/${encodeURIComponent(current)}/feed">` +
-        `<span class="meta mono">${esc(session.last_event.summary)}</span>` +
+        `<span class="meta">${esc(session.last_event.summary)}</span>` +
         `<time class="meta mono" datetime="${esc(session.last_event.at)}" title="${esc(session.last_event.at)}">${relative(session.last_event.at)}</time>` +
         `<svg class="session-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>` +
       `</a>`
@@ -293,8 +292,6 @@ export function sessionDetailHTML(
     ? `Session ended ${relative(session.last_activity ?? session.created_at)}. Brain and logs can be pruned.`
     : "Pruning becomes available once the session has ended.";
 
-  const brainFilesCount = fsEntries ? fsEntries.length : 0;
-  const brainFootnote = `${brainFilesCount} files · ${brainSize} · written by ${esc(session.owner ?? session.agent ?? "agent")}`;
 
   // The pane shows the brain tree or, at `?resume=1`, the events after the
   // anchor. The header line names which, so the reader knows what they are
@@ -303,11 +300,11 @@ export function sessionDetailHTML(
   const resumeActive = Boolean(resumeMode && resume);
   const stageTree = resumeActive
     ? `<div class="brain-header-line">
-            <span class="brain-label">Resume <span class="mono">· ${resumeEvents.length} event${resumeEvents.length === 1 ? "" : "s"}</span></span>
+            <span class="brain-label">Resume <span class="mono">· ${count(resumeEvents.length, "event")}</span></span>
           </div>
           ${resumeListHTML(current, resume)}`
     : `<div class="brain-header-line">
-            <span class="brain-label">Brain <span class="mono">· ${brainSize} · ${totalItems} items</span></span>
+            <span class="brain-label">Brain <span class="mono">· ${count(totalItems, "item")}</span></span>
             <span class="brain-size-col mono">size</span>
           </div>
           ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}`;
@@ -329,10 +326,8 @@ export function sessionDetailHTML(
       <header class="session-detail-header">
         <div class="session-header-main">
           <div class="session-detail-title-block">
-            <div class="session-title-line">
-              <span class="session-status ${statusClass}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span>
-            </div>
-            <div class="meta" data-owner="${esc(session.owner ?? session.agent)}">${esc(session.owner ?? session.agent)} · <span class="mono">${truncatedId}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button> · started ${relative(session.created_at)} · ${eventsCount} events · <span class="mono">${brainSize}</span></div>
+            <div class="meta" data-owner="${esc(session.owner ?? session.agent)}"><span class="mono">${esc(session.id)}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button></div>
+            <div class="meta"><span class="session-status ${session.status === "active" ? "active" : "ended"}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span> · started ${relative(session.created_at)} · ${count(eventsCount, "event")}</div>
             ${handoff}
             ${lineage}
           </div>
@@ -349,7 +344,6 @@ export function sessionDetailHTML(
         <div class="session-tree-pane" role="region" aria-label="${resumeActive ? "Resume" : "Brain tree"}">
           ${anchorCardHTML(current, resume, session)}
           ${stageTree}
-          <div class="tree-pane-footnote mono">${brainFootnote}</div>
           ${lastEvent}
           <div class="session-actions-footer">
             ${primaryButton}
