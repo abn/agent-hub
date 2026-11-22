@@ -19,13 +19,14 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./app.mjs";
+import { api, oneOffEvent } from "./invariants.mjs";
 import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./screens.mjs";
 
 // The headings, labels, rows and paragraphs that start on the gutter. A row's
 // own title is not among them: it starts at the gutter plus the row's fixed
 // glyph column, which is the row's own layout.
 const ON_THE_GUTTER =
-  ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .wiki-editor-label, .wiki-comment-body";
+  ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .wiki-editor-label, .wiki-comment-body, .shell-pad > .empty, .shell-body-pad > .empty, .empty-state";
 
 // Content that sits inside a row rather than on it, and the margins of Now and
 // the artifacts list, which are ruled off by their own hairline and carry their
@@ -107,5 +108,73 @@ test.describe("one gutter per pane", () => {
     }
     expect(held.length, "no heading, label or row was found on any screen").toBeGreaterThan(0);
     expect(off, "a row does not start on its pane's gutter").toEqual([]);
+  });
+});
+
+// An empty note is prose on the pane's gutter: no border, no fill. The project
+// is made for the check, so its feed, artifacts and sessions are known empty.
+test.describe("empty notes", () => {
+  test("an empty list's note sits on the pane gutter, with no border or fill", async ({ hub, page }) => {
+    const id = `empty-${Date.now().toString(36)}`;
+    const at = `#/projects/${encodeURIComponent(id)}`;
+    await api(hub, "POST", "/api/v1/projects", { id, display_name: "Empty notes" });
+    await page.goto(`${hub.baseUrl}/`);
+    for (const segment of ["feed", "artifacts", "sessions"]) {
+      await page.goto(`${hub.baseUrl}/${at}/${segment}`);
+      const found = "main .shell-index :is(.empty-state, .shell-body-pad > p.empty)";
+      const note = page.locator(found).first();
+      await expect(note, `${segment} shows an empty note`).toBeVisible();
+      const read = await page.evaluate((found) => {
+        const el = document.querySelector(found);
+        const own = getComputedStyle(el);
+        const text = el.querySelector(".empty-title") || el;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const pane = el.closest(".shell-index").getBoundingClientRect().left;
+        const edge = pane + parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--s-4"));
+        return {
+          offset: Math.round((range.getBoundingClientRect().left - pane) * 10) / 10,
+          gutter: Math.round((edge - pane) * 10) / 10,
+          border: own.borderTopWidth,
+          fill: own.backgroundColor,
+        };
+      }, found);
+      expect(read.offset, `${segment}: the note starts on the gutter`).toBeCloseTo(read.gutter, 0);
+      expect(read.border, `${segment}: no border`).toBe("0px");
+      expect(read.fill, `${segment}: no fill`).toBe("rgba(0, 0, 0, 0)");
+    }
+  });
+
+  test("a filter that matches nothing says so in the stage", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "gutters-desktop", "the phone filters from its tools row");
+    const id = `empty-${Date.now().toString(36)}f`;
+    await api(hub, "POST", "/api/v1/projects", { id, display_name: "Empty filter" });
+    await oneOffEvent(hub, id, "signal", "A signal for the filter check");
+    await page.goto(`${hub.baseUrl}/#/projects/${encodeURIComponent(id)}/feed`);
+    await expect(page.locator("main .shell-index .feed-row").first()).toBeVisible();
+    await page.locator("main .shell-index [data-group-toggle]").click();
+    await page.getByRole("menuitemradio", { name: /^Scores/ }).click();
+    await expect(page.locator("main .shell-index .empty-state")).toBeVisible();
+    await expect(page.locator("main .shell-stage .empty")).toHaveText("No events match this filter.");
+  });
+});
+
+// Project and session rows sink on hover under a fine pointer.
+test.describe("row hover", () => {
+  test("project and session rows take the sunken ground under a fine pointer", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "gutters-desktop", "hover is a fine-pointer behaviour");
+    const ground = (row) => row.evaluate((el) => getComputedStyle(el).backgroundColor);
+    for (const [hash, selector] of [
+      ["#/projects", "main .projects-screen .project-row"],
+      [`#/projects/${encodeURIComponent(hub.projectId)}/sessions`, "main .session-row:not(.selected)"],
+    ]) {
+      await page.goto(`${hub.baseUrl}/${hash}`);
+      const row = page.locator(selector).first();
+      await expect(row).toBeVisible();
+      await page.mouse.move(0, 0);
+      const at = await ground(row);
+      await row.hover();
+      expect(await ground(row), `${selector} sinks on hover`).not.toBe(at);
+    }
   });
 });
