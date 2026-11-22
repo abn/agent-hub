@@ -240,7 +240,18 @@ for (const target of COMPOSERS) {
     }
     // Under the pointer the enabled control keeps its glyph: the ink on the
     // fill is held to the 3:1 a control's mark needs.
+    const inkRgb = await send.evaluate((el) => {
+      const probe = el.ownerDocument.createElement("i");
+      probe.style.color = "var(--ink)";
+      el.ownerDocument.body.append(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      return c;
+    });
+    const fill = (el) => getComputedStyle(el).backgroundColor;
+    expect(await send.evaluate(fill), "the send is not drawn on the ink fill").toBe(inkRgb);
     await send.hover();
+    expect(await send.evaluate(fill), "the send lost its ink fill on hover").toBe(inkRgb);
     const hovered = await send.evaluate((el) => {
       const rgb = (value) => value.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
       const lum = ([r, g, b]) => {
