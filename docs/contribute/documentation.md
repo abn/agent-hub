@@ -128,6 +128,25 @@ validator as above. `pre-commit` runs the same validator whenever a file under
 > the same commit, and the internal progress log is updated separately and never
 > in the bundle.
 
+## Where it is published
+
+The wiki is published with the project site at `https://hub.agync.dev/docs/`.
+The site lives in `site/`: a landing page, its assets and brand sources, and a
+Makefile whose `make site` renders this bundle with the okf-wiki renderer and
+the `wiki-theme/` under `/docs/`, then assembles everything into `site/dist/`.
+A Cloudflare Worker serves `site/dist/` as static assets: it runs `make site`
+with `site/` as its root on every push to `main`, and posts a preview link on a
+pull request. With podman installed, `make site` renders with the pinned
+renderer image; without it, `site/toolchain.sh` downloads the pinned release
+and checks it against `site/okf-wiki.sha256`.
+
+| Command, from `site/` | What it does |
+|---|---|
+| `make site` | builds the deploy directory, `site/dist/` |
+| `make serve` | serves `site/dist/` on `127.0.0.1:4180` |
+| `make shots` | recaptures the landing page's app screenshots from a hub seeded with demo data; set `HUB_BIN` to a built hub |
+| `make brand` | renders the social cards and icons from `site/brand/` |
+
 ## House style
 
 - No em dash and no en dash. Use a comma, a colon, or two sentences.

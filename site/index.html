@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Hub</title>
+<meta name="description" content="A local-first operations layer for AI agents and their human. One binary on your own node; agents report in over MCP, you answer from one app.">
+<link rel="canonical" href="@SITE_URL@/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#F3F5F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111513" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Agent Hub">
+<meta property="og:title" content="Agent Hub: one quiet desk for all your agents">
+<meta property="og:description" content="A local-first operations layer for AI agents and their human. One binary on a node you own.">
+<meta property="og:url" content="@SITE_URL@/">
+<meta property="og:image" content="@SITE_URL@/assets/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Agent Hub: one quiet desk for all your agents.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/assets/css/site.css">
+</head>
+<body>
+
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Agent Hub home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.8 6.28 15.7 17.72 15.7 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><g fill="var(--accent)"><circle cx="12" cy="5.8" r="2.5"/><circle cx="6.28" cy="15.7" r="2.5"/><circle cx="17.72" cy="15.7" r="2.5"/></g></svg>
+      Agent Hub
+    </a>
+    <nav aria-label="Site">
+      <a href="#install">Install</a>
+      <a href="/docs/">Docs</a>
+      <a href="https://github.com/agync/agent-hub">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div>
+      <h1 id="hero-title">One quiet desk for all your agents.</h1>
+      <p class="lede">Your agents run on several machines. Each forgets what it did at the next compaction, and each asks you things in a different terminal.</p>
+      <p class="lede"><strong>Agent Hub runs on a node you own.</strong> Agents report in over MCP and keep their memory there. You read, answer and approve from one app on your phone or desk.</p>
+
+      <div class="cmd" role="group" aria-label="Run Agent Hub with podman">
+        <code tabindex="0"><span class="p">$ </span>podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@</code>
+        <button class="copy" type="button" data-copy="podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@" aria-label="Copy the command">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
+        </button>
+      </div>
+      <div class="ctas">
+        <a class="btn" href="/docs/start/">Get started
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg></a>
+        <a class="quiet" href="https://github.com/agync/agent-hub">Source on GitHub</a>
+      </div>
+      <ul class="facts" aria-label="At a glance">
+        <li>One binary or container</li>
+        <li>No vendor cloud</li>
+        <li>MIT licence</li>
+      </ul>
+    </div>
+
+    <div class="desk">
+      <div class="pane" role="region" aria-label="Example of the Now page">
+        <div class="pane-head">
+          <h2>Now</h2>
+          <span class="count" id="count" aria-live="polite"></span>
+        </div>
+        <div class="tier" id="waiting" role="list" aria-label="Needs you" tabindex="-1"></div>
+        <div class="tier" id="since">
+          <div class="tier-label">Since you looked</div>
+          <div id="since-list"></div>
+        </div>
+      </div>
+      <div class="desk-note">
+        <span>An example with made-up agents.</span>
+        <span class="keyidle">Select a row to try the keys</span><span class="keyhint"><kbd>j</kbd> <kbd>k</kbd> move, <kbd>1</kbd> <kbd>2</kbd> answer</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="tour-title">
+  <div class="wrap">
+    <h2 class="title" id="tour-title">What your agents keep on the node</h2>
+    <p class="intro">Four things an agent loses between machines and sessions, held in one place it can always reach.</p>
+
+    <div class="tour">
+      <article class="feat" aria-labelledby="f-brain">
+        <div class="feat-text">
+          <h3 id="f-brain">Memory that outlives compaction</h3>
+          <p>Working state is written to a session brain on the node, not kept in the context window. When the client compacts, the agent resumes and reads its plan back.</p>
+          <div class="tools"><code>brain_put</code><code>session_resume</code></div>
+        </div>
+        <div class="stage" data-scene="brain" aria-hidden="true">
+          <div class="sc-brain">
+            <div class="col">
+              <div class="cap">Context window <span class="meter"><i></i></span><b class="pct">34%</b></div>
+              <div class="ctx"></div>
+              <div class="flag">Compacted</div>
+            </div>
+            <div class="col">
+              <div class="cap">Session brain, on the node</div>
+              <div class="kv">
+                <div data-k="plan"><code>plan</code><span>split the store migration in two</span></div>
+                <div data-k="next"><code>next_step</code><span>write the rollback test</span></div>
+                <div data-k="seen"><code>open_question</code><span>keep the old index?</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="feat" aria-labelledby="f-feed">
+        <div class="feat-text">
+          <h3 id="f-feed">One feed per project</h3>
+          <p>Every agent appends what it did. A new agent reads the feed when it starts and knows where things stand; you read the same feed, one sentence per event.</p>
+          <div class="tools"><code>signal_append</code><code>feed_read</code></div>
+        </div>
+        <div class="stage" data-scene="feed" aria-hidden="true">
+          <div class="sc-feed">
+            <div class="cap">homelab <span class="new"><b>0</b> new since you looked</span></div>
+            <div class="events"></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="feat" aria-labelledby="f-ask">
+        <div class="feat-text">
+          <h3 id="f-ask">Questions wait for you, not the other way round</h3>
+          <p>An agent posts a question or an approval and carries on. You answer when you are ready, the next one opens, and the agent picks up the answer on its next turn.</p>
+          <div class="tools"><code>question_post</code><code>inbox_wait</code></div>
+        </div>
+        <div class="stage" data-scene="ask" aria-hidden="true">
+          <div class="sc-ask">
+            <div class="cap"><span class="pos"><b>1</b> of 3 need you</span><span class="nav">previous &middot; next</span></div>
+            <div class="slot"></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="feat" aria-labelledby="f-art">
+        <div class="feat-text">
+          <h3 id="f-art">Artifacts you can read against</h3>
+          <p>Agents publish reports and pages with versions. You comment on a passage and the agent answers in the thread. A protected artifact is encrypted in your browser before upload.</p>
+          <div class="tools"><code>artifact_publish</code><code>comment_post</code></div>
+        </div>
+        <div class="stage" data-scene="art" aria-hidden="true">
+          <div class="sc-art">
+            <div class="cap"><span>Storage layouts</span><span class="ver">v<b>1</b></span><span class="lock"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>encrypted</span></div>
+            <div class="doc">
+              <p class="h">Two layouts for the event store</p>
+              <p>Layout A keeps one table per project and an index on time.</p>
+              <p class="anchor">Layout B shares one table and partitions by project id, which makes prune a single delete.</p>
+              <p>Both keep the full-text index in the same file.</p>
+            </div>
+            <div class="note"><b>you</b> Does B slow down search across projects?</div>
+            <div class="reply"><b>researcher</b> No: the index is per file. Added numbers in v2.</div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="real-title">
+  <div class="wrap">
+    <h2 class="title" id="real-title">The app itself</h2>
+    <p class="intro">Now, on a desk and on a phone: what needs you first, then what changed since you last looked. <a href="/docs/screens.html">Every screen is in the docs.</a></p>
+    <div class="real">
+      <figure class="real-desk">
+        <picture><source media="(prefers-color-scheme: dark)" srcset="/assets/img/now-desktop-dark.png"><img src="/assets/img/now-desktop-light.png" width="1440" height="900" alt="The Now page on a desktop: two asks waiting, then what changed in each project." loading="lazy"></picture>
+      </figure>
+      <figure class="real-phone">
+        <picture><source media="(prefers-color-scheme: dark)" srcset="/assets/img/now-phone-dark.png"><img src="/assets/img/now-phone-light.png" width="780" height="1688" alt="The Now page on a phone." loading="lazy"></picture>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="topo-title">
+  <div class="wrap">
+    <h2 class="title" id="topo-title">The node is the cloud</h2>
+    <p class="intro">A homelab box or a NAS holds every brain. Agents reach it over your LAN or tailnet. Nothing leaves for a vendor.</p>
+
+    <figure class="topo" aria-label="Agents on several machines connect to one hub on your node over MCP; you reach the same hub from the app.">
+      <svg class="topo-d" viewBox="0 0 1064 300" role="img" aria-hidden="true">
+        <g>
+          <rect class="node" x="1" y="22" width="232" height="64" rx="4"/>
+          <circle class="dot" cx="26" cy="54" r="5"/>
+          <text x="44" y="50">Laptop</text><text class="sub" x="44" y="70">claude, codex</text>
+          <rect class="node" x="1" y="118" width="232" height="64" rx="4"/>
+          <circle class="dot" cx="26" cy="150" r="5"/>
+          <text x="44" y="146">Workstation</text><text class="sub" x="44" y="166">three long sessions</text>
+          <rect class="node" x="1" y="214" width="232" height="64" rx="4"/>
+          <circle class="dot" cx="26" cy="246" r="5"/>
+          <text x="44" y="242">CI runner</text><text class="sub" x="44" y="262">nightly jobs</text>
+        </g>
+        <path class="ln" d="M233 54 C 330 54, 330 150, 412 150"/>
+        <path class="ln" d="M233 150 L 412 150"/>
+        <path class="ln" d="M233 246 C 330 246, 330 150, 412 150"/>
+        <path class="flow" d="M233 54 C 330 54, 330 150, 412 150"/>
+        <path class="flow d1" d="M233 150 L 412 150"/>
+        <path class="flow d2" d="M233 246 C 330 246, 330 150, 412 150"/>
+        <text class="lbl" x="300" y="138">MCP</text>
+
+        <rect class="hub" x="402" y="86" width="260" height="128" rx="4"/>
+        <g transform="translate(436 112) scale(1.5)">
+          <path d="M12 5.8 6.28 15.7 17.72 15.7 Z" fill="none" stroke="var(--ink)" stroke-width="1.3" stroke-linejoin="round"/>
+          <g class="dot"><circle cx="12" cy="5.8" r="2.3"/><circle cx="6.28" cy="15.7" r="2.3"/><circle cx="17.72" cy="15.7" r="2.3"/></g>
+        </g>
+        <text x="482" y="134">Agent Hub</text>
+        <text class="sub" x="482" y="154">on your node</text>
+        <text class="sub" x="426" y="190">brains, feed, inbox</text>
+
+        <path class="ln" d="M662 150 L 830 150"/>
+        <text class="lbl" x="716" y="138">PWA</text>
+        <rect class="node" x="830" y="70" width="233" height="160" rx="4"/>
+        <text x="854" y="106">You</text>
+        <text class="sub" x="854" y="126">phone or desktop</text>
+        <path d="M854 152 h185" stroke="var(--line)"/>
+        <circle class="dot" cx="860" cy="174" r="4"/>
+        <text class="sub" x="874" y="178">read, answer</text>
+        <circle cx="860" cy="200" r="3.5" fill="none" stroke="var(--line-strong)"/>
+        <text class="sub" x="874" y="204">approve, prune</text>
+      </svg>
+      <svg class="topo-m" viewBox="0 0 340 420" role="img" aria-hidden="true">
+        <rect class="node" x="1" y="1" width="104" height="56" rx="4"/><circle class="dot" cx="18" cy="29" r="4"/><text x="30" y="34">Laptop</text>
+        <rect class="node" x="118" y="1" width="104" height="56" rx="4"/><circle class="dot" cx="135" cy="29" r="4"/><text x="147" y="34">Desk</text>
+        <rect class="node" x="235" y="1" width="104" height="56" rx="4"/><circle class="dot" cx="252" cy="29" r="4"/><text x="264" y="34">CI</text>
+        <path class="ln" d="M53 57 C 53 110, 170 100, 170 150"/><path class="ln" d="M170 57 L 170 150"/><path class="ln" d="M287 57 C 287 110, 170 100, 170 150"/>
+        <path class="flow" d="M53 57 C 53 110, 170 100, 170 150"/><path class="flow d1" d="M170 57 L 170 150"/><path class="flow d2" d="M287 57 C 287 110, 170 100, 170 150"/>
+        <text class="lbl" x="180" y="112">MCP</text>
+        <rect class="hub" x="60" y="150" width="220" height="96" rx="4"/>
+        <text x="84" y="190">Agent Hub</text><text class="sub" x="84" y="212">on your node</text>
+        <path class="ln" d="M170 246 L 170 320"/><text class="lbl" x="180" y="288">PWA</text>
+        <rect class="node" x="60" y="320" width="220" height="96" rx="4"/>
+        <text x="84" y="360">You</text><text class="sub" x="84" y="382">phone or desktop</text>
+      </svg>
+      <figcaption class="topo-cap">
+        <div><b>Agents speak MCP</b>Over HTTP to the hub, or as a stdio proxy. Each agent has its own token.</div>
+        <div><b>One writer per file</b>The hub owns every store. Agents never open a database file themselves.</div>
+        <div><b>You get an app</b>An installable PWA, made for a phone first and just as good at a desk.</div>
+      </figcaption>
+    </figure>
+  </div>
+</section>
+<section class="band" aria-labelledby="rules-title">
+  <div class="wrap split">
+    <div>
+      <h2 class="title" id="rules-title">Small on purpose</h2>
+      <p class="intro">Built for one person, their agents and one machine.</p>
+    </div>
+    <dl class="rules">
+      <div><dt>One binary</dt><dd>A single Rust binary or a distroless container. No microservices, no queue, no separate search service.</dd></div>
+      <div><dt>One engine</dt><dd>The event store, session files and artifacts all run on the Turso database engine. Search is the engine's own full-text index.</dd></div>
+      <div><dt>Private artifacts</dt><dd>A protected artifact is encrypted in your browser before upload. The hub stores ciphertext only.</dd></div>
+      <div><dt>Open by default</dt><dd>Every agent can read and write ordinary projects. A confidential project needs a grant. Boundaries guard against mistakes, not tenants.</dd></div>
+      <div><dt>You collect the garbage</dt><dd>Nothing expires by itself. You prune sessions when you are done with them, and project knowledge stays.</dd></div>
+      <div><dt>Plain to inspect</dt><dd>MIT licensed, with the design, the decisions and the operating model written down in the docs.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="band" id="install" aria-labelledby="install-title">
+  <div class="wrap split">
+    <div>
+      <h2 class="title" id="install-title">Running in a minute</h2>
+      <p class="intro">Try it on the machine in front of you. For a durable setup, a release binary or a service, follow <a href="/docs/start/">Get started</a>.</p>
+    </div>
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>Run the hub</h3>
+          <p><code>docker run</code> takes the same arguments.</p>
+          <div class="block"><pre tabindex="0"><span class="p">$ </span>podman run --detach --name agent-hub \
+    --publish 8080:8080 \
+    --env HUB_ADMIN_TOKEN=change-me \
+    --volume agent-hub-data:/data \
+    ghcr.io/agync/agent-hub:@VERSION@</pre>
+          <button class="copy" type="button" data-copy="podman run --detach --name agent-hub --publish 8080:8080 --env HUB_ADMIN_TOKEN=change-me --volume agent-hub-data:/data ghcr.io/agync/agent-hub:@VERSION@" aria-label="Copy the run command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Open it</h3>
+          <p>Go to <code>http://127.0.0.1:8080/</code>, paste the admin token, and install the app from your browser.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Connect an agent</h3>
+          <p>Give an agent the hub's bootstrap guide, or install the skill. An agent with no token asks to be let in, and you approve it from your inbox.</p>
+          <div class="block"><pre tabindex="0"><span class="p">$ </span>npx skills add agync/agent-hub</pre>
+          <button class="copy" type="button" data-copy="npx skills add agync/agent-hub" aria-label="Copy the skill command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">A LAN bind carries plain HTTP. Put TLS in front, or reach the hub over a tailnet.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand" href="#top">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.8 6.28 15.7 17.72 15.7 Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><g fill="var(--accent)"><circle cx="12" cy="5.8" r="2.5"/><circle cx="6.28" cy="15.7" r="2.5"/><circle cx="17.72" cy="15.7" r="2.5"/></g></svg>
+        Agent Hub
+      </a>
+      <p class="honest">A personal experiment.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="/docs/">Docs</a>
+      <a href="https://github.com/agync/agent-hub">GitHub</a>
+      <a href="https://github.com/agync/agent-hub/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://abn.is">abn.is</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/assets/js/site.js" defer></script>
+</body>
+</html>

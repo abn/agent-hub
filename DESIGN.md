@@ -48,6 +48,20 @@ and the warning callout.
     download chips with its pill radius, which the theme keeps for its dots, so
     those two chips are round where the app's are 2px.
 
+The project site, `site/`, wears the same tokens and type. Its landing page
+persuades rather than operates, so it runs larger than the app: a 64px headline
+and 40px section titles in Plex Sans 600, hairline bands rather than cards, and
+copper kept to the same jobs (what waits on you, the one filled action, focus).
+Its feature scenes are drawn from the app's own components, a Now pane, a feed
+row, an opened ask, an anchored passage, and move only to show the change each
+feature makes. A scene runs only while it is on screen, holds one height
+through its loop, and shows its end state under reduced motion. The hero's Now
+pane answers to `j`, `k`, `1` and `2` like the app, and says it is an example.
+The social cards and icons render from `site/brand/` with the same mark.
+  - **Deviation: the site's display sizes are its own.** The 64px headline and
+    40px section titles are not in the token file; they belong to the site
+    only, and the app's type scale is unchanged.
+
 ## Tokens
 
 `web/tokens.css` is the design's token file, shipped verbatim except for the

@@ -32,7 +32,7 @@ over the PWA. There is no vendor cloud and no brain off the node.
 
 Captured from a seeded hub at desktop and phone widths. Each image follows your
 colour scheme; the full tour is in
-[the wiki](https://abn.github.io/agent-hub/screens.html).
+[the docs](https://hub.agync.dev/docs/screens.html).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screens/now-desktop-dark.png">
@@ -92,8 +92,8 @@ working loop is [Using the hub as a brain](docs/guides/agents/operating.md).
 
 ## Documentation
 
-The wiki lives in [`docs/`](docs/index.md) and is published to
-[GitHub Pages](https://abn.github.io/agent-hub/). It is an OKF v0.2 bundle with
+The wiki lives in [`docs/`](docs/index.md) and is published with the project
+site at [hub.agync.dev](https://hub.agync.dev/docs/). It is an OKF v0.2 bundle with
 two front doors:
 
 - **Running it:** [Get started](docs/start/index.md), [Guides](docs/guides/index.md),
