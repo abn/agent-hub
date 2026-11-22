@@ -681,7 +681,7 @@ export async function projectScreen(params, gen, path) {
       stageHead: stage.head,
       stageControls: stage.controls,
       stageBody: stage.body,
-      hasSelection: Boolean(selected || params?.get("new") === "1" || params?.get("edit") === "1"),
+      hasSelection: Boolean(selected || params?.get("view") || params?.get("new") === "1" || params?.get("edit") === "1"),
     });
   } else if (segment === "artifacts") {
     const built = await artifactsShell(id, segment, stats, params, mobileBar, project);

@@ -9094,6 +9094,17 @@ button.wiki-revert-btn {
 }
 .wiki-article { max-width: 640px; padding: var(--s-4); }
 .shell-controls.wiki-controls, button.wiki-editor-save, button.wiki-new-btn { padding: 0 var(--s-4); }
+.shell-controls .wiki-dirty { flex: none; }
+/* A blank page cannot be saved. Save stays focusable so the reason under it is
+   read with it, and it is drawn the way the composer's send is. */
+button.wiki-editor-save[aria-disabled="true"] {
+  background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed;
+}
+button.wiki-editor-save[aria-disabled="true"]:active { transform: none; }
+/* The filter row's New page is the desktop's; a phone has it in the overflow. */
+@media (max-width: 1099px) {
+  button.project-wiki-new { display: none; }
+}
 .wiki-editor {
   display: flex;
   flex-direction: column;
@@ -9285,6 +9296,7 @@ button.wiki-forget-btn {
   text-decoration: none;
 }
 .wiki-home-new { padding: var(--s-4) var(--s-4) 0; }
+.wiki-home-tail { display: inline-flex; align-items: center; gap: var(--s-2); }
 .wiki-stats {
   padding: var(--s-4);
   display: flex;

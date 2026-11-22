@@ -636,8 +636,8 @@ and its tab names the page count. The tree is one listing of the whole
 knowledge base, drawn as a full tree from 768px up and one drill-in level below
 that; inside a directory the drill-in level carries a breadcrumb, and at the
 root it carries none because the tools row above already names the section. A
-page row carries its title and a mono line of its type, status and derived
-trust, and a stale page adds the 12px clock glyph and the word "stale".
+page row carries its title and a line of its type, status and derived trust set
+in the sans face, since those are words and mono is for literal data, and a stale page adds the 12px clock glyph and the word "stale".
 Selecting a page opens the reader in the stage: the frontmatter block is
 metadata, drawn as the page's type, status and tags rather than as body text,
 and the page's backlinks and comment threads are listed under it.
@@ -648,7 +648,10 @@ The reader offers Review, which stamps the bytes the human read and carries the
 version they read, and Edit, whose Save carries the version token the read
 carried; a page that changed under the editor is refused rather than
 overwritten, and the refusal is said in place with Reload theirs and Keep mine.
-New page and Save to wiki are one sheet: a Location, a Title and a Description,
+In the editor a changed buffer is marked in the control row, and Save is held
+while the page is blank: it keeps its place in the tab order, reads as
+disabled, and the line under it gives the reason, the same rule the composer
+follows. A page is deleted by its own verb. New page and Save to wiki are one sheet: a Location, a Title and a Description,
 the file name computed from the title, and a note naming the type, status and
 source. New page writes a page that is not there yet; Save to wiki copies a
 session brain entry in and leaves the source where it was.
@@ -678,7 +681,10 @@ rows stay and focuses Cancel.
 ### Housekeeping
 
 The Wiki home carries the page, needs-review and stale counts and holds Recent
-changes and Lint, each a housekeeping screen reached from a well-known path. The
+changes and Lint, each a housekeeping screen reached from a well-known path.
+With no pages it shows a short note, and Recent changes stays while the history
+has rows. New page is one control at each width: in the index's filter row on a
+desktop, in the tools row's overflow on a phone. The
 routes and refusals are in
 [knowledge base pages](/reference/knowledge-base-pages.md).
 
