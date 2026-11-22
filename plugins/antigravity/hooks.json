@@ -1,0 +1,11 @@
+{
+  "agent-hub": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "agent-hub hook prompt --harness antigravity",
+        "timeout": 10
+      }
+    ]
+  }
+}

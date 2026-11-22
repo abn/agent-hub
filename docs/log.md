@@ -6,6 +6,17 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The Antigravity plugin
+
+* **Addition**: `agent-hub setup antigravity` installs the hub plugin into
+  Antigravity. It writes the plugin and the skill from files embedded in the
+  binary to the user plugin directory, or to `DIR/.agents/plugins` with
+  `--workspace DIR`, enables it in the Antigravity config, and asks for a
+  restart. A second run changes nothing, and a file it replaces is kept in a
+  backup directory first. The plugin runs `agent-hub mcp --proxy` as agent
+  `antigravity` and the `hook prompt` command before each model call. See
+  [CLI](/reference/cli.md) and the [hook contract](/reference/hook-cli.md).
+
 ### Agent self-provisioning
 
 * **Addition**: the site publishes `/llms.txt`, a bootstrap guide at
