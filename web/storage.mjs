@@ -426,6 +426,8 @@ function desktopTable(usage) {
   let sumArtifacts = 0;
   let sumKnowledge = 0;
   let sumReclaimable = 0;
+  // The bar ranks rows: a row's length is its total over the largest row's.
+  const maxTotal = Math.max(1, ...usage.projects.map(totalOf));
 
   usage.projects.forEach((project, index) => {
     const total = totalOf(project);
@@ -458,24 +460,26 @@ function desktopTable(usage) {
     // 2. SHARE
     const tdShare = el("td", "cell-share");
     const blobBytes = project.artifact_bytes || 0;
-    const brainBytes = project.session_bytes || 0;
+    const brainBytes = (project.session_bytes || 0) + (project.events_bytes || 0) + (project.kb_bytes || 0);
     const shareBar = el("div", "storage-share-bar");
     shareBar.setAttribute("role", "img");
     shareBar.setAttribute(
       "aria-label",
-      `Share: ${formatBytes(blobBytes)} blobs, ${formatBytes(brainBytes)} brains of ${formatBytes(total)} total`,
+      `Share: ${formatBytes(total)} of the largest project's ${formatBytes(maxTotal)} ` +
+        `(${formatBytes(project.artifact_bytes || 0)} artifacts, ${formatBytes(project.session_bytes || 0)} sessions, ` +
+        `${formatBytes(project.events_bytes || 0)} events, ${formatBytes(project.kb_bytes || 0)} knowledge)`,
     );
     if (total > 0) {
       if (blobBytes > 0) {
         const segBlobs = el("span", "storage-share-seg blobs");
-        segBlobs.style.width = `${Math.min(100, (blobBytes / total) * 100)}%`;
-        segBlobs.setAttribute("title", `Blobs: ${formatBytes(blobBytes)}`);
+        segBlobs.style.width = `${Math.min(100, (blobBytes / maxTotal) * 100)}%`;
+        segBlobs.setAttribute("title", `Artifacts: ${formatBytes(blobBytes)}`);
         shareBar.appendChild(segBlobs);
       }
       if (brainBytes > 0) {
         const segBrains = el("span", "storage-share-seg brains");
-        segBrains.style.width = `${Math.min(100, (brainBytes / total) * 100)}%`;
-        segBrains.setAttribute("title", `Brains: ${formatBytes(brainBytes)}`);
+        segBrains.style.width = `${Math.min(100, (brainBytes / maxTotal) * 100)}%`;
+        segBrains.setAttribute("title", `Sessions, events and knowledge: ${formatBytes(brainBytes)}`);
         shareBar.appendChild(segBrains);
       }
     }
@@ -524,7 +528,7 @@ function desktopTable(usage) {
     // 8. ACTION
     const tdAction = el("td", "cell-action");
     if (prunableSessions > 0 && prunableBytes > 0) {
-      const pruneBtn = el("button", "btn storage-prune", "Prune");
+      const pruneBtn = el("button", "btn storage-prune-all-btn storage-row-prune", "Prune");
       pruneBtn.type = "button";
       pruneBtn.dataset.id = project.project_id;
       pruneBtn.addEventListener("click", (e) => {
@@ -582,7 +586,9 @@ function desktopTable(usage) {
     el(
       "p",
       "storage-footnote",
-      "A dash is a project with no ended sessions. Free space on the volume is not shown: the hub cannot read it.",
+      usage.capacity_bytes == null
+        ? "In byte columns, a dash is zero. Free space on the volume is not shown: the hub cannot read it."
+        : "In byte columns, a dash is zero.",
     ),
   );
   return container;
