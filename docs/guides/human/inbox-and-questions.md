@@ -26,9 +26,9 @@ Now opens with one sentence that says who needs you and for what, and then
 reads in three tiers:
 
 - **Needs you**, with its count. Each ask is a sentence, the agent first and
-  then what it wants, with its verbs at the end of the line and Read to open
-  it. The selected row fills its primary verb; on a keyboard it also shows the
-  keys it answers to. Once you answer, the selection moves to the next ask.
+  then what it wants, with its verbs under it. Click the sentence, or press Open
+  on the line below the answers, to read the item in full. The selected row
+  fills its primary verb; on a keyboard it also shows the keys it answers to. Once you answer, the selection moves to the next ask.
 - **Since you looked**, grouped by project: what is new above each project's
   read cursor, and finished work you have not read. **Mark seen** marks all of
   it read.
@@ -40,7 +40,7 @@ deadline. On a phone they are one line under the ask.
 
 ## An opened item
 
-**Read** opens an item at full size. Its header says where it sits among what
+**Open** opens an item at full size. Its header says where it sits among what
 needs you, such as "2 of 7 need you", and the arrows beside it, or `k` and `j`,
 open the previous and next ask without going back to Now. Esc or **Now** leaves.
 

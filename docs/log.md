@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### An ask opens from its sentence
+
+* **Update**: [Human interface](/design/human-interface.md) and the
+  [inbox guide](/guides/human/inbox-and-questions.md) say an ask on Now opens
+  from its sentence, that Read is now Open, and that Open and Reply sit on a
+  bottom line under the answers.
+
 ### A failed screen keeps its frame
 
 * **Update**: [Human interface](/design/human-interface.md) says a screen that

@@ -299,7 +299,7 @@ test.describe("one decision", () => {
   // reader is writing.
   test("a toast leaves a writer alone", async ({ hub, page }) => {
     await goto(page, "#/inbox", "Now");
-    const question = page.locator('.now-ask:has(.glyph[data-kind="question"])').first().getByRole("link", { name: "Read" });
+    const question = page.locator('.now-ask:has(.glyph[data-kind="question"])').first().getByRole("link", { name: "Open", exact: true });
     await expect(question).toBeVisible();
     await question.click();
     const field = page.locator(".composer-field, textarea").first();

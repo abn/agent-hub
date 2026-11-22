@@ -7639,18 +7639,25 @@ dialog.dialog-project-delete {
 .now-open::after { content: ""; position: absolute; inset: 0; }
 .now-open:hover { text-decoration: underline; text-decoration-color: var(--line-strong); }
 .now-ref, .now-rc a { position: relative; z-index: 1; }
+/* An ask's sentence opens the item. Only the words are the link, so the verbs
+   beside them and a click on the row to select it are left alone. */
+.now-ask-open { color: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.now-ask-open:hover { text-decoration-color: var(--ink-2); }
 
 /* The verbs, at the end of the sentence. Only the selected row fills its
    primary; every other row's verbs are outlines. */
 .now-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-left: var(--s-2); vertical-align: middle; }
 .now-acts button { gap: var(--s-2); display: inline-flex; align-items: center; }
 .now-acts button[hidden] { display: none; }
-.now-acts button.now-link { border-color: transparent; padding: 0 var(--s-1); color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
-.now-read {
-  display: inline-flex; align-items: center; gap: var(--s-2); min-height: var(--ctl); padding: 0 var(--s-1);
-  font-size: var(--t-13); font-weight: 600; color: var(--ink-2); text-decoration: none; position: relative;
+/* Open and Reply sit on a bottom line of their own, right-aligned: smaller,
+   outlined secondaries, so the answers keep the first line. */
+.now-foot { display: flex; justify-content: flex-end; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }
+.now-foot .now-sec {
+  display: inline-flex; align-items: center; gap: var(--s-2); min-height: var(--ctl-sm); padding: 0 var(--s-3);
+  border: 1px solid var(--line-strong); border-radius: var(--r-1); background: transparent;
+  font-size: var(--t-13); font-weight: 600; color: var(--ink-2); text-decoration: none; position: relative; cursor: pointer;
 }
-.now-read:hover { color: var(--ink); }
+.now-foot .now-sec:hover { color: var(--ink); background: var(--surface-2); }
 .now-row[tabindex="0"] button.now-pri,
 .now-row[tabindex="0"] button.now-pri:hover {
   background: var(--accent); border-color: var(--accent); color: var(--ink-inverse);
@@ -7661,8 +7668,9 @@ dialog.dialog-project-delete {
 .now-hints span { display: inline-flex; align-items: center; gap: var(--s-1); }
 /* A key is named only where pressing it acts. The map presses the selected
    row's controls and no other row's, so a verb's chip is drawn on the selected
-   ask alone. */
-.now-row:not([tabindex="0"]) :is(.now-acts, .now-read) kbd { display: none; }
+   ask alone. The chip is hidden, not removed, so its width is held on every
+   row and choosing a row never rewraps the verbs. */
+.now-row:not([tabindex="0"]) :is(.now-acts, .now-foot) kbd { visibility: hidden; }
 /* On a fine pointer an ask shows its verbs only when it is the selected row,
    under the pointer, or holds focus. The rest keep their place in the line,
    so a row is the same height whichever is selected. The verbs always take
@@ -7670,7 +7678,7 @@ dialog.dialog-project-delete {
    short or long. */
 @media (pointer: fine) and (min-width: 720px) {
   .now-ask .now-acts { display: flex; margin: var(--s-2) 0 0 0; }
-  .now-row.now-ask:not([tabindex="0"], :hover, :focus-within) .now-acts { visibility: hidden; }
+  .now-row.now-ask:not([tabindex="0"], :hover, :focus-within) :is(.now-acts, .now-foot) { visibility: hidden; }
 }
 /* The keys that move and open have nothing to act on in a stream with no row.
    The artifacts list draws its rows on the same class. */
@@ -7687,13 +7695,17 @@ dialog.dialog-project-delete {
   /* On a phone an ask's verbs take their own line under the sentence and run
      on under the time column, which holds only the first line's clock, so no
      verb is left on a line of its own. */
-  .now-ask .now-acts { display: flex; margin: var(--s-2) calc(-1 * var(--s-3) - var(--s-6) - var(--s-1)) 0 0; }
+  .now-ask .now-acts, .now-ask .now-foot { margin-right: calc(-1 * var(--s-3) - var(--s-6) - var(--s-1)); }
+  .now-ask .now-acts { display: flex; margin-top: var(--s-2); margin-left: 0; }
 }
 @media (any-pointer: coarse) {
-  .now-acts { gap: var(--s-3); }
+  .now-acts, .now-foot { gap: var(--s-3); }
+  /* A 44px hit area around a verb or Open reaches 8px past a 28px box, so the
+     two lines are 16px apart and the areas do not overlap. */
+  .now-ask .now-foot { margin-top: var(--s-4); }
   .now-t button { position: relative; }
   .now-t button::after { z-index: 1; }
-  .now-read::after, .now-t button::after {
+  .now-sec::after, .now-t button::after {
     content: ""; position: absolute; top: 50%; left: 50%;
     width: max(100%, var(--tap)); height: max(100%, var(--tap));
     transform: translate(-50%, -50%);

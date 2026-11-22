@@ -263,10 +263,13 @@ three chips, All, Needs you and Since you looked, each with its count.
 - **Needs you** holds every open question, approval and idea as a sentence,
   the agent first and then what it wants, with the verbs at the end of the
   line: Approve and Decline, a question's suggested answers and Reply, an
-  idea's Resolve and Clear, and Read, which opens the item. On a desktop
-  only the selected row shows its verbs, with the primary filled and a key chip
-  on each; the row under the pointer or holding focus shows them as outlines
-  with no chips, and the rest show none, so a row keeps its height. On a phone
+  idea's Resolve and Clear. The sentence opens the item. The answers take the
+  first action line; Open and Reply are smaller secondaries on a bottom line,
+  right-aligned. A question with no suggested answers keeps Reply as its
+  primary on the first line. On a desktop only the selected row shows its
+  verbs, with the primary filled and a key chip on each; the row under the
+  pointer or holding focus shows them as outlines with no chips, and the rest
+  show none, so a row keeps its height whichever is selected. On a phone
   the verbs are always shown. A suggested answer is the agent's own words, so
   a long one wraps onto further lines inside the column rather than running
   past the screen's edge. The control row names the move and open keys once. Once an

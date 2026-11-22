@@ -104,10 +104,11 @@ const kbd = (key) => `<kbd aria-hidden="true">${esc(key)}</kbd>`;
 function askActions(item, snoozedUntil) {
   const id = esc(item.event_id);
   const summary = esc(item.summary);
-  const open = `<a class="now-read" href="#/inbox?open=${encodeURIComponent(item.event_id)}" data-open data-id="${id}">Read ${kbd("o")}</a>`;
+  const open = `<a class="now-sec now-read" href="#/inbox?open=${encodeURIComponent(item.event_id)}" data-open data-id="${id}">Open ${kbd("o")}</a>`;
   const button = (verb, label, keys, extra = "", primary = false) =>
     `<button type="button" class="${primary ? "now-pri" : ""}" data-now="${verb}" data-id="${id}" data-summary="${summary}" data-key="${keys}"${extra}>${esc(label)}${kbd(keys.split(" ")[0])}</button>`;
   const verbs = [];
+  const foot = [];
   if (item.kind === "approval") {
     verbs.push(button("approve", "Approve", "1 a", "", true), button("decline", "Decline", "2"));
   } else if (item.kind === "question") {
@@ -115,9 +116,10 @@ function askActions(item, snoozedUntil) {
     options.forEach((option, at) => {
       verbs.push(button("choose", option, String(at + 1), ` data-choice="${esc(option)}"`, at === 0));
     });
-    verbs.push(
-      `<button type="button" class="${options.length ? "now-link" : "now-pri"}" data-now="reply" data-id="${id}" data-key="${options.length ? "r" : "1 r"}"${optionsAttr(item.payload)}>Reply${kbd(options.length ? "r" : "1")}</button>`,
-    );
+    const reply = `<button type="button" class="${options.length ? "now-sec" : "now-pri"}" data-now="reply" data-id="${id}" data-key="${options.length ? "r" : "1 r"}"${optionsAttr(item.payload)}>Reply${kbd(options.length ? "r" : "1")}</button>`;
+    // With suggested answers Reply is a secondary, on the bottom line; with
+    // none it is the one answer and stays first.
+    (options.length ? foot : verbs).push(reply);
   } else if (item.kind === "idea") {
     verbs.push(button("resolve", "Resolve", "1 e", "", true), button("clear", "Clear", "2"));
   }
@@ -125,8 +127,8 @@ function askActions(item, snoozedUntil) {
   // a row that is already snoozed, where bringing it back is the one thing to do.
   if (snoozedUntil) verbs.push(button("unsnooze", "Bring back", "s"));
   else verbs.push(`<button type="button" class="now-key-only" data-now="snooze" data-id="${id}" data-summary="${summary}" data-key="s" tabindex="-1" aria-hidden="true" hidden></button>`);
-  verbs.push(open);
-  return { html: verbs.join("") };
+  foot.push(open);
+  return { html: verbs.join(""), foot: foot.join("") };
 }
 
 function askRow(item, snoozes, later) {
@@ -139,7 +141,7 @@ function askRow(item, snoozes, later) {
     <div class="now-main">
       ${mark}
       <div class="now-body">
-        <p class="now-s">${askSentenceHTML(item)}<span class="now-acts">${acts.html}</span></p>
+        <p class="now-s"><a class="now-ask-open" href="#/inbox?open=${encodeURIComponent(item.event_id)}" data-open data-id="${esc(item.event_id)}">${askSentenceHTML(item)}</a><span class="now-acts">${acts.html}</span><span class="now-foot">${acts.foot}</span></p>
       </div>
       ${stamp(item.created_at)}
     </div>

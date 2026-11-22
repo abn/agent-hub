@@ -140,7 +140,7 @@ test.describe("text stays text", () => {
       await goto(page, "#/settings", "Settings");
       await goto(page, "#/inbox", "Now");
       await expect(row).toBeVisible();
-      await row.getByRole("link", { name: "Read" }).click();
+      await row.getByRole("link", { name: "Open", exact: true }).click();
       await expect(page.locator(field).first()).toBeVisible();
       await page.locator(field).first().fill(draft);
       await page.locator(field).first().press("Escape");
