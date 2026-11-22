@@ -109,7 +109,7 @@ function earlierTier(tiers, gap) {
 
 function chips(active, choices) {
   const chip = (id, label, count) =>
-    `<button type="button" class="chip" data-arts="filter" data-project="${esc(id)}" aria-pressed="${active === id}">${esc(label)}${
+    `<button type="button" class="chip" data-arts="filter" data-project="${esc(id)}" aria-pressed="${active === id}"><span class="chip-label" title="${esc(label)}">${esc(label)}</span>${
       count === null ? "" : ` <span class="now-n">${count}</span>`
     }</button>`;
   return [chip("", "All", null), ...choices.map((c) => chip(c.id, c.name, c.count))].join("");

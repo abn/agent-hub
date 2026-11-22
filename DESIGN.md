@@ -559,7 +559,9 @@ structure, not to line length.
   last. Now has no per-row line of keys: the control row's "j k move, o open,
   ? keys" names them once, and `?` opens the full list.
 - **Buttons.** Sized by the control sizes above, radius 2, `white-space:
-  nowrap`, transparent on the canvas. Primary is the copper fill with an
+  nowrap` when the label is the interface's own, transparent on the canvas.
+  A button whose label is an agent's words, an answer on Now or a quick answer
+  in the composer, wraps onto further lines inside its column instead. Primary is the copper fill with an
   inverse label, secondary a `--line-strong` outline, Approve the primary,
   danger an outline on a screen and a fill only inside a dialog that deletes.
   Disabled is the inset surface with meta ink. A destructive action is never a
@@ -1085,6 +1087,16 @@ named checks from the current handoff.
     account for the row's own width, and no action is narrower than the share
     the row gives it. The artifact viewer's document is a separate page in a
     sandboxed frame, so this gate does not walk into it.
+16. **An agent's words fit.** Every screen the router registers is opened at
+    both widths with each subject, summary, title, name and answer option
+    stretched by a long sentence and a run of characters with no space in it,
+    and each Markdown body by the same run as inline code. No visible element
+    reaches past the screen's right edge, outside a code block, a table or a
+    strip of segments or chips that scrolls and itself fits the screen. Any
+    line may break inside a word when nothing else fits, the Artifacts list's
+    project chips are cut short with an ellipsis, and a screen reader's label
+    is pinned to its containing block's left edge, so a title cut short never
+    pushes one out.
 
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said

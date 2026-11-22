@@ -186,6 +186,33 @@ h3.group {
   font-size: var(--t-12); font-weight: 600; background: var(--action-bg); color: var(--action);
   white-space: nowrap; flex: none;
 }
+/* component: text that fits */
+/* An agent's words fit the column they are drawn in, however long. A subject,
+   a title, a name or an answer may carry a run of characters with no space in
+   it, and the agent does not know how wide the reader's screen is, so any line
+   may break inside a word when nothing else fits. A code block and a table
+   keep their lines and scroll instead; inline code wraps with its sentence. */
+body { overflow-wrap: anywhere; }
+pre, kbd, table { overflow-wrap: normal; }
+/* A control whose label is an agent's words wraps onto further lines rather
+   than running past the edge; a control whose label is the interface's own
+   stays on one line. */
+.now-acts button {
+  padding-block: var(--s-1);
+  white-space: normal; text-align: left; line-height: 1.3;
+}
+/* A chip that names a project is cut short with an ellipsis; its accessible
+   name is still the whole name, and its title shows it under a pointer. On a
+   phone the Artifacts list's row of project chips scrolls sideways, as every
+   strip of chips does, so any number of projects fits in the 44px tools row. */
+.chip-label { max-width: 20ch; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 719px) {
+  .arts-controls { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+}
+/* A screen reader's label is pinned to its containing block's left edge. Left
+   where it falls, it sits at the end of the line before it, and a title cut
+   short with an ellipsis has the rest of its line out past the screen. */
+.sr-only { left: 0; }
 /* component: chips */
 /* The design draws a chip at 32px, which is under the tap target, so the
    drawn box stays 32px and a coarse pointer gets the shared hit area. */

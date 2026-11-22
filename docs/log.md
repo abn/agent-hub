@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Long agent text fits the screen
+
+* **Update**: [Human interface](/design/human-interface.md) says a long
+  suggested answer on Now wraps inside the column. A subject, title, name or
+  answer with no space in it breaks inside a word rather than pushing the page
+  sideways, and the Artifacts list's project chips scroll as a strip.
+
 ### The project moves to agync
 
 * **Update**: the install, deploy and agent guides name the repository
