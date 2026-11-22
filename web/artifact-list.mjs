@@ -107,12 +107,33 @@ function earlierTier(tiers, gap) {
   </section>`;
 }
 
+// Under 720px the row is a scrolling strip of every project. Wider, a hub with
+// five or more projects keeps the three with the most artifacts as chips and
+// folds the rest into a More menu; a folded project that is the current filter
+// stays on the row as a chip so the filter is always visible.
+const CHIPS_SHOWN = 3;
+const MORE_CHEVRON = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 9l6 6 6-6"></path></svg>`;
+
 function chips(active, choices) {
-  const chip = (id, label, count) =>
-    `<button type="button" class="chip" data-arts="filter" data-project="${esc(id)}" aria-pressed="${active === id}"><span class="chip-label" title="${esc(label)}">${esc(label)}</span>${
+  const chip = (id, label, count, extra = "") =>
+    `<button type="button" class="chip${extra}" data-arts="filter" data-project="${esc(id)}" aria-pressed="${active === id}"><span class="chip-label" title="${esc(label)}">${esc(label)}</span>${
       count === null ? "" : ` <span class="now-n">${count}</span>`
     }</button>`;
-  return [chip("", "All", null), ...choices.map((c) => chip(c.id, c.name, c.count))].join("");
+  if (choices.length < CHIPS_SHOWN + 2) return [chip("", "All", null), ...choices.map((c) => chip(c.id, c.name, c.count))].join("");
+  const ranked = choices.map((c, i) => ({ c, i })).sort((a, b) => b.c.count - a.c.count || a.i - b.i).map(({ c }) => c);
+  const top = ranked.slice(0, CHIPS_SHOWN);
+  const rest = ranked.slice(CHIPS_SHOWN);
+  const item = (c) =>
+    `<button type="button" role="menuitemradio" aria-checked="${active === c.id}" data-arts="filter" data-project="${esc(c.id)}"><span class="arts-check" aria-hidden="true">${glyphSvg("resolve", { size: 14, strokeWidth: 2.2 })}</span><span class="chip-label" title="${esc(c.name)}">${esc(c.name)}</span> <span class="mono shell-menu-n">${c.count}</span></button>`;
+  return [
+    chip("", "All", null),
+    ...top.map((c) => chip(c.id, c.name, c.count)),
+    ...rest.map((c) => chip(c.id, c.name, c.count, c.id === active ? " arts-chip-folded is-current" : " arts-chip-folded")),
+    `<div class="shell-group arts-more">
+      <button type="button" class="hub-group-toggle" data-group-toggle data-arts-more aria-haspopup="menu" aria-expanded="false">More${MORE_CHEVRON}</button>
+      <div class="shell-group-menu" role="menu" aria-label="More projects" data-group-menu hidden>${rest.map(item).join("")}</div>
+    </div>`,
+  ].join("");
 }
 
 const HINTS = `<span class="now-hints arts-hints" aria-hidden="true"><span class="now-hint-row">${kbd("j")}${kbd("k")} move</span><span class="now-hint-row">${kbd("o")} open</span></span>`;
@@ -188,7 +209,30 @@ export async function artifactListScreen(gen) {
     }),
   );
   installShellLayout(main);
+  keepMoreInView();
   if (first) fillPreview(first);
+  if (focusAfter !== null) {
+    const chosen = [...main.querySelectorAll("button.chip[data-arts='filter']")].find((b) => /** @type {HTMLElement} */ (b).dataset.project === focusAfter);
+    /** @type {HTMLElement | undefined} */ (chosen)?.focus({ preventScroll: true });
+    focusAfter = null;
+  }
+}
+
+// The project a pick just chose; its chip takes focus once the list is redrawn.
+/** @type {string | null} */
+let focusAfter = null;
+
+// The Group menu places itself 200px from the right edge; More's items can be
+// wider than that, so once it opens the menu is pulled back inside the window.
+function keepMoreInView() {
+  const toggle = main.querySelector("[data-arts-more]");
+  const menu = /** @type {HTMLElement | null} */ (main.querySelector(".arts-more [data-group-menu]"));
+  toggle?.addEventListener("click", () => {
+    if (!menu || menu.hidden) return;
+    menu.style.maxWidth = `${window.innerWidth - 16}px`;
+    const left = Math.min(parseFloat(menu.style.left) || 8, window.innerWidth - menu.offsetWidth - 8);
+    menu.style.left = `${Math.max(8, Math.round(left))}px`;
+  });
 }
 
 // The receipts of the focused artifact, drawn at once from the list and then
@@ -303,12 +347,42 @@ main.addEventListener("focusin", (event) => {
   if (row) focusRow(row);
 });
 
+// The More menu's keys: ArrowDown on its trigger opens it, the arrows move
+// through the projects, and Escape closes it with focus back on the trigger.
+main.addEventListener("keydown", (event) => {
+  if (!onList()) return;
+  const target = /** @type {HTMLElement} */ (event.target);
+  const more = target.closest?.(".arts-more");
+  if (!more) return;
+  const toggle = /** @type {HTMLElement} */ (more.querySelector("[data-arts-more]"));
+  const menu = /** @type {HTMLElement} */ (more.querySelector("[data-group-menu]"));
+  if (event.key === "ArrowDown" && target === toggle && menu.hidden) {
+    event.preventDefault();
+    toggle.click();
+  } else if (event.key === "Escape" && !menu.hidden) {
+    toggle.focus();
+  } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && menu.contains(target)) {
+    event.preventDefault();
+    const items = [...menu.querySelectorAll("button")];
+    const at = items.indexOf(/** @type {HTMLButtonElement} */ (target));
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    items[(at + step + items.length) % items.length].focus();
+  }
+});
+
 main.addEventListener("click", async (event) => {
   const button = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("button[data-arts]"));
   if (!button || !onList()) return;
   const verb = button.dataset.arts;
   if (verb === "filter") {
-    location.hash = hrefFor(button.dataset.project || "");
+    const id = button.dataset.project || "";
+    if (id === projectFromHash()) {
+      // Picking what is already chosen changes nothing; focus goes back to More.
+      if (button.closest(".arts-more")) /** @type {HTMLElement | null} */ (main.querySelector("[data-arts-more]"))?.focus();
+      return;
+    }
+    focusAfter = id;
+    location.hash = hrefFor(id);
   } else if (verb === "all") {
     showAll = true;
     await render();

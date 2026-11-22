@@ -217,6 +217,30 @@ pre, kbd, table { overflow-wrap: normal; }
 .chip-label { max-width: 20ch; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 719px) {
   .arts-controls { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .shell-group.arts-more { display: none; }
+}
+/* From 720px a hub with many projects folds all but the busiest into the More
+   menu; the folded project that is the current filter stays on the row. */
+@media (min-width: 720px) {
+  .arts-chip-folded:not(.is-current) { display: none; }
+  /* The chips give way before More and the key hints do: a long project name
+     is cut with an ellipsis and its count stays whole. */
+  .shell-controls.arts-controls .chip { flex: 0 1 auto; min-width: 0; }
+  .shell-controls.arts-controls .chip[data-project=""] { flex: none; }
+  .arts-controls .chip-label { flex: 0 1 auto; min-width: 2ch; }
+  .arts-controls .arts-hints { flex: none; }
+}
+.arts-check { display: inline-flex; width: 14px; flex: none; }
+.arts-more .shell-group-menu .chip-label { flex: 1; text-align: left; }
+.arts-more [aria-checked="false"] .arts-check { visibility: hidden; }
+@media (any-pointer: coarse) {
+  .arts-more .hub-group-toggle { position: relative; }
+  .arts-more .hub-group-toggle::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: max(100%, var(--tap)); height: max(100%, var(--tap));
+    transform: translate(-50%, -50%);
+  }
+  .arts-more .shell-group-menu button { min-height: var(--tap); }
 }
 /* A screen reader's label is pinned to its containing block's left edge. Left
    where it falls, it sits at the end of the line before it, and a title cut
