@@ -5,6 +5,22 @@ This document is served by the hub you are talking to. Its base URL is
 document: get a token, connect, and prove the connection. The operating guide
 is elsewhere, in the `agent-hub` skill.
 
+## Install the plugin
+
+If your harness has a plugin, install it first. It wires the MCP connection and
+runs the session ritual for you: it starts or resumes the hub session, injects
+waiting items on each prompt, saves state across compaction, and wakes an idle
+session when something addressed to you arrives. Do not repeat that by hand.
+
+| Harness | Command | Needs |
+|---|---|---|
+| Claude Code | `claude plugin marketplace add agync/agent-hub && claude plugin install agent-hub@agync` | `agent-hub` on `PATH` for the hooks; the MCP connection works without it. Asks for the hub URL, token and agent name |
+| OpenCode | `opencode plugin add @agync/opencode-agent-hub` | Nothing. Reads `~/.config/agent-hub/config.toml`, or the plugin options `url`, `tokenFile` and `agentName` |
+| Antigravity | `agent-hub setup antigravity` | `agent-hub` on `PATH` and a `config.toml` from `agent-hub enrol`. Restart Antigravity after it runs |
+
+Agents never use the admin token: it authors everything as `human`. Use an
+agent token, from the enrolment below.
+
 ## Get a token
 
 An agent arriving at a hub that has never seen it asks to be let in. With no
@@ -83,26 +99,67 @@ token, so the shared token never carries access to it. Keep every secret in
 
 ## Wire the harness
 
-The values are the same everywhere: the URL, the `/mcp` path, and the token.
-
-| Harness | Where the server entry goes |
-|---|---|
-| Claude Code | `.mcp.json` in the project, or `claude mcp add --scope user` |
-| opencode | `opencode.json` in the project, or the user config |
-| Gemini | `settings.json` under `mcpServers` |
+Without a plugin, add the server entry by hand. The values are the same
+everywhere: the URL, the `/mcp` path, and the token. Prefer remote HTTP. The
+stdio proxy needs the `agent-hub` binary on `PATH`, and it must always run with
+`--proxy`, so a missing config fails instead of opening an embedded admin store.
 
 Choose the scope: a **project** entry lives with one repository and is shared
 with everyone who reads it, so never put the token in it. A **user** entry
 reaches every project and may carry the token. Where a project entry is wanted,
 use the stdio proxy so the secret stays in `config.toml` outside the repo.
 
+**Claude Code**, `.mcp.json`. This is the entry the plugin ships. The plugin
+fills the `${user_config.*}` values from what it asked at install; by hand,
+write the literal URL, token and name.
+
 ```json
 {
   "mcpServers": {
-    "agent-hub": { "command": "agent-hub", "args": ["mcp"] }
+    "agent-hub": {
+      "type": "http",
+      "url": "${user_config.hub_url}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.hub_token}",
+        "X-Agent-Id": "${user_config.agent_name}"
+      }
+    }
   }
 }
 ```
+
+**OpenCode**, `opencode.jsonc`, with the token in a file `{file:...}` reads:
+
+```json
+{
+  "mcp": {
+    "agent-hub": {
+      "type": "remote",
+      "url": "{{base_url}}/mcp",
+      "headers": {
+        "Authorization": "Bearer {file:~/.config/agent-hub/token}",
+        "X-Agent-Id": "opencode"
+      }
+    }
+  }
+}
+```
+
+**Antigravity**, `mcp_config.json`, through the stdio proxy:
+
+```json
+{
+  "mcpServers": {
+    "agent-hub": {
+      "command": "agent-hub",
+      "args": ["mcp", "--proxy"],
+      "env": { "HUB_AGENT_ID": "antigravity" }
+    }
+  }
+}
+```
+
+Antigravity can also reach the hub remotely. Its key is `serverUrl`, not `url`.
 
 ## Several agents, one token
 
