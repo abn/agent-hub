@@ -1,0 +1,15 @@
+{
+  "name": "claude-prompt-empty-string-context",
+  "input": {
+    "harness": "claude",
+    "event": "prompt",
+    "output": {
+      "context": "",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

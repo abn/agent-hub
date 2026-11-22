@@ -1,0 +1,26 @@
+{
+  "name": "notice-wake-cap-boundary-allows",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1000000,
+    "last_wake_at": 999700,
+    "items": [
+      {
+        "id": "evt_01A",
+        "kind": "answer",
+        "title": "Answer to: which port?",
+        "project": "agent-hub",
+        "direct": true
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [answer] Answer to: which port? (agent-hub, evt_01A)"
+    ],
+    "wake": true,
+    "watch_lines": [
+      "- [answer] Answer to: which port? (agent-hub, evt_01A)"
+    ]
+  }
+}

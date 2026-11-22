@@ -1,0 +1,24 @@
+{
+  "name": "context-lines-after-header",
+  "input": {
+    "project_id": "agent-hub",
+    "session_name": "feat-claude-mod",
+    "session_id": "s_01J8",
+    "actor": "abn/claude",
+    "brief": [
+      "Since your last look: 1 answer."
+    ],
+    "anchor": null,
+    "handoff": [],
+    "kb_index": [],
+    "pending": [],
+    "context_lines": [
+      "ignored HUB_PROJECT \"my project!\": not [A-Za-z0-9_-]{1,64}",
+      "no project matched; write `.agent-hub` to pin one"
+    ]
+  },
+  "expected": {
+    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nignored HUB_PROJECT \"my project!\": not [A-Za-z0-9_-]{1,64}\nno project matched; write `.agent-hub` to pin one\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nSince your last look: 1 answer.\n</agent-hub>",
+    "truncated": false
+  }
+}

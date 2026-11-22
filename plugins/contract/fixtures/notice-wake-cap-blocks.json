@@ -1,0 +1,24 @@
+{
+  "name": "notice-wake-cap-blocks",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1000000,
+    "last_wake_at": 999701,
+    "items": [
+      {
+        "id": "evt_01A",
+        "kind": "answer",
+        "title": "Answer to: which port?",
+        "project": "agent-hub",
+        "direct": true
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [answer] Answer to: which port? (agent-hub, evt_01A)"
+    ],
+    "wake": false,
+    "watch_lines": []
+  }
+}

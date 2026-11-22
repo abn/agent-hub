@@ -1,0 +1,18 @@
+{
+  "name": "context-minimal",
+  "input": {
+    "project_id": "agent-hub",
+    "session_name": "feat-claude-mod",
+    "session_id": "s_01J8",
+    "actor": "abn/claude",
+    "brief": [],
+    "anchor": null,
+    "handoff": [],
+    "kb_index": [],
+    "pending": []
+  },
+  "expected": {
+    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\n</agent-hub>",
+    "truncated": false
+  }
+}

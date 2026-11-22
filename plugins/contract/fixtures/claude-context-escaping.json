@@ -1,0 +1,20 @@
+{
+  "name": "claude-context-escaping",
+  "input": {
+    "harness": "claude",
+    "event": "prompt",
+    "output": {
+      "context": "quote \" backslash \\ newline\nend",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": "quote \" backslash \\ newline\nend"
+      }
+    },
+    "exit_code": 0
+  }
+}

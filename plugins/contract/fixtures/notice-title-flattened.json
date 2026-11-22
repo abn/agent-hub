@@ -1,0 +1,26 @@
+{
+  "name": "notice-title-flattened",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1,
+    "last_wake_at": null,
+    "items": [
+      {
+        "id": "evt_01E",
+        "kind": "comment",
+        "title": "line one\nline two   with   spaces",
+        "project": "ops",
+        "direct": true
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [comment] line one line two with spaces (ops, evt_01E)"
+    ],
+    "wake": true,
+    "watch_lines": [
+      "- [comment] line one line two with spaces (ops, evt_01E)"
+    ]
+  }
+}

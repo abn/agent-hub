@@ -1,0 +1,14 @@
+{
+  "name": "notice-empty",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1000000,
+    "last_wake_at": null,
+    "items": []
+  },
+  "expected": {
+    "lines": [],
+    "wake": false,
+    "watch_lines": []
+  }
+}

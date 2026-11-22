@@ -1,0 +1,31 @@
+{
+  "name": "resolve-project-file",
+  "input": {
+    "harness": "claude",
+    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "cwd": "/work/agent-hub",
+    "env": {},
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/agent-hub",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "feat/x",
+      "detached": false
+    },
+    "files": {
+      "/work/agent-hub/.agent-hub": "pinned\n"
+    },
+    "known_projects": [
+      "pinned",
+      "agent-hub"
+    ],
+    "personal_project": "abn-claude"
+  },
+  "expected": {
+    "project_id": "pinned",
+    "project_source": "file",
+    "session_name": "feat-x",
+    "session_source": "branch",
+    "context_line": null
+  }
+}

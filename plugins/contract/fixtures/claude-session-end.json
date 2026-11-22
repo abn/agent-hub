@@ -1,0 +1,15 @@
+{
+  "name": "claude-session-end",
+  "input": {
+    "harness": "claude",
+    "event": "session-end",
+    "output": {
+      "context": null,
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

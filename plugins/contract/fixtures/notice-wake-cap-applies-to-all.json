@@ -1,0 +1,48 @@
+{
+  "name": "notice-wake-cap-applies-to-all",
+  "input": {
+    "hub_wake": "all",
+    "now": 1000000,
+    "last_wake_at": 999990,
+    "items": [
+      {
+        "id": "evt_01A",
+        "kind": "answer",
+        "title": "Answer to: which port?",
+        "project": "agent-hub",
+        "direct": true
+      },
+      {
+        "id": "evt_01B",
+        "kind": "comment",
+        "title": "human on \"The board\": move the docs task to now",
+        "project": "agent-hub",
+        "direct": true
+      },
+      {
+        "id": "evt_01C",
+        "kind": "page",
+        "title": "Page changed: /fs/ops.md",
+        "project": "agent-hub",
+        "direct": false
+      },
+      {
+        "id": "evt_01D",
+        "kind": "artifact",
+        "title": "Artifact updated: Roadmap",
+        "project": "agent-hub",
+        "direct": false
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [answer] Answer to: which port? (agent-hub, evt_01A)",
+      "- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)",
+      "- [page] Page changed: /fs/ops.md (agent-hub, evt_01C)",
+      "- [artifact] Artifact updated: Roadmap (agent-hub, evt_01D)"
+    ],
+    "wake": false,
+    "watch_lines": []
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "claude-subagent-start",
+  "input": {
+    "harness": "claude",
+    "event": "subagent-start",
+    "output": {
+      "context": "You share the parent's hub connection and session s_01J8. Do not call session_start.",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {
+      "hookSpecificOutput": {
+        "hookEventName": "SubagentStart",
+        "additionalContext": "You share the parent's hub connection and session s_01J8. Do not call session_start."
+      }
+    },
+    "exit_code": 0
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "resolve-project-env",
+  "input": {
+    "harness": "claude",
+    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "cwd": "/work/agent-hub",
+    "env": {
+      "HUB_PROJECT": "ops"
+    },
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/agent-hub",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "feat/claude-mod",
+      "detached": false
+    },
+    "files": {
+      "/work/agent-hub/.agent-hub": "pinned\n"
+    },
+    "known_projects": [
+      "ops",
+      "pinned",
+      "agent-hub"
+    ],
+    "personal_project": "abn-claude"
+  },
+  "expected": {
+    "project_id": "ops",
+    "project_source": "env",
+    "session_name": "feat-claude-mod",
+    "session_source": "branch",
+    "context_line": null
+  }
+}

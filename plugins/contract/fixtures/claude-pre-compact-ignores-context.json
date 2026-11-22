@@ -1,0 +1,15 @@
+{
+  "name": "claude-pre-compact-ignores-context",
+  "input": {
+    "harness": "claude",
+    "event": "pre-compact",
+    "output": {
+      "context": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\n</agent-hub>",
+      "compaction_instructions": "Keep: hub project agent-hub, session feat-claude-mod (id s_01J8), the current phase and open hub items."
+    }
+  },
+  "expected": {
+    "stdout_text": "Keep: hub project agent-hub, session feat-claude-mod (id s_01J8), the current phase and open hub items.",
+    "exit_code": 0
+  }
+}

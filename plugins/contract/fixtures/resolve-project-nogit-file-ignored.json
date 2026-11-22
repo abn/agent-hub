@@ -1,0 +1,28 @@
+{
+  "name": "resolve-project-nogit-file-ignored",
+  "input": {
+    "harness": "claude",
+    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "cwd": "/work/scratch",
+    "env": {},
+    "git": {
+      "is_repo": false,
+      "top_level": null,
+      "origin_url": null,
+      "branch": null,
+      "detached": false
+    },
+    "files": {
+      "/work/scratch/.agent-hub": "pinned\n"
+    },
+    "known_projects": [],
+    "personal_project": "abn-claude"
+  },
+  "expected": {
+    "project_id": "abn-claude",
+    "project_source": "personal",
+    "session_name": "claude-3f9a1c27",
+    "session_source": "harness_session",
+    "context_line": "no project matched; write `.agent-hub` to pin one"
+  }
+}
