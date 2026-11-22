@@ -12,6 +12,9 @@ usage:
   agent-hub tools                list the hub's tools
   agent-hub kb <command>         read and write the project knowledge base
   agent-hub project <command>    create, list, and delete projects
+  agent-hub hook <event>         run one harness hook against the hub
+  agent-hub watch                wait for items that may wake an idle agent
+  agent-hub setup <harness>      install the hub plugin into a harness
   agent-hub config [flags]       inspect and validate configuration
   agent-hub enrol [why]          request enrolment and wait for operator approval
   agent-hub backup --out DIR     back up the store while no hub serves it
@@ -224,7 +227,10 @@ bundle. A page missing from the folder is kept unless --prune is given.
 ";
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
 
     // A help flag is a question about the command, not an argument to it, so it
     // is answered here, before anything else runs: no subcommand starts a hub,
@@ -264,6 +270,9 @@ fn main() -> ExitCode {
         Some("tools") => tools(&args[1..]),
         Some("kb") => kb(&args[1..]),
         Some("project") => project(&args[1..]),
+        Some("hook") => hook(&args[1..]),
+        Some("watch") => watch(&args[1..]),
+        Some("setup") => setup(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
         Some("enrol") => enrol(&args[1..]),
         Some("backup") => backup_cmd(&args[1..]),
@@ -304,6 +313,12 @@ fn usage_of(command: &str) -> Option<&'static str> {
         "kb" => KB_USAGE,
         #[cfg(feature = "client")]
         "project" => agent_hub::client::projects::PROJECT_USAGE,
+        #[cfg(feature = "client")]
+        "hook" => agent_hub::client::hook::HOOK_USAGE,
+        #[cfg(feature = "client")]
+        "watch" => agent_hub::client::hook::watch::WATCH_USAGE,
+        #[cfg(feature = "client")]
+        "setup" => agent_hub::client::hook::setup::SETUP_USAGE,
         "config" => CONFIG_USAGE,
         #[cfg(feature = "client")]
         "enrol" => agent_hub::client::enrol::ENROL_USAGE,
@@ -1687,6 +1702,36 @@ fn kb(_args: &[String]) -> ExitCode {
 
 #[cfg(not(feature = "client"))]
 fn project(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(feature = "client")]
+fn hook(args: &[String]) -> ExitCode {
+    ExitCode::from(agent_hub::client::hook::run_hook(args))
+}
+
+#[cfg(feature = "client")]
+fn watch(args: &[String]) -> ExitCode {
+    ExitCode::from(agent_hub::client::hook::watch::run_watch(args))
+}
+
+#[cfg(feature = "client")]
+fn setup(args: &[String]) -> ExitCode {
+    ExitCode::from(agent_hub::client::hook::setup::run_setup(args))
+}
+
+#[cfg(not(feature = "client"))]
+fn hook(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn watch(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn setup(_args: &[String]) -> ExitCode {
     without_client()
 }
 
