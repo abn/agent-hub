@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The OpenCode plugin
+
+* **Addition**: `plugins/opencode` is the OpenCode v2 plugin for the
+  [hook contract](/reference/hook-cli.md). It registers the hub MCP server, binds
+  a session at start, injects waiting items, keeps the session through
+  compaction and wakes an idle session from one in-process long poll. It runs
+  the same golden fixtures as the Rust hook CLI, and `make plugins/check` runs
+  its tests with the rest of the gate.
+
 ### Comments and page writes are feed events
 
 * **Addition**: a comment on an artifact or a knowledge base page, from the

@@ -1,0 +1,96 @@
+// Pure text rules of the hook contract: notice lines, the wake decision and the
+// <agent-hub> block. Lengths count Unicode scalar values.
+
+export const WAKE_COOLDOWN_SECONDS = 300;
+export const BLOCK_CAP = 2500;
+const TITLE_MAX = 120;
+const LINE_MAX = 240;
+
+const scalars = (text) => Array.from(text);
+
+export function clip(text, max) {
+  const chars = scalars(text);
+  if (chars.length <= max) return text;
+  return chars.slice(0, max - 3).join("") + "...";
+}
+
+export function flatten(text) {
+  return String(text ?? "")
+    .replace(/[ \t\n\v\f\r]+/g, " ")
+    .replace(/^ | $/g, "");
+}
+
+export function noticeLine(item) {
+  return `- [${item.kind}] ${clip(flatten(item.title), TITLE_MAX)} (${item.project}, ${item.id})`;
+}
+
+export function wakeMode(value) {
+  return value === "all" || value === "never" ? value : "direct";
+}
+
+// Whether an idle agent is woken by this batch, and what a wake would print.
+export function notices({ hub_wake, now, last_wake_at, items }) {
+  const lines = items.map(noticeLine);
+  const mode = wakeMode(hub_wake);
+  const eligible =
+    mode === "all" ? items.length > 0 : mode === "direct" ? items.some((item) => item.direct) : false;
+  const cooled = last_wake_at == null || now - last_wake_at >= WAKE_COOLDOWN_SECONDS;
+  const wake = eligible && cooled;
+  const ordered = [...items.filter((i) => i.direct), ...items.filter((i) => !i.direct)];
+  return { lines, wake, watch_lines: wake ? ordered.map(noticeLine) : [] };
+}
+
+const cut = (lines, max) => lines.slice(0, max).map((line) => clip(line, LINE_MAX));
+
+export function contextBlock(input) {
+  const { project_id, session_name, session_id, actor, anchor } = input;
+  const contextLines = input.context_lines ?? [];
+  const head = [
+    `project ${project_id} | session ${session_name}${session_id ? ` (${session_id})` : ""} | you are ${actor}`,
+    ...contextLines,
+    `Bind your hub connection now: session_start(project_id: "${project_id}", session_name: "${session_name}").`,
+    "Do not call session_brief; this block is the brief.",
+  ];
+  const groups = {
+    brief: cut(input.brief ?? [], 12),
+    anchor: anchor ? cut(anchor.lines ?? [], 10) : [],
+    handoff: cut(input.handoff ?? [], Infinity),
+    kb: cut(input.kb_index ?? [], 15),
+    pending: cut(input.pending ?? [], Infinity),
+  };
+
+  const render = (truncated) => {
+    const body = [...head, ...groups.brief];
+    if (anchor) body.push(`Last anchor (phase "${anchor.phase}", ${anchor.age}):`, ...groups.anchor);
+    if (groups.handoff.length) body.push("Handoff:", ...groups.handoff);
+    if (groups.kb.length) body.push("KB index:", ...groups.kb);
+    if (groups.pending.length) body.push("Pending:", ...groups.pending);
+    if (truncated) body.push("[truncated]");
+    return `<agent-hub>\n${body.join("\n")}\n</agent-hub>`;
+  };
+
+  let text = render(false);
+  if (scalars(text).length <= BLOCK_CAP) return { text, truncated: false };
+
+  const dropOrder = ["kb", "handoff", "anchor", "brief", "pending"];
+  for (;;) {
+    const name = dropOrder.find((key) => groups[key].length > 0);
+    if (!name) break;
+    groups[name].pop();
+    text = render(true);
+    if (scalars(text).length <= BLOCK_CAP) break;
+  }
+  return { text, truncated: true };
+}
+
+export function ago(fromIso, now = Date.now()) {
+  const then = Date.parse(fromIso);
+  if (Number.isNaN(then)) return "earlier";
+  const secs = Math.max(0, Math.floor((now - then) / 1000));
+  if (secs < 90) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 90) return `${mins}m ago`;
+  const hours = Math.round(secs / 3600);
+  if (hours < 36) return `${hours}h ago`;
+  return `${Math.round(secs / 86400)}d ago`;
+}

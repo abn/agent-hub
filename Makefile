@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -127,6 +127,13 @@ web/e2e: build node_tree ## Run the browser behaviour checks
 	fi; \
 	npx playwright test
 
+# The harness plugins. The OpenCode plugin is plain Node ES modules, so its
+# tests run on the same Vitest as the client units, against a fake hub and the
+# shared golden fixtures. Every JSON file under plugins/ must parse.
+plugins/check: node_tree ## Test the harness plugins and parse every plugins/**/*.json
+	npx vitest run --config plugins/vitest.config.mjs
+	node --input-type=module -e "import { readdirSync, readFileSync } from 'node:fs'; const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(d + '/' + e.name)) : e.name.endsWith('.json') ? [d + '/' + e.name] : []); const files = walk('plugins'); for (const f of files) JSON.parse(readFileSync(f, 'utf8')); console.log('plugins/check: ' + files.length + ' JSON files parse');"
+
 net/check: ## Test the tailnet configuration path in a build without the feature
 	cargo test --no-default-features --test ops_lifecycle a_tailnet_key
 	cargo test --no-default-features --test tailnet_config
@@ -136,8 +143,8 @@ net/check: ## Test the tailnet configuration path in a build without the feature
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types net/check serve/check test ## Everything the gate runs but the browser checks
-gate/quick: fmt/check lint/engine clippy web/units ## Fast inner loop: format, lint and client units
+gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types plugins/check net/check serve/check test ## Everything the gate runs but the browser checks
+gate/quick: fmt/check lint/engine clippy web/units plugins/check ## Fast inner loop: format, lint and client units
 e2e: web/e2e ## The browser behaviour checks
 e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2
 	npx playwright test --shard=$(SHARD)
