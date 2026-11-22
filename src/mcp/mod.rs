@@ -202,6 +202,18 @@ const SKILL_FILES: &[SkillFile] = &[
 
 /// The skill namespace. Its final segment is the skill's `name`, as the
 /// extension requires.
+/// What every client is told at the handshake, whatever harness it runs in.
+const INSTRUCTIONS: &str = "\
+Agent Hub: feeds, session brains, a project knowledge base, the human's inbox, artifacts.
+If an <agent-hub> block gave you a project and session, call session_start with exactly
+those values before your first hub write, and skip session_brief.
+Otherwise: session_brief(project_id), then session_start(project_id, session_name).
+Read the notifications member on tool results; it is delivered once.
+Durable knowledge goes to the knowledge base (store: \"project\"), not the session brain.
+Never call session_start from a subagent; it rebinds the parent's connection.
+The workflow guide is the agent-hub skill: skill://agent-hub/SKILL.md.
+";
+
 const SKILL_ROOT_URI: &str = "skill://agent-hub";
 const SKILL_MD_URI: &str = "skill://agent-hub/SKILL.md";
 const SKILL_EXTENSION_ID: &str = "io.modelcontextprotocol/skills";
@@ -391,6 +403,7 @@ impl ServerHandler for HubServer {
             "agent-hub",
             env!("CARGO_PKG_VERSION"),
         ))
+        .with_instructions(INSTRUCTIONS)
     }
 
     /// List the hub's resources: the bootstrap, the installable skill's
@@ -604,12 +617,15 @@ fn to_error_data(err: Error) -> ErrorData {
 /// result and a known tool that returned `ErrorData` present the caller the
 /// same `code`, `message`, `retryable`, and `details`.
 fn error_object(err: &Error) -> serde_json::Value {
+    let details = err
+        .reason()
+        .map_or_else(|| json!({}), |reason| json!({ "reason": reason }));
     json!({
         "error": {
             "code": err.code().as_str(),
             "message": err.to_string(),
             "retryable": err.retryable(),
-            "details": {},
+            "details": details,
         }
     })
 }

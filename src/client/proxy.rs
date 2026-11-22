@@ -9,9 +9,10 @@
 use std::sync::Arc;
 
 use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, ErrorData, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
-    ReadResourceRequestParams, ReadResourceResponse, ResultType, ServerConfig, ServerPeerInfo,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
+    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ResultType, ServerConfig,
+    ServerPeerInfo,
 };
 use rmcp::service::{Peer, RequestContext, RoleClient, ServiceError};
 use rmcp::{RoleServer, ServerHandler, ServiceExt};
@@ -51,11 +52,184 @@ fn complete_cacheable(
     }
 }
 
+/// The reason the hub gives when a connection holds no active session.
+const NO_ACTIVE_SESSION: &str = "no_active_session";
+
+/// The session the agent started, as the proxy would resume it.
+struct Lease {
+    /// The `session_start` the hub accepted, with `from` removed so a replay
+    /// resumes the session by project and name instead of picking it up again.
+    start: CallToolRequestParams,
+    session_id: String,
+}
+
 /// The stdio server, holding the hub's client peer.
 struct HubProxy {
     peer: Peer<RoleClient>,
+    /// The session the hub last accepted. The lock is held across forwarding
+    /// `session_start` and `session_end` and across a whole replay and retry,
+    /// so a replay never interleaves with an explicit start or end.
+    lease: tokio::sync::Mutex<Option<Lease>>,
     /// What the hub answered the handshake with, presented as this server's own.
     info: ServerConfig,
+}
+
+impl HubProxy {
+    /// Forward `session_start` or `session_end`, keeping the cache in step
+    /// with what the hub accepted.
+    async fn forward_lifecycle(
+        &self,
+        request: &CallToolRequestParams,
+    ) -> Result<CallToolResponse, ServiceError> {
+        let mut lease = self.lease.lock().await;
+        let outcome = self.peer.call_tool_once(request.clone()).await;
+        let accepted = match &outcome {
+            Ok(CallToolResponse::Complete(result)) if result.is_error != Some(true) => Some(result),
+            _ => None,
+        };
+        if request.name == "session_start" {
+            *lease = accepted.and_then(|result| remember(request.clone(), result));
+        } else if accepted.is_some() {
+            let ended = request
+                .arguments
+                .as_ref()
+                .and_then(|args| args.get("session_id"))
+                .and_then(serde_json::Value::as_str);
+            if lease
+                .as_ref()
+                .is_some_and(|held| Some(held.session_id.as_str()) == ended)
+            {
+                *lease = None;
+            }
+        }
+        outcome
+    }
+
+    /// Forward a call the hub refused for want of an active session: resume
+    /// the remembered session once, then retry the call once. A failed resume
+    /// returns the original refusal.
+    async fn replay(
+        &self,
+        request: CallToolRequestParams,
+        refusal: ErrorData,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let mut lease = self.lease.lock().await;
+        let Some(held) = lease.as_ref() else {
+            return Err(refusal);
+        };
+        let resumed = match self.peer.call_tool_once(held.start.clone()).await {
+            Ok(CallToolResponse::Complete(result)) if result.is_error != Some(true) => result,
+            _ => return Err(refusal),
+        };
+        let resumed_id = resumed
+            .structured_content
+            .as_ref()
+            .and_then(|body| body.get("session_id"))
+            .and_then(serde_json::Value::as_str);
+        if resumed_id != Some(held.session_id.as_str()) {
+            // The hub resumed another session than the one the agent held, so
+            // the retry would write somewhere the agent did not choose.
+            *lease = None;
+            return Err(refusal);
+        }
+        match self.peer.call_tool_once(request).await {
+            Ok(mut retried) => {
+                if let CallToolResponse::Complete(result) = &mut retried {
+                    carry_pending(&resumed, result);
+                }
+                Ok(retried)
+            }
+            Err(ServiceError::McpError(mut failure)) => {
+                carry_pending_error(&resumed, &mut failure);
+                Err(failure)
+            }
+            Err(other) => Err(upstream(other)),
+        }
+    }
+}
+
+/// The lease a `session_start` the hub accepted leaves behind, if its answer
+/// names the session.
+fn remember(mut start: CallToolRequestParams, result: &CallToolResult) -> Option<Lease> {
+    let session_id = result
+        .structured_content
+        .as_ref()?
+        .get("session_id")?
+        .as_str()?
+        .to_string();
+    if let Some(arguments) = start.arguments.as_mut() {
+        arguments.remove("from");
+    }
+    Some(Lease { start, session_id })
+}
+
+/// Whether the hub refused because the connection holds no active session.
+fn is_unbound(error: &ErrorData) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(|data| data.pointer("/error/details/reason"))
+        .and_then(serde_json::Value::as_str)
+        == Some(NO_ACTIVE_SESSION)
+}
+
+/// The notifications the resume drained, if any.
+fn drained(resumed: &CallToolResult) -> Option<&Vec<serde_json::Value>> {
+    resumed
+        .structured_content
+        .as_ref()
+        .and_then(|body| body.pointer("/notifications/pending"))
+        .and_then(serde_json::Value::as_array)
+        .filter(|items| !items.is_empty())
+}
+
+/// Move the notifications the resume drained onto the retried result, so the
+/// agent still sees them. A failed result gets them too.
+fn carry_pending(resumed: &CallToolResult, retried: &mut CallToolResult) {
+    let Some(carried) = drained(resumed) else {
+        return;
+    };
+    let mut body = match retried.structured_content.take() {
+        Some(serde_json::Value::Object(body)) => body,
+        None => serde_json::Map::new(),
+        Some(other) => {
+            retried.structured_content = Some(other);
+            return;
+        }
+    };
+    let mut pending = carried.clone();
+    match body.get("notifications").and_then(|n| n.get("pending")) {
+        Some(own) => pending.extend(own.as_array().cloned().unwrap_or_default()),
+        None if body.contains_key("notifications") => {
+            retried.structured_content = Some(serde_json::Value::Object(body));
+            return;
+        }
+        None => {}
+    }
+    body.insert(
+        "notifications".to_string(),
+        serde_json::json!({ "pending": pending }),
+    );
+    let merged = serde_json::Value::Object(body);
+    retried.content = vec![ContentBlock::text(merged.to_string())];
+    retried.structured_content = Some(merged);
+}
+
+/// Put the drained notifications into the data of the error the retry failed
+/// with, so a failed call does not swallow what the resume delivered.
+fn carry_pending_error(resumed: &CallToolResult, failure: &mut ErrorData) {
+    let Some(carried) = drained(resumed) else {
+        return;
+    };
+    let data = failure
+        .data
+        .get_or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let Some(body) = data.as_object_mut() {
+        body.insert(
+            "notifications".to_string(),
+            serde_json::json!({ "pending": carried }),
+        );
+    }
 }
 
 impl ServerHandler for HubProxy {
@@ -83,7 +257,21 @@ impl ServerHandler for HubProxy {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let mut response = self.peer.call_tool_once(request).await.map_err(upstream)?;
+        let lifecycle = matches!(request.name.as_ref(), "session_start" | "session_end");
+        let outcome = if lifecycle {
+            self.forward_lifecycle(&request).await
+        } else {
+            self.peer.call_tool_once(request.clone()).await
+        };
+        let mut response = match outcome {
+            Ok(response) => response,
+            Err(ServiceError::McpError(data)) if !lifecycle && is_unbound(&data) => {
+                // The hub forgot the session, which a restart does. Bind the
+                // connection again from what the agent last started.
+                self.replay(request, data).await?
+            }
+            Err(err) => return Err(upstream(err)),
+        };
         if let CallToolResponse::Complete(result) = &mut response {
             result.result_type = Some(ResultType::COMPLETE);
         }
@@ -187,6 +375,7 @@ pub async fn serve_stdio(config: ClientConfig) -> Result<(), Failure> {
     );
     let proxy = HubProxy {
         peer: hub.peer().clone(),
+        lease: tokio::sync::Mutex::new(None),
         info: hub_info(hub.peer_info()),
     };
 

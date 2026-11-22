@@ -30,6 +30,11 @@ fn initialize_list_and_call_over_stdio() {
         !result["capabilities"]["tools"].is_null(),
         "the tools capability is advertised"
     );
+    let instructions = result["instructions"].as_str().unwrap_or_default();
+    assert!(
+        instructions.contains("session_start") && instructions.contains("skill://agent-hub"),
+        "the handshake tells the client how to start: {instructions:?}"
+    );
 
     server.notify("notifications/initialized");
 
@@ -112,6 +117,46 @@ fn embedded_stdio_against_running_hub_refuses() {
         stderr.contains("a hub is already using this directory; set HUB_URL to reach it instead"),
         "the refusal names the situation and what to do: {stderr}"
     );
+}
+
+/// `--proxy` and `HUB_MODE=proxy` are for a caller that must never touch a local
+/// store: with no hub named, they refuse rather than serve one.
+#[test]
+fn proxy_mode_without_a_hub_exits_78_and_creates_no_data_dir() {
+    use std::process::{Command, Stdio};
+
+    for (args, mode) in [(vec!["mcp", "--proxy"], None), (vec!["mcp"], Some("proxy"))] {
+        let scratch = TempDir::new("mcp-stdio-proxy-only");
+        let data_dir = scratch.path().join("never-created");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
+        command
+            .args(&args)
+            .env("RUST_LOG", "error")
+            .env("HUB_DATA_DIR", &data_dir)
+            .env("HUB_CONFIG", scratch.path().join("client-config"))
+            .env_remove("HUB_URL")
+            .env_remove("HUB_MODE")
+            .stdin(Stdio::null());
+        if let Some(mode) = mode {
+            command.env("HUB_MODE", mode);
+        }
+        let output = command.output().expect("run the binary");
+
+        assert_eq!(
+            output.status.code(),
+            Some(78),
+            "{args:?} {mode:?}: {output:?}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("no hub configured: set HUB_URL or [client].url"),
+            "the refusal says what to set: {stderr}"
+        );
+        assert!(
+            !data_dir.exists(),
+            "{args:?} {mode:?}: refusing must not create the data directory"
+        );
+    }
 }
 
 #[test]
