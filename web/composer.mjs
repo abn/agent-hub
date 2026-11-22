@@ -62,9 +62,7 @@ export function composer({
 
   const button = document.createElement("button");
   button.type = "submit";
-  // The primary fill, so the send keeps its ink on hover like every primary
-  // button rather than taking an outline button's hover surface.
-  button.className = "primary composer-send";
+  button.className = "composer-send";
   button.setAttribute("aria-label", action);
   button.setAttribute("aria-describedby", hintId);
   button.setAttribute("aria-keyshortcuts", APPLE ? "Meta+Enter" : "Control+Enter");

@@ -1523,6 +1523,10 @@ html.has-dialog { overflow: hidden; }
   background: var(--surface-2); color: var(--ink-3); border-color: var(--line); cursor: not-allowed;
 }
 .composer-send[aria-disabled="true"]:active { transform: none; }
+/* The ink fill holds under the pointer; only the dimmed send takes a surface. */
+button.composer-send:not([disabled]):not([aria-disabled="true"]):hover {
+  background: var(--ink); color: var(--ink-inverse);
+}
 .composer-hint {
   margin: var(--s-1) 0 0; min-height: var(--composer-line);
   font-size: var(--t-12); line-height: var(--composer-line); color: var(--ink-3);
