@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Toasts clear the controls and the end line is scoped
+
+* **Update**: [Human interface](/design/human-interface.md) words the end line
+  of Now as asks to go and not answers, and gives the Needs you chip its own
+  line, since an approval is an ask and not an answer.
+
 ### The wiki says what is true
 
 * **Update**: [Human interface](/design/human-interface.md) and the

@@ -587,7 +587,10 @@ structure, not to line length.
   fills `--danger` only when it deletes; a commit that only closes, such as
   Done on a new token, takes the action fill.
 - **Toast.** Ink fill, inverse text, one at a time. Auto-dismiss at 30s when it
-  carries an undo, 5s otherwise. It is a live region.
+  carries an undo, 5s otherwise. It is a live region. It stands above the
+  bottom chrome actually drawn (the tab bar, or the item sheet's thumb bar) and,
+  on a desktop, clears the stage's bottom controls such as an editor's Save. A
+  toast about an item names it, in curly quotes and clamped to a line.
 - **Empty state.** The screen's name in mono, a title, one line, at most one
   way to act, no illustration. The one exception to "no Copy label" is this
   single way to act where the string it copies is the whole point and there is
@@ -740,8 +743,10 @@ Projects register, Agents and access, Connect, and the knowledge base.
   - **Quiet.** Everything else the response carries, folded under its count
     behind **Show**.
   - **The end.** One line in `--ink-2` with an ok check: "That is everything
-    since 18:05. Two answers and the desk is clear." The time is how far back
-    the since tier reaches; without one it reads "That is everything."
+    since 18:05. Two asks to go and the desk is clear." The time is how far back
+    the since tier reaches; without one it reads "That is everything." Under
+    the Needs you chip it reads "That is every ask waiting on you." and counts
+    nothing, since an approval is an ask and not an answer.
   - **Empty.** The empty state when nothing has happened at all, and one per
     chip when that tier is empty, each with a link back to All.
   - **Deviation: the chips are tiers, not projects, and the margin's head is
