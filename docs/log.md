@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Search scopes and long words
+
+* **Update**: [Search](/guides/human/search.md) lists one set of scope chips at
+  both widths (All, Feed, Artifacts, Wiki, Sessions), drops the phone Inbox
+  scope, and says a query the hub cannot run shows the no-results state. A
+  wiki hit previews as text, without its frontmatter or link brackets.
+
 ### Selected segments carry a mark
 
 * **Update**: the Settings, Projects, New project and Wiki screens are

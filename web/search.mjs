@@ -8,6 +8,7 @@ import { glyph, main, projectName, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyState } from "./empty.mjs";
 import { registerScreen } from "./keys.mjs";
 import { formatBytes } from "./storage.mjs";
+import { read as readFrontmatter } from "./frontmatter.mjs";
 import { relative } from "./time.mjs";
 
 // The design asks for results as you type inside 50 ms.
@@ -18,14 +19,8 @@ const SCOPES = [
   { type: "", label: "All" },
   { type: "feed", label: "Feed" },
   { type: "artifact", label: "Artifacts" },
+  { type: "kb", label: "Wiki" },
   { type: "brain", label: "Sessions" },
-];
-
-const MOBILE_SCOPES = [
-  { type: "", label: "All" },
-  { type: "feed", label: "Feed" },
-  { type: "artifact", label: "Artifacts" },
-  { type: "inbox", label: "Inbox" },
 ];
 
 // A corpus family as the reader knows it, and the kind badge its rows draw. A
@@ -225,8 +220,6 @@ function resultsNode(state) {
   const box = el("div", "search-results");
   if (!state.term) {
     box.appendChild(emptyState(EMPTY_COPY.search));
-  } else if (state.error) {
-    box.appendChild(el("p", "error", state.error));
   } else if (!state.data.count) {
     box.appendChild(emptyState(NO_MATCH, { term: `“${state.term}”` }));
   } else {
@@ -248,19 +241,17 @@ function resultsNode(state) {
 // an empty field is not sent.
 async function find(term, type, project) {
   const trimmed = (term ?? "").trim();
-  const state = { term: trimmed, data: { count: 0, truncated: false, groups: [] }, line: "", error: "" };
+  const state = { term: trimmed, data: { count: 0, truncated: false, groups: [] }, line: "" };
   if (!trimmed) return state;
-  if (type === "inbox") {
-    state.line = resultsLine(state.data);
-    return state;
-  }
   const scope = type ? `&type=${encodeURIComponent(type)}` : "";
   const proj = project ? `&project=${encodeURIComponent(project)}` : "";
   try {
     state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}${proj}`);
     state.line = resultsLine(state.data);
-  } catch (error) {
-    state.error = error.message;
+  } catch {
+    // A query the hub could not run is a query that found nothing. The reader
+    // is told that, not what the engine said.
+    state.line = "No results";
   }
   return state;
 }
@@ -272,6 +263,28 @@ function routeFor(term, type, project) {
   if (project) params.set("project", project);
   const query = params.toString();
   return query ? `#/search?${query}` : "#/search";
+}
+
+// A wiki hit's snippet is the opening of the stored page: its frontmatter
+// block, when it has one, and `[[page]]` links in the markup the wiki turns
+// into links. The preview reads as the page does, without either. A block the
+// 200-character snippet cut off before its closing line is shown as its lines.
+export function wikiPreview(snippet) {
+  const text = String(snippet ?? "");
+  let body = text;
+  if (/^---[ \t]*\r?\n/.test(text)) {
+    try {
+      const parsed = readFrontmatter(text);
+      body = parsed.raw === null ? "" : parsed.body;
+    } catch {
+      // A snippet cut before its closing fence: show what follows the opener.
+      body = text.replace(/^---[ \t]*\r?\n/, "");
+    }
+  }
+  return body
+    .replace(/\[\[([^\]|\n]*)\|([^\]\n]*)\]\]/g, "$2")
+    .replace(/\[\[([^\]\n]*)\]\]/g, "$1")
+    .trim();
 }
 
 export function previewHighlighted(text, words) {
@@ -313,11 +326,10 @@ function renderPreview(stagePane, hit, words) {
     // An empty stage still reserves the frame: a reader who selects a result
     // finds it in the same place the last one was.
     const head = el("div", "search-stage-head shell-head");
-    const path = el("span", "search-stage-path", "Select a result to preview.");
-    head.append(path);
+    head.append(el("span", "search-stage-path", ""));
     const controls = el("div", "search-stage-controls shell-controls");
     const content = el("div", "search-stage-content");
-    content.append(el("div", "search-preview-empty", ""));
+    content.append(el("div", "search-preview-empty", "Select a result to preview."));
     stagePane.append(head, controls, content);
     return;
   }
@@ -365,9 +377,10 @@ function renderPreview(stagePane, hit, words) {
   const meta = el("div", "search-preview-meta mono", metaText);
 
   const body = el("div", "search-preview-body");
-  if (hit.snippet) {
+  const snippet = hit.kind === "kb" ? wikiPreview(hit.snippet) : hit.snippet;
+  if (snippet) {
     const p = el("p", "");
-    p.appendChild(previewHighlighted(hit.snippet, words));
+    p.appendChild(previewHighlighted(snippet, words));
     body.appendChild(p);
   }
 
@@ -433,7 +446,7 @@ function renderPreview(stagePane, hit, words) {
 export async function searchScreen(term, gen) {
   const isDesktop = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(min-width: 1100px)").matches;
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
-  const asScope = (isDesktop ? SCOPES : [...MOBILE_SCOPES, { type: "brain", label: "Sessions" }]).find((scope) => scope.type === params.get("type"));
+  const asScope = SCOPES.find((scope) => scope.type === params.get("type"));
   let type = asScope ? asScope.type : "";
   let project = params.get("project") || "";
 
@@ -467,15 +480,13 @@ export async function searchScreen(term, gen) {
   field.append(icon(18, "M 11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M 16 16l4 4"), input, clear);
   form.append(label, field);
 
-  const activeScopeList = isDesktop
-    ? SCOPES
-    : (type === "brain" ? [...MOBILE_SCOPES, { type: "brain", label: "Sessions" }] : MOBILE_SCOPES);
+  const activeScopeList = SCOPES;
 
   const scopes = el("div", "search-scopes");
   scopes.setAttribute("role", "group");
   scopes.setAttribute("aria-label", "Search in");
 
-  const lastScopeCounts = { "": 0, feed: 0, artifact: 0, inbox: 0, brain: 0 };
+  const lastScopeCounts = { "": 0, feed: 0, artifact: 0, kb: 0, brain: 0 };
   function recordScopeCounts(state) {
     if (!state || !state.data) return;
     if (!type) {
@@ -490,7 +501,6 @@ export async function searchScreen(term, gen) {
   recordScopeCounts(first);
 
   function countForScope(scopeType, data) {
-    if (scopeType === "inbox") return 0;
     if (lastScopeCounts[scopeType] !== undefined) return lastScopeCounts[scopeType];
     if (!data) return 0;
     if (!scopeType) return data.count || 0;
@@ -503,14 +513,16 @@ export async function searchScreen(term, gen) {
     chip.replaceChildren(label, " ", span);
   }
 
-  function updateScopeChips(data) {
+  // A phone chip carries the count of what its scope found, and has nothing to
+  // count until a query has been run.
+  function updateScopeChips(state) {
     if (isDesktop) return;
     for (const chip of scopes.querySelectorAll("button[data-scope]")) {
       const sType = chip.dataset.scope;
       const scopeDef = activeScopeList.find((s) => s.type === sType);
       if (!scopeDef) continue;
-      const count = countForScope(sType, data);
-      setChipContent(chip, scopeDef.label, count);
+      if (!state.term) chip.textContent = scopeDef.label;
+      else setChipContent(chip, scopeDef.label, countForScope(sType, state.data));
     }
   }
 
@@ -519,7 +531,7 @@ export async function searchScreen(term, gen) {
     chip.type = "button";
     chip.dataset.scope = scope.type;
     chip.setAttribute("aria-pressed", String(scope.type === type));
-    if (isDesktop) {
+    if (isDesktop || !first.term) {
       chip.textContent = scope.label;
     } else {
       const initCount = countForScope(scope.type, first.data);
@@ -613,7 +625,7 @@ export async function searchScreen(term, gen) {
   function updateResults(state) {
     recordScopeCounts(state);
     line.textContent = state.line;
-    updateScopeChips(state.data);
+    updateScopeChips(state);
     const nextResults = resultsNode(state);
     indexPane.innerHTML = "";
     // The count line is painted above the groups it counts, and it is the same

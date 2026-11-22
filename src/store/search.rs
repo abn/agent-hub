@@ -586,16 +586,35 @@ fn prefix_upper_bound(prefix: &str) -> Option<String> {
     None
 }
 
+/// The byte length past which the tokenizer drops a token. A word whose
+/// range bounds reach it tokenizes to nothing, and the engine then refuses
+/// the range and any phrase prefix that has too few terms left.
+const TOKEN_BYTES_MAX: usize = 39;
+
 /// Format a bare term into a prefix query, boosting an exact whole-word match.
 fn prefix_term(word: &str) -> String {
     let lower = word.to_lowercase();
-    if word.contains('-') || word.contains('_') {
+    let pieces: Vec<&str> = lower
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|piece| !piece.is_empty())
+        .collect();
+    if pieces.iter().any(|piece| piece.len() > TOKEN_BYTES_MAX) {
+        // A piece too long for the tokenizer is dropped. The word is matched
+        // whole instead of by prefix.
+        return format!("\"{lower}\"");
+    }
+    if pieces.len() >= 2 && (word.contains('-') || word.contains('_')) {
         // Multi-token words (e.g. hyphenated or snake_case) match as a phrase prefix.
-        format!("(\"{lower}\"^2 OR \"{lower}\"*)")
-    } else if let Some(upper) = prefix_upper_bound(&lower) {
-        format!("(\"{lower}\"^2 OR title:[{lower} TO {upper}}} OR body:[{lower} TO {upper}}})")
-    } else {
-        format!("(\"{lower}\"^2 OR title:[{lower} TO *] OR body:[{lower} TO *])")
+        return format!("(\"{lower}\"^2 OR \"{lower}\"*)");
+    }
+    // One piece, possibly with a stray `-` or `_` around it, searched by range.
+    let piece = pieces.first().copied().unwrap_or(&lower);
+    match prefix_upper_bound(piece) {
+        Some(upper) if upper.len() > TOKEN_BYTES_MAX => format!("\"{piece}\""),
+        Some(upper) => {
+            format!("(\"{piece}\"^2 OR title:[{piece} TO {upper}}} OR body:[{piece} TO {upper}}})")
+        }
+        None => format!("(\"{piece}\"^2 OR title:[{piece} TO *] OR body:[{piece} TO *])"),
     }
 }
 
@@ -617,6 +636,13 @@ pub fn sanitize_fts(input: &str) -> String {
     }
     fn searchable(term: &str) -> bool {
         term.chars().any(char::is_alphanumeric)
+    }
+    // A word whose every piece is past the tokenizer limit indexes to
+    // nothing. Its clause is left out: a clause with no tokens is an
+    // empty query to the engine, and a query of only those is refused.
+    fn survives(word: &str) -> bool {
+        word.split(|ch: char| !ch.is_alphanumeric())
+            .any(|piece| !piece.is_empty() && piece.len() <= TOKEN_BYTES_MAX)
     }
     fn operator(term: &str) -> bool {
         matches!(term, "AND" | "OR" | "NOT" | "NEAR")
@@ -645,7 +671,7 @@ pub fn sanitize_fts(input: &str) -> String {
             if !word.is_empty() {
                 words.push(word);
             }
-            words.retain(|w| searchable(w));
+            words.retain(|w| searchable(w) && survives(w));
             if words.is_empty() {
                 continue;
             }
@@ -664,7 +690,7 @@ pub fn sanitize_fts(input: &str) -> String {
                 word.push(c);
                 chars.next();
             }
-            if searchable(&word) && !operator(&word) {
+            if searchable(&word) && survives(&word) && !operator(&word) {
                 terms.push(prefix_term(&word));
             }
         } else {

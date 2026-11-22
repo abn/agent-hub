@@ -21,10 +21,10 @@ It answers as you type.
 
 The query and the scope live in the address, so a reload or Back returns to the
 same results. The field never loses focus to its own results; the count is
-announced instead. Scope chips filter the result: on a desktop, All, Feed,
-Artifacts, and Sessions; on a phone, All, Feed, Artifacts, and Inbox, with
-Sessions joining once a brain is in scope. Sessions filters the wire type
-`brain`, and knowledge base pages match under All. A project filter adds a
+announced instead. Scope chips filter the result, and the list is
+the same at both widths: All, Feed, Artifacts, Wiki, and Sessions. Wiki filters
+the wire type `kb` and Sessions the wire type `brain`. On a phone each chip
+also shows its count once a query has run. A project filter adds a
 dismissible pill beside them. A results line at the top of the results
 gives the hub's own count and how long the query took, and a page the limit cut
 is called the first of more, never a total.
@@ -51,8 +51,9 @@ opens it.
 The query is sent exactly as typed, quotes and operators included, and the hub
 makes it safe for the index: matching is by prefix with whole-word matches
 ranked first, a balanced quoted phrase is searched as a phrase, and other
-punctuation and the bare operators are left out, so no query is refused. A
-query with no word in it finds nothing. The marked snippet is built from text
+punctuation and the bare operators are left out. A query with no word in it
+finds nothing. If the engine cannot run a query, Search shows the no-results
+state with a plain line, not an error. The marked snippet is built from text
 nodes, so neither a query nor a snippet is read as markup. An agent's `search`
 tool adds the same query over project knowledge base pages; its scopes are in
 [MCP tools](/reference/mcp-tools.md).

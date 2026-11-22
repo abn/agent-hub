@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { SUBJECT_MAX, expiredWords, formatEventSummary, stageSubject, subjectAndMessage } from "../../web/feed.mjs";
 import { deadlineWords, untilCompact } from "../../web/time.mjs";
-import { displayTitle, terms } from "../../web/search.mjs";
+import { displayTitle, terms, wikiPreview } from "../../web/search.mjs";
 import { anchorQuote } from "../../web/comments.mjs";
 import { optionsAttr, optionsFrom, questionOptions } from "../../web/dom.mjs";
 import { composer } from "../../web/composer.mjs";
@@ -479,5 +479,21 @@ describe("a row on Now", () => {
     expect(sentence({ kind: "session", actor: "build-bot", summary: "session rel-1.10 started" })).toBe(
       "build-bot started rel-1.10",
     );
+  });
+});
+
+describe("wikiPreview", () => {
+  it("drops a closed frontmatter block and unwraps links", () => {
+    expect(wikiPreview("---\ntype: Runbook\n---\nSee [[a]] and [[b|the b page]].")).toBe("See a and the b page.");
+  });
+
+  it("survives a snippet cut before the closing fence", () => {
+    const cut = "---\ntype: Runbook\ntitle: Quokka plan\nsummary: the plan for [[rollb";
+    let text;
+    expect(() => {
+      text = wikiPreview(cut);
+    }).not.toThrow();
+    expect(text.startsWith("---")).toBe(false);
+    expect(text).toContain("title: Quokka plan");
   });
 });
