@@ -15,6 +15,7 @@
 
 import { expect } from "@playwright/test";
 import { open, test } from "./app.mjs";
+import { encrypt } from "../web/crypto.mjs";
 import { api, newSession, structured, toolCall } from "./invariants.mjs";
 
 // One artifact opened by its own address, the one a feed link and a share link
@@ -263,6 +264,9 @@ test.describe("the artifact viewer's comments bar", () => {
     await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
     await expect(page.locator("#hub-frame")).toBeVisible();
     const bar = page.locator(".hub-comments-strip");
+    // Where the aside shows the threads the bar steps aside, so it is closed.
+    const aside = page.locator(".shell-aside");
+    if (await aside.isVisible()) await page.keyboard.press("c");
     await expect(bar).toBeVisible();
 
     // The frame reports its own height, so the document is short until that
@@ -455,5 +459,221 @@ test.describe("the artifact frame's layout", () => {
     await expect(gate.frameLocator("#hub-frame").getByText(hub.fixture.protectedBody)).toBeVisible({ timeout: 15_000 });
     await expect(gate.getByRole("heading", { name: "Encrypted artifact" })).toBeHidden();
     await expect(gate.locator(".hub-lock-tile")).toBeHidden();
+  });
+});
+
+test.describe("the artifact viewer tells the truth about its comments and its lock", () => {
+  test("a thread on a newer version is stamped as such and not counted against this one", async ({ hub, page }, testInfo) => {
+    const session = await newSession(hub);
+    const published = await toolCall(hub, session, "artifact_publish", {
+      project_id: hub.projectId,
+      title: "Stamp check",
+      kind: "markdown",
+      content: "# Stamp check\n\nFirst save.\n",
+    });
+    const id = structured(published).artifact_id;
+    for (const content of ["# Stamp check\n\nSecond save.\n", "# Stamp check\n\nThird save.\n"]) {
+      await toolCall(hub, session, "artifact_update", { artifact_id: id, content });
+    }
+    await api(hub, "POST", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`, {
+      body: "Written on the third save.",
+      anchor: { mode: "text", quote: "Third save" },
+      anchor_version: 3,
+    });
+
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}&version=1`);
+    await expect(page.locator("#hub-frame")).toBeVisible();
+    const bar = page.locator(".hub-comments-strip");
+    const desktop = testInfo.project.name === "desktop";
+    if (desktop) {
+      await expect(page.locator(".shell-aside .hub-quote-stamp")).toHaveText("v3 · newer version");
+      await expect(page.locator(".hub-comments-head-meta")).toHaveText("0 · v1");
+      // The aside is open here, so the bar steps aside.
+      await expect(bar).toBeHidden();
+      const font = await page
+        .locator(".shell-aside .hub-quote-text")
+        .evaluate((el) => getComputedStyle(el).fontFamily);
+      expect(font, "the quote is words, in sans").not.toMatch(/mono/i);
+    } else {
+      await expect(bar).toBeVisible();
+      await expect(bar.locator(".hub-comments-count")).toHaveText("0");
+    }
+  });
+
+  test("the comments bar shows again once the aside is closed", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the aside is the desktop's surface");
+    const id = await longCommentedArtifact(hub);
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    const aside = page.locator(".shell-aside");
+    await expect(aside).toBeVisible();
+    await expect(page.locator(".hub-comments-strip")).toBeHidden();
+    await page.keyboard.press("c");
+    await expect(aside).toBeHidden();
+    await expect(page.locator(".hub-comments-strip")).toBeVisible();
+  });
+
+  test("a locked artifact offers no new thread and no anchoring hint, and is not called locked once open", async ({ hub, page }, testInfo) => {
+    await page.goto(`${hub.baseUrl}/#/artifacts/${encodeURIComponent(hub.protectedId)}?project=${encodeURIComponent(hub.projectId)}`);
+    const gate = page.frameLocator("#hub-frame");
+    await expect(gate.getByRole("heading", { name: "Encrypted artifact" })).toBeVisible({ timeout: 10_000 });
+    const desktop = testInfo.project.name === "desktop";
+    const plus = page.locator('[data-action="new-thread"]');
+    if (desktop) {
+      await expect(plus).toBeHidden();
+      await expect(page.locator(".shell-aside .shell-foot")).toHaveCount(0);
+    }
+    const meta = page.locator(".shell-stage").getByText(/v1 of 1/).first();
+    const before = await meta.textContent();
+    expect(before).not.toMatch(/locked/i);
+    await gate.locator("#hub-password").fill(hub.fixture.protectedPassword);
+    await gate.locator('#hub-unlock-form button[type="submit"]').click();
+    await expect(gate.frameLocator("#hub-frame").getByText(hub.fixture.protectedBody)).toBeVisible({ timeout: 15_000 });
+    if (desktop) await expect(plus).toBeVisible();
+    await expect(meta).toHaveText(before);
+  });
+
+  // The sealed HTML artifact is sealed here, in the browser's own format, so
+  // the spec holds both kinds the viewer opens.
+  async function sealedHtml(hub) {
+    const session = await newSession(hub);
+    const { envelope, ciphertext } = await encrypt("pw-html", "<p id=\"sealed-html\">Sealed page body.</p>");
+    const published = await toolCall(hub, session, "artifact_publish", {
+      project_id: hub.projectId,
+      title: "Sealed page",
+      kind: "html",
+      content: ciphertext,
+      envelope,
+    });
+    return structured(published).artifact_id;
+  }
+
+  test("the aside's foot and a thread's quote are set in sans", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the aside is the desktop's surface");
+    const id = await longCommentedArtifact(hub);
+    await api(hub, "POST", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`, {
+      body: "On a passage.",
+      anchor: { mode: "text", quote: "Section 3" },
+      anchor_version: 1,
+    });
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    const foot = page.locator(".shell-aside .shell-foot");
+    await expect(foot).toBeVisible();
+    expect(await foot.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i);
+    const quote = page.locator(".shell-aside .hub-quote-text").first();
+    await expect(quote).toBeVisible();
+    expect(await quote.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i);
+
+    const thread = (await api(hub, "POST", `/api/v1/artifacts/${encodeURIComponent(id)}/comments`, {
+      body: "Settled.",
+      anchor: { mode: "text", quote: "Section 3" },
+      anchor_version: 1,
+    })).json();
+    await api(hub, "PATCH", `/api/v1/artifacts/${encodeURIComponent(id)}/comments/${thread.id}`, { done: true });
+    await page.reload();
+    const resolved = page.locator(".hub-card-resolved-text").first();
+    await expect(resolved).toBeAttached();
+    expect(await resolved.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i);
+  });
+
+  test("a sealed artifact offers a new thread only on unlock, for markdown and for html", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the new-thread control lives in the aside");
+    const htmlId = await sealedHtml(hub);
+    const cases = [
+      { id: hub.protectedId, password: hub.fixture.protectedPassword, body: hub.fixture.protectedBody },
+      { id: htmlId, password: "pw-html", body: "Sealed page body." },
+    ];
+    for (const { id, password, body } of cases) {
+      await page.goto(`${hub.baseUrl}/#/artifacts/${encodeURIComponent(id)}?project=${encodeURIComponent(hub.projectId)}`);
+      const plus = page.locator('[data-action="new-thread"]');
+      const gate = page.frameLocator("#hub-frame");
+      await expect(gate.getByRole("heading", { name: "Encrypted artifact" })).toBeVisible({ timeout: 10_000 });
+      // A readiness message from the locked gate is not an unlock.
+      await gate.locator("#hub-password").evaluate(() => window.parent.postMessage({ type: "hub:frame-ready" }, "*"));
+      await page.waitForTimeout(300);
+      await expect(plus).toBeHidden();
+      await gate.locator("#hub-password").fill(password);
+      await gate.locator('#hub-unlock-form button[type="submit"]').click();
+      await expect(gate.frameLocator("#hub-frame").getByText(body)).toBeVisible({ timeout: 15_000 });
+      await expect(plus).toBeVisible();
+    }
+  });
+
+  test("leaving an artifact and coming back leaves one message listener, not two", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "one stage shape is enough");
+    await page.addInitScript(() => {
+      const live = new Set();
+      const add = window.addEventListener.bind(window);
+      const remove = window.removeEventListener.bind(window);
+      window.addEventListener = (type, fn, opts) => {
+        if (type === "message") live.add(fn);
+        return add(type, fn, opts);
+      };
+      window.removeEventListener = (type, fn, opts) => {
+        if (type === "message") live.delete(fn);
+        return remove(type, fn, opts);
+      };
+      window.__messageListeners = () => live.size;
+    });
+    const at = `${hub.baseUrl}/#/artifacts/${encodeURIComponent(hub.protectedId)}?project=${encodeURIComponent(hub.projectId)}`;
+    await page.goto(at);
+    await expect(page.frameLocator("#hub-frame").getByRole("heading", { name: "Encrypted artifact" })).toBeVisible({ timeout: 10_000 });
+    const once = await page.evaluate(() => window.__messageListeners());
+    // Away, before unlocking, and back.
+    await page.goto(`${hub.baseUrl}/#/artifacts?project=${encodeURIComponent(hub.projectId)}`);
+    await expect(page.locator("#hub-frame")).toHaveCount(0);
+    expect(await page.evaluate(() => window.__messageListeners()), "listeners left behind after leaving").toBeLessThan(once);
+    await page.goto(at);
+    await expect(page.frameLocator("#hub-frame").getByRole("heading", { name: "Encrypted artifact" })).toBeVisible({ timeout: 10_000 });
+    expect(await page.evaluate(() => window.__messageListeners())).toBe(once);
+  });
+
+  test("a repaint of the project stage without a viewer takes the listeners down", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "one stage shape is enough");
+    await page.addInitScript(() => {
+      const live = new Set();
+      const add = window.addEventListener.bind(window);
+      const remove = window.removeEventListener.bind(window);
+      window.addEventListener = (type, fn, opts) => {
+        if (type === "message") live.add(fn);
+        return add(type, fn, opts);
+      };
+      window.removeEventListener = (type, fn, opts) => {
+        if (type === "message") live.delete(fn);
+        return remove(type, fn, opts);
+      };
+      window.__messageListeners = () => live.size;
+    });
+    const session = await newSession(hub);
+    const published = await toolCall(hub, session, "artifact_publish", {
+      project_id: hub.projectId,
+      title: "Repaint gone",
+      kind: "markdown",
+      content: "# Repaint gone\n",
+    });
+    const id = structured(published).artifact_id;
+    await page.goto(`${hub.baseUrl}/#/projects/${hub.projectId}/artifacts?artifact=${encodeURIComponent(id)}`);
+    await expect(page.locator("#hub-frame")).toBeVisible({ timeout: 10_000 });
+    const open = await page.evaluate(() => window.__messageListeners());
+    await api(hub, "DELETE", `/api/v1/artifacts/${encodeURIComponent(id)}`);
+    await page.getByRole("button", { name: /^Group/ }).first().click();
+    await page.getByRole("menuitemradio", { name: /^Kind/ }).click();
+    await expect(page.locator(".shell-stage").getByText("This artifact is no longer on the hub.")).toBeVisible();
+    expect(await page.evaluate(() => window.__messageListeners()), "listeners left on the replaced stage").toBeLessThan(open);
+  });
+
+  test("the comments bar hands focus to the aside before it steps aside", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the aside is the desktop's surface");
+    const id = await longCommentedArtifact(hub);
+    await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+    await expect(page.locator(".shell-aside")).toBeVisible();
+    await page.keyboard.press("c");
+    const bar = page.locator(".hub-comments-strip");
+    await expect(bar).toBeVisible();
+    await bar.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".shell-aside")).toBeVisible();
+    await expect(bar).toBeHidden();
+    const inside = await page.evaluate(() => !!document.activeElement?.closest(".shell-aside"));
+    expect(inside, "focus stayed on the hidden bar").toBe(true);
   });
 });

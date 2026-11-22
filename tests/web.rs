@@ -1319,7 +1319,7 @@ fn app_drawer_wiring_for_comments() {
         "comments-compose",
         "drawer-error",
         "Comments",
-        "No comments yet. Be the first to leave one.",
+        "No comments yet.",
         "Write a comment to post it.",
         "Pinned",
         "Quoted",

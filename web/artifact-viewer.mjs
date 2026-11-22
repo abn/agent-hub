@@ -575,6 +575,7 @@ function init() {
       gate?.querySelector(".hub-lock-tile")?.setAttribute("hidden", "");
       gate?.querySelector("h2")?.setAttribute("hidden", "");
       renderForTheme(state, state.theme);
+      if (window.parent && window.parent !== window) window.parent.postMessage({ type: "hub:unlocked" }, "*");
       return "ok";
     } catch (error) {
       if (error?.code === INSECURE_CONTEXT) {
