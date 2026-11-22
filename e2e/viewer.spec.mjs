@@ -173,6 +173,78 @@ test.describe("the project artifact stage's actions", () => {
     await expect(page.getByText("Path copied")).toBeVisible();
   });
 
+  test("the version list opens under its trigger on a fine pointer", async ({ hub, page }, testInfo) => {
+    await open(page, hub, `#/projects/${hub.projectId}/artifacts`, "artifacts");
+    if (testInfo.project.name === "phone") {
+      await page.locator(`.artifact-row[data-id="${hub.artifactId}"] a`).click();
+    }
+    const toggle = page.locator(".shell-stage .hub-version-toggle");
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    const list = page.locator("#hub-version-menu");
+    await expect(list).toBeVisible();
+    await expect(list).toHaveAttribute("role", "menu");
+    await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#hub-version-backdrop")).toHaveCount(0);
+    const t = await toggle.boundingBox();
+    const m = await list.boundingBox();
+    expect(m.y - (t.y + t.height), "the list is not under its trigger").toBeLessThanOrEqual(8);
+    expect(m.y, "the list opened above its trigger").toBeGreaterThanOrEqual(t.y + t.height - 1);
+    const box = await list.boundingBox();
+    const view = page.viewportSize();
+    expect(box.x, "the list runs off the left edge").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "the list runs off the right edge").toBeLessThanOrEqual(view.width);
+    expect(box.y + box.height, "the list runs off the bottom").toBeLessThanOrEqual(view.height);
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeFocused();
+  });
+
+  test("the version list stays inside a narrow desktop window", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name === "phone", "a fine pointer only");
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.goto(`${hub.baseUrl}/#/artifacts/${hub.artifactId}?project=${hub.projectId}`);
+    const toggle = page.locator(".shell-stage .hub-version-toggle");
+    await expect(toggle).toHaveAttribute("aria-haspopup", "menu");
+    await toggle.click();
+    const list = page.locator("#hub-version-menu");
+    await expect(list).toBeVisible();
+    const box = await list.boundingBox();
+    expect(box.x, "the list runs off the left edge").toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, "the list runs off the right edge").toBeLessThanOrEqual(480);
+  });
+
+  test("the version menu answers the arrow keys and closes on Tab", async ({ hub, page }, testInfo) => {
+    await open(page, hub, `#/projects/${hub.projectId}/artifacts`, "artifacts");
+    if (testInfo.project.name === "phone") {
+      await page.locator(`.artifact-row[data-id="${hub.artifactId}"] a`).click();
+    }
+    const toggle = page.locator(".shell-stage .hub-version-toggle");
+    const list = page.locator("#hub-version-menu");
+    // The stage can repaint once after it opens, which takes an open list down
+    // with it; the key is pressed again until the list stays.
+    await expect(async () => {
+      if ((await list.count()) === 0) await toggle.press("Enter");
+      await expect(list).toBeVisible({ timeout: 1000 });
+    }).toPass();
+    await expect(list).toHaveAttribute("role", "menu");
+    const items = list.getByRole("menuitemradio");
+    await expect(items.first()).toBeVisible();
+    const count = await items.count();
+    await expect(list.getByRole("menuitemradio", { checked: true })).toHaveCount(1);
+    const start = await page.evaluate(() => document.activeElement?.textContent?.trim().slice(0, 4));
+    await page.keyboard.press("ArrowDown");
+    const next = await page.evaluate(() => document.activeElement?.textContent?.trim().slice(0, 4));
+    if (count > 1) expect(next, "ArrowDown did not move").not.toBe(start);
+    await page.keyboard.press("ArrowUp");
+    await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.trim().slice(0, 4))).toBe(start);
+    await page.keyboard.press("Tab");
+    await expect(list).toHaveCount(0);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
   test("commenting on selected text opens the composer", async ({ hub, page }, testInfo) => {
     // A desktop stage draws the selection callout in the frame. The callout
     // posted a message the shell could not answer on a fine pointer, because the
@@ -675,5 +747,19 @@ test.describe("the artifact viewer tells the truth about its comments and its lo
     await expect(bar).toBeHidden();
     const inside = await page.evaluate(() => !!document.activeElement?.closest(".shell-aside"));
     expect(inside, "focus stayed on the hidden bar").toBe(true);
+  });
+});
+
+test.describe("the version list on a coarse pointer", () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+
+  test("stays a sheet over a scrim", async ({ hub, page }) => {
+    await open(page, hub, `#/projects/${hub.projectId}/artifacts`, "artifacts");
+    await page.locator(`.artifact-row[data-id="${hub.artifactId}"] a`).click();
+    await expect(page.locator(".shell-stage .hub-version-toggle")).toHaveAttribute("aria-haspopup", "dialog");
+    await page.locator(".shell-stage .hub-version-toggle").tap();
+    await expect(page.locator("#hub-version-backdrop")).toBeVisible();
+    await expect(page.locator("#hub-version-menu")).toHaveAttribute("aria-modal", "true");
+    await expect(page.locator(".shell-stage .hub-version-toggle")).toHaveAttribute("aria-haspopup", "dialog");
   });
 });

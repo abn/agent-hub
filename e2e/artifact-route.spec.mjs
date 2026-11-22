@@ -58,6 +58,10 @@ const shellAddress = (hub, id) =>
     `#/projects/${hub.projectId}/artifacts\\?artifact=${id}(&|$)`.replace(/[.]/g, "\\."),
   );
 
+// The list is a menu of radio items under a mouse and a sheet of buttons under
+// a touch; the pick is the same either way.
+const pickRole = async (list) => ((await list.getAttribute("role")) === "menu" ? "menuitemradio" : "button");
+
 const isDesktop = (testInfo) => testInfo.project.name === "route-desktop";
 
 // The document inside the hub's frame route, which is itself framed.
@@ -85,9 +89,9 @@ test.describe("the artifact's address", () => {
     await expect(documentOf(page).getByText(SECOND)).toBeVisible();
     if (isDesktop(testInfo)) {
       // The index is beside the stage, with the linked artifact marked.
-      const row = page.locator(".shell-index").getByRole("link", { name: TITLE, exact: true });
+      const row = page.locator(".shell-index").getByRole("link", { name: SLUG, exact: true });
       await expect(row).toHaveAttribute("aria-current", "true");
-      await expect(page.locator(".shell-index").getByRole("link", { name: "Route decoy" })).not.toHaveAttribute(
+      await expect(page.locator(".shell-index").getByRole("link", { name: "route-decoy.md" })).not.toHaveAttribute(
         "aria-current",
         "true",
       );
@@ -97,7 +101,7 @@ test.describe("the artifact's address", () => {
       await expect(page.locator(".shell-index")).toBeHidden();
       await page.getByRole("link", { name: "Back to list" }).click();
       await expect(page).toHaveURL(new RegExp(`#/projects/${hub.projectId}/artifacts$`));
-      await expect(page.locator(".shell-index").getByRole("link", { name: TITLE, exact: true })).toBeVisible();
+      await expect(page.locator(".shell-index").getByRole("link", { name: SLUG, exact: true })).toBeVisible();
     }
   });
 
@@ -116,9 +120,9 @@ test.describe("the artifact's address", () => {
     const id = await linkedArtifact(hub);
     await follow(page, hub, id);
     await page.getByRole("button", { name: "Version 2" }).click();
-    const sheet = page.getByRole("dialog", { name: "Versions" });
+    const sheet = page.locator("#hub-version-menu");
     await expect(sheet).toBeVisible();
-    await sheet.getByRole("button", { name: /^v1\b/ }).click();
+    await sheet.getByRole(await pickRole(sheet), { name: /^v1\b/ }).click();
     await expect(page).toHaveURL(/[?&]version=1(&|$)/);
     await expect(page).toHaveURL(shellAddress(hub, id));
     await expect(page.locator('.shell[data-segment="artifacts"]')).toBeVisible();

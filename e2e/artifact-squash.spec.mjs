@@ -27,18 +27,23 @@ test("the version sheet squashes prior versions after confirmation", async ({ hu
   await expect(page.getByRole("button", { name: "Version 3" })).toBeVisible();
 
   await page.getByRole("button", { name: "Version 3" }).click();
-  const sheet = page.getByRole("dialog", { name: "Versions" });
+  const sheet = page.locator("#hub-version-menu");
   await expect(sheet).toBeVisible();
-  await sheet.getByRole("button", { name: "Squash", exact: true }).click();
+  // A menu under a mouse and a sheet under a touch; the squash is a button
+  // in the footer of either.
+  const squash = sheet.locator('[data-action="version-squash"]');
+  await squash.click();
 
   const confirm = page.getByRole("dialog", { name: "Squash versions?" });
   await expect(confirm.getByRole("button", { name: "Cancel" })).toBeFocused();
   await confirm.getByRole("button", { name: "Squash", exact: true }).click();
   await expect(page.getByText("Versions squashed")).toBeVisible();
+  // The stage repaints with the one version left, and the list is read from it.
+  await expect(page.getByRole("button", { name: "Version 3" })).toContainText("of 1");
 
   await page.getByRole("button", { name: "Version 3" }).click();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("1 · newest first")).toBeVisible();
-  await expect(sheet.getByRole("button", { name: /^v3\b/ })).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Squash", exact: true })).toHaveCount(0);
+  await expect(sheet.locator('.hub-version-row[data-version="3"]')).toBeVisible();
+  await expect(sheet.locator('[data-action="version-squash"]')).toHaveCount(0);
 });

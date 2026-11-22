@@ -2140,8 +2140,8 @@ fn artifact_stage_version_control_is_wired_and_opens_a_sheet() {
         "the control shows the chevron that says it opens something"
     );
     assert!(
-        ARTIFACTS_JS.contains("buildVersionSheet(id, info.versions, info.version, \"\")"),
-        "the stage mounts the version sheet the control opens"
+        ARTIFACTS_JS.contains("openVersionPicker(button, versionData,"),
+        "the control opens the version list from what the stage carries"
     );
     assert!(
         ARTIFACTS_JS.contains("versions,"),
