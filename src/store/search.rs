@@ -159,7 +159,15 @@ pub async fn query_visible(
     visible: Option<&[String]>,
 ) -> Result<Vec<SearchHit>> {
     let limit = search.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
-    query_limited(db, search, visible, limit).await
+    query_limited(db, search, visible, limit, Reader::Agent).await
+}
+
+/// Who reads a result page. The human's surfaces leave out the feed events
+/// written for agents, which the human's own feed does not carry either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reader {
+    Human,
+    Agent,
 }
 
 /// The query path with the page size already resolved.
@@ -172,6 +180,7 @@ async fn query_limited(
     search: &SearchQuery,
     visible: Option<&[String]>,
     limit: i64,
+    reader: Reader,
 ) -> Result<Vec<SearchHit>> {
     if search.text.trim().is_empty() {
         return Err(Error::InvalidArgument(
@@ -214,6 +223,18 @@ async fn query_limited(
             .collect();
         params.extend(visible.iter().map(|id| Value::Text(id.clone())));
         scopes.push_str(&format!(" AND project_id IN ({})", holes.join(", ")));
+    }
+    // The human's search ranks and counts without the events the human's feed
+    // leaves out, so they never take a place on the page.
+    if reader == Reader::Human {
+        scopes.push_str(&format!(
+            " AND NOT (type = 'feed' AND ref_id IN (SELECT id FROM events WHERE kind IN ({})))",
+            super::events::AGENT_ONLY_KINDS
+                .iter()
+                .map(|kind| format!("'{kind}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     // Brain entries for soft-pruned sessions are excluded from search immediately.
     // This predicate is always present, so the query never has an empty scope
@@ -448,9 +469,24 @@ pub async fn search(
     query: &SearchQuery,
     visible: Option<&[String]>,
 ) -> Result<SearchResults> {
+    search_as(db, query, visible, Reader::Agent).await
+}
+
+/// [`search`] for the human's surfaces, which leave out the `comment` and
+/// `page` feed events written for agents.
+pub async fn search_human(db: &Database, query: &SearchQuery) -> Result<SearchResults> {
+    search_as(db, query, None, Reader::Human).await
+}
+
+async fn search_as(
+    db: &Database,
+    query: &SearchQuery,
+    visible: Option<&[String]>,
+    reader: Reader,
+) -> Result<SearchResults> {
     let limit = query.limit.clamp(1, crate::limits::SEARCH_LIMIT_MAX);
     let started = std::time::Instant::now();
-    let mut hits = query_limited(db, query, visible, limit.saturating_add(1)).await?;
+    let mut hits = query_limited(db, query, visible, limit.saturating_add(1), reader).await?;
     let took_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     let truncated = hits.len() as i64 > limit;
     hits.truncate(limit as usize);

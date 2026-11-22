@@ -4,6 +4,7 @@ use agent_hub::app::AppState;
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments::{self, AnchorInput};
+use agent_hub::store::events::{self, FeedQuery};
 use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
@@ -547,4 +548,200 @@ async fn host_filters_comments_by_shown_version() {
     let latest = text_body(response).await;
     assert!(latest.contains("On the first version"));
     assert!(latest.contains("On the second version"));
+}
+
+async fn comment_events(state: &AppState) -> Vec<events::Event> {
+    events::read_feed(
+        &state.db,
+        "proj",
+        &FeedQuery {
+            kinds: Some(vec!["comment".to_string()]),
+            ..FeedQuery::default()
+        },
+    )
+    .await
+    .expect("read the feed")
+    .events
+}
+
+#[tokio::test]
+async fn a_human_comment_appends_one_event_naming_the_publisher() {
+    let state = state().await;
+    let id = publish(&state, "Report", b"<p>body</p>").await;
+
+    let post = |state: &AppState, body: &str| {
+        let uri = format!("/api/v1/artifacts/{id}/comments");
+        router(state.clone()).oneshot(request(
+            "POST",
+            &uri,
+            Some("Bearer token"),
+            Some(json!({"body": body, "idempotency_key": "same-key"})),
+        ))
+    };
+    let posted = json_body(post(&state, "Needs a table").await.expect("request")).await;
+    let replayed = json_body(post(&state, "Needs a table").await.expect("request")).await;
+    assert_eq!(posted["id"], replayed["id"]);
+
+    let found = comment_events(&state).await;
+    assert_eq!(found.len(), 1, "a replayed key appends no second event");
+    let event = &found[0];
+    assert_eq!(event.actor, "human");
+    assert_eq!(event.summary, "comment on Report");
+    let payload = event.payload.as_ref().expect("payload");
+    assert_eq!(payload["target"], "artifact");
+    assert_eq!(payload["artifact_id"], id.as_str());
+    assert_eq!(payload["comment_id"], posted["id"]);
+    assert_eq!(payload["author"], "human");
+    assert_eq!(payload["audience"], json!(["agent-one"]));
+}
+
+#[tokio::test]
+async fn the_audience_grows_with_earlier_commenters_and_leaves_out_the_author() {
+    let state = state().await;
+    let id = publish(&state, "Report", b"<p>body</p>").await;
+    let earlier =
+        comments::add_comment(&state.db, &id, "agent-two", "First", None, None, None, None)
+            .await
+            .expect("comment")
+            .0;
+    assert!(!earlier.id.is_empty());
+
+    let app = router(state.clone());
+    let response = app
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/artifacts/{id}/comments"),
+            Some("Bearer token"),
+            Some(json!({"body": "Second"})),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let found = comment_events(&state).await;
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].payload.as_ref().expect("payload")["audience"],
+        json!(["agent-one", "agent-two"]),
+        "the publisher and the earlier commenter, not the human who wrote it"
+    );
+}
+
+#[tokio::test]
+async fn the_human_feed_leaves_comment_events_out() {
+    let state = state().await;
+    let id = publish(&state, "Report", b"<p>body</p>").await;
+    let app = router(state.clone());
+    app.oneshot(request(
+        "POST",
+        &format!("/api/v1/artifacts/{id}/comments"),
+        Some("Bearer token"),
+        Some(json!({"body": "Note"})),
+    ))
+    .await
+    .expect("request");
+    assert_eq!(comment_events(&state).await.len(), 1);
+
+    let response = router(state.clone())
+        .oneshot(request(
+            "GET",
+            "/api/v1/projects/proj/feed",
+            Some("Bearer token"),
+            None,
+        ))
+        .await
+        .expect("request");
+    let page = json_body(response).await;
+    let kinds: Vec<&str> = page["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect();
+    assert_eq!(kinds, vec!["artifact"], "only the publish shows: {page}");
+}
+
+#[tokio::test]
+async fn only_a_publish_or_an_update_puts_an_actor_in_an_artifacts_audience() {
+    let state = state().await;
+    let id = publish(&state, "Report", b"<p>body</p>").await;
+    events::append(
+        &state.db,
+        0,
+        "agent-legacy",
+        None,
+        events::NewEvent {
+            project_id: "proj".to_string(),
+            kind: "artifact".to_string(),
+            summary: "comment on Report".to_string(),
+            payload: Some(json!({
+                "action": "commented",
+                "artifact_id": id,
+                "comment_id": "old",
+            })),
+            needs_action: false,
+            thread_id: None,
+            session_id: None,
+        },
+    )
+    .await
+    .expect("append a legacy comment event");
+
+    let response = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/artifacts/{id}/comments"),
+            Some("Bearer token"),
+            Some(json!({"body": "Note"})),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let found = comment_events(&state).await;
+    assert_eq!(
+        found[0].payload.as_ref().expect("payload")["audience"],
+        json!(["agent-one"]),
+        "an actor who only commented on it in the old way is not its owner"
+    );
+}
+
+#[tokio::test]
+async fn a_comment_is_not_told_about_comments_posted_after_it() {
+    let state = state().await;
+    let id = publish(&state, "Report", b"<p>body</p>").await;
+    let first = comments::add_comment(&state.db, &id, "agent-two", "First", None, None, None, None)
+        .await
+        .expect("first")
+        .0;
+    comments::add_comment(
+        &state.db,
+        &id,
+        "agent-three",
+        "Second",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("second");
+
+    let event = events::comment_event(
+        &state.db,
+        events::CommentTarget::Artifact {
+            project_id: "proj",
+            artifact_id: &id,
+            title: "Report",
+        },
+        &first.id,
+        "agent-two",
+    )
+    .await
+    .expect("event");
+    assert_eq!(
+        event.payload.as_ref().expect("payload")["audience"],
+        json!(["agent-one"]),
+        "the later commenter is not an earlier one"
+    );
 }

@@ -121,9 +121,15 @@ fn the_counters_render_all_three_families() {
         "{text}"
     );
     // Every fixed event kind has a series, so a scraper sees the shape.
-    for kind in [
-        "signal", "finished", "question", "answer", "approval", "artifact", "session", "system",
-    ] {
+    assert!(
+        text.contains("agenthub_events_total{kind=\"comment\"}"),
+        "{text}"
+    );
+    assert!(
+        text.contains("agenthub_events_total{kind=\"page\"}"),
+        "{text}"
+    );
+    for kind in agent_hub::store::events::KINDS {
         assert!(
             text.contains(&format!("agenthub_events_total{{kind=\"{kind}\"}}")),
             "kind {kind} is rendered: {text}"

@@ -78,9 +78,9 @@ identity.
 | `answer_post` | Reply to a question by its question id. The answer lands in the feed and closes the thread. |
 | `inbox_read` | Read the human's global inbox, optionally by status, project or actor, and from a `since` cursor; the response carries `next_since`. Each item carries its `project_display_name` beside `project_id`, and the `session_id` it was posted in, absent when it was posted outside a session. A decided approval carries its `decision`: approved or declined, the note the human left, who decided and when. A resolved question carries its `answer`: the reply body, who answered and when. An item with a deadline carries `expires_at` and `on_expiry`, and a resolution the hub made at the deadline carries `expired: true` with `hub` as the actor. |
 | `inbox_wait` | Wait up to `wait_seconds` (30 default, 60 maximum) for a resolved item or a new event to land, then return the page and a `next_since` cursor. It carries the same filters as `inbox_read`, is scoped to the caller's own items, and returns as soon as something arrives, so an agent need not poll. `wait_seconds: 0` polls once. |
-| `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, and optionally narrowed to one actor or with the caller's own events dropped, so they are delivered through the notification trailer instead of polled. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
+| `notify_subscribe` | Register a standing interest in feed events by kind, optionally scoped to one project, and optionally narrowed to one actor, with the caller's own events dropped (`exclude_self`), or to events that name the caller in their audience (`about_self`), so they are delivered through the notification trailer instead of polled. The subscribable kinds are `signal`, `finished`, `approval`, `question`, `answer`, `artifact`, `anchor`, `score`, `idea`, `comment` and `page`. An empty or unknown kind is refused. The cursor is seeded at the newest matching event, so nothing from before the subscription is reported. Returns the `subscription_id` and the cursor it started at. |
 | `notify_unsubscribe` | Remove one of the caller's own subscriptions by `subscription_id`. An unknown id, or another agent's, is `not_found`. |
-| `notify_list` | List the caller's own subscriptions, with ids, kinds, scope, and cursor. |
+| `notify_list` | List the caller's own subscriptions, with ids, kinds, scope, `about_self`, and cursor. |
 | `notify_wait` | Block until something is pending for the caller or `wait_seconds` elapses (30 by default, 60 at most); returns the same `notifications` shape as an ordinary tool result, delivered once. `wait_seconds: 0` polls once. |
 | `artifact_publish` | Publish an HTML or markdown artifact, public or password protected. |
 | `artifact_update` | Publish a new version of an existing artifact, sealing any live version first. |
@@ -478,14 +478,29 @@ and resolving an item frees its slot. See
 
 ## Kind families
 
-Event kinds are a closed set of ten design families (`signal`, `finished`,
+Event kinds are a closed set of twelve design families (`signal`, `finished`,
 `question`, `answer`, `approval`, `artifact`, `session`, `idea`, `anchor`,
-`score`) plus `system`. Sub-actions ride in the payload, so an artifact has an
+`score`, `comment`, `page`) plus `system`. Sub-actions ride in the payload, so an artifact has an
 action of `published` or `updated` and a session has `started`, `ended`,
 `adopted`, `forked`, or `reassigned`. An `anchor` and a `score` are ordinary
 session events: they page, search, subscribe and prune with the session. An
 anchor is written by `session_anchor` and a score only by the human, so
 `signal_append` refuses both.
+
+A `comment` event is appended when a comment is posted on an artifact or a
+knowledge base page, whoever posts it, the human included. Its payload carries
+`target` (`artifact` or `page`), the `artifact_id` or `path`, the `comment_id`,
+the `author`, and an `audience`: the actors the comment concerns. For an
+artifact that is whoever published or updated it and whoever commented earlier;
+for a page it is whoever commented earlier and the last actor to write it. The
+author is left out. A `page` event is appended when a page is written, with the
+`path`, an `action` of `created` or `updated`, the `prev_actor` and an
+`audience` holding `prev_actor`, even when the writer is the same actor, so
+`exclude_self` decides whether the writer hears of it. One actor's writes to a
+page inside ten minutes make one event. Both kinds are for agents: the human
+feed, its unseen count, Home and the human's search leave them out, and an
+agent reads them with `feed_read`, `search` or a subscription. `about_self` on
+`notify_subscribe` keeps only the events whose `audience` names the caller.
 
 ## See also
 

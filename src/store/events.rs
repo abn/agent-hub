@@ -10,8 +10,14 @@ use crate::store::search::{SearchDoc, index_doc};
 /// The closed set of event kinds.
 pub const KINDS: &[&str] = &[
     "signal", "finished", "question", "answer", "approval", "artifact", "session", "system",
-    "idea", "anchor", "score",
+    "idea", "anchor", "score", "comment", "page",
 ];
+
+/// The kinds written for agents and left out of the human's feed. A comment
+/// and a page write are read where they happen, on the artifact and on the
+/// page, so the feed, its unseen count and Home's recent list do not carry
+/// them. An agent reads them through `feed_read` and subscriptions.
+pub const AGENT_ONLY_KINDS: &[&str] = &["comment", "page"];
 
 /// The kind carrying the hub's record of itself: who was created, whose trust
 /// changed, which tokens were issued and revoked. The identity store is its
@@ -549,15 +555,16 @@ async fn last_seen_on(conn: &Connection, project_id: &str) -> Result<Option<Stri
 /// Move a project's cursor up to an event the human has seen.
 ///
 /// The cursor never moves backwards, and an id that is not an event of this
-/// project is ignored rather than trusted: it says nothing about this feed.
+/// project's feed is ignored rather than trusted: it says nothing about this
+/// feed. The events written for agents are not on it.
 /// The read and the write share an immediate transaction, so a cursor cannot
 /// step over an event committed between them.
 pub async fn mark_seen(db: &Database, project_id: &str, event_id: &str) -> Result<Seen> {
     let tx = super::begin_write(db).await?;
     let current = last_seen_on(&tx, project_id).await?;
-    let belongs = get_on(&tx, event_id)
-        .await?
-        .is_some_and(|event| event.project_id == project_id);
+    let belongs = get_on(&tx, event_id).await?.is_some_and(|event| {
+        event.project_id == project_id && !AGENT_ONLY_KINDS.contains(&event.kind.as_str())
+    });
     let forward = belongs && current.as_deref().is_none_or(|seen| event_id > seen);
     if !forward {
         return Ok(Seen {
@@ -617,7 +624,7 @@ pub struct Dismissed {
 /// row, and its search document, so an agent still reads it. The events are
 /// checked against the project in the same transaction as the insert, so an
 /// id from another project can never be dismissed here, and the hub's own
-/// audit trail is left alone.
+/// audit trail and the events written for agents are left alone.
 pub async fn dismiss(db: &Database, project_id: &str, event_ids: &[String]) -> Result<Dismissed> {
     let tx = super::begin_write(db).await?;
     let now = crate::store::now_rfc3339();
@@ -627,7 +634,8 @@ pub async fn dismiss(db: &Database, project_id: &str, event_ids: &[String]) -> R
             .execute(
                 "INSERT OR IGNORE INTO feed_dismissals(event_id, project_id, dismissed_at)
                  SELECT id, project_id, ?3 FROM events
-                  WHERE id = ?1 AND project_id = ?2 AND kind <> 'system'",
+                  WHERE id = ?1 AND project_id = ?2 AND kind <> 'system'
+                    AND kind NOT IN ('comment', 'page')",
                 vec![
                     Value::Text(event_id.clone()),
                     Value::Text(project_id.to_string()),
@@ -668,6 +676,7 @@ pub async fn dismiss_read(db: &Database, project_id: &str) -> Result<Dismissed> 
                     "SELECT e.id FROM events e
                       WHERE e.project_id = ?1 AND e.id > ?2 AND e.id <= ?3
                         AND e.kind <> 'system'
+                        AND e.kind NOT IN ('comment', 'page')
                         AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)
                       ORDER BY e.id ASC LIMIT ?4",
                     vec![
@@ -870,6 +879,7 @@ pub(crate) async fn forget_agent_cursors_in_tx(
 /// with no cursor passes the empty string, which sorts below every id.
 pub const UNSEEN_COUNT_SQL: &str = "SELECT COUNT(*) FROM events e
      WHERE e.project_id = ?1 AND e.id > ?2 AND e.kind <> 'system'
+       AND e.kind NOT IN ('comment', 'page')
        AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)";
 
 /// How many events one project holds above its cursor.
@@ -1100,9 +1110,237 @@ async fn get_on(conn: &Connection, event_id: &str) -> Result<Option<Event>> {
 pub fn human_kinds() -> Vec<String> {
     KINDS
         .iter()
-        .filter(|kind| **kind != AUDIT_KIND)
+        .filter(|kind| **kind != AUDIT_KIND && !AGENT_ONLY_KINDS.contains(kind))
         .map(|kind| kind.to_string())
         .collect()
+}
+
+/// What a comment was posted on.
+#[derive(Debug, Clone, Copy)]
+pub enum CommentTarget<'a> {
+    Artifact {
+        project_id: &'a str,
+        artifact_id: &'a str,
+        title: &'a str,
+    },
+    Page {
+        project_id: &'a str,
+        path: &'a str,
+    },
+}
+
+/// The feed event for a comment that was just posted.
+///
+/// Its payload names the actors the comment concerns in `audience`, so a
+/// subscription with `about_self` can keep the discussion of its own work and
+/// drop the rest. For an artifact that is whoever published or updated it and
+/// whoever commented before; for a page it is whoever commented before and the
+/// page's last writer. Only comments posted before this one count, so a
+/// concurrent comment is never read as an earlier one. The author is left out:
+/// a comment is not news to the one who wrote it.
+pub async fn comment_event(
+    db: &Database,
+    target: CommentTarget<'_>,
+    comment_id: &str,
+    author: &str,
+) -> Result<NewEvent> {
+    let conn = super::connect(db)?;
+    let (project_id, summary, mut audience, payload) = match target {
+        CommentTarget::Artifact {
+            project_id,
+            artifact_id,
+            title,
+        } => {
+            let mut audience = actors_of(
+                &conn,
+                "SELECT DISTINCT actor FROM events
+                  WHERE project_id = ?1 AND kind = 'artifact'
+                    AND json_extract(payload, '$.action') IN ('published', 'updated')
+                    AND json_extract(payload, '$.artifact_id') = ?2",
+                vec![
+                    Value::Text(project_id.to_string()),
+                    Value::Text(artifact_id.to_string()),
+                ],
+            )
+            .await?;
+            audience.extend(
+                actors_of(
+                    &conn,
+                    "SELECT DISTINCT author FROM comments WHERE artifact_id = ?1 AND id < ?2",
+                    vec![
+                        Value::Text(artifact_id.to_string()),
+                        Value::Text(comment_id.to_string()),
+                    ],
+                )
+                .await?,
+            );
+            (
+                project_id,
+                format!("comment on {title}"),
+                audience,
+                serde_json::json!({"target": "artifact", "artifact_id": artifact_id}),
+            )
+        }
+        CommentTarget::Page { project_id, path } => {
+            let mut audience = actors_of(
+                &conn,
+                "SELECT DISTINCT author FROM kb_comments
+                  WHERE project_id = ?1 AND path = ?2 AND id < ?3",
+                vec![
+                    Value::Text(project_id.to_string()),
+                    Value::Text(path.to_string()),
+                    Value::Text(comment_id.to_string()),
+                ],
+            )
+            .await?;
+            audience.extend(
+                newest_page_event(&conn, project_id, path)
+                    .await?
+                    .map(|written| written.actor),
+            );
+            (
+                project_id,
+                format!("comment on {path}"),
+                audience,
+                serde_json::json!({"target": "page", "path": path}),
+            )
+        }
+    };
+    audience.retain(|actor| actor != author);
+    audience.sort();
+    audience.dedup();
+    let mut payload = payload;
+    payload["comment_id"] = serde_json::json!(comment_id);
+    payload["author"] = serde_json::json!(author);
+    payload["audience"] = serde_json::json!(audience);
+    Ok(NewEvent {
+        project_id: project_id.to_string(),
+        kind: "comment".to_string(),
+        summary,
+        payload: Some(payload),
+        needs_action: false,
+        thread_id: None,
+        session_id: None,
+    })
+}
+
+/// Append the feed event for a comment that was just posted.
+///
+/// The comment is already stored, so a failure here is logged and costs the
+/// post nothing: the event is the notice, not the record.
+pub async fn record_comment(
+    db: &Database,
+    events_per_project: i64,
+    target: CommentTarget<'_>,
+    comment_id: &str,
+    author: &str,
+) {
+    let appended = async {
+        let event = comment_event(db, target, comment_id, author).await?;
+        append(db, events_per_project, author, None, event).await
+    }
+    .await;
+    if let Err(err) = appended {
+        tracing::warn!(comment_id, error = %err, "could not append a comment event");
+    }
+}
+
+/// How long one actor's writes to a page stay a single `page` event.
+const PAGE_COALESCE_SECS: i64 = 10 * 60;
+
+/// The `page` event for a write, or `None` when the actor's earlier write to
+/// the same page is recent enough that this one is part of the same stretch of
+/// editing.
+///
+/// `prev_actor` is whoever wrote the page before this write. It is the
+/// audience: they are the one who may want to know their page changed under
+/// them. It stays the audience when the writer is the same actor, and
+/// `exclude_self` on a subscription decides whether they hear of it.
+pub async fn page_event(
+    db: &Database,
+    project_id: &str,
+    path: &str,
+    actor: &str,
+    prev_actor: Option<&str>,
+    created: bool,
+) -> Result<Option<NewEvent>> {
+    let conn = super::connect(db)?;
+    if let Some(newest) = newest_page_event(&conn, project_id, path).await?
+        && newest.actor == actor
+        && age_secs(&newest.created_at).is_some_and(|age| age < PAGE_COALESCE_SECS)
+    {
+        return Ok(None);
+    }
+    let audience: Vec<&str> = prev_actor.into_iter().collect();
+    Ok(Some(NewEvent {
+        project_id: project_id.to_string(),
+        kind: "page".to_string(),
+        summary: format!(
+            "page {path} {}",
+            if created { "created" } else { "updated" }
+        ),
+        payload: Some(serde_json::json!({
+            "path": path,
+            "action": if created { "created" } else { "updated" },
+            "prev_actor": prev_actor,
+            "audience": audience,
+        })),
+        needs_action: false,
+        thread_id: None,
+        session_id: None,
+    }))
+}
+
+struct PageEvent {
+    actor: String,
+    created_at: String,
+}
+
+async fn newest_page_event(
+    conn: &Connection,
+    project_id: &str,
+    path: &str,
+) -> Result<Option<PageEvent>> {
+    let mut rows = conn
+        .query(
+            "SELECT actor, created_at FROM events
+              WHERE project_id = ?1 AND kind = 'page'
+                AND json_extract(payload, '$.path') = ?2
+              ORDER BY id DESC LIMIT 1",
+            vec![
+                Value::Text(project_id.to_string()),
+                Value::Text(path.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        return Ok(None);
+    };
+    Ok(Some(PageEvent {
+        actor: required_text_at(&row, 0)?,
+        created_at: required_text_at(&row, 1)?,
+    }))
+}
+
+async fn actors_of(conn: &Connection, sql: &str, params: Vec<Value>) -> Result<Vec<String>> {
+    let mut rows = conn.query(sql, params).await.map_err(engine)?;
+    let mut actors = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        actors.push(required_text_at(&row, 0)?);
+    }
+    Ok(actors)
+}
+
+fn required_text_at(row: &Row, index: usize) -> Result<String> {
+    text_at(row, index)?.ok_or_else(|| Error::Engine("event row is missing a column".to_string()))
+}
+
+/// Seconds since an RFC 3339 timestamp, or `None` when it does not parse.
+fn age_secs(stamp: &str) -> Option<i64> {
+    let then =
+        time::OffsetDateTime::parse(stamp, &time::format_description::well_known::Rfc3339).ok()?;
+    Some((time::OffsetDateTime::now_utc() - then).whole_seconds())
 }
 
 /// Read the most recent human-visible events across every project, newest
@@ -1116,6 +1354,7 @@ pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
             "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
              FROM events e LEFT JOIN inbox i ON i.event_id = e.id
              WHERE e.kind <> 'system'
+               AND e.kind NOT IN ('comment', 'page')
                AND NOT EXISTS (SELECT 1 FROM feed_dismissals d WHERE d.event_id = e.id)
              ORDER BY e.id DESC LIMIT ?1",
             vec![Value::Integer(limit)],

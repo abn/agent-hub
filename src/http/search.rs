@@ -26,7 +26,7 @@ pub async fn search(
 
     let params = parse(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
 
-    let results = search::search(&state.db, &params, None)
+    let results = search::search_human(&state.db, &params)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 

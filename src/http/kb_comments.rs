@@ -17,6 +17,7 @@ use crate::app::AppState;
 use crate::error::Error;
 use crate::http::kb;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
+use crate::store::events;
 use crate::store::page_comments;
 
 /// The query for a page's comment thread.
@@ -89,6 +90,18 @@ pub async fn create(
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;
+
+    events::record_comment(
+        &state.db,
+        state.config.events_per_project.per_project,
+        events::CommentTarget::Page {
+            project_id: &project_id,
+            path: &path,
+        },
+        &comment.id,
+        &comment.author,
+    )
+    .await;
 
     state.notify();
     Ok((StatusCode::CREATED, Json(json!({ "comment": comment }))))
