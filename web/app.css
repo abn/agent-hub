@@ -2213,6 +2213,12 @@ button.empty-link {
 .search-scopes::-webkit-scrollbar {
   display: none;
 }
+/* Five scopes have to fit the default index width without scrolling. */
+.search-scopes { gap: var(--s-1); }
+.search-scopes .chip { padding: 0 var(--s-1); gap: var(--s-1); }
+@media (any-pointer: coarse) {
+  .search-scopes { padding-inline: var(--s-1); }
+}
 .search-results .section-label, .search-results > .empty-state, .search-results > .error { margin-top: var(--s-3); }
 /* Rows run to the group's edge at their own 16px, as the design draws them. */
 .search-group { padding: 0; }
@@ -7809,6 +7815,15 @@ dialog.dialog-project-delete {
   padding: 0;
   margin: 0;
   overflow-x: auto;
+}
+/* The scroll box would clip the first and last chip's 44px hit area, so it
+   pads by the overhang and gives the space back in margin. */
+@media (any-pointer: coarse) {
+  .shell-controls .search-scopes,
+  .shell[data-segment="search"] .shell-controls .search-scopes {
+    padding-inline: var(--s-1);
+    margin-inline: calc(-1 * var(--s-1));
+  }
 }
 /* The count line sits above the groups on the desktop, so it takes the pane's
    16px gutter rather than the control row's 12px. */

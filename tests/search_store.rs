@@ -874,3 +874,140 @@ async fn soft_pruned_session_brain_is_immediately_excluded_from_search() {
     let hits_restored = search::query(&db, &q("secret")).await.expect("search");
     assert_eq!(hits_restored.len(), 1, "undo restores search visibility");
 }
+
+#[tokio::test]
+async fn a_very_long_word_is_searched_and_never_refused() {
+    let dir = TempDir::new("search-long-word");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    for len in (1..=200).step_by(3).chain([400, 1000]) {
+        let word = "a".repeat(len);
+        let hits = search::query(&db, &q(&word)).await;
+        assert!(hits.is_ok(), "{len} characters: {hits:?}");
+        let mixed = format!("note {}", "x".repeat(len));
+        assert!(search::query(&db, &q(&mixed)).await.is_ok(), "{len} mixed");
+    }
+}
+
+#[tokio::test]
+async fn long_words_joined_by_punctuation_are_never_refused() {
+    let dir = TempDir::new("search-long-joined");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    let long = "c".repeat(140);
+    for text in [
+        format!("{long}-{long}"),
+        format!("{long}_x"),
+        format!("x-{long}"),
+        format!("\"{long} {long}\""),
+        format!("\"{long}\""),
+        format!("{long} note"),
+    ] {
+        let hits = search::query(&db, &q(&text)).await;
+        assert!(hits.is_ok(), "{hits:?}");
+    }
+}
+
+#[test]
+fn a_word_too_long_for_a_range_is_matched_whole() {
+    use agent_hub::store::search::sanitize_fts;
+
+    let edge = "e".repeat(32);
+    assert!(sanitize_fts(&edge).contains(" TO "), "32 stays a prefix");
+    let mixed = format!("note-{}", "d".repeat(140));
+    assert_eq!(
+        sanitize_fts(&mixed),
+        format!("\"{}\"", mixed.to_lowercase())
+    );
+    assert!(
+        !sanitize_fts("note-").contains("\"note-\""),
+        "one piece is not a phrase"
+    );
+}
+
+#[test]
+fn a_clause_with_no_surviving_token_is_left_out() {
+    use agent_hub::store::search::sanitize_fts;
+
+    let word = "d".repeat(140);
+    assert_eq!(sanitize_fts(&word), "");
+    assert_eq!(sanitize_fts(&format!("{word} {word}")), "");
+    assert_eq!(sanitize_fts(&"é".repeat(20)), "", "bytes, not characters");
+    assert_eq!(sanitize_fts(&format!("\"{word}\"")), "");
+    assert_eq!(sanitize_fts(&format!("note {word}")), sanitize_fts("note"));
+}
+
+#[tokio::test]
+async fn several_standalone_long_words_return_nothing_and_never_error() {
+    let dir = TempDir::new("search-long-many");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    let long = "g".repeat(140);
+    for count in 1..=3 {
+        let text = vec![long.as_str(); count].join(" ");
+        let hits = search::query(&db, &q(&text)).await.expect("not refused");
+        assert!(hits.is_empty(), "{count} long words");
+    }
+}
+
+#[tokio::test]
+async fn a_long_word_beside_a_normal_word_still_finds_the_normal_word() {
+    let dir = TempDir::new("search-long-mixed");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    let long = "h".repeat(140);
+    for text in [format!("{long} note"), format!("note {long} {long}")] {
+        let hits = search::query(&db, &q(&text)).await.expect("not refused");
+        assert_eq!(hits.len(), 1, "{text}");
+    }
+}
+
+#[tokio::test]
+async fn a_140_character_token_alone_is_searched_and_never_refused() {
+    let dir = TempDir::new("search-140");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    let word = "b".repeat(140);
+    assert_eq!(word.chars().count(), 140);
+    assert!(search::query(&db, &q(&word)).await.is_ok());
+}
+
+#[tokio::test]
+async fn multibyte_words_near_the_token_limit_are_never_refused() {
+    let dir = TempDir::new("search-multibyte");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    for ch in ["é", "ß", "ж", "中", "😀", "z"] {
+        for count in 1..=45 {
+            let word = ch.repeat(count);
+            let hits = search::query(&db, &q(&word)).await;
+            assert!(hits.is_ok(), "{count} x {ch}: {hits:?}");
+            let joined = format!("{word}-{word}");
+            let hits = search::query(&db, &q(&joined)).await;
+            assert!(hits.is_ok(), "{count} x {ch} joined: {hits:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn words_wrapped_in_punctuation_are_never_refused() {
+    let dir = TempDir::new("search-punct");
+    let db = open(&dir).await;
+    plant(&db, "doc-plain", "proj", "feed", "an ordinary note").await;
+    let long = "k".repeat(60);
+    for text in [
+        "note-".to_string(),
+        "-note".to_string(),
+        "_note_".to_string(),
+        "no--te".to_string(),
+        "é-".to_string(),
+        "-é_".to_string(),
+        format!("_{long}"),
+        format!("{long}-"),
+        format!("{}-", "é".repeat(20)),
+        format!("-{}", "é".repeat(21)),
+    ] {
+        let hits = search::query(&db, &q(&text)).await;
+        assert!(hits.is_ok(), "{text}: {hits:?}");
+    }
+}
