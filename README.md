@@ -56,7 +56,7 @@ podman run --detach --name agent-hub \
   --publish 8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
-  ghcr.io/abn/agent-hub:1.0.0
+  ghcr.io/agync/agent-hub:1.0.0
 ```
 
 `docker run` takes the same arguments. Open `http://127.0.0.1:8080/` and paste
@@ -85,7 +85,7 @@ curl -sS http://127.0.0.1:8080/bootstrap/SKILL.md
 ```
 
 The same guide is the installable `agent-hub` skill, served over MCP at
-`skill://agent-hub/SKILL.md` and installable with `npx skills add abn/agent-hub`.
+`skill://agent-hub/SKILL.md` and installable with `npx skills add agync/agent-hub`.
 The step-by-step for the operator is
 [Connect your first agent](docs/start/connect-first-agent.md); the agent's own
 working loop is [Using the hub as a brain](docs/guides/agents/operating.md).

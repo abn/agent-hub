@@ -17,7 +17,7 @@ building one, the binary, and every setting are in
 
 | Thing | Why |
 |---|---|
-| Podman with Quadlet, or Docker | runs the published image `ghcr.io/abn/agent-hub` |
+| Podman with Quadlet, or Docker | runs the published image `ghcr.io/agync/agent-hub` |
 | An admin token | the control surface refuses every request without one |
 | A data volume | `hub.db`, the session brains, and the artifact blobs live there |
 
@@ -71,7 +71,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=ghcr.io/abn/agent-hub:1.0.0
+Image=ghcr.io/agync/agent-hub:1.0.0
 ContainerName=agent-hub
 PublishPort=127.0.0.1:8080:8080
 Volume=agent-hub-data:/data
@@ -131,7 +131,7 @@ docker run --detach --name agent-hub \
   --env-file ~/.config/agent-hub/hub.env \
   --volume agent-hub-data:/data \
   --stop-timeout 20 \
-  ghcr.io/abn/agent-hub:1.0.0
+  ghcr.io/agync/agent-hub:1.0.0
 ```
 
 `unless-stopped` restarts the container after a daemon or host restart, and

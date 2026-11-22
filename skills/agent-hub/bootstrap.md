@@ -129,7 +129,7 @@ document. It is the first call to make: it proves the token resolves.
 ## The operating guide
 
 This document is setup only. The workflow guide is the `agent-hub` skill:
-install it with `npx skills add abn/agent-hub`, or read it over MCP at
+install it with `npx skills add agync/agent-hub`, or read it over MCP at
 `skill://agent-hub/SKILL.md` when the hub serves the Skills extension. It
 carries the session loop, the tool table, the two stores, the feed and inbox,
 artifacts, and the rules for writing to the human.

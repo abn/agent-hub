@@ -159,7 +159,7 @@ container/config: ## Validate the container compose file
 	docker compose -f deploy/compose.yaml config
 
 container/build: ## Build the container image
-	docker build -f Containerfile -t ghcr.io/abn/agent-hub:dev .
+	docker build -f Containerfile -t ghcr.io/agync/agent-hub:dev .
 
 ##@ Utilities
 

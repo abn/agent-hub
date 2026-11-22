@@ -4,7 +4,7 @@ A release is automated from the commit history. `release-please` reads the
 conventional commits on `main`, keeps a release pull request open with the next
 version and the changelog, and, when that pull request is merged, tags the
 release and publishes it. The same workflow then builds the container image with
-buildah and podman, pushes it to `ghcr.io/abn/agent-hub`, and verifies that the
+buildah and podman, pushes it to `ghcr.io/agync/agent-hub`, and verifies that the
 published image serves.
 
 The version lives in `Cargo.toml`, and `CARGO_PKG_VERSION` is the single source
@@ -32,7 +32,7 @@ HUB_REQUIRE_BROWSER=1 make check
 4. Merge it. `release-please` creates the annotated tag `v<version>` and the
    GitHub release with the changelog as its body.
 5. The same workflow run sees `release_created`, builds the image, pushes
-   `ghcr.io/abn/agent-hub:<version>` and `:latest`, runs it, and probes it. The
+   `ghcr.io/agync/agent-hub:<version>` and `:latest`, runs it, and probes it. The
    release is not done until that step is green.
 6. In parallel it calls the binaries workflow, which builds the standalone
    binary for each target and attaches the archives to the release.
@@ -97,7 +97,7 @@ podman run --detach --name agent-hub-verify \
   --publish 18080:8080 \
   --env HUB_ADMIN_TOKEN=release-check \
   --volume agent-hub-verify-data:/data \
-  "ghcr.io/abn/agent-hub:$VERSION"
+  "ghcr.io/agync/agent-hub:$VERSION"
 for attempt in $(seq 30); do
   podman exec agent-hub-verify \
     /usr/local/bin/agent-hub health --url http://127.0.0.1:8080 && break
@@ -144,10 +144,10 @@ printf '%s' "$(gh auth token)" | podman login ghcr.io \
   --username "$(gh api user --jq .login)" --password-stdin
 podman build -f Containerfile \
   --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
-  --tag "ghcr.io/abn/agent-hub:$VERSION" \
-  --tag ghcr.io/abn/agent-hub:latest .
-podman push "ghcr.io/abn/agent-hub:$VERSION"
-podman push ghcr.io/abn/agent-hub:latest
+  --tag "ghcr.io/agync/agent-hub:$VERSION" \
+  --tag ghcr.io/agync/agent-hub:latest .
+podman push "ghcr.io/agync/agent-hub:$VERSION"
+podman push ghcr.io/agync/agent-hub:latest
 ```
 
 Then verify as above.
