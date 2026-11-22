@@ -788,7 +788,7 @@ export function stageRoot(event, projectId) {
 
 export async function eventStage(event, projectId) {
   if (!event) {
-    return `<div class="shell-prose"><p class="empty">Select an event from the list.</p></div>`;
+    return `<div class="shell-prose"><p class="empty">${activeKinds(projectId).size ? "No events match this filter." : "No events yet."}</p></div>`;
   }
   const visit = feedVisit(projectId);
   event = stageRoot(event, projectId);

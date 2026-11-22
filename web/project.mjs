@@ -451,7 +451,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
 
   let stageHead = shellStageHead("Artifacts", listMeta);
   let stageControls = `<div class="shell-controls"><span class="shell-meta mono">${esc(id)} / artifacts</span></div>`;
-  let stageBody = `<div class="shell-pad"><p class="empty">Select an artifact from the list.</p></div>`;
+  let stageBody = `<div class="shell-pad"><p class="empty">No artifacts yet.</p></div>`;
   let info = null;
 
   if (chosen) {
