@@ -7,7 +7,7 @@
 
 import { api } from "./api.mjs";
 import { esc, paint } from "./dom.mjs";
-import { saveToken } from "./prefs.mjs";
+import { prefs, saveToken } from "./prefs.mjs";
 import { renderRailProjects } from "./shell.mjs";
 import {
   installShellLayout,
@@ -164,14 +164,26 @@ if (typeof document !== "undefined") {
 // because a token field cannot satisfy a hub that has no token to match.
 const NO_ADMIN = /no admin token is configured/i;
 
-async function noAdminToken() {
+// What this browser's token does at the hub: "ok" when it is accepted,
+// "no-admin" when the hub has no token to match, "refused" when a held token
+// is turned away, "none" when there is no token to send.
+async function probe() {
   try {
     await api("/api/v1/home");
-    return false;
+    return prefs.token ? "ok" : "none";
   } catch (error) {
-    return error.status === 401 && NO_ADMIN.test(error.message || "");
+    if (error.status !== 401) return "none";
+    if (NO_ADMIN.test(error.message || "")) return "no-admin";
+    return prefs.token ? "refused" : "none";
   }
 }
+
+const STATE_WORDS = {
+  ok: "Connected",
+  refused: "Token refused",
+  none: "Not connected",
+  "no-admin": "No admin token",
+};
 
 export async function connectScreen(params, gen) {
   const next = nextFrom(params);
@@ -192,9 +204,10 @@ export async function connectScreen(params, gen) {
     </div>
   </div>`;
 
-  const blocked = await noAdminToken();
+  const state = await probe();
+  const blocked = state === "no-admin";
 
-  const stageControls = `<div class="shell-controls"><span class="connect-tools-text">${blocked ? "No admin token" : "Not connected"}</span></div>`;
+  const stageControls = `<div class="shell-controls"><span class="connect-tools-text">${STATE_WORDS[state]}</span></div>`;
 
   const stageBody = blocked
     ? `
