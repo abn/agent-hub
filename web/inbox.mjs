@@ -438,7 +438,11 @@ function mountReply() {
         await render();
         toast("Addendum logged on the idea's thread.");
       } else {
-        await sendAnswer(/** @type {HTMLElement} */ (slot).dataset.id, body);
+        const queued = await answerWith(/** @type {HTMLElement} */ (slot).dataset.id, body);
+        if (queued) {
+          toast("Queued, will send when online.");
+          return;
+        }
         await leave(shown.landing);
         toast("Answer sent, recorded on the feed.");
       }

@@ -50,7 +50,9 @@ export async function enqueue(request) {
       req.onerror = () => reject(req.error);
     });
   }
-  await tryRegisterSync();
+  // Background sync is optional and must not hold the caller: the answer is
+  // stored, so the reader is released whether or not a worker is active.
+  tryRegisterSync();
   return id;
 }
 
@@ -88,18 +90,43 @@ export async function queuedCount() {
   return (await listQueue()).length;
 }
 
-export async function flushQueue() {
-  const items = await listQueue();
+// Replays run one at a time, whatever raised them (the online event, a worker
+// message, a caller). A row is claimed before its POST, so an overlapping
+// trigger never sends the same answer twice.
+let flushChain = Promise.resolve(0);
+const claimed = new Set();
+
+const LOCK = "offline-queue";
+const REPLAY_DEADLINE_MS = 15000;
+
+// Where Web Locks exist the replay is origin-wide, so two tabs cannot send the
+// same row; otherwise the per-tab chain is the guard.
+export function flushQueue() {
+  const locked = () =>
+    typeof navigator !== "undefined" && navigator.locks && typeof navigator.locks.request === "function"
+      ? navigator.locks.request(LOCK, replay)
+      : replay();
+  const run = flushChain.then(locked, locked);
+  flushChain = run.catch(() => 0);
+  return run;
+}
+
+async function replay() {
+  const items = (await listQueue()).filter((item) => !claimed.has(item.id));
   if (!items.length) {
     window.dispatchEvent(new CustomEvent("agent-hub:queue-flushed", { detail: { count: 0 } }));
     return 0;
   }
   let sent = 0;
   for (const item of items) {
+    claimed.add(item.id);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REPLAY_DEADLINE_MS);
     try {
       await api(item.url, {
         method: item.method,
         body: item.body == null ? undefined : item.body,
+        signal: controller.signal,
       });
       await remove(item.id);
       sent += 1;
@@ -109,6 +136,9 @@ export async function flushQueue() {
         continue;
       }
       break;
+    } finally {
+      clearTimeout(timer);
+      claimed.delete(item.id);
     }
   }
   if (sent > 0) toast("Queued requests sent.");
@@ -120,7 +150,10 @@ async function tryRegisterSync() {
   try {
     if (!("serviceWorker" in navigator)) return;
     /** @type {ServiceWorkerRegistration & { sync?: { register(tag: string): Promise<void> } }} */
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
     if (reg && reg.sync && typeof reg.sync.register === "function") {
       await reg.sync.register(SYNC_TAG);
     }
