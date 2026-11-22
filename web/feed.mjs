@@ -4,7 +4,8 @@
 
 import { api } from "./api.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { actionFor, esc, glyph, isOpen, kindMark, main, waitingMarks } from "./dom.mjs";
+import { outcomeOf } from "./inbox.mjs";
+import { esc, glyph, isOpen, kindMark, main, waitingMarks } from "./dom.mjs";
 import { emptyStateHTML, EMPTY_COPY } from "./empty.mjs";
 import { registerPane } from "./keys.mjs";
 import { focusAfterRender, render } from "./router.mjs";
@@ -237,7 +238,7 @@ export function subjectAndMessage(summary) {
   const clause = lastClauseBoundary(text.slice(0, SUBJECT_MAX));
   const space = text.lastIndexOf(" ", SUBJECT_MAX);
   const cut = clause > 0 ? clause : space > 0 ? space : SUBJECT_MAX;
-  return { subject: `${text.slice(0, cut).trimEnd()}…`, message: text.slice(cut).trim() };
+  return { subject: `${trimPause(text.slice(0, cut))}…`, message: text.slice(cut).trim() };
 }
 
 // The last point inside the window where the text itself pauses: a colon, a
@@ -259,7 +260,13 @@ function lastClauseBoundary(window) {
 function clampSubject(text) {
   if (text.length <= SUBJECT_MAX) return text;
   const space = text.lastIndexOf(" ", SUBJECT_MAX);
-  return `${text.slice(0, space > 0 ? space : SUBJECT_MAX).trimEnd()}…`;
+  return `${trimPause(text.slice(0, space > 0 ? space : SUBJECT_MAX))}…`;
+}
+
+// A comma, colon, semicolon or dash the cut lands on is the pause the text was
+// taking, not the end of a thought, so it does not stand before the ellipsis.
+function trimPause(text) {
+  return text.trimEnd().replace(/[,;:\u2013\u2014-]+$/, "").trimEnd();
 }
 
 export function formatEventSummary(event) {
@@ -768,22 +775,24 @@ function scoreDetail(event, projectId) {
 // An event body is markdown. An agent writes its report there, and rendering it
 // is what turns the headings, tables and code into the document the agent
 // wrote rather than the syntax it wrote it in.
+// An answer is a reply: reading it reads its whole thread, Gmail-style, so the
+// main question and every reply render together rather than one at a time. The
+// event the stage shows is the thread's root, and the control row names that
+// one too.
+export function stageRoot(event, projectId) {
+  if (!event || event.kind !== "answer" || !event.thread_id) return event;
+  const visit = feedVisit(projectId);
+  const found = visit?.events?.find((candidate) => candidate.id === event.thread_id || candidate.event_id === event.thread_id);
+  return found || event;
+}
+
 export async function eventStage(event, projectId) {
   if (!event) {
     return `<div class="shell-prose"><p class="empty">Select an event from the list.</p></div>`;
   }
-  // An answer is a reply: reading it reads its whole thread, Gmail-style, so
-  // the main question and every reply render together rather than one at a
-  // time.
   const visit = feedVisit(projectId);
-  const rootId =
-    event.kind === "answer" && event.thread_id ? event.thread_id : event.id || event.event_id;
-  let rootEvent = event;
-  if (event.kind === "answer" && visit?.events) {
-    const found = visit.events.find((candidate) => candidate.id === rootId || candidate.event_id === rootId);
-    if (found) rootEvent = found;
-  }
-  event = rootEvent;
+  event = stageRoot(event, projectId);
+  const rootId = event.kind === "answer" && event.thread_id ? event.thread_id : event.id || event.event_id;
   const threadReplies = visit?.events
     ? visit.events
         .filter(
@@ -811,14 +820,16 @@ export async function eventStage(event, projectId) {
         : "";
   const dest = feedDestination(event);
   const sessionId = event.kind === "session" ? event.payload?.session_id : null;
+  const outcome = open ? "" : await outcomeWord(event, projectId);
   let pointsAt = "";
   if (dest) {
     pointsAt = pointsCard("Artifact", event.payload?.title || "Open artifact", dest);
   } else if (sessionId) {
     pointsAt = pointsCard(
       "Session",
-      sessionId,
+      sessionName(event) || sessionId,
       `#/projects/${encodeURIComponent(projectId)}/sessions?id=${encodeURIComponent(sessionId)}`,
+      sessionName(event) ? sessionId : "",
     );
   }
   const row = (kind, sentence, at) => `<div class="item-trow">
@@ -842,25 +853,51 @@ export async function eventStage(event, projectId) {
       <p class="item-kindline feed-stage-kind">
         <span class="item-kind">${kindMark(event.kind)}${esc(word)}</span>
         ${open ? `<span class="item-state is-wait"><span class="item-dot" aria-hidden="true"></span>Waiting on you</span>` : ""}
+        ${outcome ? `<span class="item-state">${esc(outcome)}</span>` : ""}
       </p>
       <h2 class="feed-stage-title">${esc(subject)}</h2>
       <p class="item-from feed-stage-from">${byline}</p>
       ${message ? `<p class="feed-stage-message">${esc(message)}</p>` : ""}
       ${renderedBody ? `<div class="feed-stage-body markdown-body">${renderedBody}</div>` : ""}
       ${detail}
-      <div class="feed-stage-actions">${actionFor(event)}</div>
+      ${open ? `<div class="feed-stage-actions"><a class="feed-answer" href="#/inbox?open=${encodeURIComponent(event.id || event.event_id)}">Answer</a></div>` : ""}
       ${pointsAt}
       ${thread}
     </article>`;
 }
 
-function pointsCard(label, name, href) {
+// The name a session event carries, from its payload, or failing that from its
+// summary, "session NAME started" and its siblings. The id is the fallback and the card's mono meta.
+function sessionName(event) {
+  const stored = event.payload?.session_name;
+  if (typeof stored === "string" && stored.trim()) return stored.trim();
+  const named = (event.summary || "").match(/^session\s+(.+?)\s+(?:started|ended|picked up|forked|reassigned)\b/i);
+  return named ? named[1] : "";
+}
+
+// What a closed ask came to, in one word for the kind line. It is read from
+// the inbox item the event is tracked as, the same place the opened item reads
+// it, so it does not depend on which replies the feed page has loaded. A miss claims no outcome.
+async function outcomeWord(event, projectId) {
+  if (event.kind !== "approval" && event.kind !== "question") return "";
+  try {
+    const held = await api(`/api/v1/inbox?status=resolved&project=${encodeURIComponent(projectId)}&limit=500`);
+    const item = (held.items || []).find((entry) => entry.event_id === event.id);
+    if (item) return outcomeOf(item);
+  } catch {
+    // The kind line then says only that it is closed.
+  }
+  return "Closed";
+}
+
+function pointsCard(label, name, href, meta = "") {
   return `
     <section class="points-card" aria-label="Points at">
-      <div class="points-head mono">POINTS AT</div>
+      <div class="points-head">Points at</div>
       <a class="points-row" href="${esc(href)}">
         <span class="sr-only">${esc(label)}: </span>
         <span class="points-name">${esc(name)}</span>
+        ${meta ? `<span class="points-meta mono">${esc(meta)}</span>` : ""}
         <span class="points-chev" aria-hidden="true">${CHEVRON}</span>
       </a>
     </section>`;

@@ -68,18 +68,6 @@ const COMPOSERS = [
     },
   },
   {
-    name: "feed stage",
-    label: "Your answer",
-    action: "Send",
-    empty: "Write a reply to send it.",
-    open: async (page, hub) => {
-      await page.goto(
-        `${hub.baseUrl}/#/projects/${encodeURIComponent(hub.projectId)}/feed?event=${encodeURIComponent(hub.questionId)}`,
-      );
-      await page.locator(".feed-stage-actions").getByRole("button", { name: "Reply", exact: true }).click();
-    },
-  },
-  {
     name: "new comment",
     label: "New comment",
     action: "Post",
