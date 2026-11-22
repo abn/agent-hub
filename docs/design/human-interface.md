@@ -342,7 +342,10 @@ to the can-wait end of Now's first tier, on this device only.
 ### Project
 
 The Projects register lists every project with its live counts, and each row
-leads to the project's feed. A project is its own address: the feed, the
+leads to the project's feed. A desktop shows the agent spaces under their own
+label below the projects, so the header count matches the rows. A phone keeps
+them behind a switcher and adds a filter glyph to its tools row once the
+register passes eight rows. A project is its own address: the feed, the
 artifact gallery, the sessions list and the knowledge base are the four
 segments of one shell, each with its own route. The index header carries the
 segmented switcher and the filter field under it; the switcher states that it
