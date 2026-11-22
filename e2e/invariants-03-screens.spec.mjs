@@ -745,6 +745,76 @@ test.describe("settings and storage", () => {
     await expect(helper.first()).toContainText("of events is the shared hub database, not in any row below");
   });
 
+  test("the storage footnote names free space only when capacity is unknown", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    for (const capacity of [null, 8 * 1024 ** 4]) {
+      await page.route("**/api/v1/storage", async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        body.capacity_bytes = capacity;
+        await route.fulfill({ response, json: body });
+      });
+      await goto(page, "#/storage", "Storage");
+      await page.reload();
+      await expect(page.locator(".storage-footnote")).toBeVisible();
+      const note = page.locator(".storage-footnote");
+      await expect(note).toContainText("In byte columns, a dash is zero.");
+      if (capacity === null) await expect(note).toContainText("Free space on the volume is not shown");
+      else await expect(note).not.toContainText("Free space");
+      await page.unroute("**/api/v1/storage");
+    }
+  });
+
+  test("the share bar ranks rows by total and every row Prune is danger", async ({ hub, page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const row = (id, parts) => ({
+      project_id: id,
+      name: id,
+      events_bytes: parts[0],
+      session_bytes: parts[1],
+      artifact_bytes: parts[2],
+      kb_bytes: parts[3],
+      prunable_bytes: 1000,
+      prunable_sessions: 1,
+      agents_active: 0,
+    });
+    await page.route("**/api/v1/storage", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.projects = [
+        row("big", [4000, 3000, 2000, 1000]),
+        row("half", [2000, 1500, 1000, 500]),
+        row("events-only", [1000, 0, 0, 0]),
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await goto(page, "#/storage", "Storage");
+    await page.reload();
+    const fill = async (id) =>
+      page
+        .locator(`.storage-table tbody tr[data-project="${id}"] .storage-share-bar`)
+        .evaluate((bar) => [...bar.querySelectorAll(".storage-share-seg")].reduce((sum, s) => sum + s.getBoundingClientRect().width, 0) / bar.getBoundingClientRect().width);
+    expect(await fill("big")).toBeCloseTo(1, 2);
+    expect(await fill("half")).toBeCloseTo(0.5, 2);
+    expect(await fill("events-only")).toBeCloseTo(0.1, 2);
+    const buttons = page.locator(".storage-table .storage-row-prune");
+    await expect(buttons).toHaveCount(3);
+    const danger = await page.evaluate(() => {
+      const probe = document.createElement("i");
+      probe.style.color = "var(--danger)";
+      document.body.appendChild(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    for (let i = 0; i < 3; i += 1) {
+      await expect(buttons.nth(i)).toBeVisible();
+      const border = await buttons.nth(i).evaluate((el) => getComputedStyle(el).borderTopColor);
+      expect(border, "row Prune has a danger border").toBe(danger);
+    }
+    await page.unroute("**/api/v1/storage");
+  });
+
   test("Storage rows list only non-zero kinds", async ({ hub, page }) => {
     await goto(page, "#/storage", "Storage");
     await expect(page.locator(".storage-project-meta, .storage-row .storage-detail").first()).toBeVisible();
