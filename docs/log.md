@@ -6,6 +6,16 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The Claude Code plugin
+
+* **Addition**: the repository is a Claude Code marketplace named `agync`
+  with one plugin, `agent-hub`. It registers the hub as a remote MCP server from
+  a URL, a sensitive token and an agent name asked at install, runs the
+  [hook CLI](/reference/hook-cli.md) on the session, prompt, compaction,
+  subagent and end events, and starts the idle-wake watcher when a turn ends.
+  The hooks need `agent-hub` on `PATH`; without it they report a hook error and
+  the session carries on.
+
 ### The hook CLI
 
 * **Addition**: `agent-hub hook`, `agent-hub watch` and `agent-hub setup` are

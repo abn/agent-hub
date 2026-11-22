@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "agent-hub hook session-start --harness claude" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "agent-hub hook prompt --harness claude" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "agent-hub hook pre-compact --harness claude" } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "agent-hub hook subagent-start --harness claude" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "agent-hub hook session-end --harness claude", "timeout": 5 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "agent-hub watch --harness claude --max-seconds 3300", "asyncRewake": true, "timeout": 3600 } ] }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "agent-hub",
+  "version": "1.11.0",
+  "description": "Connect Claude Code to an Agent Hub node: MCP tools, session lifecycle hooks, idle wake and the agent-hub skill.",
+  "author": {
+    "name": "agync",
+    "url": "https://github.com/agync"
+  },
+  "homepage": "https://hub.agync.dev",
+  "repository": "https://github.com/agync/agent-hub",
+  "license": "MIT",
+  "keywords": [
+    "agent-hub",
+    "mcp",
+    "agents"
+  ],
+  "userConfig": {
+    "hub_url": {
+      "type": "string",
+      "title": "Hub URL",
+      "description": "Base URL of your Agent Hub node, without a trailing slash, for example https://hub.example.net",
+      "required": true
+    },
+    "hub_token": {
+      "type": "string",
+      "title": "Hub token",
+      "description": "Agent token for the hub. Stored in the system keychain.",
+      "sensitive": true,
+      "required": true
+    },
+    "agent_name": {
+      "type": "string",
+      "title": "Agent name",
+      "description": "Name this agent reports to the hub.",
+      "default": "claude",
+      "required": false
+    }
+  }
+}

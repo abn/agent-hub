@@ -129,10 +129,14 @@ web/e2e: build node_tree ## Run the browser behaviour checks
 
 # The harness plugins. The OpenCode plugin is plain Node ES modules, so its
 # tests run on the same Vitest as the client units, against a fake hub and the
-# shared golden fixtures. Every JSON file under plugins/ must parse.
+# shared golden fixtures. Every JSON file under plugins/ must parse. The Claude
+# plugin is manifests only: its versions must track Cargo.toml, its hooks must
+# call the binary, and its skill link must resolve to skills/agent-hub.
 plugins/check: node_tree ## Test the harness plugins and parse every plugins/**/*.json
 	npx vitest run --config plugins/vitest.config.mjs
 	node --input-type=module -e "import { readdirSync, readFileSync } from 'node:fs'; const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(d + '/' + e.name)) : e.name.endsWith('.json') ? [d + '/' + e.name] : []); const files = walk('plugins'); for (const f of files) JSON.parse(readFileSync(f, 'utf8')); console.log('plugins/check: ' + files.length + ' JSON files parse');"
+	@node --input-type=module -e "import { readFileSync, realpathSync, existsSync } from 'node:fs'; import { join } from 'node:path'; const read = (f) => JSON.parse(readFileSync(f, 'utf8')); const fail = (m) => { console.error('plugins/check: ' + m); process.exit(1); }; const cargo = /^version = \"(.+)\"/m.exec(readFileSync('Cargo.toml', 'utf8'))[1]; const mkt = read('.claude-plugin/marketplace.json'); const reserved = /^(claude-|anthropic-|cc-plugin-)/; if (reserved.test(mkt.name)) fail('reserved marketplace name ' + mkt.name); for (const e of mkt.plugins) { const dir = join('.claude-plugin', '..', e.source); const man = read(join(dir, '.claude-plugin/plugin.json')); if (reserved.test(man.name)) fail('reserved plugin name ' + man.name); if (man.name !== e.name) fail('marketplace entry ' + e.name + ' != manifest ' + man.name); if (man.version !== cargo || e.version !== cargo) fail('plugin versions ' + man.version + ' and ' + e.version + ' differ from Cargo ' + cargo); const skill = join(dir, 'skills/agent-hub'); if (realpathSync(skill) !== realpathSync('skills/agent-hub') || !existsSync(join(skill, 'SKILL.md'))) fail('skill at ' + skill + ' does not resolve to skills/agent-hub'); const hooks = read(join(dir, 'hooks/hooks.json')).hooks; for (const [ev, groups] of Object.entries(hooks)) for (const g of groups) for (const h of g.hooks) if (!/^agent-hub (hook|watch) /.test(h.command)) fail(ev + ' hook is not an agent-hub command'); const stop = hooks.Stop[0].hooks[0]; if (stop.asyncRewake !== true || !(stop.timeout > 3300)) fail('Stop hook must set asyncRewake and a timeout above the watcher limit'); } console.log('plugins/check: Claude plugin manifests, hooks and skill link agree');"
+	@if command -v claude >/dev/null 2>&1; then claude plugin validate plugins/claude && claude plugin validate .; else echo 'plugins/check: claude not on PATH, skipping plugin validate'; fi
 
 net/check: ## Test the tailnet configuration path in a build without the feature
 	cargo test --no-default-features --test ops_lifecycle a_tailnet_key
