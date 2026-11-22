@@ -42,13 +42,18 @@ pub struct Subscription {
     /// Whether only events that name the registering actor in their payload's
     /// `audience` are reported.
     pub about_self: bool,
+    /// The session it was made for, or `None` for one that serves every
+    /// session of the actor. A session-bound subscription drains only for a
+    /// call bound to that session.
+    pub session_id: Option<String>,
     /// The newest event id already reported: the exclusive cursor of the next
     /// drain. Empty before the subscription's first drain.
     pub last_seen_event_id: String,
     pub created_at: String,
 }
 
-/// Register a subscription and return its id.
+/// Register a subscription that serves every session of the actor and return
+/// its id.
 ///
 /// The cursor is passed in rather than read here: the caller establishes it
 /// against the events the principal may actually read, which is a policy
@@ -60,27 +65,17 @@ pub async fn create(
     kinds: &[String],
     last_seen_event_id: &str,
 ) -> Result<String> {
-    let _turn = super::write_turn().await?;
-    let conn = super::connect(db)?;
-    let id = super::next_id();
-    conn.execute(
-        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        vec![
-            Value::Text(id.clone()),
-            Value::Text(agent.to_string()),
-            match project_id {
-                Some(project_id) => Value::Text(project_id.to_string()),
-                None => Value::Null,
-            },
-            Value::Text(kinds.join(",")),
-            Value::Text(last_seen_event_id.to_string()),
-            Value::Text(super::now_rfc3339()),
-        ],
+    let registered = create_with_filters(
+        db,
+        agent,
+        None,
+        project_id,
+        kinds,
+        last_seen_event_id,
+        Filters::default(),
     )
-    .await
-    .map_err(engine)?;
-    Ok(id)
+    .await?;
+    Ok(registered.id)
 }
 
 /// The drain-time filters a subscription may carry.
@@ -94,50 +89,121 @@ pub struct Filters<'a> {
     pub about_self: bool,
 }
 
-/// Register a subscription with optional filters.
+/// What a registration returned.
+#[derive(Debug, Clone)]
+pub struct Registered {
+    pub id: String,
+    /// The cursor the subscription holds: the one passed in for a new row, the
+    /// stored one for a row that already existed.
+    pub last_seen_event_id: String,
+    /// False when an identical subscription already existed and was returned.
+    pub created: bool,
+}
+
+/// Register a subscription with optional filters, or return the identical one
+/// the actor already holds.
+///
+/// Identical means the same session, project, kind set, actor filter and
+/// flags. The kinds compare as a set, so the order they were listed in does
+/// not make a second row. The lookup and the insert share one immediate
+/// transaction, so two calls that race register one row. A session that is not
+/// active takes no subscription: the check shares the transaction, so a
+/// subscription cannot land after the end that would have removed it.
 pub async fn create_with_filters(
     db: &Database,
     agent: &str,
+    session_id: Option<&str>,
     project_id: Option<&str>,
     kinds: &[String],
     last_seen_event_id: &str,
     filters: Filters<'_>,
-) -> Result<String> {
-    let conn = super::connect(db)?;
+) -> Result<Registered> {
+    let tx = super::begin_write(db).await?;
+    if let Some(session_id) = session_id
+        && !super::notifications::session_is_active(&tx, session_id).await?
+    {
+        return Err(Error::Conflict(format!(
+            "session {session_id} has ended; call session_start to begin or resume a session of your own"
+        )));
+    }
+    let wanted = sorted(kinds);
+    let mut rows = tx
+        .query(
+            &format!("SELECT {COLUMNS} FROM notify_subscriptions WHERE agent = ?1 ORDER BY id"),
+            vec![Value::Text(agent.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let held = subscription_from_row(&row)?;
+        if held.session_id.as_deref() == session_id
+            && held.project_id.as_deref() == project_id
+            && sorted(&held.kinds) == wanted
+            && held.actor_filter.as_deref() == filters.actor
+            && held.exclude_self == filters.exclude_self
+            && held.about_self == filters.about_self
+        {
+            return Ok(Registered {
+                id: held.id,
+                last_seen_event_id: held.last_seen_event_id,
+                created: false,
+            });
+        }
+    }
+    drop(rows);
+
     let id = super::next_id();
-    conn.execute(
-        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    tx.execute(
+        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self, session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         vec![
             Value::Text(id.clone()),
             Value::Text(agent.to_string()),
-            match project_id {
-                Some(project_id) => Value::Text(project_id.to_string()),
-                None => Value::Null,
-            },
+            optional(project_id),
             Value::Text(kinds.join(",")),
             Value::Text(last_seen_event_id.to_string()),
             Value::Text(super::now_rfc3339()),
-            match filters.actor {
-                Some(actor) => Value::Text(actor.to_string()),
-                None => Value::Null,
-            },
+            optional(filters.actor),
             Value::Integer(i64::from(filters.exclude_self)),
             Value::Integer(i64::from(filters.about_self)),
+            optional(session_id),
         ],
     )
     .await
     .map_err(engine)?;
-    Ok(id)
+    tx.commit().await.map_err(engine)?;
+    Ok(Registered {
+        id,
+        last_seen_event_id: last_seen_event_id.to_string(),
+        created: true,
+    })
 }
 
-/// Every subscription one agent owns, oldest first.
+fn sorted(kinds: &[String]) -> Vec<&str> {
+    let mut kinds: Vec<&str> = kinds.iter().map(String::as_str).collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    kinds
+}
+
+fn optional(value: Option<&str>) -> Value {
+    match value {
+        Some(value) => Value::Text(value.to_string()),
+        None => Value::Null,
+    }
+}
+
+/// The columns a subscription row is read from, in the order
+/// [`subscription_from_row`] expects.
+const COLUMNS: &str = "id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self, session_id";
+
+/// Every subscription one agent owns, whatever session it is bound to, oldest
+/// first.
 pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self
-             FROM notify_subscriptions WHERE agent = ?1 ORDER BY id",
+            &format!("SELECT {COLUMNS} FROM notify_subscriptions WHERE agent = ?1 ORDER BY id"),
             vec![Value::Text(agent.to_string())],
         )
         .await
@@ -147,6 +213,24 @@ pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
         subscriptions.push(subscription_from_row(&row)?);
     }
     Ok(subscriptions)
+}
+
+/// The subscriptions one agent owns that a call in one session scope drains:
+/// those bound to that session and those bound to none. A call with no
+/// session drains only the unbound ones.
+pub async fn list_in_scope(
+    db: &Database,
+    agent: &str,
+    session_id: Option<&str>,
+) -> Result<Vec<Subscription>> {
+    Ok(list(db, agent)
+        .await?
+        .into_iter()
+        .filter(|held| match held.session_id.as_deref() {
+            None => true,
+            Some(bound) => session_id == Some(bound),
+        })
+        .collect())
 }
 
 /// Remove one subscription the agent owns, reporting whether a row went.
@@ -187,8 +271,9 @@ pub async fn set_cursor(db: &Database, id: &str, event_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The events above one subscription's cursor that match its kinds, oldest
-/// first.
+/// The events above a cursor of one subscription that match its kinds, oldest
+/// first. The cursor is passed in, so a read that does not advance the
+/// subscription can walk forward from where the stored one stands.
 ///
 /// The read is the feed's own: a subscription reports feed events, so it is
 /// read the way `feed_read` reads, from the cursor forward with the kinds
@@ -198,10 +283,11 @@ pub async fn set_cursor(db: &Database, id: &str, event_id: &str) -> Result<()> {
 pub async fn drain_events(
     db: &Database,
     subscription: &Subscription,
+    since: &str,
     limit: i64,
 ) -> Result<Vec<events::Event>> {
     let query = FeedQuery {
-        since: Some(subscription.last_seen_event_id.clone()),
+        since: Some(since.to_string()),
         kinds: Some(subscription.kinds.clone()),
         limit,
         ..FeedQuery::default()
@@ -219,6 +305,21 @@ pub(crate) async fn forget_project_in_tx(
     tx.execute(
         "DELETE FROM notify_subscriptions WHERE project_id = ?1",
         vec![Value::Text(project_id.to_string())],
+    )
+    .await
+    .map_err(engine)?;
+    Ok(())
+}
+
+/// Forget every subscription bound to one session, so an ended or pruned
+/// session leaves no standing interest behind.
+pub(crate) async fn forget_session_in_tx(
+    tx: &crate::store::WriteTx,
+    session_id: &str,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM notify_subscriptions WHERE session_id = ?1",
+        vec![Value::Text(session_id.to_string())],
     )
     .await
     .map_err(engine)?;
@@ -250,6 +351,7 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
         actor_filter: text_at(row, 6)?,
         exclude_self,
         about_self,
+        session_id: text_at(row, 9)?,
         last_seen_event_id: required_text(row, 4)?,
         created_at: required_text(row, 5)?,
     })

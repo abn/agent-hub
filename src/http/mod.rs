@@ -31,6 +31,7 @@ pub mod ideas;
 pub mod inbox;
 pub mod kb;
 pub mod kb_comments;
+pub mod me;
 pub mod metrics;
 pub mod origin;
 pub mod problem;
@@ -126,6 +127,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/artifacts/{id}/comments/{comment_id}",
             patch(artifacts::comment_resolve).delete(artifacts::comment_remove),
         )
+        .route("/api/v1/me/pending", get(me::pending))
         .route("/api/v1/feed", get(feed::read_global))
         .route("/api/v1/home", get(inbox::home))
         .route("/api/v1/inbox", get(inbox::list))

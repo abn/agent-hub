@@ -1201,6 +1201,87 @@ impl HubServer {
         }
     }
 
+    /// The session this connection holds a lease on, when it is the caller's.
+    ///
+    /// A lease the human has since reassigned names a session the caller no
+    /// longer owns, and scopes nothing.
+    async fn held_session(&self, principal: &Principal) -> Option<String> {
+        let active = self.active.lock().await;
+        active
+            .as_ref()
+            .filter(|lease| lease.agent == principal.actor)
+            .map(|lease| lease.session_id.clone())
+    }
+
+    /// The session a call delivers into: the held one while it is running.
+    ///
+    /// A lease on a session that has since ended or been pruned scopes as no
+    /// session, so the call reads the items asked outside any session and keeps
+    /// no cursor for a session that no longer exists.
+    pub(super) async fn lease_session(&self, principal: &Principal) -> Option<String> {
+        let held = self.held_session(principal).await?;
+        // An unreadable store keeps the lease: the settle guards the write.
+        let running = match crate::store::connect(&self.state.db) {
+            Ok(conn) => crate::store::notifications::session_is_active(&conn, &held)
+                .await
+                .unwrap_or(true),
+            Err(_) => true,
+        };
+        running.then_some(held)
+    }
+
+    /// The session a notification call is scoped to: the one it names, which
+    /// must be the caller's own and still running, else the connection's lease,
+    /// else none.
+    ///
+    /// Naming it is how a caller that holds no lease, a hook or a watcher on a
+    /// connection of its own, reads the scope of a session it works under.
+    pub(super) async fn notify_scope(
+        &self,
+        principal: &Principal,
+        reference: Option<&SessionRef>,
+    ) -> Result<Option<String>> {
+        let Some(reference) = reference else {
+            return Ok(self.lease_session(principal).await);
+        };
+        self.named_scope(principal, reference).await
+    }
+
+    /// The session a subscription is bound to: the one named, else the one this
+    /// connection holds even if it has ended, which is then refused rather than
+    /// quietly bound to none.
+    pub(super) async fn subscribe_scope(
+        &self,
+        principal: &Principal,
+        reference: Option<&SessionRef>,
+    ) -> Result<Option<String>> {
+        match reference {
+            Some(reference) => self.named_scope(principal, reference).await,
+            None => Ok(self.held_session(principal).await),
+        }
+    }
+
+    async fn named_scope(
+        &self,
+        principal: &Principal,
+        reference: &SessionRef,
+    ) -> Result<Option<String>> {
+        let session = self.referenced_session(principal, reference).await?;
+        if session.agent != principal.actor {
+            return Err(Error::Forbidden(format!(
+                "{SESSION_OWNER_ONLY} owner={}",
+                session.agent
+            )));
+        }
+        if session.status == "ended" {
+            return Err(Error::Conflict(format!(
+                "session {} has ended; call session_start to begin or resume a session of your own",
+                session.id
+            )));
+        }
+        Ok(Some(session.id))
+    }
+
     /// The recorded active session, or a conflict when none was started.
     async fn active_session(&self) -> Result<ActiveSessionLease> {
         let active = self.active.lock().await;
@@ -1659,7 +1740,7 @@ struct SessionListParams {
 /// the caller's own, and naming it is how a caller with no active session of
 /// its own reaches it.
 #[derive(Debug, Deserialize, JsonSchema)]
-struct SessionRef {
+pub(super) struct SessionRef {
     /// The hub session id, on its own.
     #[serde(default)]
     session_id: Option<String>,

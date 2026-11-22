@@ -344,6 +344,27 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
     )
     .await
     .expect("a subscription from before the upgrade");
+    conn.execute(
+        "INSERT INTO projects(id, display_name, created_at) VALUES ('p1', 'P', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("a project");
+    conn.execute(
+        "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity)
+         VALUES ('sess-old', 'p1', 'old', 'agent-a', 'active', 'brains/old', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z'),
+                ('sess-theirs', 'p1', 'theirs', 'agent-b', 'active', 'brains/theirs', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("sessions from before the upgrade");
+    conn.execute(
+        "INSERT INTO agent_notify_cursors(agent, last_seen_event_id, updated_at)
+         VALUES ('agent-a', 'evt-7', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("an attention cursor from before the upgrade");
 
     let version = agent_hub::store::migrate(&db).await.expect("migrate");
     assert_eq!(version, newest);
@@ -363,4 +384,221 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
     assert!(kept.exclude_self);
     assert_eq!(kept.last_seen_event_id, "evt-9");
     assert!(!kept.about_self, "an old subscription filters nothing new");
+    assert_eq!(
+        kept.session_id, None,
+        "an old subscription serves every session of its actor"
+    );
+
+    use agent_hub::store::notifications::cursor;
+    assert_eq!(
+        cursor(&db, "agent-a", "").await.expect("cursor").as_deref(),
+        Some("evt-7"),
+        "the attention cursor keeps its place for items asked outside a session"
+    );
+    assert_eq!(
+        cursor(&db, "agent-a", "sess-old")
+            .await
+            .expect("cursor")
+            .as_deref(),
+        Some("evt-7"),
+        "each existing session starts where the actor stood, so nothing is delivered twice"
+    );
+    assert_eq!(
+        cursor(&db, "agent-b", "sess-theirs").await.expect("cursor"),
+        None,
+        "an actor with no cursor gets none"
+    );
+}
+
+#[test]
+fn subscribing_the_same_shape_again_returns_the_same_subscription() {
+    let mut server = server("subscribe-upsert");
+
+    let first = server.call_tool(
+        "notify_subscribe",
+        json!({"kinds": "signal,finished", "project_id": "p1"}),
+    );
+    assert_eq!(structured(&first)["created"], true, "{first}");
+    let again = server.call_tool(
+        "notify_subscribe",
+        json!({"kinds": "finished, signal", "project_id": "p1"}),
+    );
+    assert_eq!(
+        subscription_id(&again),
+        subscription_id(&first),
+        "the same kinds in another order are the same subscription"
+    );
+    assert_eq!(structured(&again)["created"], false, "{again}");
+    assert_eq!(structured(&again)["cursor"], structured(&first)["cursor"]);
+
+    let listed = server.call_tool("notify_list", json!({}));
+    assert_eq!(
+        structured(&listed)["subscriptions"]
+            .as_array()
+            .expect("rows")
+            .len(),
+        1,
+        "{listed}"
+    );
+
+    for different in [
+        json!({"kinds": "signal", "project_id": "p1"}),
+        json!({"kinds": "signal,finished"}),
+        json!({"kinds": "signal,finished", "project_id": "p1", "exclude_self": true}),
+        json!({"kinds": "signal,finished", "project_id": "p1", "about_self": true}),
+        json!({"kinds": "signal,finished", "project_id": "p1", "actor": "someone"}),
+    ] {
+        let other = server.call_tool("notify_subscribe", different.clone());
+        assert_eq!(structured(&other)["created"], true, "{different}: {other}");
+    }
+}
+
+/// The ids of the subscriptions a list call returned.
+fn listed_ids(server: &mut McpServer) -> Vec<String> {
+    let listed = server.call_tool("notify_list", json!({}));
+    structured(&listed)["subscriptions"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["subscription_id"].as_str().expect("id").to_string())
+        .collect()
+}
+
+#[test]
+fn a_subscription_binds_to_the_active_session_and_ending_it_removes_the_row() {
+    let mut server = server("subscribe-session-end");
+    let started = |server: &mut McpServer, name: &str| {
+        let started = server.call_tool(
+            "session_start",
+            json!({"project_id": "p1", "session_name": name}),
+        );
+        structured(&started)["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_string()
+    };
+    let wide = subscription_id(&server.call_tool("notify_subscribe", json!({"kinds": "idea"})));
+
+    let first = started(&mut server, "first");
+    let bound = server.call_tool("notify_subscribe", json!({"kinds": "signal"}));
+    assert_eq!(structured(&bound)["session_id"], first.as_str(), "{bound}");
+    let first_row = subscription_id(&bound);
+    let again = server.call_tool("notify_subscribe", json!({"kinds": "signal"}));
+    assert_eq!(
+        subscription_id(&again),
+        first_row,
+        "an upsert inside the session"
+    );
+
+    let second = started(&mut server, "second");
+    let second_bound = server.call_tool("notify_subscribe", json!({"kinds": "signal"}));
+    assert_ne!(
+        subscription_id(&second_bound),
+        first_row,
+        "the same shape in another session is its own subscription"
+    );
+    assert_eq!(structured(&second_bound)["session_id"], second.as_str());
+    assert_eq!(listed_ids(&mut server).len(), 3);
+
+    server.call_tool("session_end", json!({"session_id": first}));
+    let left = listed_ids(&mut server);
+    assert!(
+        !left.contains(&first_row),
+        "ending a session removes the subscriptions bound to it: {left:?}"
+    );
+    assert!(
+        left.contains(&wide) && left.contains(&subscription_id(&second_bound)),
+        "the session-less row and the other session's row stay: {left:?}"
+    );
+}
+
+#[tokio::test]
+async fn pruning_a_session_removes_its_subscriptions_and_cursors() {
+    use agent_hub::brain::BrainStore;
+    use agent_hub::store::subscriptions::{self, Filters};
+    use agent_hub::store::{notifications, prune, sessions};
+
+    let dir = TempDir::new("subs-prune");
+    let db = common::store::open(&dir).await;
+    agent_hub::store::projects::create(&db, "p1", "Project")
+        .await
+        .expect("project");
+    let doomed = sessions::start(&db, "p1", "doomed", "agent-a")
+        .await
+        .expect("start");
+    let kept = sessions::start(&db, "p1", "kept", "agent-a")
+        .await
+        .expect("start");
+    let kinds = vec!["signal".to_string()];
+    for session in [&doomed, &kept] {
+        subscriptions::create_with_filters(
+            &db,
+            "agent-a",
+            Some(&session.id),
+            Some("p1"),
+            &kinds,
+            "",
+            Filters::default(),
+        )
+        .await
+        .expect("subscribe");
+        notifications::advance(&db, "agent-a", &session.id, "evt-3")
+            .await
+            .expect("advance");
+    }
+    notifications::advance(&db, "agent-a", "", "evt-1")
+        .await
+        .expect("advance");
+
+    BrainStore::new(dir.join("sessions"))
+        .open("p1", &doomed.id)
+        .await
+        .expect("open brain")
+        .put("/kv/note", b"x")
+        .await
+        .expect("put");
+    sessions::end(&db, &doomed.id, "agent-a", None, None)
+        .await
+        .expect("end");
+    prune::prune_session(&db, &doomed.id).await.expect("prune");
+    let old = time::OffsetDateTime::now_utc() - time::Duration::seconds(120);
+    db.connect()
+        .expect("connect")
+        .execute(
+            "UPDATE sessions SET deleted_at = ?1 WHERE id = ?2",
+            vec![
+                turso::Value::Text(
+                    old.format(&time::format_description::well_known::Rfc3339)
+                        .expect("format"),
+                ),
+                turso::Value::Text(doomed.id.clone()),
+            ],
+        )
+        .await
+        .expect("age the tombstone");
+    assert_eq!(prune::sweep(&db, &dir).await.expect("sweep"), 1);
+
+    let left = subscriptions::list(&db, "agent-a").await.expect("list");
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0].session_id.as_deref(), Some(kept.id.as_str()));
+    assert_eq!(
+        notifications::cursor(&db, "agent-a", &doomed.id)
+            .await
+            .expect("cursor"),
+        None
+    );
+    assert_eq!(
+        notifications::cursor(&db, "agent-a", &kept.id)
+            .await
+            .expect("cursor")
+            .as_deref(),
+        Some("evt-3")
+    );
+    assert_eq!(
+        notifications::cursor(&db, "agent-a", "")
+            .await
+            .expect("cursor")
+            .as_deref(),
+        Some("evt-1")
+    );
 }

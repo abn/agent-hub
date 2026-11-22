@@ -6,6 +6,29 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Session-scoped delivery and the peek route
+
+* **Addition**: `GET /api/v1/me/pending` reads what the notification trailer
+  would deliver without delivering it, and can be held open with `wait` and
+  `after`. Trailer and peek items carry `direct`. See
+  [REST API](/reference/rest-api.md#reading-what-is-pending).
+* **Update**: notification delivery is scoped to a session. The attention cursor
+  is kept per agent and session, `notify_subscribe` binds a subscription to a
+  session and returns the existing one for the same shape, and `notify_wait` and
+  `notify_subscribe` take `session`. Ending a session, from MCP or REST, removes
+  its subscriptions in the same commit, and an ended session takes no new one.
+  Each scope delivers oldest first a page at a time, so another session's
+  resolutions cannot hide an item and a backlog drains with none lost. A
+  `notify_wait` that finds nothing returns an empty `pending` list. The peek
+  returns items newer than `after`, oldest first, with the cursor at the last
+  one, reads each scope from the later of its cursor and `after`, and never
+  splits a run of items that share one order. A connection whose session has
+  ended reads as though it held none. A peek passes a subscription's cursor only
+  over rows its own filters drop.
+  [MCP tools](/reference/mcp-tools.md) and the
+  [data model](/architecture/data-model.md) describe the scope. The tools page
+  also names `details.reason` on tool errors.
+
 ### The OpenCode plugin
 
 * **Addition**: `plugins/opencode` is the OpenCode v2 plugin for the

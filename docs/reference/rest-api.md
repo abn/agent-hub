@@ -24,6 +24,7 @@ GET    /metrics
 GET    /bootstrap/SKILL.md
 
 GET    /api/v1/home
+GET    /api/v1/me/pending?session=&limit=&wait=&after=
 GET    /api/v1/feed
 GET    /api/v1/projects
 POST   /api/v1/projects
@@ -180,6 +181,46 @@ caller's own origin into it from the forwarded or request host, so an agent that
 can already reach the hub can fetch the connection details and the tool list
 before it has a token, and behind a reverse proxy it receives the public address
 rather than the internal bind.
+
+## Reading what is pending
+
+`GET /api/v1/me/pending` is the one route made for an agent rather than the
+human. It answers with what the notification trailer would deliver to the agent
+behind the token, in the trailer's item shape, and delivers none of it: no cursor
+moves, so a later `notify_wait` or tool result still carries every item. The one
+exception is a subscription's cursor passing rows that subscription could never
+report because its own filters drop them (kinds, actor, `exclude_self`,
+`about_self`): skipping them delivers nothing, and it lets repeated peeks move on
+through a long filtered stretch. A row the caller may not read is never passed
+this way, since access can be granted later. A hook
+reads it before each prompt, and a watcher holds it open between turns.
+
+| Query | Meaning |
+|---|---|
+| `session` | One of the caller's own running sessions, by id. Reads that session's scope as `session` does on `notify_wait`: the items asked in it and those asked outside any session. Without it, only the items asked outside any session. Another agent's session is `403`. |
+| `limit` | How many items to return, 20 by default and 100 at most. |
+| `wait` | Hold the request open up to this many seconds, 60 at most. |
+| `after` | An id from an earlier `cursor`. Only items newer than it are returned. With `wait`, the request ends as soon as one is pending. Without `after`, any pending item ends the wait. |
+
+The body is `{count, items, cursor}`. `count` is how many items newer than
+`after` are pending, an item that two subscriptions both report counting once.
+`items` are the first `limit` of them, oldest first, each `{source, kind, id,
+project_id, title, at, direct}`. A run of items that share one id order is never
+cut by `limit`: the run is returned whole. `cursor` is the id of the last item
+returned, so the next peek with that `after` starts at the item after it and
+nothing behind the `limit` is stepped over; with no items it is `after`, or
+empty. A held request that reaches its time answers with an empty list when
+nothing newer is pending. An attention item is ordered by the answer or
+decision that resolved it, not by the question, so an old question answered
+late counts as newer than a signal that arrived in between. A peek starts each
+scope's read at the later of the trailer's cursor and `after`, so a backlog
+larger than a page is paged through by the cursor alone, with no trailer
+delivering the first page in between.
+
+The token must be an agent's. On a loopback hub with no admin token, a caller
+with no token declares its identity with `X-Agent-Id`, as it does on MCP. The
+admin token is refused with `403`, since the admin has no attention queue, and a
+missing or unknown token is `401`.
 
 ## Errors
 
