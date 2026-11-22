@@ -1,0 +1,15 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "agent-hub",
+  "displayName": "Agent Hub",
+  "version": "1.11.0",
+  "description": "Connect Antigravity to an Agent Hub node: MCP tools, a hub session that starts on its own, waiting items on each model call, and the agent-hub skill.",
+  "author": {
+    "name": "agync",
+    "url": "https://github.com/agync"
+  },
+  "homepage": "https://hub.agync.dev",
+  "repository": "https://github.com/agync/agent-hub",
+  "license": "MIT",
+  "logo": "logo.png"
+}

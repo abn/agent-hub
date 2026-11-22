@@ -220,7 +220,11 @@ watcher a Claude Code `Stop` hook runs in the background; it exits 0, or 2 to
 wake an idle session, and 64 for a bad command line, never 2. Their settings,
 the events, the output formats and the rules for resolving the project and the
 session are in [Hook CLI contract](/reference/hook-cli.md). `setup antigravity`
-installs the Antigravity plugin and is not available in every build.
+installs the Antigravity plugin and enables it, and asks you to restart
+Antigravity. It refuses to write through a symlink, and it copies any file it
+replaces into a fresh timestamped backup directory first; the Antigravity config is
+always backed up under `~/.gemini/config/agent-hub-backup`, even with
+`--workspace`.
 
 ## `config`
 
