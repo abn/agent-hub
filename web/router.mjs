@@ -1,10 +1,11 @@
 // The hash router. It owns which screen is current, the nav marking, and the
-// one place a screen's failure becomes an error card.
+// one place a screen's failure becomes an error state inside the shell.
 
-import { beginRender, esc, main, paint } from "./dom.mjs";
+import { beginRender, main, paint, stale } from "./dom.mjs";
+import { ERROR_COPY, errorDetail, errorShellHTML } from "./empty.mjs";
 import { refreshBadge } from "./events.mjs";
 import { applyPrefs } from "./prefs.mjs";
-import { resetScrollCollapse } from "./shell-layout.mjs";
+import { installShellLayout, resetScrollCollapse } from "./shell-layout.mjs";
 
 // The screen table, registered by the entry point. Keeping it out of this
 // module is what lets a screen ask for a render without an import cycle.
@@ -94,14 +95,66 @@ function setCurrent(screen, path = "") {
   document.title = name.charAt(0).toUpperCase() + name.slice(1) + " · Agent Hub";
 }
 
+// What a failed screen is called in its header: the screen's own name, or the
+// project a project route is inside, since the failure replaces the stage that
+// would have carried the project's name.
+const TITLES = {
+  home: "Now",
+  inbox: "Now",
+  projects: "Projects",
+  feed: "Feed",
+  sessions: "Sessions",
+  session: "Sessions",
+  artifacts: "Artifacts",
+  search: "Search",
+  storage: "Storage",
+  settings: "Settings",
+  more: "More",
+  access: "Access",
+  connect: "Connect",
+};
+
+function failedTitle(screen, path) {
+  const project = screen === "projects" ? path.split("/")[2] : "";
+  if (project) {
+    try {
+      return decodeURIComponent(project);
+    } catch {
+      return project;
+    }
+  }
+  return TITLES[screen] || "Agent Hub";
+}
+
+// The failed screen keeps the shell. Retry runs the same render again, so it
+// recovers as soon as the hub does without the reader losing their place.
+function paintFailure(gen, screen, path, error) {
+  paint(
+    gen,
+    errorShellHTML(failedTitle(screen, path), ERROR_COPY.load, {
+      detail: errorDetail(error),
+      where: { action: "retry", button: true },
+    }),
+  );
+  if (stale(gen)) return;
+  installShellLayout(main);
+  main.querySelector('[data-action="retry"]')?.addEventListener("click", () => render());
+}
+
 export async function render() {
   applyPrefs();
   resetScrollCollapse();
-  const gen = beginRender();
   const hash = location.hash.replace(/^#/, "") || "/home";
   const [path, query = ""] = hash.split("?");
   const params = new URLSearchParams(query);
   const screen = path.split("/")[1] || "home";
+  // An address no screen answers to is replaced by Now's own, so the bar
+  // names the place the reader is in and Back does not return to the dead one.
+  if (!Object.hasOwn(screens, screen)) {
+    location.replace("#/home");
+    return;
+  }
+  const gen = beginRender();
   const sameScreen = path === lastPath;
   lastPath = path;
   setCurrent(screen, path);
@@ -109,8 +162,11 @@ export async function render() {
     // The path is handed over so a route with an id of its own, such as the
     // project view and the artifact viewer, can read its segment without
     // reaching into the location itself.
-    refreshBadge(await (screens[screen] || screens.home)(params, gen, path));
+    refreshBadge(await screens[screen](params, gen, path));
   } catch (error) {
+    // A failure that lands after the reader has moved on is not theirs to see,
+    // and a late refusal must not take them to Connect from somewhere else.
+    if (stale(gen)) return;
     // A refusal to authenticate is not this screen's to report: there is one
     // screen that can fix it, and it takes the route it interrupted so the
     // reader arrives where they were going rather than at the start.
@@ -118,7 +174,7 @@ export async function render() {
       location.hash = `#/connect?next=${encodeURIComponent(hash)}`;
       return;
     }
-    paint(gen, `<h1>Agent Hub</h1><p class="error">${esc(error.message)}</p>`);
+    paintFailure(gen, screen, path, error);
   }
   const focus = pendingFocus;
   const restore = pendingRestore;

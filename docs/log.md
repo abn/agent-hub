@@ -6,6 +6,14 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### A failed screen keeps its frame
+
+* **Update**: [Human interface](/design/human-interface.md) says a screen that
+  fails to load keeps the rail, the bands and the header, shows the hub's
+  message with a Retry, and reads "Could not reach the hub" when the request
+  never arrived. An unknown artifact is said in the Artifacts screen, and an
+  unknown address opens Now.
+
 ### Long agent text fits the screen
 
 * **Update**: [Human interface](/design/human-interface.md) says a long

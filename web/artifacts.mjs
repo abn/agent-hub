@@ -18,12 +18,12 @@ import {
 } from "./comments.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
-import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
+import { EMPTY_COPY, ERROR_COPY, emptyStateHTML, errorShellHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { placeTime } from "./now-model.mjs";
 import { render } from "./router.mjs";
-import { asideAvailable, toggleAside } from "./shell-layout.mjs";
+import { asideAvailable, installShellLayout, toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
 
@@ -1018,8 +1018,12 @@ async function listsArtifact(projectId, id) {
   try {
     const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
     return (artifacts || []).some((a) => a.id === id);
-  } catch {
-    return false;
+  } catch (error) {
+    // A project the hub does not hold lists nothing. Any other failure means
+    // the answer is unknown, so it goes to the router rather than reading as
+    // "not listed".
+    if (error.status === 404) return false;
+    throw error;
   }
 }
 
@@ -1035,6 +1039,14 @@ async function projectOf(id) {
   return "";
 }
 
+function notOnHub(gen, copy) {
+  paint(
+    gen,
+    errorShellHTML("Artifacts", copy, { where: { href: "#/artifacts" }, back: "#/more" }),
+  );
+  if (!stale(gen)) installShellLayout(main);
+}
+
 // `#/artifacts/<id>` is the address a feed row, a search hit, a comment's
 // "open v2" and an older saved link carry. An artifact has one surface, its
 // project's Artifacts shell with it selected, so this address is replaced by
@@ -1046,12 +1058,14 @@ export async function artifactRoute(params, gen, path) {
     location.replace("#/projects");
     return;
   }
-  // An artifact the hub does not hold is said here, in the hub's own words,
-  // rather than as an empty shell.
+  // An artifact the hub does not hold is said in the Artifacts shell with a
+  // way back. Any other failure is the router's: a refusal to authenticate
+  // goes to Connect, and the rest get its error state with a Retry.
   try {
     await api(`/api/v1/artifacts/${encodeURIComponent(id)}/versions`);
   } catch (error) {
-    paint(gen, `<h1>Artifact</h1><p class="error">${esc(error.message)}</p>`);
+    if (stale(gen) || error.status !== 404) throw error;
+    notOnHub(gen, ERROR_COPY.artifactGone);
     return;
   }
   // A project the address names is taken only when its own list holds the
@@ -1060,7 +1074,7 @@ export async function artifactRoute(params, gen, path) {
   const project = (named && (await listsArtifact(named, id)) ? named : "") || (await projectOf(id));
   if (stale(gen)) return;
   if (!project) {
-    paint(gen, `<h1>Artifact</h1><p class="error">No project on this hub lists this artifact.</p>`);
+    notOnHub(gen, ERROR_COPY.artifactUnlisted);
     return;
   }
   location.replace(artifactHref(project, id, params.get("version")));
