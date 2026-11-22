@@ -1,0 +1,26 @@
+{
+  "name": "notice-title-capped",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1,
+    "last_wake_at": null,
+    "items": [
+      {
+        "id": "evt_01F",
+        "kind": "answer",
+        "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "project": "agent-hub",
+        "direct": true
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [answer] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx... (agent-hub, evt_01F)"
+    ],
+    "wake": true,
+    "watch_lines": [
+      "- [answer] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx... (agent-hub, evt_01F)"
+    ]
+  }
+}

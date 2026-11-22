@@ -1,0 +1,34 @@
+{
+  "name": "context-brief-capped-at-12",
+  "input": {
+    "project_id": "agent-hub",
+    "session_name": "feat-claude-mod",
+    "session_id": "s_01J8",
+    "actor": "abn/claude",
+    "brief": [
+      "brief line 01",
+      "brief line 02",
+      "brief line 03",
+      "brief line 04",
+      "brief line 05",
+      "brief line 06",
+      "brief line 07",
+      "brief line 08",
+      "brief line 09",
+      "brief line 10",
+      "brief line 11",
+      "brief line 12",
+      "brief line 13",
+      "brief line 14",
+      "brief line 15"
+    ],
+    "anchor": null,
+    "handoff": [],
+    "kb_index": [],
+    "pending": []
+  },
+  "expected": {
+    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nbrief line 01\nbrief line 02\nbrief line 03\nbrief line 04\nbrief line 05\nbrief line 06\nbrief line 07\nbrief line 08\nbrief line 09\nbrief line 10\nbrief line 11\nbrief line 12\n</agent-hub>",
+    "truncated": false
+  }
+}

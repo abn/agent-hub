@@ -1,0 +1,36 @@
+{
+  "name": "context-anchor-capped-at-10",
+  "input": {
+    "project_id": "agent-hub",
+    "session_name": "feat-claude-mod",
+    "session_id": "s_01J8",
+    "actor": "abn/claude",
+    "brief": [],
+    "anchor": {
+      "phase": "p",
+      "age": "1h ago",
+      "lines": [
+        "anchor line 01",
+        "anchor line 02",
+        "anchor line 03",
+        "anchor line 04",
+        "anchor line 05",
+        "anchor line 06",
+        "anchor line 07",
+        "anchor line 08",
+        "anchor line 09",
+        "anchor line 10",
+        "anchor line 11",
+        "anchor line 12",
+        "anchor line 13"
+      ]
+    },
+    "handoff": [],
+    "kb_index": [],
+    "pending": []
+  },
+  "expected": {
+    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nLast anchor (phase \"p\", 1h ago):\nanchor line 01\nanchor line 02\nanchor line 03\nanchor line 04\nanchor line 05\nanchor line 06\nanchor line 07\nanchor line 08\nanchor line 09\nanchor line 10\n</agent-hub>",
+    "truncated": false
+  }
+}

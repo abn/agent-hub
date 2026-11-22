@@ -1,0 +1,28 @@
+{
+  "name": "resolve-project-origin-unknown-falls-to-dir",
+  "input": {
+    "harness": "claude",
+    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "cwd": "/work/hub-checkout",
+    "env": {},
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/hub-checkout",
+      "origin_url": "git@github.com:agync/other.git",
+      "branch": "feat/x",
+      "detached": false
+    },
+    "files": {},
+    "known_projects": [
+      "hub-checkout"
+    ],
+    "personal_project": "abn-claude"
+  },
+  "expected": {
+    "project_id": "hub-checkout",
+    "project_source": "dir",
+    "session_name": "feat-x",
+    "session_source": "branch",
+    "context_line": null
+  }
+}

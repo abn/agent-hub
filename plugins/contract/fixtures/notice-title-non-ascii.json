@@ -1,0 +1,26 @@
+{
+  "name": "notice-title-non-ascii",
+  "input": {
+    "hub_wake": "direct",
+    "now": 1000000,
+    "last_wake_at": null,
+    "items": [
+      {
+        "id": "evt_01G",
+        "kind": "comment",
+        "title": "caf\u00e9\u00a0menu\u000b\fupdate\t\u00fcber  \u65e5\u672c",
+        "project": "agent-hub",
+        "direct": true
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [comment] caf\u00e9\u00a0menu update \u00fcber \u65e5\u672c (agent-hub, evt_01G)"
+    ],
+    "wake": true,
+    "watch_lines": [
+      "- [comment] caf\u00e9\u00a0menu update \u00fcber \u65e5\u672c (agent-hub, evt_01G)"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "claude-pre-compact-empty",
+  "input": {
+    "harness": "claude",
+    "event": "pre-compact",
+    "output": {
+      "context": null,
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_text": "",
+    "exit_code": 0
+  }
+}

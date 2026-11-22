@@ -1,0 +1,15 @@
+{
+  "name": "antigravity-session-end-no-op",
+  "input": {
+    "harness": "antigravity",
+    "event": "session-end",
+    "output": {
+      "context": null,
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

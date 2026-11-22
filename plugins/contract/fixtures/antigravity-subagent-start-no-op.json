@@ -1,0 +1,15 @@
+{
+  "name": "antigravity-subagent-start-no-op",
+  "input": {
+    "harness": "antigravity",
+    "event": "subagent-start",
+    "output": {
+      "context": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\n</agent-hub>",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

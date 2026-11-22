@@ -1,0 +1,21 @@
+{
+  "name": "antigravity-prompt-later-no-notices",
+  "input": {
+    "harness": "antigravity",
+    "event": "prompt",
+    "output": {
+      "context": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\n</agent-hub>",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {
+      "injectSteps": [
+        {
+          "ephemeralMessage": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\n</agent-hub>"
+        }
+      ]
+    },
+    "exit_code": 0
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "notice-unknown-mode-is-direct",
+  "input": {
+    "hub_wake": "bogus",
+    "now": 1000000,
+    "last_wake_at": null,
+    "items": [
+      {
+        "id": "evt_01C",
+        "kind": "page",
+        "title": "Page changed: /fs/ops.md",
+        "project": "agent-hub",
+        "direct": false
+      },
+      {
+        "id": "evt_01D",
+        "kind": "artifact",
+        "title": "Artifact updated: Roadmap",
+        "project": "agent-hub",
+        "direct": false
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [page] Page changed: /fs/ops.md (agent-hub, evt_01C)",
+      "- [artifact] Artifact updated: Roadmap (agent-hub, evt_01D)"
+    ],
+    "wake": false,
+    "watch_lines": []
+  }
+}

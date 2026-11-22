@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The hook contract
+
+* **Addition**: [Hook CLI contract](/reference/hook-cli.md) states the `hook`
+  and `watch` subcommands, the neutral input and output, configuration,
+  project and session resolution, the context block and its cap, notice lines
+  the wake policy and the watcher loop. It is marked draft until the commands ship.
+
 ### Toasts clear the controls and the end line is scoped
 
 * **Update**: [Human interface](/design/human-interface.md) words the end line

@@ -1,0 +1,35 @@
+{
+  "name": "context-full",
+  "input": {
+    "project_id": "agent-hub",
+    "session_name": "feat-claude-mod",
+    "session_id": "s_01J8",
+    "actor": "abn/claude",
+    "brief": [
+      "Since your last look: 3 answers, 2 comments on your artifacts, 1 page changed."
+    ],
+    "anchor": {
+      "phase": "plugins design",
+      "age": "2h ago",
+      "lines": [
+        "Design approved.",
+        "Next: build the hook CLI."
+      ]
+    },
+    "handoff": [
+      "Resume with the hook CLI tests."
+    ],
+    "kb_index": [
+      "# Index",
+      "- ops.md",
+      "- plugins.md"
+    ],
+    "pending": [
+      "- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)"
+    ]
+  },
+  "expected": {
+    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nSince your last look: 3 answers, 2 comments on your artifacts, 1 page changed.\nLast anchor (phase \"plugins design\", 2h ago):\nDesign approved.\nNext: build the hook CLI.\nHandoff:\nResume with the hook CLI tests.\nKB index:\n# Index\n- ops.md\n- plugins.md\nPending:\n- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)\n</agent-hub>",
+    "truncated": false
+  }
+}
