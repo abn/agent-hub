@@ -74,9 +74,17 @@ export function sendCommentsToFrame() {
   } catch (_) {}
 }
 
+// The open threads on the version being read. A comment on another version is
+// read from that version, so it is not counted against this one; a comment with
+// no passage belongs to the artifact as a whole and counts everywhere.
+export function openThreadsOn(comments, version) {
+  const here = comments.filter((comment) => !comment.anchor_version || comment.anchor_version === version);
+  return openThreadCount(here);
+}
+
 export function refreshCommentsToggle() {
   const els = commentsState.elements;
-  const openCount = openThreadCount(commentsState.comments);
+  const openCount = openThreadsOn(commentsState.comments, commentsState.shownVersion);
   if (els && els.badge) {
     els.badge.hidden = openCount === 0;
     els.badge.textContent = String(openCount);
@@ -135,7 +143,7 @@ function quoteBlockNode(comment, shownVersion) {
   anchorIcon.setAttribute("aria-hidden", "true");
   anchorIcon.innerHTML = glyphSvg("anchorPin", { size: 14 });
   const quoteText = document.createElement("div");
-  quoteText.className = "hub-quote-text mono";
+  quoteText.className = "hub-quote-text";
   if (anchor.mode === "text" && anchor.quote) {
     quoteText.textContent = `“${anchor.quote}”`;
   } else if (anchor.mode === "point") {
@@ -150,6 +158,8 @@ function quoteBlockNode(comment, shownVersion) {
     stamp.textContent = `v${comment.anchor_version || shownVersion}`;
   } else if (isThisVersion) {
     stamp.textContent = `v${comment.anchor_version} · the version you are reading`;
+  } else if (comment.anchor_version > shownVersion) {
+    stamp.textContent = `v${comment.anchor_version} · newer version`;
   } else {
     stamp.textContent = `v${comment.anchor_version} · older version`;
   }
@@ -440,7 +450,7 @@ function renderListView() {
   if (!commentsState.comments.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "No comments yet. Be the first to leave one.";
+    empty.textContent = "No comments yet.";
     els.list.appendChild(empty);
     return;
   }
@@ -489,7 +499,7 @@ function renderListView() {
   const helper = document.createElement("div");
   helper.className = "hub-comments-helper";
   helper.textContent =
-    "A comment carries the version it was written against. Highlighted here and in the text means it belongs to the version you are reading; a comment stamped with an older version opens that version to show its quote in place.";
+    "A comment carries the version it was written against. Highlighted here and in the text means it belongs to the version you are reading; a comment stamped with another version opens that version to show its quote in place.";
   els.list.appendChild(helper);
 }
 
@@ -864,7 +874,7 @@ export function renderDesktopCard(comment, replies = []) {
   // Resolved thread carries check glyph and the word Resolved (never dimming alone)
   if (comment.done) {
     const resHead = document.createElement("div");
-    resHead.className = "hub-card-resolved-head mono";
+    resHead.className = "hub-card-resolved-head";
     resHead.innerHTML = `<svg class="resolved-glyph" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Resolved"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>`;
     const span = document.createElement("span");
     span.className = "hub-card-resolved-text";

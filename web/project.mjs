@@ -5,7 +5,7 @@
 // gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
-import { artifactGroupMenu, artifactIndex, artifactStage, wireArtifactStage } from "./artifacts.mjs";
+import { artifactGroupMenu, artifactIndex, artifactStage, endArtifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmAction, confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { count, esc, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -697,6 +697,7 @@ export async function projectScreen(params, gen, path) {
   }
   if (stale(gen)) return;
 
+  endArtifactStage();
   paint(gen, shell);
   installShellLayout(main);
   if (segment === "feed") resumePicking();

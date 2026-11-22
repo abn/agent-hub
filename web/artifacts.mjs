@@ -4,7 +4,7 @@
 // shell with the artifact selected, and reload and the browser's Back keep it.
 
 import { api } from "./api.mjs";
-import { artifactLine, artifactSlug, formatBytes, openThreadCount, seeOne } from "./artifact-model.mjs";
+import { artifactLine, artifactSlug, formatBytes, seeOne } from "./artifact-model.mjs";
 import {
   closeCommentsDrawer,
   loadComments,
@@ -15,6 +15,7 @@ import {
   openCompose,
   renderDesktopCards,
   startComments,
+  openThreadsOn,
 } from "./comments.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { esc, main, paint, stale } from "./dom.mjs";
@@ -180,7 +181,7 @@ export async function artifactStage(id, projectId, version = null, listing = nul
     const list = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/comments`);
     const arr = Array.isArray(list) ? list : Array.isArray(list?.comments) ? list.comments : [];
     commentsCount = arr.length;
-    openCommentsCount = openThreadCount(arr);
+    openCommentsCount = openThreadsOn(arr, shown);
   } catch {}
 
   const project = projectId || "";
@@ -281,16 +282,18 @@ export async function artifactStage(id, projectId, version = null, listing = nul
     <div class="shell-head">
       <div class="shell-title"><span class="shell-title-line">Comments</span></div>
       <span class="shell-meta mono hub-comments-head-meta" data-version="${shown}">${openCommentsCount} · v${shown}</span>
-      <button type="button" class="hub-btn-glyph" data-action="new-thread" aria-label="New thread">${plus}</button>
+      <button type="button" class="hub-btn-glyph" data-action="new-thread" aria-label="New thread"${
+        current.protected ? ' style="display:none"' : ""
+      }>${plus}</button>
     </div>
     <div class="shell-controls"></div>
     <div class="shell-body"><div class="hub-comments-cards-list"></div></div>
-    <div class="shell-foot mono">Select text in the document to anchor a comment</div>`;
+    ${current.protected ? "" : `<div class="shell-foot">Select text in the document to anchor a comment</div>`}`;
 
   // A protected artifact names no author: what the reader can know about it is
   // that it is sealed.
   const who = current.protected
-    ? "Locked · only readable with the password"
+    ? "Encrypted"
     : (listing && listing.actor) || current.actor || "agent";
   return {
     aside,
@@ -314,7 +317,29 @@ export async function artifactStage(id, projectId, version = null, listing = nul
 // The stage's own wiring: the frame reports its height so it never scrolls
 // inside itself, the copy controls confirm in place, and the comments control
 // opens the thread for the version on screen.
+// What the stage's page-level listeners undo. One stage is wired at a time, so
+// the next wiring, or a change of route, takes the last one's listeners down.
+let stageTeardown = null;
+window.addEventListener("hashchange", () => stageTeardown?.());
+
+// A repaint of the stage that has no viewer to wire (the artifact is gone, the
+// segment changed) calls this first, so the old stage's listeners go with it.
+export function endArtifactStage() {
+  stageTeardown?.();
+}
+
 export function wireArtifactStage(root, id, info) {
+  stageTeardown?.();
+  const undo = [];
+  const listen = (type, handler) => {
+    window.addEventListener(type, handler);
+    undo.push(() => window.removeEventListener(type, handler));
+  };
+  const teardown = () => {
+    for (const fn of undo.splice(0)) fn();
+    if (stageTeardown === teardown) stageTeardown = null;
+  };
+  stageTeardown = teardown;
   const frame = root.querySelector("#hub-frame");
   if (frame) {
     const onHeight = (event) => {
@@ -323,7 +348,7 @@ export function wireArtifactStage(root, id, info) {
       if (typeof h !== "number" || !isFinite(h)) return;
       frame.style.height = `${Math.max(Math.round(h), 200)}px`;
     };
-    window.addEventListener("message", onHeight);
+    listen("message", onHeight);
     const doc = root.querySelector(".hub-viewer-doc");
     if (doc && info) {
       const band = liveBandElement();
@@ -381,7 +406,46 @@ export function wireArtifactStage(root, id, info) {
       }
     });
   }
-  root.querySelector('[data-action="comments-strip"]')?.addEventListener("click", openThreads);
+  // The bar is the way to the threads where no aside shows them, so it steps
+  // aside while the aside is open. Focus moves into the aside first, so the
+  // keyboard does not lose its place when the bar hides.
+  root.querySelector('[data-action="comments-strip"]')?.addEventListener("click", () => {
+    openThreads();
+    if (aside && !aside.hidden && asideAvailable(aside)) {
+      const head = aside.querySelector(".shell-title");
+      if (head) {
+        head.tabIndex = -1;
+        head.focus();
+      }
+    }
+  });
+  const strip = root.querySelector(".hub-comments-strip");
+  if (strip && aside) {
+    const syncStrip = () => {
+      const beside =
+        !aside.hidden && !window.matchMedia("(pointer: coarse)").matches && getComputedStyle(aside).display !== "none";
+      strip.style.display = beside ? "none" : "";
+    };
+    const observer = new MutationObserver(syncStrip);
+    observer.observe(aside, { attributes: true, attributeFilter: ["hidden"] });
+    undo.push(() => observer.disconnect());
+    listen("resize", () => {
+      if (strip.isConnected) syncStrip();
+    });
+    syncStrip();
+  }
+  // A sealed artifact offers a new thread only once it is open. The viewer
+  // page announces the unlock itself; its readiness while still locked does
+  // not count.
+  if (info && info.protected && frame) {
+    const onUnlocked = (event) => {
+      if (event.source !== frame.contentWindow || !event.data || event.data.type !== "hub:unlocked") return;
+      const plus = root.querySelector('[data-action="new-thread"]');
+      if (plus) plus.style.display = "";
+      window.removeEventListener("message", onUnlocked);
+    };
+    listen("message", onUnlocked);
+  }
   root.querySelector('[data-action="new-thread"]')?.addEventListener("click", () => openCompose(null));
   for (const btn of root.querySelectorAll('[data-action="copy-path"]')) {
     btn.addEventListener("click", async () => {
