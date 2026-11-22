@@ -4,6 +4,26 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.10.0...agent-hub-v1.11.0) (2026-11-22)
+
+
+### Features
+
+* **docs:** dress the docs site in the app's palette and IBM Plex ([76f7356](https://github.com/agync/agent-hub/commit/76f73568dc9f8e70f1d7c560df13a8bfd7f6ed28))
+* **site:** add a landing page and serve the docs beside it ([7cbc29a](https://github.com/agync/agent-hub/commit/7cbc29ae690f8eae6a53f4b32461c00a42a61ae8))
+* **web:** bring the remaining screens onto the quiet desk ([754b6f6](https://github.com/agync/agent-hub/commit/754b6f6e37e025785b70b6563671fed35b6be7f8))
+* **web:** list every artifact and read one against its threads ([90008ce](https://github.com/agync/agent-hub/commit/90008ce2e74a3176bcb8ee6585792b82c2d7d320))
+* **web:** merge home and inbox into the now stream ([d6cf792](https://github.com/agync/agent-hub/commit/d6cf7929ac24140c264e85be828c2ed49bc9a5c8))
+* **web:** move the interface to lichen slate, copper and IBM Plex ([8241775](https://github.com/agync/agent-hub/commit/8241775a5cd7c4b5d10a747c15b2cd35e6f8fc4d))
+* **web:** read an opened item around its answer ([1f30506](https://github.com/agync/agent-hub/commit/1f30506e3c5fbc71f3302110e0b733e30b03fa17))
+* **web:** read the project feed as one sentence per event ([68f83bf](https://github.com/agync/agent-hub/commit/68f83bf24e743f0df36c43eb07cd09ac01104b1d))
+
+
+### Bug Fixes
+
+* **web:** make the web types check pass ([3bfa9b2](https://github.com/agync/agent-hub/commit/3bfa9b2808b67f5c3909633a58704fc49c27a81a))
+* **web:** show an ask's verbs and keys on the selected row only ([7c1691b](https://github.com/agync/agent-hub/commit/7c1691b45cb204ef76f57996083c901ea42e4de7))
+
 ## [1.10.0](https://github.com/abn/agent-hub/compare/agent-hub-v1.9.0...agent-hub-v1.10.0) (2026-11-07)
 
 
