@@ -3,6 +3,8 @@
 // line of what this is, one line of what to do, and at most one way to act.
 // No illustration.
 
+import { shellHTML, shellStageHead } from "./shell-layout.mjs";
+
 // The copy the design settles for each screen. A screen names its entry and
 // supplies the values a line needs, so the strings live in one place rather
 // than inside eight render functions.
@@ -72,6 +74,19 @@ function fill(text, values) {
 
 function action(label, where) {
   if (!where) return null;
+  // A verb that repeats work is a real outline button, so a coarse pointer
+  // gets the shared tap size in both axes. It sits in a block of its own so
+  // the column does not stretch it to the width of the card.
+  if (where.button) {
+    const wrap = document.createElement("div");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn-outline";
+    button.textContent = label;
+    button.dataset.action = where.action;
+    wrap.appendChild(button);
+    return wrap;
+  }
   const element = document.createElement(where.href ? "a" : "button");
   element.className = "empty-link";
   element.textContent = label;
@@ -113,4 +128,49 @@ export function emptyState(copy, values = {}, where = null) {
 // quotes the attributes and the text it holds.
 export function emptyStateHTML(copy, values = {}, where = null) {
   return emptyState(copy, values, where).outerHTML;
+}
+
+// The copy for a screen that could not be shown. It is the same four parts as
+// an empty state, set in ink: a failure to load is not a deletion, so it does
+// not borrow the danger tone. The detail line is the hub's own words.
+export const ERROR_COPY = {
+  load: {
+    title: "This screen did not load.",
+    link: "Retry",
+  },
+  artifactGone: {
+    screen: "artifacts",
+    title: "This artifact is not on this hub.",
+    link: "Back to Artifacts",
+  },
+  artifactUnlisted: {
+    screen: "artifacts",
+    title: "This artifact is on this hub, but no project lists it.",
+    link: "Back to Artifacts",
+  },
+};
+
+// A browser's own words for a request that never reached the hub are not
+// words a reader can use, so they are replaced by one sentence that says it.
+const UNREACHED = /^(failed to fetch|networkerror|load failed|network request failed)/i;
+
+export function errorDetail(error) {
+  const said = String((error && error.message) || "").trim();
+  if (!said) return "";
+  if (!(error && error.status) && UNREACHED.test(said)) return "Could not reach the hub";
+  return said;
+}
+
+// A failed screen drawn inside the shell, so the rail, the bands and the phone
+// header stay where they were and only the stage says what went wrong. `where`
+// is what the copy's one control does, as for an empty state.
+export function errorShellHTML(title, copy, { detail = "", where = null, back = "" } = {}) {
+  const shown = { screen: title.toLowerCase(), ...copy, body: detail };
+  return shellHTML({
+    noIndex: true,
+    segment: "error",
+    stageHead: shellStageHead(title, "", "", back),
+    stageControls: `<div class="shell-controls"></div>`,
+    stageBody: `<div class="shell-pad">${emptyStateHTML(shown, {}, where)}</div>`,
+  });
 }

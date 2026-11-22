@@ -839,6 +839,11 @@ copies is the whole point and there is no row to carry a glyph: the project
 feed's empty state may read Copy MCP setup. There is no emoji anywhere; icons
 are inline SVG line glyphs or typographic marks.
 
+A screen that cannot load keeps its frame and says so in the stage, in ink and
+not in the deletion tone: one plain sentence, the hub's own message as the
+detail, and a Retry. An unknown artifact is said in the Artifacts screen with a
+link back, and an address that names no screen opens Now.
+
 A grant is access or no access, so no screen renders read or write as an access
 value. The revoke-token dialog says that the token stops working now, that
 projects stay granted, and that a new token restores access. The stage's foot

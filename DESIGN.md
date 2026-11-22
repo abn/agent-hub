@@ -585,6 +585,15 @@ structure, not to line length.
   no row to carry a glyph: the project feed's empty state may read **Copy MCP
   setup**. The wiki's empty state does not take the exception: it shows the
   command on a row and the copy glyph sits on that row.
+- **Error state.** A screen that cannot load keeps the frame: the rail, the two
+  desktop bands and the phone header carry the screen's own title, and only the
+  stage changes. It is the empty state's four parts set in ink, never
+  `--danger`: the screen's name in mono, one plain sentence, the hub's own
+  message as the detail, and one **Retry** that runs the same render again. A
+  request that never reached the hub reads "Could not reach the hub", not the
+  browser's wording. A refusal to authenticate still routes to Connect. An
+  artifact the hub does not hold is said in the Artifacts shell with a way back
+  to Artifacts, and an address no screen answers to is replaced by Now's own.
 - **Filter field.** Every index over about eight rows carries a `--ctl`, 32px,
   `type="search"` field in its control row, naming the list it
   filters ("Filter artifacts"). It filters in place and does not navigate.
