@@ -1529,19 +1529,14 @@ fn desktop_settings_groups_are_device_keyboard_hub() {
         .next()
         .unwrap_or(desktop);
     assert!(
-        desktop.contains("THIS DEVICE")
+        desktop.contains("THIS BROWSER")
             && desktop.contains("KEYBOARD")
             && desktop.contains("THIS HUB"),
-        "desktop Settings groups must be THIS DEVICE, KEYBOARD, THIS HUB"
+        "desktop Settings groups must be THIS BROWSER, KEYBOARD, THIS HUB"
     );
     assert!(
         !desktop.contains("APPEARANCE") && !desktop.contains("ALERTS"),
-        "APPEARANCE and ALERTS must fold into THIS DEVICE"
-    );
-    assert!(
-        desktop.contains("Press ? for the list")
-            || desktop.contains("Press <span class=\"mono\">?</span> for the list"),
-        "single-key shortcuts must carry sub 'Press ? for the list'"
+        "APPEARANCE and ALERTS must fold into THIS BROWSER"
     );
     assert!(
         desktop.contains("Version") && desktop.contains("${esc(versionValue)}"),
@@ -1594,11 +1589,6 @@ fn desktop_settings_groups_are_device_keyboard_hub() {
         !SETTINGS_JS.contains("usedOfCapacity(used, capacity)"),
         "Storage row value must show used only, not used / capacity"
     );
-
-    assert!(
-        desktop.contains("This device's settings are saved in this browser only."),
-        "desktop settings must carry the helper line"
-    );
 }
 
 #[test]
@@ -1622,10 +1612,6 @@ fn desktop_settings_keeps_one_helper_line_and_no_second_path() {
         .split("\n  const form = `")
         .next()
         .unwrap_or(desktop);
-    assert!(
-        desktop.contains("This device's settings are saved in this browser only."),
-        "the desktop settings carries the one helper line"
-    );
     assert!(
         !desktop.contains("settings-footer"),
         "the footer that repeated the path and the node must go"

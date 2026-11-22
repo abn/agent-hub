@@ -55,7 +55,7 @@ function switchControl(id, labelId, checked, action = "", extra = "") {
 
 export function truncatePathLastTwo(fullPath) {
   if (!fullPath) return "";
-  const parts = fullPath.replace(/\/+$/, "").split("/").filter(Boolean);
+  const parts = fullPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
   if (parts.length <= 2) return fullPath;
   return `\u2026/${parts.slice(-2).join("/")}`;
 }
@@ -271,7 +271,7 @@ export async function settingsScreen(gen) {
       </style>
       <div class="form-column">
         <section class="form-group">
-          <div class="form-group-label">THIS DEVICE</div>
+          <div class="form-group-label">THIS BROWSER</div>
           <div class="form-row">
             <div class="form-row-main">
               <span class="form-row-title" id="label-theme">Theme</span>
@@ -292,11 +292,10 @@ export async function settingsScreen(gen) {
         </section>
 
         <section class="form-group form-group-keyboard settings-group-keyboard">
-          <div class="form-group-label">KEYBOARD</div>
+          <div class="form-group-label">KEYBOARD \u00b7 ? FOR THE LIST</div>
           <div class="form-row">
             <div class="form-row-main">
               <span class="form-row-title" id="shortcuts-label">Single-key shortcuts</span>
-              <span class="form-row-sub">Press <span class="mono">?</span> for the list</span>
             </div>
             ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
           </div>
@@ -334,8 +333,6 @@ export async function settingsScreen(gen) {
             <span class="form-row-main"><span class="form-row-title">Sign out of this browser</span></span>
           </button>
         </section>
-
-        <div class="settings-helper-line">This device's settings are saved in this browser only.</div>
       </div>
     </form>`;
 
@@ -345,7 +342,7 @@ export async function settingsScreen(gen) {
         noIndex: true,
         stageHead: shellStageHead("Settings", nodeLine),
         stageControls: `<div class="shell-controls shell-controls-path">
-          <span class="shell-meta mono settings-control-path">${esc(dataPath)}</span>
+          <span class="shell-meta mono settings-control-path" title="${esc(dataPath)}">${esc(lastTwoPath)}</span>
           <button type="button" aria-label="Copy full data path" class="settings-copy-path-btn" data-action="copy-path" data-path="${esc(dataPath)}">${COPY_PATH_SVG}</button>
         </div>`,
         stageBody: `<div class="shell-pad settings-pad">${desktopForm}</div>`,
@@ -359,7 +356,7 @@ export async function settingsScreen(gen) {
   const form = `
     <form class="settings" data-action="prefs" onsubmit="event.preventDefault();">
       <div class="settings-flat-group">
-        <div class="settings-group-title">This device</div>
+        <div class="settings-group-title">This browser</div>
         <div class="settings-flat-row row">
           <span class="title settings-row-label">Theme</span>
           <div role="radiogroup" aria-label="Theme" class="settings-theme-track">
@@ -375,7 +372,6 @@ export async function settingsScreen(gen) {
         <div class="settings-flat-row row settings-row-shortcuts">
           <span class="settings-row-text">
             <span class="title settings-row-title" id="shortcuts-label">Single-key shortcuts</span>
-            <span class="meta settings-row-sub">j, k, e, r act with no modifier, suspended while a text field has focus.</span>
           </span>
           ${switchControl("shortcuts", "shortcuts-label", shortcutsOn, "toggle-shortcuts")}
         </div>
@@ -425,7 +421,29 @@ export async function settingsScreen(gen) {
   setupSettingsEvents();
 }
 
+async function copyPath(btn) {
+  const fullPath = btn.dataset.path || "";
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(fullPath);
+    } catch {}
+  }
+  btn.innerHTML = CHECK_SVG;
+  btn.classList.add("is-copied");
+  btn.setAttribute("aria-label", "Copied");
+  setTimeout(() => {
+    btn.innerHTML = COPY_PATH_SVG;
+    btn.classList.remove("is-copied");
+    btn.setAttribute("aria-label", "Copy full data path");
+  }, 1400);
+}
+
 function setupDesktopSettingsEvents() {
+  // The glyph sits on the control row, outside the form, so it is bound itself.
+  document.querySelector(".shell-controls-path [data-action='copy-path']")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    copyPath(/** @type {HTMLElement} */ (event.currentTarget));
+  });
   const root = document.querySelector(".settings");
   if (!root) return;
 
@@ -503,27 +521,6 @@ function setupDesktopSettingsEvents() {
       return;
     }
 
-    // Copy path control on the reserved control row
-    const copyPathBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='copy-path']"));
-    if (copyPathBtn) {
-      event.preventDefault();
-      const fullPath = copyPathBtn.dataset.path || "";
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        try {
-          await navigator.clipboard.writeText(fullPath);
-        } catch {}
-      }
-      copyPathBtn.innerHTML = CHECK_SVG;
-      copyPathBtn.classList.add("is-copied");
-      copyPathBtn.setAttribute("aria-label", "Copied");
-      setTimeout(() => {
-        copyPathBtn.innerHTML = COPY_PATH_SVG;
-        copyPathBtn.classList.remove("is-copied");
-        copyPathBtn.setAttribute("aria-label", "Copy full data path");
-      }, 1400);
-      return;
-    }
-
     // Sign out button
     const signoutBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='signout']"));
     if (signoutBtn) {
@@ -560,20 +557,7 @@ function setupSettingsEvents() {
     const copyPathBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest("[data-action='copy-path']"));
     if (copyPathBtn) {
       event.preventDefault();
-      const fullPath = copyPathBtn.dataset.path || "";
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        try {
-          await navigator.clipboard.writeText(fullPath);
-        } catch {}
-      }
-      copyPathBtn.innerHTML = CHECK_SVG;
-      copyPathBtn.classList.add("is-copied");
-      copyPathBtn.setAttribute("aria-label", "Copied");
-      setTimeout(() => {
-        copyPathBtn.innerHTML = COPY_PATH_SVG;
-        copyPathBtn.classList.remove("is-copied");
-        copyPathBtn.setAttribute("aria-label", "Copy full data path");
-      }, 1400);
+      await copyPath(copyPathBtn);
       return;
     }
 
