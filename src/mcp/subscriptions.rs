@@ -29,13 +29,14 @@ use super::{HubServer, to_error_data};
 /// The kinds an agent may subscribe to. `session` and `system` are the hub's
 /// own bookkeeping and are not offered.
 const SUBSCRIBABLE_KINDS: &[&str] = &[
-    "signal", "finished", "approval", "question", "answer", "artifact", "anchor", "score",
+    "signal", "finished", "approval", "question", "answer", "artifact", "anchor", "score", "idea",
+    "comment", "page",
 ];
 
 #[tool_router(router = subscriptions_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, and score; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id and the cursor it started at. Matching events are delivered through the notifications member of a later tool result."
+        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, score, idea, comment, and page; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id and the cursor it started at. about_self keeps only events that name you in their audience: comments on artifacts and pages you worked on, and edits to a page you wrote last. Matching events are delivered through the notifications member of a later tool result."
     )]
     async fn notify_subscribe(
         &self,
@@ -69,8 +70,11 @@ impl HubServer {
             params.project_id.as_deref(),
             &kinds,
             &cursor,
-            params.actor.as_deref(),
-            params.exclude_self,
+            subscriptions::Filters {
+                actor: params.actor.as_deref(),
+                exclude_self: params.exclude_self,
+                about_self: params.about_self,
+            },
         )
         .await
         .map_err(to_error_data)?;
@@ -122,6 +126,7 @@ impl HubServer {
                     "kinds": row.kinds,
                     "project_id": row.project_id,
                     "cursor": row.last_seen_event_id,
+                    "about_self": row.about_self,
                     "created_at": row.created_at,
                 })
             })
@@ -244,28 +249,25 @@ async fn drain_one(
         return Ok(Vec::new());
     }
 
-    let page = subscriptions::drain_events(&state.db, subscription, DRAIN_LIMIT).await?;
+    let scanned = subscriptions::drain_events(&state.db, subscription, DRAIN_LIMIT).await?;
+    let Some(newest) = scanned.last().map(|event| event.id.clone()) else {
+        return Ok(Vec::new());
+    };
+    // The cursor moves to the last event scanned, whether or not any of the
+    // batch is reported: events the caller cannot read and events the filters
+    // drop are left behind rather than retried on every call, and a batch made
+    // only of them must not pin the cursor in front of an event that follows.
+    subscriptions::set_cursor(&state.db, &subscription.id, &newest).await?;
+
     // An unscoped read spans every project in the store, so what the caller may
-    // read is applied here. The cursor still moves across the page, including
-    // events the caller cannot read or that the actor filters drop: they are
-    // left behind rather than retried on every call.
+    // read is applied here.
     let page: Vec<&events::Event> = match subscription.project_id {
-        Some(_) => page.iter().collect(),
-        None => page
+        Some(_) => scanned.iter().collect(),
+        None => scanned
             .iter()
             .filter(|event| may_read(visible, &event.project_id))
             .collect(),
     };
-    if page.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let newest = page
-        .last()
-        .expect("a non-empty page has a newest event")
-        .id
-        .clone();
-    subscriptions::set_cursor(&state.db, &subscription.id, &newest).await?;
 
     let page: Vec<&events::Event> = page
         .into_iter()
@@ -278,6 +280,9 @@ async fn drain_one(
             if subscription.exclude_self && event.actor == principal.actor {
                 return false;
             }
+            if subscription.about_self && !names_actor(event, &principal.actor) {
+                return false;
+            }
             true
         })
         .collect();
@@ -286,6 +291,16 @@ async fn drain_one(
     }
 
     Ok(page.into_iter().map(item).collect())
+}
+
+/// Whether an event's payload lists the actor in its `audience`.
+fn names_actor(event: &events::Event, actor: &str) -> bool {
+    event
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.get("audience"))
+        .and_then(|audience| audience.as_array())
+        .is_some_and(|audience| audience.iter().any(|named| named == actor))
 }
 
 /// Whether a project is in the caller's visible set.
@@ -385,7 +400,8 @@ fn parse_kinds(list: &str) -> crate::error::Result<Vec<String>> {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct NotifySubscribeParams {
     /// Comma-separated kinds, from `signal`, `finished`, `approval`,
-    /// `question`, `answer`, and `artifact`.
+    /// `question`, `answer`, `artifact`, `anchor`, `score`, `idea`, `comment`,
+    /// and `page`.
     kinds: String,
     /// Scope the subscription to one project. Omitted means every project the
     /// caller may read.
@@ -397,6 +413,10 @@ struct NotifySubscribeParams {
     /// Drop the registering agent's own events at drain time.
     #[serde(default)]
     exclude_self: bool,
+    /// Report only events that name the registering agent in their audience,
+    /// such as a comment on an artifact the agent published.
+    #[serde(default)]
+    about_self: bool,
 }
 
 /// Arguments for `notify_unsubscribe`.
@@ -648,6 +668,60 @@ mod tests {
         assert_eq!(titles(&state, &principal).await, vec!["yours"]);
     }
 
+    /// A batch the caller may not read, a whole drain page of it, must not
+    /// hold the cursor in front of the visible event that follows.
+    #[tokio::test]
+    async fn a_batch_of_unreadable_events_does_not_pin_the_cursor() {
+        let state = state("subs-pinned").await;
+        for (id, confidential) in [("p1", false), ("secret", true)] {
+            crate::store::projects::create(&state.db, id, id)
+                .await
+                .expect("create project");
+            crate::store::projects::set_confidential(&state.db, id, confidential)
+                .await
+                .expect("posture");
+        }
+        let principal = caller("agent-a", false);
+        crate::store::identity::create_agent(&state.db, "agent-a", "Agent A")
+            .await
+            .expect("create agent");
+        let kinds = parse_kinds("signal").expect("kinds");
+        subscriptions::create(&state.db, &principal.actor, None, &kinds, "")
+            .await
+            .expect("create");
+
+        for _ in 0..DRAIN_LIMIT {
+            crate::store::events::append(
+                &state.db,
+                0,
+                "seeder",
+                None,
+                crate::store::events::NewEvent {
+                    project_id: "secret".to_string(),
+                    kind: "signal".to_string(),
+                    summary: "not yours".to_string(),
+                    payload: None,
+                    needs_action: false,
+                    thread_id: None,
+                    session_id: None,
+                },
+            )
+            .await
+            .expect("append");
+        }
+        append(&state, "signal", "yours").await;
+
+        assert!(
+            drain(&state, &principal).await.is_none(),
+            "a page of unreadable events reports nothing"
+        );
+        assert_eq!(
+            titles(&state, &principal).await,
+            vec!["yours"],
+            "the next drain reaches the readable event behind them"
+        );
+    }
+
     #[tokio::test]
     async fn a_subscription_actor_filter_drops_other_actors() {
         let state = state("subs-actor").await;
@@ -676,8 +750,10 @@ mod tests {
             Some("p1"),
             &kinds,
             &cursor,
-            Some("seeder"),
-            false,
+            subscriptions::Filters {
+                actor: Some("seeder"),
+                ..Default::default()
+            },
         )
         .await
         .expect("create");
@@ -758,8 +834,10 @@ mod tests {
             Some("p1"),
             &kinds,
             &cursor,
-            None,
-            true,
+            subscriptions::Filters {
+                exclude_self: true,
+                ..Default::default()
+            },
         )
         .await
         .expect("create");

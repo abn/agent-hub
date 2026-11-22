@@ -246,11 +246,43 @@ fn comment_post_appends_a_feed_event() {
     let items = structured(&feed)["events"].as_array().expect("feed events");
     assert!(
         items.iter().any(|item| {
-            item["kind"] == "artifact"
-                && item["summary"]
-                    .as_str()
-                    .is_some_and(|summary| summary.contains("comment on"))
+            item["kind"] == "comment"
+                && item["summary"] == "comment on Report"
+                && item["payload"]["target"] == "artifact"
+                && item["payload"]["author"] == "stdio-agent"
         }),
-        "posting a comment records a feed event: {feed}"
+        "posting a comment records a comment event: {feed}"
     );
+    assert!(
+        !items
+            .iter()
+            .any(|item| { item["kind"] == "artifact" && item["payload"]["action"] == "commented" }),
+        "a comment is no longer an artifact event: {feed}"
+    );
+}
+
+#[test]
+fn an_idempotent_comment_replay_appends_no_second_event() {
+    let data_dir = TempDir::new("comment-replay-feed");
+    common::seed::seed_project(data_dir.path(), "proj");
+    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    server.initialize();
+
+    let artifact_id = publish(&mut server);
+    for _ in 0..2 {
+        let posted = server.call_tool(
+            "comment_post",
+            json!({"artifact_id": artifact_id, "body": "Once", "idempotency_key": "key-feed"}),
+        );
+        assert!(posted.get("error").is_none(), "{posted}");
+    }
+
+    let feed = server.call_tool("feed_read", json!({"project_id": "proj"}));
+    let comments = structured(&feed)["events"]
+        .as_array()
+        .expect("feed events")
+        .iter()
+        .filter(|item| item["kind"] == "comment")
+        .count();
+    assert_eq!(comments, 1, "a replayed post is not a second event: {feed}");
 }

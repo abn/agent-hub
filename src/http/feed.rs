@@ -255,6 +255,11 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
                         "unknown event kind '{value}'"
                     )));
                 }
+                if events::AGENT_ONLY_KINDS.contains(&value.as_ref()) {
+                    return Err(Error::InvalidArgument(format!(
+                        "event kind '{value}' is written for agents and is not part of the human feed"
+                    )));
+                }
                 kinds.push(value.into_owned());
             }
             other => {

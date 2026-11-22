@@ -468,3 +468,182 @@ async fn dismissing_needs_a_token_a_project_and_a_sensible_list() {
         .expect("request");
     assert_eq!(read_denied.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn the_human_feed_omits_comment_and_page_events_but_an_agent_read_keeps_them() {
+    let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    for kind in ["signal", "comment", "page"] {
+        let mut agent_event = event(kind);
+        agent_event.kind = kind.to_string();
+        append(&state.db, 0, "agent", None, agent_event)
+            .await
+            .expect("append");
+    }
+
+    for uri in ["/api/v1/projects/proj/feed", "/api/v1/feed"] {
+        let response = router(state.clone())
+            .oneshot(get(uri, Some("Bearer token")))
+            .await
+            .expect("request");
+        let page = json_body(response).await;
+        let kinds: Vec<&str> = page["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .filter_map(|event| event["kind"].as_str())
+            .collect();
+        assert_eq!(kinds, vec!["signal"], "{uri} shows only the signal");
+    }
+
+    let unseen = agent_hub::store::events::unseen_count(&state.db, "proj")
+        .await
+        .expect("count");
+    assert_eq!(
+        unseen, 1,
+        "the unseen badge counts only what the feed shows"
+    );
+
+    let all = agent_hub::store::events::read_feed(
+        &state.db,
+        "proj",
+        &agent_hub::store::events::FeedQuery::default(),
+    )
+    .await
+    .expect("agent read");
+    assert_eq!(all.events.len(), 3, "an agent's feed read keeps them");
+}
+
+async fn agent_event(state: &AppState, kind: &str, summary: &str) -> String {
+    let mut agent_event = event(summary);
+    agent_event.kind = kind.to_string();
+    append(&state.db, 0, "agent", None, agent_event)
+        .await
+        .expect("append")
+}
+
+#[tokio::test]
+async fn the_feed_refuses_to_filter_by_a_kind_written_for_agents() {
+    let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    agent_event(&state, "comment", "a comment").await;
+    agent_event(&state, "page", "a page").await;
+
+    for uri in [
+        "/api/v1/projects/proj/feed?kinds=comment",
+        "/api/v1/projects/proj/feed?kinds=signal&kinds=page",
+        "/api/v1/feed?kinds=comment",
+    ] {
+        let response = router(state.clone())
+            .oneshot(get(uri, Some("Bearer token")))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(problem_body(response).await["code"], "invalid_argument");
+    }
+
+    let response = router(state.clone())
+        .oneshot(get(
+            "/api/v1/projects/proj/feed?kinds=system",
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK, "system stays reachable");
+}
+
+#[tokio::test]
+async fn dismissing_and_marking_seen_ignore_comment_and_page_events() {
+    let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    let comment = agent_event(&state, "comment", "a comment").await;
+    let page = agent_event(&state, "page", "a page").await;
+    let signal = agent_event(&state, "signal", "a signal").await;
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/projects/proj/feed/dismiss",
+            Some("Bearer token"),
+            Some(serde_json::json!({ "event_ids": [comment, page, signal] })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        json_body(response).await["dismissed"],
+        1,
+        "only the signal is dismissed"
+    );
+    let agent_view = agent_hub::store::events::read_feed(
+        &state.db,
+        "proj",
+        &agent_hub::store::events::FeedQuery {
+            hide_dismissed: true,
+            kinds: Some(vec!["comment".to_string(), "page".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read");
+    assert_eq!(agent_view.events.len(), 2, "no dismissal row was written");
+
+    for event_id in [comment, page] {
+        let response = router(state.clone())
+            .oneshot(post(
+                "/api/v1/projects/proj/feed/seen",
+                Some("Bearer token"),
+                Some(serde_json::json!({ "event_id": event_id })),
+            ))
+            .await
+            .expect("request");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["advanced"], false, "{event_id} does not move it");
+        assert!(body["last_seen"].is_null());
+    }
+}
+
+#[tokio::test]
+async fn the_human_search_leaves_comment_and_page_events_out_and_an_agent_search_keeps_them() {
+    let state = state().await;
+    let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
+    agent_event(&state, "signal", "zebra signal").await;
+    agent_event(&state, "comment", "zebra comment").await;
+    agent_event(&state, "page", "zebra page").await;
+
+    let response = router(state.clone())
+        .oneshot(get("/api/v1/search?q=zebra", Some("Bearer token")))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["count"], 1, "only the signal is counted: {body}");
+    assert_eq!(body["truncated"], false);
+
+    let response = router(state.clone())
+        .oneshot(get("/api/v1/search?q=zebra&limit=1", Some("Bearer token")))
+        .await
+        .expect("request");
+    let body = json_body(response).await;
+    assert_eq!(body["count"], 1);
+    assert_eq!(
+        body["truncated"], false,
+        "the agent-only events do not make a one-hit result look cut: {body}"
+    );
+
+    let agent = agent_hub::store::search::search(
+        &state.db,
+        &agent_hub::store::search::SearchQuery {
+            text: "zebra".to_string(),
+            project_id: None,
+            kind: None,
+            session_id: None,
+            limit: 50,
+            mode: None,
+        },
+        None,
+    )
+    .await
+    .expect("agent search");
+    assert_eq!(agent.count, 3, "an agent's search keeps them");
+}

@@ -220,3 +220,73 @@ async fn comment_routes_require_a_token() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(problem_body(response).await["code"], "unauthenticated");
 }
+
+#[tokio::test]
+async fn a_page_comment_appends_a_comment_event_naming_the_pages_writer() {
+    let state = state().await;
+    agent_hub::brain::knowledge::put(
+        &state,
+        "proj",
+        "agent-writer",
+        "/fs/notes/todo.md",
+        "# Todo\n",
+        None,
+    )
+    .await
+    .expect("write the page");
+
+    post_comment(&state, "notes/todo.md", "Looks good").await;
+
+    let page = agent_hub::store::events::read_feed(
+        &state.db,
+        "proj",
+        &agent_hub::store::events::FeedQuery {
+            kinds: Some(vec!["comment".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read the feed");
+    assert_eq!(page.events.len(), 1);
+    let event = &page.events[0];
+    assert_eq!(event.actor, "human");
+    assert_eq!(event.summary, "comment on /fs/notes/todo.md");
+    let payload = event.payload.as_ref().expect("payload");
+    assert_eq!(payload["target"], "page");
+    assert_eq!(payload["path"], "/fs/notes/todo.md");
+    assert_eq!(payload["author"], "human");
+    assert_eq!(payload["audience"], json!(["agent-writer"]));
+}
+
+#[tokio::test]
+async fn a_page_comment_event_carries_the_stored_author() {
+    let state = state().await;
+    let response = router(state.clone())
+        .oneshot(request(
+            "POST",
+            "/api/v1/projects/proj/kb/comments",
+            Some(ADMIN),
+            Some(json!({ "path": "notes/todo.md", "body": "Hi", "author": "  agent-x  " })),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(json_body(response).await["comment"]["author"], "agent-x");
+
+    let page = agent_hub::store::events::read_feed(
+        &state.db,
+        "proj",
+        &agent_hub::store::events::FeedQuery {
+            kinds: Some(vec!["comment".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("read the feed");
+    assert_eq!(page.events.len(), 1);
+    assert_eq!(page.events[0].actor, "agent-x");
+    assert_eq!(
+        page.events[0].payload.as_ref().expect("payload")["author"],
+        "agent-x"
+    );
+}

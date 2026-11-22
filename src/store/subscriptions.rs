@@ -39,6 +39,9 @@ pub struct Subscription {
     pub actor_filter: Option<String>,
     /// Whether the registering actor's own events are dropped at drain time.
     pub exclude_self: bool,
+    /// Whether only events that name the registering actor in their payload's
+    /// `audience` are reported.
+    pub about_self: bool,
     /// The newest event id already reported: the exclusive cursor of the next
     /// drain. Empty before the subscription's first drain.
     pub last_seen_event_id: String,
@@ -80,21 +83,31 @@ pub async fn create(
     Ok(id)
 }
 
-/// Register a subscription with optional actor filters.
+/// The drain-time filters a subscription may carry.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Filters<'a> {
+    /// Only events authored by this actor.
+    pub actor: Option<&'a str>,
+    /// Drop the registering actor's own events.
+    pub exclude_self: bool,
+    /// Keep only events that name the registering actor in their audience.
+    pub about_self: bool,
+}
+
+/// Register a subscription with optional filters.
 pub async fn create_with_filters(
     db: &Database,
     agent: &str,
     project_id: Option<&str>,
     kinds: &[String],
     last_seen_event_id: &str,
-    actor_filter: Option<&str>,
-    exclude_self: bool,
+    filters: Filters<'_>,
 ) -> Result<String> {
     let conn = super::connect(db)?;
     let id = super::next_id();
     conn.execute(
-        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         vec![
             Value::Text(id.clone()),
             Value::Text(agent.to_string()),
@@ -105,11 +118,12 @@ pub async fn create_with_filters(
             Value::Text(kinds.join(",")),
             Value::Text(last_seen_event_id.to_string()),
             Value::Text(super::now_rfc3339()),
-            match actor_filter {
+            match filters.actor {
                 Some(actor) => Value::Text(actor.to_string()),
                 None => Value::Null,
             },
-            Value::Integer(if exclude_self { 1 } else { 0 }),
+            Value::Integer(i64::from(filters.exclude_self)),
+            Value::Integer(i64::from(filters.about_self)),
         ],
     )
     .await
@@ -122,7 +136,7 @@ pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self
+            "SELECT id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self
              FROM notify_subscriptions WHERE agent = ?1 ORDER BY id",
             vec![Value::Text(agent.to_string())],
         )
@@ -219,15 +233,15 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
             .collect::<Vec<String>>(),
         None => Vec::new(),
     };
-    let exclude_self = match row.get_value(7).map_err(engine)? {
-        Value::Integer(n) => n != 0,
-        Value::Null => false,
-        other => {
-            return Err(Error::Engine(format!(
-                "expected integer in a column, found {other:?}"
-            )));
-        }
+    let flag = |index: usize| match row.get_value(index).map_err(engine)? {
+        Value::Integer(n) => Ok(n != 0),
+        Value::Null => Ok(false),
+        other => Err(Error::Engine(format!(
+            "expected integer in a column, found {other:?}"
+        ))),
     };
+    let exclude_self = flag(7)?;
+    let about_self = flag(8)?;
     Ok(Subscription {
         id: required_text(row, 0)?,
         agent: required_text(row, 1)?,
@@ -235,6 +249,7 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
         kinds,
         actor_filter: text_at(row, 6)?,
         exclude_self,
+        about_self,
         last_seen_event_id: required_text(row, 4)?,
         created_at: required_text(row, 5)?,
     })

@@ -2401,3 +2401,177 @@ async fn the_knowledge_base_reference_documents_every_route_and_its_refusals() {
         "the log records the knowledge base backend"
     );
 }
+
+/// Every `page` event a project's feed holds, oldest first.
+async fn page_events(hub: &Hub, project: &str) -> Vec<(String, Value)> {
+    let conn = hub.state.db.connect().expect("connect");
+    let mut rows = conn
+        .query(
+            "SELECT actor, payload FROM events WHERE project_id = ?1 AND kind = 'page' ORDER BY id",
+            vec![turso::Value::Text(project.to_string())],
+        )
+        .await
+        .expect("query events");
+    let mut found = Vec::new();
+    while let Some(row) = rows.next().await.expect("next row") {
+        if let (Ok(turso::Value::Text(actor)), Ok(turso::Value::Text(payload))) =
+            (row.get_value(0), row.get_value(1))
+        {
+            found.push((
+                actor,
+                serde_json::from_str(&payload).expect("payload is JSON"),
+            ));
+        }
+    }
+    found
+}
+
+#[tokio::test]
+async fn one_actors_writes_to_a_page_make_one_event_and_a_second_actor_makes_another() {
+    let hub = Hub::start().await;
+    hub.project("proj").await;
+
+    hub.put_page("proj", "plan.md", "# One\n").await;
+    hub.put_page("proj", "plan.md", "# Two\n").await;
+    let events = page_events(&hub, "proj").await;
+    assert_eq!(
+        events.len(),
+        1,
+        "two writes by one actor inside ten minutes: {events:?}"
+    );
+    assert_eq!(events[0].0, "human");
+    assert_eq!(events[0].1["path"], "/fs/plan.md");
+    assert_eq!(events[0].1["action"], "created");
+    assert_eq!(events[0].1["prev_actor"], Value::Null);
+    assert_eq!(events[0].1["audience"], json!([]));
+
+    agent_hub::brain::knowledge::put(
+        &hub.state,
+        "proj",
+        "agent-w",
+        "/fs/plan.md",
+        "# Three\n",
+        None,
+    )
+    .await
+    .expect("a second actor writes");
+    let events = page_events(&hub, "proj").await;
+    assert_eq!(
+        events.len(),
+        2,
+        "a second actor starts its own event: {events:?}"
+    );
+    assert_eq!(events[1].0, "agent-w");
+    assert_eq!(events[1].1["action"], "updated");
+    assert_eq!(events[1].1["prev_actor"], "human");
+    assert_eq!(events[1].1["audience"], json!(["human"]));
+
+    agent_hub::brain::knowledge::put(
+        &hub.state,
+        "proj",
+        "agent-w",
+        "/fs/plan.md",
+        "# Four\n",
+        None,
+    )
+    .await
+    .expect("the second actor writes again");
+    assert_eq!(page_events(&hub, "proj").await.len(), 2);
+
+    agent_hub::brain::knowledge::put(
+        &hub.state,
+        "proj",
+        "agent-w",
+        "/fs/other.md",
+        "# Other\n",
+        None,
+    )
+    .await
+    .expect("a different page");
+    assert_eq!(
+        page_events(&hub, "proj").await.len(),
+        3,
+        "coalescing is per page"
+    );
+}
+
+/// Move every `page` event of a project back in time, as if it had been
+/// written that many minutes ago.
+async fn age_page_events(hub: &Hub, project: &str, minutes: i64) {
+    let then = time::OffsetDateTime::now_utc() - time::Duration::minutes(minutes);
+    let stamp = then
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format");
+    let conn = hub.state.db.connect().expect("connect");
+    conn.execute(
+        "UPDATE events SET created_at = ?2 WHERE project_id = ?1 AND kind = 'page'",
+        vec![
+            turso::Value::Text(project.to_string()),
+            turso::Value::Text(stamp),
+        ],
+    )
+    .await
+    .expect("age the events");
+}
+
+#[tokio::test]
+async fn a_write_after_the_coalescing_window_makes_a_new_event_that_names_ones_own_earlier_write() {
+    let hub = Hub::start().await;
+    hub.project("proj").await;
+
+    hub.put_page("proj", "plan.md", "# One\n").await;
+    hub.put_page("proj", "plan.md", "# Two\n").await;
+    assert_eq!(page_events(&hub, "proj").await.len(), 1);
+
+    age_page_events(&hub, "proj", 11).await;
+    hub.put_page("proj", "plan.md", "# Three\n").await;
+    let events = page_events(&hub, "proj").await;
+    assert_eq!(
+        events.len(),
+        2,
+        "eleven minutes on is a new stretch: {events:?}"
+    );
+    assert_eq!(events[1].0, "human");
+    assert_eq!(events[1].1["prev_actor"], "human");
+    assert_eq!(
+        events[1].1["audience"],
+        json!(["human"]),
+        "the audience is the previous writer even when it is the writer"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_writers_each_see_the_writer_before_them() {
+    let hub = Hub::start().await;
+    hub.project("proj").await;
+    hub.put_page("proj", "plan.md", "# Start\n").await;
+
+    let mut writers = tokio::task::JoinSet::new();
+    for n in 0..6 {
+        let state = (*hub.state).clone();
+        writers.spawn(async move {
+            agent_hub::brain::knowledge::put(
+                &state,
+                "proj",
+                &format!("agent-{n}"),
+                "/fs/plan.md",
+                &format!("# Edit {n}\n"),
+                None,
+            )
+            .await
+            .expect("write");
+        });
+    }
+    while let Some(done) = writers.join_next().await {
+        done.expect("writer finished");
+    }
+
+    let events = page_events(&hub, "proj").await;
+    assert_eq!(events.len(), 7, "one event per actor's stretch: {events:?}");
+    for pair in events.windows(2) {
+        assert_eq!(
+            pair[1].1["prev_actor"], pair[0].0,
+            "each event names the actor of the event before it: {events:?}"
+        );
+    }
+}

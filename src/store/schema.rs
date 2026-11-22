@@ -118,6 +118,10 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 26,
         ddl: V26,
     },
+    Migration {
+        version: 27,
+        ddl: V27,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -685,4 +689,14 @@ CREATE TABLE IF NOT EXISTS feed_dismissals(
 );
 CREATE INDEX IF NOT EXISTS feed_dismissals_project
   ON feed_dismissals(project_id, dismissed_at);
+"#;
+
+/// Version 27: subscriptions that report only events about the subscriber.
+///
+/// A comment or page event names the actors it concerns in its payload's
+/// `audience`. A subscription with `about_self` set keeps an event only when
+/// the registering actor is in that list, so an agent hears about discussion of
+/// its own artifacts and pages and not the whole project's.
+const V27: &str = r#"
+ALTER TABLE notify_subscriptions ADD COLUMN about_self INTEGER NOT NULL DEFAULT 0;
 "#;

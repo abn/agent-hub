@@ -6,6 +6,20 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Comments and page writes are feed events
+
+* **Addition**: a comment on an artifact or a knowledge base page, from the
+  human or an agent, and a page write now append a `comment` or `page` event
+  that names the actors it concerns. The human feed leaves both out.
+  `notify_subscribe` accepts them, `idea` and a new `about_self` filter.
+  [MCP tools](/reference/mcp-tools.md) and the
+  [data model](/architecture/data-model.md) describe them.
+* **Update**: an agent's comment no longer appears as an `artifact` event with
+  the action `commented`. The REST feed refuses `comment` and `page` in a
+  `kinds` filter, the human's search leaves them out, and dismissing or marking
+  them seen does nothing. A subscription cursor now moves past a batch that
+  was all filtered out, so a later event is delivered.
+
 ### Server instructions, `mcp --proxy` and proxy session replay
 
 * **Update**: [MCP tools](/reference/mcp-tools.md) describes the server

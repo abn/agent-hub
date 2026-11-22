@@ -28,6 +28,7 @@ use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::markdown::escape_html;
 use crate::store::artifacts::{self as artifact_store, Artifact, ArtifactVersion};
 use crate::store::comments::{self as comment_store, Comment, comment_view, parse_anchor};
+use crate::store::events;
 
 /// The artifacts of one project.
 #[derive(Debug, Serialize)]
@@ -462,7 +463,7 @@ pub async fn comment_post(
 
     let payload = json_body(body, "comment body must be JSON with a body field")?;
     let anchor = parse_anchor(payload.anchor).map_err(|err| Problem::from_error(&err))?;
-    let (comment, _replayed) = comment_store::add_comment(
+    let (comment, replayed) = comment_store::add_comment(
         &state.db,
         &artifact_id,
         "human",
@@ -474,6 +475,24 @@ pub async fn comment_post(
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;
+
+    if !replayed {
+        let artifact = artifact_store::metadata(&state.db, &artifact_id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        events::record_comment(
+            &state.db,
+            state.config.events_per_project.per_project,
+            events::CommentTarget::Artifact {
+                project_id: &artifact.project_id,
+                artifact_id: &artifact_id,
+                title: &artifact.title,
+            },
+            &comment.id,
+            "human",
+        )
+        .await;
+    }
 
     state.notify();
     Ok(Json(comment_view(&comment)))

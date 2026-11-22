@@ -134,11 +134,85 @@ pub async fn put(
 ) -> Result<Written> {
     let path = page_path(path)?;
     crate::limits::check_kb_page(content.len())?;
+    // One write of a page at a time per project, from the predecessor read to
+    // the event append, so two writers never both see the same predecessor and
+    // the coalescing decision is made against the event the writer before left.
+    let _serial = page_write_turn(project_id).await;
     let brain = open_for_write(state, project_id).await?;
-    store(
+    let previous = brain
+        .last_write(&path)
+        .await?
+        .filter(|write| write.version.is_some());
+    let written = store(
         state, &brain, project_id, "kb.put", actor, path, content, if_version,
     )
-    .await
+    .await?;
+    page_written(
+        state,
+        project_id,
+        actor,
+        &written.path,
+        previous.as_ref().map(|write| write.actor.as_str()),
+    )
+    .await;
+    Ok(written)
+}
+
+/// The turn a page write holds while its `page` event is decided.
+async fn page_write_turn(project_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    static TURNS: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(Default::default);
+    let turn = TURNS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(project_id.to_string())
+        .or_default()
+        .clone();
+    turn.lock_owned().await
+}
+
+/// Record that an actor wrote a page, as one `page` event per stretch of
+/// editing. A failure is logged and costs the write nothing: the page is
+/// stored, and the event is a courtesy to whoever wrote it before.
+async fn page_written(
+    state: &AppState,
+    project_id: &str,
+    actor: &str,
+    path: &str,
+    prev_actor: Option<&str>,
+) {
+    let appended = async {
+        let Some(event) = events::page_event(
+            &state.db,
+            project_id,
+            path,
+            actor,
+            prev_actor,
+            prev_actor.is_none(),
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        events::append(
+            &state.db,
+            state.config.events_per_project.per_project,
+            actor,
+            None,
+            event,
+        )
+        .await?;
+        Ok::<bool, Error>(true)
+    }
+    .await;
+    match appended {
+        Ok(true) => state.notify(),
+        Ok(false) => {}
+        Err(err) => {
+            tracing::warn!(project_id, error = %err, "could not append a knowledge base page event");
+        }
+    }
 }
 
 /// Delete one page, reporting the canonical path that went.
