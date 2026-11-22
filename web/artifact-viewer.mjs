@@ -158,7 +158,10 @@ function frameStyle() {
     `h2{font-size:17px;font-weight:600;margin:32px 0 8px}` +
     `h3{font-size:15px;font-weight:600;margin:24px 0 8px}` +
     `h1,h2,h3{color:#151B17;line-height:1.25;text-wrap:balance}` +
-    `p,ul,ol{margin:0 0 16px}li{margin-bottom:4px}` +
+    `p,ul,ol{margin:0 0 16px}li{margin-bottom:4px}li>ul,li>ol{margin:0}` +
+    `li:has(>input[type="checkbox"]),li:has(>p:first-child>input[type="checkbox"]){list-style:none}` +
+    `li>input[type="checkbox"],li>p:first-child>input[type="checkbox"]{margin:0 .4em 0 -1.4em}` +
+    `body{overflow-wrap:anywhere}` +
     `html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3{color:#E4EAE5}` +
     `a{color:#151B17;text-underline-offset:3px}` +
     `html[data-theme="dark"] a{color:#E4EAE5}` +
@@ -167,8 +170,13 @@ function frameStyle() {
     `code{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}` +
     `:not(pre)>code{background:#E8ECE7;border:1px solid #D3DAD2;border-radius:2px;padding:.1em .35em}` +
     `html[data-theme="dark"] :not(pre)>code{background:#1A1F1C;border-color:#29312C}` +
-    `table{border-collapse:collapse;display:block;overflow-x:auto}` +
-    `th,td{border:1px solid #D3DAD2;padding:.4rem .7rem;text-align:left}` +
+    `table{border-collapse:separate;border-spacing:0;display:block;max-width:100%;overflow-x:auto}` +
+    `th,td{border:1px solid #D3DAD2;border-width:0 1px 1px 0;padding:.4rem .7rem;text-align:left;min-width:8rem}` +
+    `th{white-space:nowrap}` +
+    `th:first-child,td:first-child{position:sticky;left:0;background:#F3F5F2;border-left-width:1px;z-index:1;max-width:min(12rem,45vw);overflow-wrap:anywhere}` +
+    `th:first-child{white-space:normal}` +
+    `table>:first-child>tr:first-child>:is(th,td){border-top-width:1px}` +
+    `html[data-theme="dark"] th:first-child,html[data-theme="dark"] td:first-child{background:#111513}` +
     `html[data-theme="dark"] th,html[data-theme="dark"] td{border-color:#29312C}` +
     `blockquote{margin:0;padding-left:1rem;border-left:3px solid #D3DAD2;color:#56625A}` +
     `html[data-theme="dark"] blockquote{border-color:#29312C;color:#8E9991}` +
@@ -561,6 +569,11 @@ function init() {
       form.hidden = true;
       const copy = /** @type {HTMLElement} */ (form.closest(".hub-gate")?.querySelector(".hub-gate-copy"));
       if (copy) copy.hidden = true;
+      // The lock tile and the heading describe a locked page; once the
+      // document is open they only take up room above it.
+      const gate = form.closest(".hub-gate");
+      gate?.querySelector(".hub-lock-tile")?.setAttribute("hidden", "");
+      gate?.querySelector("h2")?.setAttribute("hidden", "");
       renderForTheme(state, state.theme);
       return "ok";
     } catch (error) {

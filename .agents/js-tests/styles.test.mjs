@@ -1040,6 +1040,14 @@ const VIEWER_ROLES = [
     "dark inline code border",
   ],
   ["th,td", "border", "light", "--line", "light table border"],
+  ["th:first-child,td:first-child", "background", "light", "--bg", "light pinned table cell"],
+  [
+    'html[data-theme="dark"] th:first-child,html[data-theme="dark"] td:first-child',
+    "background",
+    "dark",
+    "--bg",
+    "dark pinned table cell",
+  ],
   [
     'html[data-theme="dark"] th,html[data-theme="dark"] td',
     "border-color",

@@ -331,3 +331,129 @@ test.describe("the artifact viewer's comments bar", () => {
     await held("at the end");
   });
 });
+
+test.describe("the artifact frame's layout", () => {
+  const rows = Array.from({ length: 3 }, (_, i) => `| row ${i} | ${"cell ".repeat(6)} | ${"wide ".repeat(8)} | more ${i} | last ${i} |`);
+  const content = [
+    `# Layout`,
+    "",
+    "x".repeat(140),
+    "",
+    "| Name of the record that this first column heading describes at length | Description | Another long column | Fourth | Fifth |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+    "",
+    "- outer",
+    "  - inner one",
+    "  - inner two",
+    "",
+    "- [ ] open task",
+    "- [x] done task",
+  ].join("\n");
+
+  for (const [name, size] of [
+    ["phone", { width: 390, height: 800 }],
+    ["desktop", { width: 1440, height: 900 }],
+  ]) {
+    test(`wraps, scrolls and pins inside the frame at ${name} width`, async ({ hub, page }) => {
+      await page.setViewportSize(size);
+      const session = await newSession(hub);
+      const published = await toolCall(hub, session, "artifact_publish", {
+        project_id: hub.projectId,
+        title: `Layout ${name}`,
+        kind: "markdown",
+        content,
+      });
+      const id = structured(published).artifact_id;
+      await page.goto(`${hub.baseUrl}/#/artifacts/${id}?project=${hub.projectId}`);
+      await expect(page.locator("#hub-frame")).toBeVisible();
+      const document = page.frameLocator("#hub-frame").frameLocator("#hub-frame");
+      await expect(document.locator("table")).toBeVisible();
+
+      const root = document.locator("html");
+      const [scrollWidth, clientWidth] = await root.evaluate((el) => [el.scrollWidth, el.clientWidth]);
+      expect(scrollWidth, "the frame scrolls sideways").toBeLessThanOrEqual(clientWidth);
+
+      // The first column is pinned but capped, so a long first heading wraps
+      // inside it and leaves room for the columns it scrolls over.
+      const table = document.locator("table");
+      const [firstWidth, tableWidth] = await table.evaluate((el) => [
+        el.querySelector("th:first-child").getBoundingClientRect().width,
+        el.getBoundingClientRect().width,
+      ]);
+      expect(firstWidth, "the pinned first column covers the table").toBeLessThanOrEqual(tableWidth * 0.5);
+      const overflow = await table.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(overflow, "the wide table does not scroll").toBeGreaterThan(0);
+      const geometry = () =>
+        table.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const first = el.querySelector("th:first-child").getBoundingClientRect();
+          const last = el.querySelector("th:last-child").getBoundingClientRect();
+          return { first: first.left - box.left, lastRight: last.right - box.right };
+        });
+      const before = await geometry();
+      expect(before.lastRight, "the last column starts visible").toBeGreaterThan(0);
+      await table.evaluate((el) => {
+        el.scrollLeft = el.scrollWidth;
+      });
+      const after = await geometry();
+      expect(after.lastRight, "the last column does not scroll into view").toBeLessThanOrEqual(1);
+      expect(Math.abs(after.first - before.first), "the first column does not stay pinned").toBeLessThan(2);
+
+      expect(await document.locator("th:first-child").first().evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
+      expect(await document.locator("th:nth-child(2)").evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("nowrap");
+      expect(await document.locator("td").first().evaluate((el) => parseFloat(getComputedStyle(el).minWidth))).toBeGreaterThan(0);
+
+      const gap = await document.locator("li > ul").first().evaluate((el) => getComputedStyle(el).marginBottom);
+      expect(gap, "a nested list keeps the paragraph gap").toBe("0px");
+      const marker = await document
+        .locator("li:has(input[type=checkbox])")
+        .first()
+        .evaluate((el) => getComputedStyle(el).listStyleType);
+      expect(marker, "a task item shows a bullet beside its box").toBe("none");
+    });
+  }
+
+  for (const [name, size] of [
+    ["phone", { width: 390, height: 800 }],
+    ["desktop", { width: 1440, height: 900 }],
+  ]) {
+    test(`the password field's focus ring is not clipped at ${name} width`, async ({ hub, page }) => {
+      await page.setViewportSize(size);
+      await page.goto(`${hub.baseUrl}/#/artifacts/${encodeURIComponent(hub.protectedId)}?project=${encodeURIComponent(hub.projectId)}`);
+      const gate = page.frameLocator("#hub-frame");
+      const field = gate.locator("#hub-password");
+      await expect(field).toBeVisible({ timeout: 10_000 });
+      await field.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(field).toBeFocused();
+      const slack = await field.evaluate((el) => {
+        const ring = 4;
+        const box = el.getBoundingClientRect();
+        let left = 0;
+        let right = el.ownerDocument.documentElement.clientWidth;
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          if (getComputedStyle(node).overflowX === "visible") continue;
+          const r = node.getBoundingClientRect();
+          left = Math.max(left, r.left);
+          right = Math.min(right, r.right);
+        }
+        return { left: box.left - ring - left, right: right - (box.right + ring) };
+      });
+      expect(slack.left, "the ring is clipped on the left").toBeGreaterThanOrEqual(0);
+      expect(slack.right, "the ring is clipped on the right").toBeGreaterThanOrEqual(0);
+    });
+  }
+
+  test("an unlocked artifact hides the lock tile and the heading", async ({ hub, page }) => {
+    await page.goto(`${hub.baseUrl}/#/artifacts/${encodeURIComponent(hub.protectedId)}?project=${encodeURIComponent(hub.projectId)}`);
+    const gate = page.frameLocator("#hub-frame");
+    await expect(gate.getByRole("heading", { name: "Encrypted artifact" })).toBeVisible({ timeout: 10_000 });
+    await gate.locator("#hub-password").fill(hub.fixture.protectedPassword);
+    await gate.locator('#hub-unlock-form button[type="submit"]').click();
+    await expect(gate.frameLocator("#hub-frame").getByText(hub.fixture.protectedBody)).toBeVisible({ timeout: 15_000 });
+    await expect(gate.getByRole("heading", { name: "Encrypted artifact" })).toBeHidden();
+    await expect(gate.locator(".hub-lock-tile")).toBeHidden();
+  });
+});
