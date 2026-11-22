@@ -503,7 +503,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   // a slow paint off the screen, and without it every detail returned empty.
   if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen, resumeMode);
   const meta = selectedSession
-    ? `${selectedSession.agent} · ${selectedSession.status} · ${formatBytes(selectedSession.brain_bytes || 0)}`
+    ? `${selectedSession.agent} · ${formatBytes(selectedSession.brain_bytes || 0)}`
     : "";
 
   let stageHead = shellStageHead(
@@ -519,14 +519,13 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
     activeSessionId || "",
   )}`;
   const viewToggle =
-    selectedSession && !filePath
+    selectedSession
       ? `<div class="session-view-toggle" role="group" aria-label="Session view">
           <a class="session-view-link" href="${brainHref}&resume=1"${resumeMode ? ' aria-current="page"' : ""}>Resume</a>
           <a class="session-view-link" href="${brainHref}"${resumeMode ? "" : ' aria-current="page"'}>Brain</a>
         </div>`
       : "";
   let stageControls = `<div class="shell-controls session-view-controls">
-    <span class="shell-meta mono session-view-id">${esc(activeSessionId || id)}</span>
     ${viewToggle}
   </div>`;
   let stageBody = detailHTML || `<div class="shell-pad"><p class="empty">Select a session.</p></div>`;

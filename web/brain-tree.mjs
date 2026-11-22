@@ -39,6 +39,9 @@ function svg(d) {
 // leaves get a kind glyph and no chevron. The node carries data-path so the
 // expand handler knows what to fetch, and data-kind so the glyph can switch
 // to folder-open when expanded.
+// "1 key", "2 keys": a count with its noun in the right number.
+export const count = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`;
+
 export function treeItem(node, level, posinset, setsize) {
   const chevron = node.isFolder
     ? `<span class="tree-chev" aria-hidden="true"></span>`
@@ -102,7 +105,7 @@ export function unifiedBrainTree(sessionId, projectId, kvEntries = [], fsEntries
         <span class="tree-chev open" aria-hidden="true"></span>
         ${svg(GLYPHS["folder-open"])}
         <span class="tree-name">kv/</span>
-        <span class="tree-count mono">${kvEntries ? kvEntries.length : 0} keys</span>
+        <span class="tree-count mono">${count(kvEntries ? kvEntries.length : 0, "key")}</span>
       </div>
       <div role="group" class="tree-group" data-folder="/kv">
         ${kvItems}
@@ -112,7 +115,7 @@ export function unifiedBrainTree(sessionId, projectId, kvEntries = [], fsEntries
         <span class="tree-chev open" aria-hidden="true"></span>
         ${svg(GLYPHS["folder-open"])}
         <span class="tree-name">fs/</span>
-        <span class="tree-count mono">${fsEntries ? fsEntries.length : 0} files</span>
+        <span class="tree-count mono">${count(fsEntries ? fsEntries.length : 0, "file")}</span>
       </div>
       <div role="group" class="tree-group" data-folder="/fs">
         ${fsItems}
