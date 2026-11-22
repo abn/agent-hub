@@ -758,9 +758,9 @@ async function homeStage(id, stats, shellStageHead, projectName = "") {
       <button type="button" class="primary wiki-new-btn" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}">New page</button>
     </div>
     <div class="wiki-stats">
-      <div><div class="mono wiki-stat-label">PAGES</div><div class="wiki-stat-value">${pages}</div></div>
-      <div><div class="mono wiki-stat-label">NEEDS REVIEW</div><div class="wiki-stat-value">${review}</div></div>
-      <div><div class="mono wiki-stat-label">STALE</div><div class="wiki-stat-value">${stale}</div></div>
+      <div><div class="wiki-stat-label">Pages</div><div class="wiki-stat-value">${pages}</div></div>
+      <div><div class="wiki-stat-label">Needs review</div><div class="wiki-stat-value">${review}</div></div>
+      <div><div class="wiki-stat-label">Stale</div><div class="wiki-stat-value">${stale}</div></div>
     </div>
     ${link("review", "Needs review")}
     ${link("changes", "Recent changes")}

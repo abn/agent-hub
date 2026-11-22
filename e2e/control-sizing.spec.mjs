@@ -211,6 +211,79 @@ test.describe("control sizing", () => {
     ).toEqual([]);
   });
 
+  // Two glyph controls drawn small inside a larger answer: the New project
+  // close and the capture glyph. Each keeps its drawn size and answers to a 44
+  // by 44 box around its centre, read the way the walk above reads it.
+  test("the New project close and the capture glyph are drawn whole and answer to 44", async ({ hub, page }, testInfo) => {
+    test.skip(testInfo.project.name !== "sizing-touch", "the target is a coarse-pointer rule");
+    const reach = (selector) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return { error: `${sel} is not in the page` };
+        const r = el.getBoundingClientRect();
+        const svg = el.querySelector("svg").getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const misses = [];
+        for (const dx of [-21, 0, 21]) {
+          for (const dy of [-21, 0, 21]) {
+            const hit = document.elementFromPoint(cx + dx, cy + dy);
+            if (!hit || !el.contains(hit)) misses.push(`${dx},${dy}`);
+          }
+        }
+        return { box: [r.width, r.height], glyph: [svg.width, svg.height], misses };
+      }, selector);
+
+    await page.goto(`${hub.baseUrl}/#/projects/${encodeURIComponent(hub.projectId)}/feed`);
+    await page.locator("main .shell-index .feed-row").first().waitFor();
+    // On a phone the control row opens from the filter control.
+    await page.locator(".project-filter-btn").click();
+    await page.locator(".shell-controls > .feed-capture").waitFor({ state: "visible" });
+    const capture = await reach(".shell-controls > .feed-capture");
+    expect(capture.error, capture.error).toBeUndefined();
+    expect(capture.box, "the capture glyph is not drawn at 32 by 32").toEqual([32, 32]);
+    expect(capture.misses, "the capture glyph does not answer to a 44 by 44 box").toEqual([]);
+
+    await page.goto(`${hub.baseUrl}/#/projects`);
+    await page.locator("main .projects-screen .project-row").first().waitFor();
+    await page.getByRole("button", { name: "New project" }).click();
+    await page.locator(".project-create-close").waitFor();
+    const close = await reach(".project-create-close");
+    expect(close.error, close.error).toBeUndefined();
+    expect(Math.min(...close.glyph), "the close glyph is drawn under 16px").toBeGreaterThanOrEqual(16);
+    expect(close.misses, "the close control does not answer to a 44 by 44 box").toEqual([]);
+  });
+
+  // The selected segment is told apart by an ink rule along its foot, which a
+  // fill a shade off the track does not do. The mark is read off the rendered
+  // shadow and held to 3:1 against the track it sits on.
+  test("the selected theme segment carries an ink mark at 3:1 against its track", async ({ hub, page }, testInfo) => {
+    test.skip(!/^sizing-/.test(testInfo.project.name), "held at both widths by the sizing projects");
+    await page.goto(`${hub.baseUrl}/#/settings`);
+    const selected = page.locator('[data-theme-val][aria-pressed="true"], [data-theme-val][aria-checked="true"]').first();
+    await selected.waitFor();
+    for (const scheme of ["light", "dark"]) {
+      await page.emulateMedia({ colorScheme: scheme });
+      const mark = await selected.evaluate((el) => {
+        const lum = (rgb) => {
+          const c = rgb.match(/\d+(\.\d+)?/g).slice(0, 3).map((v) => {
+            const x = Number(v) / 255;
+            return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        };
+        const layer = getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map((p) => p.trim()).find((p) => p.includes("inset") && /0px -2px 0px 0px/.test(p));
+        const track = getComputedStyle(el.parentElement).backgroundColor;
+        if (!layer) return { layer: null };
+        const ink = layer.match(/rgba?\([^)]*\)/)[0];
+        const [a, b] = [lum(ink), lum(track)].sort((x, y) => y - x);
+        return { layer, ratio: (a + 0.05) / (b + 0.05) };
+      });
+      expect(mark.layer, `${scheme}: the selected segment draws no ink rule`).not.toBeNull();
+      expect(mark.ratio, `${scheme}: the mark is ${mark.ratio} against the track`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   // A button's label is one style per control size, read off the rendered page:
   // 15/600 where the control is --ctl-form or --tap, and 13/600 where it is
   // --ctl. The drawn height is what says which size a control is, so the label

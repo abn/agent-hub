@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Selected segments carry a mark
+
+* **Update**: the Settings, Projects, New project and Wiki screens are
+  recaptured. A selected theme segment and project tab draw an ink rule, the
+  wiki counts and agent project label use the one label style, and the New
+  project close glyph is drawn whole.
+
 ### An ask opens from its sentence
 
 * **Update**: [Human interface](/design/human-interface.md) and the
