@@ -271,6 +271,7 @@ export async function renderRailProjects() {
       const label = document.createElement("span");
       label.className = "rail-label";
       label.textContent = p.display_name || p.id;
+      a.title = label.textContent;
 
       a.append(dot, label);
 

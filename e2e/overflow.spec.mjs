@@ -8,6 +8,7 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./app.mjs";
+import { newSession, structured, toolCall } from "./invariants.mjs";
 import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./screens.mjs";
 
 // What an agent's text is stretched with: a sentence that has to wrap, and a
@@ -101,4 +102,35 @@ test("no screen goes sideways with long agent text", async ({ hub, page }) => {
   }
   await page.unrouteAll({ behavior: "ignoreErrors" });
   expect(misfits, "a screen goes sideways").toEqual([]);
+});
+
+// A brain key is a path an agent chose. At phone width it is cut with an
+// ellipsis inside its own row, and the full key stays reachable in `title`.
+test("a long brain key is cut inside its row", async ({ hub, page }) => {
+  const key = `long-${"k".repeat(140)}`;
+  const agent = await newSession(hub);
+  const started = await toolCall(hub, agent, "session_start", {
+    project_id: hub.projectId,
+    session_name: "long-key",
+  });
+  const id = structured(started).session_id || "";
+  expect(id, "the check could not start a session").toBeTruthy();
+  await toolCall(hub, agent, "brain_put", { path: `/kv/${key}`, content: "one", store: "session" });
+  await page.goto(
+    `${hub.baseUrl}/#/projects/${encodeURIComponent(hub.projectId)}/sessions?id=${encodeURIComponent(id)}`,
+  );
+  const name = page.locator(".brain-tree-unified .tree-name", { hasText: key });
+  await expect(name).toBeVisible();
+  await expect(name).toHaveAttribute("title", key);
+  const cut = await name.evaluate((el) => {
+    const row = el.closest(".tree-item").getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    return {
+      clipped: el.scrollWidth > el.clientWidth,
+      ellipsis: getComputedStyle(el).textOverflow,
+      inside: box.right <= row.right + 1,
+      page: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    };
+  });
+  expect(cut).toEqual({ clipped: true, ellipsis: "ellipsis", inside: true, page: true });
 });

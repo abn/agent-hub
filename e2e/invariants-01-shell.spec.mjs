@@ -679,3 +679,223 @@ test.describe("inbox detail", () => {
     if (previous) await page.setViewportSize(previous);
   });
 });
+
+test.describe("rail footer", () => {
+  // With many projects the list scrolls and the footer stays in view. A long
+  // project name is cut and carries its full text in `title`.
+  test("Storage, Settings and the sync line stay in view with 23 projects", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const long = `a-very-long-project-name-${"x".repeat(60)}`;
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const list = Array.isArray(body) ? body : body.projects;
+      const extra = Array.from({ length: 23 }, (_, i) => ({
+        ...list[0],
+        id: `many-${i}`,
+        display_name: i === 0 ? long : `Project ${i}`,
+      }));
+      await route.fulfill({ response, json: Array.isArray(body) ? [...list, ...extra] : { ...body, projects: [...list, ...extra] } });
+    });
+    await page.goto(`${hub.baseUrl}/#/home`);
+    await page.reload();
+    await expect(page.locator(".rail-project-item", { hasText: "Project 22" })).toBeVisible({ timeout: 10_000 });
+    expect(await page.locator(".rail-project-item").count()).toBeGreaterThanOrEqual(23);
+    const viewport = page.viewportSize();
+    for (const route of ["storage", "settings"]) {
+      const box = await page.locator(`.rail-foot [data-route="${route}"]`).boundingBox();
+      expect(box.y + box.height, `${route} is below the fold`).toBeLessThanOrEqual(viewport.height);
+    }
+    const projects = page.locator("#rail-projects");
+    expect(await projects.evaluate((el) => el.scrollHeight > el.clientHeight), "the project list does not scroll").toBe(true);
+    await expect(page.locator(".rail-project-item", { hasText: long })).toHaveAttribute("title", long);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("a long project name keeps every Storage column in view", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const long = `a-very-long-project-name-${"x".repeat(80)}`;
+    await page.route("**/api/v1/storage", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.projects[0].project_display_name = long;
+      await route.fulfill({ response, json: body });
+    });
+    await goto(page, "#/storage", "Storage");
+    const link = page.locator(".storage-proj-link").first();
+    await expect(link).toHaveText(long);
+    await expect(link).toHaveAttribute("title", long);
+    const fit = await page.locator(".storage-table-wrap").evaluate((el) => ({
+      scrolls: el.scrollWidth > el.clientWidth + 1,
+      lines: getComputedStyle(el.querySelector(".storage-proj-link")).whiteSpace,
+    }));
+    expect(fit.scrolls, "the Storage table scrolls sideways").toBe(false);
+    expect(fit.lines).toBe("nowrap");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+});
+
+test.describe("rail footer under pressure", () => {
+  const manyProjects = async (page, count = 23) => {
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const list = Array.isArray(body) ? body : body.projects;
+      const extra = Array.from({ length: count }, (_, i) => ({ ...list[0], id: `many-${i}`, display_name: `Project ${i}` }));
+      await route.fulfill({ response, json: Array.isArray(body) ? [...list, ...extra] : { ...body, projects: [...list, ...extra] } });
+    });
+  };
+
+  test("a focused project row far down the list draws its ring inside the scrollport", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await manyProjects(page);
+    await page.goto(`${hub.baseUrl}/#/home`);
+    await page.reload();
+    const last = page.locator(".rail-project-item", { hasText: "Project 22" });
+    await expect(last).toBeAttached({ timeout: 10_000 });
+    await last.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(last).toBeFocused();
+    const ring = await last.evaluate((el) => {
+      const row = el.getBoundingClientRect();
+      const port = document.getElementById("rail-projects").getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const offset = parseFloat(cs.outlineOffset) || 0;
+      const width = parseFloat(cs.outlineWidth) || 0;
+      return {
+        top: row.top - port.top,
+        bottom: port.bottom - row.bottom,
+        shadow: cs.boxShadow,
+        outer: Math.max(offset + width, 0),
+      };
+    });
+    expect(ring.outer, "an outline is drawn outside the row").toBe(0);
+    expect(ring.shadow).toContain("inset");
+    expect(ring.top).toBeGreaterThanOrEqual(0);
+    expect(ring.bottom).toBeGreaterThanOrEqual(0);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("tabbing from outside the rail reaches an offscreen project and draws its ring inside", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await manyProjects(page);
+    await page.goto(`${hub.baseUrl}/#/home`);
+    await page.reload();
+    const last = page.locator(".rail-project-item", { hasText: "Project 22" });
+    await expect(last).toBeAttached({ timeout: 10_000 });
+    await page.locator("body").click({ position: { x: 700, y: 5 } });
+    for (let i = 0; i < 200; i += 1) {
+      await page.keyboard.press("Tab");
+      if (await last.evaluate((el) => el === document.activeElement)) break;
+    }
+    await expect(last).toBeFocused();
+    const ring = await last.evaluate((el) => {
+      const row = el.getBoundingClientRect();
+      const port = document.getElementById("rail-projects").getBoundingClientRect();
+      return { top: row.top - port.top, bottom: port.bottom - row.bottom, shadow: getComputedStyle(el).boxShadow };
+    });
+    expect(ring.shadow).toContain("inset");
+    expect(ring.top).toBeGreaterThanOrEqual(0);
+    expect(ring.bottom).toBeGreaterThanOrEqual(0);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("the focused current rail link shows its stripe and an inset ring", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${hub.baseUrl}/#/home`);
+    const current = page.locator('.rail a[aria-current="page"]').first();
+    await expect(current).toBeAttached();
+    await page.locator("body").click({ position: { x: 700, y: 5 } });
+    for (let i = 0; i < 200; i += 1) {
+      await page.keyboard.press("Tab");
+      if (await current.evaluate((el) => el === document.activeElement)) break;
+    }
+    await expect(current).toBeFocused();
+    await expect.poll(() => current.evaluate((el) => /0px 0px 0px 2px/.test(getComputedStyle(el).boxShadow))).toBe(true);
+    const shadow = await current.evaluate((el) => getComputedStyle(el).boxShadow);
+    const layers = shadow.split(/,(?![^(]*\))/).map((l) => l.trim());
+    expect(layers.length, "stripe and ring are both drawn").toBeGreaterThanOrEqual(2);
+    expect(layers.every((l) => l.includes("inset")), shadow).toBe(true);
+    expect(layers.some((l) => /\b2px 0px 0px 0px\b/.test(l)), "the stripe").toBe(true);
+    expect(layers.some((l) => /0px 0px 0px 2px/.test(l)), "the ring").toBe(true);
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("a short window scrolls the whole rail and never clips the footer", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 280 });
+    await manyProjects(page);
+    await page.goto(`${hub.baseUrl}/#/home`);
+    await page.reload();
+    await expect(page.locator(".rail-project-item", { hasText: "Project 22" })).toBeAttached({ timeout: 10_000 });
+    const list = await page.locator("#rail-projects").evaluate((el) => el.clientHeight);
+    expect(list, "the project list collapsed").toBeGreaterThanOrEqual(36);
+    const rail = page.locator("nav.rail, .rail").first();
+    expect(await rail.evaluate((el) => el.scrollHeight > el.clientHeight), "the rail does not scroll").toBe(true);
+    const settings = page.locator('.rail-foot [data-route="settings"]');
+    await settings.scrollIntoViewIfNeeded();
+    const box = await settings.boundingBox();
+    expect(box.y + box.height).toBeLessThanOrEqual(280);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("the sync line stays in view after the project list scrolls", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await manyProjects(page);
+    await page.goto(`${hub.baseUrl}/#/home`);
+    await page.reload();
+    await expect(page.locator(".rail-project-item", { hasText: "Project 22" })).toBeAttached({ timeout: 10_000 });
+    await page.evaluate(() => {
+      window.__sync.noteSyncFailure({ status: 500 });
+      window.__sync.noteSyncFailure({ status: 500 });
+    });
+    const sync = page.locator("#rail-sync");
+    await expect(sync).toBeVisible();
+    await page.locator("#rail-projects").evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    const box = await sync.boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(900);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+
+  test("a long project name leaves the phone Storage total on one line", async ({ hub, page }) => {
+    const previous = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const long = `a-very-long-project-name-${"x".repeat(80)}`;
+    await page.route("**/api/v1/storage", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.projects[0].project_display_name = long;
+      await route.fulfill({ response, json: body });
+    });
+    await goto(page, "#/storage", "Storage");
+    const name = page.locator(".storage-project-name").first();
+    await expect(name).toHaveAttribute("title", long);
+    const total = page.locator(".storage-project-total").first();
+    const fit = await total.evaluate((el) => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      const row = el.closest(".storage-project-row").getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return { lines: Math.round(box.height / lh), inside: box.right <= row.right + 1 };
+    });
+    expect(fit.lines).toBe(1);
+    expect(fit.inside).toBe(true);
+    expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth), "the name is cut").toBe(true);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (previous) await page.setViewportSize(previous);
+  });
+});
