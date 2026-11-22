@@ -120,3 +120,70 @@ jobs:
           printf '%s\n' "$payload" | grep -q "\"version\":\"$VERSION\""
           printf '%s\n' "$payload" | grep -q "\"commit\":\"$COMMIT\""
           podman rm --force --volumes "$name"
+
+  antigravity:
+    name: Antigravity plugin archive
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build the archive
+        run: make plugins/antigravity-dist
+
+      - name: Attach the archive and its checksum to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          cd target/dist
+          archive="agent-hub-antigravity-$VERSION.tar.gz"
+          test -f "$archive"
+          sha256sum "$archive" > "agent-hub-antigravity-$VERSION.sha256"
+          gh release upload "$TAG" "$archive" "agent-hub-antigravity-$VERSION.sha256" \
+            --clobber --repo "${{ github.repository }}"
+
+  # Publishes only when the owner has opted in: an NPM_TOKEN secret, or the
+  # PUBLISH_NPM repository variable set to true for npm trusted publishing.
+  opencode:
+    name: Publish the OpenCode plugin
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      PUBLISH_NPM: ${{ vars.PUBLISH_NPM }}
+    steps:
+      - id: gate
+        run: |
+          if [ -n "$NPM_TOKEN" ] || [ "$PUBLISH_NPM" = true ]; then
+            printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'npm publishing is not configured, skipping\n'
+          fi
+
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish with provenance
+        if: steps.gate.outputs.enabled == 'true'
+        working-directory: plugins/opencode
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          npm publish --access public --provenance

@@ -36,6 +36,9 @@ HUB_REQUIRE_BROWSER=1 make check
    release is not done until that step is green.
 6. In parallel it calls the binaries workflow, which builds the standalone
    binary for each target and attaches the archives to the release.
+7. Also in parallel, the plugins ship (see [The plugins](#the-plugins)): the
+   Antigravity archive is attached to the release, and the OpenCode package is
+   published to npm when publishing is configured.
 
 The workflow is `.github/workflows/release.yml`. The configuration is
 `release-please-config.json` and `.release-please-manifest.json`.
@@ -85,6 +88,45 @@ gh workflow run binaries.yml -f tag=agent-hub-v1.2.0
 The `targets` input takes a JSON array of `{"target", "runner", "build-tool"}`
 objects when one archive needs rebuilding on its own. A re-run replaces the
 assets it uploaded.
+
+## The plugins
+
+`release-please` bumps the plugin versions with `Cargo.toml`, through
+`extra-files` in `release-please-config.json`: the Claude manifest and
+marketplace entry, `plugins/opencode/package.json` and
+`plugins/antigravity/plugin.json`. `make plugins/check` fails when they drift
+from `Cargo.toml`, and CI runs it.
+
+| Plugin | What a release does |
+|---|---|
+| Claude Code | Nothing. The repository is the marketplace, and `/plugin marketplace add agync/agent-hub` reads `.claude-plugin/marketplace.json` from the default branch, which carries the new version once the release pull request merges. |
+| OpenCode | The `opencode` job publishes `@agync/opencode-agent-hub` from `plugins/opencode` with `npm publish --access public --provenance`. It does nothing until publishing is configured. |
+| Antigravity | The `antigravity` job runs `make plugins/antigravity-dist` and attaches `agent-hub-antigravity-<version>.tar.gz` and its `.sha256` to the release. |
+
+To attach the Antigravity archive to a release by hand:
+
+```sh
+make plugins/antigravity-dist
+gh release upload "agent-hub-v<VERSION>" \
+  "target/dist/agent-hub-antigravity-<VERSION>.tar.gz"
+```
+
+### One-time setup
+
+Nothing below is done by the workflow. Until it is, a release skips the npm
+publish and the plugins are listed nowhere but this repository.
+
+1. **npm.** Create the `@agync` organisation on npmjs.com. Then either add an
+   automation token as the repository secret `NPM_TOKEN`, or configure npm
+   trusted publishing for the package (repository `agync/agent-hub`, workflow
+   `release.yml`) and set the repository variable `PUBLISH_NPM` to `true`. The
+   first publish creates the package.
+2. **Antigravity marketplace.** Listing is a manual step: submit the release
+   archive through the Antigravity marketplace intake form. Repeat it for a
+   release that should replace the listed version.
+3. **Claude directory.** The marketplace works without a listing. To submit the
+   plugin to the Claude plugin directory, prepare the icon and a privacy policy
+   URL the form asks for, then submit through its form.
 
 ## Verify the release
 
