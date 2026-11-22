@@ -689,6 +689,14 @@ Now, an inbox item, Artifacts, Project (feed, artifacts, sessions under one
 shell), artifact viewer, session detail, Search, Storage and prune, Settings,
 Projects register, Agents and access, Connect, and the knowledge base.
 
+- **Projects register.** One header count, and every row it counts is
+  listed. A desktop shows the projects, then the agent spaces under an
+  "Agent spaces" section label; a desktop with no agent space draws no label.
+  A phone splits the two with the segmented switcher in its tools row; the
+  header counts both tabs. Once the register passes eight rows the row also
+  carries a filter glyph that swaps the switcher for a search field and
+  searches both lists together, with a separate match count while it filters.
+
 - **Now.** Home and the Inbox are one screen: one stream in three tiers, read
   top to bottom, painted from the one Home response. `#/home` is its address;
   `#/inbox` opens it showing only what needs the reader, so an old link, the

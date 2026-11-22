@@ -2,7 +2,7 @@
 // puts one in front of a screen. Also owns the Projects register.
 
 import { api } from "./api.mjs";
-import { esc, paint, stale } from "./dom.mjs";
+import { beginRender, esc, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { formatBytes } from "./storage.mjs";
 import {
@@ -63,18 +63,23 @@ if (typeof document !== "undefined") {
   });
 }
 
-// The desktop register's filter (RULE 11.14): it hides non-matching project rows
-// and replaces the count with one mono line, the same shape the index filter
-// uses. The register has no index pane, so it filters its own lists.
+// The register's filter (RULE 11.14): it hides non-matching project rows and
+// replaces the count with one mono line, the same shape the index filter uses.
+// The register has no index pane, so it filters its own lists. On a phone the
+// field takes the tab switcher's place while it is open, and a live query
+// searches projects and agent spaces together.
 function wireProjectFilter() {
-  const field = /** @type {HTMLInputElement} */ (document.querySelector("[data-action='projects-filter']"));
+  const field = /** @type {any} */ (document.querySelector("[data-action='projects-filter']"));
   if (!field || field.dataset.wired === "on") return;
   field.dataset.wired = "on";
   const screen = document.querySelector(".projects-screen");
-  const count = document.createElement("div");
-  count.className = "shell-count mono";
-  count.hidden = true;
-  screen?.prepend(count);
+  let count = /** @type {HTMLElement | null} */ (screen?.querySelector(":scope > .shell-count") ?? null);
+  if (!count) {
+    count = document.createElement("div");
+    count.className = "shell-count mono";
+    count.hidden = true;
+    screen?.prepend(count);
+  }
   const apply = () => {
     const q = field.value.trim().toLowerCase();
     const rows = [...document.querySelectorAll(".projects-list .project-row")];
@@ -84,9 +89,20 @@ function wireProjectFilter() {
       /** @type {HTMLElement} */ (row).hidden = !match;
       if (match) shown++;
     }
+    // The switcher leaves the row while the field is open, so it is read from
+    // where it is parked. With no query the selected tab decides what shows,
+    // even when that tab holds no rows; a query looks across both lists.
+    const tabbed = document.querySelector(".projects-tabs-track") ?? parked;
+    const tab = tabbed?.querySelector('[aria-selected="true"]')?.getAttribute("data-tab");
     for (const list of document.querySelectorAll(".projects-list")) {
-      const any = [...list.querySelectorAll(".project-row:not([hidden])")].length > 0;
-      /** @type {HTMLElement} */ (list).hidden = !any;
+      const isSpaces = list.classList.contains("projects-list-spaces");
+      const any = list.querySelectorAll(".project-row:not([hidden])").length > 0;
+      const off = tabbed ? isSpaces !== (tab === "spaces") : false;
+      /** @type {HTMLElement} */ (list).hidden = q ? !any : off;
+    }
+    for (const label of document.querySelectorAll(".projects-section-label")) {
+      const list = label.nextElementSibling;
+      /** @type {HTMLElement} */ (label).hidden = !list || /** @type {HTMLElement} */ (list).hidden;
     }
     if (q) {
       count.textContent = `${shown} of ${rows.length} match "${field.value.trim()}"`;
@@ -96,6 +112,60 @@ function wireProjectFilter() {
     }
   };
   field.addEventListener("input", apply);
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeProjectFilter();
+  });
+  field._apply = apply;
+}
+
+/** @type {Element | null} */
+let parked = null;
+
+function closeProjectFilter() {
+  const toggle = /** @type {HTMLElement | null} */ (document.querySelector("[data-action='projects-filter-toggle']"));
+  const field = /** @type {any} */ (document.querySelector("[data-action='projects-filter']"));
+  if (!toggle || !field) return;
+  const wrap = field.closest(".shell-filter");
+  field.value = "";
+  field._apply?.();
+  // The field and the switcher take turns in the row: a field's own display
+  // beats [hidden], so it is made on opening and removed on closing.
+  if (parked && wrap) wrap.before(parked);
+  wrap?.remove();
+  parked = null;
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.focus();
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", (event) => {
+    const toggle = /** @type {HTMLElement} */ (event.target).closest?.("[data-action='projects-filter-toggle']");
+    if (!toggle) return;
+    if (toggle.getAttribute("aria-expanded") === "true") {
+      closeProjectFilter();
+      return;
+    }
+    const template = /** @type {HTMLTemplateElement | null} */ (document.querySelector("template[data-role='projects-filter']"));
+    if (!template) return;
+    const tabs = document.querySelector(".projects-tabs-track");
+    template.before(template.content.cloneNode(true));
+    parked = tabs;
+    tabs?.remove();
+    wireProjectFilter();
+    toggle.setAttribute("aria-expanded", "true");
+    /** @type {HTMLInputElement | null} */ (document.querySelector("[data-action='projects-filter']"))?.focus();
+  });
+}
+
+// The register is drawn for one width, so crossing the breakpoint draws it
+// again for the other, in both directions.
+if (typeof window !== "undefined" && window.matchMedia) {
+  const mq = window.matchMedia("(min-width: 720px)");
+  mq.addEventListener?.("change", () => {
+    if (location.hash === "#/projects" || location.hash === "#/projects/") {
+      projectsIndexScreen(beginRender());
+    }
+  });
 }
 
 export async function projectsIndexScreen(gen, passedProjects) {
@@ -230,22 +300,30 @@ export async function projectsIndexScreen(gen, passedProjects) {
     ? agentSpaces.map(renderRow).join("")
     : `<div class="projects-empty-tab">No agent spaces yet</div>`;
 
+  // A desktop has the room for both lists under their own labels; a phone
+  // splits them with a segmented switcher in its tools row.
+  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
+  const spacesLabel =
+    isDesktop && agentSpaces.length
+      ? `<div class="access-section-label projects-section-label">Agent spaces</div>`
+      : "";
   const bodyHTML = `
     <div class="projects-screen">
       <div class="projects-list projects-list-regular">
         ${regularRows}
       </div>
-      <div class="projects-list projects-list-spaces" hidden>
-        ${spaceRows}
+      ${spacesLabel}
+      <div class="projects-list projects-list-spaces"${isDesktop ? "" : " hidden"}>
+        ${isDesktop && !agentSpaces.length ? "" : spaceRows}
       </div>
     </div>`;
 
-  // The register lists every project on one screen, so the segmented switcher is
-  // phone chrome. On a desktop the control row carries the filter field once the
-  // list is over eight rows (RULE 11.14); the phone keeps the switcher, because
-  // its control row is the only place the two lists can be told apart. Round 12
-  // drops the "Agent spaces n" footer line at both widths.
-  const isDesktop = window.matchMedia("(min-width: 720px)").matches;
+  const search = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>`;
+  const filterField = () => `<label class="shell-filter">
+           ${search}
+           <input type="search" data-action="projects-filter" placeholder="Filter projects" aria-label="Filter projects">
+         </label>`;
+  const filterToggle = `<button type="button" class="project-filter-btn" data-action="projects-filter-toggle" aria-label="Filter projects" aria-expanded="false">${search.replace('width="14" height="14"', 'width="16" height="16"')}</button>`;
   const tabsHTML = `
     <div class="projects-tabs-track" role="tablist" aria-label="Project filter">
       <button type="button" role="tab" class="projects-tab-btn" data-tab="projects" aria-selected="true">
@@ -255,17 +333,13 @@ export async function projectsIndexScreen(gen, passedProjects) {
         Agent spaces <span class="tab-count mono">${agentSpaces.length}</span>
       </button>
     </div>`;
-  const filterHTML = `<div class="shell-controls">${
-    isDesktop && projects.length > 8
-      ? `<label class="shell-filter">
-           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="M16 16l4 4"></path></svg>
-           <input type="search" data-action="projects-filter" placeholder="Filter projects" aria-label="Filter projects">
-         </label>`
-      : isDesktop
-        ? ""
-        : tabsHTML
-  }</div>`;
-
+  const many = projects.length > 8;
+  const controlsInner = isDesktop
+    ? many
+      ? filterField()
+      : ""
+    : tabsHTML + (many ? `<template data-role="projects-filter">${filterField()}</template>${filterToggle}` : "");
+  const filterHTML = `<div class="shell-controls">${controlsInner}</div>`;
 
   paint(
     gen,
@@ -277,5 +351,6 @@ export async function projectsIndexScreen(gen, passedProjects) {
       }),
   );
   installShellLayout(document.querySelector(".shell"));
+  parked = null;
   wireProjectFilter();
 }

@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The register lists agent spaces and filters on a phone
+
+* **Update**: [Human interface](/design/human-interface.md) says a desktop
+  lists agent spaces under a label in the Projects register, and a phone with
+  more than eight rows gets a filter glyph in its tools row.
+
 ### Search scopes and long words
 
 * **Update**: [Search](/guides/human/search.md) lists one set of scope chips at
