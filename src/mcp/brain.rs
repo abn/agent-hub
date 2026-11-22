@@ -1204,9 +1204,7 @@ impl HubServer {
     /// The recorded active session, or a conflict when none was started.
     async fn active_session(&self) -> Result<ActiveSessionLease> {
         let active = self.active.lock().await;
-        active.clone().ok_or_else(|| {
-            Error::Conflict("no active session; call session_start first".to_string())
-        })
+        active.clone().ok_or(Error::NoActiveSession)
     }
 
     /// The active session while it is still live.

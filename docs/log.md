@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Server instructions, `mcp --proxy` and proxy session replay
+
+* **Update**: [MCP tools](/reference/mcp-tools.md) describes the server
+  instructions sent at the handshake. [CLI](/reference/cli.md) documents
+  `mcp --proxy`, `HUB_MODE=proxy`, and the proxy's session replay after a hub
+  restart, which the hub's `no_active_session` refusal reason triggers.
+
 ### The hook contract
 
 * **Addition**: [Hook CLI contract](/reference/hook-cli.md) states the `hook`

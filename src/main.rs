@@ -39,13 +39,17 @@ for help gets its usage rather than a second process on the data directory.
 
 const MCP_USAGE: &str = "\
 usage:
-  agent-hub mcp
+  agent-hub mcp [--proxy]
 
 Serve MCP on stdio. With HUB_URL set, this bridges stdio to that hub and holds
 one connection for the life of the process, which is what keeps a session
-active across calls. With no HUB_URL, it serves the local data directory
-standalone as the human admin, which fails while a hub is serving that
-directory.
+active across calls. If the hub restarts, the bridge reconnects once and binds
+the new connection to the last session it started. With no HUB_URL, it serves
+the local data directory standalone as the human admin, which fails while a
+hub is serving that directory.
+
+--proxy (or HUB_MODE=proxy) never falls back to the local data directory: with
+no hub configured it exits 78 and touches nothing.
 ";
 
 const CALL_USAGE: &str = "\
@@ -255,7 +259,7 @@ fn main() -> ExitCode {
         .init();
     match args.first().map(String::as_str) {
         None | Some("serve") => report(serve()),
-        Some("mcp") => mcp(),
+        Some("mcp") => mcp(&args[1..]),
         Some("call") => call(&args[1..]),
         Some("tools") => tools(&args[1..]),
         Some("kb") => kb(&args[1..]),
@@ -821,7 +825,7 @@ fn serve() -> Result<()> {
 }
 
 /// Serve MCP on stdio: a proxy to a running hub, or the embedded hub.
-fn mcp() -> ExitCode {
+fn mcp(args: &[String]) -> ExitCode {
     let client = match ClientConfig::from_env() {
         Ok(client) => client,
         Err(err) => {
@@ -831,6 +835,12 @@ fn mcp() -> ExitCode {
     };
     if client.url.is_some() {
         return proxy(client);
+    }
+    let proxy_only = args.iter().any(|arg| arg == "--proxy")
+        || std::env::var("HUB_MODE").is_ok_and(|mode| mode.eq_ignore_ascii_case("proxy"));
+    if proxy_only {
+        eprintln!("agent-hub mcp: no hub configured: set HUB_URL or [client].url");
+        return ExitCode::from(78);
     }
     // The two modes differ in who the caller is: embedded stdio is the local
     // human admin over the whole data directory, where the proxy is whatever

@@ -22,7 +22,7 @@ use common::temp::TempDir;
 const COMMANDS: [(&str, &str); 14] = [
     ("", "agent-hub [serve]"),
     ("serve", "agent-hub serve"),
-    ("mcp", "agent-hub mcp"),
+    ("mcp", "agent-hub mcp [--proxy]"),
     ("call", "agent-hub call"),
     ("tools", "agent-hub tools"),
     ("kb", "agent-hub kb get"),

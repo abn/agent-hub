@@ -104,6 +104,15 @@ identity.
 | `whoami` | Report the calling identity (`actor`, and `agent`, the agent the call resolved to, null for the admin), its personal space, and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
 
+## Server instructions
+
+The `initialize` result carries a short `instructions` text, and the stdio proxy
+passes it on. It tells a client to call `session_start` with the project and
+session an `<agent-hub>` block named, or to read `session_brief` first, to read
+the `notifications` member of tool results, to keep durable knowledge in the
+project knowledge base, to leave `session_start` to the main agent rather than a
+subagent, and where the guide is: `skill://agent-hub/SKILL.md`.
+
 ## Resources
 
 Every knowledge base page the caller may read is also an MCP resource, so a

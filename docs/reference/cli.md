@@ -16,7 +16,7 @@ client, and they read the `[client]` settings in
 
 ```text
 agent-hub [serve]              serve the hub over HTTP (the default)
-agent-hub mcp                  bridge stdio MCP to the hub named by HUB_URL
+agent-hub mcp [--proxy]        bridge stdio MCP to the hub named by HUB_URL
 agent-hub call <tool> [json]   call one tool and print its JSON result
 agent-hub tools                list the hub's tools
 agent-hub kb <command>         read and write the project knowledge base
@@ -66,6 +66,21 @@ standalone as the human admin, and says so on stderr; that mode opens the data
 directory itself, so pointing it at a directory a hub is already serving fails
 at startup with `a hub is already using this directory; set HUB_URL to reach it
 instead`.
+
+`mcp --proxy`, or `HUB_MODE=proxy` in the environment, never falls back to the
+local data directory. With no hub configured it prints `no hub configured: set
+HUB_URL or [client].url`, exits 78 and creates nothing, which suits a harness
+that must not open a second store by accident.
+
+If the hub restarts, it forgets which session a connection was on. A call that
+needs a session is refused with the reason `no_active_session`, and the proxy
+then resumes the last session the agent started, by project and name, and
+retries the call once. Only calls refused with the reason `no_active_session`
+are replayed; a project-store call without `project_id` fails with
+`invalid_argument` and is not. If the resume fails, or lands in another
+session than the one held, the original refusal is returned. A session ended with `session_end` is not resumed. A write that needs no
+session, such as `signal_append`, may land without session attribution after a
+restart, until the next call that does need one replays the session.
 
 ## `call`
 
