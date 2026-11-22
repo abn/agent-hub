@@ -58,7 +58,7 @@ export function treeItem(node, level, posinset, setsize) {
     ${node.isFolder ? 'aria-expanded="false"' : ""}
     data-path="${esc(node.path)}" data-kind="${esc(node.type || "")}"
     tabindex="-1" aria-label="${esc(name)}">
-    ${chevron}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono">${esc(name)}</span>${size}
+    ${chevron}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono" title="${esc(name)}">${esc(name)}</span>${size}
   </li>`;
 }
 
@@ -87,7 +87,7 @@ export function unifiedBrainTree(sessionId, projectId, kvEntries = [], fsEntries
       ${isDir ? 'aria-expanded="false"' : ""}
       data-path="${esc(entry.path)}" data-kind="${esc(entry.type || kind)}" tabindex="-1" aria-label="${esc(name)}">
       ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}
-      <span class="tree-name mono">${esc(name)}</span>
+      <span class="tree-name mono" title="${esc(name)}">${esc(name)}</span>
       ${size}
       ${fileChev}
     </div>`;
@@ -206,7 +206,7 @@ export async function expandNode(treeUl, node, fetchChildren) {
         ${isDir ? 'aria-expanded="false"' : ""}
         data-path="${esc(child.path)}" data-kind="${esc(child.type || "")}"
         tabindex="-1" aria-label="${esc(child.name)}">
-        ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono">${esc(child.name)}</span>${size}${fileChev}
+        ${chev}${svg(GLYPHS[glyphKind] || GLYPHS.file)}<span class="tree-name mono" title="${esc(child.name)}">${esc(child.name)}</span>${size}${fileChev}
       </div>`);
     });
   if (node.tagName.toLowerCase() === "li") {

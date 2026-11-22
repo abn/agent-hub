@@ -448,6 +448,7 @@ function desktopTable(usage) {
     const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
     dot.setAttribute("aria-hidden", "true");
     const link = el("a", "storage-proj-link", projectName(project));
+    link.title = projectName(project);
     link.href = projectHref(project);
     const inner = el("div", "storage-proj-inner");
     inner.append(dot, link);
@@ -648,7 +649,7 @@ function renderMobileHTML(usage) {
     return `
       <a class="storage-project-row storage-row row" href="${projectHref(project)}">
         <span class="storage-project-top">
-          <b class="storage-project-name">${esc(projectName(project))}</b>
+          <b class="storage-project-name" title="${esc(projectName(project))}">${esc(projectName(project))}</b>
           <span class="mono storage-project-total">${esc(formatBytes(total))}</span>
         </span>
         <span class="storage-project-meta">${esc(metaLine)}</span>
