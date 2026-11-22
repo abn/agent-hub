@@ -149,8 +149,14 @@ function rowHTML(entry, id, selected, narrow = false) {
       <span class="wiki-row-name">${esc(name)}</span>
       ${staleMark(entry)}
     </span>
-    <span class="mono wiki-row-meta">${esc(meta)}</span>
+    <span class="wiki-row-meta">${esc(meta)}</span>
   </a>`;
+}
+
+// The line an agent runs to write the first page. It names the project by id,
+// which is what the CLI takes, and the real `kb put` form.
+function kbPutCommand(id) {
+  return `agent-hub kb put index.md --file index.md --project ${id}`;
 }
 
 export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
@@ -165,15 +171,30 @@ export async function wikiIndexBody(id, selected, projectName = "", dir = "") {
     // The instruction the agent needs is a literal string, so it is shown on
     // the row that owns it and the copy control is a glyph on that row, which
     // is what the design's copy component is (no visible "Copy" label).
-    const command = `hub wiki write ${projectName || id} --type concept`;
+    const command = kbPutCommand(id);
+    // Below 1100px the index is the only list, so a deleted page's history,
+    // where it is restored from, is reached from here.
+    let changesLink = "";
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1099px)").matches) {
+      try {
+        const h = await api(`/api/v1/projects/${encodeURIComponent(id)}/kb/history?limit=1`);
+        const n = h.total ?? (h.rows || []).length;
+        if (n) {
+          changesLink = `<a class="row wiki-home-link" href="#/projects/${encodeURIComponent(id)}/wiki?view=changes"><span>Recent changes</span><span class="wiki-home-tail"><span class="wiki-home-count">${n}</span>${glyphSvg("chevronRight", { size: 16 })}</span></a>`;
+        }
+      } catch {
+        changesLink = "";
+      }
+    }
     return `<div class="wiki-empty">
       <div class="mono wiki-empty-label">wiki · empty</div>
       <h2 class="wiki-empty-title">No wiki yet in ${esc(projectName || id)}.</h2>
       <p class="wiki-empty-lead">Agents write durable knowledge here; sessions come and go, these pages stay. The first write creates index.md.</p>
       <div class="wiki-instruction-row">
         <code class="mono wiki-instruction-command">${esc(command)}</code>
-        <button type="button" class="hub-btn-glyph" data-action="wiki-instruction" data-id="${esc(id)}" data-project="${esc(projectName || id)}" aria-label="Copy agent instruction">${glyphSvg("copy", { size: 16 })}</button>
+        <button type="button" class="hub-btn-glyph" data-action="wiki-instruction" data-id="${esc(id)}" aria-label="Copy agent instruction">${glyphSvg("copy", { size: 16 })}</button>
       </div>
+      ${changesLink}
     </div>`;
   }
   const narrow = typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
@@ -290,8 +311,10 @@ async function pageStage(id, path, shellStageHead) {
     entry = null;
   }
   const needsReview = !entry || entry.trust !== "human_reviewed";
-  // The reader's two header controls share one box: Edit is an anchor, so it
-  // takes the button class and the stylesheet sizes both for the band.
+  // The reader's two controls share one box: Edit is an anchor, so it takes
+  // the button class and the stylesheet sizes both for the band. They sit in
+  // the control row, which is the phone's tools row, so the title keeps the
+  // header to itself.
   const reviewBtn = `<button type="button" class="btn-outline wiki-review-btn" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}">${needsReview ? "Review" : "Review again"}</button>`;
   const last = page.last_write
     ? `${esc(page.last_write.actor)} · ${timeHTML(page.last_write.at)}`
@@ -319,23 +342,28 @@ async function pageStage(id, path, shellStageHead) {
     head: shellStageHead(
       fm.title || displayPath(page.path).split("/").pop(),
       meta,
-      `<span class="wiki-page-actions">${reviewBtn}<a class="button btn-outline wiki-edit-link" href="${wikiPageHash(id, path, "&edit=1")}">Edit</a></span>`,
+      "",
       `#/projects/${encodeURIComponent(id)}/wiki`,
     ),
-    controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta mono wiki-meta-line">${last}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a></div>`,
+    controls: `<div class="shell-controls wiki-page-controls">${staleMark(entry)}<span class="shell-meta wiki-meta-line">${last}</span><a class="wiki-history-link" href="${wikiPageHash(id, displayPath(page.path), "&history=1")}">History</a><span class="wiki-page-actions">${reviewBtn}<a class="button btn-outline wiki-edit-link" href="${wikiPageHash(id, path, "&edit=1")}">Edit</a></span></div>`,
     body: `<article class="shell-prose wiki-page wiki-article markdown-body">${fm.description ? `<p class="wiki-description">${esc(fm.description)}</p>` : ""}${rendered}</article>${back}${await commentsSection(id, path)}`,
   };
 }
 
+const SAVE_BLANK = "Write the page to save it.";
+
 function editorStage(id, path, content, version, isNew, shellStageHead) {
-  const title = isNew ? "New page" : path.split("/").pop();
-  const note = isNew ? "Saved as type: concept · status: draft, unverified." : `Editing ${path}`;
+  const title = isNew
+    ? "New page"
+    : pageFrontmatter(content).title || displayPath(path).split("/").pop();
+  const note = isNew ? "Saved as type: concept · status: draft, unverified." : `Editing ${displayPath(path)}`;
+  const blank = !content.trim();
   const back = `#/projects/${encodeURIComponent(id)}/wiki${
     path ? `?page=${encodeURIComponent(path)}` : ""
   }`;
   return {
     head: shellStageHead(title, "", "", back),
-    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono">${esc(note)}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta wiki-dirty" role="status" hidden>Unsaved changes</span><span class="shell-meta wiki-editor-meta">${esc(note)}</span></div>`,
     body: `<div class="wiki-editor">
       ${
         isNew
@@ -345,13 +373,14 @@ function editorStage(id, path, content, version, isNew, shellStageHead) {
       }
       <label class="wiki-editor-content">
         <span class="sr-only">Page content</span>
-        <textarea class="wiki-editor-text" id="wiki-content" name="content" spellcheck="false">${esc(content)}</textarea>
+        <textarea class="wiki-editor-text" id="wiki-content" name="content" spellcheck="false" placeholder="Write the page in Markdown.">${esc(content)}</textarea>
       </label>
       <div class="wiki-editor-actions">
-        <button type="button" class="primary wiki-editor-save" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}">${isNew ? "Create page" : "Save"}</button>
+        <button type="button" class="primary wiki-editor-save" aria-disabled="${blank}" aria-describedby="wiki-save-reason" data-action="wiki-save" data-id="${esc(id)}" data-path="${esc(path)}" data-version="${esc(version)}" data-new="${isNew ? "1" : "0"}">${isNew ? "Create page" : "Save"}</button>
         <a class="button btn-outline wiki-editor-cancel" href="${back}">Cancel</a>
         <span class="wiki-editor-note"></span>
       </div>
+      <p class="composer-hint wiki-editor-reason" id="wiki-save-reason">${blank ? SAVE_BLANK : ""}</p>
     </div>`,
   };
 }
@@ -370,7 +399,7 @@ const OP_WORDS = {
 function simpleStage(shellStageHead, id, title, controls, body, actions = "") {
   return {
     head: shellStageHead(title, "", actions, `#/projects/${encodeURIComponent(id)}/wiki`),
-    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta mono wiki-meta-line">${esc(controls)}</span></div>`,
+    controls: `<div class="shell-controls wiki-controls"><span class="shell-meta wiki-meta-line">${esc(controls)}</span></div>`,
     body,
   };
 }
@@ -751,20 +780,39 @@ async function homeStage(id, stats, shellStageHead, projectName = "") {
   const pages = s?.pages ?? stats?.kb_pages ?? 0;
   const review = s?.needs_review?.total ?? 0;
   const stale = s?.stale ?? 0;
-  const link = (view, label) =>
-    `<a class="row wiki-home-link" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}">${label}</a>`;
+  const total = async (path, pick) => {
+    try {
+      return pick(await api(`/api/v1/projects/${encodeURIComponent(id)}${path}`));
+    } catch {
+      return null;
+    }
+  };
+  const link = (view, label, n) =>
+    `<a class="row wiki-home-link" href="#/projects/${encodeURIComponent(id)}/wiki?view=${view}"><span>${label}</span><span class="wiki-home-tail">${n == null ? "" : `<span class="wiki-home-count">${n}</span>`}${glyphSvg("chevronRight", { size: 16 })}</span></a>`;
+  const changes = await total("/kb/history?limit=1", (data) => data.total ?? (data.rows || []).length);
+  if (!pages) {
+    // A deleted page keeps its history, which is where it is restored from, so
+    // Recent changes stays for as long as there is any.
+    return simpleStage(
+      shellStageHead,
+      id,
+      "Wiki",
+      "0 pages",
+      `<div class="wiki-home"><p class="empty wiki-index-note">No pages yet. Agents write them, or add one with New page.</p>${
+        changes ? link("changes", "Recent changes", changes) : ""
+      }</div>`,
+    );
+  }
+  const findings = await total("/kb/lint", (data) => (data.findings || []).length);
   const body = `<div class="wiki-home">
-    <div class="wiki-home-new">
-      <button type="button" class="primary wiki-new-btn" data-action="wiki-new" data-id="${esc(id)}" data-project="${esc(projectName || id)}">New page</button>
-    </div>
     <div class="wiki-stats">
       <div><div class="wiki-stat-label">Pages</div><div class="wiki-stat-value">${pages}</div></div>
       <div><div class="wiki-stat-label">Needs review</div><div class="wiki-stat-value">${review}</div></div>
       <div><div class="wiki-stat-label">Stale</div><div class="wiki-stat-value">${stale}</div></div>
     </div>
-    ${link("review", "Needs review")}
-    ${link("changes", "Recent changes")}
-    ${link("lint", "Lint")}
+    ${link("review", "Needs review", review)}
+    ${link("changes", "Recent changes", changes)}
+    ${link("lint", "Lint", findings)}
   </div>`;
   return simpleStage(shellStageHead, id, "Wiki", `${pages} page${pages === 1 ? "" : "s"}`, body);
 }
@@ -866,12 +914,9 @@ export async function wikiCommentResolve(button) {
   }
 }
 
-// The one-line instruction an agent needs to start a wiki. Round 14 ships the
-// card without the code block until the `kb` command exists; the control still
-// copies the command for whoever wants it.
+// The one-line instruction an agent needs to start a wiki.
 export function wikiInstruction(button) {
-  const project = button.dataset.project || button.dataset.id || "";
-  const command = `hub wiki write ${project} --type concept`;
+  const command = kbPutCommand(button.dataset.id || "");
   return confirmCopy(button, command, () => toast("Nothing copied."));
 }
 
@@ -1067,6 +1112,11 @@ export async function wikiSave(button) {
       else delete note.dataset.tone;
     }
   };
+  if (button.getAttribute("aria-disabled") === "true" || !content.trim()) {
+    say("");
+    (/** @type {HTMLElement | null} */ (document.getElementById("wiki-content")))?.focus();
+    return;
+  }
   if (!path) {
     say("A page needs a path.", "danger");
     return;
@@ -1101,8 +1151,12 @@ export async function wikiSave(button) {
           return;
         }
         if (page) {
-          (/** @type {HTMLTextAreaElement} */ (document.getElementById("wiki-content"))).value = page.content || "";
+          const text = /** @type {HTMLTextAreaElement} */ (document.getElementById("wiki-content"));
+          text.value = page.content || "";
+          // Theirs is the new baseline, so the buffer is clean again.
+          text.defaultValue = text.value;
           button.dataset.version = page.version || "absent";
+          syncEditorState();
         }
         note.textContent = "Reloaded the hub's copy.";
       });
@@ -1122,4 +1176,29 @@ export async function wikiSave(button) {
     }
     say(error.message, "danger");
   }
+}
+
+// The editor's live state: a dirty buffer is marked in the control row, and
+// Save is held (aria-disabled, still focusable) while the page is blank, with
+// the reason on the line under it. One listener on the document, because the
+// stage is repainted whole and a field's own listener would be lost with it.
+function syncEditorState() {
+  const text = /** @type {HTMLTextAreaElement | null} */ (document.getElementById("wiki-content"));
+  const path = /** @type {HTMLInputElement | null} */ (document.getElementById("wiki-new-path"));
+  if (!text) return;
+  const stage = text.closest(".shell-stage");
+  const dirty = text.value !== text.defaultValue || Boolean(path && path.value);
+  const mark = stage?.querySelector(".wiki-dirty");
+  if (mark) /** @type {HTMLElement} */ (mark).hidden = !dirty;
+  const blank = !text.value.trim();
+  stage?.querySelector(".wiki-editor-save")?.setAttribute("aria-disabled", String(blank));
+  const reason = stage?.querySelector(".wiki-editor-reason");
+  if (reason) reason.textContent = blank ? SAVE_BLANK : "";
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("input", (event) => {
+    const field = event.target;
+    if (field instanceof HTMLElement && field.closest(".wiki-editor")) syncEditorState();
+  });
 }

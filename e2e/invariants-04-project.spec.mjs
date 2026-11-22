@@ -740,7 +740,7 @@ test.describe("wiki", () => {
   test("a wiki tree row's meta line stays inside the index pane", async ({ hub, page }) => {
     const project = hub.projectId;
     await api(hub, "PUT", `/api/v1/projects/${encodeURIComponent(project)}/kb/pages/notes/agent.md`, {
-      content: "---\ntype: Overview\nstatus: draft\ntitle: Agent notes\n---\n# Agent notes\n\nA page the check reads.\n",
+      content: "---\ntype: Overview of everything the agents have noted so far\nstatus: draft\ntitle: Agent notes\n---\n# Agent notes\n\nA page the check reads.\n",
     });
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/settings", "Settings");
@@ -754,7 +754,7 @@ test.describe("wiki", () => {
         paneRight: Math.round(paneBox.right * 10) / 10,
         rows: [...pane.querySelectorAll(".wiki-row")].map((row) => {
           const box = row.getBoundingClientRect();
-          const meta = row.querySelector("span.mono");
+          const meta = row.querySelector(".wiki-row-meta");
           const metaBox = meta ? meta.getBoundingClientRect() : null;
           return {
             name: (row.querySelector("span") || {}).textContent?.trim().slice(0, 30) || "",

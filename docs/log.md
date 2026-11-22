@@ -6,6 +6,14 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### The wiki says what is true
+
+* **Update**: [Human interface](/design/human-interface.md) and the
+  [knowledge base guide](/guides/human/knowledge-base.md) say the editor marks
+  unsaved changes and holds Save while a page is blank, that Reload theirs
+  resets the starting point, that the Wiki home keeps Recent changes while
+  history exists, and that row metadata is sans, not mono.
+
 ### The Artifacts list folds extra projects into a menu
 
 * **Update**: [Human interface](/design/human-interface.md) says that on a wide

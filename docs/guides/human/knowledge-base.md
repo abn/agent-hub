@@ -24,7 +24,7 @@ tools are in [MCP tools](/reference/mcp-tools.md).
 
 The tree is the whole knowledge base in one listing, drawn as a full tree on a
 desktop and one drill-in level on a phone. A page row carries its title and a
-mono line of its type, status, and derived trust; a stale page adds the word
+line of its type, status, and derived trust; a stale page adds the word
 "stale", and a directory row carries its child count. Selecting a page renders
 it: the frontmatter block is metadata, shown as the page's type, status, and
 tags rather than as body text, and the backlinks are listed under it.
@@ -56,7 +56,14 @@ page.
 **Edit** opens the editor, whose Save carries the version token the read
 carried. A page that changed under the editor is refused rather than
 overwritten, and the refusal is shown in place with **Reload theirs** and
-**Keep mine**. **New page** writes a page that is not there yet.
+**Keep mine**. **Reload theirs** takes the hub's copy as the new starting
+point, so the editor reads as unchanged again. **New page** writes a page that
+is not there yet.
+
+A changed buffer is marked "Unsaved changes" in the control row. Save is held
+while the page is blank: it stays focusable, reads as disabled, and the line
+under it says why. A page is deleted from its own verb, never by saving it
+empty.
 
 ## History, revert, and restore
 
@@ -84,7 +91,10 @@ it came from and leaves the source where it was. An agent does the same with the
 
 ## Housekeeping
 
-The Wiki home carries the page, needs-review, and stale counts, and holds:
+The Wiki home carries the page, needs-review, and stale counts, and holds the
+rows below. A wiki with no pages shows a short note instead of the counts, and
+keeps Recent changes for as long as the history has rows, so a page deleted
+by mistake can still be restored from there.
 
 - **Recent changes**, which reads who did what to which page and when, grouped
   by day, with rows that open that page's history;
