@@ -196,11 +196,17 @@ h2.title { font-weight: 600; font-size: clamp(28px, 3.4vw, 40px); line-height: 1
 }
 .steps h3 { margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
 .steps p { margin: 0; color: var(--ink-2); max-width: 38em; }
-.block { margin-top: 14px; position: relative; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--raised); }
-.block pre { margin: 0; padding: 16px 52px 16px 16px; overflow-x: auto; font: 400 13px/1.65 var(--font-mono); color: var(--ink); }
+.block { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1fr) 48px; align-items: start; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--raised); }
+.block pre { margin: 0; padding: 16px 0 16px 16px; overflow-x: auto; font: 400 13px/1.65 var(--font-mono); color: var(--ink); }
 .block pre .p { color: var(--ink-3); user-select: none; }
-.block .copy { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; border: 0; border-radius: var(--r-1); }
+.block .copy { position: relative; margin: 6px 6px 0 0; width: 36px; height: 36px; border: 0; border-radius: var(--r-1); }
 .aside-note { margin-top: 14px; font-size: 14px; color: var(--ink-3); max-width: 40em; }
+/* Install: one row per harness */
+.steps h4 { margin: 28px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.steps h4 + p { margin-top: 4px; }
+.steps h4 + .block, .steps h4 + p + .block { margin-top: 8px; }
+.block.prompt pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (pointer: coarse) { .block .copy::after { content: ""; position: absolute; inset: -4px; } }
 
 /* Tour: one focused, moving scene per feature */
 .tour { margin-top: 64px; display: grid; gap: 96px; }

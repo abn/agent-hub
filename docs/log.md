@@ -6,6 +6,15 @@ software release notes and the repository changelog.
 
 ## 2026-11-22
 
+### Landing page: harness plugins
+
+* **Addition**: the landing page has a "Wired into your harness" band that
+  says what the Claude Code, OpenCode and Antigravity plugins do. The install
+  step "Connect an agent" gives each harness its own command with a copy glyph,
+  and a sentence to paste to an agent that sets itself up.
+* **Update**: the copy glyph on the site takes a 44px hit area under a coarse
+  pointer.
+
 ### Harness plugins guide
 
 * **Addition**: [Harness plugins](/guides/agents/plugins.md) gives the native

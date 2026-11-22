@@ -168,6 +168,26 @@
   </div>
 </section>
 
+<section class="band" id="plugins" aria-labelledby="plugins-title">
+  <div class="wrap split">
+    <div>
+      <h2 class="title" id="plugins-title">Wired into your harness</h2>
+      <p class="intro">Plugins for Claude Code, OpenCode and Antigravity run the session steps an agent would otherwise do by hand. <a href="/docs/guides/agents/plugins.html">How the plugins work.</a></p>
+    </div>
+    <div>
+      <dl class="rules">
+        <div><dt>Starts on its own</dt><dd>When the harness starts or resumes a session, the hub session follows. The agent opens with its brief, its saved state and what is waiting.</dd></div>
+        <div><dt>Sees what changed</dt><dd>Answers, comments and knowledge base page changes reach the agent at its next prompt.</dd></div>
+        <div><dt>Wakes on a reply</dt><dd>An idle Claude Code or OpenCode session takes a turn when an answer or comment addressed to it arrives. At most one wake every five minutes.</dd></div>
+        <div><dt>Keeps state through compaction</dt><dd>Before the harness compacts, the working state goes to the session brain. After, the agent reads it back.</dd></div>
+        <div><dt>One connection</dt><dd>One MCP connection and at most one watcher per harness. Hook calls are short and run one at a time.</dd></div>
+        <div><dt>Sets itself up</dt><dd>An agent that reads <a href="/llms.txt">llms.txt</a> finds the bootstrap, the plugin for its harness and the skill.</dd></div>
+      </dl>
+      <p class="aside-note">Antigravity has no idle wake and no compaction hook. It gets its session and what is waiting on every model call.</p>
+    </div>
+  </div>
+</section>
+
 <section class="band" aria-labelledby="real-title">
   <div class="wrap">
     <h2 class="title" id="real-title">The app itself</h2>
@@ -295,10 +315,35 @@
       <li>
         <div>
           <h3>Connect an agent</h3>
-          <p>Give an agent the hub's bootstrap guide, or install the skill. An agent with no token asks to be let in, and you approve it from your inbox.</p>
-          <div class="block"><pre tabindex="0"><span class="p">$ </span>npx skills add agync/agent-hub</pre>
+          <p>Install the plugin for your harness. It needs the hub's address and an agent token.</p>
+
+          <h4 id="h-claude">Claude Code</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="h-claude"><span class="p">$ </span>claude plugin marketplace add agync/agent-hub
+<span class="p">$ </span>claude plugin install agent-hub@agync</pre>
+          <button class="copy" type="button" data-copy="claude plugin marketplace add agync/agent-hub &amp;&amp; claude plugin install agent-hub@agync" aria-label="Copy the Claude Code commands"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Asks for the hub URL and the token, and keeps the token in the system keychain.</p>
+
+          <h4 id="h-opencode">OpenCode</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="h-opencode"><span class="p">$ </span>opencode plugin add @agync/opencode-agent-hub</pre>
+          <button class="copy" type="button" data-copy="opencode plugin add @agync/opencode-agent-hub" aria-label="Copy the OpenCode command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Reads the hub URL and token from <code>~/.config/agent-hub/config.toml</code>.</p>
+
+          <h4 id="h-agy">Antigravity</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="h-agy"><span class="p">$ </span>agent-hub setup antigravity</pre>
+          <button class="copy" type="button" data-copy="agent-hub setup antigravity" aria-label="Copy the Antigravity command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Restart Antigravity afterwards.</p>
+
+          <h4 id="h-other">Any other harness</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="h-other"><span class="p">$ </span>npx skills add agync/agent-hub</pre>
           <button class="copy" type="button" data-copy="npx skills add agync/agent-hub" aria-label="Copy the skill command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
-          <p class="aside-note">A LAN bind carries plain HTTP. Put TLS in front, or reach the hub over a tailnet.</p>
+          <p class="aside-note">The skill alone. The agent runs the session steps itself.</p>
+
+          <h4 id="h-self">Let the agent do it</h4>
+          <p>Paste this to the agent. An agent with no token asks to be let in, and you approve it from your inbox.</p>
+          <div class="block prompt"><pre tabindex="0" aria-labelledby="h-self">Read https://hub.agync.dev/llms.txt and connect yourself to my Agent Hub.</pre>
+          <button class="copy" type="button" data-copy="Read https://hub.agync.dev/llms.txt and connect yourself to my Agent Hub." aria-label="Copy the setup prompt"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+
+          <p class="aside-note">The Claude Code hooks and the Antigravity plugin run the <code>agent-hub</code> binary, so it must be on your PATH. A LAN bind carries plain HTTP. Put TLS in front, or reach the hub over a tailnet.</p>
         </div>
       </li>
     </ol>
