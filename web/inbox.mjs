@@ -105,7 +105,7 @@ function deadlineLine(item) {
   return "";
 }
 
-function outcomeOf(item) {
+export function outcomeOf(item) {
   if (item.status !== "resolved") return "";
   if (expiredOf(item)) {
     if (!item.decision) return "Closed unanswered";
@@ -237,6 +237,15 @@ function relatedList(item, queue) {
   </section>`;
 }
 
+// A decision's reply reads as what was decided, "declined: Not now.", rather
+// than as an answer that happens to be the word Declined.
+function replySentence(reply) {
+  const verb = { approved: "approved", declined: "declined" }[reply.payload?.decision];
+  if (reply.kind !== "answer" || !verb || reply.payload?.expired) return replySentenceHTML(reply);
+  const note = typeof reply.payload.note === "string" ? reply.payload.note.trim() : "";
+  return `<b>${esc(reply.actor)}</b> ${verb}${note ? `: ${esc(note)}` : ""}`;
+}
+
 // The replies so far, on the shared row anatomy: glyph, the sentence, the time.
 function threadHTML(item, replies) {
   if (!replies.length) return "";
@@ -248,7 +257,7 @@ function threadHTML(item, replies) {
   return `<section class="item-thread" aria-labelledby="item-thread-label">
     <h3 class="section-label" id="item-thread-label">Thread</h3>
     ${row(item.kind, eventSentenceHTML({ kind: item.kind, actor: item.actor, summary: item.summary }), item.created_at)}
-    ${replies.map((reply) => row(reply.kind, replySentenceHTML(reply), reply.created_at)).join("")}
+    ${replies.map((reply) => row(reply.kind, replySentence(reply), reply.created_at)).join("")}
   </section>`;
 }
 
@@ -335,6 +344,9 @@ function stateWord(item, outcome, isEnrol, later) {
   // tomorrow, so it says so in ink rather than copper.
   if (waits(item) && later) return `<span class="item-state">${clock()}Can wait</span>`;
   if (waits(item)) return `<span class="item-state is-wait"><span class="item-dot" aria-hidden="true"></span>Waiting on you</span>`;
+  // The check says it is done, which a decline is not the opposite of, so a
+  // declined outcome is the word alone.
+  if (/^declined/i.test(outcome)) return `<span class="item-state">${esc(outcome)}</span>`;
   return outcome ? `<span class="item-state">${glyphSvg("resolve", { size: 14, strokeWidth: 2 })}${esc(outcome)}</span>` : "";
 }
 
@@ -749,7 +761,7 @@ export const declineApproval = (id, summary, { landing = "" } = {}) =>
   ask(id, "decline", {
     title: summary ? `Decline "${summary}"?` : "Decline this action?",
     danger: "Decline",
-    tone: "danger",
+    tone: "action",
     done: "Declined",
     landing,
   });

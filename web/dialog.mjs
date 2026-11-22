@@ -35,7 +35,8 @@ let openDialog = null;
 // dialog that records a judgement carries; its value is handed to the commit
 // beside the note. commit: the work itself, given the trimmed note and the
 // score, run while the dialog is still open; what it throws is shown in the
-// dialog, and the dialog closes as committed once it returns.
+// dialog, and the dialog closes as committed once it returns. focusField puts
+// focus in the field on open, for a dialog that is only a field to fill.
 export function confirmAction({
   title,
   body,
@@ -46,6 +47,7 @@ export function confirmAction({
   tone = "danger",
   field = null,
   score = false,
+  focusField = false,
   commit: work = null,
 }) {
   // Two dialogs at once would fight over the top layer and over which control
@@ -292,7 +294,9 @@ export function confirmAction({
   // pointer and focus reaching it but not the wheel.
   document.documentElement.classList.add("has-dialog");
   el.showModal();
-  keep.focus();
+  // The safe action takes focus, so Enter never commits a destructive one. A
+  // dialog whose whole purpose is its field asks for that field instead.
+  (input && focusField ? input : keep).focus();
 
   return new Promise((resolve) => {
     el.addEventListener(

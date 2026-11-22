@@ -20,6 +20,7 @@ import {
   kindMenu,
   resumePicking,
   setFeedSelection,
+  stageRoot,
 } from "./feed.mjs";
 import { registerScreen } from "./keys.mjs";
 import { render } from "./router.mjs";
@@ -193,7 +194,8 @@ async function captureIdea(projectId, opener) {
     safe: "Cancel",
     danger: "Capture",
     tone: "action",
-    field: { label: "Idea", limit: 2000 },
+    field: { label: "Idea", limit: 2000, optional: false },
+    focusField: true,
     commit: async (note) => {
       const summary = (note || "").trim();
       if (!summary) throw new Error("Write an idea to capture.");
@@ -421,7 +423,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
     indexBody,
     stageHead: shellStageHead(title, meta, "", `#/projects/${encodeURIComponent(id)}/feed`),
     stageControls: `<div class="shell-controls"><span class="shell-meta mono">${esc(
-      event ? `${id} / feed / ${event.kind}` : id,
+      event ? `${id} / feed / ${stageRoot(event, id).kind}` : id,
     )}</span></div>`,
     stageBody: missing
       ? `<div class="shell-pad"><p class="empty">${

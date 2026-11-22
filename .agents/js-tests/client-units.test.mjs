@@ -71,19 +71,29 @@ describe("subjectAndMessage", () => {
     expect(readsBack(summary)).toBe(flat(summary));
   });
 
-  it("stops a one-line summary at the last clause mark inside the budget, keeping the punctuation", () => {
+  it("stops a one-line summary at the last clause mark inside the budget, without the mark before the ellipsis", () => {
     // A report with no sentence end inside the budget is titled by the clause it
     // last pauses at, so the heading ends on a phrase rather than inside one.
-    // The mark is the reader's, so the subject keeps it.
+    // The mark is the pause the cut took, so it does not stand before the ellipsis.
     const summary =
       "The nightly run is green, the loader rewrite is behind the flag, " +
       "and the artifact viewer now reserves its 52px chrome like every other pane in the shell.";
     const { subject, message } = subjectAndMessage(summary);
-    expect(subject).toBe("The nightly run is green, the loader rewrite is behind the flag,…");
+    expect(subject).toBe("The nightly run is green, the loader rewrite is behind the flag…");
     expect(message).toBe(
       "and the artifact viewer now reserves its 52px chrome like every other pane in the shell.",
     );
-    expect(readsBack(summary)).toBe(flat(summary));
+    // Every word reads back once; only the pause mark itself is dropped.
+    expect(readsBack(summary)).toBe(flat(summary).replace("flag,", "flag"));
+  });
+
+  it("trims a clause mark off the cut of a multiline summary's first line", () => {
+    const first = `${"word ".repeat(30)}and so on, and on`;
+    const { subject } = subjectAndMessage(`${first}\nthe rest`);
+    expect(subject.endsWith("…")).toBe(true);
+    expect(subject).not.toMatch(/[,;:]…$/);
+    const cutAtComma = `${"a".repeat(60)}, ${"b".repeat(80)}\nrest`;
+    expect(subjectAndMessage(cutAtComma).subject).not.toMatch(/[,;:]…$/);
   });
 
   it("does not read a hyphen inside a word as a clause boundary", () => {
