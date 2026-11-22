@@ -18,7 +18,7 @@ import {
   openThreadsOn,
 } from "./comments.mjs";
 import { confirmAction } from "./dialog.mjs";
-import { esc, main, paint, stale } from "./dom.mjs";
+import { confirmCopy, esc, main, paint, stale } from "./dom.mjs";
 import { EMPTY_COPY, ERROR_COPY, emptyStateHTML, errorShellHTML } from "./empty.mjs";
 import { onArtifactLive } from "./events.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -449,6 +449,10 @@ export function wireArtifactStage(root, id, info) {
   root.querySelector('[data-action="new-thread"]')?.addEventListener("click", () => openCompose(null));
   for (const btn of root.querySelectorAll('[data-action="copy-path"]')) {
     btn.addEventListener("click", async () => {
+      if (btn.matches(".hub-btn-glyph")) {
+        await confirmCopy(btn, btn.dataset.path, () => toast("Nothing copied."));
+        return;
+      }
       try {
         await navigator.clipboard.writeText(btn.dataset.path);
       } catch {}
@@ -457,8 +461,13 @@ export function wireArtifactStage(root, id, info) {
   }
   for (const btn of root.querySelectorAll('[data-action="copy-raw"]')) {
     btn.addEventListener("click", async () => {
+      const raw = () => fetchRawText(btn.dataset.id, Number(btn.dataset.version));
+      if (btn.matches(".hub-btn-glyph")) {
+        await confirmCopy(btn, raw, () => toast("Nothing copied."));
+        return;
+      }
       try {
-        const text = await fetchRawText(btn.dataset.id, Number(btn.dataset.version));
+        const text = await raw();
         await navigator.clipboard.writeText(text);
         toast("Raw text copied");
       } catch {

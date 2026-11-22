@@ -1,5 +1,6 @@
 // The markup helpers every screen shares, and the element they paint into.
 
+import { glyphSvg } from "./glyphs.mjs";
 import { byDay, timeHTML } from "./time.mjs";
 
 export const main = document.getElementById("main");
@@ -191,4 +192,51 @@ export function groupedEvents(events, row) {
          <div class="card">${group.events.map(row).join("")}</div>`,
     )
     .join("");
+}
+
+// One persistent, visually hidden polite region tells a screen reader what
+// the glyph's change says to the eye.
+function announce(text) {
+  let region = document.getElementById("copy-status");
+  if (!region) {
+    region = document.createElement("div");
+    region.id = "copy-status";
+    region.className = "sr-only";
+    region.setAttribute("role", "status");
+    region.setAttribute("aria-live", "polite");
+    document.body.append(region);
+  }
+  region.textContent = "";
+  requestAnimationFrame(() => { region.textContent = text; });
+}
+
+// A copy glyph confirms on itself: it becomes the ok-tone check, says "Copied"
+// for 1.4s, then goes back. `text` is the string or a function that returns it.
+// A write that fails leaves the glyph alone and calls `onFail`.
+export async function confirmCopy(button, text, onFail) {
+  try {
+    const value = typeof text === "function" ? await text() : text;
+    await navigator.clipboard.writeText(value);
+  } catch {
+    onFail?.();
+    return false;
+  }
+  if (button.dataset.copying) return true;
+  button.dataset.copying = "1";
+  const html = button.innerHTML;
+  const label = button.getAttribute("aria-label");
+  const size = Number(button.querySelector("svg")?.getAttribute("width")) || 16;
+  button.innerHTML = glyphSvg("resolve", { size, strokeWidth: 2 });
+  button.classList.add("is-copied");
+  button.setAttribute("aria-label", "Copied");
+  announce("Copied");
+  setTimeout(() => {
+    if (!button.dataset.copying) return;
+    button.innerHTML = html;
+    button.classList.remove("is-copied");
+    if (label == null) button.removeAttribute("aria-label");
+    else button.setAttribute("aria-label", label);
+    delete button.dataset.copying;
+  }, 1400);
+  return true;
 }

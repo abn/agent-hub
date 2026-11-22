@@ -51,7 +51,7 @@ export default defineConfig({
       use: { viewport },
       // Anchored on the file name, so a checkout whose own path carries one of
       // these words does not ignore every spec.
-      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels|anchors|feed-dismiss|overflow)[^/]*\.spec\.mjs$/,
+      testIgnore: /\/(a11y|focus-rings|prefix|invariants|control-sizing|index-rows|artifact-route|composer|forms|gutters|labels|anchors|feed-dismiss|overflow|copy)[^/]*\.spec\.mjs$/,
     })),
     // The behavioural invariants are their own project so their run does not
     // move the behaviour checks' state. They are one phone-width run with the
@@ -120,6 +120,12 @@ export default defineConfig({
       name: "labels",
       use: { viewport: WIDTHS.desktop },
       testMatch: /labels\.spec\.mjs/,
+    },
+    // A copy glyph confirms on itself.
+    {
+      name: "copy",
+      use: { viewport: WIDTHS.desktop },
+      testMatch: /copy\.spec\.mjs/,
     },
     // One gutter per pane, at every width.
     {

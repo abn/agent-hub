@@ -5,7 +5,7 @@ import { api } from "./api.mjs";
 import { count, focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
-import { esc, glyph, main, paint, stale } from "./dom.mjs";
+import { confirmCopy, esc, glyph, main, paint, stale } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
 import { pickProject, withProject } from "./projects.mjs";
 import { render, restoreFocusAfterRender } from "./router.mjs";
@@ -920,10 +920,7 @@ if (typeof document !== "undefined") {
     if (copyBtn) {
       const id = copyBtn.dataset.id || copyBtn.getAttribute("title");
       if (id) {
-        try {
-          await navigator.clipboard.writeText(id);
-        } catch {}
-        toast("Copied session id.");
+        await confirmCopy(copyBtn, id, () => toast("Nothing copied."));
       }
       return;
     }
@@ -972,10 +969,7 @@ if (typeof document !== "undefined") {
     if (copyFileBtn) {
       const path = copyFileBtn.dataset.path;
       if (path) {
-        try {
-          await navigator.clipboard.writeText(path);
-        } catch {}
-        toast("Copied file path.");
+        await confirmCopy(copyFileBtn, path, () => toast("Nothing copied."));
       }
       return;
     }
@@ -984,10 +978,7 @@ if (typeof document !== "undefined") {
     if (copyKvBtn) {
       const val = copyKvBtn.dataset.value;
       if (val != null) {
-        try {
-          await navigator.clipboard.writeText(val);
-        } catch {}
-        toast("Copied key value.");
+        await confirmCopy(copyKvBtn, val, () => toast("Nothing copied."));
       }
       return;
     }
