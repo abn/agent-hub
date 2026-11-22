@@ -571,9 +571,7 @@ test.describe("register and connect", () => {
     await expect(page.locator(".tabbar"), "connect shows a tab bar").toBeHidden();
     const tools = page.locator(".shell-controls");
     await expect(tools).toBeVisible();
-    expect((await tools.innerText()).toLowerCase(), "the connect tools row does not read 'Not connected'").toContain(
-      "not connected",
-    );
+    await expect(tools.locator(".connect-tools-text"), "the connect tools row does not read Connected").toHaveText("Connected");
     expect(await page.locator(".connect.card, main .card:has(.connect-field)").count(), "connect is wrapped in a card").toBe(0);
     const field = page.locator(".connect-field");
     await expect(field).toBeVisible();

@@ -4,7 +4,7 @@
 import { beginRender, main, paint, stale } from "./dom.mjs";
 import { ERROR_COPY, errorDetail, errorShellHTML } from "./empty.mjs";
 import { refreshBadge } from "./events.mjs";
-import { applyPrefs } from "./prefs.mjs";
+import { applyPrefs, prefs } from "./prefs.mjs";
 import { installShellLayout, resetScrollCollapse } from "./shell-layout.mjs";
 
 // The screen table, registered by the entry point. Keeping it out of this
@@ -171,7 +171,9 @@ export async function render() {
     // screen that can fix it, and it takes the route it interrupted so the
     // reader arrives where they were going rather than at the start.
     if (error.status === 401 && screen !== "connect") {
-      location.hash = `#/connect?next=${encodeURIComponent(hash)}`;
+      // A token that was sent and refused is told apart from none at all.
+      const why = prefs.token ? "&reason=refused" : "";
+      location.hash = `#/connect?next=${encodeURIComponent(hash)}${why}`;
       return;
     }
     paintFailure(gen, screen, path, error);
