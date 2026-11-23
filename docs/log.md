@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-23
 
+### Landing page: harness tabs
+
+* **Update**: the landing page's "Connect an agent" step shows one tab per
+  harness. The panels share one height, and without script every panel stays
+  stacked under its heading.
+
 ### Hook CLI: one agent name, shared sessions, headless runs
 
 * **Update**: the [hook CLI contract](/reference/hook-cli.md) resolves the

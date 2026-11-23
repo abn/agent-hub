@@ -317,26 +317,36 @@
           <h3>Connect an agent</h3>
           <p>Install the plugin for your harness. It needs the hub's address and an agent token.</p>
 
+          <div class="harness">
+          <section class="hpanel" id="connect-claude" data-tab="Claude Code">
           <h4 id="h-claude">Claude Code</h4>
           <div class="block"><pre tabindex="0" aria-labelledby="h-claude"><span class="p">$ </span>claude plugin marketplace add agync/agent-hub
 <span class="p">$ </span>claude plugin install agent-hub@agync</pre>
           <button class="copy" type="button" data-copy="claude plugin marketplace add agync/agent-hub &amp;&amp; claude plugin install agent-hub@agync" aria-label="Copy the Claude Code commands"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
           <p class="aside-note">Asks for the hub URL and the token, and keeps the token in the system keychain.</p>
+          </section>
 
+          <section class="hpanel" id="connect-opencode" data-tab="OpenCode">
           <h4 id="h-opencode">OpenCode</h4>
           <div class="block"><pre tabindex="0" aria-labelledby="h-opencode"><span class="p">$ </span>opencode plugin add @agync/opencode-agent-hub</pre>
           <button class="copy" type="button" data-copy="opencode plugin add @agync/opencode-agent-hub" aria-label="Copy the OpenCode command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
           <p class="aside-note">Reads the hub URL and token from <code>~/.config/agent-hub/config.toml</code>.</p>
+          </section>
 
+          <section class="hpanel" id="connect-antigravity" data-tab="Antigravity">
           <h4 id="h-agy">Antigravity</h4>
           <div class="block"><pre tabindex="0" aria-labelledby="h-agy"><span class="p">$ </span>agent-hub setup antigravity</pre>
           <button class="copy" type="button" data-copy="agent-hub setup antigravity" aria-label="Copy the Antigravity command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
           <p class="aside-note">Restart Antigravity afterwards.</p>
+          </section>
 
+          <section class="hpanel" id="connect-other" data-tab="Other">
           <h4 id="h-other">Any other harness</h4>
           <div class="block"><pre tabindex="0" aria-labelledby="h-other"><span class="p">$ </span>npx skills add agync/agent-hub</pre>
           <button class="copy" type="button" data-copy="npx skills add agync/agent-hub" aria-label="Copy the skill command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
           <p class="aside-note">The skill alone. The agent runs the session steps itself.</p>
+          </section>
+          </div>
 
           <h4 id="h-self">Let the agent do it</h4>
           <p>Paste this to the agent. An agent with no token asks to be let in, and you approve it from your inbox.</p>

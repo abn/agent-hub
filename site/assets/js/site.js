@@ -13,6 +13,51 @@
     });
   });
 
+  // Install step 3: one tab per harness. Without script every panel stays
+  // stacked under its heading; with it the headings become the tabs.
+  const harness = document.querySelector('.harness');
+  if (harness) {
+    const panels = [...harness.querySelectorAll('.hpanel')], KEY = 'hub-site-harness';
+    const list = document.createElement('div'), tabs = [];
+    list.className = 'tabs'; list.setAttribute('role', 'tablist'); list.setAttribute('aria-label', 'Harness');
+    panels.forEach(p => {
+      const tab = document.createElement('button');
+      tab.type = 'button'; tab.id = 'tab-' + p.id; tab.className = 'tab'; tab.textContent = p.dataset.tab;
+      tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', p.id);
+      p.setAttribute('role', 'tabpanel'); p.setAttribute('aria-labelledby', tab.id);
+      tab.addEventListener('click', () => pick(tabs.indexOf(tab)));
+      tabs.push(tab); list.append(tab);
+    });
+    const pick = (i, focus) => {
+      tabs.forEach((t, k) => {
+        t.setAttribute('aria-selected', k === i); t.tabIndex = k === i ? 0 : -1; panels[k].toggleAttribute('data-off', k !== i);
+      });
+      tabs[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (focus) tabs[i].focus();
+      try { localStorage.setItem(KEY, panels[i].id); } catch {}
+    };
+    list.addEventListener('keydown', e => {
+      const at = tabs.indexOf(document.activeElement), n = tabs.length;
+      const to = { ArrowRight: (at + 1) % n, ArrowLeft: (at + n - 1) % n, Home: 0, End: n - 1 }[e.key];
+      if (at < 0 || to === undefined || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault(); pick(to, true);
+    });
+    // The strip scrolls on a narrow phone; an edge fades while more lies beyond it.
+    const edges = () => {
+      list.toggleAttribute('data-more-start', list.scrollLeft > 1);
+      list.toggleAttribute('data-more-end', list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+    };
+    list.addEventListener('scroll', edges, { passive: true }); addEventListener('resize', edges);
+    harness.prepend(list); harness.classList.add('tabbed');
+    const named = () => panels.findIndex(p => p.id === location.hash.slice(1));
+    let first = named();
+    if (first < 0) { try { first = panels.findIndex(p => p.id === localStorage.getItem(KEY)); } catch {} }
+    pick(Math.max(first, 0)); edges();
+    // A hidden panel cannot be scrolled to, so a link to one opens it first.
+    addEventListener('hashchange', () => { const i = named(); if (i >= 0) { pick(i); harness.scrollIntoView(); } });
+    if (named() >= 0) requestAnimationFrame(() => harness.scrollIntoView());
+  }
+
   // The desk: made-up asks, answered with the same keys as the app.
   const asks = [
     { who: 'release-bot', text: 'wants to ship 1.4.2 to the NAS.', meta: 'homelab, approval', verbs: ['Approve', 'Hold'], past: ['approved the 1.4.2 release', 'held the 1.4.2 release'] },

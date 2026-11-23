@@ -57,8 +57,13 @@ row, an opened ask, an anchored passage, and move only to show the change each
 feature makes. A scene runs only while it is on screen, holds one height
 through its loop, and shows its end state under reduced motion. The hero's Now
 pane answers to `j`, `k`, `1` and `2` like the app, and says it is an example.
-The install section gives each harness a row with its command and its copy
+The install section gives each harness a panel with its command and its copy
 glyph, and the glyph sits in its own column beside the command, never over it, and the coarse-pointer glyph takes a 44px hit area.
+With script the panels sit behind a tab strip drawn like the app's segmented
+control (a 2px ink rule under the selected tab, 44px tall under a coarse
+pointer, scrolling inside its own row with a fading edge on a phone); the panels share
+one height, so nothing below moves when the tab changes; without
+script every panel stays stacked under its heading.
 The social cards and icons render from `site/brand/` with the same mark.
   - **Deviation: the site's display sizes are its own.** The 64px headline and
     40px section titles are not in the token file; they belong to the site
